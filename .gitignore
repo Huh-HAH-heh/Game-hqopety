@@ -1,0 +1,30 @@
+## ========================================================
+## БРОНИРОВАННЫЙ .GITIGNORE ПОД C# / .NET / SFML.NET
+## ========================================================
+
+# Временный мусор и кэш самой IDE Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Результаты компиляции (бинарники, которые C# пересобирает сам)
+[Bb]in/
+[Oo]bj/
+[Log]/
+*.log
+
+# Кэш пакетов NuGet
+nuget.config
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+
+# Временные файлы ОС
+Thumbs.db
+Ehthumbs.db
+Desktop.ini
+.DS_Store

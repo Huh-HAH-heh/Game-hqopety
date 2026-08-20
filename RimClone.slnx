@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/Элементы решения/">
+    <File Path="roadmap.txt" />
+    <File Path="правка модели.txt" />
+  </Folder>
+  <Folder Name="/Элементы решения/tile/">
+    <File Path="tile.txt" />
+    <File Path="проМоель мира.txt" />
+  </Folder>
+  <Folder Name="/Элементы решения/Unit/">
+    <File Path="Unit.txt" />
+  </Folder>
+  <Project Path="App/App.csproj" />
+  <Project Path="Core/Core.csproj" />
+  <Project Path="Render/Render.csproj" Id="97da9925-bd62-450e-90ff-8668e4ce8c80" />
+  <Project Path="Units/Units.csproj" Id="9b26261f-35dc-4273-a71d-176dc6c12109" />
+  <Project Path="World/World.csproj" Id="1951e96e-ebc4-4a59-8913-d989ea40fc4a" />
+</Solution>

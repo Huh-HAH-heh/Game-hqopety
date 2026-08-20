@@ -1,0 +1,11 @@
+[gd_scene format=3 uid="uid://bvm7a14pio801"]
+
+[node name="Node2D" type="Node2D" unique_id=35179650]
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=329051083]
+
+[node name="ColorRect" type="ColorRect" parent="." unique_id=523663931]
+offset_left = 23.0
+offset_top = 22.0
+offset_right = 63.0
+offset_bottom = 62.0

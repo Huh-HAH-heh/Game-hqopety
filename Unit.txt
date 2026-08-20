@@ -1,0 +1,38 @@
+UNIT
+│
+├── Identity
+│   ├── UnitId
+│   ├── DefId
+│   └── SquadId
+│
+├── Physical
+│   ├── Position
+│   ├── Size
+│   ├── Mass
+│   └── Movement
+│
+├── Body
+│   ├── BodyIndex
+│   └── Health
+│
+├── Equipment
+│   ├── Clothing
+│   └── Weapons
+│
+├── Combat
+│   ├── Shooting
+│   ├── Aiming
+│   └── Observation
+│
+└── Characteristics
+    ├── Skills
+    ├── Traits
+    └── Modifiers
+SQUAD
+│
+├── Members
+├── Orders
+├── Path
+├── Formation
+├── SquadVision
+└── SquadAI
