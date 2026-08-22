@@ -38,12 +38,12 @@ namespace RimClone.App
 
             // 3. Создаём юнитов и отряды на 100 существ
             UnitStore unitStore = new UnitStore(maxUnits: 100);
-            SquadStore squadStore = new SquadStore();
+            
 
             // Наполняем мир: спавним 5 синих людей-стрелков и 3 красных жуков-рейдеров
             TestUnitSpawner.Spawn(
                 unitStore,
-                squadStore,
+                
                 spatialGrid
             );
 
@@ -54,7 +54,7 @@ namespace RimClone.App
             renderer.InitializeAndRun(
                 worldMap,
                 unitStore,
-                squadStore,
+             
                 spatialGrid,
                 edificeStore
             );

@@ -26,42 +26,31 @@ namespace Core.Unit.Systems
         {
             if (deltaTime <= 0f) return;
 
-            // 1. СБРОС КУЛДАУНОВ, ОСТЫВАНИЕ ОТДАЧИ И ТЕПЛОВОЙ МЕНЕДЖМЕНТ
+           
+            // // 1. СБРОС КУЛДАУНОВ, ОСТЫВАНИЕ ОТДАЧИ И ТЕПЛОВОЙ МЕНЕДЖЕМЕНТ
             for (int i = 0; i < units.Count; i++)
             {
                 if (units.HealthMasks[i] == 0) continue;
 
+                // Плавно уменьшаем кулдаун выстрела каждую дельту кадра
                 if (units.ShotCooldowns[i] > 0f)
                 {
                     units.ShotCooldowns[i] -= deltaTime;
                     if (units.ShotCooldowns[i] < 0f) units.ShotCooldowns[i] = 0f;
                 }
 
+                // ЧЕСТНОЕ ОСТЫВАНИЕ ОТДАЧИ (БЕЗ ТЕРМОДИНАМИКИ И ПЕРЕГРЕВА)
                 if (units.WeaponSlot[i] is Weapon activeWeapon)
                 {
-                    // А. Остывание отдачи (Recoil Recovery)
+                    // Оставляем только восстановление точности/отдачи оружия
                     if (activeWeapon.currentRecoil > 0f)
                     {
                         activeWeapon.currentRecoil -= activeWeapon.BaseStats.RecoilRecovery * deltaTime;
                         if (activeWeapon.currentRecoil < 0f) activeWeapon.currentRecoil = 0f;
                     }
-
-                    // Б. СИСТЕМА ОСТЫВАНИЯ СТВОЛА (Weapon Overheat Cooling)
-                    if (activeWeapon.CurrentHeat > 0f)
-                    {
-                        activeWeapon.CurrentHeat -= activeWeapon.BaseStats.HeatCoolingRate * deltaTime;
-                        if (activeWeapon.CurrentHeat < 0f) activeWeapon.CurrentHeat = 0f;
-                    }
-
-                    // В. Снятие блокировки перегрева
-                    // Ствол заклинило, боец ждет, пока оружие полностью остынет, прежде чем снова стрелять
-                    if (activeWeapon.IsOverheated && activeWeapon.CurrentHeat <= 0f)
-                    {
-                        activeWeapon.IsOverheated = false;
-                        Console.WriteLine($"♻️ Оружие юнита {i} остыло и снова готово к бою.");
-                    }
                 }
             }
+
 
             // 2. ИИ сканирует цели и ведет бой
             ExecuteRimWorldCombat(units, spatialGrid, map, edificeStore, effectSystem, microCellPixelSize, deltaTime);
@@ -251,8 +240,7 @@ namespace Core.Unit.Systems
                         // ФАЗА Б: Начало подготовки к новой очереди (Изготовление выстрела)
                         // ========================================================
                         // Солдат начнет целиться ТОЛЬКО если старый кулдаун прошел и пушка не заклинила от перегрева
-                        bool canShoot = units.WeaponSlot[i] == null || !units.WeaponSlot[i].IsOverheated;
-
+                        bool canShoot = units.WeaponSlot[i] != null;
                         if (!units.IsAiming[i] && units.ShotCooldowns[i] <= 0f && canShoot)
                         {
                             units.IsAiming[i] = true;
@@ -365,23 +353,8 @@ namespace Core.Unit.Systems
             // 3. НАКАПЛИВАЕМ ОТДАЧУ И ТЕПЛО СТВОЛА ПОСЛЕ ВЫСТРЕЛА
             if (units.WeaponSlot[attackerId] is Weapon shootingWeapon)
             {
-                // Сбиваем прицел импульсом отдачи
                 shootingWeapon.currentRecoil += shootingWeapon.BaseStats.RecoilPerShot;
 
-                // Накапливаем тепло в термодинамический паспорт ствола
-                float heatPerShot = shootingWeapon.BaseStats.HeatPerShot > 0f ? shootingWeapon.BaseStats.HeatPerShot : 12f;
-                float maxHeat = shootingWeapon.BaseStats.MaxHeatThreshold > 0f ? shootingWeapon.BaseStats.MaxHeatThreshold : 80f;
-
-                shootingWeapon.CurrentHeat += heatPerShot;
-
-                // Проверяем критический перегрев (Клин / Застревание ствола)
-                if (shootingWeapon.CurrentHeat >= maxHeat)
-                {
-                    shootingWeapon.IsOverheated = true;
-                    units.RemainingBurstShots[attackerId] = 0; // Намертво обрываем текущую очередь!
-                    units.ShotCooldowns[attackerId] = 2.5f;    // Блокировка ИИ на 2.5 секунды охлаждения
-                    Console.WriteLine($"🔥 КРИТИЧЕСКИЙ ПЕРЕГРЕВ! Ствол {shootingWeapon.BaseStats.Name} у юнита {attackerId} раскалился докрасна! (Тепло: {shootingWeapon.CurrentHeat}/{maxHeat})");
-                }
             }
 
             // Физическая дистанция для расчета излёта и промахов

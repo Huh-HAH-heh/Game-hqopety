@@ -220,7 +220,7 @@ namespace Core.Unit;
         /// <summary>
         /// Ежекадровое обновление жизненных показателей всех живых муравьев в мире.
         /// </summary>
-        public void UpdateHealthSystems(float deltaTime, SquadStore squadStore)
+        public void UpdateHealthSystems(float deltaTime)
         {
             for (int i = 0; i < Count; i++)
             {
@@ -241,7 +241,7 @@ namespace Core.Unit;
                     int squadId = SquadIds[i];
                     if (squadId != -1)
                     {
-                        squadStore.Members[squadId].Remove(i);
+                        
                         SquadIds[i] = -1;
                     }
                 }

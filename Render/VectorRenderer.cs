@@ -22,7 +22,7 @@ namespace RimClone.Render
         private WorldMap _worldMap;
         private GameCamera _gameCamera;
         private UnitStore _unitStore;
-        private SquadStore _squadStore;
+       
         private UnitSpatialGrid _spatialGrid;
         private EdificeStore _edificeStore;
         private const int TileSize = 16;
@@ -30,23 +30,17 @@ namespace RimClone.Render
         private static readonly float RegionPixelSize = MapRegion.MicroSize * MicroCellPixelSize;
 
         // В полях класса VectorRenderer:
-        private readonly Core.Unit.Systems.SquadTacticalAiSystem _squadTacticalAiSystem = new Core.Unit.Systems.SquadTacticalAiSystem();
         private readonly Core.Unit.Systems.UnitCpuBrainSystem _cpuBrainSystem = new Core.Unit.Systems.UnitCpuBrainSystem(); // <-- ДОБАВИЛИ СЮДА!
 
         private readonly MouseInputSystem _mouseInputSystem = new MouseInputSystem();
-       
-        //Автоматический менеджер тактического деления на огневые группы (Fireteams)
-        private readonly Core.Unit.Systems.SquadClusterManagerSystem _squadClusterManager = new Core.Unit.Systems.SquadClusterManagerSystem();
-       
-        
-        //Автономный реестр навигации и кэшей для Fireteams!
-        private readonly Core.Unit.Systems.FireteamRegistry _fireteamRegistry = new Core.Unit.Systems.FireteamRegistry();
 
-        public void InitializeAndRun(WorldMap worldMap, UnitStore unitStore, SquadStore squadStore, UnitSpatialGrid spatialGrid, EdificeStore edificeStore)
+        //Автоматический менеджер тактического деления на огневые группы (Fireteams)
+   
+        public void InitializeAndRun(WorldMap worldMap, UnitStore unitStore,  UnitSpatialGrid spatialGrid, EdificeStore edificeStore)
         {
             _worldMap = worldMap;
             _unitStore = unitStore;
-            _squadStore = squadStore;
+            
             _spatialGrid = spatialGrid;
 
             // ИСПРАВЛЕНО: Присваиваем тот самый store из генератора, где лежат наши кибитки и генераторы!
@@ -55,8 +49,8 @@ namespace RimClone.Render
 
             // Инициализируем логические системы
             var unitMovementSystem = new UnitMovementSystem();
-            var squadMovementSystem = new SquadMovementSystem(unitMovementSystem);
-            _simulation.Initialize(unitMovementSystem, squadMovementSystem);
+            
+            _simulation.Initialize(unitMovementSystem);
 
             // Инициализируем графические системы
             _mapRenderSystem = new MapRenderSystem(MicroCellPixelSize);
@@ -120,7 +114,8 @@ namespace RimClone.Render
 
                 // А. Считываем рамку и тактические иерархические приказы игрока (ПКМ/ЛКМ)
                 // Передаем _squadStore третьим аргументом, чтобы мышка видела под-отряды!
-                _mouseInputSystem.Update(_window, _unitStore, _squadStore, _gameCamera.View, MicroCellPixelSize);
+                _mouseInputSystem.Update(_window, _unitStore, _worldMap.CurrentViewZ, MicroCellPixelSize, deltaTime);
+
 
 
                 // Б. Обновляем плавный физический скролл камеры
@@ -153,26 +148,20 @@ namespace RimClone.Render
                 // и вызывает поклеточный TryStartMove для сквадов и их дочерних групп!
                 _simulation.Update(
                     _unitStore,
-                    _squadStore,
+                  
                     _spatialGrid,
                     _worldMap,
                     _edificeStore,
                     MicroCellPixelSize,
-                    deltaTime,
-                    _fireteamRegistry
+                    deltaTime
+                 
                 );
 
-                // Д. АНТИ-ОВЕРКЛОК: Автоматически дробим толпу на мелкие дочерние огневые группы (Fireteams)
-                // Работает в фоне строго раз в 4 секунды вне боя!
-                _squadClusterManager.Update(_unitStore, _squadStore,_fireteamRegistry, deltaTime);
-
-                // Е. ТАКТ 6: Запускаем коллективный тактический разум отрядов (Цепная тревога и шеринг целей)
-                _squadTacticalAiSystem.Update(_unitStore, _squadStore, _squadStore.Registry, _worldMap, _edificeStore);
-
+           
                 // Ж. ТАКТ 4 и 5: Запуск ИИ-процессоров ЦП одиночных пешек (Переключение опкодов, таймеры зажима автомата)
                 _cpuBrainSystem.Update(
                     _unitStore,
-                    _squadStore,
+                  
                     _spatialGrid,
                     _worldMap,
                     _edificeStore,

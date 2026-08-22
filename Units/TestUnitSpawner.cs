@@ -12,7 +12,7 @@ namespace Units
     {
         private const int Scale = MapRegion.SubDivision; // 3
 
-        public static void Spawn(UnitStore unitStore, SquadStore squadStore, UnitSpatialGrid spatialGrid)
+        public static void Spawn(UnitStore unitStore,  UnitSpatialGrid spatialGrid)
         {
             var inventorySystem = new UnitInventorySystem();
 
@@ -52,7 +52,7 @@ namespace Units
             var helmet = new ArmorConfig { Name = "Каска", ProtectedZone = 0, DamageAbsorption = 0.4f, BleedProtectionChance = 0.7f, Weight = 1.5f };
 
             // 1. СОЗДАЕМ ОТРЯД №0: СИНИЕ КОЛОНИСТЫ (СВЕРХУ)
-            int squadColonists = squadStore.CreateSquad();
+         
 
             // Начальная точка шеренги синих на Севере
             int blueStartCellX = 50;
@@ -65,7 +65,7 @@ namespace Units
                 int spawnY = blueStartCellY + (i / 20);
 
                 int unitId = CreateUnitEntity(unitStore, spawnX, spawnY, UnitType.Human, spatialGrid);
-                AddToSquad(squadStore, squadColonists, unitStore, unitId, spatialGrid);
+                
 
                 // Выдаем автоматы и пришвартовываем плавный рендер к клетке
                 inventorySystem.EquipWeapon(unitStore, unitId, ak47);
@@ -76,16 +76,11 @@ namespace Units
 
             // Направляем Синих на 500 тайлов вниз (на Юг) и на 20 тайлов ПРАВЕЕ!
             SpatialCoord blueTarget = new SpatialCoord(blueStartCellX + 20, blueStartCellY + 500, 1);
-            squadStore.SetWaypoint(squadColonists, blueTarget);
-            squadStore.IsMoving[squadColonists] = true; // Сквад-менеджер сразу подхватит марш!
-
-
-            // 2. СОЗДАЕМ ОТРЯД №1: КРАСНЫЕ ЖУКИ-РЕЙДЕРЫ (СНИЗУ)
-            int squadRaiders = squadStore.CreateSquad();
+           
 
             // Начальная точка шеренги жуков на Юге (ровно на 500 клеток ниже синих!)
             int redStartCellX = 50;
-            int redStartCellY = blueStartCellY + 500; // 100 + 500 = 600 (Южная граница)
+            int redStartCellY = blueStartCellY + 30; // 100 + 500 = 600 (Южная граница)
 
             for (int i = 0; i < 40; i++)
             {
@@ -94,7 +89,7 @@ namespace Units
                 int spawnY = redStartCellY + (i / 20);
 
                 int unitId = CreateUnitEntity(unitStore, spawnX, spawnY, UnitType.Insect, spatialGrid);
-                AddToSquad(squadStore, squadRaiders, unitStore, unitId, spatialGrid);
+                
 
                 // Заряжаем им снайперские СВД, одеваем в броню и швартуем рендер
                 inventorySystem.EquipWeapon(unitStore, unitId, svd);
@@ -108,9 +103,7 @@ namespace Units
             // Направляем Красных на 500 тайлов вверх (на Север) и тоже на 20 тайлов ПРАВЕЕ!
             // Они пойдут на перехват синей колонны!
             SpatialCoord redTarget = new SpatialCoord(redStartCellX + 20, redStartCellY - 500, 1);
-            squadStore.SetWaypoint(squadRaiders, redTarget);
-            squadStore.IsMoving[squadRaiders] = true;
-
+        
             Console.WriteLine("⚔️ БАТАЛИЯ ЗАПУЩЕНА! Шеренги рождены в легальных границах карты и маршируют навстречу друг другу!");
 
         }
@@ -128,9 +121,6 @@ namespace Units
             );
         }
 
-        private static void AddToSquad(SquadStore squadStore, int squadId, UnitStore unitStore, int unitId, UnitSpatialGrid spatialGrid)
-        {
-            squadStore.AddMember(squadId, unitId, unitStore, spatialGrid);
-        }
+        
     }
 }

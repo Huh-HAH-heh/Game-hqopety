@@ -77,7 +77,7 @@ namespace Core.Unit
 
         public void Update(
         UnitStore units,
-        SquadStore squads,
+        
         UnitSpatialGrid spatialGrid,
         WorldMap map,
         float deltaTime)

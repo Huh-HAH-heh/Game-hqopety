@@ -7,17 +7,21 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="RenderNeed\**" />
+    <Compile Remove="RenderSystems\**" />
+    <EmbeddedResource Remove="RenderNeed\**" />
+    <EmbeddedResource Remove="RenderSystems\**" />
+    <None Remove="RenderNeed\**" />
+    <None Remove="RenderSystems\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Raylib-cs" Version="8.0.0" />
     <PackageReference Include="SFML.Net" Version="3.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="RenderNeed\" />
-    <Folder Include="RenderSystems\" />
   </ItemGroup>
 
 </Project>

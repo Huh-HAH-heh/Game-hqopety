@@ -10,15 +10,13 @@ namespace RimClone.Render
         private readonly UnitPushSystem _unitPushSystem = new UnitPushSystem();
         private readonly UnitCombatSystem _unitCombatSystem = new UnitCombatSystem();
         private readonly CombatEffectSystem _effectSystem = new CombatEffectSystem();
-        private SquadMovementSystem _squadMovementSystem;
         private UnitMovementSystem _unitMovementSystem;
 
         public CombatEffectSystem EffectSystem => _effectSystem;
 
-        public void Initialize(UnitMovementSystem movementSystem, SquadMovementSystem squadSystem)
+        public void Initialize(UnitMovementSystem movementSystem)
         {
             _unitMovementSystem = movementSystem;
-            _squadMovementSystem = squadSystem;
         }
 
         /// <summary>
@@ -27,20 +25,19 @@ namespace RimClone.Render
         /// </summary>
         public void Update(
             UnitStore units,
-            SquadStore squads,
+            
             UnitSpatialGrid spatialGrid,
             WorldMap map,
             EdificeStore edificeStore, // <-- Добавили сюда
             float microCellPixelSize,
-            float deltaTime,
-            FireteamRegistry fireteamRegistry)
+            float deltaTime)
+            
         {
             // 1. Отряды рассчитывают микро-шаги строя
-            _squadMovementSystem.Update(units, squads, spatialGrid, map, deltaTime);
 
 
             // 2. Попиксельное скольжение муравьев (LERP)
-            _unitMovementSystem.Update(units, squads, spatialGrid, map, deltaTime);
+            _unitMovementSystem.Update(units,  spatialGrid, map, deltaTime);
 
             // 3. Мягкое расталкивание в стиле RimWorld
             _unitPushSystem.Update(units, spatialGrid, deltaTime);
@@ -60,7 +57,7 @@ namespace RimClone.Render
             _effectSystem.Update(deltaTime);
 
             // 6. Медицина: Кровотечение, заживление ран, смерть от кровопотери
-            units.UpdateHealthSystems(deltaTime, squads);
+            units.UpdateHealthSystems(deltaTime);
 
             // 7. Очистка погибших из пространственной сетки
             for (int i = 0; i < units.Count; i++)
