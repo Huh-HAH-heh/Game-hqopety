@@ -61,12 +61,13 @@ namespace RimClone.Render
     _groupMovementManager
 
     );            // Время кадра
-      // Менеджер групп (аргумент метода симуляции)
+                  // Менеджер групп (аргумент метода симуляции)
 
 
 
             // 3. Мягкое расталкивание в стиле RimWorld
-            _unitPushSystem.Update(units, spatialGrid, deltaTime);
+            _unitPushSystem.Update(units, spatialGrid, deltaTime, map);
+
 
             // 4. ИСПРАВЛЕНО: Боевой ИИ теперь получает ВСЕ необходимые параметры для расчета баллистики промахов
             _unitCombatSystem.Update(
