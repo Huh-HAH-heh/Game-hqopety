@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using Core.Unit.Components;
+using Core.Unit;
 
 namespace Core.Unit.Systems
 {
@@ -17,9 +17,7 @@ namespace Core.Unit.Systems
             // Радиус 0.4 означает, что диаметр муравья 0.8 ячейки, и они идеально вписываются по одному в клетку
             const float UnitRadius = 0.4f;
             const float MinDistance = UnitRadius * 2f; // Расстояние, ближе которого начнется расталкивание
-
-            // Радиус поиска в микро-сетке. 1 ячейка вокруг себя (квадрат 3х3 микро-ячейки) — этого более чем достаточно
-            const int GridSearchRadius = 1;
+            const int GridSearchRadius = 1; // Радиус поиска в микро-сетке (квадрат 3х3 клетки)
 
             for (int i = 0; i < units.Count; i++)
             {
@@ -28,7 +26,7 @@ namespace Core.Unit.Systems
                 ref var posA = ref units.Positions[i];
                 ref var moveA = ref units.Movement[i];
 
-                // Собираем всех соседей в радиусе 1 микро-ячейки через наш супер-быстрый грид
+                // Собираем всех соседей в радиусе 1 микро-ячейки через быстрый пространственный граф
                 _neighborBuffer.Clear();
                 spatialGrid.GetNearby(posA.Spatial, GridSearchRadius, _neighborBuffer);
 
@@ -43,54 +41,56 @@ namespace Core.Unit.Systems
                     ref var moveB = ref units.Movement[j];
 
                     // Расталкивание работает только на одном Z-этаже
-                    if (posA.Z != posB.Z) continue;
+                    if (posA.Spatial.Z != posB.Spatial.Z) continue;
 
-                    // Считаем вектор расстояния между муравьями по их текущим визуальным координатам рендера
+                    // Считаем вектор расстояния между муравьями по их визуальным render-координатам
                     float dx = posA.RenderX - posB.RenderX;
                     float dy = posA.RenderY - posB.RenderY;
 
-                    float distanceSqr = dx * dx + dy * dy;
+                    float distanceSqr = (dx * dx) + (dy * dy);
 
                     // Если муравьи разошлись дальше безопасной дистанции — коллизии нет
                     if (distanceSqr >= MinDistance * MinDistance || distanceSqr <= 0f) continue;
 
                     float distance = (float)Math.Sqrt(distanceSqr);
-                    // Вычисляем, насколько сильно муравьи залезли друг на друга
+
+                    // Вычисляем, насколько сильно муравьи налезли друг на друга
                     float penetration = MinDistance - distance;
 
                     // Нормализуем вектор направления расталкивания
                     float pushX = dx / distance;
-                    float pushY = dy / distance;
+                    float dyPushY = dy / distance;
 
-                    // Сила расталкивания (коэффициент мягкости)
-                    // Умножаем на deltaTime, чтобы расталкивание происходило плавно, а не мгновенным рывком
-                    float pushForce = penetration * 5f * deltaTime;
+                    // Сила расталкивания с коэффициентом мягкости
+                    // Умножаем на deltaTime для плавного скольжения без рывков
+                    float pushForce = penetration * 8f * deltaTime; // Слегка увеличили коэффициент до 8f для отзывчивости
 
-                    // ПРАВИЛО РИМВОРЛДА: Кто движется, у того приоритет!
-                    // Если муравей А идет, а муравей Б стоит (Idle), то муравей А расталкивает муравья Б со всей силы, 
-                    // а сам почти не отклоняется от своего маршрута, чтобы идти плавно.
+                    // =========================================================================
+                    // // ПРАВИЛО RIMWORLD: Кто движется, у того приоритет!
+                    // =========================================================================
                     if (moveA.State == MovementState.Moving && moveB.State != MovementState.Moving)
                     {
-                        // Муравей А идет напролом, муравей Б (Idle) полностью принимает удар и отлетает в сторону
-                        posB.RenderX -= pushX * pushForce;
-                        posB.RenderY -= pushY * pushForce;
+                        // Муравей А идет напролом, муравей Б (Idle) уступает дорогу и отлетает в сторону
+                        posB.RenderX -= pushX * pushForce * 1.5f;
+                        posB.RenderY -= dyPushY * pushForce * 1.5f;
                     }
                     else if (moveA.State != MovementState.Moving && moveB.State == MovementState.Moving)
                     {
                         // Наоборот: муравей Б идет, значит муравей А (Idle) вежливо уступает дорогу
-                        posA.RenderX += pushX * pushForce;
-                        posA.RenderY += pushY * pushForce;
+                        posA.RenderX += pushX * pushForce * 1.5f;
+                        posA.RenderY += dyPushY * pushForce * 1.5f;
                     }
                     else
                     {
                         // Если оба стоят ИЛИ оба идут толпой — они расталкивают друг друга поровну (50 на 50)
                         float halfPush = pushForce * 0.5f;
 
+                        // ИДУЩИЕ юниты теперь аддитивно смещаются, создавая естественное огибание плеч
                         posA.RenderX += pushX * halfPush;
-                        posA.RenderY += pushY * halfPush;
+                        posA.RenderY += dyPushY * halfPush;
 
                         posB.RenderX -= pushX * halfPush;
-                        posB.RenderY -= pushY * halfPush;
+                        posB.RenderY -= dyPushY * halfPush;
                     }
                 }
             }

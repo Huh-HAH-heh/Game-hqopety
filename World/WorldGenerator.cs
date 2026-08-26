@@ -1,58 +1,25 @@
-﻿using Core.Map;
+﻿using System;
+using Core.Map;
 using Core.Structs;
 using Core.Items;
-using System;
 
 namespace World
 {
     public static class WorldGenerator
     {
+        private const int MapSizeInCells = 16 * 48; // 768х768 микро-ячеек
+
         public static void Generate(WorldMap worldMap, EdificeStore edificeStore)
         {
-            // 1. Полная базовая зачистка карты грунтом (Земля/Трава)
-            GenerateBaseLayers(worldMap);
+            // 1. Очищаем карту, заливая базовой ровной землей
+            ClearToFlatGround(worldMap);
 
-            // 2. Строим вертикальный проспект с кибитками на Z-этаже 1
-            GenerateVerticalTestStreet(worldMap, edificeStore, zLevel: 1);
-        }
-
-        private static void GenerateBaseLayers(WorldMap worldMap)
-        {
-            int totalMicroX = MapLayer.WidthInRegions * MapRegion.Size * MapRegion.SubDivision;
-            int totalMicroY = MapLayer.HeightInRegions * MapRegion.Size * MapRegion.SubDivision;
-
-            for (int z = worldMap.MinZ; z <= worldMap.MaxZ; z++)
+            // 2. Инициализируем элемент массива Configs по индексу (TypeId/ConfigId = 1)
+            if (edificeStore.Configs == null || edificeStore.Configs.Length <= 1)
             {
-                MapLayer layer = worldMap.GetLayer(z);
-                if (layer == null) continue;
-
-                for (int y = 0; y < totalMicroY; y++)
-                {
-                    for (int x = 0; x < totalMicroX; x++)
-                    {
-                        ref MicroCell tile = ref layer.GetMicroCell(x, y);
-
-                        tile.FloorId = 0;    // Трава/Грунт вокруг города
-                        tile.EdificeId = 0;  // Чистое поле
-                        tile.Height = 10;    // Плоская равнина
-                        tile.Flags = 0x0004; // Взводим Бит 2 (Проходимо)
-                    }
-                }
+                edificeStore.Configs = new EdificeConfig[10];
             }
-        }
 
-        private static void GenerateVerticalTestStreet(WorldMap worldMap, EdificeStore edificeStore, int zLevel)
-        {
-            MapLayer layer = worldMap.GetLayer(zLevel);
-            if (layer == null) return;
-
-            int maxCoord = (16 * 48) - 1; // 767
-
-            // ========================================================
-            // 1. РЕГИСТРАЦИЯ ВСЕХ ТЕСТОВЫХ ШАБЛОНОВ ОБЪЕКТОВ (Configs)
-            // ========================================================
-
-            // Шаблон 1: Монолитная стена для кибиток (1х1 ячейка, непроходима)
             edificeStore.Configs[1] = new EdificeConfig
             {
                 TypeId = 1,
@@ -61,140 +28,101 @@ namespace World
                 WidthCells = 1,
                 HeightCells = 1,
                 MaxHitPoints = 600,
-                CoverEffectiveness = 1.0f // 100% блок обзора и пуль
+                CoverEffectiveness = 1.0f
             };
 
-            // Шаблон 2: Мешки с песком / Баррикады (1х1 ячейка, проходимы)
-            edificeStore.Configs[2] = new EdificeConfig
-            {
-                TypeId = 2,
-                Name = "Мешки с песком",
-                Type = EdificeType.Wall,
-                WidthCells = 1,
-                HeightCells = 1,
-                MaxHitPoints = 250,
-                CoverEffectiveness = 0.65f // Оставляем честные 65% защиты
-            };
+            // 3. Запускаем рекурсивную генерацию фрактального лабиринта в центре карты
+            // Квадрат размером 486х486 идеально делится на 3 на всех уровнях рекурсии (486 -> 162 -> 54 -> 18 -> 6)
+            int fractalSize = 486;
+            int startX = (MapSizeInCells - fractalSize) / 2; // Центрирование на карте 768
+            int startY = (MapSizeInCells - fractalSize) / 2;
 
-            // Шаблон 3: Промышленный Генератор (Крупный тестовый объект 2х2 ячейки!)
-            edificeStore.Configs[3] = new EdificeConfig
-            {
-                TypeId = 3,
-                Name = "Тестовый Генератор",
-                Type = EdificeType.Generator,
-                WidthCells = 2,
-                HeightCells = 2,
-                MaxHitPoints = 400,
-                CoverEffectiveness = 0.40f // Генератор крупный, за ним тоже можно частично укрыться!
-            };
+            // ИСПРАВЛЕНО: Заменили имя именованного аргумента с zLevel на z, чтобы оно соответствовало сигнатуре метода
+            GenerateFractalRooms(worldMap, edificeStore, startX, startY, fractalSize, z: 1, currentDepth: 0, maxDepth: 4);
 
-            // ========================================================
-            // 2. ГЕОМЕТРИЯ ВЕРТИКАЛЬНОГО ПРОСПЕКТА (Дорога по центру X)
-            // ========================================================
-            // Улица пойдет сверху вниз ровно по центру карты (X от 40 до 60 микро-ячеек)
-            int streetMinX = 40;
-            int streetMaxX = 60;
-
-            for (int y = 0; y <= maxCoord; y++)
-            {
-                for (int x = streetMinX; x <= streetMaxX; x++)
-                {
-                    ref MicroCell tile = ref layer.GetMicroCell(x, y);
-                    tile.FloorId = 2; // Код серого асфальта
-                }
-            }
-
-            // ========================================================
-            // 3. СТРОИТЕЛЬСТВО ЗАПОЛНЕННЫХ СТЕНАМИ КИБИТОК (ДОМА-КОРОБКИ)
-            // ========================================================
-            // Построим жилые кибитки размером 6х6 ячеек слева и справа от проспекта
-            // Левый ряд кибиток (X от 33 до 39) и правый ряд кибиток (X от 61 до 67)
-
-            for (int houseY = 10; houseY < maxCoord - 20; houseY += 16)
-            {
-                // ---- ЛЕВАЯ КИБИТКА (Коробка 6х6 из монолитных стен) ----
-                BuildBoxHouse(worldMap, edificeStore, startX: 33, startY: houseY, width: 6, height: 6, zLevel, doorFacingRight: true);
-
-                // ---- ПРАВАЯ КИБИТКА (Коробка 6х6 из монолитных стен) ----
-                BuildBoxHouse(worldMap, edificeStore, startX: 61, startY: houseY, width: 6, height: 6, zLevel, doorFacingRight: false);
-            }
-
-            // ========================================================
-            // 4. РАССТАВЛЯЕМ ТЕСТОВЫЕ ОБЪЕКТЫ НА ДОРОГЕ (МЕШКИ, ГЕНЕРАТОРЫ И НЕПРОГЛЯДНЫЕ СТЕНЫ)
-            // ========================================================
-
-            // --- СЕКЦИЯ А: ВЕРХНИЙ БЛОКПОСТ СИНЕЙ КОМАНДЫ (Y = 30) ---
-            // Слева ставим мешки с песком (проходимы, можно выглядывать), 
-            // а справа возводим глухую непроглядную бетонную стену (configId: 1) в качестве ДОТа!
-            for (int x = streetMinX + 2; x <= streetMaxX - 2; x++)
-            {
-                if (x < streetMinX + 10)
-                {
-                    // Левый фланг — низкие укрытия (мешки с песком, configId: 2)
-                    edificeStore.Build(worldMap, configId: 2, startMx: x, startY: 30, z: zLevel);
-                }
-                else
-                {
-                    // Правый фланг — ЖЕСТКАЯ НЕПРОГЛЯДНАЯ СТЕНА (configId: 1)
-                    // Сквозь нее нельзя стрелять и смотреть, это монолитный блокпост!
-                    edificeStore.Build(worldMap, configId: 1, startMx: x, startY: 30, z: zLevel);
-                }
-            }
-
-            // --- СЕКЦИЯ Б: ЦЕНТРАЛЬНЫЕ ТАКТИЧЕСКИЕ ЩИТЫ (Между генераторами) ---
-            // Поставим прямо по центру дороги (Y = 75) глухую бетонную стенку длиной в 4 ячейки.
-            // Она разорвет линию огня СВД по центру улицы и создаст укрытие для сближения!
-            int ShieldY = 75;
-            int roadCenter = (streetMinX + streetMaxX) / 2;
-            for (int x = roadCenter - 2; x <= roadCenter + 2; x++)
-            {
-                edificeStore.Build(worldMap, configId: 1, startMx: x, startY: ShieldY, z: zLevel);
-            }
-
-
-            // --- СЕКЦИЯ В: НИЖНИЙ БЛОКПОСТ КРАСНОЙ КОМАНДЫ (Y = 120) ---
-            // Зеркально меняем фланги: слева глухая бетонная стена, справа мешки с песком
-            for (int x = streetMinX + 2; x <= streetMaxX - 2; x++)
-            {
-                if (x < streetMinX + 10)
-                {
-                    // Левый фланг — НЕПРОГЛЯДНАЯ СТЕНА (configId: 1)
-                    edificeStore.Build(worldMap, configId: 1, startMx: x, startY: 120, z: zLevel);
-                }
-                else
-                {
-                    // Правый фланг — мешки с песком (configId: 2)
-                    edificeStore.Build(worldMap, configId: 2, startMx: x, startY: 120, z: zLevel);
-                }
-            }
-
-            // Центральные массивные 2х2 генераторы (из прошлого шага) оставляем для объема
-            edificeStore.Build(worldMap, configId: 3, startMx: 45, startY: 65, z: zLevel);
-            edificeStore.Build(worldMap, configId: 3, startMx: 53, startY: 85, z: zLevel);
-
-            Console.WriteLine("🛡️ На вертикальный проспект добавлены глухие блокпосты и центральные щиты видимости!");
-
+            Console.WriteLine("[WorldGenerator] Фрактальная сквозная структура Серпинского успешно возведена.");
         }
 
-        /// <summary>
-        /// Вспомогательный метод, который собирает пустую внутри коробку дома (кибитку) и оставляет дверной проем.
-        /// </summary>
-        private static void BuildBoxHouse(WorldMap map, EdificeStore store, int startX, int startY, int width, int height, int z, bool doorFacingRight)
+        private static void ClearToFlatGround(WorldMap worldMap)
         {
-            for (int dy = 0; dy < height; dy++)
+            for (int z = worldMap.MinZ; z <= worldMap.MaxZ; z++)
             {
-                for (int dx = 0; dx < width; dx++)
+                MapLayer layer = worldMap.GetLayer(z);
+                if (layer == null) continue;
+
+                for (int y = 0; y < MapSizeInCells; y++)
                 {
-                    // Проверяем, крайняя ли это ячейка, чтобы строить строго контур (стены)
-                    bool isBorder = (dx == 0 || dx == width - 1 || dy == 0 || dy == height - 1);
+                    for (int x = 0; x < MapSizeInCells; x++)
+                    {
+                        ref MicroCell tile = ref layer.GetMicroCell(x, y);
+                        tile.FloorId = 0;     // Базовая трава/пол
+                        tile.EdificeId = 0;   // Пусто
+                        tile.Flags = 0x0004;  // Проходимо
+                        tile.Height = 10;     // Ровный ландшафт
+                    }
+                }
+            }
+        }
+
+        private static void GenerateFractalRooms(WorldMap map, EdificeStore store, int x, int y, int size, int z, int currentDepth, int maxDepth)
+        {
+            if (currentDepth > maxDepth || size < 6) return;
+
+            // Строим стены текущей квадратной комнаты
+            BuildPassableRoomFrame(map, store, x, y, size, z);
+
+            // Делим текущий квадрат на 9 равных частей (сетка 3х3)
+            int subSize = size / 3;
+
+            for (int row = 0; row < 3; row++)
+            {
+                for (int col = 0; col < 3; col++)
+                {
+                    // Центральный сектор (row == 1 && col == 1) оставляем пустым по принципу ковра Серпинского
+                    if (row == 1 && col == 1) continue;
+
+                    int subX = x + col * subSize;
+                    int subY = y + row * subSize;
+
+                    // Рекурсивный вызов для следующего под-уровня фрактала
+                    GenerateFractalRooms(map, store, subX, subY, subSize, z, currentDepth + 1, maxDepth);
+                }
+            }
+        }
+
+        private static void BuildPassableRoomFrame(WorldMap map, EdificeStore store, int startX, int startY, int size, int z)
+        {
+            int endX = startX + size - 1;
+            int endY = startY + size - 1;
+
+            // Определяем центр стен для создания сквозных проемов (дверей)
+            int midX = startX + size / 2;
+            int midY = startY + size / 2;
+
+            // Размер проема (для больших внешних комнат делаем шире, для внутренних — в 1 клетку)
+            int doorRadius = size > 100 ? 2 : 1;
+
+            for (int currY = startY; currY <= endY; currY++)
+            {
+                for (int currX = startX; currX <= endX; currX++)
+                {
+                    // Строим строго по периметру квадрата
+                    bool isBorder = (currX == startX || currX == endX || currY == startY || currY == endY);
                     if (!isBorder) continue;
 
-                    // Оставляем пустой дверной проем (пропускаем постройку стены в центре одной из стен)
-                    if (doorFacingRight && dx == width - 1 && dy == height / 2) continue; // Дверь смотрит на дорогу справа
-                    if (!doorFacingRight && dx == 0 && dy == height / 2) continue;       // Дверь смотрит на дорогу слева
+                    // --- МАГИЯ СКВОЗНОГО ПРОХОДА ---
+                    // Пропускаем постройку стен ровно по центру каждой из 4-х сторон
+                    if (Math.Abs(currX - midX) <= doorRadius && (currY == startY || currY == endY)) continue;
+                    if (Math.Abs(currY - midY) <= doorRadius && (currX == startX || currX == endX)) continue;
 
-                    // Возводим блок монолитной стены (configId = 1)
-                    store.Build(map, configId: 1, startMx: startX + dx, startY: startY + dy, z: z);
+                    ushort gx = unchecked((ushort)currX);
+                    ushort gy = unchecked((ushort)currY);
+
+                    // Проверка выхода за границы карты
+                    if (gx >= MapSizeInCells || gy >= MapSizeInCells) continue;
+
+                    // Передаем configId = 1
+                    store.Build(map, 1, gx, gy, z);
                 }
             }
         }

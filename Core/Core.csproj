@@ -7,7 +7,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Map\UnitMap\" />
+    <Compile Remove="Map\UnitMap\**" />
+    <EmbeddedResource Remove="Map\UnitMap\**" />
+    <None Remove="Map\UnitMap\**" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,4 +1,5 @@
-﻿using Core.Structs;
+﻿using Core.AI;
+using Core.Structs;
 using Core.Unit;
 using Core.Unit.Components;
 using Core.Unit.Components.AiComponents.Core.Unit.Components;
@@ -25,16 +26,23 @@ namespace Core.Input.Systems
         public readonly List<int> SelectedUnitIds = new List<int>(16);
 
         /// <summary>
-        /// ОБНОВЛЕННАЯ СИГНАТУРА: Полностью совпадает с вызовом из VectorRenderer.cs
+        /// Главный цикл обновления ввода мыши.
+        /// Фиксирует выделение рамкой (ЛКМ) и отдает приказы перемещения (ПКМ).
         /// </summary>
-        public void Update(RenderWindow window, UnitStore units, int currentViewZ, float microCellPixelSize, float deltaTime)
+        public void Update(
+            RenderWindow window,
+            UnitStore units,
+            int currentViewZ,
+            float microCellPixelSize,
+            float deltaTime,
+            GroupMovementManager groupMovementManager) // Ссылка на оригинальный менеджер симуляции
         {
             Vector2i mousePosWindow = Mouse.GetPosition(window);
             _currentMousePixels = window.MapPixelToCoords(mousePosWindow, window.GetView());
 
-            // ============================================================
-            // ОБРАБОТКА ЛЕВОЙ КНОПКИ МЫШИ (ВЫДЕЛЕНИЕ РАМКОЙ)
-            // ============================================================
+            // =========================================================================
+            // // ОБРАБОТКА ЛЕВОЙ КНОПКИ МЫШИ (ВЫДЕЛЕНИЕ РАМКОЙ)
+            // =========================================================================
             if (Mouse.IsButtonPressed(Mouse.Button.Left))
             {
                 if (!_isSelecting)
@@ -53,9 +61,9 @@ namespace Core.Input.Systems
                 }
             }
 
-            // ============================================================
-            // ОБРАБОТКА ПРАВОЙ КНОПКИ МЫШИ (ПРИКАЗ НА МАРШ ОДИНАЧКАМ)
-            // ============================================================
+            // =========================================================================
+            // // ОБРАБОТКА ПРАВОЙ КНОПКИ МЫШИ (ПРИКАЗ НА ПЕРЕМЕЩЕНИЕ)
+            // =========================================================================
             if (Mouse.IsButtonPressed(Mouse.Button.Right))
             {
                 if (!_hasFiredRightClick && SelectedUnitIds.Count > 0)
@@ -68,16 +76,15 @@ namespace Core.Input.Systems
 
                     if (clickMx >= 0 && clickMx <= maxCoord && clickMy >= 0 && clickMy <= maxCoord)
                     {
-                        // Обслуживание одиночек: отдаем приказ напрямую в ИИ-стек каждой выделенной пешки
                         foreach (int unitId in SelectedUnitIds)
                         {
-                            // Сбрасываем старые команды, если они застряли
+                            // Сбрасываем старые ИИ команды из стека юнита
                             while (units.AiStackPointers[unitId] >= 0)
                             {
                                 units.CpuPopCommand(unitId);
                             }
 
-                            // Пушим чистую команду MoveToTarget без сквадовых надстроек
+                            // Пушим базовую команду движения в стек ИИ
                             units.CpuPushCommand(unitId, new AiCommand
                             {
                                 OpCode = AiOpCode.MoveToTarget,
@@ -85,11 +92,20 @@ namespace Core.Input.Systems
                                 TargetY = clickMy
                             });
 
-                            // Взводим параметры для системы перемещения
-                            units.Movement[unitId].TargetCell = new SpatialCoord(clickMx, clickMy, currentViewZ);
-                            units.Movement[unitId].SourceCell = units.Positions[unitId].Spatial;
+                            // ВАЖНО ДЛЯ ТЕСТА: Пишем координаты клика в оригинальный менеджер групп!
+                            // Буква 'W' используется большая, как объявлено в вашем менеджере.
+                            groupMovementManager._unitSubWaypointsBuffer[unitId, 0] = new PacketWaypoint
+                            {
+                                X = (short)clickMx,
+                                Y = (short)clickMy
+                            };
+                            groupMovementManager._unitSubWaypointsCount[unitId] = 1;
+
+                            // Переводим стейт перемещения в Idle и обнуляем прогресс,
+                            // чтобы UnitMovementSystem на следующем кадре сама рассчитала первый шаг.
+                            units.Movement[unitId].State = MovementState.Idle;
                             units.Movement[unitId].Progress = 0f;
-                            units.Movement[unitId].State = MovementState.Moving;
+                            units.MovementCooldowns[unitId] = 0f;
                         }
                     }
                 }
@@ -101,7 +117,7 @@ namespace Core.Input.Systems
         }
 
         /// <summary>
-        /// МАТЕМАТИЧЕСКИЙ СЧЕТ РАМКИ ВЫДЕЛЕНИЯ ОДИНАЧЕК (Снесли сквад-буферы)
+        /// Расчет попадания юнитов в рамку выделения мыши.
         /// </summary>
         private void CalculateSelectionBox(UnitStore units, float microCellPixelSize)
         {
@@ -120,16 +136,16 @@ namespace Core.Input.Systems
             {
                 if (units.HealthMasks[i] == 0) continue; // Мертвых не выделяем
 
-                // Рассчитываем пиксельные координаты центра пешки на экране
+                // Переводим render-координаты юнита на сетке в экранные пиксели
                 float unitPx = units.Positions[i].RenderX * microCellPixelSize;
                 float unitPy = units.Positions[i].RenderY * microCellPixelSize;
 
                 if (isSingleClick)
                 {
-                    // Обычный одиночный клик — проверяем дистанцию до пешки
+                    // Клик в точку — проверяем радиус вокруг пешки
                     float dx = _currentMousePixels.X - unitPx;
                     float dy = _currentMousePixels.Y - unitPy;
-                    float dist = MathF.Sqrt(dx * dx + dy * dy);
+                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
 
                     if (dist <= 14f)
                     {
@@ -139,7 +155,7 @@ namespace Core.Input.Systems
                 }
                 else
                 {
-                    // Проверяем попадание пешки внутрь прямоугольника зажима рамки
+                    // Зажим рамки — проверяем попадание в прямоугольник
                     if (unitPx >= xMin && unitPx <= xMax && unitPy >= yMin && unitPy <= yMax)
                     {
                         SelectedUnitIds.Add(i);
@@ -149,7 +165,7 @@ namespace Core.Input.Systems
         }
 
         /// <summary>
-        /// ОТРИСОВКА СИНЕЙ СЕЛЕКТ-РАМКИ ЗАЖИМА (Оригинальный метод без изменений)
+        /// Отрисовка полупрозрачной синей рамки выделения на экране.
         /// </summary>
         public void DrawSelectionBox(RenderWindow window)
         {

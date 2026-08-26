@@ -1,4 +1,5 @@
-﻿using System;
+﻿// Path: Core/Items/EdificeStore.cs
+using System;
 using Core.Map;
 using Core.Structs;
 
@@ -16,16 +17,50 @@ namespace Core.Items
             Configs = new EdificeConfig[maxConfigs];
         }
 
-        public ushort Build(WorldMap map, ushort configId, int startMx, int startY, int z)
+        /// <summary>
+        /// Внутренний метод для динамического увеличения емкости массива инстансов построек
+        /// </summary>
+        private void EnsureInstancesCapacity(int requiredId)
         {
+            if (requiredId >= Instances.Length)
+            {
+                int newCapacity = Math.Max(Instances.Length * 2, requiredId + 4);
+                EdificeInstance[] newArray = new EdificeInstance[newCapacity];
+                Array.Copy(Instances, 0, newArray, 0, Instances.Length);
+                Instances = newArray;
+            }
+        }
+
+        /// <summary>
+        /// Внутренний метод для динамического увеличения емкости массива конфигураций
+        /// </summary>
+        private void EnsureConfigsCapacity(int requiredConfigId)
+        {
+            if (requiredConfigId >= Configs.Length)
+            {
+                int newCapacity = Math.Max(Configs.Length * 2, requiredConfigId + 4);
+                EdificeConfig[] newArray = new EdificeConfig[newCapacity];
+                Array.Copy(Configs, 0, newArray, 0, Configs.Length);
+                Configs = newArray;
+            }
+        }
+
+        public ushort Build(WorldMap map, ushort configId, int startX, int startY, int z)
+        {
+            // Динамически расширяем массив конфигураций, если переданный ID выходит за текущие границы
+            EnsureConfigsCapacity(configId);
+
             var config = Configs[configId];
             ushort instanceId = (ushort)Count++;
+
+            // Динамически расширяем массив инстансов перед записью нового элемента
+            EnsureInstancesCapacity(instanceId);
 
             Instances[instanceId] = new EdificeInstance
             {
                 ConfigId = configId,
                 HitPoints = config.MaxHitPoints,
-                OriginX = startMx,
+                OriginX = startX,
                 OriginY = startY,
                 ZLevel = z,
                 InternalTimer = 0f,
@@ -39,27 +74,24 @@ namespace Core.Items
             {
                 for (int dx = 0; dx < config.WidthCells; dx++)
                 {
-                    ref MicroCell cell = ref layer.GetMicroCell(startMx + dx, startY + dy);
+                    ref MicroCell cell = ref layer.GetMicroCell(startX + dx, startY + dy);
                     cell.EdificeId = instanceId;
 
-                    // --- ТАКТИЧЕСКОЕ УПРАВЛЕНИЕ ПРОХОДИМОСТЬЮ (RimWorld-стиль) ---
-                    // Только глухая бетонная/каменная стена здания или дверь полностью перекрывают путь!
-                    // Если это мешки с песком (у них CoverEffectiveness равен 0.65f, а не 1.0f), 
-                    // мы НЕ затираем проходимость, чтобы солдаты могли физически залезть НА мешки и укрыться!
-                    if ((config.Type == EdificeType.Wall && config.CoverEffectiveness >= 1.0f) || config.Type == EdificeType.Door)
+                    // ТАКТИЧЕСКОЕ УПРАВЛЕНИЕ ПРОХОДИМОСТЬЮ (RimWorld-стиль)
+                    if (config.Type == EdificeType.Wall && config.CoverEffectiveness >= 1.0f || config.Type == EdificeType.Door)
                     {
-                        // Сбрасываем Бит 2 (0x0004) — ячейка становится абсолютно твердой препятствием
+                        // Сбрасываем Бит 2 (0x0004) - ячейка становится абсолютно твердой преградой
                         cell.Flags = (ushort)(cell.Flags & ~0x0004);
 
                         if (config.Type == EdificeType.Door)
                         {
-                            // Взводим Бит 3 (0x0008) — пометка "Это шлюз/дверь" для ИИ
+                            // Вводим Бит 3 (0x0008) - пометка "Это шлюз/дверь" для ИИ
                             cell.Flags |= 0x0008;
                         }
                     }
                     else
                     {
-                        // Мешки с песком, баррикады, верстаки и генераторы проходимы (взводим Бит 2 в 1)
+                        // Мешки с песком, баррикады, верстаки и генераторы проходимы (вводим Бит 2 в 1)
                         cell.Flags |= 0x0004;
                     }
                 }
@@ -67,15 +99,17 @@ namespace Core.Items
 
             if (config.Type != EdificeType.Turret)
             {
-                BuildRoof(map, startMx, startY, config.WidthCells, config.HeightCells, z, 1);
+                BuildRoof(map, startX, startY, config.WidthCells, config.HeightCells, z, 1);
             }
 
             return instanceId;
         }
 
-
         public void SetDoorState(WorldMap map, ushort instanceId, bool open)
         {
+            // Проверка на выход за границы динамического массива во избежание IndexOutOfRangeException
+            if (instanceId >= Instances.Length) return;
+
             ref var instance = ref Instances[instanceId];
             var config = Configs[instance.ConfigId];
 
@@ -91,7 +125,7 @@ namespace Core.Items
                 {
                     ref MicroCell cell = ref layer.GetMicroCell(instance.OriginX + dx, instance.OriginY + dy);
 
-                    // --- ИСПРАВЛЕНИЕ ОШИБКИ USHORT (-2) ---
+                    // ИСПРАВЛЕНИЕ ОШИБКИ USHORT (~2)
                     if (open)
                     {
                         cell.Flags |= 0x0004; // Открылась: проходимо
@@ -104,7 +138,6 @@ namespace Core.Items
                 }
             }
         }
-
 
         public void BuildRoof(WorldMap map, int sx, int sy, int w, int h, int z, byte roofType)
         {

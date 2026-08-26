@@ -210,10 +210,10 @@ namespace Core.Unit.Systems
 
                 int targetUid = currentCmd.TargetX;
 
+              /*
                 // ============================================================
                 // ИСПОЛНЕНИЕ МИРНЫХ ОПЕРАЦИЙ (КОМАНДЫ ИИ)
                 // ============================================================
-              
                 if (currentCmd.OpCode != AiOpCode.CombatEngage)
                 {
                     switch (currentCmd.OpCode)
@@ -303,7 +303,7 @@ namespace Core.Unit.Systems
                                     break;
                                 }
                                 continue; // Пропускаем боевой блок ниже, если пешка занята мирной операцией
-                            }
+                            }*/
 
                             // ============================================================
                             // ТАКТИЧЕСКИЙ ОГНЕВОЙ БЛОК COMBAT ENGAGE (ВЕДЕНИЕ БОЯ) С КАРТИНКИ
@@ -357,35 +357,46 @@ namespace Core.Unit.Systems
                                 break;
                             }
 
-                            // ФАЗА В: Lean-Выглядывание и полиморфный зажим пушки
-                            if (units.IsAiming[i] && units.RemainingBurstShots[i] <= 0)
+                // // ФАЗА В: Lean-Выглядывание и полиморфный зажим пушки
+                if (units.IsAiming[i] && units.RemainingBurstShots[i] <= 0)
+                {
+                    currentCmd.Timer -= deltaTime;
+
+                    if (move.State == MovementState.InCover)
+                    {
+                        // Сдвигаем рендер-координату из-за угла укрытия на 40% ячейки (Тактическое выглядывание RimWorld)
+                        pos.RenderX = pos.Spatial.X + (units.LeanOffsetX[i] * 0.4f);
+                        pos.RenderY = pos.Spatial.Y + (units.LeanOffsetY[i] * 0.4f);
+                    }
+
+                    if (currentCmd.Timer <= 0f)
+                    {
+                        // --- ИСПРАВЛЕНИЕ ОШИБКИ ИНДЕКСА ---
+                        // Проверяем, что в targetId лежит корректный индекс существа, а не координата лабиринта
+                        if (targetId >= 0 && targetId < units.Count && units.HealthMasks[targetId] > 0)
+                        {
+                            ref var enemyPos = ref units.Positions[targetId];
+                            float ex = pos.Spatial.X - enemyPos.Spatial.X;
+                            float ey = pos.Spatial.Y - enemyPos.Spatial.Y;
+                            float distanceToEnemy = MathF.Sqrt(ex * ex + ey * ey);
+
+                            int burstCount = 1; // Дефолтный одиночный тык
+                            if (units.WeaponSlot[i] != null)
                             {
-                                currentCmd.Timer -= deltaTime;
-
-                                if (move.State == MovementState.InCover)
-                                {
-                                    // Сдвигаем рендер-координату из-за угла укрытия на 40% ячейки (Тактическое выглядывание RimWorld)
-                                    pos.RenderX = pos.Spatial.X + (units.LeanOffsetX[i] * 0.4f);
-                                    pos.RenderY = pos.Spatial.Y + (units.LeanOffsetY[i] * 0.4f);
-                                }
-
-                                if (currentCmd.Timer <= 0f)
-                                {
-                                    ref var enemyPos = ref units.Positions[targetId];
-                                    float ex = pos.Spatial.X - enemyPos.Spatial.X;
-                                    float ey = pos.Spatial.Y - enemyPos.Spatial.Y;
-                                    float distanceToEnemy = MathF.Sqrt(ex * ex + ey * ey);
-
-                                    int burstCount = 1; // Дефолтный одиночный тык
-                                    if (units.WeaponSlot[i] != null)
-                                    {
-                                        // Оружие само оценивает дистанцию и выдает оптимальный зажим под автомат/винтовку
-                                        burstCount = units.WeaponSlot[i].GetBurstCountForDistance(distanceToEnemy);
-                                    }
-                                    units.RemainingBurstShots[i] = burstCount;
-                                }
+                                // Оружие само оценивает дистанцию и выдает оптимальный зажим под автомат/винтовку
+                                burstCount = units.WeaponSlot[i].GetBurstCountForDistance(distanceToEnemy);
                             }
-                    } // Конец огромного цикла по юнитам
+                            units.RemainingBurstShots[i] = burstCount;
+                        }
+                        else
+                        {
+                            // Если это была координата сетки (марш), а не враг — сбрасываем прицеливание, чтобы выйти из Фазы В
+                            units.IsAiming[i] = false;
+                        }
+                    }
                 }
+
+            } // Конец огромного цикла по юнитам
+        }
             }
         } 

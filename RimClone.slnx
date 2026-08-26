@@ -8,7 +8,9 @@
     <File Path="проМоель мира.txt" />
   </Folder>
   <Folder Name="/Элементы решения/Unit/">
+    <File Path="AI.txt" />
     <File Path="Unit.txt" />
+    <File Path="менеджер движения групы из А в Б.txt" />
   </Folder>
   <Project Path="App/App.csproj" />
   <Project Path="Core/Core.csproj" />

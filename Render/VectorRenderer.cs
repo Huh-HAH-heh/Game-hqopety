@@ -1,9 +1,11 @@
-﻿using Core.Input.Systems;
+﻿using Core.AI;
+using Core.Input.Systems;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
 using Core.Unit.Components;
 using Render;
+using RimClone.Render.Test;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
@@ -13,6 +15,13 @@ namespace RimClone.Render
 {
     public class VectorRenderer
     {
+  
+
+
+
+        private AsyncPathfindingTester _pathTester;//тест
+
+
         private bool _showDebugGrid = false; // По умолчанию отладочная сетка выключена
         private readonly WorldSimulation _simulation = new WorldSimulation();
         private MapRenderSystem _mapRenderSystem;
@@ -22,7 +31,7 @@ namespace RimClone.Render
         private WorldMap _worldMap;
         private GameCamera _gameCamera;
         private UnitStore _unitStore;
-       
+
         private UnitSpatialGrid _spatialGrid;
         private EdificeStore _edificeStore;
         private const int TileSize = 16;
@@ -35,13 +44,20 @@ namespace RimClone.Render
         private readonly MouseInputSystem _mouseInputSystem = new MouseInputSystem();
 
         //Автоматический менеджер тактического деления на огневые группы (Fireteams)
-   
-        public void InitializeAndRun(WorldMap worldMap, UnitStore unitStore,  UnitSpatialGrid spatialGrid, EdificeStore edificeStore)
+
+        public void InitializeAndRun(WorldMap worldMap, UnitStore unitStore, UnitSpatialGrid spatialGrid, EdificeStore edificeStore)
         {
             _worldMap = worldMap;
             _unitStore = unitStore;
-            
+
             _spatialGrid = spatialGrid;
+
+
+            
+            _pathTester = new AsyncPathfindingTester();//тест
+
+
+
 
             // ИСПРАВЛЕНО: Присваиваем тот самый store из генератора, где лежат наши кибитки и генераторы!
             // Старую строчку пересоздания с занулением ("new EdificeStore") УДАЛИЛИ!
@@ -49,7 +65,7 @@ namespace RimClone.Render
 
             // Инициализируем логические системы
             var unitMovementSystem = new UnitMovementSystem();
-            
+
             _simulation.Initialize(unitMovementSystem);
 
             // Инициализируем графические системы
@@ -114,12 +130,30 @@ namespace RimClone.Render
 
                 // А. Считываем рамку и тактические иерархические приказы игрока (ПКМ/ЛКМ)
                 // Передаем _squadStore третьим аргументом, чтобы мышка видела под-отряды!
-                _mouseInputSystem.Update(_window, _unitStore, _worldMap.CurrentViewZ, MicroCellPixelSize, deltaTime);
+                // 1. Мышка обрабатывает клик ПКМ и записывает координаты в свои внутренние массивы
+                _mouseInputSystem.Update(
+      _window,
+      _unitStore,
+      _worldMap.CurrentViewZ,
+      MicroCellPixelSize,
+      deltaTime,
+      _simulation.GroupMovementManager // <-- ДОПИШИТЕ ЭТОТ АРГУМЕНТ В САМЫЙ КОНЕЦ!
+  );
+
+
+
+                // 2. ТЕСТ: Система движения НАПРЯМУЮ забирает данные из мышки и двигает муравьев по DDA!
+                // Мы вызываем систему движения напрямую из симуляции (или твоего локального поля)
+
+
 
 
 
                 // Б. Обновляем плавный физический скролл камеры
                 _gameCamera.UpdateInput(deltaTime);
+
+                //_pathTester.Update(_worldMap, _worldMap.CurrentViewZ, deltaTime);//тест поиска пути 
+
 
                 // В. ТАКТИЧЕСКИЙ КЛИК-ИНСПЕКТОР ТАЙЛОВ КАРТЫ
                 if (Mouse.IsButtonPressed(Mouse.Button.Left))
@@ -147,21 +181,21 @@ namespace RimClone.Render
                 // Она монопольно плавно двигает RenderX/Y, инкрементирует Progress 
                 // и вызывает поклеточный TryStartMove для сквадов и их дочерних групп!
                 _simulation.Update(
-                    _unitStore,
-                  
-                    _spatialGrid,
-                    _worldMap,
-                    _edificeStore,
-                    MicroCellPixelSize,
-                    deltaTime
-                 
-                );
+                _unitStore,
+                _spatialGrid,
+                _worldMap,
+                _edificeStore,
+                MicroCellPixelSize,   // Передаем float размер пикселя ячейки
+                deltaTime          // Передаем float время кадра
+                 // Передаем локальное поле менеджера групп из рендерера в самый конец!
+            );
 
-           
+
+
                 // Ж. ТАКТ 4 и 5: Запуск ИИ-процессоров ЦП одиночных пешек (Переключение опкодов, таймеры зажима автомата)
                 _cpuBrainSystem.Update(
                     _unitStore,
-                  
+
                     _spatialGrid,
                     _worldMap,
                     _edificeStore,
