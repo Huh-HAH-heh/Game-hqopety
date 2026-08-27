@@ -5,7 +5,6 @@ using Core.Map;
 using Core.Unit;
 using Core.Unit.Components;
 using Render;
-using RimClone.Render.Test;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
@@ -19,7 +18,6 @@ namespace RimClone.Render
 
 
 
-        private AsyncPathfindingTester _pathTester;//тест
 
 
         private bool _showDebugGrid = false; // По умолчанию отладочная сетка выключена
@@ -54,7 +52,6 @@ namespace RimClone.Render
 
 
             
-            _pathTester = new AsyncPathfindingTester();//тест
 
 
 
@@ -132,13 +129,15 @@ namespace RimClone.Render
                 // Передаем _squadStore третьим аргументом, чтобы мышка видела под-отряды!
                 // 1. Мышка обрабатывает клик ПКМ и записывает координаты в свои внутренние массивы
                 _mouseInputSystem.Update(
-      _window,
-      _unitStore,
-      _worldMap.CurrentViewZ,
-      MicroCellPixelSize,
-      deltaTime,
-      _simulation.GroupMovementManager // <-- ДОПИШИТЕ ЭТОТ АРГУМЕНТ В САМЫЙ КОНЕЦ!
-  );
+        _window,
+        _unitStore,
+        _worldMap,
+        _edificeStore,
+        _worldMap.CurrentViewZ,
+        MicroCellPixelSize,
+        deltaTime,
+        _simulation.GroupMovementManager
+    );
 
 
 

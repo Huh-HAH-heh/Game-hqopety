@@ -1,249 +1,361 @@
-﻿// Path: Assets/Scripts/AI/GroupMovementManager.cs
+﻿using Core.Items;
 using Core.Map;
 using Core.Structs;
-using Core.Unit; // Пространство имен вашего класса UnitStore и UnitMovement
 using Core.Unit.Components;
+using Core.Unit.Systems.CombatPath;
 using System;
-using System.Runtime.InteropServices;
-using static Core.Unit.UnitStore;
 
 namespace Core.AI
 {
-
-
-    /// <summary>
-    /// Компактная структура тактического вейпоинта для юнита, упакованная в один int
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct PacketWaypoint
-    {
-        public short X;
-        public short Y;
-    }
-
-    /// <summary>
-    /// DOD-структура макро-пути A* для конкретной группы отряда
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct GroupMacroPath
     {
         public int GroupId;
         public int TotalSteps;
-        // Плоский буфер хэшей всего маршрута (максимум 512 шагов)
-        public int[] GlobalSteps;
+        public SpatialCoord[] GlobalSteps;
     }
 
-    /// <summary>
-    /// Автономная Data-Oriented система управления движением групп.
-    /// Полностью динамическая — массивы расширяются синхронно с базой данных UnitStore.
-    /// </summary>
     public class GroupMovementManager
     {
-        public const int MaxWaypointsPerPath = 512;
-        public const int MaxSubWaypointsToUnit = 4; // Лимит выдачи вейпоинтов юниту на один такт
-        public const int MaxGridSize = 768;
+        public const int MaxWaypointsPointsPerPath = 512;
+        public const int MaxSubwaypointsToUnit = 8;
 
-        // Хранилище макро-маршрутов для групп
-        public GroupMacroPath[] _groupPaths;
+        private GroupMacroPath[] _groupPaths;
 
-        // --- ДИНАМИЧЕСКИЕ ПАРАЛЛЕЛЬНЫЕ МАССИВЫ КОМПОНЕНТОВ НАВИГАЦИИ ЮНИТОВ ---
         public int[] _unitGlobalPathIndices;
-        public PacketWaypoint[,] _unitSubWaypointsBuffer;
-        public byte[] _unitSubWaypointsCount;
+        public int[] _unitSubwaypointsCount;
+        public SpatialCoord[,] _unitSubwaypointsBuffer;
 
         public GroupMovementManager(int initialMaxGroups, int initialMaxUnits)
         {
+            if (initialMaxGroups < 1)
+                initialMaxGroups = 1;
+
+            if (initialMaxUnits < 1)
+                initialMaxUnits = 1;
+
             _groupPaths = new GroupMacroPath[initialMaxGroups];
+
             for (int i = 0; i < initialMaxGroups; i++)
             {
-                _groupPaths[i].GlobalSteps = new int[MaxWaypointsPerPath];
+                _groupPaths[i].GlobalSteps =
+                    new SpatialCoord[MaxWaypointsPointsPerPath];
             }
 
-            // Первичная аллокация параллельных DOD-массивов под юнитов
-            _unitGlobalPathIndices = new int[initialMaxUnits];
-            _unitSubWaypointsBuffer = new PacketWaypoint[initialMaxUnits, MaxSubWaypointsToUnit];
-            _unitSubWaypointsCount = new byte[initialMaxUnits];
+            _unitGlobalPathIndices =
+                new int[initialMaxUnits];
+
+            _unitSubwaypointsCount =
+                new int[initialMaxUnits];
+
+            _unitSubwaypointsBuffer =
+                new SpatialCoord[
+                    initialMaxUnits,
+                    MaxSubwaypointsToUnit
+                ];
         }
 
-        /// <summary>
-        /// ДИНАМИЧЕСКОЕ РАСШИРЕНИЕ ХРАНИЛИЩА.
-        /// Должно вызываться внутри вашего оригинального UnitStore.ResizeStorage().
-        /// Исключает вылеты по границам массивов при спавне новых существ.
-        /// </summary>
-        public void ResizeStorage(int newSize)
+        public bool RequestAndStoreGroupRoute(
+            WorldMap map,
+            EdificeStore edifices,
+            MapLayer layer,
+            int groupId,
+            SpatialCoord start,
+            SpatialCoord target,
+            int[] unitIds,
+            int unitCount)
         {
-            int oldSize = _unitGlobalPathIndices.Length;
-            if (newSize <= oldSize) return;
+            if (layer == null)
+                return false;
 
-            // 1. Расширяем массив глобальных индексов прогресса A*
-            Array.Resize(ref _unitGlobalPathIndices, newSize);
+            if (groupId < 0)
+                return false;
 
-            // 2. Расширяем массив количества активных вейпоинтов
-            Array.Resize(ref _unitSubWaypointsCount, newSize);
+            if (unitIds == null || unitCount <= 0)
+                return false;
 
-            // 3. Расширяем многомерный плоский буфер под-целей [UnitId, 4]
-            // Так как Array.Resize не работает с двумерными матрицами напрямую, пересоздаем ее
-            PacketWaypoint[,] newSubWaypointsBuffer = new PacketWaypoint[newSize, MaxSubWaypointsToUnit];
+            if (unitCount > unitIds.Length)
+                unitCount = unitIds.Length;
 
-            // Пошагово копируем старые данные без потерь
-            for (int u = 0; u < oldSize; u++)
-            {
-                for (int w = 0; w < MaxSubWaypointsToUnit; w++)
-                {
-                    newSubWaypointsBuffer[u, w] = _unitSubWaypointsBuffer[u, w];
-                }
-            }
-            _unitSubWaypointsBuffer = newSubWaypointsBuffer;
-        }
-
-        /// <summary>
-        /// Динамическое расширение лимита зарегистрированных ИИ-групп на карте при необходимости.
-        /// </summary>
-        public void EnsureGroupsCapacity(int requiredGroupId)
-        {
-            if (requiredGroupId >= _groupPaths.Length)
-            {
-                int newCapacity = Math.Max(_groupPaths.Length * 2, requiredGroupId + 4);
-                GroupMacroPath[] newArray = new GroupMacroPath[newCapacity];
-                Array.Copy(_groupPaths, 0, newArray, 0, _groupPaths.Length);
-
-                for (int i = _groupPaths.Length; i < newCapacity; i++)
-                {
-                    newArray[i].GlobalSteps = new int[MaxWaypointsPerPath];
-                }
-                _groupPaths = newArray;
-            }
-        }
-
-        public bool RequestAndStoreGroupRoute(MapLayer layer, int groupId, short startX, short startY, short targetX, short targetY, int firstUnitIndex, int unitCount)
-        {
-            if (layer == null) return false;
-
-            // Автоматически контролируем емкость групп
             EnsureGroupsCapacity(groupId);
 
-            short[] tempCoordBuffer = new short[MaxWaypointsPerPath * 2];
-            int actualLength;
+            SpatialCoord[] rawPath =
+                new SpatialCoord[MaxWaypointsPointsPerPath];
 
-            bool pathFound = PureAStarPathfinder.FindRoute(
-                layer,
-                startX, startY,
-                targetX, targetY,
-                tempCoordBuffer,
-                MaxWaypointsPerPath,
-                out actualLength
-            );
+            int rawLength;
 
-            if (pathFound && actualLength > 0)
+            bool pathFound =
+                PureAStarPathfinder.FindRoute(
+                    layer,
+                    start,
+                    target,
+                    rawPath,
+                    MaxWaypointsPointsPerPath,
+                    out rawLength
+                );
+
+            if (!pathFound || rawLength <= 0)
+                return false;
+
+            ref GroupMacroPath pathStorage =
+                ref _groupPaths[groupId];
+
+            pathStorage.GroupId = groupId;
+            pathStorage.TotalSteps = 0;
+
+            int optimizedStepsCount = 0;
+            int currentIdx = 0;
+
+            pathStorage.GlobalSteps[
+                optimizedStepsCount++
+            ] = rawPath[0];
+
+            while (
+                currentIdx < rawLength - 1 &&
+                optimizedStepsCount <
+                MaxWaypointsPointsPerPath
+            )
             {
-                ref GroupMacroPath pathStorage = ref _groupPaths[groupId];
-                pathStorage.GroupId = groupId;
-                pathStorage.TotalSteps = actualLength;
+                int low = currentIdx + 1;
+                int high = rawLength - 1;
 
-                for (int i = 0; i < actualLength; i++)
-                {
-                    short x = tempCoordBuffer[i * 2];
-                    short y = tempCoordBuffer[i * 2 + 1];
-                    pathStorage.GlobalSteps[i] = (y * MaxGridSize) + x;
-                }
+                int bestVisibleIdx =
+                    currentIdx + 1;
 
-                int endIndex = firstUnitIndex + unitCount;
-                for (int u = firstUnitIndex; u < endIndex; u++)
+                SpatialCoord startWaypoint =
+                    rawPath[currentIdx];
+
+                while (low <= high)
                 {
-                    if (u < _unitGlobalPathIndices.Length)
+                    int mid =
+                        (low + high) / 2;
+
+                    SpatialCoord candidate =
+                        rawPath[mid];
+
+                    if (VisibilityChecker.HasLineOfSight(
+                        map,
+                        edifices,
+                        startWaypoint.X,
+                        startWaypoint.Y,
+                        candidate.X,
+                        candidate.Y,
+                        startWaypoint.Z))
                     {
-                        _unitGlobalPathIndices[u] = 0;
-                        _unitSubWaypointsCount[u] = 0;
-                    }
-                }
-                return true;
-            }
-
-            return false;
-        }
-
-        public void DistributePathsToUnits(UnitStore unitStore)
-        {
-            if (unitStore == null) return;
-
-            // Если размер UnitStore динамически вырос во время игры, подтягиваем навигационные буферы
-            if (unitStore.Count > _unitGlobalPathIndices.Length)
-            {
-                ResizeStorage(unitStore.Count);
-            }
-
-            for (int u = 0; u < unitStore.Count; u++)
-            {
-                if (unitStore.HealthMasks[u] == 0) continue;
-
-                int groupId = unitStore.CurrentGroupId[u];
-                if (groupId < 0) continue;
-
-                EnsureGroupsCapacity(groupId);
-
-                ref GroupMacroPath macroPath = ref _groupPaths[groupId];
-                if (macroPath.TotalSteps == 0) continue;
-
-                ref var movement = ref unitStore.Movement[u];
-
-                bool readyForNextCell = movement.State == MovementState.Idle || movement.Progress >= 1.0f;
-                if (!readyForNextCell) continue;
-
-                int currentGlobalIdx = _unitGlobalPathIndices[u];
-
-                // 1. ИЗВЛЕКАЕМ И РАСПАКОВЫВАЕМ ИЗ INT (ИСПРАВЛЕНО CS0029)
-                int currentTargetHash = macroPath.GlobalSteps[currentGlobalIdx]; // Если массив int[], то все ок
-                short targetX = (short)(currentTargetHash % MaxGridSize);
-                short targetY = (short)(currentTargetHash / MaxGridSize);
-
-                // Проверяем, достиг ли юнит текущего макро-вейпоинта
-                if (unitStore.Positions[u].Spatial.X == targetX && unitStore.Positions[u].Spatial.Y == targetY)
-                {
-                    if (currentGlobalIdx < macroPath.TotalSteps - 1)
-                    {
-                        currentGlobalIdx++;
-                        _unitGlobalPathIndices[u] = currentGlobalIdx;
-
-                        // Берем координаты следующего шага
-                        currentTargetHash = macroPath.GlobalSteps[currentGlobalIdx];
-                        targetX = (short)(currentTargetHash % MaxGridSize);
-                        targetY = (short)(currentTargetHash / MaxGridSize);
+                        bestVisibleIdx = mid;
+                        low = mid + 1;
                     }
                     else
                     {
-                        // Путь завершен
-                        continue;
+                        high = mid - 1;
                     }
                 }
 
-                // 2. ЗАПОЛНЯЕМ ЛОКАЛЬНЫЙ БУФЕР ОПЕРЕЖЕНИЯ (ИСПРАВЛЕН РЕГИСТР БУКВ 'W')
-                byte subCount = 0;
-                for (int i = 0; i < MaxSubWaypointsToUnit; i++) // С большой 'W'!
+                pathStorage.GlobalSteps[
+                    optimizedStepsCount++
+                ] = rawPath[bestVisibleIdx];
+
+                currentIdx = bestVisibleIdx;
+            }
+
+            pathStorage.TotalSteps =
+                optimizedStepsCount;
+
+            AssignPathToUnits(
+                pathStorage,
+                unitIds,
+                unitCount
+            );
+
+            return true;
+        }
+
+        private void AssignPathToUnits(
+            GroupMacroPath path,
+            int[] unitIds,
+            int unitCount)
+        {
+            for (int i = 0; i < unitCount; i++)
+            {
+                int unitId = unitIds[i];
+
+                if (unitId < 0 ||
+                    unitId >= _unitGlobalPathIndices.Length)
                 {
-                    int lookAheadIdx = currentGlobalIdx + i;
-                    if (lookAheadIdx < macroPath.TotalSteps)
-                    {
-                        int hash = macroPath.GlobalSteps[lookAheadIdx];
-
-                        // Записываем чистые координаты в структуру юнита
-                        _unitSubWaypointsBuffer[u, i] = new PacketWaypoint // С большой 'W'!
-                        {
-                            X = (short)(hash % MaxGridSize),
-                            Y = (short)(hash / MaxGridSize)
-                        };
-                        subCount++;
-                    }
+                    continue;
                 }
-                _unitSubWaypointsCount[u] = subCount; // С большой 'W'!
 
-                // 3. ФЛАГ ПОВЕДЕНИЯ ДЛЯ СИНХРОНИЗАЦИИ
-                unitStore.BehaviorFlags[u] |= UnitBehaviorFlags.FollowingGroupOrder;
+                _unitGlobalPathIndices[unitId] = 0;
+
+                _unitSubwaypointsCount[unitId] = 0;
+
+                int count =
+                    Math.Min(
+                        path.TotalSteps,
+                        MaxSubwaypointsToUnit
+                    );
+
+                for (int w = 0; w < count; w++)
+                {
+                    _unitSubwaypointsBuffer[
+                        unitId,
+                        w
+                    ] = path.GlobalSteps[w];
+                }
+
+                _unitSubwaypointsCount[unitId] =
+                    count;
             }
         }
 
+        public bool TryRefillUnitSubwaypoints(
+            int unitId)
+        {
+            if (unitId < 0 ||
+                unitId >= _unitGlobalPathIndices.Length)
+            {
+                return false;
+            }
 
+            return true;
+        }
+
+        private void EnsureGroupsCapacity(
+            int requiredGroupId)
+        {
+            if (requiredGroupId < _groupPaths.Length)
+                return;
+
+            int newCapacity =
+                Math.Max(
+                    _groupPaths.Length * 2,
+                    requiredGroupId + 1
+                );
+
+            GroupMacroPath[] newArray =
+                new GroupMacroPath[newCapacity];
+
+            Array.Copy(
+                _groupPaths,
+                newArray,
+                _groupPaths.Length
+            );
+
+            for (
+                int i = _groupPaths.Length;
+                i < newCapacity;
+                i++)
+            {
+                newArray[i].GlobalSteps =
+                    new SpatialCoord[
+                        MaxWaypointsPointsPerPath
+                    ];
+            }
+
+            _groupPaths = newArray;
+        }
+
+        public void ResizeStorage(
+            int newSize)
+        {
+            int oldSize =
+                _unitGlobalPathIndices.Length;
+
+            if (newSize <= oldSize)
+                return;
+
+            Array.Resize(
+                ref _unitGlobalPathIndices,
+                newSize
+            );
+
+            Array.Resize(
+                ref _unitSubwaypointsCount,
+                newSize
+            );
+
+            SpatialCoord[,] newBuffer =
+                new SpatialCoord[
+                    newSize,
+                    MaxSubwaypointsToUnit
+                ];
+
+            for (int u = 0; u < oldSize; u++)
+            {
+                for (
+                    int w = 0;
+                    w < MaxSubwaypointsToUnit;
+                    w++
+                )
+                {
+                    newBuffer[u, w] =
+                        _unitSubwaypointsBuffer[u, w];
+                }
+            }
+
+            _unitSubwaypointsBuffer =
+                newBuffer;
+        }
+
+        public bool HasRouteForUnit(
+            int unitId)
+        {
+            if (unitId < 0 ||
+                unitId >= _unitGlobalPathIndices.Length)
+            {
+                return false;
+            }
+
+            return _unitSubwaypointsCount[unitId] > 0;
+        }
+
+        public SpatialCoord GetCurrentWaypoint(
+            int unitId)
+        {
+            if (unitId < 0 ||
+                unitId >= _unitGlobalPathIndices.Length)
+            {
+                return default;
+            }
+
+            if (_unitSubwaypointsCount[unitId] <= 0)
+                return default;
+
+            return _unitSubwaypointsBuffer[
+                unitId,
+                0
+            ];
+        }
+
+        public void AdvanceWaypoint(
+            int unitId)
+        {
+            if (unitId < 0 ||
+                unitId >= _unitGlobalPathIndices.Length)
+            {
+                return;
+            }
+
+            int count =
+                _unitSubwaypointsCount[unitId];
+
+            if (count <= 0)
+                return;
+
+            for (int i = 0; i < count - 1; i++)
+            {
+                _unitSubwaypointsBuffer[
+                    unitId,
+                    i
+                ] =
+                _unitSubwaypointsBuffer[
+                    unitId,
+                    i + 1
+                ];
+            }
+
+            _unitSubwaypointsCount[unitId]--;
+
+            _unitGlobalPathIndices[unitId]++;
+        }
     }
 }
-
-
-

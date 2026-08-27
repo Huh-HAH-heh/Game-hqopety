@@ -1,9 +1,9 @@
 ﻿using Core.AI;
+using Core.Items;
+using Core.Map;
 using Core.Structs;
 using Core.Unit;
 using Core.Unit.Components;
-using Core.Unit.Components.AiComponents.Core.Unit.Components;
-using Core.Unit.Systems;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
@@ -14,35 +14,34 @@ namespace Core.Input.Systems
 {
     public sealed class MouseInputSystem
     {
-        private bool _isSelecting = false;
+        private bool _isSelecting;
         private Vector2f _startDragPixels;
         private Vector2f _currentMousePixels;
-        private bool _hasFiredRightClick = false;
-
-        private float _lastClickTime = 0f;
+        private bool _hasFiredRightClick;
+        private float _lastClickTime;
         private readonly Clock _clickClock = new Clock();
 
-        // Список ID выделенных юнитов
         public readonly List<int> SelectedUnitIds = new List<int>(16);
 
-        /// <summary>
-        /// Главный цикл обновления ввода мыши.
-        /// Фиксирует выделение рамкой (ЛКМ) и отдает приказы перемещения (ПКМ).
-        /// </summary>
         public void Update(
             RenderWindow window,
             UnitStore units,
+            WorldMap map,
+            EdificeStore edifices,
             int currentViewZ,
             float microCellPixelSize,
             float deltaTime,
-            GroupMovementManager groupMovementManager) // Ссылка на оригинальный менеджер симуляции
+            GroupMovementManager groupMovementManager)
         {
-            Vector2i mousePosWindow = Mouse.GetPosition(window);
-            _currentMousePixels = window.MapPixelToCoords(mousePosWindow, window.GetView());
+            Vector2i mousePosWindow =
+                Mouse.GetPosition(window);
 
-            // =========================================================================
-            // // ОБРАБОТКА ЛЕВОЙ КНОПКИ МЫШИ (ВЫДЕЛЕНИЕ РАМКОЙ)
-            // =========================================================================
+            _currentMousePixels =
+                window.MapPixelToCoords(
+                    mousePosWindow,
+                    window.GetView()
+                );
+
             if (Mouse.IsButtonPressed(Mouse.Button.Left))
             {
                 if (!_isSelecting)
@@ -52,62 +51,50 @@ namespace Core.Input.Systems
                     SelectedUnitIds.Clear();
                 }
             }
-            else
+            else if (_isSelecting)
             {
-                if (_isSelecting)
-                {
-                    _isSelecting = false;
-                    CalculateSelectionBox(units, microCellPixelSize);
-                }
+                _isSelecting = false;
+
+                CalculateSelectionBox(
+                    units,
+                    microCellPixelSize,
+                    currentViewZ
+                );
             }
 
-            // =========================================================================
-            // // ОБРАБОТКА ПРАВОЙ КНОПКИ МЫШИ (ПРИКАЗ НА ПЕРЕМЕЩЕНИЕ)
-            // =========================================================================
             if (Mouse.IsButtonPressed(Mouse.Button.Right))
             {
-                if (!_hasFiredRightClick && SelectedUnitIds.Count > 0)
+                if (!_hasFiredRightClick &&
+                    SelectedUnitIds.Count > 0)
                 {
                     _hasFiredRightClick = true;
 
-                    int clickMx = (int)(_currentMousePixels.X / microCellPixelSize);
-                    int clickMy = (int)(_currentMousePixels.Y / microCellPixelSize);
-                    int maxCoord = (16 * 48) - 1;
+                    int clickMx =
+                        (int)(_currentMousePixels.X /
+                        microCellPixelSize);
 
-                    if (clickMx >= 0 && clickMx <= maxCoord && clickMy >= 0 && clickMy <= maxCoord)
-                    {
-                        foreach (int unitId in SelectedUnitIds)
-                        {
-                            // Сбрасываем старые ИИ команды из стека юнита
-                            while (units.AiStackPointers[unitId] >= 0)
-                            {
-                                units.CpuPopCommand(unitId);
-                            }
+                    int clickMy =
+                        (int)(_currentMousePixels.Y /
+                        microCellPixelSize);
 
-                            // Пушим базовую команду движения в стек ИИ
-                            units.CpuPushCommand(unitId, new AiCommand
-                            {
-                                OpCode = AiOpCode.MoveToTarget,
-                                TargetX = clickMx,
-                                TargetY = clickMy
-                            });
+                    SpatialCoord target =
+                        new SpatialCoord(
+                            clickMx,
+                            clickMy,
+                            currentViewZ
+                        );
 
-                            // ВАЖНО ДЛЯ ТЕСТА: Пишем координаты клика в оригинальный менеджер групп!
-                            // Буква 'W' используется большая, как объявлено в вашем менеджере.
-                            groupMovementManager._unitSubWaypointsBuffer[unitId, 0] = new PacketWaypoint
-                            {
-                                X = (short)clickMx,
-                                Y = (short)clickMy
-                            };
-                            groupMovementManager._unitSubWaypointsCount[unitId] = 1;
+                    Console.WriteLine(
+                        $"[MOUSE] RIGHT CLICK target=({target.X},{target.Y},{target.Z}) selected={SelectedUnitIds.Count}"
+                    );
 
-                            // Переводим стейт перемещения в Idle и обнуляем прогресс,
-                            // чтобы UnitMovementSystem на следующем кадре сама рассчитала первый шаг.
-                            units.Movement[unitId].State = MovementState.Idle;
-                            units.Movement[unitId].Progress = 0f;
-                            units.MovementCooldowns[unitId] = 0f;
-                        }
-                    }
+                    SendGroupMoveCommand(
+                        units,
+                        map,
+                        edifices,
+                        target,
+                        groupMovementManager
+                    );
                 }
             }
             else
@@ -116,71 +103,415 @@ namespace Core.Input.Systems
             }
         }
 
-        /// <summary>
-        /// Расчет попадания юнитов в рамку выделения мыши.
-        /// </summary>
-        private void CalculateSelectionBox(UnitStore units, float microCellPixelSize)
+        private void SendGroupMoveCommand(
+            UnitStore units,
+            WorldMap map,
+            EdificeStore edifices,
+            SpatialCoord target,
+            GroupMovementManager groupMovementManager)
         {
-            float xMin = Math.Min(_startDragPixels.X, _currentMousePixels.X);
-            float xMax = Math.Max(_startDragPixels.X, _currentMousePixels.X);
-            float yMin = Math.Min(_startDragPixels.Y, _currentMousePixels.Y);
-            float yMax = Math.Max(_startDragPixels.Y, _currentMousePixels.Y);
-
-            bool isSingleClick = (xMax - xMin < 5f && yMax - yMin < 5f);
-
-            float currentTime = _clickClock.ElapsedTime.AsSeconds();
-            bool isDoubleClick = isSingleClick && (currentTime - _lastClickTime < 0.25f);
-            _lastClickTime = currentTime;
-
-            for (int i = 0; i < units.Count; i++)
+            if (SelectedUnitIds.Count == 0)
             {
-                if (units.HealthMasks[i] == 0) continue; // Мертвых не выделяем
+                Console.WriteLine("[MOUSE] COMMAND CANCELLED: no selected units");
+                return;
+            }
 
-                // Переводим render-координаты юнита на сетке в экранные пиксели
-                float unitPx = units.Positions[i].RenderX * microCellPixelSize;
-                float unitPy = units.Positions[i].RenderY * microCellPixelSize;
+            MapLayer layer =
+                map.GetLayer(target.Z);
 
-                if (isSingleClick)
+            if (layer == null)
+            {
+                Console.WriteLine(
+                    $"[MOUSE] COMMAND CANCELLED: layer Z={target.Z} is null"
+                );
+
+                return;
+            }
+
+            List<int> processedGroups =
+                new List<int>(8);
+
+            for (int i = 0; i < SelectedUnitIds.Count; i++)
+            {
+                int unitId =
+                    SelectedUnitIds[i];
+
+                if (unitId < 0 ||
+                    unitId >= units.Count)
                 {
-                    // Клик в точку — проверяем радиус вокруг пешки
-                    float dx = _currentMousePixels.X - unitPx;
-                    float dy = _currentMousePixels.Y - unitPy;
-                    float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+                    Console.WriteLine(
+                        $"[MOUSE] SKIP unit={unitId}: invalid id"
+                    );
 
-                    if (dist <= 14f)
+                    continue;
+                }
+
+                if (units.HealthMasks[unitId] == 0)
+                {
+                    Console.WriteLine(
+                        $"[MOUSE] SKIP unit={unitId}: dead"
+                    );
+
+                    continue;
+                }
+
+                SpatialCoord unitPosition =
+                    units.Positions[unitId].Spatial;
+
+                if (unitPosition.Z != target.Z)
+                {
+                    Console.WriteLine(
+                        $"[MOUSE] SKIP unit={unitId}: different Z unitZ={unitPosition.Z} targetZ={target.Z}"
+                    );
+
+                    continue;
+                }
+
+                int groupId =
+                    units.CurrentGroupId[unitId];
+
+                if (groupId < 0)
+                {
+                    Console.WriteLine(
+                        $"[MOUSE] SKIP unit={unitId}: no group"
+                    );
+
+                    continue;
+                }
+
+                if (processedGroups.Contains(groupId))
+                    continue;
+
+                processedGroups.Add(groupId);
+
+                int groupUnitCount = 0;
+
+                for (int s = 0; s < SelectedUnitIds.Count; s++)
+                {
+                    int selectedId =
+                        SelectedUnitIds[s];
+
+                    if (selectedId < 0 ||
+                        selectedId >= units.Count)
                     {
-                        SelectedUnitIds.Add(i);
-                        break; // Выделяем только одного при одиночном клике
+                        continue;
+                    }
+
+                    if (units.HealthMasks[selectedId] == 0)
+                        continue;
+
+                    if (units.CurrentGroupId[selectedId] != groupId)
+                        continue;
+
+                    if (units.Positions[selectedId].Spatial.Z != target.Z)
+                        continue;
+
+                    groupUnitCount++;
+                }
+
+                if (groupUnitCount == 0)
+                {
+                    Console.WriteLine(
+                        $"[MOUSE] GROUP {groupId}: no valid selected members"
+                    );
+
+                    continue;
+                }
+
+                int[] groupUnitIds =
+                    new int[groupUnitCount];
+
+                int actualCount = 0;
+                int firstUnitId = -1;
+
+                for (int s = 0; s < SelectedUnitIds.Count; s++)
+                {
+                    int selectedId =
+                        SelectedUnitIds[s];
+
+                    if (selectedId < 0 ||
+                        selectedId >= units.Count)
+                    {
+                        continue;
+                    }
+
+                    if (units.HealthMasks[selectedId] == 0)
+                        continue;
+
+                    if (units.CurrentGroupId[selectedId] != groupId)
+                        continue;
+
+                    if (units.Positions[selectedId].Spatial.Z != target.Z)
+                        continue;
+
+                    groupUnitIds[actualCount++] =
+                        selectedId;
+
+                    if (firstUnitId == -1 ||
+                        selectedId < firstUnitId)
+                    {
+                        firstUnitId = selectedId;
                     }
                 }
-                else
+
+                if (actualCount == 0 ||
+                    firstUnitId < 0)
                 {
-                    // Зажим рамки — проверяем попадание в прямоугольник
-                    if (unitPx >= xMin && unitPx <= xMax && unitPy >= yMin && unitPy <= yMax)
+                    Console.WriteLine(
+                        $"[MOUSE] GROUP {groupId}: failed to build member list"
+                    );
+
+                    continue;
+                }
+
+                SpatialCoord groupStart =
+                    units.Positions[firstUnitId].Spatial;
+
+                Console.WriteLine(
+                    $"[MOUSE] GROUP {groupId}: start=({groupStart.X},{groupStart.Y},{groupStart.Z}) target=({target.X},{target.Y},{target.Z}) units={actualCount}"
+                );
+
+                for (int u = 0; u < actualCount; u++)
+                {
+                    int memberId =
+                        groupUnitIds[u];
+
+                    SpatialCoord memberPosition =
+                        units.Positions[memberId].Spatial;
+
+                    Console.WriteLine(
+                        $"[MOUSE] GROUP {groupId}: member[{u}] unit={memberId} pos=({memberPosition.X},{memberPosition.Y},{memberPosition.Z})"
+                    );
+                }
+
+                bool routeCreated =
+                    groupMovementManager.RequestAndStoreGroupRoute(
+                        map,
+                        edifices,
+                        layer,
+                        groupId,
+                        groupStart,
+                        target,
+                        groupUnitIds,
+                        actualCount
+                    );
+
+                Console.WriteLine(
+                    $"[MOUSE] GROUP {groupId}: routeCreated={routeCreated}"
+                );
+
+                if (!routeCreated)
+                    continue;
+
+                for (int s = 0; s < actualCount; s++)
+                {
+                    int selectedUnitId =
+                        groupUnitIds[s];
+
+                    if (selectedUnitId < 0 ||
+                        selectedUnitId >= units.Count)
                     {
-                        SelectedUnitIds.Add(i);
+                        continue;
                     }
+
+                    units.Movement[selectedUnitId].State =
+                        MovementState.Idle;
+
+                    units.Movement[selectedUnitId].Progress =
+                        0f;
+
+                    units.MovementCooldowns[selectedUnitId] =
+                        0f;
+
+                    bool hasRoute =
+                        groupMovementManager.HasRouteForUnit(
+                            selectedUnitId
+                        );
+
+                    SpatialCoord firstWaypoint =
+                        groupMovementManager.GetCurrentWaypoint(
+                            selectedUnitId
+                        );
+
+                    Console.WriteLine(
+                        $"[MOUSE] GROUP {groupId}: unit={selectedUnitId} routeAssigned={hasRoute} waypoint=({firstWaypoint.X},{firstWaypoint.Y},{firstWaypoint.Z})"
+                    );
                 }
             }
         }
 
-        /// <summary>
-        /// Отрисовка полупрозрачной синей рамки выделения на экране.
-        /// </summary>
-        public void DrawSelectionBox(RenderWindow window)
+        private void CalculateSelectionBox(
+            UnitStore units,
+            float microCellPixelSize,
+            int currentViewZ)
         {
-            if (!_isSelecting) return;
+            float xMin =
+                Math.Min(
+                    _startDragPixels.X,
+                    _currentMousePixels.X
+                );
 
-            float xMin = Math.Min(_startDragPixels.X, _currentMousePixels.X);
-            float xMax = Math.Max(_startDragPixels.X, _currentMousePixels.X);
-            float yMin = Math.Min(_startDragPixels.Y, _currentMousePixels.Y);
-            float yMax = Math.Max(_startDragPixels.Y, _currentMousePixels.Y);
+            float xMax =
+                Math.Max(
+                    _startDragPixels.X,
+                    _currentMousePixels.X
+                );
 
-            RectangleShape box = new RectangleShape(new Vector2f(xMax - xMin, yMax - yMin));
-            box.Position = new Vector2f(xMin, yMin);
-            box.FillColor = new Color(0, 150, 255, 35);
-            box.OutlineColor = new Color(0, 200, 255, 220);
+            float yMin =
+                Math.Min(
+                    _startDragPixels.Y,
+                    _currentMousePixels.Y
+                );
+
+            float yMax =
+                Math.Max(
+                    _startDragPixels.Y,
+                    _currentMousePixels.Y
+                );
+
+            bool isSingleClick =
+                xMax - xMin < 5f &&
+                yMax - yMin < 5f;
+
+            float currentTime =
+                _clickClock.ElapsedTime.AsSeconds();
+
+            bool isDoubleClick =
+                isSingleClick &&
+                currentTime - _lastClickTime < 0.25f;
+
+            _lastClickTime =
+                currentTime;
+
+            if (isDoubleClick)
+                SelectedUnitIds.Clear();
+
+            for (int i = 0; i < units.Count; i++)
+            {
+                if (units.HealthMasks[i] == 0)
+                    continue;
+
+                if (units.Positions[i].Spatial.Z != currentViewZ)
+                    continue;
+
+                float unitPx =
+                    units.Positions[i].RenderX *
+                    microCellPixelSize;
+
+                float unitPy =
+                    units.Positions[i].RenderY *
+                    microCellPixelSize;
+
+                if (isSingleClick)
+                {
+                    float dx =
+                        _currentMousePixels.X -
+                        unitPx;
+
+                    float dy =
+                        _currentMousePixels.Y -
+                        unitPy;
+
+                    float dist =
+                        (float)Math.Sqrt(
+                            dx * dx +
+                            dy * dy
+                        );
+
+                    if (dist <= 14f)
+                    {
+                        SelectedUnitIds.Add(i);
+
+                        Console.WriteLine(
+                            $"[MOUSE] SELECT unit={i} group={units.CurrentGroupId[i]} pos=({units.Positions[i].Spatial.X},{units.Positions[i].Spatial.Y},{units.Positions[i].Spatial.Z})"
+                        );
+
+                        break;
+                    }
+                }
+                else
+                {
+                    if (unitPx >= xMin &&
+                        unitPx <= xMax &&
+                        unitPy >= yMin &&
+                        unitPy <= yMax)
+                    {
+                        SelectedUnitIds.Add(i);
+
+                        Console.WriteLine(
+                            $"[MOUSE] SELECT unit={i} group={units.CurrentGroupId[i]} pos=({units.Positions[i].Spatial.X},{units.Positions[i].Spatial.Y},{units.Positions[i].Spatial.Z})"
+                        );
+                    }
+                }
+            }
+
+            Console.WriteLine(
+                $"[MOUSE] SELECTION COMPLETE count={SelectedUnitIds.Count}"
+            );
+        }
+
+        public void DrawSelectionBox(
+            RenderWindow window)
+        {
+            if (!_isSelecting)
+                return;
+
+            float xMin =
+                Math.Min(
+                    _startDragPixels.X,
+                    _currentMousePixels.X
+                );
+
+            float xMax =
+                Math.Max(
+                    _startDragPixels.X,
+                    _currentMousePixels.X
+                );
+
+            float yMin =
+                Math.Min(
+                    _startDragPixels.Y,
+                    _currentMousePixels.Y
+                );
+
+            float yMax =
+                Math.Max(
+                    _startDragPixels.Y,
+                    _currentMousePixels.Y
+                );
+
+            RectangleShape box =
+                new RectangleShape(
+                    new Vector2f(
+                        xMax - xMin,
+                        yMax - yMin
+                    )
+                );
+
+            box.Position =
+                new Vector2f(
+                    xMin,
+                    yMin
+                );
+
+            box.FillColor =
+                new Color(
+                    0,
+                    150,
+                    255,
+                    35
+                );
+
+            box.OutlineColor =
+                new Color(
+                    0,
+                    200,
+                    255,
+                    220
+                );
+
             box.OutlineThickness = 1f;
+
             window.Draw(box);
         }
     }

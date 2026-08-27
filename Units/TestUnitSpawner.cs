@@ -1,5 +1,4 @@
-﻿// Path: Assets/Scripts/Units/TestUnitSpawner.cs
-using Core.Items;
+﻿using Core.Items;
 using Core.Map;
 using Core.Structs;
 using Core.Unit;
@@ -11,111 +10,187 @@ namespace Units
 {
     public static class TestUnitSpawner
     {
-        private const int Scale = MapRegion.SubDivision; // 3
+        private const int BlueGroupId = 0;
+        private const int RedGroupId = 1;
 
-        public static void Spawn(UnitStore unitStore, UnitSpatialGrid spatialGrid)
+        public static void Spawn(
+            UnitStore unitStore,
+            UnitSpatialGrid spatialGrid)
         {
             var inventorySystem = new UnitInventorySystem();
 
-            // --- 1. СОЗДАЕМ ОРУЖИЕ И БРОНЮ ---
-            // Создаем АК-47 (Идеал одиночными на 100 тайлов/метров)
-            // --- 1. СОЗДАЕМ ОРУЖИЕ ---
-            // Создаем АК-47 на базе вашего класса RangedWeaponConfig
             RangedWeaponConfig ak47 = new RangedWeaponConfig
             {
                 Name = "АК-47",
-                Weight = 4.3f,               // Масса автомата
-                BaseDamage = 25,             // Базовый урон (у вас тип byte)
-                BleedChance = 0.7f,          // Шанс вызвать кровотечение
-                FireRate = 0.1f,             // Скорострельность
-                BaseEffectiveRange = 100f,   // Идеальная дальность одиночными (вместо BaseRange)
-                BaseAccuracy = 0.02f         // Очень точный одиночными (базовый разброс)
+                Weight = 4.3f,
+                BaseDamage = 25,
+                BleedChance = 0.7f,
+                FireRate = 0.1f,
+                BaseEffectiveRange = 100f,
+                BaseAccuracy = 0.02f
             };
 
-            // Создаем СВД на базе вашего класса RangedWeaponConfig
             RangedWeaponConfig svd = new RangedWeaponConfig
             {
                 Name = "СВД",
                 Weight = 4.5f,
-                BaseDamage = 40,             // У СВД урон повыше
-                BleedChance = 0.9f,          // Выше шанс кровотечения
-                FireRate = 0.8f,             // Стреляет медленнее, чем АК
-                BaseEffectiveRange = 300f,   // Идеальная дальность одиночными без прицела
-                BaseAccuracy = 0.005f        // Почти идеальный лазер
+                BaseDamage = 40,
+                BleedChance = 0.9f,
+                FireRate = 0.8f,
+                BaseEffectiveRange = 300f,
+                BaseAccuracy = 0.005f
             };
 
-            // ========================================================
-            // ТАКТИЧЕСКИЙ СТРЕСС-ТЕСТ: СТЕНКА НА СТЕНКУ (80 СУЩЕСТВ)
-            // ========================================================
-            Console.WriteLine("🚀 Инициализация масштабного стресс-теста: 40 vs 40...");
+            ArmorConfig heavyVest = new ArmorConfig
+            {
+                Name = "Бронежилет БЖ-4",
+                ProtectedZone = 1,
+                DamageAbsorption = 0.5f,
+                BleedProtectionChance = 0.8f,
+                Weight = 8.5f
+            };
 
-            var heavyVest = new ArmorConfig { Name = "Бронежилет БЖ-4", ProtectedZone = 1, DamageAbsorption = 0.5f, BleedProtectionChance = 0.8f, Weight = 8.5f };
-            var helmet = new ArmorConfig { Name = "Каска", ProtectedZone = 0, DamageAbsorption = 0.4f, BleedProtectionChance = 0.7f, Weight = 1.5f };
+            ArmorConfig helmet = new ArmorConfig
+            {
+                Name = "Каска",
+                ProtectedZone = 0,
+                DamageAbsorption = 0.4f,
+                BleedProtectionChance = 0.7f,
+                Weight = 1.5f
+            };
 
-            // 1. СОЗДАЕМ ОТРЯД №0: СИНИЕ КОЛОНИСТЫ (СВЕРХУ)
+            Console.WriteLine(
+                "[SPAWN] Создание группового ИИ: 40 BLUE vs 40 RED"
+            );
 
-
-            // Начальная точка шеренги синих перенесена в коридор фрактала
             int blueStartCellX = 165;
             int blueStartCellY = 165;
 
             for (int i = 0; i < 40; i++)
             {
-                // Выстраиваем синих в ровную тактическую шеренгу по горизонтали
-                int spawnX = blueStartCellX + (i % 20); // 2 ряда по 20 человек
-                int spawnY = blueStartCellY + (i / 20);
+                int spawnX =
+                    blueStartCellX +
+                    (i % 20);
 
-                int unitId = CreateUnitEntity(unitStore, spawnX, spawnY, UnitType.Human, spatialGrid);
+                int spawnY =
+                    blueStartCellY +
+                    (i / 20);
 
+                int unitId =
+                    CreateUnitEntity(
+                        unitStore,
+                        spawnX,
+                        spawnY,
+                        UnitType.Human,
+                        spatialGrid
+                    );
 
-                // Выдаем автоматы и пришвартовываем плавный рендер к клетке
-                inventorySystem.EquipWeapon(unitStore, unitId, ak47);
+                unitStore.CurrentGroupId[unitId] =
+                    BlueGroupId;
+
+                inventorySystem.EquipWeapon(
+                    unitStore,
+                    unitId,
+                    ak47
+                );
+
                 unitStore.ShotCooldowns[unitId] = 0f;
-                unitStore.Positions[unitId].RenderX = unitStore.Positions[unitId].Spatial.X;
-                unitStore.Positions[unitId].RenderY = unitStore.Positions[unitId].Spatial.Y;
+
+                unitStore.Positions[unitId].RenderX =
+                    unitStore.Positions[unitId].Spatial.X;
+
+                unitStore.Positions[unitId].RenderY =
+                    unitStore.Positions[unitId].Spatial.Y;
+
+                Console.WriteLine(
+                    $"[SPAWN] BLUE unit={unitId} group={BlueGroupId} pos=({spawnX},{spawnY},1)"
+                );
             }
 
-            // Направляем Синих на встречу красной позиции
-            SpatialCoord blueTarget = new SpatialCoord(337, 373, 1);
-
-
-            // Начальная точка шеренги жуков перенесена в коридор фрактала
             int redStartCellX = 337;
             int redStartCellY = 373;
 
             for (int i = 0; i < 40; i++)
             {
-                // Выстраиваем жуков такой же зеркальной шеренгой
-                int spawnX = redStartCellX + (i % 20);
-                int spawnY = redStartCellY + (i / 20);
+                int spawnX =
+                    redStartCellX +
+                    (i % 20);
 
-                int unitId = CreateUnitEntity(unitStore, spawnX, spawnY, UnitType.Insect, spatialGrid);
+                int spawnY =
+                    redStartCellY +
+                    (i / 20);
 
+                int unitId =
+                    CreateUnitEntity(
+                        unitStore,
+                        spawnX,
+                        spawnY,
+                        UnitType.Insect,
+                        spatialGrid
+                    );
 
-                // Заряжаем им снайперские СВД, одеваем в броню и швартуем рендер
-                inventorySystem.EquipWeapon(unitStore, unitId, svd);
-                inventorySystem.EquipArmor(unitStore, unitId, heavyVest);
-                inventorySystem.EquipArmor(unitStore, unitId, helmet);
+                unitStore.CurrentGroupId[unitId] =
+                    RedGroupId;
+
+                inventorySystem.EquipWeapon(
+                    unitStore,
+                    unitId,
+                    svd
+                );
+
+                inventorySystem.EquipArmor(
+                    unitStore,
+                    unitId,
+                    heavyVest
+                );
+
+                inventorySystem.EquipArmor(
+                    unitStore,
+                    unitId,
+                    helmet
+                );
+
                 unitStore.ShotCooldowns[unitId] = 0f;
-                unitStore.Positions[unitId].RenderX = unitStore.Positions[unitId].Spatial.X;
-                unitStore.Positions[unitId].RenderY = unitStore.Positions[unitId].Spatial.Y;
+
+                unitStore.Positions[unitId].RenderX =
+                    unitStore.Positions[unitId].Spatial.X;
+
+                unitStore.Positions[unitId].RenderY =
+                    unitStore.Positions[unitId].Spatial.Y;
+
+                Console.WriteLine(
+                    $"[SPAWN] RED unit={unitId} group={RedGroupId} pos=({spawnX},{spawnY},1)"
+                );
             }
 
-            // Направляем Красных на перехват синей позиции
-            SpatialCoord redTarget = new SpatialCoord(165, 165, 1);
+            Console.WriteLine(
+                $"[SPAWN] GROUP {BlueGroupId}: BLUE 40 units"
+            );
 
-            Console.WriteLine("⚔️ БАТАЛИЯ ЗАПУЩЕНА! Шеренги рождены в легальных границах карты и маршируют навстречу друг другу!");
+            Console.WriteLine(
+                $"[SPAWN] GROUP {RedGroupId}: RED 40 units"
+            );
 
+            Console.WriteLine(
+                "[SPAWN] Группы ИИ созданы. Можно выдавать групповые приказы."
+            );
         }
 
-        private static int CreateUnitEntity(UnitStore unitStore, int mx, int my, UnitType type, UnitSpatialGrid spatialGrid)
+        private static int CreateUnitEntity(
+            UnitStore unitStore,
+            int mx,
+            int my,
+            UnitType type,
+            UnitSpatialGrid spatialGrid)
         {
-            // ИСПРАВЛЕНО: Принудительно передаем mz = 1 вместо 0
             return unitStore.CreateUnit(
-                mx: mx, my: my, mz: 1,
+                mx: mx,
+                my: my,
+                mz: 1,
                 width: 1,
                 height: 1,
-                mass: 75f, speed: 4.0f,
+                mass: 75f,
+                speed: 4.0f,
                 type: type,
                 spatialGrid: spatialGrid
             );
