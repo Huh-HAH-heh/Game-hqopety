@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/Элементы решения/">
+    <File Path="PathfindingSystem.md" />
+    <File Path="PureAStarPathfinder.md" />
     <File Path="roadmap.txt" />
     <File Path="правка модели.txt" />
   </Folder>
@@ -9,6 +11,7 @@
   </Folder>
   <Folder Name="/Элементы решения/Unit/">
     <File Path="AI.txt" />
+    <File Path="TextFile1.txt" />
     <File Path="Unit.txt" />
     <File Path="менеджер движения групы из А в Б.txt" />
   </Folder>

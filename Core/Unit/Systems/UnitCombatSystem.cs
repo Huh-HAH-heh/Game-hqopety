@@ -9,465 +9,1015 @@ namespace Core.Unit.Systems
 {
     public sealed class UnitCombatSystem
     {
-        private readonly List<int> _nearbyCandidates = new List<int>(16);
-        private readonly UnitDamageSystem _damageSystem = new UnitDamageSystem();
+        private readonly List<int> _nearbyCandidates =
+            new List<int>(32);
 
-        /// <summary>
-        /// Главный логический тик боевой системы.
-        /// </summary>
+        private readonly UnitDamageSystem _damageSystem =
+            new UnitDamageSystem();
+
+        // ============================================================
+        // AI SCAN CACHE
+        // ============================================================
+
+        private float[] _targetScanTimers =
+            Array.Empty<float>();
+
+        private float[] _targetLosTimers =
+            Array.Empty<float>();
+
+        private const float TargetScanInterval = 0.20f;
+        private const float TargetLosInterval = 0.10f;
+
+        // Очень важно:
+        // Не даём обычному AI каждый кадр сканировать квадрат 300x300.
+        // Это именно радиус поиска цели, а не радиус самого оружия.
+        private const int MaxTargetScanRadius = 60;
+
+        private const float MeleeThreatRadius = 2.5f;
+
         public void Update(
             UnitStore units,
-            UnitSpatialGrid spatialGrid, 
-            WorldMap map, 
-            EdificeStore edificeStore, 
-            CombatEffectSystem effectSystem, 
-            float microCellPixelSize, 
+            UnitSpatialGrid spatialGrid,
+            WorldMap map,
+            EdificeStore edificeStore,
+            CombatEffectSystem effectSystem,
+            float microCellPixelSize,
             float deltaTime)
         {
-            if (deltaTime <= 0f) return;
+            if (deltaTime <= 0f)
+                return;
 
-           
-            // // 1. СБРОС КУЛДАУНОВ, ОСТЫВАНИЕ ОТДАЧИ И ТЕПЛОВОЙ МЕНЕДЖЕМЕНТ
-            for (int i = 0; i < units.Count; i++)
+            EnsureStorage(
+                units.Count
+            );
+
+            // ========================================================
+            // 1. ДЕШЕВЫЕ ТАЙМЕРЫ / ОТДАЧА
+            // ========================================================
+
+            for (int i = 0;
+                 i < units.Count;
+                 i++)
             {
-                if (units.HealthMasks[i] == 0) continue;
+                if (units.HealthMasks[i] == 0)
+                    continue;
 
-                // Плавно уменьшаем кулдаун выстрела каждую дельту кадра
+                if (_targetScanTimers[i] > 0f)
+                {
+                    _targetScanTimers[i] -= deltaTime;
+
+                    if (_targetScanTimers[i] < 0f)
+                        _targetScanTimers[i] = 0f;
+                }
+
+                if (_targetLosTimers[i] > 0f)
+                {
+                    _targetLosTimers[i] -= deltaTime;
+
+                    if (_targetLosTimers[i] < 0f)
+                        _targetLosTimers[i] = 0f;
+                }
+
                 if (units.ShotCooldowns[i] > 0f)
                 {
                     units.ShotCooldowns[i] -= deltaTime;
-                    if (units.ShotCooldowns[i] < 0f) units.ShotCooldowns[i] = 0f;
+
+                    if (units.ShotCooldowns[i] < 0f)
+                        units.ShotCooldowns[i] = 0f;
                 }
 
-                // ЧЕСТНОЕ ОСТЫВАНИЕ ОТДАЧИ (БЕЗ ТЕРМОДИНАМИКИ И ПЕРЕГРЕВА)
                 if (units.WeaponSlot[i] is Weapon activeWeapon)
                 {
-                    // Оставляем только восстановление точности/отдачи оружия
                     if (activeWeapon.currentRecoil > 0f)
                     {
-                        activeWeapon.currentRecoil -= activeWeapon.BaseStats.RecoilRecovery * deltaTime;
-                        if (activeWeapon.currentRecoil < 0f) activeWeapon.currentRecoil = 0f;
+                        activeWeapon.currentRecoil -=
+                            activeWeapon.BaseStats.RecoilRecovery *
+                            deltaTime;
+
+                        if (activeWeapon.currentRecoil < 0f)
+                            activeWeapon.currentRecoil = 0f;
                     }
                 }
             }
 
+            // ========================================================
+            // 2. БОЕВОЙ ИИ
+            // ========================================================
 
-            // 2. ИИ сканирует цели и ведет бой
-            ExecuteRimWorldCombat(units, spatialGrid, map, edificeStore, effectSystem, microCellPixelSize, deltaTime);
+            ExecuteRimWorldCombat(
+                units,
+                spatialGrid,
+                map,
+                edificeStore,
+                effectSystem,
+                microCellPixelSize,
+                deltaTime
+            );
         }
 
-
-        /// <summary>
-        /// Тактический ИИ: динамически рассчитывает дальность зрения по оружию и тревоге, 
-        /// удерживает фокус (Target Lock) через Raycast, управляет фазой прицеливания и выглядыванием.
-        /// </summary>
         private void ExecuteRimWorldCombat(
-       UnitStore units,
-       UnitSpatialGrid spatialGrid,
-       WorldMap map,
-       EdificeStore edificeStore,
-       CombatEffectSystem effectSystem,
-       float microCellPixelSize,
-       float deltaTime)
+            UnitStore units,
+            UnitSpatialGrid spatialGrid,
+            WorldMap map,
+            EdificeStore edificeStore,
+            CombatEffectSystem effectSystem,
+            float microCellPixelSize,
+            float deltaTime)
         {
-            // Переводим радиус ближней угрозы в микро-ячейки
-            const float MeleeThreatRadius = 2.5f;
-
-            for (int i = 0; i < units.Count; i++)
+            for (int i = 0;
+                 i < units.Count;
+                 i++)
             {
-                if (units.HealthMasks[i] == 0) continue;
+                if (units.HealthMasks[i] == 0)
+                    continue;
 
-                ref var posA = ref units.Positions[i];
-                ref var moveA = ref units.Movement[i];
-                int currentTargetId = units.CurrentTargets[i];
+                ref var posA =
+                    ref units.Positions[i];
 
-                // ========================================================
-                // ИСПРАВЛЕНО: ДИНАМИЧЕСКИЙ РАСЧЕТ ДАЛЬНОСТИ ПО ОРУЖИЮ
-                // ========================================================
-                // Если оружия нет (жук), базовый радиус атаки = 4 микро-ячейки (укус)
-                int currentAttackRange = 4;
+                ref var moveA =
+                    ref units.Movement[i];
 
-                if (units.WeaponSlot[i] != null)
-                {
-                    // ВАЖНО: Если у вас BaseStats.BaseRange равен 100 (метры), 
-                    // на экране это 100 тайлов * 3 ячейки = 300 микро-ячеек!
-                    // Чтобы они стреляли в пределах видимости экрана, берем дальность оружия
-                    float weaponRange = units.WeaponSlot[i].TotalEffectiveRange;
+                int currentTargetId =
+                    units.CurrentTargets[i];
 
-                    // Зажимаем максимальный радиус ИИ (например, до 60 микро-ячеек), 
-                    // чтобы они не стреляли вслепую за пределы монитора
-                    currentAttackRange = (int)MathF.Min(150f, weaponRange);
-                }
+                int currentAttackRange =
+                    GetAttackRange(
+                        units,
+                        i
+                    );
 
-                // Дальность зрения (сфера сканирования грида)
-                int visionRadius = currentAttackRange + 5;
+                // ====================================================
+                // 1. ПРОВЕРЯЕМ СУЩЕСТВУЮЩУЮ ЦЕЛЬ
+                // ====================================================
 
-                // Проверка Target Lock (Удержание фокуса)
                 if (currentTargetId != -1)
                 {
-                    if (units.HealthMasks[currentTargetId] == 0)
+                    bool targetValid =
+                        currentTargetId >= 0 &&
+                        currentTargetId < units.Count &&
+                        units.HealthMasks[currentTargetId] > 0;
+
+                    if (!targetValid)
                     {
                         units.CurrentTargets[i] = -1;
+                        currentTargetId = -1;
                     }
                     else
                     {
-                        ref var posTarget = ref units.Positions[currentTargetId];
-                        float tdx = posA.X - posTarget.X;
-                        float tdy = posA.Y - posTarget.Y;
-                        float distToTarget = MathF.Sqrt(tdx * tdx + tdy * tdy);
+                        ref var targetPos =
+                            ref units.Positions[currentTargetId];
 
-                        bool stillCanSee = CombatPath.VisibilityChecker.HasLineOfSight(map, edificeStore, posA.X, posA.Y, posTarget.X, posTarget.Y, posA.Z);
-
-                        // Теряем цель, только если она вышла за радиус зрения или скрылась за стеной
-                        if (distToTarget > visionRadius || posA.Z != posTarget.Z || !stillCanSee)
+                        if (targetPos.Spatial.Z != posA.Spatial.Z)
                         {
                             units.CurrentTargets[i] = -1;
+                            currentTargetId = -1;
                         }
-                    }
-                }
-
-                // ========================================================
-                // ПОИСК ВРАГОВ ЧЕРЕЗ РАСШИРЕННЫЙ РАДИУС ЗРЕНИЯ
-                // ========================================================
-                _nearbyCandidates.Clear();
-                // Теперь ИИ сканирует честные 40-50 ячеек вокруг себя, и легко найдет отряд напротив!
-                spatialGrid.GetNearby(posA.Spatial, visionRadius, _nearbyCandidates);
-
-                int bestNewTargetId = -1;
-                float closestDistMicroCells = float.MaxValue;
-                bool foundMeleeThreat = false;
-
-                for (int idx = 0; idx < _nearbyCandidates.Count; idx++)
-                {
-                    int j = _nearbyCandidates[idx];
-
-                    if (i == j || units.HealthMasks[j] == 0) continue;
-                    if (units.UnitType[i] == units.UnitType[j]) continue;
-
-                    ref var posB = ref units.Positions[j];
-                    if (posA.Z != posB.Z) continue;
-
-                    float cdx = posA.X - posB.X;
-                    float cdy = posA.Y - posB.Y;
-                    float distMicroCells = MathF.Sqrt(cdx * cdx + cdy * cdy);
-
-                    if (distMicroCells > visionRadius) continue;
-
-                    // Проверка видимости лучом сквозь стены
-                    bool canSee = CombatPath.VisibilityChecker.HasLineOfSight(map, edificeStore, posA.X, posA.Y, posB.X, posB.Y, posA.Z);
-                    if (!canSee) continue;
-
-                    // КРИТИЧЕСКАЯ УГРОЗА В УПОР
-                    if (distMicroCells <= MeleeThreatRadius)
-                    {
-                        if (!foundMeleeThreat)
+                        else
                         {
-                            foundMeleeThreat = true;
-                            closestDistMicroCells = float.MaxValue;
-                            bestNewTargetId = -1;
-                        }
+                            float dx =
+                                posA.X -
+                                targetPos.X;
 
-                        if (distMicroCells < closestDistMicroCells)
-                        {
-                            closestDistMicroCells = distMicroCells;
-                            bestNewTargetId = j;
-                        }
-                    }
-                    // ОБЫЧНАЯ ЦЕЛЬ
-                    else if (!foundMeleeThreat && units.CurrentTargets[i] == -1)
-                    {
-                        if (distMicroCells <= currentAttackRange && distMicroCells < closestDistMicroCells)
-                        {
-                            closestDistMicroCells = distMicroCells;
-                            bestNewTargetId = j;
-                        }
-                    }
-                }
+                            float dy =
+                                posA.Y -
+                                targetPos.Y;
 
-                if (foundMeleeThreat)
-                {
-                    units.CurrentTargets[i] = bestNewTargetId;
-                }
-                else if (units.CurrentTargets[i] == -1 && bestNewTargetId != -1)
-                {
-                    units.CurrentTargets[i] = bestNewTargetId;
-                }
+                            float distance =
+                                MathF.Sqrt(
+                                    dx * dx +
+                                    dy * dy
+                                );
 
-                // ========================================================
-                // 3. МЕХАНИКА ИЗГОТОВЛЕНИЯ ВЫСТРЕЛА И АДАПТИВНЫХ ОЧЕРЕДЕЙ
-                // ========================================================
-                int finalTarget = units.CurrentTargets[i];
+                            int visionRadius =
+                                Math.Min(
+                                    currentAttackRange + 5,
+                                    MaxTargetScanRadius
+                                );
 
-                if (finalTarget != -1)
-                {
-                    ref var targetPos = ref units.Positions[finalTarget];
-                    float fdx = posA.X - targetPos.X;
-                    float fdy = posA.Y - targetPos.Y;
-                    float distanceInTiles = MathF.Sqrt(fdx * fdx + fdy * fdy);
-
-                    if (distanceInTiles <= currentAttackRange)
-                    {
-                        // ФАЗА А: Очередь уже идет (Юнит в режиме отсечки burst-огня)
-                        if (units.RemainingBurstShots[i] > 0)
-                        {
-                            if (units.ShotCooldowns[i] <= 0f)
+                            if (distance > visionRadius)
                             {
-                                // Стреляем! Логика нагрева и отдачи из Шага 3 сработает внутри PerformAttack
-                                PerformAttack(units, i, finalTarget, map, edificeStore, spatialGrid, effectSystem, microCellPixelSize);
+                                units.CurrentTargets[i] = -1;
+                                currentTargetId = -1;
+                            }
+                            else if (_targetLosTimers[i] <= 0f)
+                            {
+                                bool visible =
+                                    CombatPath.VisibilityChecker.HasLineOfSight(
+                                        map,
+                                        edificeStore,
+                                        posA.X,
+                                        posA.Y,
+                                        targetPos.X,
+                                        targetPos.Y,
+                                        posA.Z
+                                    );
 
-                                units.RemainingBurstShots[i]--; // Израсходовали одну пулю
+                                _targetLosTimers[i] =
+                                    TargetLosInterval;
 
-                                if (units.RemainingBurstShots[i] <= 0)
+                                if (!visible)
                                 {
-                                    // ОЧЕРЕДЬ ЗАВЕРШЕНА ПЛАНОВО: прячемся за стену, уходим на кулдаун между очередями
-                                    units.IsAiming[i] = false;
-                                    posA.RenderX = posA.X;
-                                    posA.RenderY = posA.Y;
-
-                                    // Пауза между очередями (Берем из FireRate, например, 1.2 секунды)
-                                    units.ShotCooldowns[i] = (units.WeaponSlot[i] != null) ? units.WeaponSlot[i].BaseStats.FireRate : 1.5f;
-                                }
-                                else
-                                {
-                                    // Темп стрельбы ВНУТРИ очереди (АК-47 строчит с задержкой 0.1 секунды между пулями)
-                                    units.ShotCooldowns[i] = 0.1f;
+                                    units.CurrentTargets[i] = -1;
+                                    currentTargetId = -1;
                                 }
                             }
-                            continue; // Пропускаем фазу прицеливания, пока не отстреляем очередь
                         }
-
-                        // ========================================================
-                        // ФАЗА Б: Начало подготовки к новой очереди (Изготовление выстрела)
-                        // ========================================================
-                        // Солдат начнет целиться ТОЛЬКО если старый кулдаун прошел и пушка не заклинила от перегрева
-                        bool canShoot = units.WeaponSlot[i] != null;
-                        if (!units.IsAiming[i] && units.ShotCooldowns[i] <= 0f && canShoot)
-                        {
-                            units.IsAiming[i] = true;
-
-                            // Время на вскидку/прицеливание перед первой пулей очереди
-                            units.AimingTimers[i] = (units.WeaponSlot[i] != null) ? units.WeaponSlot[i].BaseStats.RecoilRecovery * 1.5f : 0.5f;
-
-                            if (moveA.State == MovementState.InCover)
-                            {
-                                units.LeanOffsetX[i] = Math.Sign(targetPos.X - posA.X);
-                                units.LeanOffsetY[i] = Math.Sign(targetPos.Y - posA.Y);
-                            }
-
-                            // ИСПРАВЛЕНО: Включили прицеливание? Ждем следующего кадра для тика таймера!
-                            continue;
-                        }
-
-                        // ========================================================
-                        // ФАЗА В: Процесс прицеливания (Юнит плавно высовывается из-за угла монолита)
-                        // ========================================================
-                        if (units.IsAiming[i] && units.RemainingBurstShots[i] <= 0)
-                        {
-                            units.AimingTimers[i] -= deltaTime;
-
-                            if (moveA.State == MovementState.InCover)
-                            {
-                                posA.RenderX = posA.X + (units.LeanOffsetX[i] * 0.4f);
-                                posA.RenderY = posA.Y + (units.LeanOffsetY[i] * 0.4f);
-                            }
-
-                            // ВРЕМЯ ИЗГОТОВЛЕНИЯ ВЫШЛО: Заряжаем боезапас очереди
-                            if (units.AimingTimers[i] <= 0f)
-                            {
-                                int burstCount = 1;
-                                if (units.WeaponSlot[i] != null)
-                                {
-                                    // ПОЛИМОРФНЫЙ ВЫЗОВ: пушка сама оценивает дистанцию до цели. 
-                                    burstCount = units.WeaponSlot[i].GetBurstCountForDistance(distanceInTiles);
-                                }
-
-                                units.RemainingBurstShots[i] = burstCount;
-
-                                // ИСПРАВЛЕНО: Глушим таймер в абсолютный 0, чтобы он не вызывал этот блок повторно 
-                                // во время отстрела очереди на следующих кадрах!
-                                units.AimingTimers[i] = 0f;
-                            }
-                        }
-
                     }
                 }
-                else
+
+                // ====================================================
+                // 2. ИЩЕМ НОВУЮ ЦЕЛЬ ТОЛЬКО КОГДА НУЖНО
+                // ====================================================
+
+                if (currentTargetId == -1 &&
+                    _targetScanTimers[i] <= 0f)
                 {
-                    // Если цель потеряна/умерла — сбрасываем прицел и остатки очереди, прячемся в сейв
-                    if (units.IsAiming[i] || units.RemainingBurstShots[i] > 0)
+                    currentTargetId =
+                        FindClosestEnemy(
+                            units,
+                            spatialGrid,
+                            map,
+                            edificeStore,
+                            i,
+                            currentAttackRange
+                        );
+
+                    units.CurrentTargets[i] =
+                        currentTargetId;
+
+                    // ==================================================
+                    // РАВНОМЕРНО РАСКИДЫВАЕМ НАГРУЗКУ
+                    //
+                    // Каждый юнит получает немного другой момент
+                    // следующего сканирования.
+                    // ==================================================
+
+                    _targetScanTimers[i] =
+                        TargetScanInterval *
+                        GetScanJitter(i);
+                }
+
+                // ====================================================
+                // 3. ЕСЛИ ЦЕЛИ НЕТ — СТРЕЛЬБЫ НЕТ
+                // ====================================================
+
+                int finalTarget =
+                    units.CurrentTargets[i];
+
+                if (finalTarget < 0 ||
+                    finalTarget >= units.Count)
+                {
+                    ResetAiming(
+                        units,
+                        i,
+                        ref posA
+                    );
+
+                    continue;
+                }
+
+                if (units.HealthMasks[finalTarget] == 0)
+                {
+                    units.CurrentTargets[i] = -1;
+
+                    ResetAiming(
+                        units,
+                        i,
+                        ref posA
+                    );
+
+                    continue;
+                }
+
+                ref var targetPosFinal =
+                    ref units.Positions[finalTarget];
+
+                float fdx =
+                    posA.X -
+                    targetPosFinal.X;
+
+                float fdy =
+                    posA.Y -
+                    targetPosFinal.Y;
+
+                float distanceInTiles =
+                    MathF.Sqrt(
+                        fdx * fdx +
+                        fdy * fdy
+                    );
+
+                if (distanceInTiles >
+                    currentAttackRange)
+                {
+                    continue;
+                }
+
+                // ====================================================
+                // 4. BURST
+                // ====================================================
+
+                if (units.RemainingBurstShots[i] > 0)
+                {
+                    if (units.ShotCooldowns[i] <= 0f)
                     {
-                        units.IsAiming[i] = false;
-                        units.RemainingBurstShots[i] = 0;
-                        posA.RenderX = posA.X;
-                        posA.RenderY = posA.Y;
+                        PerformAttack(
+                            units,
+                            i,
+                            finalTarget,
+                            map,
+                            edificeStore,
+                            spatialGrid,
+                            effectSystem,
+                            microCellPixelSize
+                        );
+
+                        units.RemainingBurstShots[i]--;
+
+                        if (units.RemainingBurstShots[i] <= 0)
+                        {
+                            units.IsAiming[i] = false;
+
+                            posA.RenderX =
+                                posA.X;
+
+                            posA.RenderY =
+                                posA.Y;
+
+                            units.ShotCooldowns[i] =
+                                units.WeaponSlot[i] != null
+                                    ? units.WeaponSlot[i].BaseStats.FireRate
+                                    : 1.5f;
+                        }
+                        else
+                        {
+                            units.ShotCooldowns[i] =
+                                0.1f;
+                        }
+                    }
+
+                    continue;
+                }
+
+                // ====================================================
+                // 5. НАЧАЛО ПРИЦЕЛИВАНИЯ
+                // ====================================================
+
+                bool canShoot =
+                    units.WeaponSlot[i] != null;
+
+                if (!units.IsAiming[i] &&
+                    units.ShotCooldowns[i] <= 0f &&
+                    canShoot)
+                {
+                    units.IsAiming[i] =
+                        true;
+
+                    units.AimingTimers[i] =
+                        units.WeaponSlot[i]
+                            .BaseStats
+                            .RecoilRecovery *
+                        1.5f;
+
+                    if (moveA.State ==
+                        MovementState.InCover)
+                    {
+                        units.LeanOffsetX[i] =
+                            Math.Sign(
+                                targetPosFinal.X -
+                                posA.X
+                            );
+
+                        units.LeanOffsetY[i] =
+                            Math.Sign(
+                                targetPosFinal.Y -
+                                posA.Y
+                            );
+                    }
+
+                    continue;
+                }
+
+                // ====================================================
+                // 6. ПРИЦЕЛИВАНИЕ
+                // ====================================================
+
+                if (units.IsAiming[i] &&
+                    units.RemainingBurstShots[i] <= 0)
+                {
+                    units.AimingTimers[i] -=
+                        deltaTime;
+
+                    if (moveA.State ==
+                        MovementState.InCover)
+                    {
+                        posA.RenderX =
+                            posA.X +
+                            units.LeanOffsetX[i] *
+                            0.4f;
+
+                        posA.RenderY =
+                            posA.Y +
+                            units.LeanOffsetY[i] *
+                            0.4f;
+                    }
+
+                    if (units.AimingTimers[i] <= 0f)
+                    {
+                        int burstCount =
+                            1;
+
+                        if (units.WeaponSlot[i] != null)
+                        {
+                            burstCount =
+                                units.WeaponSlot[i]
+                                    .GetBurstCountForDistance(
+                                        distanceInTiles
+                                    );
+                        }
+
+                        units.RemainingBurstShots[i] =
+                            burstCount;
+
+                        units.AimingTimers[i] =
+                            0f;
                     }
                 }
-            } // <-- Конец цикла for (int i = 0; i < units.Count; i++)
-        } // <-- Конец метода ExecuteRimWorldCombat
+            }
+        }
 
+        // ============================================================
+        // ПОИСК БЛИЖАЙШЕГО ВРАГА
+        // ============================================================
 
+        private int FindClosestEnemy(
+            UnitStore units,
+            UnitSpatialGrid spatialGrid,
+            WorldMap map,
+            EdificeStore edificeStore,
+            int unitId,
+            int attackRange)
+        {
+            ref var posA =
+                ref units.Positions[unitId];
 
+            int visionRadius =
+                Math.Min(
+                    attackRange + 5,
+                    MaxTargetScanRadius
+                );
+
+            _nearbyCandidates.Clear();
+
+            spatialGrid.GetNearby(
+                posA.Spatial,
+                visionRadius,
+                _nearbyCandidates
+            );
+
+            int bestTarget =
+                -1;
+
+            float bestDistance =
+                float.MaxValue;
+
+            for (int idx = 0;
+                 idx < _nearbyCandidates.Count;
+                 idx++)
+            {
+                int candidateId =
+                    _nearbyCandidates[idx];
+
+                if (candidateId == unitId)
+                    continue;
+
+                if (candidateId < 0 ||
+                    candidateId >= units.Count)
+                {
+                    continue;
+                }
+
+                if (units.HealthMasks[candidateId] == 0)
+                    continue;
+
+                if (units.UnitType[candidateId] ==
+                    units.UnitType[unitId])
+                {
+                    continue;
+                }
+
+                ref var posB =
+                    ref units.Positions[candidateId];
+
+                if (posA.Spatial.Z !=
+                    posB.Spatial.Z)
+                {
+                    continue;
+                }
+
+                float dx =
+                    posA.X -
+                    posB.X;
+
+                float dy =
+                    posA.Y -
+                    posB.Y;
+
+                float distanceSqr =
+                    dx * dx +
+                    dy * dy;
+
+                if (distanceSqr >
+                    attackRange * attackRange)
+                {
+                    continue;
+                }
+
+                if (distanceSqr <
+                    MeleeThreatRadius *
+                    MeleeThreatRadius)
+                {
+                    if (!CombatPath.VisibilityChecker.HasLineOfSight(
+                        map,
+                        edificeStore,
+                        posA.X,
+                        posA.Y,
+                        posB.X,
+                        posB.Y,
+                        posA.Z))
+                    {
+                        continue;
+                    }
+
+                    if (distanceSqr <
+                        bestDistance)
+                    {
+                        bestDistance =
+                            distanceSqr;
+
+                        bestTarget =
+                            candidateId;
+                    }
+
+                    continue;
+                }
+
+                // LOS делаем только для реально ближайшего кандидата.
+                if (distanceSqr >= bestDistance)
+                    continue;
+
+                if (!CombatPath.VisibilityChecker.HasLineOfSight(
+                    map,
+                    edificeStore,
+                    posA.X,
+                    posA.Y,
+                    posB.X,
+                    posB.Y,
+                    posA.Z))
+                {
+                    continue;
+                }
+
+                bestDistance =
+                    distanceSqr;
+
+                bestTarget =
+                    candidateId;
+            }
+
+            return bestTarget;
+        }
+
+        // ============================================================
+        // РАСЧЁТ ДАЛЬНОСТИ
+        // ============================================================
+
+        private int GetAttackRange(
+            UnitStore units,
+            int unitId)
+        {
+            if (units.WeaponSlot[unitId] == null)
+                return 4;
+
+            float range =
+                units.WeaponSlot[unitId]
+                    .TotalEffectiveRange;
+
+            return Math.Min(
+                150,
+                Math.Max(
+                    1,
+                    (int)range
+                )
+            );
+        }
+
+        // ============================================================
+        // НЕБОЛЬШОЙ ДЕТЕРМИНИРОВАННЫЙ JITTER
+        // ============================================================
+
+        private float GetScanJitter(
+            int unitId)
+        {
+            unchecked
+            {
+                uint x =
+                    (uint)unitId *
+                    747796405u;
+
+                x ^= x >> 16;
+                x *= 2246822519u;
+                x ^= x >> 13;
+
+                float value =
+                    (x & 0xFFFFu) /
+                    65536f;
+
+                return
+                    0.75f +
+                    value *
+                    0.75f;
+            }
+        }
+
+        // ============================================================
+        // СБРОС ПРИЦЕЛИВАНИЯ
+        // ============================================================
+
+        private void ResetAiming(
+            UnitStore units,
+            int unitId,
+            ref UnitPosition position)
+        {
+            units.IsAiming[unitId] =
+                false;
+
+            units.RemainingBurstShots[unitId] =
+                0;
+
+            position.RenderX =
+                position.X;
+
+            position.RenderY =
+                position.Y;
+        }
+
+        // ============================================================
+        // ARRAY STORAGE
+        // ============================================================
+
+        private void EnsureStorage(
+            int count)
+        {
+            if (_targetScanTimers.Length >= count)
+                return;
+
+            int oldSize =
+                _targetScanTimers.Length;
+
+            int newSize =
+                Math.Max(
+                    count,
+                    Math.Max(
+                        64,
+                        oldSize * 2
+                    )
+                );
+
+            Array.Resize(
+                ref _targetScanTimers,
+                newSize
+            );
+
+            Array.Resize(
+                ref _targetLosTimers,
+                newSize
+            );
+
+            for (int i = oldSize;
+                 i < newSize;
+                 i++)
+            {
+                _targetScanTimers[i] =
+                    GetInitialScanOffset(i);
+
+                _targetLosTimers[i] =
+                    0f;
+            }
+        }
+
+        private float GetInitialScanOffset(
+            int unitId)
+        {
+            unchecked
+            {
+                uint x =
+                    (uint)unitId *
+                    1597334677u;
+
+                x ^= x >> 16;
+                x *= 2246822519u;
+                x ^= x >> 13;
+
+                float value =
+                    (x & 0xFFFFu) /
+                    65536f;
+
+                return
+                    value *
+                    TargetScanInterval;
+            }
+        }
+
+        // ============================================================
+        // ATTACK
+        // ============================================================
 
         private void PerformAttack(
-        UnitStore units,
-        int attackerId,
-        int targetId,
-        WorldMap map,
-        EdificeStore edificeStore,
-        UnitSpatialGrid spatialGrid,
-        CombatEffectSystem effectSystem,
-        float microCellPixelSize)
+            UnitStore units,
+            int attackerId,
+            int targetId,
+            WorldMap map,
+            EdificeStore edificeStore,
+            UnitSpatialGrid spatialGrid,
+            CombatEffectSystem effectSystem,
+            float microCellPixelSize)
         {
-            if (attackerId < 0 || attackerId >= units.Count) return;
-            if (targetId < 0 || targetId >= units.Count) return;
-            if (units.HealthMasks[attackerId] == 0 || units.HealthMasks[targetId] == 0) return;
+            if (attackerId < 0 ||
+                attackerId >= units.Count)
+                return;
 
-            ref var posA = ref units.Positions[attackerId];
-            ref var posB = ref units.Positions[targetId];
+            if (targetId < 0 ||
+                targetId >= units.Count)
+                return;
 
-            // 1. БАЗОВЫЕ ХАРАКТЕРИСТИКИ ДЛЯ БЕЗОРУЖНОГО БОЯ (УКУС ЖУКА / КУЛАК)
-            byte baseDamage = 25;
-            float weaponBleedChance = 0.7f;
-            float effectiveRange = 2f;
-            float baseAccuracy = 0.05f;
+            if (units.HealthMasks[attackerId] == 0 ||
+                units.HealthMasks[targetId] == 0)
+                return;
 
-            // ИСПРАВЛЕНО: Извлекаем параметры из структуры BaseStats нового динамического класса Weapon
-            if (units.WeaponSlot[attackerId] is Weapon activeWeapon)
+            ref var posA =
+                ref units.Positions[attackerId];
+
+            ref var posB =
+                ref units.Positions[targetId];
+
+            byte baseDamage =
+                25;
+
+            float weaponBleedChance =
+                0.7f;
+
+            float effectiveRange =
+                2f;
+
+            if (units.WeaponSlot[attackerId]
+                is Weapon activeWeapon)
             {
-                baseDamage = activeWeapon.BaseStats.BaseDamage;
-                weaponBleedChance = activeWeapon.BaseStats.BleedChance;
+                baseDamage =
+                    activeWeapon.BaseStats.BaseDamage;
 
-                // Эффективную дальность и текущий разброс запрашиваем через динамические геттеры с учетом обвесов!
-                effectiveRange = activeWeapon.TotalEffectiveRange;
-                baseAccuracy = activeWeapon.GetCurrentSpread();
+                weaponBleedChance =
+                    activeWeapon.BaseStats.BleedChance;
+
+                effectiveRange =
+                    activeWeapon.TotalEffectiveRange;
             }
 
-            // 2. РАСЧЕТ ИТОГОВОГО ШАНСА ПОПАДАНИЯ С УЧЕТОМ ОТДАЧИ И УКРЫТИЙ
-            float hitChance = CombatPath.CombatMath.CalculateHitChance(
-                map, edificeStore, units, attackerId,
-                posA.X, posA.Y, posB.X, posB.Y, posA.Z
-            );
+            float hitChance =
+                CombatPath.CombatMath.CalculateHitChance(
+                    map,
+                    edificeStore,
+                    units,
+                    attackerId,
+                    posA.X,
+                    posA.Y,
+                    posB.X,
+                    posB.Y,
+                    posA.Z
+                );
 
-            bool isHit = Random.Shared.NextSingle() <= hitChance;
+            bool isHit =
+                Random.Shared.NextSingle() <=
+                hitChance;
 
-            // 3. НАКАПЛИВАЕМ ОТДАЧУ И ТЕПЛО СТВОЛА ПОСЛЕ ВЫСТРЕЛА
-            if (units.WeaponSlot[attackerId] is Weapon shootingWeapon)
+            if (units.WeaponSlot[attackerId]
+                is Weapon shootingWeapon)
             {
-                shootingWeapon.currentRecoil += shootingWeapon.BaseStats.RecoilPerShot;
-
+                shootingWeapon.currentRecoil +=
+                    shootingWeapon.BaseStats.RecoilPerShot;
             }
 
-            // Физическая дистанция для расчета излёта и промахов
-            float dx = posB.X - posA.X;
-            float dy = posB.Y - posA.Y;
-            float distanceInTiles = MathF.Sqrt(dx * dx + dy * dy);
+            float dx =
+                posB.X -
+                posA.X;
 
-            // ========================================================
-            // БАЛЛИСТИЧЕСКИЙ РАСЧЕТ ТРАЕКТОРИИ И ПРОМАХОВ
-            // ========================================================
+            float dy =
+                posB.Y -
+                posA.Y;
 
-            // Пиксельный старт всегда из центра стрелка
-            SFML.System.Vector2f startPixels = new SFML.System.Vector2f(
-                posA.RenderX * microCellPixelSize + microCellPixelSize * 0.5f,
-                posA.RenderY * microCellPixelSize + microCellPixelSize * 0.5f
-            );
+            float distanceInTiles =
+                MathF.Sqrt(
+                    dx * dx +
+                    dy * dy
+                );
+
+            SFML.System.Vector2f startPixels =
+                new SFML.System.Vector2f(
+                    posA.RenderX *
+                        microCellPixelSize +
+                    microCellPixelSize *
+                        0.5f,
+
+                    posA.RenderY *
+                        microCellPixelSize +
+                    microCellPixelSize *
+                        0.5f
+                );
 
             SFML.System.Vector2f endPixels;
-            int finalHitUnitId = -1;
-            int hitX = posB.X;
-            int hitY = posB.Y;
+
+            int finalHitUnitId =
+                -1;
+
+            int hitX =
+                posB.X;
+
+            int hitY =
+                posB.Y;
 
             if (isHit)
             {
-                // СЛУЧАЙ ПОПАДАНИЯ: Пуля летит точно в цель
-                finalHitUnitId = targetId;
-                endPixels = new SFML.System.Vector2f(
-                    posB.RenderX * microCellPixelSize + microCellPixelSize * 0.5f,
-                    posB.RenderY * microCellPixelSize + microCellPixelSize * 0.5f
-                );
+                finalHitUnitId =
+                    targetId;
+
+                endPixels =
+                    new SFML.System.Vector2f(
+                        posB.RenderX *
+                            microCellPixelSize +
+                        microCellPixelSize *
+                            0.5f,
+
+                        posB.RenderY *
+                            microCellPixelSize +
+                        microCellPixelSize *
+                            0.5f
+                    );
             }
             else
             {
-                // СЛУЧАЙ ПРОМАХА (Твой алгоритм разброса по радиусу излёта снаряда):
-                int scatterRadius = distanceInTiles > effectiveRange ? 2 : 1;
+                int scatterRadius =
+                    distanceInTiles >
+                    effectiveRange
+                        ? 2
+                        : 1;
 
-                int scatterX = Random.Shared.Next(-scatterRadius, scatterRadius + 1);
-                int scatterY = Random.Shared.Next(-scatterRadius, scatterRadius + 1);
+                int scatterX =
+                    Random.Shared.Next(
+                        -scatterRadius,
+                        scatterRadius + 1
+                    );
 
-                if (scatterX == 0 && scatterY == 0) scatterX = scatterRadius;
+                int scatterY =
+                    Random.Shared.Next(
+                        -scatterRadius,
+                        scatterRadius + 1
+                    );
 
-                // Жесткая защита от вылета пули за края массива микро-карты (0..767)
-                int maxCoord = (16 * 48) - 1;
-                hitX = Math.Clamp(posB.X + scatterX, 0, maxCoord);
-                hitY = Math.Clamp(posB.Y + scatterY, 0, maxCoord);
+                if (scatterX == 0 &&
+                    scatterY == 0)
+                {
+                    scatterX =
+                        scatterRadius;
+                }
 
-                endPixels = new SFML.System.Vector2f(
-                    hitX * microCellPixelSize + microCellPixelSize * 0.5f,
-                    hitY * microCellPixelSize + microCellPixelSize * 0.5f
-                );
+                int maxCoord =
+                    (16 * 48) - 1;
 
-                // Friendly Fire: проверяем, не зацепила ли пуля кого-то в ячейке приземления
-                var unitsInScatterCell = spatialGrid.GetUnitsAt(new Components.SpatialCoord(hitX, hitY, posA.Z));
+                hitX =
+                    Math.Clamp(
+                        posB.X + scatterX,
+                        0,
+                        maxCoord
+                    );
+
+                hitY =
+                    Math.Clamp(
+                        posB.Y + scatterY,
+                        0,
+                        maxCoord
+                    );
+
+                endPixels =
+                    new SFML.System.Vector2f(
+                        hitX *
+                            microCellPixelSize +
+                        microCellPixelSize *
+                            0.5f,
+
+                        hitY *
+                            microCellPixelSize +
+                        microCellPixelSize *
+                            0.5f
+                    );
+
+                var unitsInScatterCell =
+                    spatialGrid.GetUnitsAt(
+                        new SpatialCoord(
+                            hitX,
+                            hitY,
+                            posA.Z
+                        )
+                    );
+
                 if (unitsInScatterCell.Count > 0)
                 {
-                    finalHitUnitId = unitsInScatterCell[0];
+                    finalHitUnitId =
+                        unitsInScatterCell[0];
                 }
             }
 
-            // ========================================================
-            // ПРИМЕНЕНИЕ ДИНАМИЧЕСКОГО УРОНА НА ИЗЛЁТЕ
-            // ========================================================
-            // Твой калькулятор BulletPhysicsCalculator считает падение убойной силы за пределами эффективной зоны
-            float finalCalculatedDamage = CombatPath.BulletPhysicsCalculator.CalculateDamageAtDistance(distanceInTiles, effectiveRange, baseDamage);
-            byte damageToApply = (byte)Math.Clamp(finalCalculatedDamage, 1, 255);
+            float finalCalculatedDamage =
+                CombatPath
+                    .BulletPhysicsCalculator
+                    .CalculateDamageAtDistance(
+                        distanceInTiles,
+                        effectiveRange,
+                        baseDamage
+                    );
+
+            byte damageToApply =
+                (byte)Math.Clamp(
+                    finalCalculatedDamage,
+                    1,
+                    255
+                );
 
             if (finalHitUnitId != -1)
             {
-                // Наносим урон существу и триггерим брызги крови (пробрасываем карту)
-                _damageSystem.ApplyDamage(units, finalHitUnitId, attackerId, damageToApply, weaponBleedChance, map);
+                _damageSystem.ApplyDamage(
+                    units,
+                    finalHitUnitId,
+                    attackerId,
+                    damageToApply,
+                    weaponBleedChance,
+                    map
+                );
 
-                // Оповещаем группу в радиусе 5 ячеек от точки удара о близкой опасности (Impact Danger)
-                // Оповещаем группу в радиусе 35 ячеек от стрелка о звуке выстрела (Acoustic Shockwave)
-                // (Этот блок командной тревоги завязан ниже в методе, он отработает штатно)
-
-                if (effectSystem != null && microCellPixelSize > 0f)
+                if (effectSystem != null &&
+                    microCellPixelSize > 0f)
                 {
-                    effectSystem.AddTracer(startPixels, endPixels, posA.Z, showCross: true, duration: 0.35f);
+                    effectSystem.AddTracer(
+                        startPixels,
+                        endPixels,
+                        posA.Z,
+                        showCross: true,
+                        duration: 0.35f
+                    );
                 }
             }
             else
             {
-                // Пуля врезалась в окружение (землю, скалу или постройку-укрытие)
-                MapLayer layer = map.GetLayer(posA.Z);
+                MapLayer layer =
+                    map.GetLayer(
+                        posA.Z
+                    );
+
                 if (layer != null)
                 {
-                    ref MicroCell cell = ref layer.GetMicroCell(hitX, hitY);
+                    ref MicroCell cell =
+                        ref layer.GetMicroCell(
+                            hitX,
+                            hitY
+                        );
+
                     if (cell.EdificeId > 0)
                     {
-                        ref var edifice = ref edificeStore.Instances[cell.EdificeId];
-                        if (edificeStore.Configs[edifice.ConfigId] != null)
+                        ref var edifice =
+                            ref edificeStore
+                                .Instances[
+                                    cell.EdificeId
+                                ];
+
+                        if (edificeStore.Configs[
+                                edifice.ConfigId] != null)
                         {
-                            // Крошим прочность баррикады/стены пулей
-                            edifice.HitPoints -= damageToApply;
-                            if (edifice.HitPoints <= 0)
-                            {
-                                Console.WriteLine($"💥 Укрытие ID {cell.EdificeId} полностью разрушено баллистическим огнем!");
-                            }
+                            edifice.HitPoints -=
+                                damageToApply;
                         }
                     }
                 }
 
-                if (effectSystem != null && microCellPixelSize > 0f)
+                if (effectSystem != null &&
+                    microCellPixelSize > 0f)
                 {
-                    effectSystem.AddTracer(startPixels, endPixels, posA.Z, showCross: false, duration: 0.35f);
+                    effectSystem.AddTracer(
+                        startPixels,
+                        endPixels,
+                        posA.Z,
+                        showCross: false,
+                        duration: 0.35f
+                    );
                 }
             }
-
-            // ИСПРАВЛЕНО: Легаси-строчка units.ShotCooldowns[attackerId] = fireRate; полностью удалена!
-            // Кулдаунами теперь безопасно управляет ИИ в ExecuteRimWorldCombat.
         }
-
-
     }
 }
-

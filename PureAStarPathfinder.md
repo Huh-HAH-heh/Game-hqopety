@@ -1,4 +1,7 @@
-﻿using System;
+
+# PureAStarPathfinder
+```csharp
+using System;
 using Core.Map;
 using Core.Unit.Components;
 
@@ -480,3 +483,5 @@ namespace Core.AI
         }
     }
 }
+
+```

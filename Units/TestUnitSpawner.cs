@@ -10,171 +10,315 @@ namespace Units
 {
     public static class TestUnitSpawner
     {
-        private const int BlueGroupId = 0;
-        private const int RedGroupId = 1;
+        // ============================================================
+        // GROUPS
+        // ============================================================
+
+        private const int BlueFirstGroupId = 0;
+        private const int RedFirstGroupId = 8;
+
+        private const int GroupsPerSide = 8;
+
+        // 8 групп * 50 = 400 юнитов на сторону.
+        private const int UnitsPerGroup = 50;
+
+        private const int TotalUnitsPerSide =
+            GroupsPerSide *
+            UnitsPerGroup;
+
+        // ============================================================
+        // FORMATION / SPAWN
+        // ============================================================
+
+        private const int SpawnColumnsPerGroup = 10;
+
+        // Размер пространства, занимаемого одной группой.
+        private const int GroupBlockWidth = 14;
+        private const int GroupBlockHeight = 8;
 
         public static void Spawn(
             UnitStore unitStore,
             UnitSpatialGrid spatialGrid)
         {
-            var inventorySystem = new UnitInventorySystem();
+            var inventorySystem =
+                new UnitInventorySystem();
 
-            RangedWeaponConfig ak47 = new RangedWeaponConfig
-            {
-                Name = "АК-47",
-                Weight = 4.3f,
-                BaseDamage = 25,
-                BleedChance = 0.7f,
-                FireRate = 0.1f,
-                BaseEffectiveRange = 100f,
-                BaseAccuracy = 0.02f
-            };
+            // ========================================================
+            // WEAPONS
+            // ========================================================
 
-            RangedWeaponConfig svd = new RangedWeaponConfig
-            {
-                Name = "СВД",
-                Weight = 4.5f,
-                BaseDamage = 40,
-                BleedChance = 0.9f,
-                FireRate = 0.8f,
-                BaseEffectiveRange = 300f,
-                BaseAccuracy = 0.005f
-            };
+            RangedWeaponConfig ak47 =
+                new RangedWeaponConfig
+                {
+                    Name = "АК-47",
+                    Weight = 4.3f,
+                    BaseDamage = 25,
+                    BleedChance = 0.7f,
+                    FireRate = 0.1f,
+                    BaseEffectiveRange = 100f,
+                    BaseAccuracy = 0.02f
+                };
 
-            ArmorConfig heavyVest = new ArmorConfig
-            {
-                Name = "Бронежилет БЖ-4",
-                ProtectedZone = 1,
-                DamageAbsorption = 0.5f,
-                BleedProtectionChance = 0.8f,
-                Weight = 8.5f
-            };
+            RangedWeaponConfig svd =
+                new RangedWeaponConfig
+                {
+                    Name = "СВД",
+                    Weight = 4.5f,
+                    BaseDamage = 40,
+                    BleedChance = 0.9f,
+                    FireRate = 0.8f,
+                    BaseEffectiveRange = 300f,
+                    BaseAccuracy = 0.005f
+                };
 
-            ArmorConfig helmet = new ArmorConfig
-            {
-                Name = "Каска",
-                ProtectedZone = 0,
-                DamageAbsorption = 0.4f,
-                BleedProtectionChance = 0.7f,
-                Weight = 1.5f
-            };
+            // ========================================================
+            // ARMOR
+            // ========================================================
+
+            ArmorConfig heavyVest =
+                new ArmorConfig
+                {
+                    Name = "Бронежилет БЖ-4",
+                    ProtectedZone = 1,
+                    DamageAbsorption = 0.5f,
+                    BleedProtectionChance = 0.8f,
+                    Weight = 8.5f
+                };
+
+            ArmorConfig helmet =
+                new ArmorConfig
+                {
+                    Name = "Каска",
+                    ProtectedZone = 0,
+                    DamageAbsorption = 0.4f,
+                    BleedProtectionChance = 0.7f,
+                    Weight = 1.5f
+                };
 
             Console.WriteLine(
-                "[SPAWN] Создание группового ИИ: 40 BLUE vs 40 RED"
+                "[SPAWN] Stress test: " +
+                TotalUnitsPerSide +
+                " BLUE vs " +
+                TotalUnitsPerSide +
+                " RED"
             );
 
-            int blueStartCellX = 165;
-            int blueStartCellY = 165;
+            Console.WriteLine(
+                "[SPAWN] " +
+                GroupsPerSide +
+                " groups per side, " +
+                UnitsPerGroup +
+                " units per group"
+            );
 
-            for (int i = 0; i < 40; i++)
+            // ========================================================
+            // BLUE
+            // ========================================================
+
+            int blueOriginX = 100;
+            int blueOriginY = 120;
+
+            for (int groupIndex = 0;
+                 groupIndex < GroupsPerSide;
+                 groupIndex++)
             {
-                int spawnX =
-                    blueStartCellX +
-                    (i % 20);
+                int groupId =
+                    BlueFirstGroupId +
+                    groupIndex;
 
-                int spawnY =
-                    blueStartCellY +
-                    (i / 20);
+                // Расставляем группы сеткой 4 x 2.
+                int blockX =
+                    groupIndex % 4;
 
-                int unitId =
-                    CreateUnitEntity(
-                        unitStore,
-                        spawnX,
-                        spawnY,
-                        UnitType.Human,
-                        spatialGrid
-                    );
+                int blockY =
+                    groupIndex / 4;
 
-                unitStore.CurrentGroupId[unitId] =
-                    BlueGroupId;
+                int groupStartX =
+                    blueOriginX +
+                    blockX *
+                    GroupBlockWidth;
 
-                inventorySystem.EquipWeapon(
+                int groupStartY =
+                    blueOriginY +
+                    blockY *
+                    GroupBlockHeight;
+
+                SpawnGroup(
                     unitStore,
-                    unitId,
-                    ak47
-                );
-
-                unitStore.ShotCooldowns[unitId] = 0f;
-
-                unitStore.Positions[unitId].RenderX =
-                    unitStore.Positions[unitId].Spatial.X;
-
-                unitStore.Positions[unitId].RenderY =
-                    unitStore.Positions[unitId].Spatial.Y;
-
-                Console.WriteLine(
-                    $"[SPAWN] BLUE unit={unitId} group={BlueGroupId} pos=({spawnX},{spawnY},1)"
+                    spatialGrid,
+                    inventorySystem,
+                    groupId,
+                    groupStartX,
+                    groupStartY,
+                    UnitType.Human,
+                    ak47,
+                    null,
+                    null,
+                    "BLUE"
                 );
             }
 
-            int redStartCellX = 337;
-            int redStartCellY = 373;
+            // ========================================================
+            // RED
+            // ========================================================
 
-            for (int i = 0; i < 40; i++)
+            int redOriginX = 300;
+            int redOriginY = 330;
+
+            for (int groupIndex = 0;
+                 groupIndex < GroupsPerSide;
+                 groupIndex++)
             {
-                int spawnX =
-                    redStartCellX +
-                    (i % 20);
+                int groupId =
+                    RedFirstGroupId +
+                    groupIndex;
 
-                int spawnY =
-                    redStartCellY +
-                    (i / 20);
+                int blockX =
+                    groupIndex % 4;
 
-                int unitId =
-                    CreateUnitEntity(
-                        unitStore,
-                        spawnX,
-                        spawnY,
-                        UnitType.Insect,
-                        spatialGrid
-                    );
+                int blockY =
+                    groupIndex / 4;
 
-                unitStore.CurrentGroupId[unitId] =
-                    RedGroupId;
+                int groupStartX =
+                    redOriginX +
+                    blockX *
+                    GroupBlockWidth;
 
-                inventorySystem.EquipWeapon(
+                int groupStartY =
+                    redOriginY +
+                    blockY *
+                    GroupBlockHeight;
+
+                SpawnGroup(
                     unitStore,
-                    unitId,
-                    svd
-                );
-
-                inventorySystem.EquipArmor(
-                    unitStore,
-                    unitId,
-                    heavyVest
-                );
-
-                inventorySystem.EquipArmor(
-                    unitStore,
-                    unitId,
-                    helmet
-                );
-
-                unitStore.ShotCooldowns[unitId] = 0f;
-
-                unitStore.Positions[unitId].RenderX =
-                    unitStore.Positions[unitId].Spatial.X;
-
-                unitStore.Positions[unitId].RenderY =
-                    unitStore.Positions[unitId].Spatial.Y;
-
-                Console.WriteLine(
-                    $"[SPAWN] RED unit={unitId} group={RedGroupId} pos=({spawnX},{spawnY},1)"
+                    spatialGrid,
+                    inventorySystem,
+                    groupId,
+                    groupStartX,
+                    groupStartY,
+                    UnitType.Insect,
+                    svd,
+                    heavyVest,
+                    helmet,
+                    "RED"
                 );
             }
 
             Console.WriteLine(
-                $"[SPAWN] GROUP {BlueGroupId}: BLUE 40 units"
+                "[SPAWN] ========================================"
             );
 
             Console.WriteLine(
-                $"[SPAWN] GROUP {RedGroupId}: RED 40 units"
+                $"[SPAWN] BLUE: {GroupsPerSide} groups × {UnitsPerGroup} = {TotalUnitsPerSide}"
             );
 
             Console.WriteLine(
-                "[SPAWN] Группы ИИ созданы. Можно выдавать групповые приказы."
+                $"[SPAWN] RED : {GroupsPerSide} groups × {UnitsPerGroup} = {TotalUnitsPerSide}"
+            );
+
+            Console.WriteLine(
+                $"[SPAWN] TOTAL: {TotalUnitsPerSide * 2}"
+            );
+
+            Console.WriteLine(
+                "[SPAWN] ========================================"
             );
         }
+
+        // ============================================================
+        // SPAWN GROUP
+        // ============================================================
+
+        private static void SpawnGroup(
+            UnitStore unitStore,
+            UnitSpatialGrid spatialGrid,
+            UnitInventorySystem inventorySystem,
+            int groupId,
+            int startX,
+            int startY,
+            UnitType unitType,
+            RangedWeaponConfig weapon,
+            ArmorConfig armor,
+            ArmorConfig helmet,
+            string sideName)
+        {
+            Console.WriteLine(
+                $"[SPAWN] {sideName} GROUP {groupId}: " +
+                $"start=({startX},{startY}) " +
+                $"units={UnitsPerGroup}"
+            );
+
+            for (int i = 0;
+                 i < UnitsPerGroup;
+                 i++)
+            {
+                int spawnX =
+                    startX +
+                    (i % SpawnColumnsPerGroup);
+
+                int spawnY =
+                    startY +
+                    (i / SpawnColumnsPerGroup);
+
+                int unitId =
+                    CreateUnitEntity(
+                        unitStore,
+                        spawnX,
+                        spawnY,
+                        unitType,
+                        spatialGrid
+                    );
+
+                // ----------------------------------------------------
+                // КЛЮЧЕВОЕ:
+                // каждая 50-ка получает свой CurrentGroupId.
+                // ----------------------------------------------------
+
+                unitStore.CurrentGroupId[unitId] =
+                    groupId;
+
+                inventorySystem.EquipWeapon(
+                    unitStore,
+                    unitId,
+                    weapon
+                );
+
+                if (armor != null)
+                {
+                    inventorySystem.EquipArmor(
+                        unitStore,
+                        unitId,
+                        armor
+                    );
+                }
+
+                if (helmet != null)
+                {
+                    inventorySystem.EquipArmor(
+                        unitStore,
+                        unitId,
+                        helmet
+                    );
+                }
+
+                unitStore.ShotCooldowns[unitId] =
+                    0f;
+
+                unitStore.Positions[unitId].RenderX =
+                    unitStore.Positions[unitId].Spatial.X;
+
+                unitStore.Positions[unitId].RenderY =
+                    unitStore.Positions[unitId].Spatial.Y;
+            }
+
+            Console.WriteLine(
+                $"[SPAWN] {sideName} GROUP {groupId} READY"
+            );
+        }
+
+        // ============================================================
+        // CREATE UNIT
+        // ============================================================
 
         private static int CreateUnitEntity(
             UnitStore unitStore,
