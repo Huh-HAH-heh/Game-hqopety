@@ -1,482 +1,590 @@
-﻿using System;
-using Core.Map;
+﻿using Core.Map;
 using Core.Unit.Components;
+using System;
 
-namespace Core.AI
+namespace Core.AI;
+
+public struct PurePathNode
 {
-    public struct PurePathNode
+    public int HashIndex;
+    public int X;
+    public int Y;
+    public float G;
+    public float H;
+    public float F;
+}
+
+public static class PureAStarPathfinder
+{
+    private const ushort FLAG_WALKABLE = 0x0004;
+
+    private const int MaxHeightStep = 3;
+    private const int MaxGridSize = 768;
+    private const int MaxGridCells =
+        MaxGridSize * MaxGridSize;
+
+    private const int MaxPathLength =
+        MaxGridCells;
+
+    private const float StraightCost = 1f;
+    private const float DiagonalCost = 1.41421356f;
+
+    /*
+     * Максимальное дополнительное влияние
+     * congestion на стоимость клетки.
+     */
+    private const float TrafficCostMultiplier = 0.20f;
+
+    private static readonly int[] Dx =
     {
-        public int HashIndex;
-        public int X;
-        public int Y;
-        public float G;
-        public float H;
-        public float F;
+        0, 0, -1, 1,
+        -1, 1, -1, 1
+    };
+
+    private static readonly int[] Dy =
+    {
+        -1, 1, 0, 0,
+        -1, -1, 1, 1
+    };
+
+    public static PureAStarContext CreateContext()
+    {
+        return new PureAStarContext(
+            MaxGridCells,
+            MaxPathLength);
     }
 
-    public static class PureAStarPathfinder
+     public static bool FindRoute(
+        PureAStarContext context,
+        PathTrafficMemory traffic,
+        int currentFrame,
+        MapLayer layer,
+        SpatialCoord start,
+        SpatialCoord target,
+        SpatialCoord[] outPath,
+        int maxPathLength,
+        out int pathLength)
     {
-        private const ushort FLAG_WALKABLE = 0x0004;
-        private const int MaxHeightStep = 3;
-        private const int MaxGridSize = 768;
-        private const int MaxGridCells = MaxGridSize * MaxGridSize;
-        private const int MaxPathLength = MaxGridCells;
+        return FindRouteInternal(
+            context,
+            traffic,
+            currentFrame,
+            layer,
+            start,
+            target,
+            outPath,
+            maxPathLength,
+            out pathLength);
+    }
 
-        private static readonly PurePathNode[] OpenSet =
-            new PurePathNode[MaxGridCells];
+    private static bool FindRouteInternal(
+        PureAStarContext context,
+        PathTrafficMemory traffic,
+        int currentFrame,
+        MapLayer layer,
+        SpatialCoord start,
+        SpatialCoord target,
+        SpatialCoord[] outPath,
+        int maxPathLength,
+        out int pathLength)
+    {
+        pathLength = 0;
 
-        private static readonly byte[] ClosedSet =
-            new byte[MaxGridCells];
-
-        private static readonly int[] ParentMap =
-            new int[MaxGridCells];
-
-        private static readonly float[] GScore =
-            new float[MaxGridCells];
-
-        private static readonly SpatialCoord[] TempPathBuffer =
-            new SpatialCoord[MaxPathLength];
-
-        private static readonly int[] Dx =
+        if (context == null ||
+            layer == null ||
+            outPath == null ||
+            maxPathLength <= 0)
         {
-            0, 0, -1, 1,
-            -1, 1, -1, 1
-        };
-
-        private static readonly int[] Dy =
-        {
-            -1, 1, 0, 0,
-            -1, -1, 1, 1
-        };
-
-        private static int _openCount;
-        private static readonly object SearchLock = new object();
-
-        public static bool FindRoute(
-            MapLayer layer,
-            SpatialCoord start,
-            SpatialCoord target,
-            SpatialCoord[] outPath,
-            int maxPathLength,
-            out int pathLength)
-        {
-            return FindRoute(
-                layer,
-                start,
-                target,
-                outPath,
-                maxPathLength,
-                out pathLength,
-                0u
-            );
+            return false;
         }
 
-        public static bool FindRoute(
-            MapLayer layer,
-            SpatialCoord start,
-            SpatialCoord target,
-            SpatialCoord[] outPath,
-            int maxPathLength,
-            out int pathLength,
-            uint noiseSeed)
+        if (start.Z != target.Z)
+            return false;
+
+        if (!IsInside(start.X, start.Y) ||
+            !IsInside(target.X, target.Y))
         {
-            lock (SearchLock)
+            return false;
+        }
+
+        if (!IsWalkable(
+                layer,
+                start.X,
+                start.Y) ||
+            !IsWalkable(
+                layer,
+                target.X,
+                target.Y))
+        {
+            return false;
+        }
+
+        if (start.X == target.X &&
+            start.Y == target.Y)
+        {
+            outPath[0] = start;
+            pathLength = 1;
+            return true;
+        }
+
+        context.Reset();
+
+        int startIndex =
+            ToIndex(start.X, start.Y);
+
+        int targetIndex =
+            ToIndex(target.X, target.Y);
+
+        float startH =
+            Heuristic(
+                start.X,
+                start.Y,
+                target.X,
+                target.Y);
+
+        context.GScore[startIndex] = 0f;
+
+        context.OpenSet[
+            context.OpenCount++] =
+            new PurePathNode
             {
-                return FindRouteInternal(
-                    layer,
-                    start,
-                    target,
+                HashIndex = startIndex,
+                X = start.X,
+                Y = start.Y,
+                G = 0f,
+                H = startH,
+                F = startH
+            };
+
+        while (context.OpenCount > 0)
+        {
+            int bestOpenIndex =
+                FindBestOpenNode(
+                    context);
+
+            PurePathNode current =
+                context.OpenSet[bestOpenIndex];
+
+            if (current.HashIndex ==
+                targetIndex)
+            {
+                return BuildPath(
+                    context,
+                    start.Z,
+                    targetIndex,
                     outPath,
                     maxPathLength,
-                    out pathLength,
-                    noiseSeed
-                );
+                    out pathLength);
             }
-        }
 
-        private static bool FindRouteInternal(
-            MapLayer layer,
-            SpatialCoord start,
-            SpatialCoord target,
-            SpatialCoord[] outPath,
-            int maxPathLength,
-            out int pathLength,
-            uint noiseSeed)
-        {
-            pathLength = 0;
+            RemoveOpenNode(
+                context,
+                bestOpenIndex);
 
-            if (layer == null || outPath == null || maxPathLength <= 0)
-                return false;
+            context.ClosedSet[
+                current.HashIndex] = 1;
 
-            if (start.Z != target.Z)
-                return false;
-
-            if (!IsInside(start.X, start.Y) ||
-                !IsInside(target.X, target.Y))
+            for (int d = 0; d < 8; d++)
             {
-                return false;
-            }
+                int nx =
+                    current.X + Dx[d];
 
-            if (!IsWalkable(layer, start.X, start.Y) ||
-                !IsWalkable(layer, target.X, target.Y))
-            {
-                return false;
-            }
+                int ny =
+                    current.Y + Dy[d];
 
-            if (start.X == target.X && start.Y == target.Y)
-            {
-                outPath[0] = start;
-                pathLength = 1;
-                return true;
-            }
+                if (!IsInside(nx, ny))
+                    continue;
 
-            _openCount = 0;
+                int neighborIndex =
+                    ToIndex(nx, ny);
 
-            Array.Clear(ClosedSet, 0, ClosedSet.Length);
-            Array.Fill(ParentMap, -1);
-            Array.Fill(GScore, float.MaxValue);
-
-            int startIndex =
-                ToIndex(start.X, start.Y);
-
-            int targetIndex =
-                ToIndex(target.X, target.Y);
-
-            float startH =
-                Heuristic(
-                    start.X,
-                    start.Y,
-                    target.X,
-                    target.Y
-                );
-
-            GScore[startIndex] = 0f;
-
-            OpenSet[_openCount++] =
-                new PurePathNode
+                if (context.ClosedSet[
+                        neighborIndex] != 0)
                 {
-                    HashIndex = startIndex,
-                    X = start.X,
-                    Y = start.Y,
-                    G = 0f,
-                    H = startH,
-                    F = startH
-                };
-
-            while (_openCount > 0)
-            {
-                int bestOpenIndex = FindBestOpenNode();
-                PurePathNode current = OpenSet[bestOpenIndex];
-
-                if (current.HashIndex == targetIndex)
-                {
-                    return BuildPath(
-                        start.Z,
-                        targetIndex,
-                        outPath,
-                        maxPathLength,
-                        out pathLength
-                    );
+                    continue;
                 }
 
-                RemoveOpenNode(bestOpenIndex);
-                ClosedSet[current.HashIndex] = 1;
-
-                for (int d = 0; d < 8; d++)
+                if (!IsWalkable(
+                        layer,
+                        nx,
+                        ny))
                 {
-                    int nx = current.X + Dx[d];
-                    int ny = current.Y + Dy[d];
+                    continue;
+                }
 
-                    if (!IsInside(nx, ny))
-                        continue;
-
-                    int neighborIndex = ToIndex(nx, ny);
-
-                    if (ClosedSet[neighborIndex] != 0)
-                        continue;
-
-                    if (!IsWalkable(layer, nx, ny))
-                        continue;
-
-                    if (!CanTraverseHeight(
+                if (!CanTraverseHeight(
                         layer,
                         current.X,
                         current.Y,
                         nx,
                         ny))
-                    {
-                        continue;
-                    }
+                {
+                    continue;
+                }
 
-                    bool diagonal =
-                        Math.Abs(Dx[d]) == 1 &&
-                        Math.Abs(Dy[d]) == 1;
+                bool diagonal =
+                    Math.Abs(Dx[d]) == 1 &&
+                    Math.Abs(Dy[d]) == 1;
 
-                    if (diagonal &&
-                        !CanMoveDiagonally(
-                            layer,
-                            current.X,
-                            current.Y,
-                            nx,
-                            ny
-                        ))
-                    {
-                        continue;
-                    }
+                if (diagonal &&
+                    !CanMoveDiagonally(
+                        layer,
+                        current.X,
+                        current.Y,
+                        nx,
+                        ny))
+                {
+                    continue;
+                }
 
-                    float stepCost = diagonal ? 1.41421356f : 1f;
+                float stepCost =
+                    diagonal
+                        ? DiagonalCost
+                        : StraightCost;
 
-                    // Маленький детерминированный шум.
-                    // Базовая стоимость остаётся 1 / sqrt(2),
-                    // поэтому A* сохраняет гарантированный поиск
-                    // существующего маршрута, а из равных по длине
-                    // вариантов разные юниты могут выбрать разные клетки.
-                    stepCost += GetPathNoise(nx, ny, noiseSeed);
+                /*
+                 * Главное изменение:
+                 *
+                 * предыдущие маршруты делают
+                 * использованные клетки временно
+                 * менее привлекательными.
+                 */
+                if (traffic != null)
+                {
+                    float trafficCost =
+                        traffic.GetCost(
+                            neighborIndex,
+                            currentFrame);
 
-                    float newG = current.G + stepCost;
+                    stepCost +=
+                        trafficCost *
+                        TrafficCostMultiplier;
+                }
 
-                    if (newG >= GScore[neighborIndex])
-                        continue;
+                float newG =
+                    current.G + stepCost;
 
-                    ParentMap[neighborIndex] = current.HashIndex;
-                    GScore[neighborIndex] = newG;
+                if (newG >=
+                    context.GScore[
+                        neighborIndex])
+                {
+                    continue;
+                }
 
-                    float h =
-                        Heuristic(
-                            nx,
-                            ny,
-                            target.X,
-                            target.Y
-                        );
+                context.ParentMap[
+                    neighborIndex] =
+                    current.HashIndex;
 
-                    UpdateOpenNode(
-                        neighborIndex,
+                context.GScore[
+                    neighborIndex] =
+                    newG;
+
+                float h =
+                    Heuristic(
                         nx,
                         ny,
-                        newG,
-                        h
-                    );
-                }
-            }
+                        target.X,
+                        target.Y);
 
+                UpdateOpenNode(
+                    context,
+                    neighborIndex,
+                    nx,
+                    ny,
+                    newG,
+                    h);
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsWalkable(
+        MapLayer layer,
+        int x,
+        int y)
+    {
+        var cell =
+            layer.GetMicroCell(x, y);
+
+        return
+            (cell.Flags & FLAG_WALKABLE) != 0 &&
+            cell.EdificeId <= 0;
+    }
+
+    private static bool CanTraverseHeight(
+        MapLayer layer,
+        int srcX,
+        int srcY,
+        int dstX,
+        int dstY)
+    {
+        var src =
+            layer.GetMicroCell(
+                srcX,
+                srcY);
+
+        var dst =
+            layer.GetMicroCell(
+                dstX,
+                dstY);
+
+        return Math.Abs(
+            dst.Height - src.Height)
+            <= MaxHeightStep;
+    }
+
+    private static bool CanMoveDiagonally(
+        MapLayer layer,
+        int srcX,
+        int srcY,
+        int dstX,
+        int dstY)
+    {
+        int sideX = dstX;
+        int sideY = srcY;
+
+        if (!IsWalkable(
+                layer,
+                sideX,
+                sideY))
+        {
             return false;
         }
 
-        private static bool IsWalkable(
-            MapLayer layer,
-            int x,
-            int y)
+        if (!CanTraverseHeight(
+                layer,
+                srcX,
+                srcY,
+                sideX,
+                sideY))
         {
-            var cell = layer.GetMicroCell(x, y);
-
-            return (cell.Flags & FLAG_WALKABLE) != 0 &&
-                   cell.EdificeId <= 0;
+            return false;
         }
 
-        private static bool CanTraverseHeight(
-            MapLayer layer,
-            int srcX,
-            int srcY,
-            int dstX,
-            int dstY)
-        {
-            var src = layer.GetMicroCell(srcX, srcY);
-            var dst = layer.GetMicroCell(dstX, dstY);
+        sideX = srcX;
+        sideY = dstY;
 
-            return Math.Abs(dst.Height - src.Height) <= MaxHeightStep;
+        if (!IsWalkable(
+                layer,
+                sideX,
+                sideY))
+        {
+            return false;
         }
 
-        private static bool CanMoveDiagonally(
-            MapLayer layer,
-            int srcX,
-            int srcY,
-            int dstX,
-            int dstY)
+        if (!CanTraverseHeight(
+                layer,
+                srcX,
+                srcY,
+                sideX,
+                sideY))
         {
-            int sideX = dstX;
-            int sideY = srcY;
-
-            if (!IsWalkable(layer, sideX, sideY))
-                return false;
-
-            if (!CanTraverseHeight(layer, srcX, srcY, sideX, sideY))
-                return false;
-
-            sideX = srcX;
-            sideY = dstY;
-
-            if (!IsWalkable(layer, sideX, sideY))
-                return false;
-
-            if (!CanTraverseHeight(layer, srcX, srcY, sideX, sideY))
-                return false;
-
-            if (!CanTraverseHeight(layer, srcX, srcY, dstX, dstY))
-                return false;
-
-            return true;
+            return false;
         }
 
-        private static void UpdateOpenNode(
-            int hashIndex,
-            int x,
-            int y,
-            float g,
-            float h)
-        {
-            float f = g + h;
+        return CanTraverseHeight(
+            layer,
+            srcX,
+            srcY,
+            dstX,
+            dstY);
+    }
 
-            for (int i = 0; i < _openCount; i++)
+    private static void UpdateOpenNode(
+        PureAStarContext context,
+        int hashIndex,
+        int x,
+        int y,
+        float g,
+        float h)
+    {
+        float f =
+            g + h;
+
+        for (int i = 0;
+             i < context.OpenCount;
+             i++)
+        {
+            if (context.OpenSet[i]
+                    .HashIndex != hashIndex)
             {
-                if (OpenSet[i].HashIndex != hashIndex)
-                    continue;
-
-                OpenSet[i].G = g;
-                OpenSet[i].H = h;
-                OpenSet[i].F = f;
-                return;
+                continue;
             }
 
-            if (_openCount >= OpenSet.Length)
-                return;
+            context.OpenSet[i].G = g;
+            context.OpenSet[i].H = h;
+            context.OpenSet[i].F = f;
 
-            OpenSet[_openCount++] =
-                new PurePathNode
-                {
-                    HashIndex = hashIndex,
-                    X = x,
-                    Y = y,
-                    G = g,
-                    H = h,
-                    F = f
-                };
+            return;
         }
 
-        private static int FindBestOpenNode()
+        if (context.OpenCount >=
+            context.OpenSet.Length)
         {
-            int best = 0;
+            return;
+        }
 
-            for (int i = 1; i < _openCount; i++)
+        context.OpenSet[
+            context.OpenCount++] =
+            new PurePathNode
             {
-                if (OpenSet[i].F < OpenSet[best].F)
-                {
-                    best = i;
-                    continue;
-                }
+                HashIndex = hashIndex,
+                X = x,
+                Y = y,
+                G = g,
+                H = h,
+                F = f
+            };
+    }
 
-                if (OpenSet[i].F == OpenSet[best].F &&
-                    OpenSet[i].H < OpenSet[best].H)
-                {
-                    best = i;
-                }
+    private static int FindBestOpenNode(
+        PureAStarContext context)
+    {
+        int best = 0;
+
+        for (int i = 1;
+             i < context.OpenCount;
+             i++)
+        {
+            if (context.OpenSet[i].F <
+                context.OpenSet[best].F)
+            {
+                best = i;
+                continue;
             }
 
-            return best;
-        }
-
-        private static void RemoveOpenNode(int index)
-        {
-            _openCount--;
-
-            if (index == _openCount)
-                return;
-
-            OpenSet[index] = OpenSet[_openCount];
-        }
-
-        private static bool BuildPath(
-            int z,
-            int targetIndex,
-            SpatialCoord[] outPath,
-            int maxPathLength,
-            out int pathLength)
-        {
-            pathLength = 0;
-
-            int current = targetIndex;
-            int tempCount = 0;
-
-            while (current != -1)
+            if (context.OpenSet[i].F ==
+                context.OpenSet[best].F &&
+                context.OpenSet[i].H <
+                context.OpenSet[best].H)
             {
-                if (tempCount >= TempPathBuffer.Length)
-                    return false;
-
-                int x = current % MaxGridSize;
-                int y = current / MaxGridSize;
-
-                TempPathBuffer[tempCount++] =
-                    new SpatialCoord(x, y, z);
-
-                current = ParentMap[current];
+                best = i;
             }
+        }
 
-            if (tempCount <= 0 ||
-                tempCount > maxPathLength ||
-                tempCount > outPath.Length)
+        return best;
+    }
+
+    private static void RemoveOpenNode(
+        PureAStarContext context,
+        int index)
+    {
+        context.OpenCount--;
+
+        if (index ==
+            context.OpenCount)
+        {
+            return;
+        }
+
+        context.OpenSet[index] =
+            context.OpenSet[
+                context.OpenCount];
+    }
+
+    private static bool BuildPath(
+        PureAStarContext context,
+        int z,
+        int targetIndex,
+        SpatialCoord[] outPath,
+        int maxPathLength,
+        out int pathLength)
+    {
+        pathLength = 0;
+
+        int current =
+            targetIndex;
+
+        int tempCount = 0;
+
+        while (current != -1)
+        {
+            if (tempCount >=
+                context.TempPathBuffer.Length)
             {
                 return false;
             }
 
-            for (int i = 0; i < tempCount; i++)
-            {
-                outPath[i] =
-                    TempPathBuffer[tempCount - 1 - i];
-            }
+            int x =
+                current % MaxGridSize;
 
-            pathLength = tempCount;
-            return true;
+            int y =
+                current / MaxGridSize;
+
+            context.TempPathBuffer[
+                tempCount++] =
+                new SpatialCoord(
+                    x,
+                    y,
+                    z);
+
+            current =
+                context.ParentMap[current];
         }
 
-
-        private static float GetPathNoise(
-            int x,
-            int y,
-            uint seed)
+        if (tempCount <= 0 ||
+            tempCount > maxPathLength ||
+            tempCount > outPath.Length)
         {
-            if (seed == 0u)
-                return 0f;
-
-            uint h =
-                seed ^
-                ((uint)x * 374761393u) ^
-                ((uint)y * 668265263u);
-
-            h ^= h >> 13;
-            h *= 1274126177u;
-            h ^= h >> 16;
-
-            float value =
-                (h & 0x00FFFFFFu) / 16777216f;
-
-            // Очень слабый шум: 0..0.055 стоимости клетки.
-            return value * 0.055f;
+            return false;
         }
-        private static float Heuristic(
-            int x,
-            int y,
-            int targetX,
-            int targetY)
+
+        for (int i = 0;
+             i < tempCount;
+             i++)
         {
-            int dx = Math.Abs(targetX - x);
-            int dy = Math.Abs(targetY - y);
-
-            int diagonal = Math.Min(dx, dy);
-            int straight = Math.Max(dx, dy) - diagonal;
-
-            return diagonal * 1.41421356f + straight;
+            outPath[i] =
+                context.TempPathBuffer[
+                    tempCount - 1 - i];
         }
 
-        private static int ToIndex(int x, int y)
-        {
-            return y * MaxGridSize + x;
-        }
+        pathLength =
+            tempCount;
 
-        private static bool IsInside(int x, int y)
-        {
-            return x >= 0 &&
-                   x < MaxGridSize &&
-                   y >= 0 &&
-                   y < MaxGridSize;
-        }
+        return true;
+    }
+
+    private static float Heuristic(
+        int x,
+        int y,
+        int targetX,
+        int targetY)
+    {
+        int dx =
+            Math.Abs(targetX - x);
+
+        int dy =
+            Math.Abs(targetY - y);
+
+        int diagonal =
+            Math.Min(dx, dy);
+
+        int straight =
+            Math.Max(dx, dy) -
+            diagonal;
+
+        return
+            diagonal * DiagonalCost +
+            straight;
+    }
+
+    private static int ToIndex(
+        int x,
+        int y)
+    {
+        return
+            y * MaxGridSize + x;
+    }
+
+    private static bool IsInside(
+        int x,
+        int y)
+    {
+        return
+            x >= 0 &&
+            x < MaxGridSize &&
+            y >= 0 &&
+            y < MaxGridSize;
     }
 }

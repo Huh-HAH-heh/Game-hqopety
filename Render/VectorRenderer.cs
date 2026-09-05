@@ -17,6 +17,7 @@ namespace RimClone.Render;
 
 public sealed class VectorRenderer
 {
+    private int _gameFrame;
     private const int TileSize = 16;
 
     private static readonly float MicroCellPixelSize = (float)TileSize / MapRegion.SubDivision;
@@ -61,6 +62,8 @@ public sealed class VectorRenderer
         _pathfindingSystem = new PathfindingSystem();
         _movementSystem = new UnitMovementSystem();
 
+        _movementSystem.MoveInterrupted += OnMoveInterrupted;
+
         MoveTask moveTask = new MoveTask(
             _pathfindingSystem,
             _movementSystem);
@@ -71,7 +74,11 @@ public sealed class VectorRenderer
         _mapRenderSystem = new MapRenderSystem(MicroCellPixelSize);
         _unitRenderSystem = new UnitRenderSystem();
     }
-
+    private void OnMoveInterrupted(int unitId)
+    {
+        Console.WriteLine(
+            $"[MOVEMENT] INTERRUPTED unit={unitId}");
+    }
     private void IssueMoveCommands(IReadOnlyList<int> unitIds, IReadOnlyList<SpatialCoord> points)
     {
         int count = Math.Min(unitIds.Count, points.Count);
@@ -144,10 +151,17 @@ public sealed class VectorRenderer
 
     private void Update(float deltaTime)
     {
+        _gameFrame++;
+
+        _pathfindingSystem.UpdateFrame(_gameFrame);
+
         _gameCamera.UpdateInput(deltaTime);
 
         Vector2i mousePixels = Mouse.GetPosition(_window);
-        Vector2f mouseWorld = _window.MapPixelToCoords(mousePixels, _gameCamera.View);
+        Vector2f mouseWorld =
+            _window.MapPixelToCoords(
+                mousePixels,
+                _gameCamera.View);
 
         _mouseInputSystem.Update(
             _window,
