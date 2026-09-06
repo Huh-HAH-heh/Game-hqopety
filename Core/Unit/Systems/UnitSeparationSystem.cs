@@ -1,174 +1,385 @@
-﻿//using Core.Unit.Components;
-//using System;
-//using System.Collections.Generic;
+﻿using Core.Structs;
+using Core.Unit.Components;
+using System;
+using System.Collections.Generic;
 
-//namespace Core.Unit.Systems
-//{
-//    public sealed class UnitSeparationSystem
-//    {
-//        private readonly List<int> _neighborBuffer =
-//            new List<int>(16);
+namespace Core.Unit.Systems
+{
+    public sealed class UnitSeparationSystem
+    {
+        private readonly List<int> _neighborBuffer =
+            new List<int>(16);
 
-//        public void Update(
-//            UnitStore units,
-//            UnitSpatialGrid spatialGrid,
-//            float deltaTime)
-//        {
-//            if (deltaTime <= 0f)
-//                return;
+        private readonly List<int> _sameTileBuffer =
+            new List<int>(4);
 
-//            const int SearchRadius = 1;
-//            const float DesiredDistance = 0.55f;
-//            const float SeparationStrength = 3.2f;
-//            const float MaxOffset = 0.36f;
-//            const float CenteringStrength = 1.15f;
+        private float[] _pushX = Array.Empty<float>();
+        private float[] _pushY = Array.Empty<float>();
 
-//            for (int i = 0; i < units.Count; i++)
-//            {
-//                if (units.HealthMasks[i] == 0)
-//                    continue;
+        public void Update(
+            UnitStore units,
+            UnitSpatialGrid spatialGrid,
+            float deltaTime)
+        {
+            if (deltaTime <= 0f ||
+                units.Count == 0)
+            {
+                return;
+            }
 
-//                ref var position =
-//                    ref units.Positions[i];
+            EnsureStorage(units.Count);
 
-//                _neighborBuffer.Clear();
+            Array.Clear(_pushX, 0, units.Count);
+            Array.Clear(_pushY, 0, units.Count);
 
-//                spatialGrid.GetNearby(
-//                    position.Spatial,
-//                    SearchRadius,
-//                    _neighborBuffer
-//                );
+            const int SearchRadius = 2;
 
-//                float separationX = 0f;
-//                float separationY = 0f;
+            const float DesiredDistance = 0.82f;
+            const float PushStrength = 8f;
 
-//                int neighbors = 0;
+            const float MaxOffset = 0.55f;
 
-//                for (int n = 0; n < _neighborBuffer.Count; n++)
-//                {
-//                    int otherId =
-//                        _neighborBuffer[n];
+            const float SlotFollowSpeed = 10f;
+            const float PushFollowSpeed = 14f;
 
-//                    if (otherId == i ||
-//                        units.HealthMasks[otherId] == 0)
-//                    {
-//                        continue;
-//                    }
+            /*
+             * =========================================================
+             * 1. Сначала считаем динамические столкновения.
+             *
+             * ВАЖНО:
+             * юниты в одной логической клетке здесь НЕ толкаем.
+             *
+             * Они будут разложены слотами ниже.
+             * =========================================================
+             */
 
-//                    ref var other =
-//                        ref units.Positions[otherId];
+            for (int i = 0; i < units.Count; i++)
+            {
+                if (units.HealthMasks[i] == 0)
+                    continue;
 
-//                    if (other.Spatial.Z != position.Spatial.Z)
-//                        continue;
+                ref var position =
+                    ref units.Positions[i];
 
-//                    float dx =
-//                        position.RenderX -
-//                        other.RenderX;
+                float currentX =
+                    position.RenderX +
+                    units.SeparationOffsetX[i];
 
-//                    float dy =
-//                        position.RenderY -
-//                        other.RenderY;
+                float currentY =
+                    position.RenderY +
+                    units.SeparationOffsetY[i];
 
-//                    float distanceSqr =
-//                        dx * dx +
-//                        dy * dy;
+                int queryX =
+                    (int)MathF.Floor(currentX);
 
-//                    if (distanceSqr <= 0.0001f)
-//                    {
-//                        uint seed =
-//                            (uint)(
-//                                i * 73856093 ^
-//                                otherId * 19349663
-//                            );
+                int queryY =
+                    (int)MathF.Floor(currentY);
 
-//                        float angle =
-//                            (seed % 628u) *
-//                            0.01f;
+                SpatialCoord queryPosition =
+                    new SpatialCoord(
+                        queryX,
+                        queryY,
+                        position.Spatial.Z);
 
-//                        separationX += MathF.Cos(angle);
-//                        separationY += MathF.Sin(angle);
-//                        neighbors++;
-//                        continue;
-//                    }
+                _neighborBuffer.Clear();
 
-//                    float distance =
-//                        MathF.Sqrt(distanceSqr);
+                spatialGrid.GetNearby(
+                    queryPosition,
+                    SearchRadius,
+                    _neighborBuffer);
 
-//                    if (distance >= DesiredDistance)
-//                        continue;
+                for (int n = 0; n < _neighborBuffer.Count; n++)
+                {
+                    int otherId =
+                        _neighborBuffer[n];
 
-//                    float strength =
-//                        (DesiredDistance - distance) /
-//                        DesiredDistance;
+                    if (otherId <= i)
+                        continue;
 
-//                    separationX +=
-//                        dx / distance *
-//                        strength;
+                    if (units.HealthMasks[otherId] == 0)
+                        continue;
 
-//                    separationY +=
-//                        dy / distance *
-//                        strength;
+                    ref var other =
+                        ref units.Positions[otherId];
 
-//                    neighbors++;
-//                }
+                    if (other.Spatial.Z != position.Spatial.Z)
+                        continue;
 
-//                // Лёгкое возвращение к центру клетки не даёт накопить постоянный
-//                // боковой сдвиг после выхода из толпы.
-//                float centerX =
-//                    position.Spatial.X - position.RenderX;
+                    /*
+                     * Одна логическая клетка:
+                     *
+                     * НЕ сталкиваем.
+                     *
+                     * Они будут разложены по слотам.
+                     */
 
-//                float centerY =
-//                    position.Spatial.Y - position.RenderY;
+                    if (other.Spatial.X == position.Spatial.X &&
+                        other.Spatial.Y == position.Spatial.Y)
+                    {
+                        continue;
+                    }
 
-//                position.RenderX +=
-//                    separationX *
-//                    SeparationStrength *
-//                    deltaTime;
+                    float otherX =
+                        other.RenderX +
+                        units.SeparationOffsetX[otherId];
 
-//                position.RenderY +=
-//                    separationY *
-//                    SeparationStrength *
-//                    deltaTime;
+                    float otherY =
+                        other.RenderY +
+                        units.SeparationOffsetY[otherId];
 
-//                position.RenderX +=
-//                    centerX *
-//                    CenteringStrength *
-//                    deltaTime;
+                    float dx =
+                        currentX - otherX;
 
-//                position.RenderY +=
-//                    centerY *
-//                    CenteringStrength *
-//                    deltaTime;
+                    float dy =
+                        currentY - otherY;
 
-//                if (neighbors == 0 &&
-//                    MathF.Abs(centerX) < 0.005f &&
-//                    MathF.Abs(centerY) < 0.005f)
-//                {
-//                    continue;
-//                }
+                    float distanceSqr =
+                        dx * dx +
+                        dy * dy;
 
-//                float offsetX =
-//                    position.RenderX - position.Spatial.X;
+                    if (distanceSqr >=
+                        DesiredDistance * DesiredDistance)
+                    {
+                        continue;
+                    }
 
-//                float offsetY =
-//                    position.RenderY - position.Spatial.Y;
+                    float distance;
 
-//                if (offsetX > MaxOffset)
-//                    position.RenderX =
-//                        position.Spatial.X + MaxOffset;
+                    if (distanceSqr < 0.0001f)
+                    {
+                        uint seed =
+                            (uint)(
+                                i * 73856093 ^
+                                otherId * 19349663);
 
-//                if (offsetX < -MaxOffset)
-//                    position.RenderX =
-//                        position.Spatial.X - MaxOffset;
+                        float angle =
+                            (seed % 628u) * 0.01f;
 
-//                if (offsetY > MaxOffset)
-//                    position.RenderY =
-//                        position.Spatial.Y + MaxOffset;
+                        dx = MathF.Cos(angle);
+                        dy = MathF.Sin(angle);
 
-//                if (offsetY < -MaxOffset)
-//                    position.RenderY =
-//                        position.Spatial.Y - MaxOffset;
-//            }
-//        }
-//    }
-//}
+                        distance = 0f;
+                    }
+                    else
+                    {
+                        distance =
+                            MathF.Sqrt(distanceSqr);
+                    }
+
+                    float strength =
+                        (DesiredDistance - distance) /
+                        DesiredDistance;
+
+                    float pushX =
+                        dx /
+                        MathF.Max(distance, 0.0001f) *
+                        strength;
+
+                    float pushY =
+                        dy /
+                        MathF.Max(distance, 0.0001f) *
+                        strength;
+
+                    _pushX[i] += pushX;
+                    _pushY[i] += pushY;
+
+                    _pushX[otherId] -= pushX;
+                    _pushY[otherId] -= pushY;
+                }
+            }
+
+            /*
+             * =========================================================
+             * 2. Теперь формируем конечный target offset.
+             *
+             * Для одной клетки:
+             *
+             *   1 юнит -> 0,0
+             *   2       -> -0.30 / +0.30
+             *   3       -> треугольник
+             *
+             * При этом НИКАКОГО push между ними нет.
+             * =========================================================
+             */
+
+            for (int i = 0; i < units.Count; i++)
+            {
+                if (units.HealthMasks[i] == 0)
+                    continue;
+
+                ref var position =
+                    ref units.Positions[i];
+
+                _sameTileBuffer.Clear();
+
+                IReadOnlyList<int> sameTile =
+                    spatialGrid.GetUnitsAt(position.Spatial);
+
+                for (int n = 0; n < sameTile.Count; n++)
+                {
+                    int otherId =
+                        sameTile[n];
+
+                    if (otherId == i)
+                        continue;
+
+                    if (units.HealthMasks[otherId] == 0)
+                        continue;
+
+                    _sameTileBuffer.Add(otherId);
+                }
+
+                int count =
+                    _sameTileBuffer.Count + 1;
+
+                float targetX = 0f;
+                float targetY = 0f;
+
+                if (count == 2)
+                {
+                    int slot = 0;
+
+                    if (_sameTileBuffer.Count > 0 &&
+                        _sameTileBuffer[0] < i)
+                    {
+                        slot = 1;
+                    }
+
+                    if (slot == 0)
+                        targetX = -0.30f;
+                    else
+                        targetX = 0.30f;
+                }
+                else if (count >= 3)
+                {
+                    int slot = 0;
+
+                    for (int n = 0; n < _sameTileBuffer.Count; n++)
+                    {
+                        if (_sameTileBuffer[n] < i)
+                            slot++;
+                    }
+
+                    if (slot == 0)
+                    {
+                        targetX = 0f;
+                        targetY = -0.34f;
+                    }
+                    else if (slot == 1)
+                    {
+                        targetX = -0.30f;
+                        targetY = 0.22f;
+                    }
+                    else
+                    {
+                        targetX = 0.30f;
+                        targetY = 0.22f;
+                    }
+                }
+
+                /*
+                 * -----------------------------------------------------
+                 * Если в этой клетке несколько юнитов:
+                 *
+                 *     slot target
+                 *
+                 * Если один:
+                 *
+                 *     target = 0
+                 *
+                 * Dynamic push добавляем только если
+                 * логически рядом НЕ находятся в одной клетке.
+                 * -----------------------------------------------------
+                 */
+
+                if (count == 1)
+                {
+                    targetX =
+                        _pushX[i] *
+                        PushStrength *
+                        deltaTime;
+
+                    targetY =
+                        _pushY[i] *
+                        PushStrength *
+                        deltaTime;
+                }
+
+                /*
+                 * Если несколько юнитов в одной клетке,
+                 * push НЕ участвует вообще.
+                 */
+
+                float currentX =
+                    units.SeparationOffsetX[i];
+
+                float currentY =
+                    units.SeparationOffsetY[i];
+
+                float followSpeed =
+                    count > 1
+                        ? SlotFollowSpeed
+                        : PushFollowSpeed;
+
+                float t =
+                    MathF.Min(
+                        1f,
+                        followSpeed * deltaTime);
+
+                currentX +=
+                    (targetX - currentX) * t;
+
+                currentY +=
+                    (targetY - currentY) * t;
+
+                /*
+                 * Ограничение только визуального offset.
+                 */
+
+                float lengthSqr =
+                    currentX * currentX +
+                    currentY * currentY;
+
+                if (lengthSqr >
+                    MaxOffset * MaxOffset)
+                {
+                    float length =
+                        MathF.Sqrt(lengthSqr);
+
+                    float scale =
+                        MaxOffset / length;
+
+                    currentX *= scale;
+                    currentY *= scale;
+                }
+
+                units.SeparationOffsetX[i] =
+                    currentX;
+
+                units.SeparationOffsetY[i] =
+                    currentY;
+            }
+        }
+
+        private void EnsureStorage(int size)
+        {
+            if (_pushX.Length >= size)
+                return;
+
+            int newSize =
+                Math.Max(
+                    size,
+                    Math.Max(
+                        16,
+                        _pushX.Length * 2));
+
+            Array.Resize(
+                ref _pushX,
+                newSize);
+
+            Array.Resize(
+                ref _pushY,
+                newSize);
+        }
+    }
+}

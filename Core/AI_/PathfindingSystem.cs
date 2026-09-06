@@ -61,7 +61,7 @@ public sealed class PathfindingSystem : IDisposable
     /*
      * Общая память недавно использованных путей.
      *
-     * A* её только читает.
+     * A* её читает.
      * Готовые маршруты добавляются сюда
      * после завершения поиска.
      */
@@ -154,17 +154,33 @@ public sealed class PathfindingSystem : IDisposable
     /*
      * Вызывается один раз за игровой кадр.
      */
-    public void UpdateFrame(int frame)
+    public void UpdateFrame(
+        int frame)
     {
         Volatile.Write(
             ref _currentFrame,
             frame);
     }
+
+    /*
+     * ------------------------------------------------------------
+     * REQUEUE WITH NEW START/TARGET
+     * ------------------------------------------------------------
+     *
+     * ВАЖНО:
+     *
+     * Failed НЕ означает отмену приказа.
+     * Это только означает, что конкретный поиск
+     * сейчас не нашёл маршрут.
+     *
+     * Следующий вызов снова может поставить A*
+     * в очередь.
+     */
     public bool RequeuePath(
-    int routeId,
-    SpatialCoord newStart,
-    SpatialCoord newTarget,
-    PathPriority priority = PathPriority.Normal)
+        int routeId,
+        SpatialCoord newStart,
+        SpatialCoord newTarget,
+        PathPriority priority = PathPriority.Normal)
     {
         lock (_sync)
         {
@@ -183,16 +199,23 @@ public sealed class PathfindingSystem : IDisposable
                 return false;
             }
 
-            task.Start = newStart;
-            task.Target = newTarget;
+            task.Start =
+                newStart;
+
+            task.Target =
+                newTarget;
 
             task.Priority =
                 priority;
 
-            task.Path = null;
-            task.PathLength = 0;
+            task.Path =
+                null;
 
-            task.IsOld = false;
+            task.PathLength =
+                0;
+
+            task.IsOld =
+                false;
 
             task.QueuedFrame =
                 Volatile.Read(
@@ -202,13 +225,21 @@ public sealed class PathfindingSystem : IDisposable
                 PathRequestState.Pending;
 
             _queues[(int)priority]
-                .Enqueue(task);
+                .Enqueue(
+                    task);
 
-            Monitor.PulseAll(_sync);
+            Monitor.PulseAll(
+                _sync);
 
             return true;
         }
     }
+
+    /*
+     * ------------------------------------------------------------
+     * NEW PATH REQUEST
+     * ------------------------------------------------------------
+     */
     public int RequestPath(
         MapLayer layer,
         SpatialCoord start,
@@ -242,30 +273,27 @@ public sealed class PathfindingSystem : IDisposable
                     priority,
                     queuedFrame);
 
-            _tasks.Add(task);
+            _tasks.Add(
+                task);
 
             _queues[(int)priority]
-                .Enqueue(task);
+                .Enqueue(
+                    task);
 
-            /*
-             * Будим worker'ов.
-             *
-             * Конкретную задачу заберёт
-             * только один worker, потому что
-             * очередь и State меняются
-             * внутри одного lock.
-             */
-            Monitor.PulseAll(_sync);
+            Monitor.PulseAll(
+                _sync);
 
             return routeId;
         }
     }
 
     /*
-     * Повторный расчёт того же RouteId.
+     * ------------------------------------------------------------
+     * REQUEUE SAME ROUTE
+     * ------------------------------------------------------------
      *
-     * Используется после того, как готовый
-     * маршрут оказался непригоден.
+     * Можно повторно запросить тот же маршрут
+     * даже если предыдущая попытка завершилась Failed.
      */
     public bool RequeuePath(
         int routeId,
@@ -291,10 +319,14 @@ public sealed class PathfindingSystem : IDisposable
             task.Priority =
                 priority;
 
-            task.Path = null;
-            task.PathLength = 0;
+            task.Path =
+                null;
 
-            task.IsOld = false;
+            task.PathLength =
+                0;
+
+            task.IsOld =
+                false;
 
             task.QueuedFrame =
                 Volatile.Read(
@@ -304,9 +336,11 @@ public sealed class PathfindingSystem : IDisposable
                 PathRequestState.Pending;
 
             _queues[(int)priority]
-                .Enqueue(task);
+                .Enqueue(
+                    task);
 
-            Monitor.PulseAll(_sync);
+            Monitor.PulseAll(
+                _sync);
 
             return true;
         }
@@ -390,7 +424,8 @@ public sealed class PathfindingSystem : IDisposable
             task.State =
                 PathRequestState.Cancelled;
 
-            Monitor.PulseAll(_sync);
+            Monitor.PulseAll(
+                _sync);
         }
     }
 
@@ -409,12 +444,17 @@ public sealed class PathfindingSystem : IDisposable
             task.State =
                 PathRequestState.Cancelled;
 
-            task.Path = null;
-            task.PathLength = 0;
+            task.Path =
+                null;
 
-            _tasks.Remove(routeId);
+            task.PathLength =
+                0;
 
-            Monitor.PulseAll(_sync);
+            _tasks.Remove(
+                routeId);
+
+            Monitor.PulseAll(
+                _sync);
         }
     }
 
@@ -425,9 +465,11 @@ public sealed class PathfindingSystem : IDisposable
             if (_stopRequested)
                 return;
 
-            _stopRequested = true;
+            _stopRequested =
+                true;
 
-            Monitor.PulseAll(_sync);
+            Monitor.PulseAll(
+                _sync);
         }
 
         foreach (Thread worker in _workers)
@@ -436,13 +478,20 @@ public sealed class PathfindingSystem : IDisposable
         }
     }
 
+    /*
+     * ------------------------------------------------------------
+     * WORKERS
+     * ------------------------------------------------------------
+     */
+
     private Thread CreateWorker(
         string name,
         bool oldBiased)
     {
         Thread worker =
             new Thread(
-                () => WorkerLoop(oldBiased))
+                () => WorkerLoop(
+                    oldBiased))
             {
                 IsBackground = true,
                 Name = name
@@ -457,13 +506,8 @@ public sealed class PathfindingSystem : IDisposable
         bool oldBiased)
     {
         /*
-         * ВАЖНО:
-         *
-         * Каждый worker получает
-         * собственный A* context.
-         *
-         * Поэтому здесь больше нет
-         * общего SearchLock.
+         * Каждый worker имеет собственный
+         * A* context.
          */
         PureAStarContext context =
             PureAStarPathfinder.CreateContext();
@@ -497,12 +541,8 @@ public sealed class PathfindingSystem : IDisposable
                     if (task != null)
                         break;
 
-                    /*
-                     * Нет работы.
-                     *
-                     * Поток спит и не потребляет CPU.
-                     */
-                    Monitor.Wait(_sync);
+                    Monitor.Wait(
+                        _sync);
                 }
 
                 if (_stopRequested)
@@ -510,11 +550,7 @@ public sealed class PathfindingSystem : IDisposable
             }
 
             /*
-             * Вне _sync выполняется сам A*.
-             *
-             * Поэтому Worker 1, 2 и 3
-             * действительно могут считать
-             * одновременно.
+             * A* работает вне _sync.
              */
             ProcessTask(
                 task!,
@@ -527,9 +563,8 @@ public sealed class PathfindingSystem : IDisposable
         ref int normalTaskCount)
     {
         /*
-         * Старый worker:
-         *
-         * сначала ищет старые задачи.
+         * Old-biased worker:
+         * сначала старые задачи.
          */
         if (oldBiased)
         {
@@ -539,17 +574,12 @@ public sealed class PathfindingSystem : IDisposable
             if (oldTask != null)
                 return oldTask;
 
-            /*
-             * Старых нет.
-             *
-             * Помогает обычным.
-             */
             return DequeueNormalPriorityTask();
         }
 
         /*
          * Обычный worker периодически
-         * помогает старым задачам.
+         * помогает старым.
          */
         if (normalTaskCount >=
             SingleWorkerNormalQuota)
@@ -559,7 +589,9 @@ public sealed class PathfindingSystem : IDisposable
 
             if (oldTask != null)
             {
-                normalTaskCount = 0;
+                normalTaskCount =
+                    0;
+
                 return oldTask;
             }
         }
@@ -574,17 +606,16 @@ public sealed class PathfindingSystem : IDisposable
         }
 
         /*
-         * Обычных задач нет.
-         *
-         * Значит можно полностью
-         * переключиться на старые.
+         * Обычных нет — берём старые.
          */
         RouteTask? fallbackOld =
             DequeueOldTask();
 
         if (fallbackOld != null)
         {
-            normalTaskCount = 0;
+            normalTaskCount =
+                0;
+
             return fallbackOld;
         }
 
@@ -628,7 +659,7 @@ public sealed class PathfindingSystem : IDisposable
                 ref _currentFrame);
 
         /*
-         * Для старых задач:
+         * Для старых:
          *
          * Low
          * Normal
@@ -666,9 +697,6 @@ public sealed class PathfindingSystem : IDisposable
                     currentFrame -
                     task.QueuedFrame;
 
-                /*
-                 * Она ещё не состарилась.
-                 */
                 if (!task.IsOld &&
                     waitedFrames <
                     _oldAfterFrames)
@@ -678,7 +706,8 @@ public sealed class PathfindingSystem : IDisposable
 
                 queue.Dequeue();
 
-                task.IsOld = true;
+                task.IsOld =
+                    true;
 
                 task.State =
                     PathRequestState.Processing;
@@ -689,6 +718,12 @@ public sealed class PathfindingSystem : IDisposable
 
         return null;
     }
+
+    /*
+     * ------------------------------------------------------------
+     * PROCESS TASK
+     * ------------------------------------------------------------
+     */
 
     private void ProcessTask(
         RouteTask task,
@@ -706,10 +741,15 @@ public sealed class PathfindingSystem : IDisposable
             }
         }
 
+        /*
+         * Разные этажи не поддерживаются.
+         */
         if (task.Start.Z !=
             task.Target.Z)
         {
-            CompleteFailed(task);
+            CompleteFailed(
+                task);
+
             return;
         }
 
@@ -722,11 +762,7 @@ public sealed class PathfindingSystem : IDisposable
                 ref _currentFrame);
 
         /*
-         * Каждый worker использует
-         * свой context.
-         *
-         * Общий traffic memory только
-         * читается A* во время поиска.
+         * Сам A*.
          */
         bool success =
             PureAStarPathfinder.FindRoute(
@@ -743,8 +779,8 @@ public sealed class PathfindingSystem : IDisposable
         lock (_sync)
         {
             /*
-             * За время A* задача могла быть
-             * отменена.
+             * За время поиска задача могла
+             * быть отменена.
              */
             if (task.State ==
                 PathRequestState.Cancelled)
@@ -752,6 +788,24 @@ public sealed class PathfindingSystem : IDisposable
                 return;
             }
 
+            /*
+             * ========================================================
+             * PATH NOT FOUND
+             * ========================================================
+             *
+             * ВАЖНО:
+             *
+             * Это НЕ отмена приказа.
+             *
+             * RouteTask = Failed
+             *
+             * означает только:
+             * "данный конкретный запуск A*
+             * не смог найти маршрут".
+             *
+             * При необходимости CPU может снова
+             * вызвать RequeuePath().
+             */
             if (!success)
             {
                 task.State =
@@ -759,6 +813,12 @@ public sealed class PathfindingSystem : IDisposable
 
                 return;
             }
+
+            /*
+             * ========================================================
+             * PATH FOUND
+             * ========================================================
+             */
 
             task.Path =
                 path;
@@ -770,12 +830,8 @@ public sealed class PathfindingSystem : IDisposable
                 PathRequestState.Completed;
 
             /*
-             * Маршрут добавляется в память
-             * только после полного построения.
-             *
-             * Здесь мы не держим lock во время A*,
-             * а значит сами вычисления
-             * остаются параллельными.
+             * Только готовый маршрут
+             * добавляем в traffic memory.
              */
             _trafficMemory.AddRoute(
                 path,

@@ -2,8 +2,9 @@
   <Folder Name="/Элементы решения/">
     <File Path="PathfindingSystem.md" />
     <File Path="PureAStarPathfinder.md" />
+    <File Path="roadmap.md" />
     <File Path="roadmap.txt" />
-    <File Path="правка модели.txt" />
+    <File Path="исходники.txt" />
   </Folder>
   <Folder Name="/Элементы решения/tile/">
     <File Path="tile.txt" />

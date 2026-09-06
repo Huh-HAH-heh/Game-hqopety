@@ -1,0 +1,4528 @@
+using Core.AI;
+using Core.Input.Systems;
+using Core.Items;
+using Core.Map;
+using Core.Structs;
+using Core.Unit;
+using Core.Unit.Components;
+using Core.Unit.Components.AiComponents;
+using Core.Unit.Systems;
+using Render;
+using SFML.Graphics;
+using SFML.System;
+using SFML.Window;
+using System;
+
+namespace RimClone.Render;
+
+public sealed class VectorRenderer
+{
+    private int _gameFrame;
+    private const int TileSize = 16;
+
+    private static readonly float MicroCellPixelSize = (float)TileSize / MapRegion.SubDivision;
+    private static readonly float RegionPixelSize = MapRegion.MicroSize * MicroCellPixelSize;
+
+    private readonly MouseInputSystem _mouseInputSystem = new();
+
+    private WorldSimulation _simulation;
+    private PathfindingSystem _pathfindingSystem;
+    private UnitMovementSystem _movementSystem;
+    private UnitCpuBrainSystem _cpuBrainSystem;
+
+    private MapRenderSystem _mapRenderSystem;
+    private UnitRenderSystem _unitRenderSystem;
+
+    private RenderWindow _window;
+    private WorldMap _worldMap;
+    private GameCamera _gameCamera;
+    private UnitStore _unitStore;
+    private UnitSpatialGrid _spatialGrid;
+    private EdificeStore _edificeStore;
+
+    private bool _showDebugGrid;
+
+    public void InitializeAndRun(WorldMap worldMap, UnitStore unitStore, UnitSpatialGrid spatialGrid, EdificeStore edificeStore)
+    {
+        _worldMap = worldMap;
+        _unitStore = unitStore;
+        _spatialGrid = spatialGrid;
+        _edificeStore = edificeStore;
+
+        InitializeSystems();
+        InitializeWindow();
+
+        _mouseInputSystem.MoveCommandRequested += IssueMoveCommands;
+
+        Run();
+    }
+
+    private void InitializeSystems()
+    {
+        _pathfindingSystem = new PathfindingSystem();
+        _movementSystem = new UnitMovementSystem();
+
+        _movementSystem.MoveInterrupted += OnMoveInterrupted;
+
+        MoveTask moveTask = new MoveTask(
+            _pathfindingSystem,
+            _movementSystem);
+
+        _cpuBrainSystem = new UnitCpuBrainSystem(moveTask);
+        _simulation = new WorldSimulation(_movementSystem);
+
+        _mapRenderSystem = new MapRenderSystem(MicroCellPixelSize);
+        _unitRenderSystem = new UnitRenderSystem();
+    }
+    private void OnMoveInterrupted(int unitId)
+    {
+        Console.WriteLine(
+            $"[MOVEMENT] INTERRUPTED unit={unitId}");
+    }
+    private void IssueMoveCommands(IReadOnlyList<int> unitIds, IReadOnlyList<SpatialCoord> points)
+    {
+        int count = Math.Min(unitIds.Count, points.Count);
+        //Console.WriteLine($"[VECTOR] MOVE COMMANDS units={unitIds.Count} points={points.Count}");
+
+        for (int i = 0; i < count; i++)
+        {
+            SpatialCoord target = points[i];
+            //Console.WriteLine(
+            //$"[VECTOR] UNIT {unitIds[i]} -> ({target.X},{target.Y},{target.Z})");
+
+            _cpuBrainSystem.IssueCommand(
+                _unitStore,
+                unitIds[i],
+                new AiCommand
+                {
+                    OpCode = AiOpCode.MoveToTarget,
+                    TargetX = target.X,
+                    TargetY = target.Y,
+                    TargetZ = target.Z
+                },
+                AiCommandInsertMode.ReplaceAll);
+        }
+    }
+
+    private void InitializeWindow()
+    {
+        _window = new RenderWindow(
+            new VideoMode(new Vector2u(1280, 720)),
+            "RimClone");
+
+        _window.SetFramerateLimit(60);
+
+        _gameCamera = new GameCamera(
+            new Vector2f(400, 400),
+            new Vector2f(1280, 720),
+            moveSpeed: 450f);
+
+        _gameCamera.CenterOnStreet(MicroCellPixelSize);
+
+        _window.Closed += (_, _) => _window.Close();
+        _window.MouseWheelScrolled += (_, e) => _gameCamera.HandleZoom(e.Delta);
+        _window.KeyPressed += (_, e) => HandleKey(e.Code);
+    }
+
+    private void Run()
+    {
+        float radius = 0.4f * MicroCellPixelSize;
+
+        CircleShape unitShape = new CircleShape(radius)
+        {
+            Origin = new Vector2f(radius, radius)
+        };
+
+        Clock clock = new();
+
+        while (_window.IsOpen)
+        {
+            _window.DispatchEvents();
+
+            float deltaTime = clock.Restart().AsSeconds();
+
+            if (deltaTime > 0.1f)
+                deltaTime = 0.1f;
+
+            Update(deltaTime);
+            Draw(unitShape);
+        }
+    }
+
+    private void Update(float deltaTime)
+    {
+        _gameFrame++;
+
+        _pathfindingSystem.UpdateFrame(_gameFrame);
+
+        _gameCamera.UpdateInput(deltaTime);
+
+        Vector2i mousePixels = Mouse.GetPosition(_window);
+        Vector2f mouseWorld =
+            _window.MapPixelToCoords(
+                mousePixels,
+                _gameCamera.View);
+
+        _mouseInputSystem.Update(
+            _window,
+            _unitStore,
+            _worldMap.CurrentViewZ,
+            MicroCellPixelSize,
+            mouseWorld);
+
+        _simulation.Update(
+            _unitStore,
+            _spatialGrid,
+            _worldMap,
+            _edificeStore,
+            MicroCellPixelSize,
+            deltaTime);
+
+        _cpuBrainSystem.Update(
+            _unitStore,
+            _spatialGrid,
+            _worldMap,
+            _edificeStore,
+            _simulation.EffectSystem,
+            MicroCellPixelSize,
+            deltaTime);
+
+        UpdateTileInspector(mouseWorld);
+    }
+
+    private void UpdateTileInspector(Vector2f mouseWorld)
+    {
+        if (!Mouse.IsButtonPressed(Mouse.Button.Left))
+            return;
+
+        int x = (int)(mouseWorld.X / MicroCellPixelSize);
+        int y = (int)(mouseWorld.Y / MicroCellPixelSize);
+        int max = MapRegion.MicroSize * 16 - 1;
+
+        if (x < 0 || y < 0 || x > max || y > max)
+            return;
+
+        MapLayer layer = _worldMap.GetLayer(_worldMap.CurrentViewZ);
+
+        if (layer == null)
+            return;
+
+        ref var cell = ref layer.GetMicroCell(x, y);
+
+        string info = TileMetadataSystem.InspectMicroCell(
+            ref cell,
+            x,
+            y,
+            _edificeStore);
+
+        Console.Clear();
+        Console.WriteLine(info);
+    }
+
+    private void Draw(CircleShape unitShape)
+    {
+        _window.Clear(new Color(20, 20, 25));
+        _window.SetView(_gameCamera.View);
+
+        _mapRenderSystem.Draw(
+            _window,
+            _worldMap,
+            _edificeStore,
+            _gameCamera.View,
+            RegionPixelSize,
+            MicroCellPixelSize,
+            _gameCamera.ZoomLevel,
+            _showDebugGrid);
+
+        int aliveCount = _unitRenderSystem.Draw(
+            _window,
+            _unitStore,
+            unitShape,
+            _worldMap.CurrentViewZ);
+
+        DrawSelection();
+
+        _simulation.EffectSystem.Draw(
+            _window,
+            _worldMap.CurrentViewZ);
+
+        _mouseInputSystem.DrawSelectionBox(_window);
+
+        _window.SetTitle(
+            $"RimClone | Units: {aliveCount} | Z: {_worldMap.CurrentViewZ}");
+
+        _window.Display();
+    }
+
+    private void DrawSelection()
+    {
+        for (int i = 0; i < _unitStore.Count; i++)
+        {
+            if (_unitStore.HealthMasks[i] == 0)
+                continue;
+
+            if (_unitStore.Positions[i].Spatial.Z != _worldMap.CurrentViewZ)
+                continue;
+
+            if (!_mouseInputSystem.SelectedUnitIds.Contains(i))
+                continue;
+
+            float radius = 0.4f * MicroCellPixelSize + 2f;
+
+            CircleShape ring = new CircleShape(radius)
+            {
+                Origin = new Vector2f(radius, radius),
+                Position = new Vector2f(
+                    _unitStore.Positions[i].RenderX * MicroCellPixelSize + MicroCellPixelSize * 0.5f,
+                    _unitStore.Positions[i].RenderY * MicroCellPixelSize + MicroCellPixelSize * 0.5f),
+                FillColor = Color.Transparent,
+                OutlineColor = new Color(0, 255, 130, 220),
+                OutlineThickness = 1f
+            };
+
+            _window.Draw(ring);
+        }
+    }
+
+    private void HandleKey(Keyboard.Key key)
+    {
+        if (key == Keyboard.Key.PageUp)
+        {
+            _worldMap.ChangeViewFloor(1);
+            return;
+        }
+
+        if (key == Keyboard.Key.PageDown)
+        {
+            _worldMap.ChangeViewFloor(-1);
+            return;
+        }
+
+        if (key == Keyboard.Key.G)
+        {
+            _showDebugGrid = !_showDebugGrid;
+            Console.WriteLine(_showDebugGrid ? "Micro grid ON" : "Micro grid OFF");
+        }
+    }
+}using Core.Items;
+using Core.Map;
+using Core.Unit;
+using Core.Unit.Components;
+using Core.Unit.Systems;
+
+namespace RimClone.Render;
+
+public sealed class WorldSimulation
+{
+    private readonly UnitCombatSystem _unitCombatSystem = new();
+    private readonly CombatEffectSystem _effectSystem = new();
+
+    private readonly UnitMovementSystem _movementSystem;
+
+    public CombatEffectSystem EffectSystem => _effectSystem;
+
+    public WorldSimulation(UnitMovementSystem movementSystem)
+    {
+        _movementSystem = movementSystem;
+    }
+
+    public void Update(UnitStore units, UnitSpatialGrid spatialGrid, WorldMap map, EdificeStore edifices, float microCellPixelSize, float deltaTime)
+    {
+        _movementSystem.Update(units, spatialGrid, map, deltaTime);
+
+        _unitCombatSystem.Update(
+            units,
+            spatialGrid,
+            map,
+            edifices,
+            _effectSystem,
+            microCellPixelSize,
+            deltaTime);
+
+        _effectSystem.Update(deltaTime);
+        units.UpdateHealthSystems(deltaTime);
+
+        for (int i = 0; i < units.Count; i++)
+        {
+            if (units.HealthMasks[i] == 0)
+                spatialGrid.Remove(units.Positions[i].Spatial, i);
+        }
+    }
+}using Core.Items;
+using Core.Map;
+using Core.Structs;
+using Core.Unit.Components;
+using Core.Unit.Components.AiComponents;
+using Core.Unit.Systems.CombatPath;
+using System;
+
+namespace Core.Unit.Systems;
+
+public sealed class UnitCpuBrainSystem
+{
+    private readonly IAiTask[] _tasks;
+
+    public UnitCpuBrainSystem(params IAiTask[] tasks)
+    {
+        _tasks = new IAiTask[Enum.GetValues<AiOpCode>().Length];
+
+        for (int i = 0; i < tasks.Length; i++)
+            _tasks[(int)tasks[i].OpCode] = tasks[i];
+    }
+
+    public void IssueCommand(UnitStore units, int unitId, AiCommand command, AiCommandInsertMode mode)
+    {
+        //Console.WriteLine(
+        //$"[CPU] ISSUE unit={unitId} op={command.OpCode} target=({command.TargetX},{command.TargetY},{command.TargetZ})");
+
+
+        if (mode == AiCommandInsertMode.ReplaceAll)
+        {
+            if (units.AiStackPointers[unitId] >= 0)
+            {
+                ref AiCommand current = ref units.CpuPeekCommand(unitId);
+                IAiTask? task = _tasks[(int)current.OpCode];
+                task?.Cancel(unitId);
+            }
+
+            units.CpuClearCommands(unitId);
+        }
+
+        if (mode == AiCommandInsertMode.Append)
+            units.CpuAppendCommand(unitId, command);
+        else
+            units.CpuPushCommand(unitId, command);
+    //    Console.WriteLine(
+    //$"[CPU] STACK unit={unitId} count={units.AiStackPointers[unitId] + 1}");
+
+    }
+
+    public void Update(UnitStore units, UnitSpatialGrid spatialGrid, WorldMap map, EdificeStore edifices, CombatEffectSystem effects, float pixelSize, float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        for (int unitId = 0; unitId < units.Count; unitId++)
+        {
+            if (units.HealthMasks[unitId] == 0)
+                continue;
+
+            if (units.AiStackPointers[unitId] < 0)
+                units.CpuPushCommand(unitId, new AiCommand { OpCode = AiOpCode.Idle });
+
+            if (units.ShotCooldowns[unitId] > 0f)
+            {
+                units.ShotCooldowns[unitId] -= deltaTime;
+
+                if (units.ShotCooldowns[unitId] < 0f)
+                    units.ShotCooldowns[unitId] = 0f;
+            }
+
+            ProcessInterrupts(units, unitId, map, edifices, deltaTime);
+
+            ref AiCommand command = ref units.CpuPeekCommand(unitId);
+            IAiTask task = _tasks[(int)command.OpCode];
+
+            if (task != null)
+                task.Update(units, spatialGrid, map, edifices, unitId, ref command, deltaTime);
+        }
+    }
+
+    private void ProcessInterrupts(UnitStore units, int unitId, WorldMap map, EdificeStore edifices, float deltaTime)
+    {
+        ref AiCommand command = ref units.CpuPeekCommand(unitId);
+        ref UnitPosition position = ref units.Positions[unitId];
+
+        if (units.LastImpactSourceX[unitId] != 0)
+        {
+            if (command.OpCode != AiOpCode.TakeCover)
+            {
+                SpatialCoord cover = FindDirectedCover(units, unitId, units.LastImpactSourceX[unitId], units.LastImpactSourceY[unitId], map, edifices);
+
+                units.CpuPushCommand(unitId, new AiCommand
+                {
+                    OpCode = AiOpCode.TakeCover,
+                    TargetX = cover.X,
+                    TargetY = cover.Y,
+                    TargetZ = cover.Z,
+                    Timer = 3f
+                });
+            }
+
+            units.LastImpactSourceX[unitId] = 0;
+        }
+
+        units.VisionTickTimers[unitId] += deltaTime;
+
+        if (units.VisionTickTimers[unitId] < 0.16f)
+            return;
+
+        units.VisionTickTimers[unitId] = 0.10f + (float)Random.Shared.NextDouble() * 0.04f;
+
+        int attackerId = units.LastAttackerIds[unitId];
+
+        if (attackerId < 0 || units.HealthMasks[attackerId] == 0)
+            return;
+
+        ref UnitPosition attacker = ref units.Positions[attackerId];
+
+        if (attacker.Spatial.Z != position.Spatial.Z)
+            return;
+
+        if (!VisibilityChecker.HasLineOfSight(map, edifices, position.Spatial.X, position.Spatial.Y, attacker.Spatial.X, attacker.Spatial.Y, position.Spatial.Z))
+            return;
+
+        command = ref units.CpuPeekCommand(unitId);
+
+        if (command.OpCode != AiOpCode.CombatEngage)
+        {
+            units.CpuPushCommand(unitId, new AiCommand
+            {
+                OpCode = AiOpCode.CombatEngage,
+                TargetX = attackerId
+            });
+        }
+
+        units.LastAttackerIds[unitId] = -1;
+    }
+
+    private SpatialCoord FindDirectedCover(UnitStore units, int unitId, int hazardX, int hazardY, WorldMap map, EdificeStore edifices)
+    {
+        ref UnitPosition pos = ref units.Positions[unitId];
+        SpatialCoord current = pos.Spatial;
+        MapLayer layer = map.GetLayer(pos.Spatial.Z);
+
+        if (layer == null)
+            return current;
+
+        const int maxCoord = (16 * 48) - 1;
+
+        int vecX = Math.Sign(pos.Spatial.X - hazardX);
+        int vecY = Math.Sign(pos.Spatial.Y - hazardY);
+        int bestX = -1;
+        int bestY = -1;
+        float bestDist = float.MaxValue;
+
+        for (int oy = -5; oy <= 5; oy++)
+        {
+            for (int ox = -5; ox <= 5; ox++)
+            {
+                int x = pos.Spatial.X + ox;
+                int y = pos.Spatial.Y + oy;
+
+                if (x < 0 || x > maxCoord || y < 0 || y > maxCoord)
+                    continue;
+
+                ref MicroCell cell = ref layer.GetMicroCell(x, y);
+
+                if (cell.EdificeId == 0 || edifices == null)
+                    continue;
+
+                var instance = edifices.Instances[cell.EdificeId];
+                var config = edifices.Configs[instance.ConfigId];
+
+                if (config == null || config.Type != EdificeType.Wall || config.CoverEffectiveness >= 1f)
+                    continue;
+
+                int safeX = x + vecX;
+                int safeY = y + vecY;
+
+                if (safeX < 0 || safeX > maxCoord || safeY < 0 || safeY > maxCoord)
+                    continue;
+
+                ref MicroCell hide = ref layer.GetMicroCell(safeX, safeY);
+
+                if (hide.EdificeId != 0 || (hide.Flags & 0x01) != 0)
+                    continue;
+
+                float dist = MathF.Sqrt(ox * ox + oy * oy);
+
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    bestX = safeX;
+                    bestY = safeY;
+                }
+            }
+        }
+
+        return bestX < 0 ? current : new SpatialCoord(bestX, bestY, pos.Spatial.Z);
+    }
+}using Core.Map;
+using Core.Structs;
+using Core.Unit.Components;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+
+namespace Core.AI;
+
+public enum PathRequestState : byte
+{
+    Pending,
+    Processing,
+    Completed,
+    Failed,
+    Cancelled
+}
+
+public enum PathPriority : byte
+{
+    Critical,
+    High,
+    Normal,
+    Low
+}
+
+public sealed class PathfindingSystem : IDisposable
+{
+    private const int DefaultPathCapacity = 1536;
+
+    /*
+     * <= 5 logical CPU
+     *      -> 1 worker
+     *
+     * >= 6 logical CPU
+     *      -> 2 обычных
+     *      -> 1 old-biased
+     */
+    private const int MultiWorkerCpuThreshold = 6;
+
+    /*
+     * Если worker один:
+     *
+     * 2 обычные задачи
+     * 1 попытка старой
+     */
+    private const int SingleWorkerNormalQuota = 2;
+
+    private readonly RouteTaskStore _tasks;
+
+    private readonly int _capacity;
+
+    /*
+     * Critical = 0
+     * High     = 1
+     * Normal   = 2
+     * Low      = 3
+     */
+    private readonly Queue<RouteTask>[] _queues;
+
+    /*
+     * Общая память недавно использованных путей.
+     *
+     * A* её только читает.
+     * Готовые маршруты добавляются сюда
+     * после завершения поиска.
+     */
+    private readonly PathTrafficMemory _trafficMemory;
+
+    private readonly object _sync = new();
+
+    private readonly Thread[] _workers;
+
+    private readonly int _oldAfterFrames;
+
+    /*
+     * Игровой поток пишет сюда.
+     * Worker'ы только читают.
+     */
+    private int _currentFrame;
+
+    private bool _stopRequested;
+
+    private int _nextRouteId;
+
+    public PathfindingSystem(
+        int capacity = 5000,
+        int oldAfterFrames = 5)
+    {
+        _capacity =
+            Math.Max(
+                1,
+                capacity);
+
+        _oldAfterFrames =
+            Math.Max(
+                1,
+                oldAfterFrames);
+
+        _tasks =
+            new RouteTaskStore();
+
+        _trafficMemory =
+            new PathTrafficMemory();
+
+        _queues =
+            new Queue<RouteTask>[
+                Enum.GetValues<PathPriority>().Length];
+
+        for (int i = 0;
+             i < _queues.Length;
+             i++)
+        {
+            _queues[i] =
+                new Queue<RouteTask>();
+        }
+
+        int logicalProcessors =
+            Environment.ProcessorCount;
+
+        if (logicalProcessors <
+            MultiWorkerCpuThreshold)
+        {
+            _workers =
+                new Thread[1];
+
+            _workers[0] =
+                CreateWorker(
+                    "PathfindingWorker",
+                    false);
+        }
+        else
+        {
+            _workers =
+                new Thread[3];
+
+            _workers[0] =
+                CreateWorker(
+                    "PathfindingWorker-1",
+                    false);
+
+            _workers[1] =
+                CreateWorker(
+                    "PathfindingWorker-2",
+                    false);
+
+            _workers[2] =
+                CreateWorker(
+                    "PathfindingOldWorker",
+                    true);
+        }
+    }
+
+    /*
+     * Вызывается один раз за игровой кадр.
+     */
+    public void UpdateFrame(int frame)
+    {
+        Volatile.Write(
+            ref _currentFrame,
+            frame);
+    }
+    public bool RequeuePath(
+    int routeId,
+    SpatialCoord newStart,
+    SpatialCoord newTarget,
+    PathPriority priority = PathPriority.Normal)
+    {
+        lock (_sync)
+        {
+            if (!_tasks.TryGet(
+                    routeId,
+                    out RouteTask? task))
+            {
+                return false;
+            }
+
+            if (task.State !=
+                    PathRequestState.Completed &&
+                task.State !=
+                    PathRequestState.Failed)
+            {
+                return false;
+            }
+
+            task.Start = newStart;
+            task.Target = newTarget;
+
+            task.Priority =
+                priority;
+
+            task.Path = null;
+            task.PathLength = 0;
+
+            task.IsOld = false;
+
+            task.QueuedFrame =
+                Volatile.Read(
+                    ref _currentFrame);
+
+            task.State =
+                PathRequestState.Pending;
+
+            _queues[(int)priority]
+                .Enqueue(task);
+
+            Monitor.PulseAll(_sync);
+
+            return true;
+        }
+    }
+    public int RequestPath(
+        MapLayer layer,
+        SpatialCoord start,
+        SpatialCoord target,
+        PathPriority priority = PathPriority.Normal)
+    {
+        if (layer == null)
+            return -1;
+
+        lock (_sync)
+        {
+            if (_stopRequested)
+                return -1;
+
+            if (_tasks.Count >= _capacity)
+                return -1;
+
+            int routeId =
+                ++_nextRouteId;
+
+            int queuedFrame =
+                Volatile.Read(
+                    ref _currentFrame);
+
+            RouteTask task =
+                new RouteTask(
+                    routeId,
+                    layer,
+                    start,
+                    target,
+                    priority,
+                    queuedFrame);
+
+            _tasks.Add(task);
+
+            _queues[(int)priority]
+                .Enqueue(task);
+
+            /*
+             * Будим worker'ов.
+             *
+             * Конкретную задачу заберёт
+             * только один worker, потому что
+             * очередь и State меняются
+             * внутри одного lock.
+             */
+            Monitor.PulseAll(_sync);
+
+            return routeId;
+        }
+    }
+
+    /*
+     * Повторный расчёт того же RouteId.
+     *
+     * Используется после того, как готовый
+     * маршрут оказался непригоден.
+     */
+    public bool RequeuePath(
+        int routeId,
+        PathPriority priority = PathPriority.Normal)
+    {
+        lock (_sync)
+        {
+            if (!_tasks.TryGet(
+                    routeId,
+                    out RouteTask? task))
+            {
+                return false;
+            }
+
+            if (task.State !=
+                    PathRequestState.Completed &&
+                task.State !=
+                    PathRequestState.Failed)
+            {
+                return false;
+            }
+
+            task.Priority =
+                priority;
+
+            task.Path = null;
+            task.PathLength = 0;
+
+            task.IsOld = false;
+
+            task.QueuedFrame =
+                Volatile.Read(
+                    ref _currentFrame);
+
+            task.State =
+                PathRequestState.Pending;
+
+            _queues[(int)priority]
+                .Enqueue(task);
+
+            Monitor.PulseAll(_sync);
+
+            return true;
+        }
+    }
+
+    public PathRequestState GetState(
+        int routeId)
+    {
+        lock (_sync)
+        {
+            if (!_tasks.TryGet(
+                    routeId,
+                    out RouteTask? task))
+            {
+                return PathRequestState.Failed;
+            }
+
+            return task.State;
+        }
+    }
+
+    public bool TryGetRoute(
+        int routeId,
+        out SpatialCoord[]? path,
+        out int length)
+    {
+        lock (_sync)
+        {
+            path = null;
+            length = 0;
+
+            if (!_tasks.TryGet(
+                    routeId,
+                    out RouteTask? task))
+            {
+                return false;
+            }
+
+            if (task.State !=
+                PathRequestState.Completed)
+            {
+                return false;
+            }
+
+            if (task.Path == null ||
+                task.PathLength <= 0)
+            {
+                return false;
+            }
+
+            path =
+                task.Path;
+
+            length =
+                task.PathLength;
+
+            return true;
+        }
+    }
+
+    public void Cancel(
+        int routeId)
+    {
+        lock (_sync)
+        {
+            if (!_tasks.TryGet(
+                    routeId,
+                    out RouteTask? task))
+            {
+                return;
+            }
+
+            if (task.State !=
+                    PathRequestState.Pending &&
+                task.State !=
+                    PathRequestState.Processing)
+            {
+                return;
+            }
+
+            task.State =
+                PathRequestState.Cancelled;
+
+            Monitor.PulseAll(_sync);
+        }
+    }
+
+    public void Remove(
+        int routeId)
+    {
+        lock (_sync)
+        {
+            if (!_tasks.TryGet(
+                    routeId,
+                    out RouteTask? task))
+            {
+                return;
+            }
+
+            task.State =
+                PathRequestState.Cancelled;
+
+            task.Path = null;
+            task.PathLength = 0;
+
+            _tasks.Remove(routeId);
+
+            Monitor.PulseAll(_sync);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_sync)
+        {
+            if (_stopRequested)
+                return;
+
+            _stopRequested = true;
+
+            Monitor.PulseAll(_sync);
+        }
+
+        foreach (Thread worker in _workers)
+        {
+            worker.Join();
+        }
+    }
+
+    private Thread CreateWorker(
+        string name,
+        bool oldBiased)
+    {
+        Thread worker =
+            new Thread(
+                () => WorkerLoop(oldBiased))
+            {
+                IsBackground = true,
+                Name = name
+            };
+
+        worker.Start();
+
+        return worker;
+    }
+
+    private void WorkerLoop(
+        bool oldBiased)
+    {
+        /*
+         * ВАЖНО:
+         *
+         * Каждый worker получает
+         * собственный A* context.
+         *
+         * Поэтому здесь больше нет
+         * общего SearchLock.
+         */
+        PureAStarContext context =
+            PureAStarPathfinder.CreateContext();
+
+        /*
+         * Для однопоточного режима:
+         *
+         * Normal
+         * Normal
+         * Old
+         *
+         * Normal
+         * Normal
+         * Old
+         */
+        int normalTaskCount = 0;
+
+        while (true)
+        {
+            RouteTask? task = null;
+
+            lock (_sync)
+            {
+                while (!_stopRequested)
+                {
+                    task =
+                        DequeueNextTask(
+                            oldBiased,
+                            ref normalTaskCount);
+
+                    if (task != null)
+                        break;
+
+                    /*
+                     * Нет работы.
+                     *
+                     * Поток спит и не потребляет CPU.
+                     */
+                    Monitor.Wait(_sync);
+                }
+
+                if (_stopRequested)
+                    return;
+            }
+
+            /*
+             * Вне _sync выполняется сам A*.
+             *
+             * Поэтому Worker 1, 2 и 3
+             * действительно могут считать
+             * одновременно.
+             */
+            ProcessTask(
+                task!,
+                context);
+        }
+    }
+
+    private RouteTask? DequeueNextTask(
+        bool oldBiased,
+        ref int normalTaskCount)
+    {
+        /*
+         * Старый worker:
+         *
+         * сначала ищет старые задачи.
+         */
+        if (oldBiased)
+        {
+            RouteTask? oldTask =
+                DequeueOldTask();
+
+            if (oldTask != null)
+                return oldTask;
+
+            /*
+             * Старых нет.
+             *
+             * Помогает обычным.
+             */
+            return DequeueNormalPriorityTask();
+        }
+
+        /*
+         * Обычный worker периодически
+         * помогает старым задачам.
+         */
+        if (normalTaskCount >=
+            SingleWorkerNormalQuota)
+        {
+            RouteTask? oldTask =
+                DequeueOldTask();
+
+            if (oldTask != null)
+            {
+                normalTaskCount = 0;
+                return oldTask;
+            }
+        }
+
+        RouteTask? normalTask =
+            DequeueNormalPriorityTask();
+
+        if (normalTask != null)
+        {
+            normalTaskCount++;
+            return normalTask;
+        }
+
+        /*
+         * Обычных задач нет.
+         *
+         * Значит можно полностью
+         * переключиться на старые.
+         */
+        RouteTask? fallbackOld =
+            DequeueOldTask();
+
+        if (fallbackOld != null)
+        {
+            normalTaskCount = 0;
+            return fallbackOld;
+        }
+
+        return null;
+    }
+
+    private RouteTask? DequeueNormalPriorityTask()
+    {
+        for (int i = 0;
+             i < _queues.Length;
+             i++)
+        {
+            Queue<RouteTask> queue =
+                _queues[i];
+
+            while (queue.Count > 0)
+            {
+                RouteTask task =
+                    queue.Dequeue();
+
+                if (task.State !=
+                    PathRequestState.Pending)
+                {
+                    continue;
+                }
+
+                task.State =
+                    PathRequestState.Processing;
+
+                return task;
+            }
+        }
+
+        return null;
+    }
+
+    private RouteTask? DequeueOldTask()
+    {
+        int currentFrame =
+            Volatile.Read(
+                ref _currentFrame);
+
+        /*
+         * Для старых задач:
+         *
+         * Low
+         * Normal
+         * High
+         * Critical
+         */
+        int[] order =
+        {
+            (int)PathPriority.Low,
+            (int)PathPriority.Normal,
+            (int)PathPriority.High,
+            (int)PathPriority.Critical
+        };
+
+        for (int i = 0;
+             i < order.Length;
+             i++)
+        {
+            Queue<RouteTask> queue =
+                _queues[order[i]];
+
+            while (queue.Count > 0)
+            {
+                RouteTask task =
+                    queue.Peek();
+
+                if (task.State !=
+                    PathRequestState.Pending)
+                {
+                    queue.Dequeue();
+                    continue;
+                }
+
+                int waitedFrames =
+                    currentFrame -
+                    task.QueuedFrame;
+
+                /*
+                 * Она ещё не состарилась.
+                 */
+                if (!task.IsOld &&
+                    waitedFrames <
+                    _oldAfterFrames)
+                {
+                    break;
+                }
+
+                queue.Dequeue();
+
+                task.IsOld = true;
+
+                task.State =
+                    PathRequestState.Processing;
+
+                return task;
+            }
+        }
+
+        return null;
+    }
+
+    private void ProcessTask(
+        RouteTask task,
+        PureAStarContext context)
+    {
+        /*
+         * Проверяем отмену перед A*.
+         */
+        lock (_sync)
+        {
+            if (task.State ==
+                PathRequestState.Cancelled)
+            {
+                return;
+            }
+        }
+
+        if (task.Start.Z !=
+            task.Target.Z)
+        {
+            CompleteFailed(task);
+            return;
+        }
+
+        SpatialCoord[] path =
+            new SpatialCoord[
+                DefaultPathCapacity];
+
+        int currentFrame =
+            Volatile.Read(
+                ref _currentFrame);
+
+        /*
+         * Каждый worker использует
+         * свой context.
+         *
+         * Общий traffic memory только
+         * читается A* во время поиска.
+         */
+        bool success =
+            PureAStarPathfinder.FindRoute(
+                context,
+                _trafficMemory,
+                currentFrame,
+                task.Layer,
+                task.Start,
+                task.Target,
+                path,
+                path.Length,
+                out int length);
+
+        lock (_sync)
+        {
+            /*
+             * За время A* задача могла быть
+             * отменена.
+             */
+            if (task.State ==
+                PathRequestState.Cancelled)
+            {
+                return;
+            }
+
+            if (!success)
+            {
+                task.State =
+                    PathRequestState.Failed;
+
+                return;
+            }
+
+            task.Path =
+                path;
+
+            task.PathLength =
+                length;
+
+            task.State =
+                PathRequestState.Completed;
+
+            /*
+             * Маршрут добавляется в память
+             * только после полного построения.
+             *
+             * Здесь мы не держим lock во время A*,
+             * а значит сами вычисления
+             * остаются параллельными.
+             */
+            _trafficMemory.AddRoute(
+                path,
+                length,
+                currentFrame);
+        }
+    }
+
+    private void CompleteFailed(
+        RouteTask task)
+    {
+        lock (_sync)
+        {
+            if (task.State ==
+                PathRequestState.Cancelled)
+            {
+                return;
+            }
+
+            task.State =
+                PathRequestState.Failed;
+        }
+    }
+}using Core.Map;
+using Core.Structs;
+using Core.Unit;
+using Core.Unit.Components;
+using SFML.Graphics;
+using SFML.System;
+using SFML.Window;
+using System;
+using System.Collections.Generic;
+
+namespace Core.Input.Systems;
+
+public sealed class MouseInputSystem
+{
+    private bool _isSelecting;
+    private bool _isCommanding;
+
+    private Vector2f _startDragPixels;
+    private Vector2f _currentMousePixels;
+    private Vector2f _commandStartWorld;
+
+    private float _lastClickTime;
+
+    private readonly Clock _clickClock = new();
+
+    public readonly List<int> SelectedUnitIds = new(16);
+    public readonly List<SpatialCoord> CommandPoints = new(64);
+
+    public bool IsCommanding => _isCommanding;
+
+    public event Action<IReadOnlyList<int>, IReadOnlyList<SpatialCoord>> MoveCommandRequested;
+
+    public void Update(RenderWindow window, UnitStore units, int currentViewZ, float microCellPixelSize, Vector2f mouseWorld)
+    {
+        _currentMousePixels = mouseWorld;
+
+        UpdateSelection(units, currentViewZ, microCellPixelSize);
+        UpdateCommand(units, currentViewZ, microCellPixelSize);
+    }
+
+    private void UpdateSelection(UnitStore units, int currentViewZ, float cellSize)
+    {
+        if (Mouse.IsButtonPressed(Mouse.Button.Left))
+        {
+            if (!_isSelecting)
+            {
+                _isSelecting = true;
+                _startDragPixels = _currentMousePixels;
+                SelectedUnitIds.Clear();
+            }
+
+            return;
+        }
+
+        if (!_isSelecting)
+            return;
+
+        _isSelecting = false;
+        SelectUnits(units, currentViewZ, cellSize);
+    }
+
+    private void SelectUnits(UnitStore units, int currentViewZ, float cellSize)
+    {
+        float minX = Math.Min(_startDragPixels.X, _currentMousePixels.X);
+        float maxX = Math.Max(_startDragPixels.X, _currentMousePixels.X);
+        float minY = Math.Min(_startDragPixels.Y, _currentMousePixels.Y);
+        float maxY = Math.Max(_startDragPixels.Y, _currentMousePixels.Y);
+
+        bool singleClick = maxX - minX < 5f && maxY - minY < 5f;
+        float time = _clickClock.ElapsedTime.AsSeconds();
+        bool doubleClick = singleClick && time - _lastClickTime < 0.25f;
+
+        _lastClickTime = time;
+
+        if (doubleClick)
+            SelectedUnitIds.Clear();
+
+        SpatialCoord mouseCoord = ToCoord(_currentMousePixels, currentViewZ, cellSize);
+        SpatialCoord minCoord = ToCoord(new Vector2f(minX, minY), currentViewZ, cellSize);
+        SpatialCoord maxCoord = ToCoord(new Vector2f(maxX, maxY), currentViewZ, cellSize);
+
+        for (int i = 0; i < units.Count; i++)
+        {
+            if (units.HealthMasks[i] == 0)
+                continue;
+
+            SpatialCoord unitCoord = units.Positions[i].Spatial;
+
+            if (unitCoord.Z != currentViewZ)
+                continue;
+
+            if (singleClick)
+            {
+                if (unitCoord.X != mouseCoord.X || unitCoord.Y != mouseCoord.Y)
+                    continue;
+
+                SelectedUnitIds.Add(i);
+                break;
+            }
+
+            if (unitCoord.X < minCoord.X || unitCoord.X > maxCoord.X ||
+                unitCoord.Y < minCoord.Y || unitCoord.Y > maxCoord.Y)
+                continue;
+
+            SelectedUnitIds.Add(i);
+        }
+
+        //Console.WriteLine($"[MOUSE] SELECTION count={SelectedUnitIds.Count}");
+    }
+
+    private void UpdateCommand(UnitStore units, int currentViewZ, float cellSize)
+    {
+        if (Mouse.IsButtonPressed(Mouse.Button.Right))
+        {
+            if (!_isCommanding && SelectedUnitIds.Count > 0)
+            {
+                _isCommanding = true;
+                _commandStartWorld = _currentMousePixels;
+                CommandPoints.Clear();
+
+                //Console.WriteLine($"[COMMAND] START units={SelectedUnitIds.Count} pos={_currentMousePixels}");
+            }
+
+            if (_isCommanding)
+                BuildCommandPoints(currentViewZ, cellSize);
+
+            return;
+        }
+
+        if (!_isCommanding)
+            return;
+
+        _isCommanding = false;
+
+        //Console.WriteLine($"[COMMAND] RELEASE points={CommandPoints.Count}");
+
+        if (CommandPoints.Count == 0)
+        {
+            //Console.WriteLine("[COMMAND] CANCEL: no points");
+            return;
+        }
+
+        AssignCommandPoints(units);
+
+        //Console.WriteLine($"[COMMAND] ASSIGNED units={SelectedUnitIds.Count} points={CommandPoints.Count}");
+
+        for (int i = 0; i < SelectedUnitIds.Count && i < CommandPoints.Count; i++)
+        {
+            int unitId = SelectedUnitIds[i];
+            SpatialCoord unitPos = units.Positions[unitId].Spatial;
+            SpatialCoord point = CommandPoints[i];
+
+            //Console.WriteLine(
+            //    $"[COMMAND] UNIT {unitId}: " +
+            //    $"({unitPos.X},{unitPos.Y},{unitPos.Z}) -> " +
+            //    $"({point.X},{point.Y},{point.Z})");
+        }
+
+        MoveCommandRequested?.Invoke(
+            new List<int>(SelectedUnitIds),
+            new List<SpatialCoord>(CommandPoints));
+    }
+    private void AssignCommandPoints(UnitStore units)
+    {
+        if (SelectedUnitIds.Count == 0 || CommandPoints.Count == 0)
+            return;
+
+        List<SpatialCoord> available = new(CommandPoints);
+
+        CommandPoints.Clear();
+
+        for (int i = 0; i < SelectedUnitIds.Count; i++)
+        {
+            if (available.Count == 0)
+                break;
+
+            int unitId = SelectedUnitIds[i];
+            SpatialCoord unitPos = units.Positions[unitId].Spatial;
+
+            int bestIndex = 0;
+            int bestDistance = Distance(unitPos, available[0]);
+
+            for (int j = 1; j < available.Count; j++)
+            {
+                int distance = Distance(unitPos, available[j]);
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestIndex = j;
+                }
+            }
+
+            CommandPoints.Add(available[bestIndex]);
+            available.RemoveAt(bestIndex);
+        }
+    }
+
+    private static int Distance(SpatialCoord a, SpatialCoord b)
+    {
+        return Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y);
+    }
+    private int _lastLoggedPointCount = -1;
+    private void LogCommandPoints(string mode)
+    {
+        if (_lastLoggedPointCount == CommandPoints.Count)
+            return;
+
+        _lastLoggedPointCount = CommandPoints.Count;
+
+        //Console.WriteLine($"[WAYPOINTS] mode={mode} count={CommandPoints.Count}");
+
+        for (int i = 0; i < CommandPoints.Count; i++)
+        {
+            SpatialCoord p = CommandPoints[i];
+            //Console.WriteLine($"[WAYPOINTS] {i}: ({p.X},{p.Y},{p.Z})");
+        }
+    }
+    private void BuildCommandPoints(int z, float cellSize)
+    {
+        SpatialCoord start = ToCoord(_commandStartWorld, z, cellSize);
+        SpatialCoord end = ToCoord(_currentMousePixels, z, cellSize);
+
+        int count = SelectedUnitIds.Count;
+
+        CommandPoints.Clear();
+
+        if (count == 0)
+            return;
+
+        int dx = end.X - start.X;
+        int dy = end.Y - start.Y;
+        float length = MathF.Sqrt(dx * dx + dy * dy);
+
+        if (length <= 0f)
+        {
+            BuildDenseArea(start, z, count);
+            LogCommandPoints("DENSE");
+            return;
+        }
+
+        if (count == 1)
+        {
+            CommandPoints.Add(end);
+            LogCommandPoints("SINGLE");
+            return;
+        }
+
+        int columns = Math.Max(1, (int)MathF.Floor(length) + 1);
+
+        if (count <= columns)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                int x = start.X + dx * i / (count - 1);
+                int y = start.Y + dy * i / (count - 1);
+
+                CommandPoints.Add(new SpatialCoord(x, y, z));
+            }
+
+            LogCommandPoints("LINE");
+            return;
+        }
+
+        int rows = (int)MathF.Ceiling((float)count / columns);
+
+        float invLength = 1f / length;
+        float nx = -dy * invLength;
+        float ny = dx * invLength;
+
+        float centerX = (start.X + end.X) * 0.5f;
+        float centerY = (start.Y + end.Y) * 0.5f;
+
+        HashSet<SpatialCoord> used = new();
+
+        for (int row = 0; row < rows; row++)
+        {
+            float rowOffset = row - (rows - 1) * 0.5f;
+
+            for (int col = 0; col < columns; col++)
+            {
+                if (CommandPoints.Count >= count)
+                    break;
+
+                float t = columns == 1 ? 0.5f : (float)col / (columns - 1);
+                float along = (t - 0.5f) * length;
+
+                int x = (int)MathF.Round(centerX + dx * invLength * along + nx * rowOffset);
+                int y = (int)MathF.Round(centerY + dy * invLength * along + ny * rowOffset);
+
+                SpatialCoord point = new(x, y, z);
+
+                if (used.Add(point))
+                    CommandPoints.Add(point);
+            }
+        }
+
+        if (CommandPoints.Count < count)
+        {
+            BuildDenseArea(
+                new SpatialCoord(
+                    (int)MathF.Round(centerX),
+                    (int)MathF.Round(centerY),
+                    z),
+                z,
+                count,
+                used);
+        }
+
+        LogCommandPoints("AREA");
+    }
+    private void BuildDenseArea(SpatialCoord center, int z, int count)
+    {
+        BuildDenseArea(center, z, count, new HashSet<SpatialCoord>());
+    }
+
+    private void BuildDenseArea(SpatialCoord center, int z, int count, HashSet<SpatialCoord> used)
+    {
+        for (int radius = 0; CommandPoints.Count < count; radius++)
+        {
+            int minX = center.X - radius;
+            int maxX = center.X + radius;
+            int minY = center.Y - radius;
+            int maxY = center.Y + radius;
+
+            for (int y = minY; y <= maxY; y++)
+            {
+                for (int x = minX; x <= maxX; x++)
+                {
+                    if (CommandPoints.Count >= count)
+                        return;
+
+                    if (Math.Abs(x - center.X) != radius &&
+                        Math.Abs(y - center.Y) != radius)
+                        continue;
+
+                    SpatialCoord point = new(x, y, z);
+
+                    if (used.Add(point))
+                        CommandPoints.Add(point);
+                }
+            }
+        }
+    }
+
+    public void DrawSelectionBox(RenderWindow window)
+    {
+        if (_isSelecting)
+        {
+            DrawSelection(window);
+            return;
+        }
+
+        if (_isCommanding)
+            DrawCommand(window);
+    }
+
+    private void DrawSelection(RenderWindow window)
+    {
+        float minX = Math.Min(_startDragPixels.X, _currentMousePixels.X);
+        float minY = Math.Min(_startDragPixels.Y, _currentMousePixels.Y);
+        float maxX = Math.Max(_startDragPixels.X, _currentMousePixels.X);
+        float maxY = Math.Max(_startDragPixels.Y, _currentMousePixels.Y);
+
+        RectangleShape box = new(
+            new Vector2f(maxX - minX, maxY - minY))
+        {
+            Position = new Vector2f(minX, minY),
+            FillColor = new Color(0, 100, 255, 35),
+            OutlineColor = new Color(0, 150, 255, 220),
+            OutlineThickness = 1f
+        };
+
+        window.Draw(box);
+    }
+
+    private void DrawCommand(RenderWindow window)
+    {
+        if (CommandPoints.Count == 0)
+            return;
+
+        float cellSize = GetCellSize();
+
+        for (int i = 0; i < CommandPoints.Count; i++)
+        {
+            SpatialCoord point = CommandPoints[i];
+            float radius = cellSize * 0.25f;
+
+            CircleShape circle = new(radius)
+            {
+                Origin = new Vector2f(radius, radius),
+                Position = new Vector2f(
+                    point.X * cellSize + cellSize * 0.5f,
+                    point.Y * cellSize + cellSize * 0.5f),
+                FillColor = new Color(255, 255, 255, 220)
+            };
+
+            window.Draw(circle);
+        }
+    }
+
+    private static SpatialCoord ToCoord(Vector2f position, int z, float cellSize)
+    {
+        return new SpatialCoord(
+            (int)MathF.Floor(position.X / cellSize),
+            (int)MathF.Floor(position.Y / cellSize),
+            z);
+    }
+
+    private static float GetCellSize()
+    {
+        return 16f / MapRegion.SubDivision;
+    }
+}using Core.Items;
+using Core.Map;
+using Core.Unit.Components;
+using Core.Unit.Components.AiComponents;
+using Core.Unit.Systems;
+using System;
+
+namespace Core.Unit;
+
+public sealed class UnitStore
+{
+    public int Count;
+
+    public float[] MovementCooldowns;
+    public int[] ActiveGridIds;
+
+    public UnitType[] UnitType;
+    public UnitPosition[] Positions;
+    public UnitSize[] Sizes;
+    public UnitMovement[] Movement;
+
+    public int[] SquadIds;
+
+    public uint[] HealthMasks;
+    public float[] BleedRates;
+    public float[] BloodLossLevels;
+
+    public float[] BaseBodyMass;
+    public float[] DynamicMass;
+
+    public int[] CurrentTargets;
+    public Weapon[] WeaponSlot;
+
+    public ArmorConfig[] HeadArmorSlot;
+    public ArmorConfig[] TorsoArmorSlot;
+    public ArmorConfig[] ArmsArmorSlot;
+    public ArmorConfig[] LegsArmorSlot;
+
+    public float[] ShotCooldowns;
+    public float[] RemainingBurstShots;
+    public bool[] IsAiming;
+    public float[] AimingTimers;
+    public int[] LeanOffsetX;
+    public int[] LeanOffsetY;
+    public ushort[] AttachedCoverEdificeId;
+
+    public bool[] VisionCacheFlags;
+    public float[] VisionTickTimers;
+    public bool[] IsInCombatMode;
+    public float[] AlertTimers;
+
+    public int[] LastGunshotSourceX;
+    public int[] LastGunshotSourceY;
+    public float[] GunshotInvestigateTimer;
+
+    public int[] LastImpactSourceX;
+    public int[] LastImpactSourceY;
+
+    public bool[] HasJustFinishedMoveStep;
+    public SpatialCoord[] LastVisitedSourceCell;
+
+    public int[] LastAttackerIds;
+
+    public float[] SuppressionLevels;
+    public byte[] UnitAlertFlags;
+
+    public const int MaxAiStackDepth = 4;
+
+    public AiCommand[] AiCommandStacks;
+    public int[] AiStackPointers;
+
+    public float[] Irritation;
+    public float[] Fear;
+    public float[] ThreatLevel;
+    public float[] Suppression;
+
+    public UnitBehaviorFlags[] BehaviorFlags;
+    public SpatialCoord[] LastKnownEnemyPosition;
+    public int[] CurrentGroupId;
+
+    public UnitStore(int maxUnits)
+    {
+        if (maxUnits <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxUnits));
+
+        Allocate(maxUnits);
+        InitializeDefaults(maxUnits);
+    }
+
+    private void Allocate(int size)
+    {
+        MovementCooldowns = new float[size];
+        ActiveGridIds = new int[size];
+
+        UnitType = new UnitType[size];
+        Positions = new UnitPosition[size];
+        Sizes = new UnitSize[size];
+        Movement = new UnitMovement[size];
+
+        SquadIds = new int[size];
+
+        HealthMasks = new uint[size];
+        BleedRates = new float[size];
+        BloodLossLevels = new float[size];
+
+        BaseBodyMass = new float[size];
+        DynamicMass = new float[size];
+
+        CurrentTargets = new int[size];
+        WeaponSlot = new Weapon[size];
+
+        HeadArmorSlot = new ArmorConfig[size];
+        TorsoArmorSlot = new ArmorConfig[size];
+        ArmsArmorSlot = new ArmorConfig[size];
+        LegsArmorSlot = new ArmorConfig[size];
+
+        ShotCooldowns = new float[size];
+        RemainingBurstShots = new float[size];
+        IsAiming = new bool[size];
+        AimingTimers = new float[size];
+        LeanOffsetX = new int[size];
+        LeanOffsetY = new int[size];
+        AttachedCoverEdificeId = new ushort[size];
+
+        VisionCacheFlags = new bool[size];
+        VisionTickTimers = new float[size];
+        IsInCombatMode = new bool[size];
+        AlertTimers = new float[size];
+
+        LastGunshotSourceX = new int[size];
+        LastGunshotSourceY = new int[size];
+        GunshotInvestigateTimer = new float[size];
+
+        LastImpactSourceX = new int[size];
+        LastImpactSourceY = new int[size];
+
+        HasJustFinishedMoveStep = new bool[size];
+        LastVisitedSourceCell = new SpatialCoord[size];
+
+        LastAttackerIds = new int[size];
+
+        SuppressionLevels = new float[size];
+        UnitAlertFlags = new byte[size];
+
+        AiCommandStacks = new AiCommand[size * MaxAiStackDepth];
+        AiStackPointers = new int[size];
+
+        Irritation = new float[size];
+        Fear = new float[size];
+        ThreatLevel = new float[size];
+        Suppression = new float[size];
+
+        BehaviorFlags = new UnitBehaviorFlags[size];
+        LastKnownEnemyPosition = new SpatialCoord[size];
+        CurrentGroupId = new int[size];
+    }
+
+    private void InitializeDefaults(int size)
+    {
+        Array.Fill(ActiveGridIds, -1);
+        Array.Fill(CurrentTargets, -1);
+        Array.Fill(SquadIds, -1);
+        Array.Fill(LastAttackerIds, -1);
+        Array.Fill(AiStackPointers, -1);
+        Array.Fill(CurrentGroupId, -1);
+        Array.Fill(BehaviorFlags, UnitBehaviorFlags.Idle);
+    }
+
+    public int CreateUnit(int mx, int my, int mz, byte width, byte height, float mass, float speed, UnitType type, UnitSpatialGrid spatialGrid)
+    {
+        if (spatialGrid == null)
+            throw new ArgumentNullException(nameof(spatialGrid));
+
+        if (Count == Positions.Length)
+            ResizeStorage(Math.Max(Positions.Length * 2, Count + 100));
+
+        int id = Count++;
+        SpatialCoord start = new(mx, my, mz);
+
+        Positions[id] = new UnitPosition(start);
+        Sizes[id] = new UnitSize(width, height);
+
+        Movement[id] = new UnitMovement
+        {
+            SourceCell = start,
+            TargetCell = start,
+            ZLevel = mz,
+            Speed = speed,
+            State = MovementState.Idle
+        };
+
+        UnitType[id] = type;
+        BaseBodyMass[id] = mass;
+        DynamicMass[id] = mass;
+
+        HealthMasks[id] = uint.MaxValue;
+
+        CurrentTargets[id] = -1;
+        SquadIds[id] = -1;
+        LastAttackerIds[id] = -1;
+        CurrentGroupId[id] = -1;
+
+        LastVisitedSourceCell[id] = start;
+        LastKnownEnemyPosition[id] = start;
+
+        BehaviorFlags[id] = UnitBehaviorFlags.Idle;
+        AiStackPointers[id] = -1;
+
+        spatialGrid.Add(start, id);
+
+        return id;
+    }
+
+    private void ResizeStorage(int newSize)
+    {
+        int oldSize = Positions.Length;
+
+        Array.Resize(ref MovementCooldowns, newSize);
+        Array.Resize(ref ActiveGridIds, newSize);
+        Array.Resize(ref UnitType, newSize);
+        Array.Resize(ref Positions, newSize);
+        Array.Resize(ref Sizes, newSize);
+        Array.Resize(ref Movement, newSize);
+        Array.Resize(ref SquadIds, newSize);
+
+        Array.Resize(ref HealthMasks, newSize);
+        Array.Resize(ref BleedRates, newSize);
+        Array.Resize(ref BloodLossLevels, newSize);
+
+        Array.Resize(ref BaseBodyMass, newSize);
+        Array.Resize(ref DynamicMass, newSize);
+
+        Array.Resize(ref CurrentTargets, newSize);
+        Array.Resize(ref WeaponSlot, newSize);
+
+        Array.Resize(ref HeadArmorSlot, newSize);
+        Array.Resize(ref TorsoArmorSlot, newSize);
+        Array.Resize(ref ArmsArmorSlot, newSize);
+        Array.Resize(ref LegsArmorSlot, newSize);
+
+        Array.Resize(ref ShotCooldowns, newSize);
+        Array.Resize(ref RemainingBurstShots, newSize);
+        Array.Resize(ref IsAiming, newSize);
+        Array.Resize(ref AimingTimers, newSize);
+        Array.Resize(ref LeanOffsetX, newSize);
+        Array.Resize(ref LeanOffsetY, newSize);
+        Array.Resize(ref AttachedCoverEdificeId, newSize);
+
+        Array.Resize(ref VisionCacheFlags, newSize);
+        Array.Resize(ref VisionTickTimers, newSize);
+        Array.Resize(ref IsInCombatMode, newSize);
+        Array.Resize(ref AlertTimers, newSize);
+
+        Array.Resize(ref LastGunshotSourceX, newSize);
+        Array.Resize(ref LastGunshotSourceY, newSize);
+        Array.Resize(ref GunshotInvestigateTimer, newSize);
+
+        Array.Resize(ref LastImpactSourceX, newSize);
+        Array.Resize(ref LastImpactSourceY, newSize);
+
+        Array.Resize(ref HasJustFinishedMoveStep, newSize);
+        Array.Resize(ref LastVisitedSourceCell, newSize);
+
+        Array.Resize(ref LastAttackerIds, newSize);
+
+        Array.Resize(ref SuppressionLevels, newSize);
+        Array.Resize(ref UnitAlertFlags, newSize);
+
+        Array.Resize(ref AiStackPointers, newSize);
+        Array.Resize(ref AiCommandStacks, newSize * MaxAiStackDepth);
+
+        Array.Resize(ref Irritation, newSize);
+        Array.Resize(ref Fear, newSize);
+        Array.Resize(ref ThreatLevel, newSize);
+        Array.Resize(ref Suppression, newSize);
+
+        Array.Resize(ref BehaviorFlags, newSize);
+        Array.Resize(ref LastKnownEnemyPosition, newSize);
+        Array.Resize(ref CurrentGroupId, newSize);
+
+        int added = newSize - oldSize;
+
+        Array.Fill(ActiveGridIds, -1, oldSize, added);
+        Array.Fill(CurrentTargets, -1, oldSize, added);
+        Array.Fill(SquadIds, -1, oldSize, added);
+        Array.Fill(LastAttackerIds, -1, oldSize, added);
+        Array.Fill(AiStackPointers, -1, oldSize, added);
+        Array.Fill(CurrentGroupId, -1, oldSize, added);
+        Array.Fill(BehaviorFlags, UnitBehaviorFlags.Idle, oldSize, added);
+    }
+
+    public void UpdateHealthSystems(float deltaTime)
+    {
+        for (int i = 0; i < Count; i++)
+        {
+            if (HealthMasks[i] == 0)
+                continue;
+
+            HealthSystem.UpdateTick(ref HealthMasks[i], ref BleedRates[i], ref BloodLossLevels[i], deltaTime);
+
+            if (HealthMasks[i] != 0)
+                continue;
+
+            CurrentTargets[i] = -1;
+            SquadIds[i] = -1;
+            CurrentGroupId[i] = -1;
+            BehaviorFlags[i] = UnitBehaviorFlags.None;
+        }
+    }
+
+    public void CpuPushCommand(int unitId, AiCommand command)
+    {
+        int count = AiStackPointers[unitId] + 1;
+
+        if (count >= MaxAiStackDepth)
+            return;
+
+        int start = unitId * MaxAiStackDepth;
+
+        for (int i = count; i > 0; i--)
+            AiCommandStacks[start + i] = AiCommandStacks[start + i - 1];
+
+        AiCommandStacks[start] = command;
+        AiStackPointers[unitId] = count;//убрано: count-1
+    }
+
+
+    public void CpuAppendCommand(int unitId, AiCommand command)
+    {
+        int count = AiStackPointers[unitId] + 1;
+
+        if (count >= MaxAiStackDepth)
+            return;
+
+        AiCommandStacks[unitId * MaxAiStackDepth + count] = command;
+        AiStackPointers[unitId] = count;
+    }
+
+    public void CpuClearCommands(int unitId)
+    {
+        int count = AiStackPointers[unitId] + 1;
+
+        if (count <= 0)
+            return;
+
+        int start = unitId * MaxAiStackDepth;
+
+        for (int i = 0; i < count; i++)
+            AiCommandStacks[start + i] = default;
+
+        AiStackPointers[unitId] = -1;
+    }
+    public void CpuPopCommand(int unitId)
+    {
+        int count = AiStackPointers[unitId] + 1;
+
+        if (count <= 0)
+            return;
+
+        int start = unitId * MaxAiStackDepth;
+
+        for (int i = 1; i < count; i++)
+            AiCommandStacks[start + i - 1] = AiCommandStacks[start + i];
+
+        AiCommandStacks[start + count - 1] = default;
+        AiStackPointers[unitId] = count - 2;
+    }
+
+    public ref AiCommand CpuPeekCommand(int unitId)
+    {
+        return ref AiCommandStacks[unitId * MaxAiStackDepth];
+    }
+
+    [Flags]
+    public enum UnitBehaviorFlags : ushort
+    {
+        None = 0,
+        Idle = 1 << 0,
+        Alert = 1 << 1,
+        Suppressed = 1 << 2,
+        Retreating = 1 << 3,
+        Advancing = 1 << 4,
+        Assault = 1 << 5,
+        TakingCover = 1 << 6,
+        HoldingPosition = 1 << 7,
+        Investigating = 1 << 8,
+        FollowingGroupOrder = 1 << 9,
+        IndividualOverride = 1 << 10
+    }
+}using System;
+using System.Collections.Generic;
+using Core.Map;
+using Core.Unit.Components;
+
+namespace Core.Unit
+{
+    public sealed class UnitSpatialGrid
+    {
+        private readonly int[] _cellHeadUnitId;
+
+        // ВАЖНО:
+        // Теперь массив юнитов НЕ readonly, чтобы сетка могла
+        // автоматически расширяться вместе с UnitStore.
+        private int[] _unitNextUnitId;
+
+        private readonly int _layerMicroWidth;
+        private readonly int _layerMicroHeight;
+
+        private readonly List<int> _emptyList =
+            new List<int>(0);
+
+        private readonly List<int> _queryBuffer =
+            new List<int>(16);
+
+        public UnitSpatialGrid(
+            int maxUnits,
+            int regionsX = 16,
+            int regionsY = 16,
+            int subDivision = 3)
+        {
+            if (maxUnits < 1)
+                maxUnits = 1;
+
+            if (regionsX < 1)
+                regionsX = 1;
+
+            if (regionsY < 1)
+                regionsY = 1;
+
+            if (subDivision < 1)
+                subDivision = 1;
+
+            int cellsPerChunkSide =
+                16 * subDivision;
+
+            _layerMicroWidth =
+                regionsX * cellsPerChunkSide;
+
+            _layerMicroHeight =
+                regionsY * cellsPerChunkSide;
+
+            long calculatedSize =
+                (long)_layerMicroWidth *
+                _layerMicroHeight;
+
+            if (calculatedSize <= 0 ||
+                calculatedSize > 50_000_000)
+            {
+                _layerMicroWidth = 768;
+                _layerMicroHeight = 768;
+                calculatedSize = 768L * 768L;
+            }
+
+            int totalMicroCells =
+                (int)calculatedSize;
+
+            _cellHeadUnitId =
+                new int[totalMicroCells];
+
+            _unitNextUnitId =
+                new int[maxUnits];
+
+            Array.Fill(
+                _cellHeadUnitId,
+                -1
+            );
+
+            Array.Fill(
+                _unitNextUnitId,
+                -1
+            );
+        }
+
+        public int Width =>
+            _layerMicroWidth;
+
+        public int Height =>
+            _layerMicroHeight;
+
+        public int MaxUnits =>
+            _unitNextUnitId.Length;
+
+        private bool IsInside(
+            int x,
+            int y)
+        {
+            return
+                x >= 0 &&
+                x < _layerMicroWidth &&
+                y >= 0 &&
+                y < _layerMicroHeight;
+        }
+
+        private bool IsValidUnitId(
+            int unitId)
+        {
+            return
+                unitId >= 0 &&
+                unitId < _unitNextUnitId.Length;
+        }
+
+        private int GetCellIndex(
+            int x,
+            int y)
+        {
+            return
+                y * _layerMicroWidth +
+                x;
+        }
+
+        private void EnsureUnitCapacity(
+            int unitId)
+        {
+            if (unitId < _unitNextUnitId.Length)
+                return;
+
+            int oldSize =
+                _unitNextUnitId.Length;
+
+            int newSize =
+                Math.Max(
+                    unitId + 1,
+                    Math.Max(
+                        16,
+                        oldSize * 2
+                    )
+                );
+
+            Array.Resize(
+                ref _unitNextUnitId,
+                newSize
+            );
+
+            Array.Fill(
+                _unitNextUnitId,
+                -1,
+                oldSize,
+                newSize - oldSize
+            );
+        }
+
+        public void Add(
+            SpatialCoord coord,
+            int unitId)
+        {
+            if (unitId < 0)
+                return;
+
+            if (!IsInside(
+                coord.X,
+                coord.Y))
+            {
+                return;
+            }
+
+            // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ:
+            // UnitStore может автоматически расшириться,
+            // поэтому SpatialGrid тоже обязан расширить массив
+            // под новый ID юнита.
+            EnsureUnitCapacity(unitId);
+
+            int cellIndex =
+                GetCellIndex(
+                    coord.X,
+                    coord.Y
+                );
+
+            // Если этот юнит уже является головой этой клетки,
+            // повторно добавлять его не нужно.
+            if (_cellHeadUnitId[cellIndex] == unitId)
+                return;
+
+            // Если у юнита уже есть ссылка на следующий элемент,
+            // он уже зарегистрирован в какой-то цепочке.
+            if (_unitNextUnitId[unitId] != -1)
+                return;
+
+            _unitNextUnitId[unitId] =
+                _cellHeadUnitId[cellIndex];
+
+            _cellHeadUnitId[cellIndex] =
+                unitId;
+        }
+
+        public void Remove(
+            SpatialCoord coord,
+            int unitId)
+        {
+            if (!IsValidUnitId(unitId))
+                return;
+
+            if (!IsInside(
+                coord.X,
+                coord.Y))
+            {
+                return;
+            }
+
+            int cellIndex =
+                GetCellIndex(
+                    coord.X,
+                    coord.Y
+                );
+
+            int current =
+                _cellHeadUnitId[cellIndex];
+
+            int previous =
+                -1;
+
+            int safetyCounter =
+                0;
+
+            while (current != -1)
+            {
+                if (!IsValidUnitId(current))
+                {
+                    return;
+                }
+
+                if (current == unitId)
+                {
+                    int next =
+                        _unitNextUnitId[current];
+
+                    if (previous == -1)
+                    {
+                        _cellHeadUnitId[cellIndex] =
+                            next;
+                    }
+                    else
+                    {
+                        _unitNextUnitId[previous] =
+                            next;
+                    }
+
+                    _unitNextUnitId[current] =
+                        -1;
+
+                    return;
+                }
+
+                previous =
+                    current;
+
+                current =
+                    _unitNextUnitId[current];
+
+                safetyCounter++;
+
+                if (safetyCounter > 10000)
+                {
+                    Console.WriteLine(
+                        $"[SPATIAL GRID] Remove: обнаружена циклическая ссылка в ({coord.X},{coord.Y})"
+                    );
+
+                    return;
+                }
+            }
+        }
+
+        public void Move(
+            SpatialCoord from,
+            SpatialCoord to,
+            int unitId)
+        {
+            if (from == to)
+                return;
+
+            Remove(
+                from,
+                unitId
+            );
+
+            Add(
+                to,
+                unitId
+            );
+        }
+
+        public IReadOnlyList<int> GetUnitsAt(
+            SpatialCoord coord)
+        {
+            if (!IsInside(
+                coord.X,
+                coord.Y))
+            {
+                return _emptyList;
+            }
+
+            int cellIndex =
+                GetCellIndex(
+                    coord.X,
+                    coord.Y
+                );
+
+            int current =
+                _cellHeadUnitId[cellIndex];
+
+            if (current == -1)
+                return _emptyList;
+
+            _queryBuffer.Clear();
+
+            int safetyCounter =
+                0;
+
+            while (current != -1)
+            {
+                if (!IsValidUnitId(current))
+                    break;
+
+                _queryBuffer.Add(
+                    current
+                );
+
+                current =
+                    _unitNextUnitId[current];
+
+                safetyCounter++;
+
+                if (safetyCounter > 10000)
+                {
+                    Console.WriteLine(
+                        $"[SPATIAL GRID] GetUnitsAt: обнаружена циклическая ссылка в ({coord.X},{coord.Y})"
+                    );
+
+                    break;
+                }
+            }
+
+            return _queryBuffer;
+        }
+
+        public void GetNearby(
+            SpatialCoord center,
+            int cellRadius,
+            List<int> resultList)
+        {
+            if (resultList == null)
+                return;
+
+            if (cellRadius < 0)
+                return;
+
+            int minX =
+                Math.Max(
+                    0,
+                    center.X - cellRadius
+                );
+
+            int maxX =
+                Math.Min(
+                    _layerMicroWidth - 1,
+                    center.X + cellRadius
+                );
+
+            int minY =
+                Math.Max(
+                    0,
+                    center.Y - cellRadius
+                );
+
+            int maxY =
+                Math.Min(
+                    _layerMicroHeight - 1,
+                    center.Y + cellRadius
+                );
+
+            for (int y = minY;
+                 y <= maxY;
+                 y++)
+            {
+                for (int x = minX;
+                     x <= maxX;
+                     x++)
+                {
+                    int cellIndex =
+                        y * _layerMicroWidth +
+                        x;
+
+                    int current =
+                        _cellHeadUnitId[cellIndex];
+
+                    int safetyCounter =
+                        0;
+
+                    while (current != -1)
+                    {
+                        if (!IsValidUnitId(current))
+                            break;
+
+                        resultList.Add(
+                            current
+                        );
+
+                        current =
+                            _unitNextUnitId[current];
+
+                        safetyCounter++;
+
+                        if (safetyCounter > 10000)
+                        {
+                            Console.WriteLine(
+                                $"[SPATIAL GRID] GetNearby: цикл в ({x},{y})"
+                            );
+
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}using Core.Unit;
+using Core.Unit.Components;
+using SFML.Graphics; // Для RenderWindow, CircleShape, Color
+using SFML.System;   // Для Vector2f
+using System;
+
+namespace RimClone.Render
+{
+    public sealed class UnitRenderSystem
+    {
+        // Размер макро-тайла (16) и деление на 3 суб-ячейки
+        private const int TileSize = 16;
+        private const float MicroCellPixelSize = 16f / 3f; // 5.33333f пикселей
+
+        /// <summary>
+        /// Отрисовывает всех живых муравьев и существ по новым сглаженным микро-координатам.
+        /// </summary>
+        /// <summary>
+        /// Отрисовывает всех живых существ и возвращает их общее количество для заголовка окна.
+        /// </summary>
+        public int Draw(RenderWindow window, UnitStore units, CircleShape antShape, int currentZ)
+        {
+            int aliveCount = 0; // Счетчик живых существ в мире
+
+            for (int i = 0; i < units.Count; i++)
+            {
+                // Счетчик считает абсолютно всех живых муравьев в массиве UnitStore
+                if (units.HealthMasks[i] == 0)
+                    continue;
+
+                aliveCount++;
+
+                // А рисуем только тех, кто на текущем этаже камеры (Z)
+                if (units.Positions[i].Z != currentZ)
+                    continue;
+
+                ref var pos = ref units.Positions[i];
+                float bloodLoss = units.BloodLossLevels[i];
+
+                float antScreenX = pos.RenderX * MicroCellPixelSize + (MicroCellPixelSize * 0.5f);
+                float antScreenY = pos.RenderY * MicroCellPixelSize + (MicroCellPixelSize * 0.5f);
+
+                Color unitColor = units.UnitType[i] switch
+                {
+                    UnitType.Human => new Color(100, 180, 240, 255),
+                    UnitType.Animal => new Color(140, 220, 100, 255),
+                    UnitType.Drone => new Color(240, 200, 80, 255),
+                    UnitType.Vehicle => new Color(220, 130, 60, 255),
+                    UnitType.Insect => new Color(230, 80, 80, 255),
+                    _ => new Color(200, 200, 200, 255)
+                };
+
+                if (bloodLoss > 0.1f)
+                {
+                    float healthPercent = Math.Clamp(1.0f - bloodLoss, 0.1f, 1.0f);
+                    unitColor.R = (byte)(unitColor.R * healthPercent);
+                    unitColor.G = (byte)(unitColor.G * healthPercent);
+                    unitColor.B = (byte)(unitColor.B * healthPercent);
+                }
+
+                antShape.FillColor = unitColor;
+                antShape.Position = new Vector2f(antScreenX, antScreenY);
+                window.Draw(antShape);
+            }
+
+            return aliveCount; // Возвращаем честную цифру
+        }
+
+    }
+}
+using System;
+using Core.Map;
+using Core.Structs;
+using Core.Items;
+using SFML.Graphics;
+using SFML.System;
+
+namespace RimClone.Render
+{
+    public sealed class MapRenderSystem
+    {
+        private readonly RectangleShape _tileShape;
+
+        public MapRenderSystem(float microCellPixelSize)
+        {
+            // Один универсальный кубик для всех типов тайлов
+            _tileShape = new RectangleShape();
+        }
+
+        public void Draw(RenderWindow window, WorldMap worldMap, EdificeStore edificeStore, View cameraView, float regionPixelSize, float microCellPixelSize, float zoomLevel, bool showGrid)
+        {
+            int currentZ = worldMap.CurrentViewZ;
+            MapLayer currentLayer = worldMap.GetLayer(currentZ);
+            if (currentLayer == null) return;
+
+            Vector2f center = cameraView.Center;
+            Vector2f size = cameraView.Size;
+
+            float screenMinX = center.X - (size.X * 0.5f);
+            float screenMaxX = center.X + (size.X * 0.5f);
+            float screenMinY = center.Y - (size.Y * 0.5f);
+            float screenMaxY = center.Y + (size.Y * 0.5f);
+
+            // ========================================================
+            // ИСПРАВЛЕНО: КАСКАДЫ ДЛЯ СВЕРХБЫСТРОГО FLAT-РЕНДЕРА
+            // ========================================================
+            int lodStep = 1;
+            bool drawDetails = true;
+
+            // Упрощение включается строго на огромном расстоянии
+            if (zoomLevel >= 4.5f) { lodStep = 3; drawDetails = false; }
+            else if (zoomLevel >= 2.5f) { lodStep = 2; drawDetails = false; }
+
+            // Настраиваем размер сплошной плитки. Небольшой нахлёст +0.35f 
+            // нужен только для того, чтобы залить микроскопические щели сглаживания окна SFML.
+            float currentTilePixelSize = microCellPixelSize * lodStep;
+            float safeSize = MathF.Ceiling(currentTilePixelSize) + 0.35f;
+            _tileShape.Size = new Vector2f(safeSize, safeSize);
+
+            // Отладочная сетка по кнопке G (Очень тусклая, чисто для тестов ячеек)
+            if (showGrid)
+            {
+                _tileShape.OutlineColor = new Color(50, 55, 70, 90);
+                _tileShape.OutlineThickness = -0.5f;
+            }
+            else
+            {
+                _tileShape.OutlineThickness = 0f; // В обычном режиме обводка СТРОГО равна нулю везде!
+            }
+
+            int maxCoord = (16 * 48) - 1;
+            int minCellX = Math.Max(0, (int)(screenMinX / microCellPixelSize) - lodStep);
+            int maxCellX = Math.Min(maxCoord, (int)(screenMaxX / microCellPixelSize) + lodStep);
+            int minCellY = Math.Max(0, (int)(screenMinY / microCellPixelSize) - lodStep);
+            int maxCellY = Math.Min(maxCoord, (int)(screenMaxY / microCellPixelSize) + lodStep);
+
+            minCellX = (minCellX / lodStep) * lodStep;
+            minCellY = (minCellY / lodStep) * lodStep;
+
+            // СВЕРХБЫСТРЫЙ ОДНОПРОХОДНЫЙ ЦИКЛ ПО МАТРИЦЕ КАРТЫ
+            for (int y = minCellY; y <= maxCellY; y += lodStep)
+            {
+                for (int x = minCellX; x <= maxCellX; x += lodStep)
+                {
+                    ref MicroCell cell = ref currentLayer.GetMicroCell(x, y);
+
+                    float px = MathF.Floor(x * microCellPixelSize);
+                    float py = MathF.Floor(y * microCellPixelSize);
+
+                    // ========================================================
+                    // А. МОНОЛИТНАЯ FLAT-ОТРИСОВКА ПОСТРОЕК (СТЕНЫ И МЕШКИ)
+                    // ========================================================
+                    if (cell.EdificeId > 0 && edificeStore != null)
+                    {
+                        ushort id = cell.EdificeId;
+                        if (id < edificeStore.Instances.Length)
+                        {
+                            var instance = edificeStore.Instances[id];
+                            var config = edificeStore.Configs[instance.ConfigId];
+
+                            if (config != null)
+                            {
+                                Color blockColor = new Color(85, 85, 90); // Дефолтный серый
+
+                                if (config.Type == EdificeType.Wall)
+                                {
+                                    // Бетонные стены кибиток: Чистый матово-белый flat-монолит!
+                                    // Мешки с песком (баррикады): Однотонный темно-серый цвет заграждений
+                                    blockColor = config.CoverEffectiveness >= 1.0f
+                                        ? new Color(225, 225, 230)
+                                        : new Color(120, 125, 130);
+                                }
+                                else if (config.Type == EdificeType.Generator)
+                                {
+                                    blockColor = new Color(65, 65, 70); // Индустриальный генератор
+                                }
+
+                                // Принудительно выключаем рамки, заливаем чистым цветом
+                                _tileShape.FillColor = blockColor;
+                                _tileShape.Position = new Vector2f(px, py);
+                                window.Draw(_tileShape);
+
+                                continue; // Стену залили, пол под ней не нужен
+                            }
+                        }
+                    }
+
+                    // ========================================================
+                    // Б. БЕСШОВНАЯ FLAT-ОТРИСОВКА ПОЛОВ
+                    // ========================================================
+                    if (cell.FloorId == 2)
+                    {
+                        _tileShape.FillColor = new Color(42, 44, 46); // Графитовый асфальт проспекта
+                    }
+                    else if (cell.FloorId == 1)
+                    {
+                        // Пол базы: глубокий темный сине-фиолетовый настил
+                        _tileShape.FillColor = new Color(38, 44, 65);
+                    }
+                    else
+                    {
+                        _tileShape.FillColor = new Color(20, 21, 24); // Глубокий фоновый угольный монолит пустоты
+                    }
+
+                    _tileShape.Position = new Vector2f(px, py);
+                    window.Draw(_tileShape);
+
+                    // ========================================================
+                    // В. ТАКТИЧЕСКАЯ КРОВЬ (БИТ 1)
+                    // ========================================================
+                    if (drawDetails && (cell.Flags & 0x0002) != 0)
+                    {
+                        RectangleShape bloodSplatter = new RectangleShape(new Vector2f(microCellPixelSize + 0.1f, microCellPixelSize + 0.1f));
+                        // Сочные контрастные flat-пятна крови поверх темного монолита пола
+                        bloodSplatter.FillColor = new Color(185, 15, 25, 220);
+                        bloodSplatter.Position = new Vector2f(px, py);
+                        window.Draw(bloodSplatter);
+                    }
+                }
+            }
+        }
+    }
+}
+using System;
+using SFML.Graphics;
+using SFML.System;
+using SFML.Window;
+
+namespace RimClone.Render
+{
+    public sealed class GameCamera
+    {
+        private readonly View _view;
+        private readonly float _moveSpeed;
+        private float _zoomLevel = 1.0f;
+        // Внутри GameCamera.cs добавляем свойство:
+        public float ZoomLevel => _zoomLevel;
+
+        // Целевая позиция, к которой камера ПЛАВНО стремится (Interpolation Target)
+        private Vector2f _targetPosition;
+
+        public View View => _view;
+
+        public GameCamera(Vector2f startPosition, Vector2f windowSize, float moveSpeed = 400f)
+        {
+            _view = new View(startPosition, windowSize);
+            _targetPosition = startPosition;
+            _moveSpeed = moveSpeed;
+        }
+
+        /// <summary>
+        /// Центрирует камеру прямо на вертикальный проспект города, чтобы он не улетал за край экрана.
+        /// </summary>
+        public void CenterOnStreet(float microCellPixelSize)
+        {
+            // Центр нашей дороги находится на 50-й микро-ячейке. 
+            // Считаем точную пиксельную координату центра улицы!
+            float streetCenterX = 50f * microCellPixelSize;
+            float streetCenterY = 60f * microCellPixelSize; // Встаем чуть ниже начала блокпоста
+
+            _targetPosition = new Vector2f(streetCenterX, streetCenterY);
+            _view.Center = _targetPosition;
+        }
+
+        public void HandleZoom(float delta)
+        {
+            if (delta > 0)
+            {
+                // Приближение
+                _zoomLevel *= 0.9f;
+                _view.Zoom(0.9f);
+            }
+            else if (delta < 0)
+            {
+                // Отдаление
+                _zoomLevel *= 1.1f;
+                _view.Zoom(1.1f);
+            }
+
+            // Зажимаем масштаб в разумных пределах, чтобы не сломать рендерер
+            _zoomLevel = Math.Clamp(_zoomLevel, 0.2f, 4.0f);
+        }
+
+        /// <summary>
+        /// Сверхплавное обновление позиции камеры с физической интерполяцией.
+        /// </summary>
+        public void UpdateInput(float deltaTime)
+        {
+            if (deltaTime <= 0f) return;
+
+            Vector2f moveDirection = new Vector2f(0f, 0f);
+
+            // Считываем клавиатуру (Поддержка WASD и стрелочек)
+            if (Keyboard.IsKeyPressed(Keyboard.Key.W) || Keyboard.IsKeyPressed(Keyboard.Key.Up)) moveDirection.Y -= 1f;
+            if (Keyboard.IsKeyPressed(Keyboard.Key.S) || Keyboard.IsKeyPressed(Keyboard.Key.Down)) moveDirection.Y += 1f;
+            if (Keyboard.IsKeyPressed(Keyboard.Key.A) || Keyboard.IsKeyPressed(Keyboard.Key.Left)) moveDirection.X -= 1f;
+            if (Keyboard.IsKeyPressed(Keyboard.Key.D) || Keyboard.IsKeyPressed(Keyboard.Key.Right)) moveDirection.X += 1f;
+
+            // 1. Нормализуем вектор, чтобы по диагонали камера не летела в 1.4 раза быстрее
+            float length = MathF.Sqrt(moveDirection.X * moveDirection.X + moveDirection.Y * moveDirection.Y);
+            if (length > 0f)
+            {
+                moveDirection.X /= length;
+                moveDirection.Y /= length;
+
+                // Скорость движения плавно масштабируется под уровень приближения (Зума)
+                float speedFactor = _moveSpeed * _zoomLevel;
+
+                // Сдвигаем ЦЕЛЕВУЮ точку, куда камера хочет прилететь
+                _targetPosition.X += moveDirection.X * speedFactor * deltaTime;
+                _targetPosition.Y += moveDirection.Y * speedFactor * deltaTime;
+            }
+
+            // 2. СВЕРХПЛАВНЫЙ ФИЗИЧЕСКИЙ LERP (Сглаживание микро-дерганий кадра)
+            // Вместо мгновенного прыжка, камера плавно "плывет" к целевой точке.
+            // Коэффициент 15f задает жесткость вязкости камеры (чем выше число, тем быстрее отзывчивость)
+            Vector2f currentCenter = _view.Center;
+
+            float lerpFactor = 15f * deltaTime;
+            if (lerpFactor > 1f) lerpFactor = 1f; // Защита от сверхбольшого deltaTime
+
+            float newX = currentCenter.X + (_targetPosition.X - currentCenter.X) * lerpFactor;
+            float newY = currentCenter.Y + (_targetPosition.Y - currentCenter.Y) * lerpFactor;
+
+            _view.Center = new Vector2f(newX, newY);
+        }
+    }
+}
+using Core.Items;
+using Core.Map;
+using Core.Unit.Components;
+using Core.Unit.Components.AiComponents;
+
+namespace Core.Unit.Systems;
+
+public interface IAiTask
+{
+    AiOpCode OpCode { get; }
+
+    void Update(UnitStore units, UnitSpatialGrid spatialGrid, WorldMap map, EdificeStore edifices, int unitId, ref AiCommand command, float deltaTime);
+    void Cancel(int unitId);
+}using Core.AI;
+using Core.Items;
+using Core.Map;
+using Core.Structs;
+using Core.Unit.Components;
+using Core.Unit.Components.AiComponents;
+using System;
+
+namespace Core.Unit.Systems;
+
+public sealed class MoveTask : IAiTask
+{
+    private readonly PathfindingSystem _pathfinding;
+    private readonly UnitMovementSystem _movement;
+
+    private int[] _routeIds = new int[64];
+    private int[] _routeIndices = new int[64];
+
+    /*
+     * Цель текущего MoveToTarget.
+     */
+    private SpatialCoord[] _targets =
+        new SpatialCoord[64];
+
+    /*
+     * Перестроение маршрута запрошено.
+     *
+     * true:
+     * старый маршрут больше не используем,
+     * как только его A* закончит — строим новый
+     * от текущей позиции.
+     */
+    private bool[] _repathPending =
+        new bool[64];
+
+    public AiOpCode OpCode =>
+        AiOpCode.MoveToTarget;
+
+    public MoveTask(
+        PathfindingSystem pathfinding,
+        UnitMovementSystem movement)
+    {
+        _pathfinding = pathfinding;
+        _movement = movement;
+
+        _movement.MoveInterrupted += Interrupt;
+
+        ClearRoutes();
+    }
+
+    public void Update(
+        UnitStore units,
+        UnitSpatialGrid spatialGrid,
+        WorldMap map,
+        EdificeStore edifices,
+        int unitId,
+        ref AiCommand command,
+        float deltaTime)
+    {
+        EnsureCapacity(unitId);
+
+        ref UnitPosition position =
+            ref units.Positions[unitId];
+
+        ref UnitMovement movement =
+            ref units.Movement[unitId];
+
+        SpatialCoord target =
+            new SpatialCoord(
+                command.TargetX,
+                command.TargetY,
+                command.TargetZ);
+
+        _targets[unitId] = target;
+
+        /*
+         * Юнит уже пришёл.
+         */
+        if (position.Spatial == target)
+        {
+            ClearRoute(unitId);
+
+            units.CpuPopCommand(unitId);
+
+            return;
+        }
+
+        /*
+         * Сейчас выполняется физический шаг.
+         */
+        if (movement.State ==
+            MovementState.Moving)
+        {
+            return;
+        }
+
+        /*
+         * После блокировки выдерживаем cooldown.
+         */
+        if (units.MovementCooldowns[unitId] > 0f)
+        {
+            return;
+        }
+
+        int routeId =
+            _routeIds[unitId];
+
+        /*
+         * Нет RouteTask.
+         *
+         * Строим первый маршрут.
+         */
+        if (routeId < 0)
+        {
+            RequestNewRoute(
+                units,
+                map,
+                unitId,
+                target);
+
+            return;
+        }
+
+        /*
+         * Нам нужно перестроение.
+         *
+         * Старый RouteTask не удаляем.
+         *
+         * Ждём, пока его текущий A*
+         * закончит работу.
+         */
+        if (_repathPending[unitId])
+        {
+            PathRequestState repathState =
+                _pathfinding.GetState(
+                    routeId);
+
+            /*
+             * Старый A* ещё работает.
+             *
+             * Ничего не делаем.
+             */
+            if (repathState ==
+                    PathRequestState.Pending ||
+                repathState ==
+                    PathRequestState.Processing)
+            {
+                return;
+            }
+
+            /*
+             * Старый запрос уже завершился.
+             *
+             * Теперь можно переиспользовать
+             * тот же RouteId для нового A*.
+             */
+            if (repathState ==
+                PathRequestState.Completed ||
+                repathState ==
+                PathRequestState.Failed)
+            {
+                MapLayer layer =
+                    map.GetLayer(
+                        position.Spatial.Z);
+
+                if (layer == null)
+                    return;
+
+                bool queued =
+                    _pathfinding.RequeuePath(
+                        routeId,
+                        position.Spatial,
+                        target,
+                        PathPriority.Normal);
+
+                if (!queued)
+                    return;
+
+                _repathPending[unitId] =
+                    false;
+
+                _routeIndices[unitId] =
+                    0;
+
+                return;
+            }
+
+            /*
+             * Если RouteTask был отменён/потерян,
+             * создаём новую.
+             */
+            ClearRouteWithoutRemoving(unitId);
+
+            RequestNewRoute(
+                units,
+                map,
+                unitId,
+                target);
+
+            return;
+        }
+
+        PathRequestState state =
+            _pathfinding.GetState(
+                routeId);
+
+        /*
+         * A* ещё не закончил.
+         */
+        if (state ==
+                PathRequestState.Pending ||
+            state ==
+                PathRequestState.Processing)
+        {
+            return;
+        }
+
+        /*
+         * A* не смог построить маршрут.
+         */
+        if (state !=
+            PathRequestState.Completed)
+        {
+            ClearRoute(unitId);
+            return;
+        }
+
+        if (!_pathfinding.TryGetRoute(
+                routeId,
+                out SpatialCoord[]? path,
+                out int length))
+        {
+            ClearRoute(unitId);
+            return;
+        }
+
+        int index =
+            _routeIndices[unitId];
+
+        /*
+         * Нулевая клетка маршрута —
+         * текущая позиция юнита.
+         */
+        if (index == 0 &&
+            length > 0 &&
+            path[0] == position.Spatial)
+        {
+            index = 1;
+        }
+
+        /*
+         * Маршрут закончился.
+         */
+        if (index >= length)
+        {
+            ClearRoute(unitId);
+            return;
+        }
+
+        /*
+         * Пытаемся пройти следующий тайл.
+         *
+         * При блокировке UnitMovementSystem
+         * вызовет:
+         *
+         * MoveInterrupted(unitId)
+         */
+        if (!_movement.TryStartMove(
+                units,
+                unitId,
+                path[index],
+                spatialGrid,
+                map))
+        {
+            return;
+        }
+
+        _routeIndices[unitId] =
+            index + 1;
+    }
+
+    public void Cancel(int unitId)
+    {
+        ClearRoute(unitId);
+    }
+
+    /*
+     * Движение было прервано.
+     *
+     * НИЧЕГО НЕ УДАЛЯЕМ.
+     *
+     * Просто говорим:
+     * "когда текущий A* закончит,
+     *  перестрой этот же RouteTask
+     *  от текущей позиции".
+     */
+    private void Interrupt(int unitId)
+    {
+        EnsureCapacity(unitId);
+
+        int routeId =
+            _routeIds[unitId];
+
+        if (routeId < 0)
+            return;
+
+        _repathPending[unitId] = true;
+        _routeIndices[unitId] = 0;
+    }
+
+    private void RequestNewRoute(
+        UnitStore units,
+        WorldMap map,
+        int unitId,
+        SpatialCoord target)
+    {
+        ref UnitPosition position =
+            ref units.Positions[unitId];
+
+        MapLayer layer =
+            map.GetLayer(
+                position.Spatial.Z);
+
+        if (layer == null)
+            return;
+
+        int routeId =
+            _pathfinding.RequestPath(
+                layer,
+                position.Spatial,
+                target,
+                PathPriority.Normal);
+
+        if (routeId < 0)
+            return;
+
+        _routeIds[unitId] =
+            routeId;
+
+        _routeIndices[unitId] =
+            0;
+
+        _repathPending[unitId] =
+            false;
+    }
+
+    /*
+     * Полностью убрать связь unit -> route.
+     */
+    private void ClearRoute(
+        int unitId)
+    {
+        EnsureCapacity(unitId);
+
+        int routeId =
+            _routeIds[unitId];
+
+        if (routeId >= 0)
+        {
+            _pathfinding.Remove(
+                routeId);
+        }
+
+        ClearRouteWithoutRemoving(
+            unitId);
+    }
+
+    /*
+     * Убрать локальное состояние,
+     * но не трогать RouteTask.
+     */
+    private void ClearRouteWithoutRemoving(
+        int unitId)
+    {
+        _routeIds[unitId] = -1;
+        _routeIndices[unitId] = 0;
+        _repathPending[unitId] = false;
+    }
+
+    private void ClearRoutes()
+    {
+        for (int i = 0;
+             i < _routeIds.Length;
+             i++)
+        {
+            _routeIds[i] = -1;
+            _routeIndices[i] = 0;
+            _repathPending[i] = false;
+        }
+    }
+
+    private void EnsureCapacity(
+        int unitId)
+    {
+        if (unitId < _routeIds.Length)
+            return;
+
+        int oldSize =
+            _routeIds.Length;
+
+        int newSize =
+            oldSize;
+
+        while (newSize <= unitId)
+            newSize *= 2;
+
+        Array.Resize(
+            ref _routeIds,
+            newSize);
+
+        Array.Resize(
+            ref _routeIndices,
+            newSize);
+
+        Array.Resize(
+            ref _targets,
+            newSize);
+
+        Array.Resize(
+            ref _repathPending,
+            newSize);
+
+        /*
+         * Новые элементы RouteId должны быть -1,
+         * потому что 0 — валидный RouteId.
+         */
+        for (int i = oldSize;
+             i < newSize;
+             i++)
+        {
+            _routeIds[i] = -1;
+            _routeIndices[i] = 0;
+            _repathPending[i] = false;
+        }
+    }
+}using System;
+
+namespace Core.Unit.Components
+{
+    /// <summary>
+    /// Монолитная глобальная координата микро-ячейки в мире.
+    /// Базовая единица пространства для всех муравьев и микро-объектов.
+    /// </summary>
+    public struct SpatialCoord : IEquatable<SpatialCoord>
+    {
+        // Глобальная микро-координата X в мире
+        public int X;
+
+        // Глобальная микро-координата Y в мире
+        public int Y;
+
+        // Номер этажа / Z-уровень карты
+        public int Z;
+
+        public SpatialCoord(int x, int y, int z)
+        {
+            X = x;
+            Y = y;
+            Z = z;
+        }
+
+        // Переопределяем методы сравнения, чтобы UnitSpatialGrid работал со скоростью молнии
+        public bool Equals(SpatialCoord other)
+        {
+            return X == other.X && Y == other.Y && Z == other.Z;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is SpatialCoord other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            // Высокопроизводительный хэш-код без аллокаций (быстрое перемешивание битов)
+            return HashCode.Combine(X, Y, Z);
+        }
+
+        public static bool operator ==(SpatialCoord left, SpatialCoord right) => left.Equals(right);
+        public static bool operator !=(SpatialCoord left, SpatialCoord right) => !left.Equals(right);
+
+        public override string ToString()
+        {
+            return $"MicroCell(X:{X}, Y:{Y}, Z:{Z})";
+        }
+    }
+}
+using Core.Items;
+using Core.Map;
+using Core.Structs;
+using Core.Unit.Components;
+using System;
+using System.Collections.Generic;
+
+namespace Core.Unit.Systems
+{
+    public sealed class UnitCombatSystem
+    {
+        private readonly List<int> _nearbyCandidates =
+            new List<int>(32);
+
+        private readonly UnitDamageSystem _damageSystem =
+            new UnitDamageSystem();
+
+        // ============================================================
+        // AI SCAN CACHE
+        // ============================================================
+
+        private float[] _targetScanTimers =
+            Array.Empty<float>();
+
+        private float[] _targetLosTimers =
+            Array.Empty<float>();
+
+        private const float TargetScanInterval = 0.20f;
+        private const float TargetLosInterval = 0.10f;
+
+        // Очень важно:
+        // Не даём обычному AI каждый кадр сканировать квадрат 300x300.
+        // Это именно радиус поиска цели, а не радиус самого оружия.
+        private const int MaxTargetScanRadius = 60;
+
+        private const float MeleeThreatRadius = 2.5f;
+
+        public void Update(
+            UnitStore units,
+            UnitSpatialGrid spatialGrid,
+            WorldMap map,
+            EdificeStore edificeStore,
+            CombatEffectSystem effectSystem,
+            float microCellPixelSize,
+            float deltaTime)
+        {
+            if (deltaTime <= 0f)
+                return;
+
+            EnsureStorage(
+                units.Count
+            );
+
+            // ========================================================
+            // 1. ДЕШЕВЫЕ ТАЙМЕРЫ / ОТДАЧА
+            // ========================================================
+
+            for (int i = 0;
+                 i < units.Count;
+                 i++)
+            {
+                if (units.HealthMasks[i] == 0)
+                    continue;
+
+                if (_targetScanTimers[i] > 0f)
+                {
+                    _targetScanTimers[i] -= deltaTime;
+
+                    if (_targetScanTimers[i] < 0f)
+                        _targetScanTimers[i] = 0f;
+                }
+
+                if (_targetLosTimers[i] > 0f)
+                {
+                    _targetLosTimers[i] -= deltaTime;
+
+                    if (_targetLosTimers[i] < 0f)
+                        _targetLosTimers[i] = 0f;
+                }
+
+                if (units.ShotCooldowns[i] > 0f)
+                {
+                    units.ShotCooldowns[i] -= deltaTime;
+
+                    if (units.ShotCooldowns[i] < 0f)
+                        units.ShotCooldowns[i] = 0f;
+                }
+
+                if (units.WeaponSlot[i] is Weapon activeWeapon)
+                {
+                    if (activeWeapon.currentRecoil > 0f)
+                    {
+                        activeWeapon.currentRecoil -=
+                            activeWeapon.BaseStats.RecoilRecovery *
+                            deltaTime;
+
+                        if (activeWeapon.currentRecoil < 0f)
+                            activeWeapon.currentRecoil = 0f;
+                    }
+                }
+            }
+
+            // ========================================================
+            // 2. БОЕВОЙ ИИ
+            // ========================================================
+
+            ExecuteRimWorldCombat(
+                units,
+                spatialGrid,
+                map,
+                edificeStore,
+                effectSystem,
+                microCellPixelSize,
+                deltaTime
+            );
+        }
+
+        private void ExecuteRimWorldCombat(
+            UnitStore units,
+            UnitSpatialGrid spatialGrid,
+            WorldMap map,
+            EdificeStore edificeStore,
+            CombatEffectSystem effectSystem,
+            float microCellPixelSize,
+            float deltaTime)
+        {
+            for (int i = 0;
+                 i < units.Count;
+                 i++)
+            {
+                if (units.HealthMasks[i] == 0)
+                    continue;
+
+                ref var posA =
+                    ref units.Positions[i];
+
+                ref var moveA =
+                    ref units.Movement[i];
+
+                int currentTargetId =
+                    units.CurrentTargets[i];
+
+                int currentAttackRange =
+                    GetAttackRange(
+                        units,
+                        i
+                    );
+
+                // ====================================================
+                // 1. ПРОВЕРЯЕМ СУЩЕСТВУЮЩУЮ ЦЕЛЬ
+                // ====================================================
+
+                if (currentTargetId != -1)
+                {
+                    bool targetValid =
+                        currentTargetId >= 0 &&
+                        currentTargetId < units.Count &&
+                        units.HealthMasks[currentTargetId] > 0;
+
+                    if (!targetValid)
+                    {
+                        units.CurrentTargets[i] = -1;
+                        currentTargetId = -1;
+                    }
+                    else
+                    {
+                        ref var targetPos =
+                            ref units.Positions[currentTargetId];
+
+                        if (targetPos.Spatial.Z != posA.Spatial.Z)
+                        {
+                            units.CurrentTargets[i] = -1;
+                            currentTargetId = -1;
+                        }
+                        else
+                        {
+                            float dx =
+                                posA.X -
+                                targetPos.X;
+
+                            float dy =
+                                posA.Y -
+                                targetPos.Y;
+
+                            float distance =
+                                MathF.Sqrt(
+                                    dx * dx +
+                                    dy * dy
+                                );
+
+                            int visionRadius =
+                                Math.Min(
+                                    currentAttackRange + 5,
+                                    MaxTargetScanRadius
+                                );
+
+                            if (distance > visionRadius)
+                            {
+                                units.CurrentTargets[i] = -1;
+                                currentTargetId = -1;
+                            }
+                            else if (_targetLosTimers[i] <= 0f)
+                            {
+                                bool visible =
+                                    CombatPath.VisibilityChecker.HasLineOfSight(
+                                        map,
+                                        edificeStore,
+                                        posA.X,
+                                        posA.Y,
+                                        targetPos.X,
+                                        targetPos.Y,
+                                        posA.Z
+                                    );
+
+                                _targetLosTimers[i] =
+                                    TargetLosInterval;
+
+                                if (!visible)
+                                {
+                                    units.CurrentTargets[i] = -1;
+                                    currentTargetId = -1;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ====================================================
+                // 2. ИЩЕМ НОВУЮ ЦЕЛЬ ТОЛЬКО КОГДА НУЖНО
+                // ====================================================
+
+                if (currentTargetId == -1 &&
+                    _targetScanTimers[i] <= 0f)
+                {
+                    currentTargetId =
+                        FindClosestEnemy(
+                            units,
+                            spatialGrid,
+                            map,
+                            edificeStore,
+                            i,
+                            currentAttackRange
+                        );
+
+                    units.CurrentTargets[i] =
+                        currentTargetId;
+
+                    // ==================================================
+                    // РАВНОМЕРНО РАСКИДЫВАЕМ НАГРУЗКУ
+                    //
+                    // Каждый юнит получает немного другой момент
+                    // следующего сканирования.
+                    // ==================================================
+
+                    _targetScanTimers[i] =
+                        TargetScanInterval *
+                        GetScanJitter(i);
+                }
+
+                // ====================================================
+                // 3. ЕСЛИ ЦЕЛИ НЕТ — СТРЕЛЬБЫ НЕТ
+                // ====================================================
+
+                int finalTarget =
+                    units.CurrentTargets[i];
+
+                if (finalTarget < 0 ||
+                    finalTarget >= units.Count)
+                {
+                    ResetAiming(
+                        units,
+                        i,
+                        ref posA
+                    );
+
+                    continue;
+                }
+
+                if (units.HealthMasks[finalTarget] == 0)
+                {
+                    units.CurrentTargets[i] = -1;
+
+                    ResetAiming(
+                        units,
+                        i,
+                        ref posA
+                    );
+
+                    continue;
+                }
+
+                ref var targetPosFinal =
+                    ref units.Positions[finalTarget];
+
+                float fdx =
+                    posA.X -
+                    targetPosFinal.X;
+
+                float fdy =
+                    posA.Y -
+                    targetPosFinal.Y;
+
+                float distanceInTiles =
+                    MathF.Sqrt(
+                        fdx * fdx +
+                        fdy * fdy
+                    );
+
+                if (distanceInTiles >
+                    currentAttackRange)
+                {
+                    continue;
+                }
+
+                // ====================================================
+                // 4. BURST
+                // ====================================================
+
+                if (units.RemainingBurstShots[i] > 0)
+                {
+                    if (units.ShotCooldowns[i] <= 0f)
+                    {
+                        PerformAttack(
+                            units,
+                            i,
+                            finalTarget,
+                            map,
+                            edificeStore,
+                            spatialGrid,
+                            effectSystem,
+                            microCellPixelSize
+                        );
+
+                        units.RemainingBurstShots[i]--;
+
+                        if (units.RemainingBurstShots[i] <= 0)
+                        {
+                            units.IsAiming[i] = false;
+
+                            posA.RenderX =
+                                posA.X;
+
+                            posA.RenderY =
+                                posA.Y;
+
+                            units.ShotCooldowns[i] =
+                                units.WeaponSlot[i] != null
+                                    ? units.WeaponSlot[i].BaseStats.FireRate
+                                    : 1.5f;
+                        }
+                        else
+                        {
+                            units.ShotCooldowns[i] =
+                                0.1f;
+                        }
+                    }
+
+                    continue;
+                }
+
+                // ====================================================
+                // 5. НАЧАЛО ПРИЦЕЛИВАНИЯ
+                // ====================================================
+
+                bool canShoot =
+                    units.WeaponSlot[i] != null;
+
+                if (!units.IsAiming[i] &&
+                    units.ShotCooldowns[i] <= 0f &&
+                    canShoot)
+                {
+                    units.IsAiming[i] =
+                        true;
+
+                    units.AimingTimers[i] =
+                        units.WeaponSlot[i]
+                            .BaseStats
+                            .RecoilRecovery *
+                        1.5f;
+
+                    if (moveA.State ==
+                        MovementState.InCover)
+                    {
+                        units.LeanOffsetX[i] =
+                            Math.Sign(
+                                targetPosFinal.X -
+                                posA.X
+                            );
+
+                        units.LeanOffsetY[i] =
+                            Math.Sign(
+                                targetPosFinal.Y -
+                                posA.Y
+                            );
+                    }
+
+                    continue;
+                }
+
+                // ====================================================
+                // 6. ПРИЦЕЛИВАНИЕ
+                // ====================================================
+
+                if (units.IsAiming[i] &&
+                    units.RemainingBurstShots[i] <= 0)
+                {
+                    units.AimingTimers[i] -=
+                        deltaTime;
+
+                    if (moveA.State ==
+                        MovementState.InCover)
+                    {
+                        posA.RenderX =
+                            posA.X +
+                            units.LeanOffsetX[i] *
+                            0.4f;
+
+                        posA.RenderY =
+                            posA.Y +
+                            units.LeanOffsetY[i] *
+                            0.4f;
+                    }
+
+                    if (units.AimingTimers[i] <= 0f)
+                    {
+                        int burstCount =
+                            1;
+
+                        if (units.WeaponSlot[i] != null)
+                        {
+                            burstCount =
+                                units.WeaponSlot[i]
+                                    .GetBurstCountForDistance(
+                                        distanceInTiles
+                                    );
+                        }
+
+                        units.RemainingBurstShots[i] =
+                            burstCount;
+
+                        units.AimingTimers[i] =
+                            0f;
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // ПОИСК БЛИЖАЙШЕГО ВРАГА
+        // ============================================================
+
+        private int FindClosestEnemy(
+            UnitStore units,
+            UnitSpatialGrid spatialGrid,
+            WorldMap map,
+            EdificeStore edificeStore,
+            int unitId,
+            int attackRange)
+        {
+            ref var posA =
+                ref units.Positions[unitId];
+
+            int visionRadius =
+                Math.Min(
+                    attackRange + 5,
+                    MaxTargetScanRadius
+                );
+
+            _nearbyCandidates.Clear();
+
+            spatialGrid.GetNearby(
+                posA.Spatial,
+                visionRadius,
+                _nearbyCandidates
+            );
+
+            int bestTarget =
+                -1;
+
+            float bestDistance =
+                float.MaxValue;
+
+            for (int idx = 0;
+                 idx < _nearbyCandidates.Count;
+                 idx++)
+            {
+                int candidateId =
+                    _nearbyCandidates[idx];
+
+                if (candidateId == unitId)
+                    continue;
+
+                if (candidateId < 0 ||
+                    candidateId >= units.Count)
+                {
+                    continue;
+                }
+
+                if (units.HealthMasks[candidateId] == 0)
+                    continue;
+
+                if (units.UnitType[candidateId] ==
+                    units.UnitType[unitId])
+                {
+                    continue;
+                }
+
+                ref var posB =
+                    ref units.Positions[candidateId];
+
+                if (posA.Spatial.Z !=
+                    posB.Spatial.Z)
+                {
+                    continue;
+                }
+
+                float dx =
+                    posA.X -
+                    posB.X;
+
+                float dy =
+                    posA.Y -
+                    posB.Y;
+
+                float distanceSqr =
+                    dx * dx +
+                    dy * dy;
+
+                if (distanceSqr >
+                    attackRange * attackRange)
+                {
+                    continue;
+                }
+
+                if (distanceSqr <
+                    MeleeThreatRadius *
+                    MeleeThreatRadius)
+                {
+                    if (!CombatPath.VisibilityChecker.HasLineOfSight(
+                        map,
+                        edificeStore,
+                        posA.X,
+                        posA.Y,
+                        posB.X,
+                        posB.Y,
+                        posA.Z))
+                    {
+                        continue;
+                    }
+
+                    if (distanceSqr <
+                        bestDistance)
+                    {
+                        bestDistance =
+                            distanceSqr;
+
+                        bestTarget =
+                            candidateId;
+                    }
+
+                    continue;
+                }
+
+                // LOS делаем только для реально ближайшего кандидата.
+                if (distanceSqr >= bestDistance)
+                    continue;
+
+                if (!CombatPath.VisibilityChecker.HasLineOfSight(
+                    map,
+                    edificeStore,
+                    posA.X,
+                    posA.Y,
+                    posB.X,
+                    posB.Y,
+                    posA.Z))
+                {
+                    continue;
+                }
+
+                bestDistance =
+                    distanceSqr;
+
+                bestTarget =
+                    candidateId;
+            }
+
+            return bestTarget;
+        }
+
+        // ============================================================
+        // РАСЧЁТ ДАЛЬНОСТИ
+        // ============================================================
+
+        private int GetAttackRange(
+            UnitStore units,
+            int unitId)
+        {
+            if (units.WeaponSlot[unitId] == null)
+                return 4;
+
+            float range =
+                units.WeaponSlot[unitId]
+                    .TotalEffectiveRange;
+
+            return Math.Min(
+                150,
+                Math.Max(
+                    1,
+                    (int)range
+                )
+            );
+        }
+
+        // ============================================================
+        // НЕБОЛЬШОЙ ДЕТЕРМИНИРОВАННЫЙ JITTER
+        // ============================================================
+
+        private float GetScanJitter(
+            int unitId)
+        {
+            unchecked
+            {
+                uint x =
+                    (uint)unitId *
+                    747796405u;
+
+                x ^= x >> 16;
+                x *= 2246822519u;
+                x ^= x >> 13;
+
+                float value =
+                    (x & 0xFFFFu) /
+                    65536f;
+
+                return
+                    0.75f +
+                    value *
+                    0.75f;
+            }
+        }
+
+        // ============================================================
+        // СБРОС ПРИЦЕЛИВАНИЯ
+        // ============================================================
+
+        private void ResetAiming(
+            UnitStore units,
+            int unitId,
+            ref UnitPosition position)
+        {
+            units.IsAiming[unitId] =
+                false;
+
+            units.RemainingBurstShots[unitId] =
+                0;
+
+            position.RenderX =
+                position.X;
+
+            position.RenderY =
+                position.Y;
+        }
+
+        // ============================================================
+        // ARRAY STORAGE
+        // ============================================================
+
+        private void EnsureStorage(
+            int count)
+        {
+            if (_targetScanTimers.Length >= count)
+                return;
+
+            int oldSize =
+                _targetScanTimers.Length;
+
+            int newSize =
+                Math.Max(
+                    count,
+                    Math.Max(
+                        64,
+                        oldSize * 2
+                    )
+                );
+
+            Array.Resize(
+                ref _targetScanTimers,
+                newSize
+            );
+
+            Array.Resize(
+                ref _targetLosTimers,
+                newSize
+            );
+
+            for (int i = oldSize;
+                 i < newSize;
+                 i++)
+            {
+                _targetScanTimers[i] =
+                    GetInitialScanOffset(i);
+
+                _targetLosTimers[i] =
+                    0f;
+            }
+        }
+
+        private float GetInitialScanOffset(
+            int unitId)
+        {
+            unchecked
+            {
+                uint x =
+                    (uint)unitId *
+                    1597334677u;
+
+                x ^= x >> 16;
+                x *= 2246822519u;
+                x ^= x >> 13;
+
+                float value =
+                    (x & 0xFFFFu) /
+                    65536f;
+
+                return
+                    value *
+                    TargetScanInterval;
+            }
+        }
+
+        // ============================================================
+        // ATTACK
+        // ============================================================
+
+        private void PerformAttack(
+            UnitStore units,
+            int attackerId,
+            int targetId,
+            WorldMap map,
+            EdificeStore edificeStore,
+            UnitSpatialGrid spatialGrid,
+            CombatEffectSystem effectSystem,
+            float microCellPixelSize)
+        {
+            if (attackerId < 0 ||
+                attackerId >= units.Count)
+                return;
+
+            if (targetId < 0 ||
+                targetId >= units.Count)
+                return;
+
+            if (units.HealthMasks[attackerId] == 0 ||
+                units.HealthMasks[targetId] == 0)
+                return;
+
+            ref var posA =
+                ref units.Positions[attackerId];
+
+            ref var posB =
+                ref units.Positions[targetId];
+
+            byte baseDamage =
+                25;
+
+            float weaponBleedChance =
+                0.7f;
+
+            float effectiveRange =
+                2f;
+
+            if (units.WeaponSlot[attackerId]
+                is Weapon activeWeapon)
+            {
+                baseDamage =
+                    activeWeapon.BaseStats.BaseDamage;
+
+                weaponBleedChance =
+                    activeWeapon.BaseStats.BleedChance;
+
+                effectiveRange =
+                    activeWeapon.TotalEffectiveRange;
+            }
+
+            float hitChance =
+                CombatPath.CombatMath.CalculateHitChance(
+                    map,
+                    edificeStore,
+                    units,
+                    attackerId,
+                    posA.X,
+                    posA.Y,
+                    posB.X,
+                    posB.Y,
+                    posA.Z
+                );
+
+            bool isHit =
+                Random.Shared.NextSingle() <=
+                hitChance;
+
+            if (units.WeaponSlot[attackerId]
+                is Weapon shootingWeapon)
+            {
+                shootingWeapon.currentRecoil +=
+                    shootingWeapon.BaseStats.RecoilPerShot;
+            }
+
+            float dx =
+                posB.X -
+                posA.X;
+
+            float dy =
+                posB.Y -
+                posA.Y;
+
+            float distanceInTiles =
+                MathF.Sqrt(
+                    dx * dx +
+                    dy * dy
+                );
+
+            SFML.System.Vector2f startPixels =
+                new SFML.System.Vector2f(
+                    posA.RenderX *
+                        microCellPixelSize +
+                    microCellPixelSize *
+                        0.5f,
+
+                    posA.RenderY *
+                        microCellPixelSize +
+                    microCellPixelSize *
+                        0.5f
+                );
+
+            SFML.System.Vector2f endPixels;
+
+            int finalHitUnitId =
+                -1;
+
+            int hitX =
+                posB.X;
+
+            int hitY =
+                posB.Y;
+
+            if (isHit)
+            {
+                finalHitUnitId =
+                    targetId;
+
+                endPixels =
+                    new SFML.System.Vector2f(
+                        posB.RenderX *
+                            microCellPixelSize +
+                        microCellPixelSize *
+                            0.5f,
+
+                        posB.RenderY *
+                            microCellPixelSize +
+                        microCellPixelSize *
+                            0.5f
+                    );
+            }
+            else
+            {
+                int scatterRadius =
+                    distanceInTiles >
+                    effectiveRange
+                        ? 2
+                        : 1;
+
+                int scatterX =
+                    Random.Shared.Next(
+                        -scatterRadius,
+                        scatterRadius + 1
+                    );
+
+                int scatterY =
+                    Random.Shared.Next(
+                        -scatterRadius,
+                        scatterRadius + 1
+                    );
+
+                if (scatterX == 0 &&
+                    scatterY == 0)
+                {
+                    scatterX =
+                        scatterRadius;
+                }
+
+                int maxCoord =
+                    (16 * 48) - 1;
+
+                hitX =
+                    Math.Clamp(
+                        posB.X + scatterX,
+                        0,
+                        maxCoord
+                    );
+
+                hitY =
+                    Math.Clamp(
+                        posB.Y + scatterY,
+                        0,
+                        maxCoord
+                    );
+
+                endPixels =
+                    new SFML.System.Vector2f(
+                        hitX *
+                            microCellPixelSize +
+                        microCellPixelSize *
+                            0.5f,
+
+                        hitY *
+                            microCellPixelSize +
+                        microCellPixelSize *
+                            0.5f
+                    );
+
+                var unitsInScatterCell =
+                    spatialGrid.GetUnitsAt(
+                        new SpatialCoord(
+                            hitX,
+                            hitY,
+                            posA.Z
+                        )
+                    );
+
+                if (unitsInScatterCell.Count > 0)
+                {
+                    finalHitUnitId =
+                        unitsInScatterCell[0];
+                }
+            }
+
+            float finalCalculatedDamage =
+                CombatPath
+                    .BulletPhysicsCalculator
+                    .CalculateDamageAtDistance(
+                        distanceInTiles,
+                        effectiveRange,
+                        baseDamage
+                    );
+
+            byte damageToApply =
+                (byte)Math.Clamp(
+                    finalCalculatedDamage,
+                    1,
+                    255
+                );
+
+            if (finalHitUnitId != -1)
+            {
+                _damageSystem.ApplyDamage(
+                    units,
+                    finalHitUnitId,
+                    attackerId,
+                    damageToApply,
+                    weaponBleedChance,
+                    map
+                );
+
+                if (effectSystem != null &&
+                    microCellPixelSize > 0f)
+                {
+                    effectSystem.AddTracer(
+                        startPixels,
+                        endPixels,
+                        posA.Z,
+                        showCross: true,
+                        duration: 0.35f
+                    );
+                }
+            }
+            else
+            {
+                MapLayer layer =
+                    map.GetLayer(
+                        posA.Z
+                    );
+
+                if (layer != null)
+                {
+                    ref MicroCell cell =
+                        ref layer.GetMicroCell(
+                            hitX,
+                            hitY
+                        );
+
+                    if (cell.EdificeId > 0)
+                    {
+                        ref var edifice =
+                            ref edificeStore
+                                .Instances[
+                                    cell.EdificeId
+                                ];
+
+                        if (edificeStore.Configs[
+                                edifice.ConfigId] != null)
+                        {
+                            edifice.HitPoints -=
+                                damageToApply;
+                        }
+                    }
+                }
+
+                if (effectSystem != null &&
+                    microCellPixelSize > 0f)
+                {
+                    effectSystem.AddTracer(
+                        startPixels,
+                        endPixels,
+                        posA.Z,
+                        showCross: false,
+                        duration: 0.35f
+                    );
+                }
+            }
+        }
+    }
+}using Core.Structs;
+using Render.RenderNeed;
+using SFML.Graphics;
+using SFML.System;
+using System.Collections.Generic;
+
+namespace Core.Unit.Systems
+{
+    public sealed class CombatEffectSystem
+    {
+        // Пул активных трассеров
+        private readonly List<CombatTracer> _tracers = new List<CombatTracer>(32);
+
+        /// <summary>
+        /// Добавить новый трассер в мир. Вызывается из UnitCombatSystem / UnitDamageSystem в момент удара.
+        /// </summary>
+        public void AddTracer(Vector2f startPixels, Vector2f endPixels, int zLevel, bool showCross, float duration = 0.4f)
+        {
+            _tracers.Add(new CombatTracer
+            {
+                StartPixels = startPixels,
+                EndPixels = endPixels,
+                ZLevel = zLevel,
+                TimeLeft = duration,
+                MaxTime = duration,
+                ShowCross = showCross
+            });
+        }
+
+        /// <summary>
+        /// Обновляет время жизни эффектов. Удаляет старые.
+        /// </summary>
+        public void Update(float deltaTime)
+        {
+            for (int i = _tracers.Count - 1; i >= 0; i--)
+            {
+                var tracer = _tracers[i];
+                tracer.TimeLeft -= deltaTime;
+
+                if (tracer.TimeLeft <= 0f)
+                {
+                    _tracers.RemoveAt(i); // Быстро удаляем из пула
+                }
+                else
+                {
+                    _tracers[i] = tracer; // Перезаписываем обновленную структуру
+                }
+            }
+        }
+
+        /// <summary>
+        /// Отрисовка трассеров и крестиков в окно SFML.
+        /// </summary>
+        public void Draw(RenderWindow window, int currentZ)
+        {
+            foreach (var tracer in _tracers)
+            {
+                // Рисуем эффекты только на том этаже, где сейчас смотрит камера игрока
+                if (tracer.ZLevel != currentZ) continue;
+
+                // Вычисляем процент увядания линии для плавного исчезновения (Alpha от 255 до 0)
+                float alphaPercent = tracer.TimeLeft / tracer.MaxTime;
+                byte alpha = (byte)(180 * alphaPercent); // 180 — начальная полупрозрачность белого
+
+                Color effectColor = new Color(255, 255, 255, alpha);
+
+                // 1. РИСУЕМ ПОЛУПРОЗРАЧНУЮ ЛИНЮ (через массив вершин SFML)
+                Vertex[] line = new Vertex[]
+                {
+                    new Vertex(tracer.StartPixels, effectColor),
+                    new Vertex(tracer.EndPixels, effectColor)
+                };
+                window.Draw(line, PrimitiveType.Lines);
+
+                // 2. РИСУЕМ КРЕСТИК В КОНЦЕ ЛИНИИ (Если был нанесен урон)
+                if (tracer.ShowCross)
+                {
+                    const float size = 3f; // Размер усиков крестика в пикселях
+                    Vector2f end = tracer.EndPixels;
+
+                    // Первая палочка крестика 
+                    Vertex[] cross1 = new Vertex[]
+                    {
+                        new Vertex(new Vector2f(end.X - size, end.Y - size), effectColor),
+                        new Vertex(new Vector2f(end.X + size, end.Y + size), effectColor)
+                    };
+                    // Вторая палочка крестика
+                    Vertex[] cross2 = new Vertex[]
+                    {
+                        new Vertex(new Vector2f(end.X - size, end.Y + size), effectColor),
+                        new Vertex(new Vector2f(end.X + size, end.Y - size), effectColor)
+                    };
+
+                    window.Draw(cross1, PrimitiveType.Lines);
+                    window.Draw(cross2, PrimitiveType.Lines);
+                }
+            }
+        }
+    }
+}

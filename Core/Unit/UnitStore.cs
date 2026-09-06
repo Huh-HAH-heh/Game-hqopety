@@ -19,6 +19,9 @@ public sealed class UnitStore
     public UnitSize[] Sizes;
     public UnitMovement[] Movement;
 
+    public float[] SeparationOffsetX;
+    public float[] SeparationOffsetY;
+
     public int[] SquadIds;
 
     public uint[] HealthMasks;
@@ -97,6 +100,9 @@ public sealed class UnitStore
         Sizes = new UnitSize[size];
         Movement = new UnitMovement[size];
 
+        SeparationOffsetX = new float[size];
+        SeparationOffsetY = new float[size];
+
         SquadIds = new int[size];
 
         HealthMasks = new uint[size];
@@ -166,7 +172,16 @@ public sealed class UnitStore
         Array.Fill(BehaviorFlags, UnitBehaviorFlags.Idle);
     }
 
-    public int CreateUnit(int mx, int my, int mz, byte width, byte height, float mass, float speed, UnitType type, UnitSpatialGrid spatialGrid)
+    public int CreateUnit(
+        int mx,
+        int my,
+        int mz,
+        byte width,
+        byte height,
+        float mass,
+        float speed,
+        UnitType type,
+        UnitSpatialGrid spatialGrid)
     {
         if (spatialGrid == null)
             throw new ArgumentNullException(nameof(spatialGrid));
@@ -188,6 +203,9 @@ public sealed class UnitStore
             Speed = speed,
             State = MovementState.Idle
         };
+
+        SeparationOffsetX[id] = 0f;
+        SeparationOffsetY[id] = 0f;
 
         UnitType[id] = type;
         BaseBodyMass[id] = mass;
@@ -221,6 +239,8 @@ public sealed class UnitStore
         Array.Resize(ref Positions, newSize);
         Array.Resize(ref Sizes, newSize);
         Array.Resize(ref Movement, newSize);
+        Array.Resize(ref SeparationOffsetX, newSize);
+        Array.Resize(ref SeparationOffsetY, newSize);
         Array.Resize(ref SquadIds, newSize);
 
         Array.Resize(ref HealthMasks, newSize);
@@ -296,7 +316,11 @@ public sealed class UnitStore
             if (HealthMasks[i] == 0)
                 continue;
 
-            HealthSystem.UpdateTick(ref HealthMasks[i], ref BleedRates[i], ref BloodLossLevels[i], deltaTime);
+            HealthSystem.UpdateTick(
+                ref HealthMasks[i],
+                ref BleedRates[i],
+                ref BloodLossLevels[i],
+                deltaTime);
 
             if (HealthMasks[i] != 0)
                 continue;
@@ -305,6 +329,9 @@ public sealed class UnitStore
             SquadIds[i] = -1;
             CurrentGroupId[i] = -1;
             BehaviorFlags[i] = UnitBehaviorFlags.None;
+
+            SeparationOffsetX[i] = 0f;
+            SeparationOffsetY[i] = 0f;
         }
     }
 
@@ -318,57 +345,87 @@ public sealed class UnitStore
         int start = unitId * MaxAiStackDepth;
 
         for (int i = count; i > 0; i--)
-            AiCommandStacks[start + i] = AiCommandStacks[start + i - 1];
+            AiCommandStacks[start + i] =
+                AiCommandStacks[start + i - 1];
 
         AiCommandStacks[start] = command;
-        AiStackPointers[unitId] = count;//убрано: count-1
+        AiStackPointers[unitId] = count;
     }
 
-
-    public void CpuAppendCommand(int unitId, AiCommand command)
+    public void CpuAppendCommand(
+        int unitId,
+        AiCommand command)
     {
-        int count = AiStackPointers[unitId] + 1;
+        int count =
+            AiStackPointers[unitId] + 1;
 
         if (count >= MaxAiStackDepth)
             return;
 
-        AiCommandStacks[unitId * MaxAiStackDepth + count] = command;
-        AiStackPointers[unitId] = count;
+        AiCommandStacks[
+            unitId * MaxAiStackDepth + count] =
+            command;
+
+        AiStackPointers[unitId] =
+            count;
     }
 
-    public void CpuClearCommands(int unitId)
+    public void CpuClearCommands(
+        int unitId)
     {
-        int count = AiStackPointers[unitId] + 1;
+        int count =
+            AiStackPointers[unitId] + 1;
 
         if (count <= 0)
             return;
 
-        int start = unitId * MaxAiStackDepth;
+        int start =
+            unitId * MaxAiStackDepth;
 
-        for (int i = 0; i < count; i++)
-            AiCommandStacks[start + i] = default;
+        for (int i = 0;
+             i < count;
+             i++)
+        {
+            AiCommandStacks[start + i] =
+                default;
+        }
 
-        AiStackPointers[unitId] = -1;
+        AiStackPointers[unitId] =
+            -1;
     }
-    public void CpuPopCommand(int unitId)
+
+    public void CpuPopCommand(
+        int unitId)
     {
-        int count = AiStackPointers[unitId] + 1;
+        int count =
+            AiStackPointers[unitId] + 1;
 
         if (count <= 0)
             return;
 
-        int start = unitId * MaxAiStackDepth;
+        int start =
+            unitId * MaxAiStackDepth;
 
-        for (int i = 1; i < count; i++)
-            AiCommandStacks[start + i - 1] = AiCommandStacks[start + i];
+        for (int i = 1;
+             i < count;
+             i++)
+        {
+            AiCommandStacks[start + i - 1] =
+                AiCommandStacks[start + i];
+        }
 
-        AiCommandStacks[start + count - 1] = default;
-        AiStackPointers[unitId] = count - 2;
+        AiCommandStacks[start + count - 1] =
+            default;
+
+        AiStackPointers[unitId] =
+            count - 2;
     }
 
-    public ref AiCommand CpuPeekCommand(int unitId)
+    public ref AiCommand CpuPeekCommand(
+        int unitId)
     {
-        return ref AiCommandStacks[unitId * MaxAiStackDepth];
+        return ref AiCommandStacks[
+            unitId * MaxAiStackDepth];
     }
 
     [Flags]

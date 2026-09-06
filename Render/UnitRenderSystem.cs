@@ -37,8 +37,21 @@ namespace RimClone.Render
                 ref var pos = ref units.Positions[i];
                 float bloodLoss = units.BloodLossLevels[i];
 
-                float antScreenX = pos.RenderX * MicroCellPixelSize + (MicroCellPixelSize * 0.5f);
-                float antScreenY = pos.RenderY * MicroCellPixelSize + (MicroCellPixelSize * 0.5f);
+                float renderX =
+       pos.RenderX +
+       units.SeparationOffsetX[i];
+
+                float renderY =
+                    pos.RenderY +
+                    units.SeparationOffsetY[i];
+
+                float antScreenX =
+                    renderX * MicroCellPixelSize +
+                    MicroCellPixelSize * 0.5f;
+
+                float antScreenY =
+                    renderY * MicroCellPixelSize +
+                    MicroCellPixelSize * 0.5f;
 
                 Color unitColor = units.UnitType[i] switch
                 {

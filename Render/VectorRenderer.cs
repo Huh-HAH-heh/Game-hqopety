@@ -17,6 +17,7 @@ namespace RimClone.Render;
 
 public sealed class VectorRenderer
 {
+    private UnitSeparationSystem _separationSystem;
     private int _gameFrame;
     private const int TileSize = 16;
 
@@ -63,6 +64,7 @@ public sealed class VectorRenderer
         _movementSystem = new UnitMovementSystem();
 
         _movementSystem.MoveInterrupted += OnMoveInterrupted;
+        _separationSystem = new UnitSeparationSystem();
 
         MoveTask moveTask = new MoveTask(
             _pathfindingSystem,
@@ -187,6 +189,11 @@ public sealed class VectorRenderer
             MicroCellPixelSize,
             deltaTime);
 
+        _separationSystem.Update(
+            _unitStore,
+            _spatialGrid,
+            deltaTime);
+
         UpdateTileInspector(mouseWorld);
     }
 
@@ -267,14 +274,28 @@ public sealed class VectorRenderer
             if (!_mouseInputSystem.SelectedUnitIds.Contains(i))
                 continue;
 
-            float radius = 0.4f * MicroCellPixelSize + 2f;
+            float radius =
+                0.4f * MicroCellPixelSize + 2f;
+
+            float renderX =
+                _unitStore.Positions[i].RenderX +
+                _unitStore.SeparationOffsetX[i];
+
+            float renderY =
+                _unitStore.Positions[i].RenderY +
+                _unitStore.SeparationOffsetY[i];
 
             CircleShape ring = new CircleShape(radius)
             {
                 Origin = new Vector2f(radius, radius),
+
                 Position = new Vector2f(
-                    _unitStore.Positions[i].RenderX * MicroCellPixelSize + MicroCellPixelSize * 0.5f,
-                    _unitStore.Positions[i].RenderY * MicroCellPixelSize + MicroCellPixelSize * 0.5f),
+                    renderX * MicroCellPixelSize +
+                    MicroCellPixelSize * 0.5f,
+
+                    renderY * MicroCellPixelSize +
+                    MicroCellPixelSize * 0.5f),
+
                 FillColor = Color.Transparent,
                 OutlineColor = new Color(0, 255, 130, 220),
                 OutlineThickness = 1f

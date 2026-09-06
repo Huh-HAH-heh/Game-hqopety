@@ -15,10 +15,6 @@ namespace Core.Unit.Systems
         private readonly UnitDamageSystem _damageSystem =
             new UnitDamageSystem();
 
-        // ============================================================
-        // AI SCAN CACHE
-        // ============================================================
-
         private float[] _targetScanTimers =
             Array.Empty<float>();
 
@@ -28,9 +24,6 @@ namespace Core.Unit.Systems
         private const float TargetScanInterval = 0.20f;
         private const float TargetLosInterval = 0.10f;
 
-        // Очень важно:
-        // Не даём обычному AI каждый кадр сканировать квадрат 300x300.
-        // Это именно радиус поиска цели, а не радиус самого оружия.
         private const int MaxTargetScanRadius = 60;
 
         private const float MeleeThreatRadius = 2.5f;
@@ -47,13 +40,7 @@ namespace Core.Unit.Systems
             if (deltaTime <= 0f)
                 return;
 
-            EnsureStorage(
-                units.Count
-            );
-
-            // ========================================================
-            // 1. ДЕШЕВЫЕ ТАЙМЕРЫ / ОТДАЧА
-            // ========================================================
+            EnsureStorage(units.Count);
 
             for (int i = 0;
                  i < units.Count;
@@ -100,10 +87,6 @@ namespace Core.Unit.Systems
                 }
             }
 
-            // ========================================================
-            // 2. БОЕВОЙ ИИ
-            // ========================================================
-
             ExecuteRimWorldCombat(
                 units,
                 spatialGrid,
@@ -111,8 +94,7 @@ namespace Core.Unit.Systems
                 edificeStore,
                 effectSystem,
                 microCellPixelSize,
-                deltaTime
-            );
+                deltaTime);
         }
 
         private void ExecuteRimWorldCombat(
@@ -131,10 +113,10 @@ namespace Core.Unit.Systems
                 if (units.HealthMasks[i] == 0)
                     continue;
 
-                ref var posA =
+                ref UnitPosition posA =
                     ref units.Positions[i];
 
-                ref var moveA =
+                ref UnitMovement moveA =
                     ref units.Movement[i];
 
                 int currentTargetId =
@@ -143,11 +125,10 @@ namespace Core.Unit.Systems
                 int currentAttackRange =
                     GetAttackRange(
                         units,
-                        i
-                    );
+                        i);
 
                 // ====================================================
-                // 1. ПРОВЕРЯЕМ СУЩЕСТВУЮЩУЮ ЦЕЛЬ
+                // EXISTING TARGET
                 // ====================================================
 
                 if (currentTargetId != -1)
@@ -161,16 +142,24 @@ namespace Core.Unit.Systems
                     {
                         units.CurrentTargets[i] = -1;
                         currentTargetId = -1;
+
+                        ResetAiming(
+                            units,
+                            i);
                     }
                     else
                     {
-                        ref var targetPos =
+                        ref UnitPosition targetPos =
                             ref units.Positions[currentTargetId];
 
                         if (targetPos.Spatial.Z != posA.Spatial.Z)
                         {
                             units.CurrentTargets[i] = -1;
                             currentTargetId = -1;
+
+                            ResetAiming(
+                                units,
+                                i);
                         }
                         else
                         {
@@ -185,19 +174,21 @@ namespace Core.Unit.Systems
                             float distance =
                                 MathF.Sqrt(
                                     dx * dx +
-                                    dy * dy
-                                );
+                                    dy * dy);
 
                             int visionRadius =
                                 Math.Min(
                                     currentAttackRange + 5,
-                                    MaxTargetScanRadius
-                                );
+                                    MaxTargetScanRadius);
 
                             if (distance > visionRadius)
                             {
                                 units.CurrentTargets[i] = -1;
                                 currentTargetId = -1;
+
+                                ResetAiming(
+                                    units,
+                                    i);
                             }
                             else if (_targetLosTimers[i] <= 0f)
                             {
@@ -209,8 +200,7 @@ namespace Core.Unit.Systems
                                         posA.Y,
                                         targetPos.X,
                                         targetPos.Y,
-                                        posA.Z
-                                    );
+                                        posA.Spatial.Z);
 
                                 _targetLosTimers[i] =
                                     TargetLosInterval;
@@ -219,6 +209,10 @@ namespace Core.Unit.Systems
                                 {
                                     units.CurrentTargets[i] = -1;
                                     currentTargetId = -1;
+
+                                    ResetAiming(
+                                        units,
+                                        i);
                                 }
                             }
                         }
@@ -226,7 +220,7 @@ namespace Core.Unit.Systems
                 }
 
                 // ====================================================
-                // 2. ИЩЕМ НОВУЮ ЦЕЛЬ ТОЛЬКО КОГДА НУЖНО
+                // SEARCH TARGET
                 // ====================================================
 
                 if (currentTargetId == -1 &&
@@ -239,18 +233,10 @@ namespace Core.Unit.Systems
                             map,
                             edificeStore,
                             i,
-                            currentAttackRange
-                        );
+                            currentAttackRange);
 
                     units.CurrentTargets[i] =
                         currentTargetId;
-
-                    // ==================================================
-                    // РАВНОМЕРНО РАСКИДЫВАЕМ НАГРУЗКУ
-                    //
-                    // Каждый юнит получает немного другой момент
-                    // следующего сканирования.
-                    // ==================================================
 
                     _targetScanTimers[i] =
                         TargetScanInterval *
@@ -258,7 +244,7 @@ namespace Core.Unit.Systems
                 }
 
                 // ====================================================
-                // 3. ЕСЛИ ЦЕЛИ НЕТ — СТРЕЛЬБЫ НЕТ
+                // NO TARGET
                 // ====================================================
 
                 int finalTarget =
@@ -269,9 +255,7 @@ namespace Core.Unit.Systems
                 {
                     ResetAiming(
                         units,
-                        i,
-                        ref posA
-                    );
+                        i);
 
                     continue;
                 }
@@ -282,14 +266,12 @@ namespace Core.Unit.Systems
 
                     ResetAiming(
                         units,
-                        i,
-                        ref posA
-                    );
+                        i);
 
                     continue;
                 }
 
-                ref var targetPosFinal =
+                ref UnitPosition targetPosFinal =
                     ref units.Positions[finalTarget];
 
                 float fdx =
@@ -303,17 +285,19 @@ namespace Core.Unit.Systems
                 float distanceInTiles =
                     MathF.Sqrt(
                         fdx * fdx +
-                        fdy * fdy
-                    );
+                        fdy * fdy);
 
                 if (distanceInTiles >
                     currentAttackRange)
                 {
+                    if (units.IsAiming[i])
+                        ResetAiming(units, i);
+
                     continue;
                 }
 
                 // ====================================================
-                // 4. BURST
+                // BURST
                 // ====================================================
 
                 if (units.RemainingBurstShots[i] > 0)
@@ -328,8 +312,7 @@ namespace Core.Unit.Systems
                             edificeStore,
                             spatialGrid,
                             effectSystem,
-                            microCellPixelSize
-                        );
+                            microCellPixelSize);
 
                         units.RemainingBurstShots[i]--;
 
@@ -337,15 +320,14 @@ namespace Core.Unit.Systems
                         {
                             units.IsAiming[i] = false;
 
-                            posA.RenderX =
-                                posA.X;
-
-                            posA.RenderY =
-                                posA.Y;
+                            units.LeanOffsetX[i] = 0;
+                            units.LeanOffsetY[i] = 0;
 
                             units.ShotCooldowns[i] =
                                 units.WeaponSlot[i] != null
-                                    ? units.WeaponSlot[i].BaseStats.FireRate
+                                    ? units.WeaponSlot[i]
+                                        .BaseStats
+                                        .FireRate
                                     : 1.5f;
                         }
                         else
@@ -359,7 +341,7 @@ namespace Core.Unit.Systems
                 }
 
                 // ====================================================
-                // 5. НАЧАЛО ПРИЦЕЛИВАНИЯ
+                // START AIMING
                 // ====================================================
 
                 bool canShoot =
@@ -369,8 +351,7 @@ namespace Core.Unit.Systems
                     units.ShotCooldowns[i] <= 0f &&
                     canShoot)
                 {
-                    units.IsAiming[i] =
-                        true;
+                    units.IsAiming[i] = true;
 
                     units.AimingTimers[i] =
                         units.WeaponSlot[i]
@@ -384,21 +365,24 @@ namespace Core.Unit.Systems
                         units.LeanOffsetX[i] =
                             Math.Sign(
                                 targetPosFinal.X -
-                                posA.X
-                            );
+                                posA.X);
 
                         units.LeanOffsetY[i] =
                             Math.Sign(
                                 targetPosFinal.Y -
-                                posA.Y
-                            );
+                                posA.Y);
+                    }
+                    else
+                    {
+                        units.LeanOffsetX[i] = 0;
+                        units.LeanOffsetY[i] = 0;
                     }
 
                     continue;
                 }
 
                 // ====================================================
-                // 6. ПРИЦЕЛИВАНИЕ
+                // AIMING
                 // ====================================================
 
                 if (units.IsAiming[i] &&
@@ -407,18 +391,11 @@ namespace Core.Unit.Systems
                     units.AimingTimers[i] -=
                         deltaTime;
 
-                    if (moveA.State ==
+                    if (moveA.State !=
                         MovementState.InCover)
                     {
-                        posA.RenderX =
-                            posA.X +
-                            units.LeanOffsetX[i] *
-                            0.4f;
-
-                        posA.RenderY =
-                            posA.Y +
-                            units.LeanOffsetY[i] *
-                            0.4f;
+                        units.LeanOffsetX[i] = 0;
+                        units.LeanOffsetY[i] = 0;
                     }
 
                     if (units.AimingTimers[i] <= 0f)
@@ -431,8 +408,7 @@ namespace Core.Unit.Systems
                             burstCount =
                                 units.WeaponSlot[i]
                                     .GetBurstCountForDistance(
-                                        distanceInTiles
-                                    );
+                                        distanceInTiles);
                         }
 
                         units.RemainingBurstShots[i] =
@@ -445,10 +421,6 @@ namespace Core.Unit.Systems
             }
         }
 
-        // ============================================================
-        // ПОИСК БЛИЖАЙШЕГО ВРАГА
-        // ============================================================
-
         private int FindClosestEnemy(
             UnitStore units,
             UnitSpatialGrid spatialGrid,
@@ -457,28 +429,23 @@ namespace Core.Unit.Systems
             int unitId,
             int attackRange)
         {
-            ref var posA =
+            ref UnitPosition posA =
                 ref units.Positions[unitId];
 
             int visionRadius =
                 Math.Min(
                     attackRange + 5,
-                    MaxTargetScanRadius
-                );
+                    MaxTargetScanRadius);
 
             _nearbyCandidates.Clear();
 
             spatialGrid.GetNearby(
                 posA.Spatial,
                 visionRadius,
-                _nearbyCandidates
-            );
+                _nearbyCandidates);
 
-            int bestTarget =
-                -1;
-
-            float bestDistance =
-                float.MaxValue;
+            int bestTarget = -1;
+            float bestDistance = float.MaxValue;
 
             for (int idx = 0;
                  idx < _nearbyCandidates.Count;
@@ -492,27 +459,21 @@ namespace Core.Unit.Systems
 
                 if (candidateId < 0 ||
                     candidateId >= units.Count)
-                {
                     continue;
-                }
 
                 if (units.HealthMasks[candidateId] == 0)
                     continue;
 
                 if (units.UnitType[candidateId] ==
                     units.UnitType[unitId])
-                {
                     continue;
-                }
 
-                ref var posB =
+                ref UnitPosition posB =
                     ref units.Positions[candidateId];
 
                 if (posA.Spatial.Z !=
                     posB.Spatial.Z)
-                {
                     continue;
-                }
 
                 float dx =
                     posA.X -
@@ -528,9 +489,7 @@ namespace Core.Unit.Systems
 
                 if (distanceSqr >
                     attackRange * attackRange)
-                {
                     continue;
-                }
 
                 if (distanceSqr <
                     MeleeThreatRadius *
@@ -543,7 +502,7 @@ namespace Core.Unit.Systems
                         posA.Y,
                         posB.X,
                         posB.Y,
-                        posA.Z))
+                        posA.Spatial.Z))
                     {
                         continue;
                     }
@@ -561,7 +520,6 @@ namespace Core.Unit.Systems
                     continue;
                 }
 
-                // LOS делаем только для реально ближайшего кандидата.
                 if (distanceSqr >= bestDistance)
                     continue;
 
@@ -572,7 +530,7 @@ namespace Core.Unit.Systems
                     posA.Y,
                     posB.X,
                     posB.Y,
-                    posA.Z))
+                    posA.Spatial.Z))
                 {
                     continue;
                 }
@@ -586,10 +544,6 @@ namespace Core.Unit.Systems
 
             return bestTarget;
         }
-
-        // ============================================================
-        // РАСЧЁТ ДАЛЬНОСТИ
-        // ============================================================
 
         private int GetAttackRange(
             UnitStore units,
@@ -606,14 +560,8 @@ namespace Core.Unit.Systems
                 150,
                 Math.Max(
                     1,
-                    (int)range
-                )
-            );
+                    (int)range));
         }
-
-        // ============================================================
-        // НЕБОЛЬШОЙ ДЕТЕРМИНИРОВАННЫЙ JITTER
-        // ============================================================
 
         private float GetScanJitter(
             int unitId)
@@ -639,31 +587,17 @@ namespace Core.Unit.Systems
             }
         }
 
-        // ============================================================
-        // СБРОС ПРИЦЕЛИВАНИЯ
-        // ============================================================
-
         private void ResetAiming(
             UnitStore units,
-            int unitId,
-            ref UnitPosition position)
+            int unitId)
         {
-            units.IsAiming[unitId] =
-                false;
+            units.IsAiming[unitId] = false;
+            units.RemainingBurstShots[unitId] = 0;
+            units.AimingTimers[unitId] = 0f;
 
-            units.RemainingBurstShots[unitId] =
-                0;
-
-            position.RenderX =
-                position.X;
-
-            position.RenderY =
-                position.Y;
+            units.LeanOffsetX[unitId] = 0;
+            units.LeanOffsetY[unitId] = 0;
         }
-
-        // ============================================================
-        // ARRAY STORAGE
-        // ============================================================
 
         private void EnsureStorage(
             int count)
@@ -679,19 +613,15 @@ namespace Core.Unit.Systems
                     count,
                     Math.Max(
                         64,
-                        oldSize * 2
-                    )
-                );
+                        oldSize * 2));
 
             Array.Resize(
                 ref _targetScanTimers,
-                newSize
-            );
+                newSize);
 
             Array.Resize(
                 ref _targetLosTimers,
-                newSize
-            );
+                newSize);
 
             for (int i = oldSize;
                  i < newSize;
@@ -728,10 +658,6 @@ namespace Core.Unit.Systems
             }
         }
 
-        // ============================================================
-        // ATTACK
-        // ============================================================
-
         private void PerformAttack(
             UnitStore units,
             int attackerId,
@@ -754,10 +680,10 @@ namespace Core.Unit.Systems
                 units.HealthMasks[targetId] == 0)
                 return;
 
-            ref var posA =
+            ref UnitPosition posA =
                 ref units.Positions[attackerId];
 
-            ref var posB =
+            ref UnitPosition posB =
                 ref units.Positions[targetId];
 
             byte baseDamage =
@@ -792,8 +718,7 @@ namespace Core.Unit.Systems
                     posA.Y,
                     posB.X,
                     posB.Y,
-                    posA.Z
-                );
+                    posA.Z);
 
             bool isHit =
                 Random.Shared.NextSingle() <=
@@ -817,26 +742,56 @@ namespace Core.Unit.Systems
             float distanceInTiles =
                 MathF.Sqrt(
                     dx * dx +
-                    dy * dy
-                );
+                    dy * dy);
+
+            // ========================================================
+            // VISUAL ATTACK POSITION
+            // ========================================================
+
+            float attackerRenderX =
+                posA.RenderX +
+                units.SeparationOffsetX[attackerId];
+
+            float attackerRenderY =
+                posA.RenderY +
+                units.SeparationOffsetY[attackerId];
+
+            if (units.IsAiming[attackerId] &&
+                units.Movement[attackerId].State ==
+                    MovementState.InCover)
+            {
+                attackerRenderX +=
+                    units.LeanOffsetX[attackerId] *
+                    0.4f;
+
+                attackerRenderY +=
+                    units.LeanOffsetY[attackerId] *
+                    0.4f;
+            }
+
+            float targetRenderX =
+                posB.RenderX +
+                units.SeparationOffsetX[targetId];
+
+            float targetRenderY =
+                posB.RenderY +
+                units.SeparationOffsetY[targetId];
 
             SFML.System.Vector2f startPixels =
                 new SFML.System.Vector2f(
-                    posA.RenderX *
+                    attackerRenderX *
                         microCellPixelSize +
                     microCellPixelSize *
                         0.5f,
 
-                    posA.RenderY *
+                    attackerRenderY *
                         microCellPixelSize +
                     microCellPixelSize *
-                        0.5f
-                );
+                        0.5f);
 
             SFML.System.Vector2f endPixels;
 
-            int finalHitUnitId =
-                -1;
+            int finalHitUnitId = -1;
 
             int hitX =
                 posB.X;
@@ -851,16 +806,15 @@ namespace Core.Unit.Systems
 
                 endPixels =
                     new SFML.System.Vector2f(
-                        posB.RenderX *
+                        targetRenderX *
                             microCellPixelSize +
                         microCellPixelSize *
                             0.5f,
 
-                        posB.RenderY *
+                        targetRenderY *
                             microCellPixelSize +
                         microCellPixelSize *
-                            0.5f
-                    );
+                            0.5f);
             }
             else
             {
@@ -873,14 +827,12 @@ namespace Core.Unit.Systems
                 int scatterX =
                     Random.Shared.Next(
                         -scatterRadius,
-                        scatterRadius + 1
-                    );
+                        scatterRadius + 1);
 
                 int scatterY =
                     Random.Shared.Next(
                         -scatterRadius,
-                        scatterRadius + 1
-                    );
+                        scatterRadius + 1);
 
                 if (scatterX == 0 &&
                     scatterY == 0)
@@ -896,15 +848,13 @@ namespace Core.Unit.Systems
                     Math.Clamp(
                         posB.X + scatterX,
                         0,
-                        maxCoord
-                    );
+                        maxCoord);
 
                 hitY =
                     Math.Clamp(
                         posB.Y + scatterY,
                         0,
-                        maxCoord
-                    );
+                        maxCoord);
 
                 endPixels =
                     new SFML.System.Vector2f(
@@ -916,17 +866,14 @@ namespace Core.Unit.Systems
                         hitY *
                             microCellPixelSize +
                         microCellPixelSize *
-                            0.5f
-                    );
+                            0.5f);
 
                 var unitsInScatterCell =
                     spatialGrid.GetUnitsAt(
                         new SpatialCoord(
                             hitX,
                             hitY,
-                            posA.Z
-                        )
-                    );
+                            posA.Z));
 
                 if (unitsInScatterCell.Count > 0)
                 {
@@ -941,15 +888,13 @@ namespace Core.Unit.Systems
                     .CalculateDamageAtDistance(
                         distanceInTiles,
                         effectiveRange,
-                        baseDamage
-                    );
+                        baseDamage);
 
             byte damageToApply =
                 (byte)Math.Clamp(
                     finalCalculatedDamage,
                     1,
-                    255
-                );
+                    255);
 
             if (finalHitUnitId != -1)
             {
@@ -959,8 +904,7 @@ namespace Core.Unit.Systems
                     attackerId,
                     damageToApply,
                     weaponBleedChance,
-                    map
-                );
+                    map);
 
                 if (effectSystem != null &&
                     microCellPixelSize > 0f)
@@ -970,32 +914,27 @@ namespace Core.Unit.Systems
                         endPixels,
                         posA.Z,
                         showCross: true,
-                        duration: 0.35f
-                    );
+                        duration: 0.35f);
                 }
             }
             else
             {
                 MapLayer layer =
                     map.GetLayer(
-                        posA.Z
-                    );
+                        posA.Z);
 
                 if (layer != null)
                 {
                     ref MicroCell cell =
                         ref layer.GetMicroCell(
                             hitX,
-                            hitY
-                        );
+                            hitY);
 
                     if (cell.EdificeId > 0)
                     {
                         ref var edifice =
-                            ref edificeStore
-                                .Instances[
-                                    cell.EdificeId
-                                ];
+                            ref edificeStore.Instances[
+                                cell.EdificeId];
 
                         if (edificeStore.Configs[
                                 edifice.ConfigId] != null)
@@ -1014,8 +953,7 @@ namespace Core.Unit.Systems
                         endPixels,
                         posA.Z,
                         showCross: false,
-                        duration: 0.35f
-                    );
+                        duration: 0.35f);
                 }
             }
         }
