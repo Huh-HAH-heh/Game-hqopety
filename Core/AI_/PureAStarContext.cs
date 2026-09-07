@@ -1,5 +1,4 @@
-﻿using System;
-using Core.Unit.Components;
+﻿using Core.Unit.Components;
 
 namespace Core.AI;
 
@@ -18,24 +17,19 @@ public sealed class PureAStarContext
         int maxPathLength)
     {
         OpenSet =
-            new PurePathNode[
-                maxGridCells];
+            new PurePathNode[maxGridCells];
 
         ClosedSet =
-            new byte[
-                maxGridCells];
+            new byte[maxGridCells];
 
         ParentMap =
-            new int[
-                maxGridCells];
+            new int[maxGridCells];
 
         GScore =
-            new float[
-                maxGridCells];
+            new float[maxGridCells];
 
         TempPathBuffer =
-            new SpatialCoord[
-                maxPathLength];
+            new SpatialCoord[maxPathLength];
     }
 
     public void Reset()

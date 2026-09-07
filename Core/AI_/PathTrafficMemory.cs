@@ -11,33 +11,52 @@ public sealed class PathTrafficMemory
     private const int MaxGridCells =
         MaxGridSize * MaxGridSize;
 
-    // ============================================================
-    // HEAT
-    // ============================================================
+    /*
+     * ============================================================
+     * TRAFFIC HEAT
+     * ============================================================
+     */
 
-    private const float HeatScale = 10000f;
+    private const float HeatScale =
+        10000f;
 
-    // Каждый маршрут заметно загрязняет карту.
-    private const float HeatAdd = 1.5f;
+    private const float HeatAdd =
+        1.0f;
 
-    // Долгая память.
-    private const float HeatDecay = 0.992f;
+    private const float HeatDecay =
+        0.85f;
 
-    private const float MinHeat = 0.01f;
+    private const float MaxHeat =
+        4.0f;
 
-    private const float MaxHeat = 12f;
-
-    // Радиус "коридора" старого маршрута.
-    private const int RouteMemoryRadius = 1;
-
-    // ============================================================
-    // OCCUPANCY
-    // ============================================================
+    /*
+     * ============================================================
+     * OCCUPANCY
+     * ============================================================
+     *
+     * 0 = пусто
+     * 1 = один юнит
+     * 2 = два юнита
+     * 3 = полностью занято
+     *
+     * Для pathfinding:
+     *
+     * occupancy >= 3
+     *          ↓
+     *     непроходимо
+     *
+     * Occupancy не отменяет приказ.
+     * Он только влияет на возможность построения
+     * конкретного маршрута.
+     * ============================================================
+     */
 
     private const int MaxUnitsPerTile = 3;
 
     private readonly byte[] _occupancy;
+
     private readonly int[] _heat;
+
     private readonly int[] _lastFrame;
 
     public PathTrafficMemory()
@@ -55,9 +74,11 @@ public sealed class PathTrafficMemory
                 MaxGridCells];
     }
 
-    // ============================================================
-    // OCCUPANCY
-    // ============================================================
+    /*
+     * ============================================================
+     * OCCUPANCY
+     * ============================================================
+     */
 
     public void ClearOccupancy()
     {
@@ -93,8 +114,10 @@ public sealed class PathTrafficMemory
         int y,
         int count)
     {
-        if ((uint)x >= MaxGridSize ||
-            (uint)y >= MaxGridSize)
+        if ((uint)x >=
+                MaxGridSize ||
+            (uint)y >=
+                MaxGridSize)
         {
             return;
         }
@@ -125,12 +148,17 @@ public sealed class PathTrafficMemory
             MaxUnitsPerTile;
     }
 
+    /*
+     * Удобная проверка координатами.
+     */
     public bool IsFull(
         int x,
         int y)
     {
-        if ((uint)x >= MaxGridSize ||
-            (uint)y >= MaxGridSize)
+        if ((uint)x >=
+                MaxGridSize ||
+            (uint)y >=
+                MaxGridSize)
         {
             return false;
         }
@@ -139,9 +167,21 @@ public sealed class PathTrafficMemory
             y * MaxGridSize + x);
     }
 
-    // ============================================================
-    // TRAFFIC COST
-    // ============================================================
+    /*
+     * ============================================================
+     * TRAFFIC HEAT
+     * ============================================================
+     *
+     * Это отдельная система от occupancy.
+     *
+     * Occupancy:
+     *     3/3 = нельзя пройти.
+     *
+     * Traffic heat:
+     *     маршрут можно пройти,
+     *     но клетка становится менее привлекательной.
+     * ============================================================
+     */
 
     public float GetCost(
         int index,
@@ -172,26 +212,22 @@ public sealed class PathTrafficMemory
             currentFrame -
             lastFrame;
 
-        if (elapsed > 0)
+        if (elapsed <= 0)
+            return heat;
+
+        for (int i = 0;
+             i < elapsed;
+             i++)
         {
             heat *=
-                MathF.Pow(
-                    HeatDecay,
-                    elapsed);
+                HeatDecay;
+
+            if (heat < 0.001f)
+                return 0f;
         }
-
-        if (heat < MinHeat)
-            return 0f;
-
-        if (heat > MaxHeat)
-            return MaxHeat;
 
         return heat;
     }
-
-    // ============================================================
-    // ADD ROUTE
-    // ============================================================
 
     public void AddRoute(
         SpatialCoord[] path,
@@ -199,99 +235,48 @@ public sealed class PathTrafficMemory
         int currentFrame)
     {
         if (path == null ||
-            length <= 1)
+            length <= 0)
         {
             return;
         }
 
-        if (length > path.Length)
-            length = path.Length;
+        if (length >
+            path.Length)
+        {
+            length =
+                path.Length;
+        }
 
-        // Не засоряем стартовую клетку.
-        for (int i = 1;
+        for (int i = 0;
              i < length;
              i++)
         {
             SpatialCoord p =
                 path[i];
 
-            if ((uint)p.X >= MaxGridSize ||
-                (uint)p.Y >= MaxGridSize)
+            if ((uint)p.X >=
+                    MaxGridSize ||
+                (uint)p.Y >=
+                    MaxGridSize)
             {
                 continue;
             }
 
-            // Центральная клетка маршрута.
+            int index =
+                p.Y *
+                MaxGridSize +
+                p.X;
+
             AddHeat(
-                p.X,
-                p.Y,
-                HeatAdd,
+                index,
                 currentFrame);
-
-            // ====================================================
-            // КОРИДОР ВОКРУГ МАРШРУТА
-            // ====================================================
-
-            for (int dy = -RouteMemoryRadius;
-                 dy <= RouteMemoryRadius;
-                 dy++)
-            {
-                for (int dx = -RouteMemoryRadius;
-                     dx <= RouteMemoryRadius;
-                     dx++)
-                {
-                    if (dx == 0 &&
-                        dy == 0)
-                    {
-                        continue;
-                    }
-
-                    int nx =
-                        p.X + dx;
-
-                    int ny =
-                        p.Y + dy;
-
-                    if ((uint)nx >= MaxGridSize ||
-                        (uint)ny >= MaxGridSize)
-                    {
-                        continue;
-                    }
-
-                    // Чем дальше от центра,
-                    // тем слабее память.
-                    int distance =
-                        Math.Abs(dx) +
-                        Math.Abs(dy);
-
-                    float add =
-                        distance == 1
-                            ? HeatAdd * 0.45f
-                            : HeatAdd * 0.20f;
-
-                    AddHeat(
-                        nx,
-                        ny,
-                        add,
-                        currentFrame);
-                }
-            }
         }
     }
 
-    // ============================================================
-    // ADD HEAT
-    // ============================================================
-
     private void AddHeat(
-        int x,
-        int y,
-        float amount,
+        int index,
         int currentFrame)
     {
-        int index =
-            y * MaxGridSize + x;
-
         int encoded =
             Volatile.Read(
                 ref _heat[index]);
@@ -310,16 +295,27 @@ public sealed class PathTrafficMemory
 
         if (elapsed > 0)
         {
-            heat *=
-                MathF.Pow(
-                    HeatDecay,
-                    elapsed);
+            for (int i = 0;
+                 i < elapsed;
+                 i++)
+            {
+                heat *=
+                    HeatDecay;
+
+                if (heat < 0.001f)
+                {
+                    heat =
+                        0f;
+
+                    break;
+                }
+            }
         }
 
-        heat += amount;
-
-        if (heat > MaxHeat)
-            heat = MaxHeat;
+        heat =
+            MathF.Min(
+                MaxHeat,
+                heat + HeatAdd);
 
         Volatile.Write(
             ref _lastFrame[index],
@@ -330,34 +326,5 @@ public sealed class PathTrafficMemory
             (int)(
                 heat *
                 HeatScale));
-    }
-
-    // ============================================================
-    // DEBUG
-    // ============================================================
-
-    public float GetHeat(
-        int index,
-        int currentFrame)
-    {
-        return GetCost(
-            index,
-            currentFrame);
-    }
-
-    public float GetHeat(
-        int x,
-        int y,
-        int currentFrame)
-    {
-        if ((uint)x >= MaxGridSize ||
-            (uint)y >= MaxGridSize)
-        {
-            return 0f;
-        }
-
-        return GetCost(
-            y * MaxGridSize + x,
-            currentFrame);
     }
 }

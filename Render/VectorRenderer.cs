@@ -20,6 +20,7 @@ public sealed class VectorRenderer
 {
     private UnitSeparationSystem _separationSystem;
     private int _gameFrame;
+
     private const int TileSize = 16;
 
     private static readonly float MicroCellPixelSize =
@@ -46,7 +47,6 @@ public sealed class VectorRenderer
     private EdificeStore _edificeStore;
 
     private bool _showDebugGrid;
-    private bool _showHeightDebug;
 
     public void InitializeAndRun(
         WorldMap worldMap,
@@ -62,28 +62,45 @@ public sealed class VectorRenderer
         InitializeSystems();
         InitializeWindow();
 
-        _mouseInputSystem.MoveCommandRequested += IssueMoveCommands;
+        _mouseInputSystem.MoveCommandRequested +=
+            IssueMoveCommands;
 
         Run();
     }
 
     private void InitializeSystems()
     {
-        _pathfindingSystem = new PathfindingSystem();
-        _movementSystem = new UnitMovementSystem();
+        _pathfindingSystem =
+            new PathfindingSystem();
 
-        _movementSystem.MoveInterrupted += OnMoveInterrupted;
-        _separationSystem = new UnitSeparationSystem();
+        _movementSystem =
+            new UnitMovementSystem();
 
-        MoveTask moveTask = new MoveTask(
-            _pathfindingSystem,
-            _movementSystem);
+        _movementSystem.MoveInterrupted +=
+            OnMoveInterrupted;
 
-        _cpuBrainSystem = new UnitCpuBrainSystem(moveTask);
-        _simulation = new WorldSimulation(_movementSystem);
+        _separationSystem =
+            new UnitSeparationSystem();
 
-        _mapRenderSystem = new MapRenderSystem(MicroCellPixelSize);
-        _unitRenderSystem = new UnitRenderSystem();
+        MoveTask moveTask =
+            new MoveTask(
+                _pathfindingSystem,
+                _movementSystem);
+
+        _cpuBrainSystem =
+            new UnitCpuBrainSystem(
+                moveTask);
+
+        _simulation =
+            new WorldSimulation(
+                _movementSystem);
+
+        _mapRenderSystem =
+            new MapRenderSystem(
+                MicroCellPixelSize);
+
+        _unitRenderSystem =
+            new UnitRenderSystem();
     }
 
     private void OnMoveInterrupted(int unitId)
@@ -96,23 +113,34 @@ public sealed class VectorRenderer
         IReadOnlyList<int> unitIds,
         IReadOnlyList<SpatialCoord> points)
     {
-        int count = Math.Min(
-            unitIds.Count,
-            points.Count);
+        int count =
+            Math.Min(
+                unitIds.Count,
+                points.Count);
 
-        for (int i = 0; i < count; i++)
+        for (int i = 0;
+             i < count;
+             i++)
         {
-            SpatialCoord target = points[i];
+            SpatialCoord target =
+                points[i];
 
             _cpuBrainSystem.IssueCommand(
                 _unitStore,
                 unitIds[i],
                 new AiCommand
                 {
-                    OpCode = AiOpCode.MoveToTarget,
-                    TargetX = target.X,
-                    TargetY = target.Y,
-                    TargetZ = target.Z
+                    OpCode =
+                        AiOpCode.MoveToTarget,
+
+                    TargetX =
+                        target.X,
+
+                    TargetY =
+                        target.Y,
+
+                    TargetZ =
+                        target.Z
                 },
                 AiCommandInsertMode.ReplaceAll);
         }
@@ -120,37 +148,53 @@ public sealed class VectorRenderer
 
     private void InitializeWindow()
     {
-        _window = new RenderWindow(
-            new VideoMode(new Vector2u(1280, 720)),
-            "RimClone");
+        _window =
+            new RenderWindow(
+                new VideoMode(
+                    new Vector2u(
+                        1280,
+                        720)),
+                "RimClone");
 
         _window.SetFramerateLimit(60);
 
-        _gameCamera = new GameCamera(
-            new Vector2f(400, 400),
-            new Vector2f(1280, 720),
-            moveSpeed: 450f);
+        _gameCamera =
+            new GameCamera(
+                new Vector2f(
+                    400,
+                    400),
+                new Vector2f(
+                    1280,
+                    720),
+                moveSpeed: 450f);
 
         _gameCamera.CenterOnStreet(
             MicroCellPixelSize);
 
-        _window.Closed += (_, _) => _window.Close();
-        _window.MouseWheelScrolled += (_, e) =>
-            _gameCamera.HandleZoom(e.Delta);
+        _window.Closed +=
+            (_, _) => _window.Close();
 
-        _window.KeyPressed += (_, e) =>
-            HandleKey(e.Code);
+        _window.MouseWheelScrolled +=
+            (_, e) => _gameCamera.HandleZoom(e.Delta);
+
+        _window.KeyPressed +=
+            (_, e) => HandleKey(e.Code);
     }
 
     private void Run()
     {
         float radius =
-            0.4f * MicroCellPixelSize;
+            0.4f *
+            MicroCellPixelSize;
 
-        CircleShape unitShape = new CircleShape(radius)
-        {
-            Origin = new Vector2f(radius, radius)
-        };
+        CircleShape unitShape =
+            new CircleShape(radius)
+            {
+                Origin =
+                    new Vector2f(
+                        radius,
+                        radius)
+            };
 
         Clock clock = new();
 
@@ -159,7 +203,8 @@ public sealed class VectorRenderer
             _window.DispatchEvents();
 
             float deltaTime =
-                clock.Restart().AsSeconds();
+                clock.Restart()
+                    .AsSeconds();
 
             if (deltaTime > 0.1f)
                 deltaTime = 0.1f;
@@ -173,24 +218,32 @@ public sealed class VectorRenderer
     {
         _gameFrame++;
 
-        _pathfindingSystem.UpdateFrame(_gameFrame);
+        _pathfindingSystem.UpdateFrame(
+            _gameFrame);
 
-        _gameCamera.UpdateInput(deltaTime);
+        _gameCamera.UpdateInput(
+            deltaTime);
 
         Vector2i mousePixels =
-            Mouse.GetPosition(_window);
+            Mouse.GetPosition(
+                _window);
 
         Vector2f mouseWorld =
             _window.MapPixelToCoords(
                 mousePixels,
                 _gameCamera.View);
 
+        /*
+         * Mouse работает в обычной мировой сетке.
+         * Height сюда НЕ вмешивается.
+         */
         _mouseInputSystem.Update(
-            _window,
-            _unitStore,
-            _worldMap.CurrentViewZ,
-            MicroCellPixelSize,
-            mouseWorld);
+     _window,
+     _unitStore,
+     _worldMap,
+     _worldMap.CurrentViewZ,
+     MicroCellPixelSize,
+     mouseWorld);
 
         _simulation.Update(
             _unitStore,
@@ -220,16 +273,24 @@ public sealed class VectorRenderer
     private void UpdateTileInspector(
         Vector2f mouseWorld)
     {
-        if (!Mouse.IsButtonPressed(Mouse.Button.Left))
+        if (!Mouse.IsButtonPressed(
+                Mouse.Button.Left))
+        {
             return;
+        }
 
-        int x = (int)(
-            mouseWorld.X / MicroCellPixelSize);
+        int x =
+            (int)MathF.Floor(
+                mouseWorld.X /
+                MicroCellPixelSize);
 
-        int y = (int)(
-            mouseWorld.Y / MicroCellPixelSize);
+        int y =
+            (int)MathF.Floor(
+                mouseWorld.Y /
+                MicroCellPixelSize);
 
-        int max = GetMaxCoord();
+        int max =
+            MapRegion.MicroSize * 16 - 1;
 
         if (x < 0 ||
             y < 0 ||
@@ -247,45 +308,9 @@ public sealed class VectorRenderer
             return;
 
         ref MicroCell cell =
-            ref layer.GetMicroCell(x, y);
-
-        Console.Clear();
-
-        Console.WriteLine(
-            $"[HEIGHT DEBUG] " +
-            $"Cell=({x},{y}) " +
-            $"Z={_worldMap.CurrentViewZ} " +
-            $"Height={cell.Height}");
-
-        PrintNeighbourHeight(
-            layer,
-            x + 1,
-            y,
-            "E",
-            max);
-
-        PrintNeighbourHeight(
-            layer,
-            x - 1,
-            y,
-            "W",
-            max);
-
-        PrintNeighbourHeight(
-            layer,
-            x,
-            y + 1,
-            "S",
-            max);
-
-        PrintNeighbourHeight(
-            layer,
-            x,
-            y - 1,
-            "N",
-            max);
-
-        Console.WriteLine();
+            ref layer.GetMicroCell(
+                x,
+                y);
 
         string info =
             TileMetadataSystem.InspectMicroCell(
@@ -294,41 +319,26 @@ public sealed class VectorRenderer
                 y,
                 _edificeStore);
 
+        Console.Clear();
         Console.WriteLine(info);
     }
 
-    private static void PrintNeighbourHeight(
-        MapLayer layer,
-        int x,
-        int y,
-        string direction,
-        int maxCoord)
-    {
-        if (x < 0 ||
-            y < 0 ||
-            x > maxCoord ||
-            y > maxCoord)
-        {
-            return;
-        }
-
-        ref MicroCell cell =
-            ref layer.GetMicroCell(x, y);
-
-        Console.WriteLine(
-            $"  {direction}: " +
-            $"({x},{y}) " +
-            $"Height={cell.Height}");
-    }
-
-    private void Draw(CircleShape unitShape)
+    private void Draw(
+        CircleShape unitShape)
     {
         _window.Clear(
-            new Color(20, 20, 25));
+            new Color(
+                20,
+                20,
+                25));
 
         _window.SetView(
             _gameCamera.View);
 
+        /*
+         * Height используется ТОЛЬКО
+         * внутри MapRenderSystem.
+         */
         _mapRenderSystem.Draw(
             _window,
             _worldMap,
@@ -337,8 +347,7 @@ public sealed class VectorRenderer
             RegionPixelSize,
             MicroCellPixelSize,
             _gameCamera.ZoomLevel,
-            _showDebugGrid,
-            _showHeightDebug);
+            _showDebugGrid);
 
         int aliveCount =
             _unitRenderSystem.Draw(
@@ -354,12 +363,12 @@ public sealed class VectorRenderer
             _worldMap.CurrentViewZ);
 
         _mouseInputSystem.DrawSelectionBox(
-            _window);
+        _window
+        );
 
         _window.SetTitle(
             $"RimClone | Units: {aliveCount} | " +
-            $"Z: {_worldMap.CurrentViewZ} | " +
-            $"HeightDebug: {(_showHeightDebug ? "ON" : "OFF")}");
+            $"Z: {_worldMap.CurrentViewZ}");
 
         _window.Display();
     }
@@ -373,7 +382,10 @@ public sealed class VectorRenderer
             if (_unitStore.HealthMasks[i] == 0)
                 continue;
 
-            if (_unitStore.Positions[i].Spatial.Z !=
+            ref UnitPosition position =
+                ref _unitStore.Positions[i];
+
+            if (position.Spatial.Z !=
                 _worldMap.CurrentViewZ)
             {
                 continue;
@@ -383,34 +395,57 @@ public sealed class VectorRenderer
                 continue;
 
             float radius =
-                0.4f * MicroCellPixelSize + 2f;
+                0.4f *
+                MicroCellPixelSize +
+                2f;
 
             float renderX =
-                _unitStore.Positions[i].RenderX +
+                position.RenderX +
                 _unitStore.SeparationOffsetX[i];
 
             float renderY =
-                _unitStore.Positions[i].RenderY +
+                position.RenderY +
                 _unitStore.SeparationOffsetY[i];
+
+            /*
+             * ВАЖНО:
+             * Height здесь не используется.
+             */
+            float pixelX =
+                renderX *
+                MicroCellPixelSize +
+                MicroCellPixelSize * 0.5f;
+
+            float pixelY =
+                renderY *
+                MicroCellPixelSize +
+                MicroCellPixelSize * 0.5f;
 
             CircleShape ring =
                 new CircleShape(radius)
                 {
-                    Origin = new Vector2f(
-                        radius,
-                        radius),
+                    Origin =
+                        new Vector2f(
+                            radius,
+                            radius),
 
-                    Position = new Vector2f(
-                        renderX * MicroCellPixelSize +
-                        MicroCellPixelSize * 0.5f,
+                    Position =
+                        new Vector2f(
+                            pixelX,
+                            pixelY),
 
-                        renderY * MicroCellPixelSize +
-                        MicroCellPixelSize * 0.5f),
+                    FillColor =
+                        Color.Transparent,
 
-                    FillColor = Color.Transparent,
                     OutlineColor =
-                        new Color(0, 255, 130, 220),
-                    OutlineThickness = 1f
+                        new Color(
+                            0,
+                            255,
+                            130,
+                            220),
+
+                    OutlineThickness =
+                        1f
                 };
 
             _window.Draw(ring);
@@ -420,19 +455,22 @@ public sealed class VectorRenderer
     private void HandleKey(
         Keyboard.Key key)
     {
-        if (key == Keyboard.Key.PageUp)
+        if (key ==
+            Keyboard.Key.PageUp)
         {
             _worldMap.ChangeViewFloor(1);
             return;
         }
 
-        if (key == Keyboard.Key.PageDown)
+        if (key ==
+            Keyboard.Key.PageDown)
         {
             _worldMap.ChangeViewFloor(-1);
             return;
         }
 
-        if (key == Keyboard.Key.G)
+        if (key ==
+            Keyboard.Key.G)
         {
             _showDebugGrid =
                 !_showDebugGrid;
@@ -441,26 +479,6 @@ public sealed class VectorRenderer
                 _showDebugGrid
                     ? "Micro grid ON"
                     : "Micro grid OFF");
-
-            return;
         }
-
-        if (key == Keyboard.Key.H)
-        {
-            _showHeightDebug =
-                !_showHeightDebug;
-
-            Console.WriteLine(
-                _showHeightDebug
-                    ? "Height debug ON"
-                    : "Height debug OFF");
-
-            return;
-        }
-    }
-
-    private static int GetMaxCoord()
-    {
-        return MapRegion.MicroSize * 16 - 1;
     }
 }

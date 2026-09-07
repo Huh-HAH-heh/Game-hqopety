@@ -1,7 +1,6 @@
-﻿using System;
-using Core.Map;
-using Core.Structs;
+﻿using Core.Map;
 using Core.Unit.Components;
+using System;
 
 namespace Core.AI;
 
@@ -20,36 +19,24 @@ public static class PureAStarPathfinder
     private const ushort FLAG_WALKABLE = 0x0004;
 
     private const int MaxUnitsPerTile = 3;
+
     private const int MaxHeightStep = 3;
 
     private const int MaxGridSize = 768;
+
     private const int MaxGridCells =
         MaxGridSize * MaxGridSize;
 
     private const int MaxPathLength =
         MaxGridCells;
 
-    // Обычный шаг.
     private const float StraightCost = 1f;
 
-    // ============================================================
-    // TRAFFIC
-    // ============================================================
+    private const float TrafficCostMultiplier = 0.20f;
 
-    // Насколько сильно старые маршруты влияют на A*.
-    private const float TrafficCostMultiplier = 2.5f;
-
-    // ============================================================
-    // OCCUPANCY
-    // ============================================================
-
-    private const float OneUnitOccupancyCost = 5f;
-    private const float TwoUnitsOccupancyCost = 18f;
-
-    // ============================================================
-    // DIRECTIONS
-    // ============================================================
-
+    /*
+     * Только 4 направления.
+     */
     private static readonly int[] Dx =
     {
         0,
@@ -84,6 +71,29 @@ public static class PureAStarPathfinder
         int maxPathLength,
         out int pathLength)
     {
+        return FindRouteInternal(
+            context,
+            traffic,
+            currentFrame,
+            layer,
+            start,
+            target,
+            outPath,
+            maxPathLength,
+            out pathLength);
+    }
+
+    private static bool FindRouteInternal(
+        PureAStarContext context,
+        PathTrafficMemory traffic,
+        int currentFrame,
+        MapLayer layer,
+        SpatialCoord start,
+        SpatialCoord target,
+        SpatialCoord[] outPath,
+        int maxPathLength,
+        out int pathLength)
+    {
         pathLength = 0;
 
         if (context == null ||
@@ -97,12 +107,22 @@ public static class PureAStarPathfinder
         if (start.Z != target.Z)
             return false;
 
-        if (!IsInside(start.X, start.Y) ||
-            !IsInside(target.X, target.Y))
+        if (!IsInside(
+                start.X,
+                start.Y) ||
+            !IsInside(
+                target.X,
+                target.Y))
         {
             return false;
         }
 
+        /*
+         * Старт должен быть проходимым.
+         *
+         * Не проверяем occupancy старта:
+         * там уже находится сам юнит.
+         */
         if (!IsWalkable(
                 layer,
                 start.X,
@@ -111,6 +131,9 @@ public static class PureAStarPathfinder
             return false;
         }
 
+        /*
+         * Цель должна быть проходимой.
+         */
         if (!IsWalkable(
                 layer,
                 target.X,
@@ -119,26 +142,35 @@ public static class PureAStarPathfinder
             return false;
         }
 
+        /*
+         * Если цель полностью занята —
+         * пути к ней нет.
+         */
         int targetIndex =
             ToIndex(
                 target.X,
                 target.Y);
 
-        // Полностью заполненная цель
-        // недоступна.
         if (traffic != null &&
-            traffic.GetOccupancy(targetIndex) >=
+            traffic.GetOccupancy(
+                targetIndex) >=
             MaxUnitsPerTile)
         {
             return false;
         }
 
-        // Уже на месте.
+        /*
+         * Уже в цели.
+         */
         if (start.X == target.X &&
             start.Y == target.Y)
         {
-            outPath[0] = start;
-            pathLength = 1;
+            outPath[0] =
+                start;
+
+            pathLength =
+                1;
+
             return true;
         }
 
@@ -156,7 +188,9 @@ public static class PureAStarPathfinder
                 target.X,
                 target.Y);
 
-        context.GScore[startIndex] = 0f;
+        context.GScore[
+            startIndex] =
+            0f;
 
         context.OpenSet[
             context.OpenCount++] =
@@ -173,38 +207,23 @@ public static class PureAStarPathfinder
         while (context.OpenCount > 0)
         {
             int bestOpenIndex =
-                FindBestOpenNode(context);
+                FindBestOpenNode(
+                    context);
 
             PurePathNode current =
                 context.OpenSet[
                     bestOpenIndex];
 
-            if (current.HashIndex == targetIndex)
+            if (current.HashIndex ==
+                targetIndex)
             {
-                bool success =
-                    BuildPath(
-                        context,
-                        start.Z,
-                        targetIndex,
-                        outPath,
-                        maxPathLength,
-                        out pathLength);
-
-                // =================================================
-                // ЗАПОМИНАЕМ МАРШРУТ
-                // =================================================
-
-                if (success &&
-                    traffic != null &&
-                    pathLength > 1)
-                {
-                    traffic.AddRoute(
-                        outPath,
-                        pathLength,
-                        currentFrame);
-                }
-
-                return success;
+                return BuildPath(
+                    context,
+                    start.Z,
+                    targetIndex,
+                    outPath,
+                    maxPathLength,
+                    out pathLength);
             }
 
             RemoveOpenNode(
@@ -212,18 +231,30 @@ public static class PureAStarPathfinder
                 bestOpenIndex);
 
             context.ClosedSet[
-                current.HashIndex] = 1;
+                current.HashIndex] =
+                1;
 
-            for (int d = 0; d < 4; d++)
+            /*
+             * 4 cardinal направления.
+             */
+            for (int d = 0;
+                 d < 4;
+                 d++)
             {
                 int nx =
-                    current.X + Dx[d];
+                    current.X +
+                    Dx[d];
 
                 int ny =
-                    current.Y + Dy[d];
+                    current.Y +
+                    Dy[d];
 
-                if (!IsInside(nx, ny))
+                if (!IsInside(
+                        nx,
+                        ny))
+                {
                     continue;
+                }
 
                 int neighborIndex =
                     ToIndex(
@@ -236,6 +267,9 @@ public static class PureAStarPathfinder
                     continue;
                 }
 
+                /*
+                 * Непроходимая клетка мира.
+                 */
                 if (!IsWalkable(
                         layer,
                         nx,
@@ -244,6 +278,9 @@ public static class PureAStarPathfinder
                     continue;
                 }
 
+                /*
+                 * Перепад высоты.
+                 */
                 if (!CanTraverseHeight(
                         layer,
                         current.X,
@@ -254,62 +291,43 @@ public static class PureAStarPathfinder
                     continue;
                 }
 
-                // =================================================
-                // OCCUPANCY
-                // =================================================
-
-                int occupancy = 0;
-
-                if (traffic != null)
+                /*
+                 * ====================================================
+                 * ПОЛНОСТЬЮ ЗАНЯТАЯ КЛЕТКА
+                 *
+                 * 3/3 = стена для A*.
+                 *
+                 * Исключение только для стартовой клетки.
+                 * ====================================================
+                 */
+                if (neighborIndex !=
+                    startIndex &&
+                    traffic != null &&
+                    traffic.GetOccupancy(
+                        neighborIndex) >=
+                    MaxUnitsPerTile)
                 {
-                    occupancy =
-                        traffic.GetOccupancy(
-                            neighborIndex);
-
-                    // 3/3 = физическая блокировка.
-                    if (neighborIndex != startIndex &&
-                        occupancy >= MaxUnitsPerTile)
-                    {
-                        continue;
-                    }
+                    continue;
                 }
 
                 float stepCost =
                     StraightCost;
 
-                // =================================================
-                // OCCUPANCY PENALTY
-                // =================================================
-
-                if (neighborIndex != startIndex)
-                {
-                    switch (occupancy)
-                    {
-                        case 1:
-                            stepCost +=
-                                OneUnitOccupancyCost;
-                            break;
-
-                        case 2:
-                            stepCost +=
-                                TwoUnitsOccupancyCost;
-                            break;
-                    }
-                }
-
-                // =================================================
-                // OLD ROUTE PENALTY
-                // =================================================
+                /*
+                 * ====================================================
+                 * SOFT TRAFFIC COST
+                 * ====================================================
+                 */
 
                 if (traffic != null)
                 {
-                    float heat =
+                    float trafficCost =
                         traffic.GetCost(
                             neighborIndex,
                             currentFrame);
 
                     stepCost +=
-                        heat *
+                        trafficCost *
                         TrafficCostMultiplier;
                 }
 
@@ -349,31 +367,28 @@ public static class PureAStarPathfinder
             }
         }
 
+        /*
+         * Все возможные направления закончились.
+         *
+         * Значит маршрута нет.
+         */
         return false;
     }
-
-    // ============================================================
-    // WALKABLE
-    // ============================================================
 
     private static bool IsWalkable(
         MapLayer layer,
         int x,
         int y)
     {
-        MicroCell cell =
+        var cell =
             layer.GetMicroCell(
                 x,
                 y);
 
         return
             (cell.Flags & FLAG_WALKABLE) != 0 &&
-            cell.EdificeId == 0;
+            cell.EdificeId <= 0;
     }
-
-    // ============================================================
-    // HEIGHT
-    // ============================================================
 
     private static bool CanTraverseHeight(
         MapLayer layer,
@@ -382,26 +397,21 @@ public static class PureAStarPathfinder
         int dstX,
         int dstY)
     {
-        MicroCell src =
+        var src =
             layer.GetMicroCell(
                 srcX,
                 srcY);
 
-        MicroCell dst =
+        var dst =
             layer.GetMicroCell(
                 dstX,
                 dstY);
 
-        return
-            Math.Abs(
-                (int)dst.Height -
-                (int)src.Height)
+        return Math.Abs(
+                dst.Height -
+                src.Height)
             <= MaxHeightStep;
     }
-
-    // ============================================================
-    // OPEN SET
-    // ============================================================
 
     private static void UpdateOpenNode(
         PureAStarContext context,
@@ -424,9 +434,14 @@ public static class PureAStarPathfinder
                 continue;
             }
 
-            context.OpenSet[i].G = g;
-            context.OpenSet[i].H = h;
-            context.OpenSet[i].F = f;
+            context.OpenSet[i].G =
+                g;
+
+            context.OpenSet[i].H =
+                h;
+
+            context.OpenSet[i].F =
+                f;
 
             return;
         }
@@ -453,7 +468,8 @@ public static class PureAStarPathfinder
     private static int FindBestOpenNode(
         PureAStarContext context)
     {
-        int best = 0;
+        int best =
+            0;
 
         for (int i = 1;
              i < context.OpenCount;
@@ -462,16 +478,19 @@ public static class PureAStarPathfinder
             if (context.OpenSet[i].F <
                 context.OpenSet[best].F)
             {
-                best = i;
+                best =
+                    i;
+
                 continue;
             }
 
             if (context.OpenSet[i].F ==
-                    context.OpenSet[best].F &&
+                context.OpenSet[best].F &&
                 context.OpenSet[i].H <
-                    context.OpenSet[best].H)
+                context.OpenSet[best].H)
             {
-                best = i;
+                best =
+                    i;
             }
         }
 
@@ -495,10 +514,6 @@ public static class PureAStarPathfinder
                 context.OpenCount];
     }
 
-    // ============================================================
-    // BUILD PATH
-    // ============================================================
-
     private static bool BuildPath(
         PureAStarContext context,
         int z,
@@ -507,12 +522,14 @@ public static class PureAStarPathfinder
         int maxPathLength,
         out int pathLength)
     {
-        pathLength = 0;
+        pathLength =
+            0;
 
         int current =
             targetIndex;
 
-        int tempCount = 0;
+        int tempCount =
+            0;
 
         while (current != -1)
         {
@@ -523,10 +540,12 @@ public static class PureAStarPathfinder
             }
 
             int x =
-                current % MaxGridSize;
+                current %
+                MaxGridSize;
 
             int y =
-                current / MaxGridSize;
+                current /
+                MaxGridSize;
 
             context.TempPathBuffer[
                 tempCount++] =
@@ -562,10 +581,6 @@ public static class PureAStarPathfinder
         return true;
     }
 
-    // ============================================================
-    // HEURISTIC
-    // ============================================================
-
     private static float Heuristic(
         int x,
         int y,
@@ -584,7 +599,8 @@ public static class PureAStarPathfinder
         int y)
     {
         return
-            y * MaxGridSize +
+            y *
+            MaxGridSize +
             x;
     }
 
