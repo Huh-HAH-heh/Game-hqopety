@@ -3,24 +3,36 @@ using Core.Map;
 using Core.Structs;
 using Core.Items;
 
-namespace World
+namespace World;
+
+public static class WorldGenerator
 {
-    public static class WorldGenerator
+    private const int MapSizeInCells =
+        16 * 48; // 768x768 micro cells
+
+    public static void Generate(
+        WorldMap worldMap,
+        EdificeStore edificeStore)
     {
-        private const int MapSizeInCells = 16 * 48; // 768х768 микро-ячеек
+        // --------------------------------------------------------
+        // 1. Базовый рельеф
+        // --------------------------------------------------------
 
-        public static void Generate(WorldMap worldMap, EdificeStore edificeStore)
+        GenerateBaseTerrain(worldMap);
+
+        // --------------------------------------------------------
+        // 2. Edifice config
+        // --------------------------------------------------------
+
+        if (edificeStore.Configs == null ||
+            edificeStore.Configs.Length <= 1)
         {
-            // 1. Очищаем карту, заливая базовой ровной землей
-            ClearToFlatGround(worldMap);
+            edificeStore.Configs =
+                new EdificeConfig[10];
+        }
 
-            // 2. Инициализируем элемент массива Configs по индексу (TypeId/ConfigId = 1)
-            if (edificeStore.Configs == null || edificeStore.Configs.Length <= 1)
-            {
-                edificeStore.Configs = new EdificeConfig[10];
-            }
-
-            edificeStore.Configs[1] = new EdificeConfig
+        edificeStore.Configs[1] =
+            new EdificeConfig
             {
                 TypeId = 1,
                 Name = "Бетонная стена",
@@ -31,99 +43,308 @@ namespace World
                 CoverEffectiveness = 1.0f
             };
 
-            // 3. Запускаем рекурсивную генерацию фрактального лабиринта в центре карты
-            // Квадрат размером 486х486 идеально делится на 3 на всех уровнях рекурсии (486 -> 162 -> 54 -> 18 -> 6)
-            int fractalSize = 486;
-            int startX = (MapSizeInCells - fractalSize) / 2; // Центрирование на карте 768
-            int startY = (MapSizeInCells - fractalSize) / 2;
+        // --------------------------------------------------------
+        // 3. Fractal structure
+        // --------------------------------------------------------
 
-            // ИСПРАВЛЕНО: Заменили имя именованного аргумента с zLevel на z, чтобы оно соответствовало сигнатуре метода
-            GenerateFractalRooms(worldMap, edificeStore, startX, startY, fractalSize, z: 1, currentDepth: 0, maxDepth: 4);
+        int fractalSize = 486;
 
-            Console.WriteLine("[WorldGenerator] Фрактальная сквозная структура Серпинского успешно возведена.");
-        }
+        int startX =
+            (MapSizeInCells - fractalSize) / 2;
 
-        private static void ClearToFlatGround(WorldMap worldMap)
+        int startY =
+            (MapSizeInCells - fractalSize) / 2;
+
+        GenerateFractalRooms(
+            worldMap,
+            edificeStore,
+            startX,
+            startY,
+            fractalSize,
+            z: 1,
+            currentDepth: 0,
+            maxDepth: 4);
+
+        Console.WriteLine(
+            "[WorldGenerator] " +
+            "Фрактальная структура создана.");
+    }
+
+    // ============================================================
+    // BASE TERRAIN
+    // ============================================================
+
+    private static void GenerateBaseTerrain(
+        WorldMap worldMap)
+    {
+        for (
+            int z = worldMap.MinZ;
+            z <= worldMap.MaxZ;
+            z++)
         {
-            for (int z = worldMap.MinZ; z <= worldMap.MaxZ; z++)
-            {
-                MapLayer layer = worldMap.GetLayer(z);
-                if (layer == null) continue;
+            MapLayer layer =
+                worldMap.GetLayer(z);
 
-                for (int y = 0; y < MapSizeInCells; y++)
+            if (layer == null)
+                continue;
+
+            for (int y = 0;
+                 y < MapSizeInCells;
+                 y++)
+            {
+                for (int x = 0;
+                     x < MapSizeInCells;
+                     x++)
                 {
-                    for (int x = 0; x < MapSizeInCells; x++)
+                    ref MicroCell cell =
+                        ref layer.GetMicroCell(x, y);
+
+                    cell.FloorId = 0;
+                    cell.EdificeId = 0;
+                    cell.Flags = 0x0004;
+
+                    // ------------------------------------------------
+                    // Верхний уровень имеет рельеф.
+                    // Подземные уровни оставляем ниже.
+                    // ------------------------------------------------
+
+                    if (z == 0)
                     {
-                        ref MicroCell tile = ref layer.GetMicroCell(x, y);
-                        tile.FloorId = 0;     // Базовая трава/пол
-                        tile.EdificeId = 0;   // Пусто
-                        tile.Flags = 0x0004;  // Проходимо
-                        tile.Height = 10;     // Ровный ландшафт
+                        cell.Height =
+                            GenerateHeight(x, y);
+                    }
+                    else if (z > 0)
+                    {
+                        cell.Height =
+                            GenerateUpperLevelHeight(x, y);
+                    }
+                    else
+                    {
+                        cell.Height = 0;
                     }
                 }
             }
         }
+    }
 
-        private static void GenerateFractalRooms(WorldMap map, EdificeStore store, int x, int y, int size, int z, int currentDepth, int maxDepth)
+    // ============================================================
+    // MAIN TERRAIN HEIGHT
+    // ============================================================
+
+    private static byte GenerateHeight(
+        int x,
+        int y)
+    {
+        // Крупная форма рельефа.
+        float large =
+            MathF.Sin(x * 0.018f) * 2.0f +
+            MathF.Cos(y * 0.015f) * 1.8f;
+
+        // Вторая частота.
+        float medium =
+            MathF.Sin(
+                (x + y) * 0.045f) * 1.2f;
+
+        // Мелкие неровности.
+        float small =
+            MathF.Sin(x * 0.11f) *
+            MathF.Cos(y * 0.09f) *
+            0.45f;
+
+        float height =
+            10.0f +
+            large +
+            medium +
+            small;
+
+        // Террасируем рельеф.
+        height =
+            MathF.Round(height);
+
+        return ClampHeight(height);
+    }
+
+    // ============================================================
+    // UPPER LEVEL
+    // ============================================================
+
+    private static byte GenerateUpperLevelHeight(
+     int x,
+     int y)
+    {
+        int baseHeight =
+            GenerateHeight(x, y);
+
+        int result =
+            baseHeight + 2;
+
+        return (byte)Math.Min(
+            result,
+            32);
+    }
+
+    // ============================================================
+    // CLAMP
+    // ============================================================
+
+    private static byte ClampHeight(
+        float value)
+    {
+        if (value < 4f)
+            return 4;
+
+        if (value > 20f)
+            return 20;
+
+        return (byte)value;
+    }
+
+    // ============================================================
+    // FRACTAL ROOMS
+    // ============================================================
+
+    private static void GenerateFractalRooms(
+        WorldMap map,
+        EdificeStore store,
+        int x,
+        int y,
+        int size,
+        int z,
+        int currentDepth,
+        int maxDepth)
+    {
+        if (currentDepth > maxDepth ||
+            size < 6)
         {
-            if (currentDepth > maxDepth || size < 6) return;
-
-            // Строим стены текущей квадратной комнаты
-            BuildPassableRoomFrame(map, store, x, y, size, z);
-
-            // Делим текущий квадрат на 9 равных частей (сетка 3х3)
-            int subSize = size / 3;
-
-            for (int row = 0; row < 3; row++)
-            {
-                for (int col = 0; col < 3; col++)
-                {
-                    // Центральный сектор (row == 1 && col == 1) оставляем пустым по принципу ковра Серпинского
-                    if (row == 1 && col == 1) continue;
-
-                    int subX = x + col * subSize;
-                    int subY = y + row * subSize;
-
-                    // Рекурсивный вызов для следующего под-уровня фрактала
-                    GenerateFractalRooms(map, store, subX, subY, subSize, z, currentDepth + 1, maxDepth);
-                }
-            }
+            return;
         }
 
-        private static void BuildPassableRoomFrame(WorldMap map, EdificeStore store, int startX, int startY, int size, int z)
+        BuildPassableRoomFrame(
+            map,
+            store,
+            x,
+            y,
+            size,
+            z);
+
+        int subSize =
+            size / 3;
+
+        for (int row = 0;
+             row < 3;
+             row++)
         {
-            int endX = startX + size - 1;
-            int endY = startY + size - 1;
-
-            // Определяем центр стен для создания сквозных проемов (дверей)
-            int midX = startX + size / 2;
-            int midY = startY + size / 2;
-
-            // Размер проема (для больших внешних комнат делаем шире, для внутренних — в 1 клетку)
-            int doorRadius = size > 100 ? 2 : 1;
-
-            for (int currY = startY; currY <= endY; currY++)
+            for (int col = 0;
+                 col < 3;
+                 col++)
             {
-                for (int currX = startX; currX <= endX; currX++)
+                if (row == 1 &&
+                    col == 1)
                 {
-                    // Строим строго по периметру квадрата
-                    bool isBorder = (currX == startX || currX == endX || currY == startY || currY == endY);
-                    if (!isBorder) continue;
-
-                    // --- МАГИЯ СКВОЗНОГО ПРОХОДА ---
-                    // Пропускаем постройку стен ровно по центру каждой из 4-х сторон
-                    if (Math.Abs(currX - midX) <= doorRadius && (currY == startY || currY == endY)) continue;
-                    if (Math.Abs(currY - midY) <= doorRadius && (currX == startX || currX == endX)) continue;
-
-                    ushort gx = unchecked((ushort)currX);
-                    ushort gy = unchecked((ushort)currY);
-
-                    // Проверка выхода за границы карты
-                    if (gx >= MapSizeInCells || gy >= MapSizeInCells) continue;
-
-                    // Передаем configId = 1
-                    store.Build(map, 1, gx, gy, z);
+                    continue;
                 }
+
+                int subX =
+                    x + col * subSize;
+
+                int subY =
+                    y + row * subSize;
+
+                GenerateFractalRooms(
+                    map,
+                    store,
+                    subX,
+                    subY,
+                    subSize,
+                    z,
+                    currentDepth + 1,
+                    maxDepth);
+            }
+        }
+    }
+
+    // ============================================================
+    // ROOM FRAME
+    // ============================================================
+
+    private static void BuildPassableRoomFrame(
+        WorldMap map,
+        EdificeStore store,
+        int startX,
+        int startY,
+        int size,
+        int z)
+    {
+        int endX =
+            startX + size - 1;
+
+        int endY =
+            startY + size - 1;
+
+        int midX =
+            startX + size / 2;
+
+        int midY =
+            startY + size / 2;
+
+        int doorRadius =
+            size > 100
+                ? 2
+                : 1;
+
+        for (int currY = startY;
+             currY <= endY;
+             currY++)
+        {
+            for (int currX = startX;
+                 currX <= endX;
+                 currX++)
+            {
+                bool isBorder =
+                    currX == startX ||
+                    currX == endX ||
+                    currY == startY ||
+                    currY == endY;
+
+                if (!isBorder)
+                    continue;
+
+                bool horizontalDoor =
+                    Math.Abs(currX - midX) <= doorRadius &&
+                    (currY == startY ||
+                     currY == endY);
+
+                bool verticalDoor =
+                    Math.Abs(currY - midY) <= doorRadius &&
+                    (currX == startX ||
+                     currX == endX);
+
+                if (horizontalDoor ||
+                    verticalDoor)
+                {
+                    continue;
+                }
+
+                if (currX < 0 ||
+                    currY < 0 ||
+                    currX >= MapSizeInCells ||
+                    currY >= MapSizeInCells)
+                {
+                    continue;
+                }
+
+                ushort gx =
+                    (ushort)currX;
+
+                ushort gy =
+                    (ushort)currY;
+
+                store.Build(
+                    map,
+                    1,
+                    gx,
+                    gy,
+                    z);
             }
         }
     }

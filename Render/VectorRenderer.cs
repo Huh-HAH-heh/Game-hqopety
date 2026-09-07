@@ -12,6 +12,7 @@ using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
 using System;
+using System.Collections.Generic;
 
 namespace RimClone.Render;
 
@@ -21,8 +22,11 @@ public sealed class VectorRenderer
     private int _gameFrame;
     private const int TileSize = 16;
 
-    private static readonly float MicroCellPixelSize = (float)TileSize / MapRegion.SubDivision;
-    private static readonly float RegionPixelSize = MapRegion.MicroSize * MicroCellPixelSize;
+    private static readonly float MicroCellPixelSize =
+        (float)TileSize / MapRegion.SubDivision;
+
+    private static readonly float RegionPixelSize =
+        MapRegion.MicroSize * MicroCellPixelSize;
 
     private readonly MouseInputSystem _mouseInputSystem = new();
 
@@ -42,8 +46,13 @@ public sealed class VectorRenderer
     private EdificeStore _edificeStore;
 
     private bool _showDebugGrid;
+    private bool _showHeightDebug;
 
-    public void InitializeAndRun(WorldMap worldMap, UnitStore unitStore, UnitSpatialGrid spatialGrid, EdificeStore edificeStore)
+    public void InitializeAndRun(
+        WorldMap worldMap,
+        UnitStore unitStore,
+        UnitSpatialGrid spatialGrid,
+        EdificeStore edificeStore)
     {
         _worldMap = worldMap;
         _unitStore = unitStore;
@@ -76,21 +85,24 @@ public sealed class VectorRenderer
         _mapRenderSystem = new MapRenderSystem(MicroCellPixelSize);
         _unitRenderSystem = new UnitRenderSystem();
     }
+
     private void OnMoveInterrupted(int unitId)
     {
         Console.WriteLine(
             $"[MOVEMENT] INTERRUPTED unit={unitId}");
     }
-    private void IssueMoveCommands(IReadOnlyList<int> unitIds, IReadOnlyList<SpatialCoord> points)
+
+    private void IssueMoveCommands(
+        IReadOnlyList<int> unitIds,
+        IReadOnlyList<SpatialCoord> points)
     {
-        int count = Math.Min(unitIds.Count, points.Count);
-        //Console.WriteLine($"[VECTOR] MOVE COMMANDS units={unitIds.Count} points={points.Count}");
+        int count = Math.Min(
+            unitIds.Count,
+            points.Count);
 
         for (int i = 0; i < count; i++)
         {
             SpatialCoord target = points[i];
-            //Console.WriteLine(
-            //$"[VECTOR] UNIT {unitIds[i]} -> ({target.X},{target.Y},{target.Z})");
 
             _cpuBrainSystem.IssueCommand(
                 _unitStore,
@@ -119,16 +131,21 @@ public sealed class VectorRenderer
             new Vector2f(1280, 720),
             moveSpeed: 450f);
 
-        _gameCamera.CenterOnStreet(MicroCellPixelSize);
+        _gameCamera.CenterOnStreet(
+            MicroCellPixelSize);
 
         _window.Closed += (_, _) => _window.Close();
-        _window.MouseWheelScrolled += (_, e) => _gameCamera.HandleZoom(e.Delta);
-        _window.KeyPressed += (_, e) => HandleKey(e.Code);
+        _window.MouseWheelScrolled += (_, e) =>
+            _gameCamera.HandleZoom(e.Delta);
+
+        _window.KeyPressed += (_, e) =>
+            HandleKey(e.Code);
     }
 
     private void Run()
     {
-        float radius = 0.4f * MicroCellPixelSize;
+        float radius =
+            0.4f * MicroCellPixelSize;
 
         CircleShape unitShape = new CircleShape(radius)
         {
@@ -141,7 +158,8 @@ public sealed class VectorRenderer
         {
             _window.DispatchEvents();
 
-            float deltaTime = clock.Restart().AsSeconds();
+            float deltaTime =
+                clock.Restart().AsSeconds();
 
             if (deltaTime > 0.1f)
                 deltaTime = 0.1f;
@@ -159,7 +177,9 @@ public sealed class VectorRenderer
 
         _gameCamera.UpdateInput(deltaTime);
 
-        Vector2i mousePixels = Mouse.GetPosition(_window);
+        Vector2i mousePixels =
+            Mouse.GetPosition(_window);
+
         Vector2f mouseWorld =
             _window.MapPixelToCoords(
                 mousePixels,
@@ -197,39 +217,117 @@ public sealed class VectorRenderer
         UpdateTileInspector(mouseWorld);
     }
 
-    private void UpdateTileInspector(Vector2f mouseWorld)
+    private void UpdateTileInspector(
+        Vector2f mouseWorld)
     {
         if (!Mouse.IsButtonPressed(Mouse.Button.Left))
             return;
 
-        int x = (int)(mouseWorld.X / MicroCellPixelSize);
-        int y = (int)(mouseWorld.Y / MicroCellPixelSize);
-        int max = MapRegion.MicroSize * 16 - 1;
+        int x = (int)(
+            mouseWorld.X / MicroCellPixelSize);
 
-        if (x < 0 || y < 0 || x > max || y > max)
+        int y = (int)(
+            mouseWorld.Y / MicroCellPixelSize);
+
+        int max = GetMaxCoord();
+
+        if (x < 0 ||
+            y < 0 ||
+            x > max ||
+            y > max)
+        {
             return;
+        }
 
-        MapLayer layer = _worldMap.GetLayer(_worldMap.CurrentViewZ);
+        MapLayer layer =
+            _worldMap.GetLayer(
+                _worldMap.CurrentViewZ);
 
         if (layer == null)
             return;
 
-        ref var cell = ref layer.GetMicroCell(x, y);
-
-        string info = TileMetadataSystem.InspectMicroCell(
-            ref cell,
-            x,
-            y,
-            _edificeStore);
+        ref MicroCell cell =
+            ref layer.GetMicroCell(x, y);
 
         Console.Clear();
+
+        Console.WriteLine(
+            $"[HEIGHT DEBUG] " +
+            $"Cell=({x},{y}) " +
+            $"Z={_worldMap.CurrentViewZ} " +
+            $"Height={cell.Height}");
+
+        PrintNeighbourHeight(
+            layer,
+            x + 1,
+            y,
+            "E",
+            max);
+
+        PrintNeighbourHeight(
+            layer,
+            x - 1,
+            y,
+            "W",
+            max);
+
+        PrintNeighbourHeight(
+            layer,
+            x,
+            y + 1,
+            "S",
+            max);
+
+        PrintNeighbourHeight(
+            layer,
+            x,
+            y - 1,
+            "N",
+            max);
+
+        Console.WriteLine();
+
+        string info =
+            TileMetadataSystem.InspectMicroCell(
+                ref cell,
+                x,
+                y,
+                _edificeStore);
+
         Console.WriteLine(info);
+    }
+
+    private static void PrintNeighbourHeight(
+        MapLayer layer,
+        int x,
+        int y,
+        string direction,
+        int maxCoord)
+    {
+        if (x < 0 ||
+            y < 0 ||
+            x > maxCoord ||
+            y > maxCoord)
+        {
+            return;
+        }
+
+        ref MicroCell cell =
+            ref layer.GetMicroCell(x, y);
+
+        Console.WriteLine(
+            $"  {direction}: " +
+            $"({x},{y}) " +
+            $"Height={cell.Height}");
     }
 
     private void Draw(CircleShape unitShape)
     {
-        _window.Clear(new Color(20, 20, 25));
-        _window.SetView(_gameCamera.View);
+        _window.Clear(
+            new Color(20, 20, 25));
+
+        _window.SetView(
+            _gameCamera.View);
 
         _mapRenderSystem.Draw(
             _window,
@@ -239,13 +337,15 @@ public sealed class VectorRenderer
             RegionPixelSize,
             MicroCellPixelSize,
             _gameCamera.ZoomLevel,
-            _showDebugGrid);
+            _showDebugGrid,
+            _showHeightDebug);
 
-        int aliveCount = _unitRenderSystem.Draw(
-            _window,
-            _unitStore,
-            unitShape,
-            _worldMap.CurrentViewZ);
+        int aliveCount =
+            _unitRenderSystem.Draw(
+                _window,
+                _unitStore,
+                unitShape,
+                _worldMap.CurrentViewZ);
 
         DrawSelection();
 
@@ -253,23 +353,31 @@ public sealed class VectorRenderer
             _window,
             _worldMap.CurrentViewZ);
 
-        _mouseInputSystem.DrawSelectionBox(_window);
+        _mouseInputSystem.DrawSelectionBox(
+            _window);
 
         _window.SetTitle(
-            $"RimClone | Units: {aliveCount} | Z: {_worldMap.CurrentViewZ}");
+            $"RimClone | Units: {aliveCount} | " +
+            $"Z: {_worldMap.CurrentViewZ} | " +
+            $"HeightDebug: {(_showHeightDebug ? "ON" : "OFF")}");
 
         _window.Display();
     }
 
     private void DrawSelection()
     {
-        for (int i = 0; i < _unitStore.Count; i++)
+        for (int i = 0;
+             i < _unitStore.Count;
+             i++)
         {
             if (_unitStore.HealthMasks[i] == 0)
                 continue;
 
-            if (_unitStore.Positions[i].Spatial.Z != _worldMap.CurrentViewZ)
+            if (_unitStore.Positions[i].Spatial.Z !=
+                _worldMap.CurrentViewZ)
+            {
                 continue;
+            }
 
             if (!_mouseInputSystem.SelectedUnitIds.Contains(i))
                 continue;
@@ -285,27 +393,32 @@ public sealed class VectorRenderer
                 _unitStore.Positions[i].RenderY +
                 _unitStore.SeparationOffsetY[i];
 
-            CircleShape ring = new CircleShape(radius)
-            {
-                Origin = new Vector2f(radius, radius),
+            CircleShape ring =
+                new CircleShape(radius)
+                {
+                    Origin = new Vector2f(
+                        radius,
+                        radius),
 
-                Position = new Vector2f(
-                    renderX * MicroCellPixelSize +
-                    MicroCellPixelSize * 0.5f,
+                    Position = new Vector2f(
+                        renderX * MicroCellPixelSize +
+                        MicroCellPixelSize * 0.5f,
 
-                    renderY * MicroCellPixelSize +
-                    MicroCellPixelSize * 0.5f),
+                        renderY * MicroCellPixelSize +
+                        MicroCellPixelSize * 0.5f),
 
-                FillColor = Color.Transparent,
-                OutlineColor = new Color(0, 255, 130, 220),
-                OutlineThickness = 1f
-            };
+                    FillColor = Color.Transparent,
+                    OutlineColor =
+                        new Color(0, 255, 130, 220),
+                    OutlineThickness = 1f
+                };
 
             _window.Draw(ring);
         }
     }
 
-    private void HandleKey(Keyboard.Key key)
+    private void HandleKey(
+        Keyboard.Key key)
     {
         if (key == Keyboard.Key.PageUp)
         {
@@ -321,8 +434,33 @@ public sealed class VectorRenderer
 
         if (key == Keyboard.Key.G)
         {
-            _showDebugGrid = !_showDebugGrid;
-            Console.WriteLine(_showDebugGrid ? "Micro grid ON" : "Micro grid OFF");
+            _showDebugGrid =
+                !_showDebugGrid;
+
+            Console.WriteLine(
+                _showDebugGrid
+                    ? "Micro grid ON"
+                    : "Micro grid OFF");
+
+            return;
         }
+
+        if (key == Keyboard.Key.H)
+        {
+            _showHeightDebug =
+                !_showHeightDebug;
+
+            Console.WriteLine(
+                _showHeightDebug
+                    ? "Height debug ON"
+                    : "Height debug OFF");
+
+            return;
+        }
+    }
+
+    private static int GetMaxCoord()
+    {
+        return MapRegion.MicroSize * 16 - 1;
     }
 }
