@@ -1,4 +1,5 @@
-﻿using Core.Items;
+﻿using Core.CombatPath;
+using Core.Items;
 using Core.Map;
 using Core.Structs;
 using Core.Unit.Components;
@@ -119,8 +120,40 @@ public sealed class UnitCpuBrainSystem
         if (attacker.Spatial.Z != position.Spatial.Z)
             return;
 
-        if (!VisibilityChecker.HasLineOfSight(map, edifices, position.Spatial.X, position.Spatial.Y, attacker.Spatial.X, attacker.Spatial.Y, position.Spatial.Z))
+        MapLayer layer =
+         map.GetLayer(position.Spatial.Z);
+
+        if (layer == null)
             return;
+
+        ref MicroCell sourceCell =
+            ref layer.GetMicroCell(
+                position.Spatial.X,
+                position.Spatial.Y);
+
+        ref MicroCell targetCell =
+            ref layer.GetMicroCell(
+                attacker.Spatial.X,
+                attacker.Spatial.Y);
+
+        float sourceHeight =
+            sourceCell.Height + 0.4f;
+
+        float targetHeight =
+            targetCell.Height + 0.4f;
+
+        if (!VisibilityChecker.HasLineOfSight(
+                layer,
+                edifices,
+                position.Spatial.X,
+                position.Spatial.Y,
+                HeightRange.Point(sourceHeight),
+                attacker.Spatial.X,
+                attacker.Spatial.Y,
+                HeightRange.Point(targetHeight)))
+        {
+            return;
+        }
 
         command = ref units.CpuPeekCommand(unitId);
 

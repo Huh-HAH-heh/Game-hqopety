@@ -1,98 +1,344 @@
 ﻿using System;
+using Core.Items;
 using Core.Map;
 using Core.Structs;
-using Core.Items;
 
-namespace Core.Unit.Systems.CombatPath
+namespace Core.CombatPath;
+
+public static class VisibilityChecker
 {
-    public static class VisibilityChecker
+    private const int MaxCoord =
+        MapLayer.WidthInRegions * MapRegion.MicroSize - 1;
+
+    public static bool HasLineOfSight(
+        MapLayer layer,
+        EdificeStore edificeStore,
+        int x0,
+        int y0,
+        HeightRange sourceHeight,
+        int x1,
+        int y1,
+        HeightRange targetHeight)
     {
-        /// <summary>
-        /// Профессиональный DDA-рейкаст (Grid Raycast). 
-        /// Возвращает true, если между точками А и Б нет сплошных монолитных стен.
-        /// Не имеет асимметрии, не цепляет углы кибиток по касательной и работает сверхдешево.
-        /// </summary>
-        public static bool HasLineOfSight(WorldMap map, EdificeStore edifices, int x0, int y0, int x1, int y1, int z)
+        if (layer == null)
+            return false;
+
+        if (!InBounds(x0, y0) ||
+            !InBounds(x1, y1))
         {
-            // 1. Быстрый выход, если точки совпадают
-            if (x0 == x1 && y0 == y1) return true;
+            return false;
+        }
 
-            // 2. Валидация слоя карты
-            MapLayer layer = map.GetLayer(z);
-            if (layer == null) return false;
+        if (x0 == x1 &&
+            y0 == y1)
+        {
+            return true;
+        }
 
-            // 3. Быстрая проверка границ один раз на входе вместо проверок внутри цикла
-            const int maxCoord = (16 * 48) - 1; // 767
-            if (x0 < 0 || x0 > maxCoord || y0 < 0 || y0 > maxCoord ||
-                x1 < 0 || x1 > maxCoord || y1 < 0 || y1 > maxCoord) return false;
+        int dx = x1 - x0;
+        int dy = y1 - y0;
 
-            // Вычисляем ненормализованные дельты
-            int dx = x1 - x0;
-            int dy = y1 - y0;
+        int stepX =
+            dx < 0
+                ? -1
+                : 1;
 
-            // Вычисляем шаг изменения координат
-            int stepX = dx < 0 ? -1 : 1;
-            int stepY = dy < 0 ? -1 : 1;
+        int stepY =
+            dy < 0
+                ? -1
+                : 1;
 
-            // DDA-математика без нормализации вектора и без Mathf.Sqrt
-            // Используем инверсию абсолютных значений разностей
-            float deltaDistX = (dx == 0) ? float.MaxValue : MathF.Abs(1f / dx);
-            float deltaDistY = (dy == 0) ? float.MaxValue : MathF.Abs(1f / dy);
+        float deltaX =
+            dx == 0
+                ? float.PositiveInfinity
+                : 1f / MathF.Abs(dx);
 
-            // Так как старт строго из центра ячейки (+0.5f), до границы всегда ровно половина пути ячейки
-            float sideDistX = 0.5f * deltaDistX;
-            float sideDistY = 0.5f * deltaDistY;
+        float deltaY =
+            dy == 0
+                ? float.PositiveInfinity
+                : 1f / MathF.Abs(dy);
 
-            int currentX = x0;
-            int currentY = y0;
+        float tMaxX =
+            dx == 0
+                ? float.PositiveInfinity
+                : 0.5f * deltaX;
 
-            // Кешируем ссылки на массивы для быстрого доступа внутри цикла
-            var instances = edifices?.Instances;
-            var configs = edifices?.Configs;
-            int instancesLength = instances?.Length ?? 0;
-            int configsLength = configs?.Length ?? 0;
+        float tMaxY =
+            dy == 0
+                ? float.PositiveInfinity
+                : 0.5f * deltaY;
 
-            // Главный маршевый цикл DDA
-            while (true)
+        int x = x0;
+        int y = y0;
+
+        while (true)
+        {
+            if (tMaxX < tMaxY)
             {
-                // Выбираем ось для шага
-                if (sideDistX < sideDistY)
-                {
-                    sideDistX += deltaDistX;
-                    currentX += stepX;
-                }
-                else
-                {
-                    sideDistY += deltaDistY;
-                    currentY += stepY;
-                }
+                x += stepX;
 
-                // УСПЕШНЫЙ ФИНИШ: долетели до целевой клетки без препятствий
-                if (currentX == x1 && currentY == y1)
+                float tEnter = tMaxX;
+
+                tMaxX += deltaX;
+
+                if (x == x1 &&
+                    y == y1)
                 {
                     return true;
                 }
 
-                // ПРОВЕРКА ПРЕПЯТСТВИЙ (границы массива гарантированно соблюдены валидацией на входе)
-                ref MicroCell cell = ref layer.GetMicroCell(currentX, currentY);
+                float tExit =
+                    MathF.Min(
+                        tMaxX,
+                        tMaxY);
 
-                if (cell.EdificeId > 0 && instances != null)
+                if (!CheckCell(
+                        layer,
+                        edificeStore,
+                        x,
+                        y,
+                        sourceHeight,
+                        targetHeight,
+                        tEnter,
+                        tExit))
                 {
-                    ushort id = cell.EdificeId;
-                    if (id < instancesLength)
+                    return false;
+                }
+            }
+            else if (tMaxY < tMaxX)
+            {
+                y += stepY;
+
+                float tEnter = tMaxY;
+
+                tMaxY += deltaY;
+
+                if (x == x1 &&
+                    y == y1)
+                {
+                    return true;
+                }
+
+                float tExit =
+                    MathF.Min(
+                        tMaxX,
+                        tMaxY);
+
+                if (!CheckCell(
+                        layer,
+                        edificeStore,
+                        x,
+                        y,
+                        sourceHeight,
+                        targetHeight,
+                        tEnter,
+                        tExit))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                /*
+                 * Луч проходит точно через угол.
+                 *
+                 * Проверяем обе соседние клетки,
+                 * чтобы нельзя было смотреть
+                 * через угол двух препятствий.
+                 */
+
+                float t = tMaxX;
+
+                int sideX = x + stepX;
+                int sideY = y;
+
+                if (InBounds(sideX, sideY) &&
+                    !(sideX == x1 &&
+                      sideY == y1))
+                {
+                    if (!CheckCell(
+                            layer,
+                            edificeStore,
+                            sideX,
+                            sideY,
+                            sourceHeight,
+                            targetHeight,
+                            t,
+                            t))
                     {
-                        var instance = instances[id];
-                        if (instance.ConfigId < configsLength)
-                        {
-                            var config = configs[instance.ConfigId];
-                            if (config != null && config.Type == EdificeType.Wall && config.CoverEffectiveness >= 1.0f)
-                            {
-                                return false; // Путь перекрыт сплошной стеной
-                            }
-                        }
+                        return false;
                     }
+                }
+
+                int sideX2 = x;
+                int sideY2 = y + stepY;
+
+                if (InBounds(sideX2, sideY2) &&
+                    !(sideX2 == x1 &&
+                      sideY2 == y1))
+                {
+                    if (!CheckCell(
+                            layer,
+                            edificeStore,
+                            sideX2,
+                            sideY2,
+                            sourceHeight,
+                            targetHeight,
+                            t,
+                            t))
+                    {
+                        return false;
+                    }
+                }
+
+                x += stepX;
+                y += stepY;
+
+                tMaxX += deltaX;
+                tMaxY += deltaY;
+
+                if (x == x1 &&
+                    y == y1)
+                {
+                    return true;
+                }
+
+                float tExit =
+                    MathF.Min(
+                        tMaxX,
+                        tMaxY);
+
+                if (!CheckCell(
+                        layer,
+                        edificeStore,
+                        x,
+                        y,
+                        sourceHeight,
+                        targetHeight,
+                        t,
+                        tExit))
+                {
+                    return false;
                 }
             }
         }
+    }
+
+    private static bool CheckCell(
+        MapLayer layer,
+        EdificeStore edificeStore,
+        int x,
+        int y,
+        HeightRange sourceHeight,
+        HeightRange targetHeight,
+        float tEnter,
+        float tExit)
+    {
+        if (!InBounds(x, y))
+            return false;
+
+        ref MicroCell cell =
+            ref layer.GetMicroCell(x, y);
+
+        if (BlocksVisibility(
+                ref cell,
+                edificeStore))
+        {
+            return false;
+        }
+
+        float rayEnter =
+            GetRayHeight(
+                sourceHeight,
+                targetHeight,
+                tEnter);
+
+        float rayExit =
+            GetRayHeight(
+                sourceHeight,
+                targetHeight,
+                tExit);
+
+        float rayMin =
+            MathF.Min(
+                rayEnter,
+                rayExit);
+
+        /*
+         * Касание поверхности считается
+         * пересечением рельефа.
+         */
+
+        if (rayMin <= cell.Height)
+            return false;
+
+        return true;
+    }
+
+    private static float GetRayHeight(
+        HeightRange sourceHeight,
+        HeightRange targetHeight,
+        float t)
+    {
+        /*
+         * Используем верхнюю границу диапазона.
+         *
+         * Для HeightRange.Point()
+         * это обычный точечный луч.
+         */
+
+        return
+            sourceHeight.Max +
+            (targetHeight.Max - sourceHeight.Max) *
+            t;
+    }
+
+    private static bool BlocksVisibility(
+        ref MicroCell cell,
+        EdificeStore edificeStore)
+    {
+        if (cell.EdificeId == 0)
+            return false;
+
+        if (edificeStore == null)
+            return false;
+
+        if (cell.EdificeId >=
+            edificeStore.Instances.Length)
+        {
+            return false;
+        }
+
+        ref var edifice =
+            ref edificeStore.Instances[
+                cell.EdificeId];
+
+        if (edifice.ConfigId >=
+            edificeStore.Configs.Length)
+        {
+            return false;
+        }
+
+        var config =
+            edificeStore.Configs[
+                edifice.ConfigId];
+
+        if (config == null)
+            return false;
+
+        return
+            config.Type == EdificeType.Wall &&
+            config.CoverEffectiveness >= 1f;
+    }
+
+    private static bool InBounds(
+        int x,
+        int y)
+    {
+        return
+            x >= 0 &&
+            y >= 0 &&
+            x <= MaxCoord &&
+            y <= MaxCoord;
     }
 }

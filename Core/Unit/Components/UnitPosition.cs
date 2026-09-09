@@ -7,7 +7,10 @@ namespace Core.Unit
     /// Хранится в плоском массиве UnitStore.
     /// </summary>
     public struct UnitPosition
-    {
+    {    
+        
+        // Высота точки взгляда относительно поверхности.
+        public float Height;
         /// <summary>
         /// Глобальные микро-координаты ячейки (X, Y, Z) в мире.
         /// Теперь это физическое открытое поле, доступное для чтения и записи.
@@ -27,12 +30,13 @@ namespace Core.Unit
         /// <summary>
         /// Конструктор для инициализации позиции муравья на старте.
         /// </summary>
-        public UnitPosition(SpatialCoord spatial)
+        public UnitPosition(SpatialCoord spatial, float height = 0.8f)
         {
             Spatial = spatial;
             // Изначально рендер-координаты совпадают с логической микро-ячейкой
             RenderX = spatial.X;
             RenderY = spatial.Y;
+            Height = height;
         }
 
         /// <summary>
