@@ -167,12 +167,66 @@ public sealed class MapRenderSystem
                 _mapVertices);
         }
 
+        DrawWater(
+            window,
+            worldMap,
+            minTileX,
+            maxTileX,
+            minTileY,
+            maxTileY,
+            lodStep,
+            tilePixelSize);
+
         if (showGrid &&
             _gridVertices.VertexCount > 0)
         {
             window.Draw(
                 _gridVertices);
         }
+    }
+
+    private static void DrawWater(
+        RenderWindow window,
+        WorldMap worldMap,
+        int minTileX,
+        int maxTileX,
+        int minTileY,
+        int maxTileY,
+        int lodStep,
+        float tilePixelSize)
+    {
+        VertexArray waterVertices =
+            new VertexArray(
+                PrimitiveType.Triangles);
+
+        for (int y = minTileY;
+             y <= maxTileY;
+             y += lodStep)
+        {
+            for (int x = minTileX;
+                 x <= maxTileX;
+                 x += lodStep)
+            {
+                if (worldMap.Water.GetTopLevel(x, y) < 0)
+                    continue;
+
+                float left = x * tilePixelSize;
+                float top = y * tilePixelSize;
+                float right = (x + lodStep) * tilePixelSize;
+                float bottom = (y + lodStep) * tilePixelSize;
+
+                AppendQuad(
+                    waterVertices,
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    new Color(25, 45, 55, 190));
+            }
+        }
+
+        if (waterVertices.VertexCount > 0)
+            window.Draw(waterVertices);
     }
 
     private static void AppendQuad(
