@@ -13,6 +13,9 @@ public static class WorldGenerator
         GenerateBaseTerrain(
             worldMap);
 
+        GenerateWater(
+            worldMap);
+
         Console.WriteLine(
             "[WorldGenerator] " +
             "Базовый рельеф создан.");
@@ -44,6 +47,38 @@ public static class WorldGenerator
                     y,
                     heightUnits,
                     BaseMaterialId);
+            }
+        }
+    }
+
+    private static void GenerateWater(
+        WorldMap worldMap)
+    {
+        for (int y = 0;
+             y < worldMap.TileHeight;
+             y++)
+        {
+            for (int x = 0;
+                 x < worldMap.TileWidth;
+                 x++)
+            {
+                float terrainHeight =
+                    worldMap.GetSurfaceHeight(x, y);
+
+                if (terrainHeight > 7f)
+                    continue;
+
+                int waterZ =
+                    Math.Clamp(
+                        (int)MathF.Ceiling(terrainHeight),
+                        0,
+                        worldMap.Water.Levels - 1);
+
+                worldMap.Water.SetAmount(
+                    x,
+                    y,
+                    waterZ,
+                    byte.MaxValue);
             }
         }
     }
