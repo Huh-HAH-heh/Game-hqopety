@@ -1,58 +1,92 @@
-﻿using Core.Map;
-using Core.Structs;
+using Core.Map;
 
 namespace World;
 
 public static class UndergroundGenerator
 {
-    private const int Scale =
-        MapRegion.SubDivision;
+    private const ushort RockMaterialId = 1;
 
     public static void Generate(
         WorldMap worldMap)
     {
-        MapLayer layer =
-            worldMap.GetLayer(-1);
-
-        if (layer == null)
-            return;
-
-        GenerateTestRoom(layer);
+        GenerateTestRoom(
+            worldMap);
     }
 
     private static void GenerateTestRoom(
-        MapLayer layer)
+        WorldMap worldMap)
     {
-        int minMcX =
-            22 * Scale;
+        const int minX = 22;
+        const int maxX = 27;
+        const int minY = 22;
+        const int maxY = 27;
 
-        int maxMcX =
-            27 * Scale;
+        const ushort floorZ = 30;
+        const ushort ceilingZ = 60;
 
-        int minMcY =
-            22 * Scale;
-
-        int maxMcY =
-            27 * Scale;
-
-        for (int my = minMcY;
-             my <= maxMcY;
-             my++)
+        for (int y = minY;
+             y <= maxY;
+             y++)
         {
-            for (int mx = minMcX;
-                 mx <= maxMcX;
-                 mx++)
+            for (int x = minX;
+                 x <= maxX;
+                 x++)
             {
-                ref MicroCell cell =
-                    ref layer.GetMicroCell(
-                        mx,
-                        my);
+                ushort surfaceZ =
+                    worldMap.GetSurfaceHeightUnits(
+                        x,
+                        y);
 
-                cell.EdificeId = 0;
-                cell.FloorId = 2;
+                Span<TileRange> ranges =
+                    stackalloc TileRange[3];
 
-                // Ровный пол подземелья.
-                cell.Height = 3;
+                int count = 0;
+
+                ranges[count++] =
+                    new TileRange
+                    {
+                        StartZ = 0,
+                        EndZ = floorZ,
+                        MaterialId = RockMaterialId,
+                        State = WorldMap.StateSolid
+                    };
+
+                if (ceilingZ < surfaceZ)
+                {
+                    ranges[count++] =
+                        new TileRange
+                        {
+                            StartZ = floorZ,
+                            EndZ = ceilingZ,
+                            MaterialId = 0,
+                            State = WorldMap.StateEmpty
+                        };
+
+                    ranges[count++] =
+                        new TileRange
+                        {
+                            StartZ = ceilingZ,
+                            EndZ = surfaceZ,
+                            MaterialId = RockMaterialId,
+                            State = WorldMap.StateSolid
+                        };
+                }
+                else if (surfaceZ > floorZ)
+                {
+                    ranges[count++] =
+                        new TileRange
+                        {
+                            StartZ = floorZ,
+                            EndZ = surfaceZ,
+                            MaterialId = 0,
+                            State = WorldMap.StateEmpty
+                        };
+                }
+
+                worldMap.SetRanges(
+                    x,
+                    y,
+                    ranges[..count]);
             }
         }
     }

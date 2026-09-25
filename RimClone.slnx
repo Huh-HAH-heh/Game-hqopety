@@ -1,10 +1,8 @@
 <Solution>
   <Folder Name="/Элементы решения/">
-    <File Path="PathfindingSystem.md" />
-    <File Path="PureAStarPathfinder.md" />
-    <File Path="roadmap.md" />
-    <File Path="roadmap.txt" />
-    <File Path="исходники.txt" />
+    <File Path="../../Downloads/RimClone_Unit_V0.1/RimClone_Terrain_Fixed/PATCH_NOTES.md" />
+    <File Path="../../Downloads/RimClone_Unit_V0.1/RimClone_Terrain_Fixed/ROADMAP.md" />
+    <File Path="../../Downloads/RimClone_Unit_V0.1/RimClone_Terrain_Fixed/UNIT_ARCHITECTURE.md" />
   </Folder>
   <Folder Name="/Элементы решения/tile/">
     <File Path="tile.txt" />
@@ -12,14 +10,20 @@
   </Folder>
   <Folder Name="/Элементы решения/Unit/">
     <File Path="../../AppData/Local/Packages/MicrosoftWindows.Client.Core_cw5n1h2txyewy/TempState/ScreenClip/{E48AEDD0-527C-4C79-9A4A-084405AC72FE}.png" />
+    <File Path="../../Downloads/RimClone_World_Design_Summary.md" />
     <File Path="AI.txt" />
+    <File Path="PathfindingSystem.md" />
+    <File Path="PureAStarPathfinder.md" />
+    <File Path="roadmap.md" />
+    <File Path="roadmap.txt" />
     <File Path="TextFile1.txt" />
     <File Path="Unit.txt" />
+    <File Path="исходники.txt" />
     <File Path="менеджер движения групы из А в Б.txt" />
   </Folder>
   <Project Path="App/App.csproj" />
   <Project Path="Core/Core.csproj" />
   <Project Path="Render/Render.csproj" Id="97da9925-bd62-450e-90ff-8668e4ce8c80" />
-  <Project Path="Units/Units.csproj" Id="9b26261f-35dc-4273-a71d-176dc6c12109" />
+  <Project Path="Units/Test.csproj" Id="9b26261f-35dc-4273-a71d-176dc6c12109" />
   <Project Path="World/World.csproj" Id="1951e96e-ebc4-4a59-8913-d989ea40fc4a" />
 </Solution>

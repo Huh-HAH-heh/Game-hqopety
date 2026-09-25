@@ -1,65 +1,65 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿//using System;
+//using System.Collections.Generic;
+//using System.Text;
 
-namespace Core.AI;
+//namespace Core.AI;
 
-internal sealed class RouteTaskRegistry
-{
-    private RouteTask?[] _tasks;
+//internal sealed class RouteTaskRegistry
+//{
+//    private RouteTask?[] _tasks;
 
-    public RouteTaskRegistry(int capacity)
-    {
-        _tasks = new RouteTask[Math.Max(1, capacity)];
-    }
+//    public RouteTaskRegistry(int capacity)
+//    {
+//        _tasks = new RouteTask[Math.Max(1, capacity)];
+//    }
 
-    public int Add(RouteTask task)
-    {
-        for (int i = 0; i < _tasks.Length; i++)
-        {
-            if (_tasks[i] == null)
-            {
-                _tasks[i] = task;
-                return i;
-            }
-        }
+//    public int Add(RouteTask task)
+//    {
+//        for (int i = 0; i < _tasks.Length; i++)
+//        {
+//            if (_tasks[i] == null)
+//            {
+//                _tasks[i] = task;
+//                return i;
+//            }
+//        }
 
-        int oldSize = _tasks.Length;
-        int newSize = oldSize * 2;
+//        int oldSize = _tasks.Length;
+//        int newSize = oldSize * 2;
 
-        Array.Resize(ref _tasks, newSize);
+//        Array.Resize(ref _tasks, newSize);
 
-        _tasks[oldSize] = task;
+//        _tasks[oldSize] = task;
 
-        return oldSize;
-    }
+//        return oldSize;
+//    }
 
-    public RouteTask? Get(int index)
-    {
-        if ((uint)index >= (uint)_tasks.Length)
-            return null;
+//    public RouteTask? Get(int index)
+//    {
+//        if ((uint)index >= (uint)_tasks.Length)
+//            return null;
 
-        return _tasks[index];
-    }
+//        return _tasks[index];
+//    }
 
-    public void Remove(int index)
-    {
-        if ((uint)index >= (uint)_tasks.Length)
-            return;
+//    public void Remove(int index)
+//    {
+//        if ((uint)index >= (uint)_tasks.Length)
+//            return;
 
-        _tasks[index] = null;
-    }
+//        _tasks[index] = null;
+//    }
 
-    public int FindByRouteId(int routeId)
-    {
-        for (int i = 0; i < _tasks.Length; i++)
-        {
-            RouteTask? task = _tasks[i];
+//    public int FindByRouteId(int routeId)
+//    {
+//        for (int i = 0; i < _tasks.Length; i++)
+//        {
+//            RouteTask? task = _tasks[i];
 
-            if (task != null && task.RouteId == routeId)
-                return i;
-        }
+//            if (task != null && task.RouteId == routeId)
+//                return i;
+//        }
 
-        return -1;
-    }
-}
+//        return -1;
+//    }
+//}

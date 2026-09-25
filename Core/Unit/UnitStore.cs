@@ -1,447 +1,355 @@
-﻿using Core.Items;
-using Core.Map;
-using Core.Unit.Components;
-using Core.Unit.Components.AiComponents;
-using Core.Unit.Systems;
 using System;
+using System.Numerics;
 
 namespace Core.Unit;
 
 public sealed class UnitStore
 {
-    public int Count;
+    private const int DefaultCapacity = 1024;
 
-    public float[] MovementCooldowns;
-    public int[] ActiveGridIds;
+    private Vector3[] _position;
+    private Vector3[] _velocity;
+    private Vector3[] _target;
 
-    public UnitType[] UnitType;
-    public UnitPosition[] Positions;
-    public UnitSize[] Sizes;
-    public UnitMovement[] Movement;
+    private float[] _rotation;
+    private float[] _moveSpeed;
+    private float[] _radius;
+    private float[] _viewRange;
+    private float[] _fieldOfView;
 
-    public float[] SeparationOffsetX;
-    public float[] SeparationOffsetY;
+    private UnitType[] _type;
 
-    public int[] SquadIds;
+    private int[] _bodyStart;
+    private short[] _bodyCount;
 
-    public uint[] HealthMasks;
-    public float[] BleedRates;
-    public float[] BloodLossLevels;
+    private bool[] _hasTarget;
+    private uint[] _generation;
 
-    public float[] BaseBodyMass;
-    public float[] DynamicMass;
+    private int[] _activeIndices;
+    private int[] _activeSlots;
+    private int[] _freeIndices;
 
-    public int[] CurrentTargets;
-    public Weapon[] WeaponSlot;
+    private int _activeCount;
+    private int _count;
+    private int _freeCount;
 
-    public ArmorConfig[] HeadArmorSlot;
-    public ArmorConfig[] TorsoArmorSlot;
-    public ArmorConfig[] ArmsArmorSlot;
-    public ArmorConfig[] LegsArmorSlot;
+    public int ActiveCount =>
+        _activeCount;
 
-    public float[] ShotCooldowns;
-    public float[] RemainingBurstShots;
-    public bool[] IsAiming;
-    public float[] AimingTimers;
-    public int[] LeanOffsetX;
-    public int[] LeanOffsetY;
-    public ushort[] AttachedCoverEdificeId;
+    public int Capacity =>
+        _position.Length;
 
-    public bool[] VisionCacheFlags;
-    public float[] VisionTickTimers;
-    public bool[] IsInCombatMode;
-    public float[] AlertTimers;
+    public Vector3[] Position =>
+        _position;
 
-    public int[] LastGunshotSourceX;
-    public int[] LastGunshotSourceY;
-    public float[] GunshotInvestigateTimer;
+    public Vector3[] Velocity =>
+        _velocity;
 
-    public int[] LastImpactSourceX;
-    public int[] LastImpactSourceY;
+    public Vector3[] Target =>
+        _target;
 
-    public bool[] HasJustFinishedMoveStep;
-    public SpatialCoord[] LastVisitedSourceCell;
+    public float[] Rotation =>
+        _rotation;
 
-    public int[] LastAttackerIds;
+    public float[] MoveSpeed =>
+        _moveSpeed;
 
-    public float[] SuppressionLevels;
-    public byte[] UnitAlertFlags;
+    public float[] Radius =>
+        _radius;
 
-    public const int MaxAiStackDepth = 4;
+    public float[] ViewRange =>
+        _viewRange;
 
-    public AiCommand[] AiCommandStacks;
-    public int[] AiStackPointers;
+    public float[] FieldOfView =>
+        _fieldOfView;
 
-    public float[] Irritation;
-    public float[] Fear;
-    public float[] ThreatLevel;
-    public float[] Suppression;
+    public UnitType[] Type =>
+        _type;
 
-    public UnitBehaviorFlags[] BehaviorFlags;
-    public SpatialCoord[] LastKnownEnemyPosition;
-    public int[] CurrentGroupId;
+    public int[] BodyStart =>
+        _bodyStart;
 
-    public UnitStore(int maxUnits)
+    public short[] BodyCount =>
+        _bodyCount;
+
+    public bool[] HasTarget =>
+        _hasTarget;
+
+    public ReadOnlySpan<int> ActiveIndices =>
+        _activeIndices.AsSpan(
+            0,
+            _activeCount);
+
+    public UnitStore(
+        int initialCapacity = DefaultCapacity)
     {
-        if (maxUnits <= 0)
-            throw new ArgumentOutOfRangeException(nameof(maxUnits));
-
-        Allocate(maxUnits);
-        InitializeDefaults(maxUnits);
-    }
-
-    private void Allocate(int size)
-    {
-        MovementCooldowns = new float[size];
-        ActiveGridIds = new int[size];
-
-        UnitType = new UnitType[size];
-        Positions = new UnitPosition[size];
-        Sizes = new UnitSize[size];
-        Movement = new UnitMovement[size];
-
-        SeparationOffsetX = new float[size];
-        SeparationOffsetY = new float[size];
-
-        SquadIds = new int[size];
-
-        HealthMasks = new uint[size];
-        BleedRates = new float[size];
-        BloodLossLevels = new float[size];
-
-        BaseBodyMass = new float[size];
-        DynamicMass = new float[size];
-
-        CurrentTargets = new int[size];
-        WeaponSlot = new Weapon[size];
-
-        HeadArmorSlot = new ArmorConfig[size];
-        TorsoArmorSlot = new ArmorConfig[size];
-        ArmsArmorSlot = new ArmorConfig[size];
-        LegsArmorSlot = new ArmorConfig[size];
-
-        ShotCooldowns = new float[size];
-        RemainingBurstShots = new float[size];
-        IsAiming = new bool[size];
-        AimingTimers = new float[size];
-        LeanOffsetX = new int[size];
-        LeanOffsetY = new int[size];
-        AttachedCoverEdificeId = new ushort[size];
-
-        VisionCacheFlags = new bool[size];
-        VisionTickTimers = new float[size];
-        IsInCombatMode = new bool[size];
-        AlertTimers = new float[size];
-
-        LastGunshotSourceX = new int[size];
-        LastGunshotSourceY = new int[size];
-        GunshotInvestigateTimer = new float[size];
-
-        LastImpactSourceX = new int[size];
-        LastImpactSourceY = new int[size];
-
-        HasJustFinishedMoveStep = new bool[size];
-        LastVisitedSourceCell = new SpatialCoord[size];
-
-        LastAttackerIds = new int[size];
-
-        SuppressionLevels = new float[size];
-        UnitAlertFlags = new byte[size];
-
-        AiCommandStacks = new AiCommand[size * MaxAiStackDepth];
-        AiStackPointers = new int[size];
-
-        Irritation = new float[size];
-        Fear = new float[size];
-        ThreatLevel = new float[size];
-        Suppression = new float[size];
-
-        BehaviorFlags = new UnitBehaviorFlags[size];
-        LastKnownEnemyPosition = new SpatialCoord[size];
-        CurrentGroupId = new int[size];
-    }
-
-    private void InitializeDefaults(int size)
-    {
-        Array.Fill(ActiveGridIds, -1);
-        Array.Fill(CurrentTargets, -1);
-        Array.Fill(SquadIds, -1);
-        Array.Fill(LastAttackerIds, -1);
-        Array.Fill(AiStackPointers, -1);
-        Array.Fill(CurrentGroupId, -1);
-        Array.Fill(BehaviorFlags, UnitBehaviorFlags.Idle);
-    }
-
-    public int CreateUnit(
-        int mx,
-        int my,
-        int mz,
-        byte width,
-        byte height,
-        float mass,
-        float speed,
-        UnitType type,
-        UnitSpatialGrid spatialGrid)
-    {
-        if (spatialGrid == null)
-            throw new ArgumentNullException(nameof(spatialGrid));
-
-        if (Count == Positions.Length)
-            ResizeStorage(Math.Max(Positions.Length * 2, Count + 100));
-
-        int id = Count++;
-        SpatialCoord start = new(mx, my, mz);
-
-        Positions[id] = new UnitPosition(start);
-        Sizes[id] = new UnitSize(width, height);
-
-        Movement[id] = new UnitMovement
+        if (initialCapacity <= 0)
         {
-            SourceCell = start,
-            TargetCell = start,
-            ZLevel = mz,
-            Speed = speed,
-            State = MovementState.Idle
-        };
-
-        SeparationOffsetX[id] = 0f;
-        SeparationOffsetY[id] = 0f;
-
-        UnitType[id] = type;
-        BaseBodyMass[id] = mass;
-        DynamicMass[id] = mass;
-
-        HealthMasks[id] = uint.MaxValue;
-
-        CurrentTargets[id] = -1;
-        SquadIds[id] = -1;
-        LastAttackerIds[id] = -1;
-        CurrentGroupId[id] = -1;
-
-        LastVisitedSourceCell[id] = start;
-        LastKnownEnemyPosition[id] = start;
-
-        BehaviorFlags[id] = UnitBehaviorFlags.Idle;
-        AiStackPointers[id] = -1;
-
-        spatialGrid.Add(start, id);
-
-        return id;
-    }
-
-    private void ResizeStorage(int newSize)
-    {
-        int oldSize = Positions.Length;
-
-        Array.Resize(ref MovementCooldowns, newSize);
-        Array.Resize(ref ActiveGridIds, newSize);
-        Array.Resize(ref UnitType, newSize);
-        Array.Resize(ref Positions, newSize);
-        Array.Resize(ref Sizes, newSize);
-        Array.Resize(ref Movement, newSize);
-        Array.Resize(ref SeparationOffsetX, newSize);
-        Array.Resize(ref SeparationOffsetY, newSize);
-        Array.Resize(ref SquadIds, newSize);
-
-        Array.Resize(ref HealthMasks, newSize);
-        Array.Resize(ref BleedRates, newSize);
-        Array.Resize(ref BloodLossLevels, newSize);
-
-        Array.Resize(ref BaseBodyMass, newSize);
-        Array.Resize(ref DynamicMass, newSize);
-
-        Array.Resize(ref CurrentTargets, newSize);
-        Array.Resize(ref WeaponSlot, newSize);
-
-        Array.Resize(ref HeadArmorSlot, newSize);
-        Array.Resize(ref TorsoArmorSlot, newSize);
-        Array.Resize(ref ArmsArmorSlot, newSize);
-        Array.Resize(ref LegsArmorSlot, newSize);
-
-        Array.Resize(ref ShotCooldowns, newSize);
-        Array.Resize(ref RemainingBurstShots, newSize);
-        Array.Resize(ref IsAiming, newSize);
-        Array.Resize(ref AimingTimers, newSize);
-        Array.Resize(ref LeanOffsetX, newSize);
-        Array.Resize(ref LeanOffsetY, newSize);
-        Array.Resize(ref AttachedCoverEdificeId, newSize);
-
-        Array.Resize(ref VisionCacheFlags, newSize);
-        Array.Resize(ref VisionTickTimers, newSize);
-        Array.Resize(ref IsInCombatMode, newSize);
-        Array.Resize(ref AlertTimers, newSize);
-
-        Array.Resize(ref LastGunshotSourceX, newSize);
-        Array.Resize(ref LastGunshotSourceY, newSize);
-        Array.Resize(ref GunshotInvestigateTimer, newSize);
-
-        Array.Resize(ref LastImpactSourceX, newSize);
-        Array.Resize(ref LastImpactSourceY, newSize);
-
-        Array.Resize(ref HasJustFinishedMoveStep, newSize);
-        Array.Resize(ref LastVisitedSourceCell, newSize);
-
-        Array.Resize(ref LastAttackerIds, newSize);
-
-        Array.Resize(ref SuppressionLevels, newSize);
-        Array.Resize(ref UnitAlertFlags, newSize);
-
-        Array.Resize(ref AiStackPointers, newSize);
-        Array.Resize(ref AiCommandStacks, newSize * MaxAiStackDepth);
-
-        Array.Resize(ref Irritation, newSize);
-        Array.Resize(ref Fear, newSize);
-        Array.Resize(ref ThreatLevel, newSize);
-        Array.Resize(ref Suppression, newSize);
-
-        Array.Resize(ref BehaviorFlags, newSize);
-        Array.Resize(ref LastKnownEnemyPosition, newSize);
-        Array.Resize(ref CurrentGroupId, newSize);
-
-        int added = newSize - oldSize;
-
-        Array.Fill(ActiveGridIds, -1, oldSize, added);
-        Array.Fill(CurrentTargets, -1, oldSize, added);
-        Array.Fill(SquadIds, -1, oldSize, added);
-        Array.Fill(LastAttackerIds, -1, oldSize, added);
-        Array.Fill(AiStackPointers, -1, oldSize, added);
-        Array.Fill(CurrentGroupId, -1, oldSize, added);
-        Array.Fill(BehaviorFlags, UnitBehaviorFlags.Idle, oldSize, added);
-    }
-
-    public void UpdateHealthSystems(float deltaTime)
-    {
-        for (int i = 0; i < Count; i++)
-        {
-            if (HealthMasks[i] == 0)
-                continue;
-
-            HealthSystem.UpdateTick(
-                ref HealthMasks[i],
-                ref BleedRates[i],
-                ref BloodLossLevels[i],
-                deltaTime);
-
-            if (HealthMasks[i] != 0)
-                continue;
-
-            CurrentTargets[i] = -1;
-            SquadIds[i] = -1;
-            CurrentGroupId[i] = -1;
-            BehaviorFlags[i] = UnitBehaviorFlags.None;
-
-            SeparationOffsetX[i] = 0f;
-            SeparationOffsetY[i] = 0f;
-        }
-    }
-
-    public void CpuPushCommand(int unitId, AiCommand command)
-    {
-        int count = AiStackPointers[unitId] + 1;
-
-        if (count >= MaxAiStackDepth)
-            return;
-
-        int start = unitId * MaxAiStackDepth;
-
-        for (int i = count; i > 0; i--)
-            AiCommandStacks[start + i] =
-                AiCommandStacks[start + i - 1];
-
-        AiCommandStacks[start] = command;
-        AiStackPointers[unitId] = count;
-    }
-
-    public void CpuAppendCommand(
-        int unitId,
-        AiCommand command)
-    {
-        int count =
-            AiStackPointers[unitId] + 1;
-
-        if (count >= MaxAiStackDepth)
-            return;
-
-        AiCommandStacks[
-            unitId * MaxAiStackDepth + count] =
-            command;
-
-        AiStackPointers[unitId] =
-            count;
-    }
-
-    public void CpuClearCommands(
-        int unitId)
-    {
-        int count =
-            AiStackPointers[unitId] + 1;
-
-        if (count <= 0)
-            return;
-
-        int start =
-            unitId * MaxAiStackDepth;
-
-        for (int i = 0;
-             i < count;
-             i++)
-        {
-            AiCommandStacks[start + i] =
-                default;
+            throw new ArgumentOutOfRangeException(
+                nameof(initialCapacity));
         }
 
-        AiStackPointers[unitId] =
-            -1;
+        _position = new Vector3[initialCapacity];
+        _velocity = new Vector3[initialCapacity];
+        _target = new Vector3[initialCapacity];
+
+        _rotation = new float[initialCapacity];
+        _moveSpeed = new float[initialCapacity];
+        _radius = new float[initialCapacity];
+        _viewRange = new float[initialCapacity];
+        _fieldOfView = new float[initialCapacity];
+
+        _type = new UnitType[initialCapacity];
+
+        _bodyStart = new int[initialCapacity];
+        _bodyCount = new short[initialCapacity];
+
+        _hasTarget = new bool[initialCapacity];
+        _generation = new uint[initialCapacity];
+
+        _activeIndices = new int[initialCapacity];
+        _activeSlots = new int[initialCapacity];
+        _freeIndices = new int[initialCapacity];
+
+        Array.Fill(
+            _activeSlots,
+            -1);
     }
 
-    public void CpuPopCommand(
-        int unitId)
+    public UnitId Create(
+        in UnitDefinition definition,
+        Vector3 position,
+        float rotation,
+        BodyHandle body)
     {
-        int count =
-            AiStackPointers[unitId] + 1;
+        int index;
 
-        if (count <= 0)
-            return;
-
-        int start =
-            unitId * MaxAiStackDepth;
-
-        for (int i = 1;
-             i < count;
-             i++)
+        if (_freeCount > 0)
         {
-            AiCommandStacks[start + i - 1] =
-                AiCommandStacks[start + i];
+            index =
+                _freeIndices[
+                    --_freeCount];
+        }
+        else
+        {
+            if (_count == Capacity)
+            {
+                Grow();
+            }
+
+            index = _count++;
+
+            if (_generation[index] == 0)
+            {
+                _generation[index] = 1;
+            }
         }
 
-        AiCommandStacks[start + count - 1] =
-            default;
+        _position[index] = position;
+        _velocity[index] = Vector3.Zero;
+        _target[index] = position;
 
-        AiStackPointers[unitId] =
-            count - 2;
+        _rotation[index] = rotation;
+        _moveSpeed[index] = definition.MoveSpeed;
+        _radius[index] = definition.Radius;
+        _viewRange[index] = definition.ViewRange;
+        _fieldOfView[index] = definition.FieldOfView;
+
+        _type[index] = definition.Type;
+
+        _bodyStart[index] = body.Start;
+        _bodyCount[index] = checked((short)body.Count);
+
+        _hasTarget[index] = false;
+
+        _activeSlots[index] = _activeCount;
+        _activeIndices[_activeCount++] = index;
+
+        return new UnitId(
+            index,
+            _generation[index]);
     }
 
-    public ref AiCommand CpuPeekCommand(
-        int unitId)
+    public bool Destroy(
+        UnitId id)
     {
-        return ref AiCommandStacks[
-            unitId * MaxAiStackDepth];
+        if (!TryGetIndex(
+                id,
+                out int index))
+        {
+            return false;
+        }
+
+        int slot =
+            _activeSlots[index];
+
+        int lastSlot =
+            _activeCount - 1;
+
+        int movedIndex =
+            _activeIndices[lastSlot];
+
+        _activeIndices[slot] = movedIndex;
+        _activeSlots[movedIndex] = slot;
+
+        _activeCount--;
+        _activeSlots[index] = -1;
+
+        _generation[index] =
+            NextGeneration(
+                _generation[index]);
+
+        _freeIndices[_freeCount++] = index;
+
+        _hasTarget[index] = false;
+        _velocity[index] = Vector3.Zero;
+
+        return true;
     }
 
-    [Flags]
-    public enum UnitBehaviorFlags : ushort
+    public bool IsAlive(
+        UnitId id)
     {
-        None = 0,
-        Idle = 1 << 0,
-        Alert = 1 << 1,
-        Suppressed = 1 << 2,
-        Retreating = 1 << 3,
-        Advancing = 1 << 4,
-        Assault = 1 << 5,
-        TakingCover = 1 << 6,
-        HoldingPosition = 1 << 7,
-        Investigating = 1 << 8,
-        FollowingGroupOrder = 1 << 9,
-        IndividualOverride = 1 << 10
+        return TryGetIndex(
+            id,
+            out _);
+    }
+
+    public bool TryGetIndex(
+        UnitId id,
+        out int index)
+    {
+        index = id.Index;
+
+        if (index < 0 ||
+            index >= _count ||
+            id.Generation == 0 ||
+            _generation[index] != id.Generation ||
+            _activeSlots[index] < 0)
+        {
+            index = -1;
+            return false;
+        }
+
+        return true;
+    }
+
+    public void SetTarget(
+        UnitId id,
+        Vector3 target)
+    {
+        if (!TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        _target[index] = target;
+        _hasTarget[index] = true;
+    }
+
+    public void ClearTarget(
+        UnitId id)
+    {
+        if (!TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        _hasTarget[index] = false;
+        _velocity[index] = Vector3.Zero;
+    }
+
+    private void Grow()
+    {
+        int oldCapacity =
+            Capacity;
+
+        int newCapacity =
+            oldCapacity * 2;
+
+        Array.Resize(
+            ref _position,
+            newCapacity);
+
+        Array.Resize(
+            ref _velocity,
+            newCapacity);
+
+        Array.Resize(
+            ref _target,
+            newCapacity);
+
+        Array.Resize(
+            ref _rotation,
+            newCapacity);
+
+        Array.Resize(
+            ref _moveSpeed,
+            newCapacity);
+
+        Array.Resize(
+            ref _radius,
+            newCapacity);
+
+        Array.Resize(
+            ref _viewRange,
+            newCapacity);
+
+        Array.Resize(
+            ref _fieldOfView,
+            newCapacity);
+
+        Array.Resize(
+            ref _type,
+            newCapacity);
+
+        Array.Resize(
+            ref _bodyStart,
+            newCapacity);
+
+        Array.Resize(
+            ref _bodyCount,
+            newCapacity);
+
+        Array.Resize(
+            ref _hasTarget,
+            newCapacity);
+
+        Array.Resize(
+            ref _generation,
+            newCapacity);
+
+        Array.Resize(
+            ref _activeIndices,
+            newCapacity);
+
+        Array.Resize(
+            ref _activeSlots,
+            newCapacity);
+
+        Array.Resize(
+            ref _freeIndices,
+            newCapacity);
+
+        Array.Fill(
+            _activeSlots,
+            -1,
+            oldCapacity,
+            newCapacity - oldCapacity);
+    }
+
+    private static uint NextGeneration(
+        uint generation)
+    {
+        if (generation == uint.MaxValue)
+        {
+            return 1;
+        }
+
+        return generation + 1;
     }
 }

@@ -1,173 +1,131 @@
-﻿using System;
 using SFML.Graphics;
 using SFML.System;
-using SFML.Window;
+using System;
+using System.Numerics;
 
-namespace RimClone.Render
+namespace RimClone.Render;
+
+public sealed class GameCamera
 {
-    public sealed class GameCamera
+    private readonly View _view;
+    private readonly float _moveSpeed;
+
+    private float _zoomLevel = 1.0f;
+
+    private Vector2f _targetPosition;
+
+    public float ZoomLevel =>
+        _zoomLevel;
+
+    public View View =>
+        _view;
+
+    public GameCamera(
+        Vector2f startPosition,
+        Vector2f windowSize,
+        float moveSpeed = 400f)
     {
-        private readonly View _view;
-        private readonly float _moveSpeed;
-
-        private float _zoomLevel = 1.0f;
-
-        public float ZoomLevel => _zoomLevel;
-
-        private Vector2f _targetPosition;
-
-        public View View => _view;
-
-        public GameCamera(
-            Vector2f startPosition,
-            Vector2f windowSize,
-            float moveSpeed = 400f)
-        {
-            _view = new View(
+        _view =
+            new View(
                 startPosition,
                 windowSize);
 
-            _targetPosition = startPosition;
-            _moveSpeed = moveSpeed;
-        }
+        _targetPosition =
+            startPosition;
 
-        public void CenterOnStreet(
-            float microCellPixelSize)
+        _moveSpeed =
+            moveSpeed;
+    }
+
+    public void CenterOnWorld(
+        float tilePixelSize,
+        Core.Map.WorldMap worldMap)
+    {
+        float worldWidth =
+            worldMap.TileWidth *
+            tilePixelSize;
+
+        float worldHeight =
+            worldMap.TileHeight *
+            tilePixelSize;
+
+        _targetPosition =
+            new Vector2f(
+                worldWidth * 0.5f,
+                worldHeight * 0.5f);
+
+        _view.Center =
+            _targetPosition;
+    }
+
+    public void HandleZoom(
+        float delta)
+    {
+        if (delta == 0f)
+            return;
+
+        const float zoomFactor = 1.1f;
+
+        float newZoom =
+            delta > 0f
+                ? _zoomLevel / zoomFactor
+                : _zoomLevel * zoomFactor;
+
+        newZoom =
+            Math.Max(
+                0.05f,
+                newZoom);
+
+        float viewFactor =
+            newZoom /
+            _zoomLevel;
+
+        _view.Zoom(
+            viewFactor);
+
+        _zoomLevel =
+            newZoom;
+    }
+
+    public void Update(
+        Vector2 moveDirection,
+        float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        if (moveDirection.LengthSquared() > 0f)
         {
-            float streetCenterX =
-                50f * microCellPixelSize;
+            _targetPosition.X +=
+                moveDirection.X *
+                _moveSpeed *
+                deltaTime;
 
-            float streetCenterY =
-                60f * microCellPixelSize;
-
-            _targetPosition =
-                new Vector2f(
-                    streetCenterX,
-                    streetCenterY);
-
-            _view.Center =
-                _targetPosition;
+            _targetPosition.Y +=
+                moveDirection.Y *
+                _moveSpeed *
+                deltaTime;
         }
 
-        public void HandleZoom(float delta)
-        {
-            if (delta == 0f)
-                return;
+        float lerp =
+            Math.Min(
+                15f * deltaTime,
+                1f);
 
-            const float zoomFactor = 1.1f;
+        Vector2f center =
+            _view.Center;
 
-            float newZoom =
-                delta > 0f
-                    ? _zoomLevel / zoomFactor
-                    : _zoomLevel * zoomFactor;
+        center.X +=
+            (_targetPosition.X -
+             center.X) *
+            lerp;
 
-            // Только защита от экстремальных значений.
-            newZoom = Math.Max(0.05f, newZoom);
+        center.Y +=
+            (_targetPosition.Y -
+             center.Y) *
+            lerp;
 
-            float viewFactor =
-                newZoom / _zoomLevel;
-
-            _view.Zoom(viewFactor);
-
-            _zoomLevel = newZoom;
-        }
-
-        public void UpdateInput(
-            float deltaTime)
-        {
-            if (deltaTime <= 0f)
-                return;
-
-            Vector2f moveDirection =
-                new Vector2f(0f, 0f);
-
-            if (Keyboard.IsKeyPressed(
-                    Keyboard.Key.W) ||
-                Keyboard.IsKeyPressed(
-                    Keyboard.Key.Up))
-            {
-                moveDirection.Y -= 1f;
-            }
-
-            if (Keyboard.IsKeyPressed(
-                    Keyboard.Key.S) ||
-                Keyboard.IsKeyPressed(
-                    Keyboard.Key.Down))
-            {
-                moveDirection.Y += 1f;
-            }
-
-            if (Keyboard.IsKeyPressed(
-                    Keyboard.Key.A) ||
-                Keyboard.IsKeyPressed(
-                    Keyboard.Key.Left))
-            {
-                moveDirection.X -= 1f;
-            }
-
-            if (Keyboard.IsKeyPressed(
-                    Keyboard.Key.D) ||
-                Keyboard.IsKeyPressed(
-                    Keyboard.Key.Right))
-            {
-                moveDirection.X += 1f;
-            }
-
-            float length =
-                MathF.Sqrt(
-                    moveDirection.X *
-                        moveDirection.X +
-                    moveDirection.Y *
-                        moveDirection.Y);
-
-            if (length > 0f)
-            {
-                moveDirection.X /= length;
-                moveDirection.Y /= length;
-
-                // Скорость теперь НЕ зависит от zoom.
-                // Поэтому при приближении камера не становится
-                // физически медленнее.
-                float speedFactor =
-                    _moveSpeed;
-
-                _targetPosition.X +=
-                    moveDirection.X *
-                    speedFactor *
-                    deltaTime;
-
-                _targetPosition.Y +=
-                    moveDirection.Y *
-                    speedFactor *
-                    deltaTime;
-            }
-
-            Vector2f currentCenter =
-                _view.Center;
-
-            // Сохраняем плавность камеры.
-            float lerpFactor =
-                15f * deltaTime;
-
-            if (lerpFactor > 1f)
-                lerpFactor = 1f;
-
-            float newX =
-                currentCenter.X +
-                (_targetPosition.X -
-                 currentCenter.X) *
-                lerpFactor;
-
-            float newY =
-                currentCenter.Y +
-                (_targetPosition.Y -
-                 currentCenter.Y) *
-                lerpFactor;
-
-            _view.Center =
-                new Vector2f(
-                    newX,
-                    newY);
-        }
+        _view.Center =
+            center;
     }
 }

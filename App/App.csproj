@@ -10,7 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.csproj" />
     <ProjectReference Include="..\Render\Render.csproj" />
-    <ProjectReference Include="..\Units\Units.csproj" />
+    <ProjectReference Include="..\Units\Test.csproj" />
     <ProjectReference Include="..\World\World.csproj" />
   </ItemGroup>
 

@@ -1,41 +1,31 @@
-﻿using Core.Map;
-using Core.Structs;
+using Core.Map;
 
 namespace World;
 
 public static class SurfaceGenerator
 {
-    private const int Scale =
-        MapRegion.SubDivision;
+    private const ushort BaseMaterialId = 1;
+    private const ushort GroundMaterialId = 2;
+    private const ushort MountainMaterialId = 3;
 
     public static void Generate(
         WorldMap worldMap)
     {
-        MapLayer surfaceLayer =
-            worldMap.GetLayer(0);
-
-        if (surfaceLayer == null)
-            return;
-
         GenerateMountain(
-            surfaceLayer);
+            worldMap);
 
         GenerateHeightTerraces(
-            surfaceLayer);
+            worldMap);
 
         GenerateRoom(
-            surfaceLayer);
+            worldMap);
 
         GenerateOutpost(
-            surfaceLayer);
+            worldMap);
     }
 
-    // ============================================================
-    // ROOM
-    // ============================================================
-
     private static void GenerateRoom(
-        MapLayer surfaceLayer)
+        WorldMap worldMap)
     {
         const int startX = 60;
         const int startY = 60;
@@ -48,88 +38,30 @@ public static class SurfaceGenerator
         int endY =
             startY + height;
 
-        for (int mx = startX;
-             mx <= endX;
-             mx++)
+        for (int x = startX;
+             x <= endX;
+             x++)
         {
-            for (int my = startY;
-                 my <= endY;
-                 my++)
+            for (int y = startY;
+                 y <= endY;
+                 y++)
             {
-                ref MicroCell cell =
-                    ref surfaceLayer.GetMicroCell(
-                        mx,
-                        my);
-
-                cell.FloorId = 2;
-
-                // Комната стоит на ровной площадке.
-                cell.Height = 12;
+                worldMap.SetSolidHeight(
+                    x,
+                    y,
+                    120,
+                    GroundMaterialId);
             }
         }
-
-        for (int mx = startX;
-             mx <= endX;
-             mx++)
-        {
-            surfaceLayer
-                .GetMicroCell(
-                    mx,
-                    startY)
-                .EdificeId = 1;
-
-            surfaceLayer
-                .GetMicroCell(
-                    mx,
-                    endY)
-                .EdificeId = 1;
-        }
-
-        for (int my = startY;
-             my <= endY;
-             my++)
-        {
-            surfaceLayer
-                .GetMicroCell(
-                    startX,
-                    my)
-                .EdificeId = 1;
-
-            surfaceLayer
-                .GetMicroCell(
-                    endX,
-                    my)
-                .EdificeId = 1;
-        }
-
-        int doorX =
-            startX + width / 2;
-
-        surfaceLayer
-            .GetMicroCell(
-                doorX,
-                endY)
-            .EdificeId = 0;
     }
 
-    // ============================================================
-    // OUTPOST
-    // ============================================================
-
     private static void GenerateOutpost(
-        MapLayer surfaceLayer)
+        WorldMap worldMap)
     {
-        int startX =
-            20 * Scale;
-
-        int startY =
-            20 * Scale;
-
-        int width =
-            30 * Scale;
-
-        int height =
-            20 * Scale;
+        const int startX = 20;
+        const int startY = 20;
+        const int width = 30;
+        const int height = 20;
 
         int endX =
             startX + width;
@@ -137,120 +69,53 @@ public static class SurfaceGenerator
         int endY =
             startY + height;
 
-        for (int mx = startX;
-             mx <= endX;
-             mx++)
+        for (int x = startX;
+             x <= endX;
+             x++)
         {
-            for (int my = startY;
-                 my <= endY;
-                 my++)
+            for (int y = startY;
+                 y <= endY;
+                 y++)
             {
-                ref MicroCell cell =
-                    ref surfaceLayer.GetMicroCell(
-                        mx,
-                        my);
-
-                cell.FloorId = 2;
-
-                // Аванпост на другой высоте.
-                cell.Height = 8;
+                worldMap.SetSolidHeight(
+                    x,
+                    y,
+                    80,
+                    GroundMaterialId);
             }
         }
-
-        for (int mx = startX;
-             mx <= endX;
-             mx++)
-        {
-            surfaceLayer
-                .GetMicroCell(
-                    mx,
-                    startY)
-                .EdificeId = 1;
-
-            surfaceLayer
-                .GetMicroCell(
-                    mx,
-                    endY)
-                .EdificeId = 1;
-        }
-
-        for (int my = startY;
-             my <= endY;
-             my++)
-        {
-            surfaceLayer
-                .GetMicroCell(
-                    startX,
-                    my)
-                .EdificeId = 1;
-
-            surfaceLayer
-                .GetMicroCell(
-                    endX,
-                    my)
-                .EdificeId = 1;
-        }
-
-        int doorX =
-            startX + width / 2;
-
-        surfaceLayer
-            .GetMicroCell(
-                doorX,
-                endY)
-            .EdificeId = 0;
     }
-
-    // ============================================================
-    // MOUNTAIN
-    // ============================================================
 
     private static void GenerateMountain(
-        MapLayer surfaceLayer)
+        WorldMap worldMap)
     {
-        int minMcX =
-            5 * Scale;
+        const int minX = 5;
+        const int maxX = 15;
+        const int minY = 5;
+        const int maxY = 15;
 
-        int maxMcX =
-            15 * Scale;
-
-        int minMcY =
-            5 * Scale;
-
-        int maxMcY =
-            15 * Scale;
-
-        for (int mx = minMcX;
-             mx < maxMcX;
-             mx++)
+        for (int x = minX;
+             x < maxX;
+             x++)
         {
-            for (int my = minMcY;
-                 my < maxMcY;
-                 my++)
+            for (int y = minY;
+                 y < maxY;
+                 y++)
             {
-                ref MicroCell cell =
-                    ref surfaceLayer.GetMicroCell(
-                        mx,
-                        my);
-
-                cell.EdificeId = 2;
-
-                // Скала выше обычной поверхности.
-                cell.Height = 16;
+                worldMap.SetSolidHeight(
+                    x,
+                    y,
+                    160,
+                    MountainMaterialId);
             }
         }
     }
 
-    // ============================================================
-    // HEIGHT TERRACES
-    // ============================================================
-
     private static void GenerateHeightTerraces(
-        MapLayer layer)
+        WorldMap worldMap)
     {
         const int startX = 54;
         const int endX = 180;
-
         const int startY = 150;
         const int endY = 300;
 
@@ -262,18 +127,12 @@ public static class SurfaceGenerator
                  x <= endX;
                  x++)
             {
-                ref MicroCell cell =
-                    ref layer.GetMicroCell(
-                        x,
-                        y);
-
                 int localX =
                     x - startX;
 
                 int localY =
                     y - startY;
 
-                // Крупные ступени.
                 int terraceX =
                     localX / 12;
 
@@ -282,10 +141,9 @@ public static class SurfaceGenerator
 
                 int height =
                     6 +
-                    (terraceX % 4) +
-                    (terraceY % 3);
+                    terraceX % 4 +
+                    terraceY % 3;
 
-                // Центральный холм.
                 float cx =
                     (startX + endX) * 0.5f;
 
@@ -316,8 +174,11 @@ public static class SurfaceGenerator
                 if (height > 20)
                     height = 20;
 
-                cell.Height =
-                    (byte)height;
+                worldMap.SetSolidHeight(
+                    x,
+                    y,
+                    checked((ushort)(height * 10)),
+                    BaseMaterialId);
             }
         }
     }
