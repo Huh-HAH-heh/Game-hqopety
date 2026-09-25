@@ -4,12 +4,16 @@ namespace Core.Map;
 
 public sealed class WaterLayer
 {
-    private readonly float[] _levels;
+    private readonly byte[] _water;
 
     public int Width { get; }
     public int Height { get; }
+    public int Levels { get; }
 
-    public WaterLayer(int width, int height)
+    public WaterLayer(
+        int width,
+        int height,
+        int levels = 32)
     {
         if (width <= 0)
             throw new ArgumentOutOfRangeException(nameof(width));
@@ -17,44 +21,119 @@ public sealed class WaterLayer
         if (height <= 0)
             throw new ArgumentOutOfRangeException(nameof(height));
 
+        if (levels <= 0)
+            throw new ArgumentOutOfRangeException(nameof(levels));
+
         Width = width;
         Height = height;
-        _levels = new float[width * height];
+        Levels = levels;
+
+        _water =
+            new byte[
+                width *
+                height *
+                levels];
     }
 
-    public float GetLevel(int x, int y)
+    public byte GetAmount(
+        int x,
+        int y,
+        int z)
     {
-        if (!IsInside(x, y))
-            return 0f;
+        if (!IsInside(x, y, z))
+            return 0;
 
-        return _levels[x + y * Width];
+        return _water[GetIndex(x, y, z)];
     }
 
-    public void SetLevel(int x, int y, float level)
+    public void SetAmount(
+        int x,
+        int y,
+        int z,
+        byte amount)
     {
-        if (!IsInside(x, y))
+        if (!IsInside(x, y, z))
             throw new IndexOutOfRangeException();
 
-        _levels[x + y * Width] = MathF.Max(0f, level);
+        _water[GetIndex(x, y, z)] = amount;
     }
 
-    public float GetDepth(int x, int y, float terrainHeight)
+    public void AddAmount(
+        int x,
+        int y,
+        int z,
+        int amount)
     {
-        return MathF.Max(0f, GetLevel(x, y) - terrainHeight);
+        if (!IsInside(x, y, z))
+            return;
+
+        int index = GetIndex(x, y, z);
+
+        _water[index] =
+            (byte)Math.Clamp(
+                _water[index] + amount,
+                0,
+                byte.MaxValue);
     }
 
-    public bool HasWater(int x, int y, float terrainHeight)
+    public bool HasWater(
+        int x,
+        int y,
+        int z)
     {
-        return GetLevel(x, y) > terrainHeight;
+        return GetAmount(x, y, z) > 0;
+    }
+
+    public int GetTopLevel(
+        int x,
+        int y)
+    {
+        if (x < 0 ||
+            y < 0 ||
+            x >= Width ||
+            y >= Height)
+        {
+            return -1;
+        }
+
+        for (int z = Levels - 1;
+             z >= 0;
+             z--)
+        {
+            if (_water[GetIndex(x, y, z)] > 0)
+                return z;
+        }
+
+        return -1;
     }
 
     public void Clear()
     {
-        Array.Clear(_levels);
+        Array.Clear(_water);
     }
 
-    private bool IsInside(int x, int y)
+    private int GetIndex(
+        int x,
+        int y,
+        int z)
     {
-        return x >= 0 && y >= 0 && x < Width && y < Height;
+        return
+            x +
+            y * Width +
+            z * Width * Height;
+    }
+
+    private bool IsInside(
+        int x,
+        int y,
+        int z)
+    {
+        return
+            x >= 0 &&
+            y >= 0 &&
+            z >= 0 &&
+            x < Width &&
+            y < Height &&
+            z < Levels;
     }
 }
