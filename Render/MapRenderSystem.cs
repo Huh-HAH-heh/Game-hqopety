@@ -15,6 +15,10 @@ public sealed class MapRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _waterVertices =
+        new VertexArray(
+            PrimitiveType.Triangles);
+
     private const byte GridAlpha = 90;
 
     public MapRenderSystem(
@@ -185,7 +189,7 @@ public sealed class MapRenderSystem
         }
     }
 
-    private static void DrawWater(
+    private void DrawWater(
         RenderWindow window,
         WorldMap worldMap,
         int minTileX,
@@ -195,9 +199,10 @@ public sealed class MapRenderSystem
         int lodStep,
         float tilePixelSize)
     {
-        VertexArray waterVertices =
-            new VertexArray(
-                PrimitiveType.Triangles);
+        _waterVertices.Clear();
+
+        Color waterColor =
+            new Color(25, 45, 55, 190);
 
         for (int y = minTileY;
              y <= maxTileY;
@@ -216,17 +221,17 @@ public sealed class MapRenderSystem
                 float bottom = (y + lodStep) * tilePixelSize;
 
                 AppendQuad(
-                    waterVertices,
+                    _waterVertices,
                     left,
                     top,
                     right,
                     bottom,
-                    new Color(25, 45, 55, 190));
+                    waterColor);
             }
         }
 
-        if (waterVertices.VertexCount > 0)
-            window.Draw(waterVertices);
+        if (_waterVertices.VertexCount > 0)
+            window.Draw(_waterVertices);
     }
 
     private static void AppendQuad(
