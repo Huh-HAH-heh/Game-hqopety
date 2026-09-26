@@ -11,13 +11,20 @@ public sealed class UnitStore
     private Vector3[] _velocity;
     private Vector3[] _target;
 
-    private float[] _rotation;
+    private Vector3[] _bodyNormal;
+    private Vector3[] _headNormal;
+
     private float[] _moveSpeed;
+    private float[] _width;
+    private float[] _length;
+    private float[] _height;
     private float[] _radius;
     private float[] _viewRange;
     private float[] _fieldOfView;
 
     private UnitType[] _type;
+    private UnitPosture[] _posture;
+    private int[] _locationId;
 
     private int[] _bodyStart;
     private short[] _bodyCount;
@@ -48,11 +55,23 @@ public sealed class UnitStore
     public Vector3[] Target =>
         _target;
 
-    public float[] Rotation =>
-        _rotation;
+    public Vector3[] BodyNormal =>
+        _bodyNormal;
+
+    public Vector3[] HeadNormal =>
+        _headNormal;
 
     public float[] MoveSpeed =>
         _moveSpeed;
+
+    public float[] Width =>
+        _width;
+
+    public float[] Length =>
+        _length;
+
+    public float[] Height =>
+        _height;
 
     public float[] Radius =>
         _radius;
@@ -65,6 +84,12 @@ public sealed class UnitStore
 
     public UnitType[] Type =>
         _type;
+
+    public UnitPosture[] Posture =>
+        _posture;
+
+    public int[] LocationId =>
+        _locationId;
 
     public int[] BodyStart =>
         _bodyStart;
@@ -93,13 +118,20 @@ public sealed class UnitStore
         _velocity = new Vector3[initialCapacity];
         _target = new Vector3[initialCapacity];
 
-        _rotation = new float[initialCapacity];
+        _bodyNormal = new Vector3[initialCapacity];
+        _headNormal = new Vector3[initialCapacity];
+
         _moveSpeed = new float[initialCapacity];
+        _width = new float[initialCapacity];
+        _length = new float[initialCapacity];
+        _height = new float[initialCapacity];
         _radius = new float[initialCapacity];
         _viewRange = new float[initialCapacity];
         _fieldOfView = new float[initialCapacity];
 
         _type = new UnitType[initialCapacity];
+        _posture = new UnitPosture[initialCapacity];
+        _locationId = new int[initialCapacity];
 
         _bodyStart = new int[initialCapacity];
         _bodyCount = new short[initialCapacity];
@@ -119,8 +151,10 @@ public sealed class UnitStore
     public UnitId Create(
         in UnitDefinition definition,
         Vector3 position,
-        float rotation,
-        BodyHandle body)
+        Vector3 bodyNormal,
+        Vector3 headNormal,
+        BodyHandle body,
+        int locationId = 0)
     {
         int index;
 
@@ -145,17 +179,32 @@ public sealed class UnitStore
             }
         }
 
+        bodyNormal = NormalizeHorizontal(bodyNormal);
+        headNormal = NormalizeHorizontal(headNormal);
+
         _position[index] = position;
         _velocity[index] = Vector3.Zero;
         _target[index] = position;
 
-        _rotation[index] = rotation;
+        _bodyNormal[index] = bodyNormal;
+        _headNormal[index] = headNormal;
+
         _moveSpeed[index] = definition.MoveSpeed;
-        _radius[index] = definition.Radius;
+        _width[index] = definition.Width;
+        _length[index] = definition.Length;
+        _height[index] = definition.Height;
+
+        _radius[index] =
+            MathF.Max(
+                definition.Width,
+                definition.Length) * 0.5f;
+
         _viewRange[index] = definition.ViewRange;
         _fieldOfView[index] = definition.FieldOfView;
 
         _type[index] = definition.Type;
+        _posture[index] = UnitPosture.Standing;
+        _locationId[index] = locationId;
 
         _bodyStart[index] = body.Start;
         _bodyCount[index] = checked((short)body.Count);
@@ -263,6 +312,50 @@ public sealed class UnitStore
         _velocity[index] = Vector3.Zero;
     }
 
+    public void SetPosture(
+        UnitId id,
+        UnitPosture posture)
+    {
+        if (!TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        _posture[index] = posture;
+    }
+
+    public void SetBodyNormal(
+        UnitId id,
+        Vector3 normal)
+    {
+        if (!TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        _bodyNormal[index] =
+            NormalizeHorizontal(normal);
+    }
+
+    public void SetHeadNormal(
+        UnitId id,
+        Vector3 normal)
+    {
+        if (!TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        _headNormal[index] =
+            NormalizeHorizontal(normal);
+    }
+
     private void Grow()
     {
         int oldCapacity =
@@ -284,11 +377,27 @@ public sealed class UnitStore
             newCapacity);
 
         Array.Resize(
-            ref _rotation,
+            ref _bodyNormal,
+            newCapacity);
+
+        Array.Resize(
+            ref _headNormal,
             newCapacity);
 
         Array.Resize(
             ref _moveSpeed,
+            newCapacity);
+
+        Array.Resize(
+            ref _width,
+            newCapacity);
+
+        Array.Resize(
+            ref _length,
+            newCapacity);
+
+        Array.Resize(
+            ref _height,
             newCapacity);
 
         Array.Resize(
@@ -305,6 +414,14 @@ public sealed class UnitStore
 
         Array.Resize(
             ref _type,
+            newCapacity);
+
+        Array.Resize(
+            ref _posture,
+            newCapacity);
+
+        Array.Resize(
+            ref _locationId,
             newCapacity);
 
         Array.Resize(
@@ -340,6 +457,26 @@ public sealed class UnitStore
             -1,
             oldCapacity,
             newCapacity - oldCapacity);
+    }
+
+    private static Vector3 NormalizeHorizontal(
+        Vector3 value)
+    {
+        value.Z = 0f;
+
+        float lengthSquared =
+            value.LengthSquared();
+
+        if (lengthSquared < 0.000001f)
+        {
+            return new Vector3(
+                1f,
+                0f,
+                0f);
+        }
+
+        return value /
+            MathF.Sqrt(lengthSquared);
     }
 
     private static uint NextGeneration(
