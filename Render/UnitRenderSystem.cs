@@ -464,7 +464,9 @@ public sealed class UnitRenderSystem
                 color);
 
             Vector2f headOffset =
-                headNormal *
+                new Vector2f(
+                    headNormal.X,
+                    headNormal.Y) *
                 (headRadius * 0.35f);
 
             AppendCircle(
