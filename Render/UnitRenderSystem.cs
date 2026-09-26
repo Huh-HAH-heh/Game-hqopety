@@ -327,7 +327,9 @@ public sealed class UnitRenderSystem
                     y,
                     h,
                     width,
-                    headNormal);
+                    new Vector2f(
+                        headNormal.X,
+                        headNormal.Y));
 
             Color limbColor =
                 new Color(
