@@ -319,20 +319,19 @@ public sealed class UnitRenderSystem
 
         if (posture == UnitPosture.Standing)
         {
-            // unitPosition is the ground/selection anchor.
-            // The human is centered around that anchor instead of
-            // having its feet placed on it.
+            // unitPosition is the ground/contact anchor.
+            // Keep the feet on the anchor and build the silhouette upward.
             float legY =
-                y + h * 0.37f;
+                y;
 
             float bodyY =
-                y + h * 0.05f;
+                y - h * 0.32f;
 
             float chestY =
-                y - h * 0.13f;
+                y - h * 0.50f;
 
             float headY =
-                y - h * 0.37f;
+                y - h * 0.74f;
 
             AppendCircle(
                 vertices,
