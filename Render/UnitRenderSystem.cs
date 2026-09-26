@@ -227,8 +227,7 @@ public sealed class UnitRenderSystem
                 float selectionRadius =
                     MathF.Max(
                         widths[unitIndex],
-                        lengths[unitIndex]) *
-                    0.6f;
+                        lengths[unitIndex]) * 0.6f;
 
                 AppendSelection(
                     _selection,
@@ -295,10 +294,12 @@ public sealed class UnitRenderSystem
             NormalizeHorizontal(headNormal);
 
         float x =
-            position.X * tilePixelSize;
+            position.X *
+            tilePixelSize;
 
         float y =
-            position.Y * tilePixelSize;
+            position.Y *
+            tilePixelSize;
 
         float h =
             MathF.Max(0.20f, height) *
@@ -318,19 +319,20 @@ public sealed class UnitRenderSystem
 
         if (posture == UnitPosture.Standing)
         {
-            // Keep the footprint/selection point under the colonist.
-            // The body rises from that point toward the head.
+            // unitPosition is the ground/selection anchor.
+            // The human is centered around that anchor instead of
+            // having its feet placed on it.
             float legY =
-                y;
+                y + h * 0.37f;
 
             float bodyY =
-                y - h * 0.32f;
+                y + h * 0.05f;
 
             float chestY =
-                y - h * 0.50f;
+                y - h * 0.13f;
 
             float headY =
-                y - h * 0.74f;
+                y - h * 0.37f;
 
             AppendCircle(
                 vertices,
@@ -353,8 +355,6 @@ public sealed class UnitRenderSystem
                 torsoRadius * 0.92f,
                 color);
 
-            // Head position follows the head direction slightly,
-            // while the body remains independent from movement.
             Vector2f headOffset =
                 new Vector2f(
                     headNormal.X,
