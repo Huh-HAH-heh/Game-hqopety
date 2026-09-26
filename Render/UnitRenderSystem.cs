@@ -318,18 +318,19 @@ public sealed class UnitRenderSystem
 
         if (posture == UnitPosture.Standing)
         {
-            // RimWorld-like silhouette: overlapping round primitives.
+            // Keep the footprint/selection point under the colonist.
+            // The body rises from that point toward the head.
             float legY =
-                y - h * 0.18f;
+                y;
 
             float bodyY =
-                y - h * 0.50f;
+                y - h * 0.32f;
 
             float chestY =
-                y - h * 0.66f;
+                y - h * 0.50f;
 
             float headY =
-                y - h * 0.90f;
+                y - h * 0.74f;
 
             AppendCircle(
                 vertices,
