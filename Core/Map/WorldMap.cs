@@ -24,6 +24,8 @@ public sealed class WorldMap
     public int MaxTileY =>
         TileHeight - 1;
 
+    public WaterLayer Water { get; }
+
     private readonly TerrainRegion?[] _regions;
 
     public WorldMap(
@@ -44,6 +46,11 @@ public sealed class WorldMap
         _regions =
             new TerrainRegion?[
                 regionsX * regionsY];
+
+        Water =
+            new WaterLayer(
+                TileWidth,
+                TileHeight);
     }
 
     // ============================================================
