@@ -20,53 +20,79 @@ public sealed class UnitMovementSystem
         ReadOnlySpan<int> active =
             units.ActiveIndices;
 
-        Vector3[] positions = units.Position;
-        Vector3[] velocities = units.Velocity;
-        Vector3[] targets = units.Target;
-        float[] rotations = units.Rotation;
-        float[] speeds = units.MoveSpeed;
-        float[] radii = units.Radius;
-        bool[] hasTarget = units.HasTarget;
+        Vector3[] positions =
+            units.Position;
+
+        Vector3[] velocities =
+            units.Velocity;
+
+        Vector3[] targets =
+            units.Target;
+
+        float[] speeds =
+            units.MoveSpeed;
+
+        float[] widths =
+            units.Width;
+
+        float[] lengths =
+            units.Length;
+
+        bool[] hasTarget =
+            units.HasTarget;
 
         for (int i = 0;
              i < active.Length;
              i++)
         {
-            int unit = active[i];
+            int unit =
+                active[i];
 
             Vector3 position =
                 positions[unit];
 
             if (!hasTarget[unit])
             {
-                velocities[unit] = Vector3.Zero;
+                velocities[unit] =
+                    Vector3.Zero;
+
                 continue;
             }
 
             Vector3 target =
                 targets[unit];
 
+            float halfWidth =
+                MathF.Max(
+                    0.01f,
+                    widths[unit] * 0.5f);
+
+            float halfLength =
+                MathF.Max(
+                    0.01f,
+                    lengths[unit] * 0.5f);
+
             float minX =
                 MathF.Min(
-                    radii[unit],
+                    halfWidth,
                     worldMap.MaxTileX);
 
             float maxX =
                 MathF.Max(
                     minX,
                     worldMap.MaxTileX -
-                    radii[unit]);
+                    halfWidth);
 
             float minY =
                 MathF.Min(
-                    radii[unit],
+                    halfLength,
                     worldMap.MaxTileY);
 
             float maxY =
                 MathF.Max(
                     minY,
                     worldMap.MaxTileY -
-                    radii[unit]);
+                    halfLength);
 
             target.X =
                 Math.Clamp(
@@ -81,29 +107,27 @@ public sealed class UnitMovementSystem
                     maxY);
 
             Vector3 delta =
-                target - position;
+                target -
+                position;
 
             delta.Z = 0f;
 
             float distanceSquared =
                 delta.LengthSquared();
 
-            float stopDistance =
-                MathF.Max(
-                    0.05f,
-                    radii[unit] * 0.25f);
-
             if (distanceSquared <=
-                stopDistance * stopDistance)
+                0.0025f)
             {
-                positions[unit] =
-                    new Vector3(
+                position.X = target.X;
+                position.Y = target.Y;
+                position.Z =
+                    SampleSurfaceZ(
+                        worldMap,
                         target.X,
-                        target.Y,
-                        SampleSurfaceZ(
-                            worldMap,
-                            target.X,
-                            target.Y));
+                        target.Y);
+
+                positions[unit] =
+                    position;
 
                 velocities[unit] =
                     Vector3.Zero;
@@ -119,43 +143,48 @@ public sealed class UnitMovementSystem
             Vector3 direction =
                 delta / distance;
 
-            Vector3 velocity =
-                direction * speeds[unit];
+            float step =
+                speeds[unit] *
+                deltaTime;
 
-            float maxStep =
-                speeds[unit] * deltaTime;
-
-            if (distance <= maxStep)
+            if (distance <= step)
             {
-                position.X = target.X;
-                position.Y = target.Y;
-                velocities[unit] = Vector3.Zero;
+                position.X =
+                    target.X;
+
+                position.Y =
+                    target.Y;
+
+                velocities[unit] =
+                    Vector3.Zero;
+
                 hasTarget[unit] = false;
             }
             else
             {
-                Vector3 next =
-                    position +
-                    velocity * deltaTime;
+                Vector3 velocity =
+                    direction *
+                    speeds[unit];
 
-                next.X = Math.Clamp(
-                    next.X,
+                position +=
+                    velocity *
+                    deltaTime;
+
+                velocities[unit] =
+                    velocity;
+            }
+
+            position.X =
+                Math.Clamp(
+                    position.X,
                     minX,
                     maxX);
 
-                next.Y = Math.Clamp(
-                    next.Y,
+            position.Y =
+                Math.Clamp(
+                    position.Y,
                     minY,
                     maxY);
-
-                position = next;
-                velocities[unit] = velocity;
-
-                rotations[unit] =
-                    MathF.Atan2(
-                        direction.Y,
-                        direction.X);
-            }
 
             position.Z =
                 SampleSurfaceZ(
@@ -163,7 +192,8 @@ public sealed class UnitMovementSystem
                     position.X,
                     position.Y);
 
-            positions[unit] = position;
+            positions[unit] =
+                position;
         }
     }
 
