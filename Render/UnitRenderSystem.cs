@@ -73,20 +73,23 @@ public sealed class UnitRenderSystem
         Vector3[] positions =
             units.Position;
 
-        float[] radii =
-            units.Radius;
+        Vector3[] bodyNormals =
+            units.BodyNormal;
 
-        float[] rotations =
-            units.Rotation;
+        Vector3[] headNormals =
+            units.HeadNormal;
+
+        float[] widths =
+            units.Width;
+
+        float[] lengths =
+            units.Length;
 
         float[] viewRanges =
             units.ViewRange;
 
         float[] fieldOfViews =
             units.FieldOfView;
-
-        UnitType[] types =
-            units.Type;
 
         int[] bodyStarts =
             units.BodyStart;
@@ -107,7 +110,7 @@ public sealed class UnitRenderSystem
             bodies.Primitive;
 
         bool hasSelection =
-            simulation.Units.TryGetIndex(
+            units.TryGetIndex(
                 selectedUnit,
                 out int selectedIndex);
 
@@ -130,8 +133,10 @@ public sealed class UnitRenderSystem
             }
 
             Color color =
-                GetUnitColor(
-                    types[unitIndex]);
+                new Color(
+                    238,
+                    238,
+                    238);
 
             int start =
                 bodyStarts[unitIndex];
@@ -180,11 +185,11 @@ public sealed class UnitRenderSystem
                         pixelX,
                         pixelY,
                         MathF.Max(
-                            0.06f,
+                            0.03f,
                             scale.X) *
                         tilePixelSize,
                         MathF.Max(
-                            0.06f,
+                            0.03f,
                             scale.Y) *
                         tilePixelSize,
                         partRotations[part],
@@ -195,20 +200,39 @@ public sealed class UnitRenderSystem
             if (hasSelection &&
                 selectedIndex == unitIndex)
             {
+                float selectionRadius =
+                    MathF.Max(
+                        widths[unitIndex],
+                        lengths[unitIndex]) *
+                    0.6f;
+
                 AppendSelection(
                     _selection,
-                    unitPosition.X * tilePixelSize,
-                    unitPosition.Y * tilePixelSize,
+                    unitPosition.X *
+                    tilePixelSize,
+                    unitPosition.Y *
+                    tilePixelSize,
                     MathF.Max(
-                        radii[unitIndex],
+                        selectionRadius,
                         0.45f) *
                     tilePixelSize);
 
+                Vector3 headNormal =
+                    NormalizeHorizontal(
+                        headNormals[unitIndex]);
+
+                float headAngle =
+                    MathF.Atan2(
+                        headNormal.Y,
+                        headNormal.X);
+
                 AppendVisionCone(
                     _selection,
-                    unitPosition.X * tilePixelSize,
-                    unitPosition.Y * tilePixelSize,
-                    rotations[unitIndex],
+                    unitPosition.X *
+                    tilePixelSize,
+                    unitPosition.Y *
+                    tilePixelSize,
+                    headAngle,
                     fieldOfViews[unitIndex],
                     viewRanges[unitIndex] *
                     tilePixelSize);
@@ -226,37 +250,6 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _selection);
         }
-    }
-
-    private static Color GetUnitColor(
-        UnitType type)
-    {
-        return type switch
-        {
-            UnitType.Colonist =>
-                new Color(
-                    220,
-                    224,
-                    228),
-
-            UnitType.Greenbob =>
-                new Color(
-                    150,
-                    178,
-                    156),
-
-            UnitType.SegmentedMonster =>
-                new Color(
-                    170,
-                    148,
-                    142),
-
-            _ =>
-                new Color(
-                    200,
-                    200,
-                    200)
-        };
     }
 
     private static void AppendCircle(
@@ -319,7 +312,7 @@ public sealed class UnitRenderSystem
         float centerX,
         float centerY,
         float halfWidth,
-        float halfHeight,
+        float halfLength,
         float rotation,
         Color color)
     {
@@ -333,37 +326,37 @@ public sealed class UnitRenderSystem
             new Vector2f(
                 centerX -
                 halfWidth * cos +
-                halfHeight * sin,
+                halfLength * sin,
                 centerY -
                 halfWidth * sin -
-                halfHeight * cos);
+                halfLength * cos);
 
         Vector2f p1 =
             new Vector2f(
                 centerX +
                 halfWidth * cos +
-                halfHeight * sin,
+                halfLength * sin,
                 centerY +
                 halfWidth * sin -
-                halfHeight * cos);
+                halfLength * cos);
 
         Vector2f p2 =
             new Vector2f(
                 centerX +
                 halfWidth * cos -
-                halfHeight * sin,
+                halfLength * sin,
                 centerY +
                 halfWidth * sin +
-                halfHeight * cos);
+                halfLength * cos);
 
         Vector2f p3 =
             new Vector2f(
                 centerX -
                 halfWidth * cos -
-                halfHeight * sin,
+                halfLength * sin,
                 centerY -
                 halfWidth * sin +
-                halfHeight * cos);
+                halfLength * cos);
 
         vertices.Append(
             new Vertex(
@@ -400,7 +393,7 @@ public sealed class UnitRenderSystem
         VertexArray vertices,
         float centerX,
         float centerY,
-        float rotation,
+        float direction,
         float fieldOfViewDegrees,
         float range)
     {
@@ -417,11 +410,11 @@ public sealed class UnitRenderSystem
             360f;
 
         float left =
-            rotation -
+            direction -
             halfFov;
 
         float right =
-            rotation +
+            direction +
             halfFov;
 
         vertices.Append(
@@ -512,5 +505,26 @@ public sealed class UnitRenderSystem
                         radius),
                     color));
         }
+    }
+
+    private static Vector3 NormalizeHorizontal(
+        Vector3 value)
+    {
+        value.Z = 0f;
+
+        float lengthSquared =
+            value.LengthSquared();
+
+        if (lengthSquared < 0.000001f)
+        {
+            return new Vector3(
+                1f,
+                0f,
+                0f);
+        }
+
+        return value /
+            MathF.Sqrt(
+                lengthSquared);
     }
 }
