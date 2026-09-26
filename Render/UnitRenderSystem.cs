@@ -106,8 +106,11 @@ public sealed class UnitRenderSystem
         float[] partRotations =
             bodies.WorldRotation;
 
-        BodyPrimitive[] primitives =
-            bodies.Primitive;
+        UnitType[] types =
+            units.Type;
+
+        UnitPosture[] postures =
+            units.Posture;
 
         bool hasSelection =
             units.TryGetIndex(
@@ -138,36 +141,50 @@ public sealed class UnitRenderSystem
                     238,
                     238);
 
-            int start =
-                bodyStarts[unitIndex];
-
-            int count =
-                bodyCounts[unitIndex];
-
-            int end =
-                start + count;
-
-            for (int part = start;
-                 part < end;
-                 part++)
+            if (types[unitIndex] ==
+                UnitType.Colonist)
             {
-                Vector3 position =
-                    partPositions[part];
+                AppendHuman(
+                    _vertices,
+                    unitPosition,
+                    widths[unitIndex],
+                    lengths[unitIndex],
+                    units.Height[unitIndex],
+                    bodyNormals[unitIndex],
+                    headNormals[unitIndex],
+                    postures[unitIndex],
+                    tilePixelSize,
+                    color);
+            }
+            else
+            {
+                int start =
+                    bodyStarts[unitIndex];
 
-                Vector3 scale =
-                    partScales[part];
+                int count =
+                    bodyCounts[unitIndex];
 
-                float pixelX =
-                    position.X *
-                    tilePixelSize;
+                int end =
+                    start + count;
 
-                float pixelY =
-                    position.Y *
-                    tilePixelSize;
-
-                if (primitives[part] ==
-                    BodyPrimitive.Circle)
+                for (int part = start;
+                     part < end;
+                     part++)
                 {
+                    Vector3 position =
+                        partPositions[part];
+
+                    Vector3 scale =
+                        partScales[part];
+
+                    float pixelX =
+                        position.X *
+                        tilePixelSize;
+
+                    float pixelY =
+                        position.Y *
+                        tilePixelSize;
+
                     AppendCircle(
                         _vertices,
                         pixelX,
@@ -176,23 +193,6 @@ public sealed class UnitRenderSystem
                             0.06f,
                             scale.X) *
                         tilePixelSize,
-                        color);
-                }
-                else
-                {
-                    AppendBox(
-                        _vertices,
-                        pixelX,
-                        pixelY,
-                        MathF.Max(
-                            0.03f,
-                            scale.X) *
-                        tilePixelSize,
-                        MathF.Max(
-                            0.03f,
-                            scale.Y) *
-                        tilePixelSize,
-                        partRotations[part],
                         color);
                 }
             }
@@ -250,6 +250,158 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _selection);
         }
+    }
+
+    private static void AppendHuman(
+        VertexArray vertices,
+        Vector3 position,
+        float width,
+        float length,
+        float height,
+        Vector3 bodyNormal,
+        Vector3 headNormal,
+        UnitPosture posture,
+        float tilePixelSize,
+        Color color)
+    {
+        bodyNormal =
+            NormalizeHorizontal(bodyNormal);
+
+        headNormal =
+            NormalizeHorizontal(headNormal);
+
+        float pixelX =
+            position.X * tilePixelSize;
+
+        float groundY =
+            position.Y * tilePixelSize;
+
+        float bodyWidth =
+            MathF.Max(
+                0.055f,
+                width * 0.20f) *
+            tilePixelSize;
+
+        float bodyHeight =
+            MathF.Max(
+                0.20f,
+                height) *
+            tilePixelSize;
+
+        float headRadius =
+            MathF.Max(
+                0.045f,
+                MathF.Min(width, length) * 0.28f) *
+            tilePixelSize;
+
+        if (posture == UnitPosture.Standing)
+        {
+            float topY =
+                groundY -
+                bodyHeight;
+
+            AppendLine(
+                vertices,
+                pixelX,
+                groundY,
+                pixelX,
+                topY,
+                bodyWidth,
+                color);
+
+            AppendCircle(
+                vertices,
+                pixelX,
+                topY - headRadius,
+                headRadius,
+                color);
+        }
+        else
+        {
+            float bodyLength =
+                MathF.Max(
+                    0.20f,
+                    length) *
+                tilePixelSize;
+
+            float half =
+                bodyLength * 0.5f;
+
+            Vector2f center =
+                new Vector2f(
+                    pixelX,
+                    groundY);
+
+            Vector2f direction =
+                new Vector2f(
+                    bodyNormal.X,
+                    bodyNormal.Y);
+
+            Vector2f start =
+                center - direction * half;
+
+            Vector2f end =
+                center + direction * half;
+
+            AppendLine(
+                vertices,
+                start.X,
+                start.Y,
+                end.X,
+                end.Y,
+                bodyWidth,
+                color);
+
+            AppendCircle(
+                vertices,
+                end.X,
+                end.Y,
+                headRadius,
+                color);
+        }
+    }
+
+    private static void AppendLine(
+        VertexArray vertices,
+        float x0,
+        float y0,
+        float x1,
+        float y1,
+        float width,
+        Color color)
+    {
+        Vector2f direction =
+            new Vector2f(
+                x1 - x0,
+                y1 - y0);
+
+        float length =
+            MathF.Sqrt(
+                direction.X * direction.X +
+                direction.Y * direction.Y);
+
+        if (length < 0.0001f)
+            return;
+
+        direction /= length;
+
+        Vector2f normal =
+            new Vector2f(
+                -direction.Y * width,
+                direction.X * width);
+
+        Vector2f p0 = new(x0 + normal.X, y0 + normal.Y);
+        Vector2f p1 = new(x1 + normal.X, y1 + normal.Y);
+        Vector2f p2 = new(x1 - normal.X, y1 - normal.Y);
+        Vector2f p3 = new(x0 - normal.X, y0 - normal.Y);
+
+        vertices.Append(new Vertex(p0, color));
+        vertices.Append(new Vertex(p1, color));
+        vertices.Append(new Vertex(p2, color));
+
+        vertices.Append(new Vertex(p0, color));
+        vertices.Append(new Vertex(p2, color));
+        vertices.Append(new Vertex(p3, color));
     }
 
     private static void AppendCircle(
