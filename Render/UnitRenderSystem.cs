@@ -294,49 +294,76 @@ public sealed class UnitRenderSystem
         headNormal =
             NormalizeHorizontal(headNormal);
 
-        float pixelX =
+        float x =
             position.X * tilePixelSize;
 
-        float groundY =
+        float y =
             position.Y * tilePixelSize;
 
-        float bodyWidth =
-            MathF.Max(
-                0.055f,
-                width * 0.20f) *
+        float h =
+            MathF.Max(0.20f, height) *
             tilePixelSize;
 
-        float bodyHeight =
-            MathF.Max(
-                0.20f,
-                height) *
+        float baseRadius =
+            MathF.Max(0.035f, width * 0.20f) *
+            tilePixelSize;
+
+        float torsoRadius =
+            MathF.Max(0.045f, width * 0.30f) *
             tilePixelSize;
 
         float headRadius =
-            MathF.Max(
-                0.045f,
-                MathF.Min(width, length) * 0.28f) *
+            MathF.Max(0.055f, width * 0.34f) *
             tilePixelSize;
 
         if (posture == UnitPosture.Standing)
         {
-            float topY =
-                groundY -
-                bodyHeight;
+            // RimWorld-like silhouette: overlapping round primitives.
+            float legY =
+                y - h * 0.18f;
 
-            AppendLine(
+            float bodyY =
+                y - h * 0.50f;
+
+            float chestY =
+                y - h * 0.66f;
+
+            float headY =
+                y - h * 0.90f;
+
+            AppendCircle(
                 vertices,
-                pixelX,
-                groundY,
-                pixelX,
-                topY,
-                bodyWidth,
+                x,
+                legY,
+                baseRadius,
                 color);
 
             AppendCircle(
                 vertices,
-                pixelX,
-                topY - headRadius,
+                x,
+                bodyY,
+                torsoRadius,
+                color);
+
+            AppendCircle(
+                vertices,
+                x,
+                chestY,
+                torsoRadius * 0.92f,
+                color);
+
+            // Head position follows the head direction slightly,
+            // while the body remains independent from movement.
+            Vector2f headOffset =
+                new Vector2f(
+                    headNormal.X,
+                    headNormal.Y) *
+                (headRadius * 0.35f);
+
+            AppendCircle(
+                vertices,
+                x + headOffset.X,
+                headY + headOffset.Y,
                 headRadius,
                 color);
         }
@@ -348,38 +375,33 @@ public sealed class UnitRenderSystem
                     length) *
                 tilePixelSize;
 
-            float half =
-                bodyLength * 0.5f;
-
-            Vector2f center =
-                new Vector2f(
-                    pixelX,
-                    groundY);
-
             Vector2f direction =
                 new Vector2f(
                     bodyNormal.X,
                     bodyNormal.Y);
 
-            Vector2f start =
-                center - direction * half;
+            Vector2f center =
+                new Vector2f(x, y);
 
-            Vector2f end =
-                center + direction * half;
+            Vector2f bodyCenter =
+                center -
+                direction * (bodyLength * 0.15f);
 
-            AppendLine(
+            Vector2f headCenter =
+                center +
+                direction * (bodyLength * 0.38f);
+
+            AppendCircle(
                 vertices,
-                start.X,
-                start.Y,
-                end.X,
-                end.Y,
-                bodyWidth,
+                bodyCenter.X,
+                bodyCenter.Y,
+                torsoRadius,
                 color);
 
             AppendCircle(
                 vertices,
-                end.X,
-                end.Y,
+                headCenter.X,
+                headCenter.Y,
                 headRadius,
                 color);
         }
