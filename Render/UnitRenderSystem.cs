@@ -112,6 +112,9 @@ public sealed class UnitRenderSystem
         UnitPosture[] postures =
             units.Posture;
 
+        BodyPrimitive[] primitives =
+            bodies.Primitive;
+
         bool hasSelection =
             units.TryGetIndex(
                 selectedUnit,
@@ -185,15 +188,36 @@ public sealed class UnitRenderSystem
                         position.Y *
                         tilePixelSize;
 
-                    AppendCircle(
-                        _vertices,
-                        pixelX,
-                        pixelY,
-                        MathF.Max(
-                            0.06f,
-                            scale.X) *
-                        tilePixelSize,
-                        color);
+                    if (primitives[part] ==
+                        BodyPrimitive.Circle)
+                    {
+                        AppendCircle(
+                            _vertices,
+                            pixelX,
+                            pixelY,
+                            MathF.Max(
+                                0.06f,
+                                scale.X) *
+                            tilePixelSize,
+                            color);
+                    }
+                    else
+                    {
+                        AppendBox(
+                            _vertices,
+                            pixelX,
+                            pixelY,
+                            MathF.Max(
+                                0.03f,
+                                scale.X) *
+                            tilePixelSize,
+                            MathF.Max(
+                                0.03f,
+                                scale.Y) *
+                            tilePixelSize,
+                            partRotations[part],
+                            color);
+                    }
                 }
             }
 
