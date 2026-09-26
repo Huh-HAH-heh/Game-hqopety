@@ -25,3 +25,9 @@ public enum BodyPartMotion : byte
     StaticRelative = 0,
     FollowParent = 1
 }
+
+public enum UnitPosture : byte
+{
+    Standing = 0,
+    Lying = 1
+}

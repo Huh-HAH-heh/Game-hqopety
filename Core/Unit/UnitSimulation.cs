@@ -33,7 +33,29 @@ public sealed class UnitSimulation
     public UnitId Spawn(
         UnitType type,
         Vector3 position,
-        float rotation = 0f)
+        float bodyAngle = 0f,
+        int locationId = 0)
+    {
+        Vector3 bodyNormal =
+            new Vector3(
+                MathF.Cos(bodyAngle),
+                MathF.Sin(bodyAngle),
+                0f);
+
+        return Spawn(
+            type,
+            position,
+            bodyNormal,
+            bodyNormal,
+            locationId);
+    }
+
+    public UnitId Spawn(
+        UnitType type,
+        Vector3 position,
+        Vector3 bodyNormal,
+        Vector3 headNormal,
+        int locationId = 0)
     {
         UnitDefinition definition =
             UnitCatalog.Get(type);
@@ -46,13 +68,17 @@ public sealed class UnitSimulation
             Units.Create(
                 definition,
                 position,
-                rotation,
-                body);
+                bodyNormal,
+                headNormal,
+                body,
+                locationId);
 
         Bodies.SetInitialWorldPosition(
             body,
             position,
-            rotation);
+            MathF.Atan2(
+                bodyNormal.Y,
+                bodyNormal.X));
 
         return id;
     }
@@ -85,6 +111,33 @@ public sealed class UnitSimulation
         Units.SetTarget(
             id,
             target);
+    }
+
+    public void SetPosture(
+        UnitId id,
+        UnitPosture posture)
+    {
+        Units.SetPosture(
+            id,
+            posture);
+    }
+
+    public void SetBodyNormal(
+        UnitId id,
+        Vector3 normal)
+    {
+        Units.SetBodyNormal(
+            id,
+            normal);
+    }
+
+    public void SetHeadNormal(
+        UnitId id,
+        Vector3 normal)
+    {
+        Units.SetHeadNormal(
+            id,
+            normal);
     }
 
     public void Update(
