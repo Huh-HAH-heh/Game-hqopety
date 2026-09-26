@@ -287,6 +287,8 @@ public sealed class UnitRenderSystem
         float tilePixelSize,
         Color color)
     {
+        // Unit data stays three-dimensional, but the current visual
+        // representation is intentionally a flat ground marker.
         float x =
             position.X *
             tilePixelSize;
@@ -295,118 +297,18 @@ public sealed class UnitRenderSystem
             position.Y *
             tilePixelSize;
 
-        if (posture == UnitPosture.Standing)
-        {
-                // World data stays three-dimensional. This representation
-            // deliberately projects only X/Y into a flat marker.
-            // Z remains part of the unit state and is available to a future
-            // 2.5D renderer without changing the unit model.
-            const float VisualHeight =
-                0.82f;
+        float radius =
+            MathF.Max(
+                0.12f,
+                width * 0.50f) *
+            tilePixelSize;
 
-            float largeRadius =
-                MathF.Max(
-                    0.10f,
-                    width * 0.48f) *
-                tilePixelSize;
-
-            float headRadius =
-                MathF.Max(
-                    0.055f,
-                    width * 0.27f) *
-                tilePixelSize;
-
-            // Deliberately primitive silhouette:
-            //        o
-            //        O
-            //        O
-            //
-            // Head and body stay on the same vertical axis.
-            // The two large circles are intentionally almost identical.
-            float lowerCenterY =
-                y - largeRadius;
-
-            float bodyCenterY =
-                lowerCenterY -
-                largeRadius * 1.45f;
-
-            float headCenterY =
-                bodyCenterY -
-                largeRadius * 1.55f;
-
-            AppendCircle(
-                vertices,
-                x,
-                lowerCenterY,
-                largeRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x,
-                bodyCenterY,
-                largeRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x,
-                headCenterY,
-                headRadius,
-                color);
-        }
-        else
-        {
-            float bodyLength =
-                MathF.Max(
-                    0.20f,
-                    length) *
-                tilePixelSize;
-
-            Vector2f direction =
-                new Vector2f(
-                    bodyNormal.X,
-                    bodyNormal.Y);
-
-            Vector2f center =
-                new Vector2f(
-                    x,
-                    y);
-
-            Vector2f bodyCenter =
-                center -
-                direction * (bodyLength * 0.15f);
-
-            Vector2f headCenter =
-                center +
-                direction * (bodyLength * 0.38f);
-
-            float torsoRadius =
-                MathF.Max(
-                    0.045f,
-                    width * 0.30f) *
-                tilePixelSize;
-
-            float headRadius =
-                MathF.Max(
-                    0.055f,
-                    width * 0.34f) *
-                tilePixelSize;
-
-            AppendCircle(
-                vertices,
-                bodyCenter.X,
-                bodyCenter.Y,
-                torsoRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                headCenter.X,
-                headCenter.Y,
-                headRadius,
-                color);
-        }
+        AppendCircle(
+            vertices,
+            x,
+            y,
+            radius,
+            color);
     }
 
     private static void AppendLine(
