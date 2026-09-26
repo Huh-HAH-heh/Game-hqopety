@@ -302,32 +302,62 @@ public sealed class UnitRenderSystem
             tilePixelSize;
 
         float h =
-            MathF.Max(0.20f, height) *
+            MathF.Max(
+                0.20f,
+                height) *
             tilePixelSize;
 
         float torsoRadius =
-            MathF.Max(0.045f, width * 0.30f) *
+            MathF.Max(
+                0.045f,
+                width * 0.30f) *
             tilePixelSize;
 
         float headRadius =
-            MathF.Max(0.055f, width * 0.34f) *
+            MathF.Max(
+                0.055f,
+                width * 0.34f) *
             tilePixelSize;
 
         if (posture == UnitPosture.Standing)
         {
-            // A standing human is still deliberately made from circles.
-            // Each limb has several overlapping elements so proportions
-            // remain readable without introducing polygonal geometry.
+            HumanPose pose =
+                BuildStandingHumanPose(
+                    x,
+                    y,
+                    h,
+                    width,
+                    headNormal);
 
-            Vector2f facing =
-                new Vector2f(
-                    headNormal.X,
-                    headNormal.Y);
+            Color limbColor =
+                new Color(
+                    205,
+                    205,
+                    205);
 
-            Vector2f side =
-                new Vector2f(
-                    -facing.Y,
-                    facing.X);
+            float pelvisRadius =
+                MathF.Max(
+                    0.045f,
+                    width * 0.23f) *
+                tilePixelSize;
+
+            float abdomenRadius =
+                MathF.Max(
+                    0.045f,
+                    width * 0.27f) *
+                tilePixelSize;
+
+            float chestRadius =
+                MathF.Max(
+                    0.050f,
+                    width * 0.30f) *
+                tilePixelSize;
+
+            float neckRadius =
+                MathF.Max(
+                    0.025f,
+                    width * 0.14f) *
+                tilePixelSize;
 
             float legRadius =
                 MathF.Max(
@@ -359,249 +389,86 @@ public sealed class UnitRenderSystem
                     width * 0.085f) *
                 tilePixelSize;
 
-            float pelvisRadius =
-                MathF.Max(
-                    0.045f,
-                    width * 0.23f) *
-                tilePixelSize;
-
-            float abdomenRadius =
-                MathF.Max(
-                    0.045f,
-                    width * 0.27f) *
-                tilePixelSize;
-
-            float chestRadius =
-                MathF.Max(
-                    0.050f,
-                    width * 0.30f) *
-                tilePixelSize;
-
-            float neckRadius =
-                MathF.Max(
-                    0.025f,
-                    width * 0.14f) *
-                tilePixelSize;
-
-            // Human proportions in normalized body height:
-            // foot 0.00, knee 0.30, pelvis 0.46,
-            // shoulders 0.70, neck 0.77, head 0.87.
-
-            float footY =
-                y - h * 0.02f;
-
-            float shinY =
-                y - h * 0.15f;
-
-            float kneeY =
-                y - h * 0.30f;
-
-            float thighY =
-                y - h * 0.40f;
-
-            float pelvisY =
-                y - h * 0.46f;
-
-            float abdomenY =
-                y - h * 0.58f;
-
-            float chestY =
-                y - h * 0.69f;
-
-            float neckY =
-                y - h * 0.77f;
-
-            float headY =
-                y - h * 0.87f;
-
-            float legSpread =
-                width * 0.11f *
-                tilePixelSize;
-
-            float armUpperOffset =
-                width * 0.30f *
-                tilePixelSize;
-
-            float armLowerOffset =
-                width * 0.36f *
-                tilePixelSize;
-
-            float handOffset =
-                width * 0.40f *
-                tilePixelSize;
-
-            Vector2f leftLeg =
-                side * legSpread;
-
-            Vector2f rightLeg =
-                side * -legSpread;
-
-            // Left leg: foot -> shin -> knee -> thigh.
+            // Torso remains the bright central mass.
             AppendCircle(
                 vertices,
-                x + leftLeg.X,
-                footY + leftLeg.Y,
-                legRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + leftLeg.X,
-                shinY + leftLeg.Y,
-                legRadius * 1.05f,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + leftLeg.X,
-                kneeY + leftLeg.Y,
-                kneeRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + leftLeg.X * 0.75f,
-                thighY + leftLeg.Y * 0.75f,
-                thighRadius,
-                color);
-
-            // Right leg: foot -> shin -> knee -> thigh.
-            AppendCircle(
-                vertices,
-                x + rightLeg.X,
-                footY + rightLeg.Y,
-                legRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + rightLeg.X,
-                shinY + rightLeg.Y,
-                legRadius * 1.05f,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + rightLeg.X,
-                kneeY + rightLeg.Y,
-                kneeRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + rightLeg.X * 0.75f,
-                thighY + rightLeg.Y * 0.75f,
-                thighRadius,
-                color);
-
-            // Pelvis and torso: overlapping central circles.
-            AppendCircle(
-                vertices,
-                x,
-                pelvisY,
+                pose.Pelvis.X,
+                pose.Pelvis.Y,
                 pelvisRadius,
                 color);
 
             AppendCircle(
                 vertices,
-                x,
-                abdomenY,
+                pose.Abdomen.X,
+                pose.Abdomen.Y,
                 abdomenRadius,
                 color);
 
             AppendCircle(
                 vertices,
-                x,
-                chestY,
+                pose.Chest.X,
+                pose.Chest.Y,
                 chestRadius,
                 color);
 
-            // Arms hang from the shoulders. The side vector keeps their
-            // placement stable while the facing direction controls the
-            // small forearm offset.
-            Vector2f leftShoulder =
-                side * -armUpperOffset +
-                facing * (width * 0.03f * tilePixelSize);
-
-            Vector2f rightShoulder =
-                side * armUpperOffset +
-                facing * (width * 0.03f * tilePixelSize);
-
-            Vector2f leftElbow =
-                side * -armLowerOffset -
-                facing * (width * 0.02f * tilePixelSize);
-
-            Vector2f rightElbow =
-                side * armLowerOffset -
-                facing * (width * 0.02f * tilePixelSize);
-
-            Vector2f leftHand =
-                side * -handOffset -
-                facing * (width * 0.05f * tilePixelSize);
-
-            Vector2f rightHand =
-                side * handOffset -
-                facing * (width * 0.05f * tilePixelSize);
-
-            AppendCircle(
+            // Limbs are chains of logical joints. Their links overlap,
+            // so animation can move the joints without changing rendering
+            // logic.
+            AppendLimbChain(
                 vertices,
-                x + leftShoulder.X,
-                chestY + leftShoulder.Y,
-                armRadius * 1.05f,
-                color);
+                pose.LeftHip,
+                pose.LeftKnee,
+                pose.LeftFoot,
+                thighRadius,
+                kneeRadius,
+                legRadius,
+                limbColor);
 
-            AppendCircle(
+            AppendLimbChain(
                 vertices,
-                x + leftElbow.X,
-                y - h * 0.60f + leftElbow.Y,
+                pose.RightHip,
+                pose.RightKnee,
+                pose.RightFoot,
+                thighRadius,
+                kneeRadius,
+                legRadius,
+                limbColor);
+
+            AppendLimbChain(
+                vertices,
+                pose.LeftShoulder,
+                pose.LeftElbow,
+                pose.LeftHand,
                 armRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + leftHand.X,
-                y - h * 0.49f + leftHand.Y,
-                handRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + rightShoulder.X,
-                chestY + rightShoulder.Y,
-                armRadius * 1.05f,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + rightElbow.X,
-                y - h * 0.60f + rightElbow.Y,
                 armRadius,
-                color);
-
-            AppendCircle(
-                vertices,
-                x + rightHand.X,
-                y - h * 0.49f + rightHand.Y,
                 handRadius,
-                color);
+                limbColor);
 
-            // Neck and head remain separate, preserving the simple
-            // character of the original visual.
+            AppendLimbChain(
+                vertices,
+                pose.RightShoulder,
+                pose.RightElbow,
+                pose.RightHand,
+                armRadius,
+                armRadius,
+                handRadius,
+                limbColor);
+
             AppendCircle(
                 vertices,
-                x,
-                neckY,
+                pose.Neck.X,
+                pose.Neck.Y,
                 neckRadius,
                 color);
 
             Vector2f headOffset =
-                facing *
+                headNormal *
                 (headRadius * 0.35f);
 
             AppendCircle(
                 vertices,
-                x + headOffset.X,
-                headY + headOffset.Y,
+                pose.Head.X + headOffset.X,
+                pose.Head.Y + headOffset.Y,
                 headRadius,
                 color);
         }
@@ -642,6 +509,283 @@ public sealed class UnitRenderSystem
                 headCenter.Y,
                 headRadius,
                 color);
+        }
+    }
+
+    private static HumanPose BuildStandingHumanPose(
+        float x,
+        float y,
+        float h,
+        float width,
+        Vector2f facing)
+    {
+        Vector2f side =
+            new Vector2f(
+                -facing.Y,
+                facing.X);
+
+        // Move the whole visual a little closer to the ground anchor.
+        float rootY =
+            y + h * 0.015f;
+
+        // A small forward lean. The pelvis stays back, the chest,
+        // neck and head progressively move toward the facing direction.
+        Vector2f pelvis =
+            new Vector2f(
+                x,
+                rootY - h * 0.45f);
+
+        Vector2f abdomen =
+            pelvis +
+            facing * (width * 0.075f) *
+            h /
+            MathF.Max(
+                1f,
+                h) -
+            new Vector2f(
+                0f,
+                h * 0.12f);
+
+        Vector2f chest =
+            abdomen +
+            facing * (width * 0.11f) -
+            new Vector2f(
+                0f,
+                h * 0.12f);
+
+        Vector2f neck =
+            chest +
+            facing * (width * 0.055f) -
+            new Vector2f(
+                0f,
+                h * 0.075f);
+
+        Vector2f head =
+            neck +
+            facing * (width * 0.075f) -
+            new Vector2f(
+                0f,
+                h * 0.095f);
+
+        float legSide =
+            width * 0.11f;
+
+        float hipSide =
+            width * 0.10f;
+
+        Vector2f leftHip =
+            pelvis +
+            side * legSide;
+
+        Vector2f rightHip =
+            pelvis -
+            side * legSide;
+
+        Vector2f leftKnee =
+            new Vector2f(
+                leftHip.X,
+                rootY - h * 0.27f);
+
+        Vector2f rightKnee =
+            new Vector2f(
+                rightHip.X,
+                rootY - h * 0.27f);
+
+        Vector2f leftFoot =
+            new Vector2f(
+                leftHip.X,
+                rootY);
+
+        Vector2f rightFoot =
+            new Vector2f(
+                rightHip.X,
+                rootY);
+
+        float shoulderSide =
+            width * 0.30f;
+
+        float elbowSide =
+            width * 0.36f;
+
+        float handSide =
+            width * 0.40f;
+
+        Vector2f leftShoulder =
+            chest +
+            side * shoulderSide +
+            facing * (width * 0.02f);
+
+        Vector2f rightShoulder =
+            chest -
+            side * shoulderSide +
+            facing * (width * 0.02f);
+
+        // Elbows and hands hang slightly back from the shoulders,
+        // reinforcing the relaxed/slouched posture.
+        Vector2f leftElbow =
+            new Vector2f(
+                x,
+                chest.Y + h * 0.055f) +
+            side * elbowSide -
+            facing * (width * 0.025f);
+
+        Vector2f rightElbow =
+            new Vector2f(
+                x,
+                chest.Y + h * 0.055f) -
+            side * elbowSide -
+            facing * (width * 0.025f);
+
+        Vector2f leftHand =
+            new Vector2f(
+                x,
+                chest.Y + h * 0.14f) +
+            side * handSide -
+            facing * (width * 0.055f);
+
+        Vector2f rightHand =
+            new Vector2f(
+                x,
+                chest.Y + h * 0.14f) -
+            side * handSide -
+            facing * (width * 0.055f);
+
+        return new HumanPose(
+            pelvis,
+            abdomen,
+            chest,
+            neck,
+            head,
+            leftHip,
+            leftKnee,
+            leftFoot,
+            rightHip,
+            rightKnee,
+            rightFoot,
+            leftShoulder,
+            leftElbow,
+            leftHand,
+            rightShoulder,
+            rightElbow,
+            rightHand);
+    }
+
+    private static void AppendLimbChain(
+        VertexArray vertices,
+        Vector2f start,
+        Vector2f joint,
+        Vector2f end,
+        float startRadius,
+        float jointRadius,
+        float endRadius,
+        Color color)
+    {
+        AppendCircle(
+            vertices,
+            start.X,
+            start.Y,
+            startRadius,
+            color);
+
+        AppendCircle(
+            vertices,
+            Lerp(start, joint, 0.5f).X,
+            Lerp(start, joint, 0.5f).Y,
+            startRadius * 0.95f,
+            color);
+
+        AppendCircle(
+            vertices,
+            joint.X,
+            joint.Y,
+            jointRadius,
+            color);
+
+        AppendCircle(
+            vertices,
+            Lerp(joint, end, 0.5f).X,
+            Lerp(joint, end, 0.5f).Y,
+            endRadius * 0.95f,
+            color);
+
+        AppendCircle(
+            vertices,
+            end.X,
+            end.Y,
+            endRadius,
+            color);
+    }
+
+    private static Vector2f Lerp(
+        Vector2f a,
+        Vector2f b,
+        float amount)
+    {
+        return a +
+            (b - a) *
+            amount;
+    }
+
+    private readonly struct HumanPose
+    {
+        public readonly Vector2f Pelvis;
+        public readonly Vector2f Abdomen;
+        public readonly Vector2f Chest;
+        public readonly Vector2f Neck;
+        public readonly Vector2f Head;
+
+        public readonly Vector2f LeftHip;
+        public readonly Vector2f LeftKnee;
+        public readonly Vector2f LeftFoot;
+
+        public readonly Vector2f RightHip;
+        public readonly Vector2f RightKnee;
+        public readonly Vector2f RightFoot;
+
+        public readonly Vector2f LeftShoulder;
+        public readonly Vector2f LeftElbow;
+        public readonly Vector2f LeftHand;
+
+        public readonly Vector2f RightShoulder;
+        public readonly Vector2f RightElbow;
+        public readonly Vector2f RightHand;
+
+        public HumanPose(
+            Vector2f pelvis,
+            Vector2f abdomen,
+            Vector2f chest,
+            Vector2f neck,
+            Vector2f head,
+            Vector2f leftHip,
+            Vector2f leftKnee,
+            Vector2f leftFoot,
+            Vector2f rightHip,
+            Vector2f rightKnee,
+            Vector2f rightFoot,
+            Vector2f leftShoulder,
+            Vector2f leftElbow,
+            Vector2f leftHand,
+            Vector2f rightShoulder,
+            Vector2f rightElbow,
+            Vector2f rightHand)
+        {
+            Pelvis = pelvis;
+            Abdomen = abdomen;
+            Chest = chest;
+            Neck = neck;
+            Head = head;
+            LeftHip = leftHip;
+            LeftKnee = leftKnee;
+            LeftFoot = leftFoot;
+            RightHip = rightHip;
+            RightKnee = rightKnee;
+            RightFoot = rightFoot;
+            LeftShoulder = leftShoulder;
+            LeftElbow = leftElbow;
+            LeftHand = leftHand;
+            RightShoulder = rightShoulder;
+            RightElbow = rightElbow;
+            RightHand = rightHand;
         }
     }
 
