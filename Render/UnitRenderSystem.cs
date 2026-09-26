@@ -302,47 +302,48 @@ public sealed class UnitRenderSystem
             const float VisualHeight =
                 0.82f;
 
-            float legRadius =
+            float largeRadius =
                 MathF.Max(
-                    0.11f,
-                    width * 0.50f) *
-                tilePixelSize;
-
-            float bodyRadius =
-                MathF.Max(
-                    0.09f,
-                    width * 0.44f) *
+                    0.10f,
+                    width * 0.48f) *
                 tilePixelSize;
 
             float headRadius =
                 MathF.Max(
-                    0.065f,
-                    width * 0.34f) *
+                    0.055f,
+                    width * 0.27f) *
                 tilePixelSize;
 
-            float legCenterY =
-                y - legRadius;
+            // Deliberately primitive silhouette:
+            //        o
+            //        O
+            //        O
+            //
+            // Head and body stay on the same vertical axis.
+            // The two large circles are intentionally almost identical.
+            float lowerCenterY =
+                y - largeRadius;
 
             float bodyCenterY =
-                y - VisualHeight * 0.34f;
+                lowerCenterY -
+                largeRadius * 1.45f;
 
             float headCenterY =
-                y - VisualHeight * 0.66f;
+                bodyCenterY -
+                largeRadius * 1.55f;
 
-            // Three simple circles: legs, body, head.
-            // They overlap slightly to read as one compact colonist.
             AppendCircle(
                 vertices,
                 x,
-                legCenterY,
-                legRadius,
+                lowerCenterY,
+                largeRadius,
                 color);
 
             AppendCircle(
                 vertices,
                 x,
                 bodyCenterY,
-                bodyRadius,
+                largeRadius,
                 color);
 
             AppendCircle(
