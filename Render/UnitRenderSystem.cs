@@ -636,7 +636,9 @@ public sealed class UnitRenderSystem
             return;
 
         Vector2f center =
-            Vector2f.Zero;
+            new Vector2f(
+                0f,
+                0f);
 
         for (int i = 0;
              i < points.Length;
