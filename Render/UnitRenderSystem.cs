@@ -526,7 +526,7 @@ public sealed class UnitRenderSystem
 
         // Move the whole visual a little closer to the ground anchor.
         float rootY =
-            y + h * 0.015f;
+            y + h * 0.04f;
 
         // A small forward lean. The pelvis stays back, the chest,
         // neck and head progressively move toward the facing direction.
@@ -537,32 +537,28 @@ public sealed class UnitRenderSystem
 
         Vector2f abdomen =
             pelvis +
-            facing * (width * 0.075f) *
-            h /
-            MathF.Max(
-                1f,
-                h) -
+            facing * (h * 0.025f) -
             new Vector2f(
                 0f,
                 h * 0.12f);
 
         Vector2f chest =
             abdomen +
-            facing * (width * 0.11f) -
+            facing * (h * 0.045f) -
             new Vector2f(
                 0f,
                 h * 0.12f);
 
         Vector2f neck =
             chest +
-            facing * (width * 0.055f) -
+            facing * (h * 0.055f) -
             new Vector2f(
                 0f,
                 h * 0.075f);
 
         Vector2f head =
             neck +
-            facing * (width * 0.075f) -
+            facing * (h * 0.070f) -
             new Vector2f(
                 0f,
                 h * 0.095f);
@@ -613,12 +609,12 @@ public sealed class UnitRenderSystem
         Vector2f leftShoulder =
             chest +
             side * shoulderSide +
-            facing * (width * 0.02f);
+            facing * (h * 0.012f);
 
         Vector2f rightShoulder =
             chest -
             side * shoulderSide +
-            facing * (width * 0.02f);
+            facing * (h * 0.012f);
 
         // Elbows and hands hang slightly back from the shoulders,
         // reinforcing the relaxed/slouched posture.
@@ -627,7 +623,7 @@ public sealed class UnitRenderSystem
                 x,
                 chest.Y + h * 0.055f) +
             side * elbowSide -
-            facing * (width * 0.025f);
+            facing * (h * 0.018f);
 
         Vector2f rightElbow =
             new Vector2f(
@@ -641,7 +637,7 @@ public sealed class UnitRenderSystem
                 x,
                 chest.Y + h * 0.14f) +
             side * handSide -
-            facing * (width * 0.055f);
+            facing * (h * 0.028f);
 
         Vector2f rightHand =
             new Vector2f(
