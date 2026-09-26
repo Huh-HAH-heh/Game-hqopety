@@ -1,5 +1,4 @@
 using System;
-using System.Numerics;
 
 namespace Core.Unit;
 
@@ -9,7 +8,10 @@ public readonly struct UnitDefinition
     public UnitBodyType BodyType { get; }
 
     public float MoveSpeed { get; }
-    public float Radius { get; }
+
+    public float Width { get; }
+    public float Length { get; }
+    public float Height { get; }
 
     public float ViewRange { get; }
     public float FieldOfView { get; }
@@ -18,14 +20,18 @@ public readonly struct UnitDefinition
         UnitType type,
         UnitBodyType bodyType,
         float moveSpeed,
-        float radius,
+        float width,
+        float length,
+        float height,
         float viewRange,
         float fieldOfView)
     {
         Type = type;
         BodyType = bodyType;
         MoveSpeed = moveSpeed;
-        Radius = radius;
+        Width = width;
+        Length = length;
+        Height = height;
         ViewRange = viewRange;
         FieldOfView = fieldOfView;
     }
@@ -43,7 +49,9 @@ public static class UnitCatalog
                     UnitType.Colonist,
                     UnitBodyType.Colonist,
                     moveSpeed: 2.8f,
-                    radius: 0.30f,
+                    width: 0.35f,
+                    length: 0.60f,
+                    height: 1.75f,
                     viewRange: 20f,
                     fieldOfView: 110f),
 
@@ -52,7 +60,9 @@ public static class UnitCatalog
                     UnitType.Greenbob,
                     UnitBodyType.SmallCreature,
                     moveSpeed: 3.2f,
-                    radius: 0.24f,
+                    width: 0.40f,
+                    length: 0.40f,
+                    height: 0.40f,
                     viewRange: 16f,
                     fieldOfView: 120f),
 
@@ -61,7 +71,9 @@ public static class UnitCatalog
                     UnitType.SegmentedMonster,
                     UnitBodyType.SegmentedCreature,
                     moveSpeed: 1.4f,
-                    radius: 1.0f,
+                    width: 1.0f,
+                    length: 6.0f,
+                    height: 0.45f,
                     viewRange: 28f,
                     fieldOfView: 140f),
 
