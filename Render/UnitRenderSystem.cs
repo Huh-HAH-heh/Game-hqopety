@@ -315,107 +315,287 @@ public sealed class UnitRenderSystem
 
         if (posture == UnitPosture.Standing)
         {
-            // Keep the intentionally simple circle-based visual.
-            // Height changes the spacing; width changes circle sizes.
-            // Overlap makes the figure read as one person without adding
-            // polygonal or mesh-like detail.
+            // A standing human is still deliberately made from circles.
+            // Each limb has several overlapping elements so proportions
+            // remain readable without introducing polygonal geometry.
 
-            float legY =
-                y - h * 0.03f;
+            Vector2f facing =
+                new Vector2f(
+                    headNormal.X,
+                    headNormal.Y);
 
-            float pelvisY =
-                y - h * 0.18f;
-
-            float bodyY =
-                y - h * 0.35f;
-
-            float chestY =
-                y - h * 0.52f;
-
-            float headY =
-                y - h * 0.72f;
+            Vector2f side =
+                new Vector2f(
+                    -facing.Y,
+                    facing.X);
 
             float legRadius =
                 MathF.Max(
-                    0.025f,
-                    width * 0.11f) *
+                    0.022f,
+                    width * 0.10f) *
+                tilePixelSize;
+
+            float kneeRadius =
+                MathF.Max(
+                    0.026f,
+                    width * 0.115f) *
+                tilePixelSize;
+
+            float thighRadius =
+                MathF.Max(
+                    0.032f,
+                    width * 0.145f) *
                 tilePixelSize;
 
             float armRadius =
                 MathF.Max(
-                    0.025f,
+                    0.022f,
                     width * 0.10f) *
                 tilePixelSize;
 
-            float armOffset =
+            float handRadius =
                 MathF.Max(
-                    armRadius,
-                    width * 0.28f) *
+                    0.020f,
+                    width * 0.085f) *
                 tilePixelSize;
 
-            float legOffset =
+            float pelvisRadius =
                 MathF.Max(
-                    legRadius,
-                    width * 0.12f) *
+                    0.045f,
+                    width * 0.23f) *
                 tilePixelSize;
 
-            // Two small leg circles overlap the pelvis/body.
+            float abdomenRadius =
+                MathF.Max(
+                    0.045f,
+                    width * 0.27f) *
+                tilePixelSize;
+
+            float chestRadius =
+                MathF.Max(
+                    0.050f,
+                    width * 0.30f) *
+                tilePixelSize;
+
+            float neckRadius =
+                MathF.Max(
+                    0.025f,
+                    width * 0.14f) *
+                tilePixelSize;
+
+            // Human proportions in normalized body height:
+            // foot 0.00, knee 0.30, pelvis 0.46,
+            // shoulders 0.70, neck 0.77, head 0.87.
+
+            float footY =
+                y - h * 0.02f;
+
+            float shinY =
+                y - h * 0.15f;
+
+            float kneeY =
+                y - h * 0.30f;
+
+            float thighY =
+                y - h * 0.40f;
+
+            float pelvisY =
+                y - h * 0.46f;
+
+            float abdomenY =
+                y - h * 0.58f;
+
+            float chestY =
+                y - h * 0.69f;
+
+            float neckY =
+                y - h * 0.77f;
+
+            float headY =
+                y - h * 0.87f;
+
+            float legSpread =
+                width * 0.11f *
+                tilePixelSize;
+
+            float armUpperOffset =
+                width * 0.30f *
+                tilePixelSize;
+
+            float armLowerOffset =
+                width * 0.36f *
+                tilePixelSize;
+
+            float handOffset =
+                width * 0.40f *
+                tilePixelSize;
+
+            Vector2f leftLeg =
+                side * legSpread;
+
+            Vector2f rightLeg =
+                side * -legSpread;
+
+            // Left leg: foot -> shin -> knee -> thigh.
             AppendCircle(
                 vertices,
-                x - legOffset,
-                legY,
+                x + leftLeg.X,
+                footY + leftLeg.Y,
                 legRadius,
                 color);
 
             AppendCircle(
                 vertices,
-                x + legOffset,
-                legY,
+                x + leftLeg.X,
+                shinY + leftLeg.Y,
+                legRadius * 1.05f,
+                color);
+
+            AppendCircle(
+                vertices,
+                x + leftLeg.X,
+                kneeY + leftLeg.Y,
+                kneeRadius,
+                color);
+
+            AppendCircle(
+                vertices,
+                x + leftLeg.X * 0.75f,
+                thighY + leftLeg.Y * 0.75f,
+                thighRadius,
+                color);
+
+            // Right leg: foot -> shin -> knee -> thigh.
+            AppendCircle(
+                vertices,
+                x + rightLeg.X,
+                footY + rightLeg.Y,
                 legRadius,
                 color);
 
-            // Main four-circle body detail, kept close to the old style.
+            AppendCircle(
+                vertices,
+                x + rightLeg.X,
+                shinY + rightLeg.Y,
+                legRadius * 1.05f,
+                color);
+
+            AppendCircle(
+                vertices,
+                x + rightLeg.X,
+                kneeY + rightLeg.Y,
+                kneeRadius,
+                color);
+
+            AppendCircle(
+                vertices,
+                x + rightLeg.X * 0.75f,
+                thighY + rightLeg.Y * 0.75f,
+                thighRadius,
+                color);
+
+            // Pelvis and torso: overlapping central circles.
             AppendCircle(
                 vertices,
                 x,
                 pelvisY,
-                torsoRadius,
+                pelvisRadius,
                 color);
 
             AppendCircle(
                 vertices,
                 x,
-                bodyY,
-                torsoRadius,
+                abdomenY,
+                abdomenRadius,
                 color);
 
             AppendCircle(
                 vertices,
                 x,
                 chestY,
-                torsoRadius * 0.92f,
+                chestRadius,
                 color);
 
-            // Optional small arm circles. They remain at the same simple
-            // visual detail level rather than becoming a mesh.
+            // Arms hang from the shoulders. The side vector keeps their
+            // placement stable while the facing direction controls the
+            // small forearm offset.
+            Vector2f leftShoulder =
+                side * -armUpperOffset +
+                facing * (width * 0.03f * tilePixelSize);
+
+            Vector2f rightShoulder =
+                side * armUpperOffset +
+                facing * (width * 0.03f * tilePixelSize);
+
+            Vector2f leftElbow =
+                side * -armLowerOffset -
+                facing * (width * 0.02f * tilePixelSize);
+
+            Vector2f rightElbow =
+                side * armLowerOffset -
+                facing * (width * 0.02f * tilePixelSize);
+
+            Vector2f leftHand =
+                side * -handOffset -
+                facing * (width * 0.05f * tilePixelSize);
+
+            Vector2f rightHand =
+                side * handOffset -
+                facing * (width * 0.05f * tilePixelSize);
+
             AppendCircle(
                 vertices,
-                x - armOffset,
-                chestY + h * 0.03f,
+                x + leftShoulder.X,
+                chestY + leftShoulder.Y,
+                armRadius * 1.05f,
+                color);
+
+            AppendCircle(
+                vertices,
+                x + leftElbow.X,
+                y - h * 0.60f + leftElbow.Y,
                 armRadius,
                 color);
 
             AppendCircle(
                 vertices,
-                x + armOffset,
-                chestY + h * 0.03f,
+                x + leftHand.X,
+                y - h * 0.49f + leftHand.Y,
+                handRadius,
+                color);
+
+            AppendCircle(
+                vertices,
+                x + rightShoulder.X,
+                chestY + rightShoulder.Y,
+                armRadius * 1.05f,
+                color);
+
+            AppendCircle(
+                vertices,
+                x + rightElbow.X,
+                y - h * 0.60f + rightElbow.Y,
                 armRadius,
+                color);
+
+            AppendCircle(
+                vertices,
+                x + rightHand.X,
+                y - h * 0.49f + rightHand.Y,
+                handRadius,
+                color);
+
+            // Neck and head remain separate, preserving the simple
+            // character of the original visual.
+            AppendCircle(
+                vertices,
+                x,
+                neckY,
+                neckRadius,
                 color);
 
             Vector2f headOffset =
-                new Vector2f(
-                    headNormal.X,
-                    headNormal.Y) *
+                facing *
                 (headRadius * 0.35f);
 
             AppendCircle(
