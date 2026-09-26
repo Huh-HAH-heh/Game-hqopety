@@ -297,8 +297,10 @@ public sealed class UnitRenderSystem
 
         if (posture == UnitPosture.Standing)
         {
-            // Fixed visual scale: the colonist never grows above one tile.
-            // This is a renderer choice, not a UnitDefinition property.
+                // World data stays three-dimensional. This representation
+            // deliberately projects only X/Y into a flat marker.
+            // Z remains part of the unit state and is available to a future
+            // 2.5D renderer without changing the unit model.
             const float VisualHeight =
                 0.82f;
 
