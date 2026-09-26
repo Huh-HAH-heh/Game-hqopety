@@ -305,10 +305,6 @@ public sealed class UnitRenderSystem
             MathF.Max(0.20f, height) *
             tilePixelSize;
 
-        float baseRadius =
-            MathF.Max(0.035f, width * 0.20f) *
-            tilePixelSize;
-
         float torsoRadius =
             MathF.Max(0.045f, width * 0.30f) *
             tilePixelSize;
@@ -337,19 +333,19 @@ public sealed class UnitRenderSystem
 
             float pelvisHalfWidth =
                 MathF.Max(
-                    baseRadius,
+                    0.045f,
                     width * 0.42f) *
                 tilePixelSize;
 
             float waistHalfWidth =
                 MathF.Max(
-                    baseRadius,
+                    0.040f,
                     width * 0.34f) *
                 tilePixelSize;
 
             float shoulderHalfWidth =
                 MathF.Max(
-                    torsoRadius,
+                    0.055f,
                     width * 0.48f) *
                 tilePixelSize;
 
