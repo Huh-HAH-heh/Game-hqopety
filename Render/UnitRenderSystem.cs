@@ -566,9 +566,6 @@ public sealed class UnitRenderSystem
         float legSide =
             width * 0.11f;
 
-        float hipSide =
-            width * 0.10f;
-
         Vector2f leftHip =
             pelvis +
             side * legSide;
@@ -630,7 +627,7 @@ public sealed class UnitRenderSystem
                 x,
                 chest.Y + h * 0.055f) -
             side * elbowSide -
-            facing * (width * 0.025f);
+            facing * (h * 0.018f);
 
         Vector2f leftHand =
             new Vector2f(
@@ -644,7 +641,7 @@ public sealed class UnitRenderSystem
                 x,
                 chest.Y + h * 0.14f) -
             side * handSide -
-            facing * (width * 0.055f);
+            facing * (h * 0.028f);
 
         return new HumanPose(
             pelvis,
