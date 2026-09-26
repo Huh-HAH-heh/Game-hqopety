@@ -324,10 +324,10 @@ public sealed class UnitRenderSystem
                 y - legRadius;
 
             float bodyCenterY =
-                y - VisualHeight * 0.43f;
+                y - VisualHeight * 0.34f;
 
             float headCenterY =
-                y - VisualHeight * 0.70f;
+                y - VisualHeight * 0.66f;
 
             // Three simple circles: legs, body, head.
             // They overlap slightly to read as one compact colonist.
