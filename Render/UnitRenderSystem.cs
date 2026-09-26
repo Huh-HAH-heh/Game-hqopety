@@ -319,39 +319,129 @@ public sealed class UnitRenderSystem
 
         if (posture == UnitPosture.Standing)
         {
-            // unitPosition is the ground/contact anchor.
-            // Keep the feet on the anchor and build the silhouette upward.
-            float legY =
-                y;
+            // The unit position is the ground/contact anchor.
+            // Build one connected silhouette instead of a vertical chain
+            // of independent circles. Height controls the whole body,
+            // width controls its thickness.
+            float pelvisY =
+                y - h * 0.24f;
 
-            float bodyY =
-                y - h * 0.32f;
+            float waistY =
+                y - h * 0.42f;
 
-            float chestY =
-                y - h * 0.50f;
+            float shoulderY =
+                y - h * 0.59f;
 
             float headY =
                 y - h * 0.74f;
 
-            AppendCircle(
+            float pelvisHalfWidth =
+                MathF.Max(
+                    baseRadius,
+                    width * 0.42f) *
+                tilePixelSize;
+
+            float waistHalfWidth =
+                MathF.Max(
+                    baseRadius,
+                    width * 0.34f) *
+                tilePixelSize;
+
+            float shoulderHalfWidth =
+                MathF.Max(
+                    torsoRadius,
+                    width * 0.48f) *
+                tilePixelSize;
+
+            float legRadius =
+                MathF.Max(
+                    0.025f,
+                    width * 0.11f) *
+                tilePixelSize;
+
+            float legSpread =
+                MathF.Max(
+                    legRadius,
+                    width * 0.18f) *
+                tilePixelSize;
+
+            float leftLegX =
+                x - legSpread;
+
+            float rightLegX =
+                x + legSpread;
+
+            // Legs are rounded filled segments. Their bottom edge stays
+            // on the same ground anchor as the selection ring.
+            AppendCapsule(
                 vertices,
-                x,
-                legY,
-                baseRadius,
+                new Vector2f(
+                    leftLegX,
+                    y - legRadius),
+                new Vector2f(
+                    leftLegX,
+                    pelvisY + legRadius),
+                legRadius,
                 color);
 
-            AppendCircle(
+            AppendCapsule(
                 vertices,
-                x,
-                bodyY,
-                torsoRadius,
+                new Vector2f(
+                    rightLegX,
+                    y - legRadius),
+                new Vector2f(
+                    rightLegX,
+                    pelvisY + legRadius),
+                legRadius,
                 color);
 
-            AppendCircle(
+            // One filled torso envelope. The widths at each level make
+            // the silhouette react continuously to the unit definition.
+            AppendFilledPolygon(
                 vertices,
-                x,
-                chestY,
-                torsoRadius * 0.92f,
+                new Vector2f[]
+                {
+                    new Vector2f(
+                        x - pelvisHalfWidth,
+                        pelvisY),
+                    new Vector2f(
+                        x - waistHalfWidth,
+                        waistY),
+                    new Vector2f(
+                        x - shoulderHalfWidth,
+                        shoulderY),
+                    new Vector2f(
+                        x + shoulderHalfWidth,
+                        shoulderY),
+                    new Vector2f(
+                        x + waistHalfWidth,
+                        waistY),
+                    new Vector2f(
+                        x + pelvisHalfWidth,
+                        pelvisY)
+                },
+                color);
+
+            // Short neck segment overlaps the torso and head so there is
+            // no visual gap when the unit becomes taller or wider.
+            float neckRadius =
+                MathF.Max(
+                    0.03f,
+                    width * 0.16f) *
+                tilePixelSize;
+
+            Vector2f neckCenter =
+                new Vector2f(
+                    x,
+                    headY + headRadius * 0.45f);
+
+            AppendCapsule(
+                vertices,
+                new Vector2f(
+                    x,
+                    shoulderY),
+                neckCenter,
+                neckRadius,
                 color);
 
             Vector2f headOffset =
@@ -448,6 +538,142 @@ public sealed class UnitRenderSystem
         vertices.Append(new Vertex(p0, color));
         vertices.Append(new Vertex(p2, color));
         vertices.Append(new Vertex(p3, color));
+    }
+
+    private static void AppendCapsule(
+        VertexArray vertices,
+        Vector2f start,
+        Vector2f end,
+        float radius,
+        Color color)
+    {
+        Vector2f direction =
+            end - start;
+
+        float length =
+            MathF.Sqrt(
+                direction.X * direction.X +
+                direction.Y * direction.Y);
+
+        if (length < 0.0001f)
+        {
+            AppendCircle(
+                vertices,
+                start.X,
+                start.Y,
+                radius,
+                color);
+
+            return;
+        }
+
+        direction /= length;
+
+        Vector2f normal =
+            new Vector2f(
+                -direction.Y * radius,
+                direction.X * radius);
+
+        Vector2f p0 =
+            start + normal;
+
+        Vector2f p1 =
+            end + normal;
+
+        Vector2f p2 =
+            end - normal;
+
+        Vector2f p3 =
+            start - normal;
+
+        vertices.Append(
+            new Vertex(
+                p0,
+                color));
+
+        vertices.Append(
+            new Vertex(
+                p1,
+                color));
+
+        vertices.Append(
+            new Vertex(
+                p2,
+                color));
+
+        vertices.Append(
+            new Vertex(
+                p0,
+                color));
+
+        vertices.Append(
+            new Vertex(
+                p2,
+                color));
+
+        vertices.Append(
+            new Vertex(
+                p3,
+                color));
+
+        AppendCircle(
+            vertices,
+            start.X,
+            start.Y,
+            radius,
+            color);
+
+        AppendCircle(
+            vertices,
+            end.X,
+            end.Y,
+            radius,
+            color);
+    }
+
+    private static void AppendFilledPolygon(
+        VertexArray vertices,
+        Vector2f[] points,
+        Color color)
+    {
+        if (points.Length < 3)
+            return;
+
+        Vector2f center =
+            Vector2f.Zero;
+
+        for (int i = 0;
+             i < points.Length;
+             i++)
+        {
+            center += points[i];
+        }
+
+        center /= points.Length;
+
+        for (int i = 0;
+             i < points.Length;
+             i++)
+        {
+            int next =
+                (i + 1) %
+                points.Length;
+
+            vertices.Append(
+                new Vertex(
+                    center,
+                    color));
+
+            vertices.Append(
+                new Vertex(
+                    points[i],
+                    color));
+
+            vertices.Append(
+                new Vertex(
+                    points[next],
+                    color));
+        }
     }
 
     private static void AppendCircle(
