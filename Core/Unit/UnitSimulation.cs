@@ -1,3 +1,4 @@
+using Core.Items;
 using Core.Map;
 using System.Numerics;
 
@@ -8,10 +9,12 @@ public sealed class UnitSimulation
     private readonly UnitMovementSystem _movementSystem;
     private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
+    private readonly UnitInventorySystem _inventorySystem;
 
     public UnitStore Units { get; }
     public UnitBodyStore Bodies { get; }
     public UnitHealthStore Health { get; }
+    public UnitInventoryStore Inventory { get; }
 
     public UnitSimulation(
         int unitCapacity = 1024,
@@ -29,6 +32,10 @@ public sealed class UnitSimulation
             new UnitHealthStore(
                 unitCapacity);
 
+        Inventory =
+            new UnitInventoryStore(
+                unitCapacity);
+
         _movementSystem =
             new UnitMovementSystem();
 
@@ -37,6 +44,9 @@ public sealed class UnitSimulation
 
         _healthSystem =
             new UnitHealthSystem();
+
+        _inventorySystem =
+            new UnitInventorySystem();
     }
 
     public UnitId Spawn(
@@ -93,6 +103,9 @@ public sealed class UnitSimulation
             id.Index,
             type);
 
+        Inventory.InitializeUnit(
+            id.Index);
+
         return id;
     }
 
@@ -117,7 +130,68 @@ public sealed class UnitSimulation
         Health.ClearUnit(
             index);
 
+        Inventory.ClearUnit(
+            index);
+
         return Units.Destroy(id);
+    }
+
+    public int AddInventoryItem(
+        UnitId id,
+        ItemConfig item,
+        float maxDurability = 0f)
+    {
+        return _inventorySystem.AddItem(
+            Inventory,
+            id,
+            item,
+            maxDurability);
+    }
+
+    public bool EquipArmor(
+        UnitId id,
+        int inventorySlot)
+    {
+        return _inventorySystem.EquipArmor(
+            Units,
+            Inventory,
+            id,
+            inventorySlot);
+    }
+
+    public bool EquipWeapon(
+        UnitId id,
+        int inventorySlot,
+        UnitWeaponSlot slot)
+    {
+        return _inventorySystem.EquipWeapon(
+            Units,
+            Inventory,
+            id,
+            inventorySlot,
+            slot);
+    }
+
+    public UnitDamageResult ApplyDamage(
+        UnitId id,
+        UnitHealthPartId part,
+        float rawDamage)
+    {
+        UnitDamageResult result =
+            _inventorySystem.ResolveIncomingDamage(
+                part,
+                rawDamage,
+                id,
+                Inventory);
+
+        _healthSystem.ApplyDamage(
+            Units,
+            Health,
+            id,
+            part,
+            result.FinalDamage);
+
+        return result;
     }
 
     public void SetTarget(
