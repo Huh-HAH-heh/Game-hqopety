@@ -323,6 +323,37 @@ public sealed class UnitInventoryStore
             (int)slot];
     }
 
+    public void UnequipBodyZone(
+        int unitIndex,
+        int zone,
+        ArmorLayer layer)
+    {
+        if (!IsValidBodyZone(zone) ||
+            unitIndex < 0 ||
+            unitIndex >= Capacity)
+            return;
+
+        _bodyEquipment[
+            GetBodyEquipmentStart(unitIndex) +
+            zone * ArmorLayerCount +
+            (int)layer] =
+            -1;
+    }
+
+    public void UnequipWeapon(
+        int unitIndex,
+        UnitWeaponSlot slot)
+    {
+        if (unitIndex < 0 ||
+            unitIndex >= Capacity)
+            return;
+
+        _weaponEquipment[
+            GetWeaponEquipmentStart(unitIndex) +
+            (int)slot] =
+            -1;
+    }
+
     public bool IsValidItemSlot(
         int unitIndex,
         int inventorySlot)
