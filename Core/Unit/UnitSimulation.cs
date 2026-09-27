@@ -148,6 +148,41 @@ public sealed class UnitSimulation
             maxDurability);
     }
 
+    public bool RemoveInventoryItem(
+        UnitId id,
+        int inventorySlot)
+    {
+        return _inventorySystem.RemoveItem(
+            Units,
+            Inventory,
+            id,
+            inventorySlot);
+    }
+
+    public void UnequipArmor(
+        UnitId id,
+        int zone,
+        ArmorLayer layer)
+    {
+        _inventorySystem.UnequipArmor(
+            Units,
+            Inventory,
+            id,
+            zone,
+            layer);
+    }
+
+    public void UnequipWeapon(
+        UnitId id,
+        UnitWeaponSlot slot)
+    {
+        _inventorySystem.UnequipWeapon(
+            Units,
+            Inventory,
+            id,
+            slot);
+    }
+
     public bool EquipArmor(
         UnitId id,
         int inventorySlot)
