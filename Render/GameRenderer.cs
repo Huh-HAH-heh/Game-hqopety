@@ -194,43 +194,85 @@ public sealed class GameRenderer
 
     private void CreateDemoUnits()
     {
-        float centerX =
-            _worldMap.TileWidth * 0.5f;
+        const int StressUnitCount = 500;
+        const int Columns = 25;
+        const int Rows = 20;
 
-        float centerY =
-            _worldMap.TileHeight * 0.5f;
+        float margin =
+            12f;
+
+        float usableWidth =
+            _worldMap.TileWidth -
+            margin * 2f;
+
+        float usableHeight =
+            _worldMap.TileHeight -
+            margin * 2f;
+
+        UnitId firstUnit =
+            new UnitId(
+                -1,
+                0);
+
+        for (int i = 0;
+             i < StressUnitCount;
+             i++)
+        {
+            int column =
+                i % Columns;
+
+            int row =
+                i / Columns;
+
+            float x =
+                margin +
+                usableWidth *
+                ((column + 0.5f) /
+                 Columns);
+
+            float y =
+                margin +
+                usableHeight *
+                ((row + 0.5f) /
+                 Rows);
+
+            UnitId unit =
+                _unitSimulation.Spawn(
+                    UnitType.Colonist,
+                    new Vector3(
+                        x,
+                        y,
+                        0f),
+                    bodyAngle:
+                        0f);
+
+            if (i == 0)
+            {
+                firstUnit = unit;
+            }
+
+            float targetX =
+                Math.Clamp(
+                    x + 24f,
+                    margin,
+                    _worldMap.MaxTileX - margin);
+
+            float targetY =
+                Math.Clamp(
+                    y + 16f,
+                    margin,
+                    _worldMap.MaxTileY - margin);
+
+            _unitSimulation.SetTarget(
+                unit,
+                new Vector3(
+                    targetX,
+                    targetY,
+                    0f));
+        }
 
         _selectedUnit =
-            _unitSimulation.Spawn(
-                UnitType.Colonist,
-                new Vector3(
-                    centerX - 18f,
-                    centerY - 8f,
-                    0f),
-                0f);
-
-        UnitId monster =
-            _unitSimulation.Spawn(
-                UnitType.SegmentedMonster,
-                new Vector3(
-                    centerX + 18f,
-                    centerY + 8f,
-                    0f),
-                MathF.PI);
-
-        _unitSimulation.SetTarget(
-            _selectedUnit,
-            new Vector3(
-                centerX + 12f,
-                centerY - 10f,
-                0f));
-
-        _unitSimulation.SetTarget(
-            monster,
-            new Vector3(
-                centerX - 12f,
-                centerY + 10f,
-                0f));
+            firstUnit;
     }
 
 
