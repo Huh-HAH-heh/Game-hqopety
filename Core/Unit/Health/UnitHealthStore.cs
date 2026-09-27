@@ -97,7 +97,7 @@ public sealed class UnitHealthStore
 
         Array.Fill(
             _parent,
-            -1);
+            (short)-1);
     }
 
     public void InitializeUnit(
@@ -140,7 +140,7 @@ public sealed class UnitHealthStore
              i < MaxPartsPerUnit;
              i++)
         {
-            _parent[start + i] = -1;
+            _parent[start + i] = (short)-1;
         }
 
         _partCount[unitIndex] = 0;
