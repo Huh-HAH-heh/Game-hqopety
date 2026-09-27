@@ -154,7 +154,6 @@ public sealed class UnitInventorySystem
         UnitHealthPartId part,
         float rawDamage,
         UnitId unitId,
-        UnitHealthStore health,
         UnitInventoryStore inventory)
     {
         if (rawDamage <= 0f ||
