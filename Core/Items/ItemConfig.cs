@@ -4,6 +4,47 @@ using System.Text;
 
 namespace Core.Items
 {
+    
+[Flags]
+public enum ArmorCoverage : ushort
+{
+    None = 0,
+    Head = 1 << 0,
+    Torso = 1 << 1,
+    LeftArm = 1 << 2,
+    RightArm = 1 << 3,
+    LeftHand = 1 << 4,
+    RightHand = 1 << 5,
+    LeftLeg = 1 << 6,
+    RightLeg = 1 << 7,
+    LeftFoot = 1 << 8,
+    RightFoot = 1 << 9
+}
+
+public enum ArmorLayer : byte
+{
+    Base = 0,
+    Clothing = 1,
+    Armor = 2,
+    Outer = 3
+}
+
+[Flags]
+public enum WeaponCapabilities : byte
+{
+    None = 0,
+    Ranged = 1 << 0,
+    Melee = 1 << 1
+}
+
+public enum UnitWeaponSlot : byte
+{
+    Primary = 0,
+    Secondary = 1,
+    Melee = 2,
+    Utility = 3
+}
+
     public abstract class ItemConfig
     {
         public string Name;
@@ -12,9 +53,20 @@ namespace Core.Items
 
     public sealed class ArmorConfig : ItemConfig
     {
+        // Legacy zone is kept for compatibility with the archived system.
         public int ProtectedZone;
+
+        // Fraction of incoming damage removed by this item.
         public float DamageAbsorption;
+
+        // Fraction of the absorbed damage that damages the armor itself.
+        public float ArmorDamageCoefficient = 0.25f;
+
         public float BleedProtectionChance;
+
+        public ArmorCoverage Coverage;
+
+        public ArmorLayer Layer;
     }
 
     public enum WeaponType { Melee, Ranged }
@@ -22,6 +74,10 @@ namespace Core.Items
     public abstract class WeaponConfig : ItemConfig
     {
         public WeaponType Type;
+
+        // Ranged + Melee supports hybrid weapons.
+        public WeaponCapabilities Capabilities;
+
         public byte BaseDamage;
         public float BleedChance;
         public float FireRate; // Задержка между атаками в секундах
@@ -29,7 +85,11 @@ namespace Core.Items
 
     public sealed class MeleeWeaponConfig : WeaponConfig
     {
-        public MeleeWeaponConfig() => Type = WeaponType.Melee;
+        public MeleeWeaponConfig()
+        {
+            Type = WeaponType.Melee;
+            Capabilities = WeaponCapabilities.Melee;
+        }
     }
 
     // ========================================================
@@ -37,7 +97,11 @@ namespace Core.Items
     // ========================================================
     public sealed class RangedWeaponConfig : WeaponConfig
     {
-        public RangedWeaponConfig() => Type = WeaponType.Ranged;
+        public RangedWeaponConfig()
+        {
+            Type = WeaponType.Ranged;
+            Capabilities = WeaponCapabilities.Ranged;
+        }
 
         // Идеальная дистанция одиночными (АК = 100, СВД = 300)
         // Мы переименовали MaxRange в BaseEffectiveRange, чтобы уйти от логики "исчезновения пули"
