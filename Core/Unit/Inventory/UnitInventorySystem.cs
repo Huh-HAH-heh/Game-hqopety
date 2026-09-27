@@ -41,6 +41,56 @@ public sealed class UnitInventorySystem
             maxDurability);
     }
 
+    public bool RemoveItem(
+        UnitStore units,
+        UnitInventoryStore inventory,
+        UnitId unitId,
+        int inventorySlot)
+    {
+        if (!units.TryGetIndex(
+                unitId,
+                out int unitIndex))
+            return false;
+
+        return inventory.RemoveItem(
+            unitIndex,
+            inventorySlot);
+    }
+
+    public void UnequipArmor(
+        UnitStore units,
+        UnitInventoryStore inventory,
+        UnitId unitId,
+        int zone,
+        ArmorLayer layer)
+    {
+        if (!units.TryGetIndex(
+                unitId,
+                out int unitIndex))
+            return;
+
+        inventory.UnequipBodyZone(
+            unitIndex,
+            zone,
+            layer);
+    }
+
+    public void UnequipWeapon(
+        UnitStore units,
+        UnitInventoryStore inventory,
+        UnitId unitId,
+        UnitWeaponSlot slot)
+    {
+        if (!units.TryGetIndex(
+                unitId,
+                out int unitIndex))
+            return;
+
+        inventory.UnequipWeapon(
+            unitIndex,
+            slot);
+    }
+
     public bool EquipArmor(
         UnitStore units,
         UnitInventoryStore inventory,
