@@ -168,15 +168,28 @@ public sealed class UnitInventoryStore
             unitIndex >= Capacity)
             return -1;
 
-        int count =
-            _itemCount[unitIndex];
+        int localSlot = -1;
 
-        if (count >= MaxInventorySlots)
+        int itemStart =
+            GetItemStart(unitIndex);
+
+        for (int i = 0;
+             i < MaxInventorySlots;
+             i++)
+        {
+            if (_occupied[itemStart + i])
+                continue;
+
+            localSlot = i;
+            break;
+        }
+
+        if (localSlot < 0)
             return -1;
 
         int slot =
-            GetItemStart(unitIndex) +
-            count;
+            itemStart +
+            localSlot;
 
         _items[slot] = item;
         _maxDurability[slot] =
@@ -190,9 +203,9 @@ public sealed class UnitInventoryStore
         _occupied[slot] = true;
 
         _itemCount[unitIndex] =
-            checked((short)(count + 1));
+            checked((short)(_itemCount[unitIndex] + 1));
 
-        return count;
+        return localSlot;
     }
 
     public bool RemoveItem(
@@ -219,6 +232,12 @@ public sealed class UnitInventoryStore
         _durability[index] = 0f;
         _maxDurability[index] = 0f;
         _occupied[index] = false;
+
+        _itemCount[unitIndex] =
+            checked((short)(
+                Math.Max(
+                    0,
+                    _itemCount[unitIndex] - 1)));
 
         // Keep slot indices stable: no compaction.
         return true;
