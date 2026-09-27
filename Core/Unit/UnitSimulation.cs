@@ -7,9 +7,11 @@ public sealed class UnitSimulation
 {
     private readonly UnitMovementSystem _movementSystem;
     private readonly UnitBodySystem _bodySystem;
+    private readonly UnitHealthSystem _healthSystem;
 
     public UnitStore Units { get; }
     public UnitBodyStore Bodies { get; }
+    public UnitHealthStore Health { get; }
 
     public UnitSimulation(
         int unitCapacity = 1024,
@@ -23,11 +25,18 @@ public sealed class UnitSimulation
             new UnitBodyStore(
                 bodyCapacity);
 
+        Health =
+            new UnitHealthStore(
+                unitCapacity);
+
         _movementSystem =
             new UnitMovementSystem();
 
         _bodySystem =
             new UnitBodySystem();
+
+        _healthSystem =
+            new UnitHealthSystem();
     }
 
     public UnitId Spawn(
@@ -80,6 +89,10 @@ public sealed class UnitSimulation
                 bodyNormal.Y,
                 bodyNormal.X));
 
+        Health.InitializeUnit(
+            id.Index,
+            type);
+
         return id;
     }
 
@@ -100,6 +113,9 @@ public sealed class UnitSimulation
 
         Bodies.FreeBody(
             body);
+
+        Health.ClearUnit(
+            index);
 
         return Units.Destroy(id);
     }
@@ -153,5 +169,9 @@ public sealed class UnitSimulation
             Units,
             Bodies,
             deltaTime);
+
+        _healthSystem.Update(
+            Units,
+            Health);
     }
 }
