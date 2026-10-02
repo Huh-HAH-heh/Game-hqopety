@@ -323,20 +323,6 @@ public sealed class UnitRenderSystem
             units.Position[observerIndex].Y *
             tilePixelSize;
 
-        AppendVisionCone(
-            area,
-            centerX,
-            centerY,
-            headAngle,
-            fieldOfView,
-            range * tilePixelSize);
-
-        AppendRangeRing(
-            debug,
-            centerX,
-            centerY,
-            range * tilePixelSize);
-
         float eyeX =
             observerEye.X *
             tilePixelSize;
@@ -344,6 +330,21 @@ public sealed class UnitRenderSystem
         float eyeY =
             observerEye.Y *
             tilePixelSize;
+
+        AppendVisionCone(
+            area,
+            debug,
+            eyeX,
+            eyeY,
+            headAngle,
+            fieldOfView,
+            range * tilePixelSize);
+
+        AppendRangeRing(
+            debug,
+            eyeX,
+            eyeY,
+            range * tilePixelSize);
 
         AppendDebugLine(
             debug,
