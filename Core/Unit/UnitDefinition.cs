@@ -63,8 +63,8 @@ public static class UnitCatalog
                     width: 0.40f,
                     length: 0.40f,
                     height: 0.40f,
-                    viewRange: 16f,
-                    fieldOfView: 120f),
+                    viewRange: 20f,
+                    fieldOfView: 110f),
 
             UnitType.SegmentedMonster =>
                 new UnitDefinition(
@@ -74,8 +74,8 @@ public static class UnitCatalog
                     width: 1.0f,
                     length: 6.0f,
                     height: 0.45f,
-                    viewRange: 28f,
-                    fieldOfView: 140f),
+                    viewRange: 20f,
+                    fieldOfView: 110f),
 
             _ =>
                 throw new ArgumentOutOfRangeException(
