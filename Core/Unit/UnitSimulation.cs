@@ -10,11 +10,14 @@ public sealed class UnitSimulation
     private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
     private readonly UnitInventorySystem _inventorySystem;
+    private readonly VisionSystem _visionSystem;
 
     public UnitStore Units { get; }
     public UnitBodyStore Bodies { get; }
     public UnitHealthStore Health { get; }
     public UnitInventoryStore Inventory { get; }
+    public VisionSystem Vision =>
+        _visionSystem;
 
     public UnitSimulation(
         int unitCapacity = 1024,
@@ -47,6 +50,10 @@ public sealed class UnitSimulation
 
         _inventorySystem =
             new UnitInventorySystem();
+
+        _visionSystem =
+            new VisionSystem(
+                unitCapacity);
     }
 
     public UnitId Spawn(
@@ -282,5 +289,10 @@ public sealed class UnitSimulation
         _healthSystem.Update(
             Units,
             Health);
+
+        _visionSystem.Update(
+            Units,
+            worldMap,
+            deltaTime);
     }
 }
