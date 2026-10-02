@@ -1,7 +1,7 @@
 using System;
 using Core.Map;
 using Core.Unit;
-using System.Numerics;
+using RimClone.Render;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
@@ -12,8 +12,6 @@ public sealed class GameRenderer
 {
     private const float TileSize = 16f;
 
-    // Сохраняем прежний масштаб: старый MicroCell был
-    // TileSize / SubDivision, то есть 16 / 3 пикселя.
     private const float TerrainTilePixelSize =
         TileSize / 3f;
 
@@ -24,12 +22,15 @@ public sealed class GameRenderer
     private readonly MapRenderSystem _mapRenderer;
     private readonly UnitSimulation _unitSimulation;
     private readonly UnitRenderSystem _unitRenderer;
+    private readonly VisionTestScene _visionTestScene;
 
     private UnitId _selectedUnit;
 
     private RenderWindow _window = null!;
 
     private bool _showDebugGrid;
+    private bool _showVisionDebug = true;
+    private int _visionTestIndex;
 
     public GameRenderer(
         WorldMap worldMap)
@@ -60,7 +61,10 @@ public sealed class GameRenderer
         _unitRenderer =
             new UnitRenderSystem();
 
-        CreateDemoUnits();
+        _visionTestScene =
+            new VisionTestScene();
+
+        CreateVisionTestScene();
     }
 
     public void Run()
@@ -122,20 +126,92 @@ public sealed class GameRenderer
             _camera.ZoomLevel,
             _showDebugGrid);
 
+        if (_showVisionDebug)
+        {
+            _visionTestScene.DrawDebug(
+                _window);
+        }
+
         _unitRenderer.Draw(
             _window,
             _unitSimulation,
+            _worldMap,
             _camera.View,
             TerrainTilePixelSize,
-            _selectedUnit);
+            _selectedUnit,
+            _showVisionDebug);
 
         _window.SetTitle(
-            $"RimClone | " +
-            $"{_worldMap.TileWidth}x" +
-            $"{_worldMap.TileHeight} | " +
-            $"Units={_unitSimulation.Units.ActiveCount}");
+            BuildWindowTitle());
 
         _window.Display();
+    }
+
+    private string BuildWindowTitle()
+    {
+        int visible = 0;
+        int blocked = 0;
+        int outsideFov = 0;
+        int outOfRange = 0;
+
+        if (_unitSimulation.Units.TryGetIndex(
+                _selectedUnit,
+                out int observerIndex))
+        {
+            ReadOnlySpan<UnitId> testUnits =
+                _visionTestScene.Units;
+
+            for (int i = 0;
+                 i < testUnits.Length;
+                 i++)
+            {
+                if (!_unitSimulation.Units.TryGetIndex(
+                        testUnits[i],
+                        out int targetIndex) ||
+                    targetIndex == observerIndex)
+                {
+                    continue;
+                }
+
+                VisionState state =
+                    _unitSimulation.Vision.Evaluate(
+                        _unitSimulation.Units,
+                        _worldMap,
+                        observerIndex,
+                        targetIndex).State;
+
+                switch (state)
+                {
+                    case VisionState.Visible:
+                        visible++;
+                        break;
+
+                    case VisionState.HiddenByTerrain:
+                        blocked++;
+                        break;
+
+                    case VisionState.OutsideFieldOfView:
+                        outsideFov++;
+                        break;
+
+                    case VisionState.OutOfRange:
+                        outOfRange++;
+                        break;
+                }
+            }
+        }
+
+        string debug =
+            _showVisionDebug
+                ? "ON"
+                : "OFF";
+
+        return
+            $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
+            $"Vision {debug} | " +
+            $"Visible={visible} Blocked={blocked} " +
+            $"FOV={outsideFov} Range={outOfRange} | " +
+            $"V=debug TAB=unit G=grid";
     }
 
     private void InitializeWindow()
@@ -162,7 +238,6 @@ public sealed class GameRenderer
         _window.KeyPressed +=
             (_, e) =>
                 HandleKey(e.Code);
-
     }
 
     private void HandleKey(
@@ -175,8 +250,42 @@ public sealed class GameRenderer
             return;
         }
 
+        if (key == Keyboard.Key.V)
+        {
+            _showVisionDebug =
+                !_showVisionDebug;
+            return;
+        }
+
+        if (key == Keyboard.Key.Tab)
+        {
+            _visionTestIndex =
+                (_visionTestIndex + 1) %
+                _visionTestScene.UnitCount;
+
+            _selectedUnit =
+                _visionTestScene.GetUnit(
+                    _visionTestIndex);
+
+            return;
+        }
+
+        if (key == Keyboard.Key.R)
+        {
+            _visionTestIndex = 0;
+            _selectedUnit =
+                _visionTestScene.Observer;
+            return;
+        }
+
         if (key == Keyboard.Key.T)
         {
+            if (!_unitSimulation.Units.IsAlive(
+                    _selectedUnit))
+            {
+                return;
+            }
+
             float centerX =
                 _worldMap.TileWidth * 0.5f;
 
@@ -185,96 +294,21 @@ public sealed class GameRenderer
 
             _unitSimulation.SetTarget(
                 _selectedUnit,
-                new Vector3(
+                new System.Numerics.Vector3(
                     centerX,
                     centerY - 20f,
                     0f));
         }
     }
 
-    private void CreateDemoUnits()
+    private void CreateVisionTestScene()
     {
-        const int StressUnitCount = 500;
-        const int Columns = 25;
-        const int Rows = 20;
-
-        float margin =
-            12f;
-
-        float usableWidth =
-            _worldMap.TileWidth -
-            margin * 2f;
-
-        float usableHeight =
-            _worldMap.TileHeight -
-            margin * 2f;
-
-        UnitId firstUnit =
-            new UnitId(
-                -1,
-                0);
-
-        for (int i = 0;
-             i < StressUnitCount;
-             i++)
-        {
-            int column =
-                i % Columns;
-
-            int row =
-                i / Columns;
-
-            float x =
-                margin +
-                usableWidth *
-                ((column + 0.5f) /
-                 Columns);
-
-            float y =
-                margin +
-                usableHeight *
-                ((row + 0.5f) /
-                 Rows);
-
-            UnitId unit =
-                _unitSimulation.Spawn(
-                    UnitType.Colonist,
-                    new Vector3(
-                        x,
-                        y,
-                        0f),
-                    bodyAngle:
-                        0f);
-
-            if (i == 0)
-            {
-                firstUnit = unit;
-            }
-
-            float targetX =
-                Math.Clamp(
-                    x + 24f,
-                    margin,
-                    _worldMap.MaxTileX - margin);
-
-            float targetY =
-                Math.Clamp(
-                    y + 16f,
-                    margin,
-                    _worldMap.MaxTileY - margin);
-
-            _unitSimulation.SetTarget(
-                unit,
-                new Vector3(
-                    targetX,
-                    targetY,
-                    0f));
-        }
+        _visionTestScene.Setup(
+            _worldMap,
+            _unitSimulation,
+            TerrainTilePixelSize);
 
         _selectedUnit =
-            firstUnit;
+            _visionTestScene.Observer;
     }
-
-
 }
-
