@@ -1,3 +1,4 @@
+using Core.Map;
 using Core.Unit;
 using SFML.Graphics;
 using SFML.System;
@@ -9,8 +10,14 @@ namespace RimClone.Render;
 public sealed class UnitRenderSystem
 {
     private const int CircleSegments = 8;
+    private const int VisionConeSegments = 20;
+    private const int VisionRingSegments = 48;
 
     private readonly VertexArray _vertices =
+        new VertexArray(
+            PrimitiveType.Triangles);
+
+    private readonly VertexArray _visionArea =
         new VertexArray(
             PrimitiveType.Triangles);
 
@@ -18,18 +25,26 @@ public sealed class UnitRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _visionDebug =
+        new VertexArray(
+            PrimitiveType.Lines);
+
     public void Draw(
         RenderWindow window,
         UnitSimulation simulation,
+        WorldMap worldMap,
         View cameraView,
         float tilePixelSize,
-        UnitId selectedUnit)
+        UnitId selectedUnit,
+        bool showVisionDebug)
     {
         if (tilePixelSize <= 0f)
             return;
 
         _vertices.Clear();
+        _visionArea.Clear();
         _selection.Clear();
+        _visionDebug.Clear();
 
         Vector2f center =
             cameraView.Center;
@@ -84,12 +99,6 @@ public sealed class UnitRenderSystem
 
         float[] lengths =
             units.Length;
-
-        float[] viewRanges =
-            units.ViewRange;
-
-        float[] fieldOfViews =
-            units.FieldOfView;
 
         int[] bodyStarts =
             units.BodyStart;
@@ -239,27 +248,25 @@ public sealed class UnitRenderSystem
                         selectionRadius,
                         0.45f) *
                     tilePixelSize);
-
-                Vector3 headNormal =
-                    NormalizeHorizontal(
-                        headNormals[unitIndex]);
-
-                float headAngle =
-                    MathF.Atan2(
-                        headNormal.Y,
-                        headNormal.X);
-
-                AppendVisionCone(
-                    _selection,
-                    unitPosition.X *
-                    tilePixelSize,
-                    unitPosition.Y *
-                    tilePixelSize,
-                    headAngle,
-                    fieldOfViews[unitIndex],
-                    viewRanges[unitIndex] *
-                    tilePixelSize);
             }
+        }
+
+        if (hasSelection &&
+            showVisionDebug)
+        {
+            AppendVisionDebug(
+                _visionArea,
+                _visionDebug,
+                simulation,
+                worldMap,
+                selectedIndex,
+                tilePixelSize);
+        }
+
+        if (_visionArea.VertexCount > 0)
+        {
+            window.Draw(
+                _visionArea);
         }
 
         if (_vertices.VertexCount > 0)
@@ -273,6 +280,304 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _selection);
         }
+
+        if (_visionDebug.VertexCount > 0)
+        {
+            window.Draw(
+                _visionDebug);
+        }
+    }
+
+    private static void AppendVisionDebug(
+        VertexArray area,
+        VertexArray debug,
+        UnitSimulation simulation,
+        WorldMap worldMap,
+        int observerIndex,
+        float tilePixelSize)
+    {
+        UnitStore units =
+            simulation.Units;
+
+        Vector3 observerEye =
+            simulation.Vision.GetEyePosition(
+                units,
+                observerIndex);
+
+        float headAngle =
+            MathF.Atan2(
+                units.HeadNormal[observerIndex].Y,
+                units.HeadNormal[observerIndex].X);
+
+        float range =
+            units.ViewRange[observerIndex];
+
+        float fieldOfView =
+            units.FieldOfView[observerIndex];
+
+        float centerX =
+            units.Position[observerIndex].X *
+            tilePixelSize;
+
+        float centerY =
+            units.Position[observerIndex].Y *
+            tilePixelSize;
+
+        AppendVisionCone(
+            area,
+            centerX,
+            centerY,
+            headAngle,
+            fieldOfView,
+            range * tilePixelSize);
+
+        AppendRangeRing(
+            debug,
+            centerX,
+            centerY,
+            range * tilePixelSize);
+
+        float eyeX =
+            observerEye.X *
+            tilePixelSize;
+
+        float eyeY =
+            observerEye.Y *
+            tilePixelSize;
+
+        AppendDebugLine(
+            debug,
+            centerX,
+            centerY,
+            eyeX,
+            eyeY,
+            new Color(
+                220,
+                220,
+                220,
+                170));
+
+        float directionLength =
+            MathF.Min(
+                range,
+                3f) *
+            tilePixelSize;
+
+        AppendDebugLine(
+            debug,
+            eyeX,
+            eyeY,
+            eyeX +
+            MathF.Cos(headAngle) *
+            directionLength,
+            eyeY +
+            MathF.Sin(headAngle) *
+            directionLength,
+            new Color(
+                255,
+                255,
+                255,
+                220));
+
+        ReadOnlySpan<int> active =
+            units.ActiveIndices;
+
+        Span<Vector3> points =
+            stackalloc Vector3[
+                VisionSystem.VisibilityPointCount];
+
+        for (int i = 0;
+             i < active.Length;
+             i++)
+        {
+            int targetIndex =
+                active[i];
+
+            if (targetIndex == observerIndex)
+                continue;
+
+            VisionCheck check =
+                simulation.Vision.Evaluate(
+                    units,
+                    worldMap,
+                    observerIndex,
+                    targetIndex);
+
+            Color targetColor =
+                GetVisionColor(
+                    check.State);
+
+            float targetX =
+                check.TargetCenter.X *
+                tilePixelSize;
+
+            float targetY =
+                check.TargetCenter.Y *
+                tilePixelSize;
+
+            AppendCircleOutline(
+                debug,
+                targetX,
+                targetY,
+                0.32f * tilePixelSize,
+                targetColor,
+                12);
+
+            if (check.State ==
+                VisionState.OutOfRange ||
+                check.State ==
+                VisionState.OutsideFieldOfView)
+            {
+                continue;
+            }
+
+            simulation.Vision.GetVisibilityPoints(
+                units,
+                targetIndex,
+                points);
+
+            for (int pointIndex = 0;
+                 pointIndex < points.Length;
+                 pointIndex++)
+            {
+                Vector3 point =
+                    points[pointIndex];
+
+                bool clear =
+                    simulation.Vision.HasLineOfSight(
+                        worldMap,
+                        observerEye,
+                        point,
+                        out Vector3 blockingPoint);
+
+                Color pointColor =
+                    clear
+                        ? new Color(
+                            70,
+                            220,
+                            120,
+                            210)
+                        : new Color(
+                            240,
+                            80,
+                            80,
+                            180);
+
+                float pointX =
+                    point.X *
+                    tilePixelSize;
+
+                float pointY =
+                    point.Y *
+                    tilePixelSize;
+
+                AppendCircleOutline(
+                    debug,
+                    pointX,
+                    pointY,
+                    0.075f * tilePixelSize,
+                    pointColor,
+                    8);
+
+                if (clear)
+                {
+                    AppendDebugLine(
+                        debug,
+                        eyeX,
+                        eyeY,
+                        pointX,
+                        pointY,
+                        pointColor);
+                }
+                else
+                {
+                    AppendDebugLine(
+                        debug,
+                        eyeX,
+                        eyeY,
+                        blockingPoint.X *
+                        tilePixelSize,
+                        blockingPoint.Y *
+                        tilePixelSize,
+                        pointColor);
+
+                    AppendDebugLine(
+                        debug,
+                        blockingPoint.X *
+                        tilePixelSize,
+                        blockingPoint.Y *
+                        tilePixelSize,
+                        pointX,
+                        pointY,
+                        new Color(
+                            240,
+                            80,
+                            80,
+                            70));
+                }
+            }
+
+            if (check.State ==
+                VisionState.HiddenByTerrain)
+            {
+                AppendCircleOutline(
+                    debug,
+                    check.BlockingPoint.X *
+                    tilePixelSize,
+                    check.BlockingPoint.Y *
+                    tilePixelSize,
+                    0.16f *
+                    tilePixelSize,
+                    new Color(
+                        255,
+                        210,
+                        70,
+                        220),
+                    10);
+            }
+        }
+    }
+
+    private static Color GetVisionColor(
+        VisionState state)
+    {
+        return state switch
+        {
+            VisionState.Visible =>
+                new Color(
+                    70,
+                    220,
+                    120,
+                    220),
+
+            VisionState.HiddenByTerrain =>
+                new Color(
+                    240,
+                    80,
+                    80,
+                    220),
+
+            VisionState.OutsideFieldOfView =>
+                new Color(
+                    235,
+                    170,
+                    70,
+                    220),
+
+            VisionState.OutOfRange =>
+                new Color(
+                    130,
+                    135,
+                    145,
+                    160),
+
+            _ =>
+                new Color(
+                    220,
+                    220,
+                    220,
+                    180)
+        };
     }
 
     private static void AppendHuman(
@@ -287,8 +592,6 @@ public sealed class UnitRenderSystem
         float tilePixelSize,
         Color color)
     {
-        // Unit data stays three-dimensional, but the current visual
-        // representation is intentionally a flat ground marker.
         float x =
             position.X *
             tilePixelSize;
@@ -311,47 +614,273 @@ public sealed class UnitRenderSystem
             color);
     }
 
-    private static void AppendLine(
+    private static void AppendVisionCone(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float direction,
+        float fieldOfViewDegrees,
+        float range)
+    {
+        Color color =
+            new Color(
+                190,
+                200,
+                210,
+                45);
+
+        float halfFov =
+            fieldOfViewDegrees *
+            MathF.PI /
+            360f;
+
+        float start =
+            direction -
+            halfFov;
+
+        float step =
+            fieldOfViewDegrees *
+            MathF.PI /
+            180f /
+            VisionConeSegments;
+
+        for (int i = 0;
+             i < VisionConeSegments;
+             i++)
+        {
+            float a0 =
+                start +
+                step * i;
+
+            float a1 =
+                start +
+                step * (i + 1);
+
+            vertices.Append(
+                new Vertex(
+                    new Vector2f(
+                        centerX,
+                        centerY),
+                    color));
+
+            vertices.Append(
+                new Vertex(
+                    new Vector2f(
+                        centerX +
+                        MathF.Cos(a0) *
+                        range,
+                        centerY +
+                        MathF.Sin(a0) *
+                        range),
+                    color));
+
+            vertices.Append(
+                new Vertex(
+                    new Vector2f(
+                        centerX +
+                        MathF.Cos(a1) *
+                        range,
+                        centerY +
+                        MathF.Sin(a1) *
+                        range),
+                    color));
+        }
+
+        Color boundary =
+            new Color(
+                235,
+                235,
+                235,
+                180);
+
+        AppendDebugLine(
+            vertices,
+            centerX,
+            centerY,
+            centerX +
+            MathF.Cos(start) *
+            range,
+            centerY +
+            MathF.Sin(start) *
+            range,
+            boundary);
+
+        AppendDebugLine(
+            vertices,
+            centerX,
+            centerY,
+            centerX +
+            MathF.Cos(start +
+                       step *
+                       VisionConeSegments) *
+            range,
+            centerY +
+            MathF.Sin(start +
+                       step *
+                       VisionConeSegments) *
+            range,
+            boundary);
+    }
+
+    private static void AppendRangeRing(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float radius)
+    {
+        Color color =
+            new Color(
+                180,
+                190,
+                200,
+                80);
+
+        for (int i = 0;
+             i < VisionRingSegments;
+             i++)
+        {
+            float a0 =
+                i *
+                MathF.Tau /
+                VisionRingSegments;
+
+            float a1 =
+                (i + 1) *
+                MathF.Tau /
+                VisionRingSegments;
+
+            AppendDebugLine(
+                vertices,
+                centerX +
+                MathF.Cos(a0) *
+                radius,
+                centerY +
+                MathF.Sin(a0) *
+                radius,
+                centerX +
+                MathF.Cos(a1) *
+                radius,
+                centerY +
+                MathF.Sin(a1) *
+                radius,
+                color);
+        }
+    }
+
+    private static void AppendDebugLine(
         VertexArray vertices,
         float x0,
         float y0,
         float x1,
         float y1,
-        float width,
         Color color)
     {
-        Vector2f direction =
-            new Vector2f(
-                x1 - x0,
-                y1 - y0);
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    x0,
+                    y0),
+                color));
 
-        float length =
-            MathF.Sqrt(
-                direction.X * direction.X +
-                direction.Y * direction.Y);
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    x1,
+                    y1),
+                color));
+    }
 
-        if (length < 0.0001f)
-            return;
+    private static void AppendCircleOutline(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float radius,
+        Color color,
+        int segments)
+    {
+        for (int i = 0;
+             i < segments;
+             i++)
+        {
+            float a0 =
+                i *
+                MathF.Tau /
+                segments;
 
-        direction /= length;
+            float a1 =
+                (i + 1) *
+                MathF.Tau /
+                segments;
 
-        Vector2f normal =
-            new Vector2f(
-                -direction.Y * width,
-                direction.X * width);
+            AppendDebugLine(
+                vertices,
+                centerX +
+                MathF.Cos(a0) *
+                radius,
+                centerY +
+                MathF.Sin(a0) *
+                radius,
+                centerX +
+                MathF.Cos(a1) *
+                radius,
+                centerY +
+                MathF.Sin(a1) *
+                radius,
+                color);
+        }
+    }
 
-        Vector2f p0 = new(x0 + normal.X, y0 + normal.Y);
-        Vector2f p1 = new(x1 + normal.X, y1 + normal.Y);
-        Vector2f p2 = new(x1 - normal.X, y1 - normal.Y);
-        Vector2f p3 = new(x0 - normal.X, y0 - normal.Y);
+    private static void AppendSelection(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float radius)
+    {
+        const int segments = 16;
 
-        vertices.Append(new Vertex(p0, color));
-        vertices.Append(new Vertex(p1, color));
-        vertices.Append(new Vertex(p2, color));
+        Color color =
+            new Color(
+                235,
+                235,
+                235,
+                190);
 
-        vertices.Append(new Vertex(p0, color));
-        vertices.Append(new Vertex(p2, color));
-        vertices.Append(new Vertex(p3, color));
+        for (int i = 0;
+             i < segments;
+             i++)
+        {
+            float a0 =
+                i *
+                MathF.Tau /
+                segments;
+
+            float a1 =
+                (i + 1) *
+                MathF.Tau /
+                segments;
+
+            vertices.Append(
+                new Vertex(
+                    new Vector2f(
+                        centerX +
+                        MathF.Cos(a0) *
+                        radius,
+                        centerY +
+                        MathF.Sin(a0) *
+                        radius),
+                    color));
+
+            vertices.Append(
+                new Vertex(
+                    new Vector2f(
+                        centerX +
+                        MathF.Cos(a1) *
+                        radius,
+                        centerY +
+                        MathF.Sin(a1) *
+                        radius),
+                    color));
+        }
     }
 
     private static void AppendCircle(
@@ -489,124 +1018,6 @@ public sealed class UnitRenderSystem
             new Vertex(
                 p3,
                 color));
-    }
-
-    private static void AppendVisionCone(
-        VertexArray vertices,
-        float centerX,
-        float centerY,
-        float direction,
-        float fieldOfViewDegrees,
-        float range)
-    {
-        Color color =
-            new Color(
-                190,
-                200,
-                210,
-                80);
-
-        float halfFov =
-            fieldOfViewDegrees *
-            MathF.PI /
-            360f;
-
-        float left =
-            direction -
-            halfFov;
-
-        float right =
-            direction +
-            halfFov;
-
-        vertices.Append(
-            new Vertex(
-                new Vector2f(
-                    centerX,
-                    centerY),
-                color));
-
-        vertices.Append(
-            new Vertex(
-                new Vector2f(
-                    centerX +
-                    MathF.Cos(left) *
-                    range,
-                    centerY +
-                    MathF.Sin(left) *
-                    range),
-                color));
-
-        vertices.Append(
-            new Vertex(
-                new Vector2f(
-                    centerX,
-                    centerY),
-                color));
-
-        vertices.Append(
-            new Vertex(
-                new Vector2f(
-                    centerX +
-                    MathF.Cos(right) *
-                    range,
-                    centerY +
-                    MathF.Sin(right) *
-                    range),
-                color));
-    }
-
-    private static void AppendSelection(
-        VertexArray vertices,
-        float centerX,
-        float centerY,
-        float radius)
-    {
-        const int segments = 16;
-
-        Color color =
-            new Color(
-                235,
-                235,
-                235,
-                190);
-
-        for (int i = 0;
-             i < segments;
-             i++)
-        {
-            float a0 =
-                i *
-                MathF.Tau /
-                segments;
-
-            float a1 =
-                (i + 1) *
-                MathF.Tau /
-                segments;
-
-            vertices.Append(
-                new Vertex(
-                    new Vector2f(
-                        centerX +
-                        MathF.Cos(a0) *
-                        radius,
-                        centerY +
-                        MathF.Sin(a0) *
-                        radius),
-                    color));
-
-            vertices.Append(
-                new Vertex(
-                    new Vector2f(
-                        centerX +
-                        MathF.Cos(a1) *
-                        radius,
-                        centerY +
-                        MathF.Sin(a1) *
-                        radius),
-                    color));
-        }
     }
 
     private static Vector3 NormalizeHorizontal(
