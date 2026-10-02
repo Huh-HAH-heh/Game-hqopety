@@ -548,6 +548,25 @@ public sealed class VisionSystem
         int stepY =
             Math.Sign(dy);
 
+        // A ray that starts exactly on a cell boundary and travels
+        // in the negative direction is immediately inside the
+        // previous cell, not the one returned by Floor().
+        if (stepX < 0 &&
+            MathF.Abs(start.X -
+                     MathF.Round(start.X)) <
+            Epsilon)
+        {
+            cellX--;
+        }
+
+        if (stepY < 0 &&
+            MathF.Abs(start.Y -
+                     MathF.Round(start.Y)) <
+            Epsilon)
+        {
+            cellY--;
+        }
+
         float tDeltaX =
             stepX == 0
                 ? float.PositiveInfinity
