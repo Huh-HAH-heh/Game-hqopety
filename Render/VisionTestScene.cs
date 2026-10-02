@@ -165,7 +165,7 @@ public sealed class VisionTestScene
                 UnitType.Colonist,
                 new Vector3(
                     centerX - 4f,
-                    centerY + 8f,
+                    centerY + 12f,
                     BaseHeight),
                 forward,
                 forward);
