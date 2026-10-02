@@ -36,7 +36,8 @@ public sealed class UnitRenderSystem
         View cameraView,
         float tilePixelSize,
         UnitId selectedUnit,
-        bool showVisionDebug)
+        bool showVisionDebug,
+        bool hideUnseenTargets = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -138,6 +139,21 @@ public sealed class UnitRenderSystem
 
             Vector3 unitPosition =
                 positions[unitIndex];
+
+            if (hideUnseenTargets &&
+                hasSelection &&
+                unitIndex != selectedIndex)
+            {
+                VisionState state =
+                    simulation.Vision.Evaluate(
+                        units,
+                        worldMap,
+                        selectedIndex,
+                        unitIndex).State;
+
+                if (state != VisionState.Visible)
+                    continue;
+            }
 
             if (unitPosition.X < minWorldX ||
                 unitPosition.X > maxWorldX ||
