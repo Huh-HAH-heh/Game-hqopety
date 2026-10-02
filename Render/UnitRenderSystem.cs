@@ -615,7 +615,8 @@ public sealed class UnitRenderSystem
     }
 
     private static void AppendVisionCone(
-        VertexArray vertices,
+        VertexArray area,
+        VertexArray debug,
         float centerX,
         float centerY,
         float direction,
@@ -656,14 +657,14 @@ public sealed class UnitRenderSystem
                 start +
                 step * (i + 1);
 
-            vertices.Append(
+            area.Append(
                 new Vertex(
                     new Vector2f(
                         centerX,
                         centerY),
                     color));
 
-            vertices.Append(
+            area.Append(
                 new Vertex(
                     new Vector2f(
                         centerX +
@@ -674,7 +675,7 @@ public sealed class UnitRenderSystem
                         range),
                     color));
 
-            vertices.Append(
+            area.Append(
                 new Vertex(
                     new Vector2f(
                         centerX +
@@ -694,7 +695,7 @@ public sealed class UnitRenderSystem
                 180);
 
         AppendDebugLine(
-            vertices,
+            debug,
             centerX,
             centerY,
             centerX +
@@ -706,7 +707,7 @@ public sealed class UnitRenderSystem
             boundary);
 
         AppendDebugLine(
-            vertices,
+            debug,
             centerX,
             centerY,
             centerX +
