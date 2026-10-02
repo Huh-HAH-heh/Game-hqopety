@@ -135,7 +135,7 @@ public sealed class VisionTestScene
                 UnitType.Colonist,
                 new Vector3(
                     centerX - 5f,
-                    centerY - 4f,
+                    centerY - 8f,
                     BaseHeight),
                 forward,
                 forward);
@@ -145,7 +145,7 @@ public sealed class VisionTestScene
                 UnitType.Greenbob,
                 new Vector3(
                     centerX - 6f,
-                    centerY + 5f,
+                    centerY - 6f,
                     BaseHeight),
                 forward,
                 forward);
