@@ -140,7 +140,7 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _selectedUnit,
             _showVisionDebug,
-            _showVisionDebug);
+            false);
 
         _window.SetTitle(
             BuildWindowTitle());
