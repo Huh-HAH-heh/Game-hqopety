@@ -622,7 +622,7 @@ public sealed class VisionSystem
                         cellY);
 
                 if (terrainHeight >
-                    rayLowestZ -
+                    rayLowestZ +
                     Epsilon)
                 {
                     float hitT =
