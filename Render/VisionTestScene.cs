@@ -31,7 +31,8 @@ public sealed class VisionTestScene
 
     public void Setup(
         WorldMap worldMap,
-        UnitSimulation simulation)
+        UnitSimulation simulation,
+        float tilePixelSize)
     {
         int centerX =
             worldMap.TileWidth / 2;
@@ -201,7 +202,8 @@ public sealed class VisionTestScene
 
         BuildObstacleDebug(
             centerX,
-            centerY);
+            centerY,
+            tilePixelSize);
     }
 
     public UnitId GetUnit(
@@ -215,11 +217,8 @@ public sealed class VisionTestScene
     }
 
     public void DrawDebug(
-        RenderWindow window,
-        float tilePixelSize)
+        RenderWindow window)
     {
-        _ = tilePixelSize;
-
         if (_obstacles.VertexCount <= 0)
             return;
 
@@ -229,16 +228,21 @@ public sealed class VisionTestScene
 
     private void BuildObstacleDebug(
         int centerX,
-        int centerY)
+        int centerY,
+        float tilePixelSize)
     {
         _obstacles.Clear();
 
         AppendRectangle(
             _obstacles,
-            centerX - 11f,
-            centerY - 4f,
-            centerX - 9f,
-            centerY + 4f,
+            (centerX - 11f) *
+            tilePixelSize,
+            (centerY - 4f) *
+            tilePixelSize,
+            (centerX - 9f) *
+            tilePixelSize,
+            (centerY + 4f) *
+            tilePixelSize,
             new Color(
                 250,
                 90,
@@ -247,10 +251,14 @@ public sealed class VisionTestScene
 
         AppendRectangle(
             _obstacles,
-            centerX - 11f,
-            centerY + 6f,
-            centerX - 9f,
-            centerY + 10f,
+            (centerX - 11f) *
+            tilePixelSize,
+            (centerY + 6f) *
+            tilePixelSize,
+            (centerX - 9f) *
+            tilePixelSize,
+            (centerY + 10f) *
+            tilePixelSize,
             new Color(
                 250,
                 205,
