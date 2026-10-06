@@ -393,7 +393,7 @@ public sealed class UnitAiSystem
              slot < UnitInventoryStore.WeaponSlotCount;
              slot++)
         {
-            if (weapons.GetIndex(
+            if (UnitWeaponStore.GetIndex(
                     unit,
                     (UnitWeaponSlot)slot) < 0)
             {
@@ -407,7 +407,7 @@ public sealed class UnitAiSystem
                 continue;
             }
 
-            if (weapons.GetIndex(
+            if (UnitWeaponStore.GetIndex(
                     unit,
                     (UnitWeaponSlot)slot) < 0)
                 continue;
