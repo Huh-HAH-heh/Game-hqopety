@@ -124,6 +124,7 @@ public sealed class UnitWeaponStore
 
         if (_ammo[index] > 0 ||
             _reloading[index] ||
+            _reserveAmmo[index] <= 0 ||
             reloadTime <= 0f)
             return;
 
