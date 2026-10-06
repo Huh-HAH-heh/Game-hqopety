@@ -29,6 +29,11 @@ public sealed class ProjectileStore
     private int _count;
     private int _freeCount;
 
+    public long TotalHits { get; private set; }
+    public Vector3 LastHitPosition { get; private set; }
+    public UnitId LastHitTarget { get; private set; }
+    public UnitHealthPartId LastHitPart { get; private set; }
+
     public int ActiveCount =>
         _activeCount;
 
@@ -174,6 +179,17 @@ public sealed class ProjectileStore
         return new ProjectileId(
             index,
             _generation[index]);
+    }
+
+    public void RegisterHit(
+        UnitId target,
+        UnitHealthPartId part,
+        Vector3 position)
+    {
+        TotalHits++;
+        LastHitTarget = target;
+        LastHitPart = part;
+        LastHitPosition = position;
     }
 
     public bool Destroy(
