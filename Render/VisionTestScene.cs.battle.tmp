@@ -1,0 +1,625 @@
+using System;
+using System.Numerics;
+using Core.Items;
+using Core.Map;
+using Core.Unit;
+using SFML.Graphics;
+using SFML.System;
+
+namespace RimClone.Render;
+
+public sealed class VisionTestScene
+{
+    private const float BaseHeight = 10f;
+    private const float CoverHeight = 11.40f;
+
+    private readonly UnitId[] _units =
+        new UnitId[8];
+
+    private readonly VertexArray _obstacles =
+        new VertexArray(
+            PrimitiveType.Lines);
+
+    private float _battleResetTimer;
+
+    public int UnitCount =>
+        _units.Length;
+
+    public UnitId Observer =>
+        _units[0];
+
+    public ReadOnlySpan<UnitId> Units =>
+        _units.AsSpan();
+
+    public void Setup(
+        WorldMap worldMap,
+        UnitSimulation simulation,
+        float tilePixelSize)
+    {
+        int centerX =
+            worldMap.TileWidth / 2;
+
+        int centerY =
+            worldMap.TileHeight / 2;
+
+        int minX =
+            Math.Max(
+                2,
+                centerX - 40);
+
+        int maxX =
+            Math.Min(
+                worldMap.MaxTileX - 2,
+                centerX + 40);
+
+        int minY =
+            Math.Max(
+                2,
+                centerY - 28);
+
+        int maxY =
+            Math.Min(
+                worldMap.MaxTileY - 2,
+                centerY + 28);
+
+        FlattenArea(
+            worldMap,
+            minX,
+            maxX,
+            minY,
+            maxY);
+
+        ClearWaterArea(
+            worldMap,
+            minX,
+            maxX,
+            minY,
+            maxY);
+
+        SpawnBattleLine(
+            simulation,
+            centerX,
+            centerY);
+
+        BuildObstacleDebug(
+            worldMap,
+            centerX,
+            centerY,
+            tilePixelSize);
+    }
+
+    public void UpdateAiDemo(
+        UnitSimulation simulation,
+        WorldMap worldMap,
+        float deltaTime)
+    {
+        if (!simulation.AI.Enabled ||
+            deltaTime <= 0f)
+        {
+            return;
+        }
+
+        int factionOneAlive =
+            CountAlive(
+                simulation,
+                1);
+
+        int factionTwoAlive =
+            CountAlive(
+                simulation,
+                2);
+
+        if (factionOneAlive > 0 &&
+            factionTwoAlive > 0)
+        {
+            _battleResetTimer = 0f;
+            return;
+        }
+
+        _battleResetTimer +=
+            deltaTime;
+
+        if (_battleResetTimer >= 3f)
+        {
+            ResetAiDemo(
+                simulation,
+                worldMap);
+        }
+    }
+
+    public string GetAiDemoStage()
+    {
+        return "BATTLE";
+    }
+
+    public int GetAliveCount(
+        UnitSimulation simulation,
+        ushort factionTag)
+    {
+        return CountAlive(
+            simulation,
+            factionTag);
+    }
+
+    public void ResetAiDemo(
+        UnitSimulation simulation,
+        WorldMap worldMap)
+    {
+        _battleResetTimer = 0f;
+
+        int centerX =
+            worldMap.TileWidth / 2;
+
+        int centerY =
+            worldMap.TileHeight / 2;
+
+        SetBattlePositions(
+            simulation,
+            centerX,
+            centerY);
+
+        for (int i = 0;
+             i < _units.Length;
+             i++)
+        {
+            if (!simulation.Units.TryGetIndex(
+                    _units[i],
+                    out int unitIndex))
+            {
+                continue;
+            }
+
+            simulation.SetFactionTag(
+                _units[i],
+                i < 4
+                    ? (ushort)1
+                    : (ushort)2);
+
+            simulation.AI.Store.InitializeUnit(
+                unitIndex);
+
+            RestoreHealth(
+                simulation,
+                unitIndex);
+
+            RestorePrimaryWeapon(
+                simulation,
+                unitIndex);
+        }
+    }
+
+    private void SpawnBattleLine(
+        UnitSimulation simulation,
+        int centerX,
+        int centerY)
+    {
+        Vector3 teamOneForward =
+            new Vector3(
+                1f,
+                0f,
+                0f);
+
+        Vector3 teamTwoForward =
+            new Vector3(
+                -1f,
+                0f,
+                0f);
+
+        float[] offsets =
+        {
+            -4.5f,
+            -1.5f,
+            1.5f,
+            4.5f
+        };
+
+        for (int i = 0;
+             i < 4;
+             i++)
+        {
+            _units[i] =
+                simulation.Spawn(
+                    UnitType.Colonist,
+                    new Vector3(
+                        centerX - 8f,
+                        centerY + offsets[i],
+                        BaseHeight),
+                    teamOneForward,
+                    teamOneForward,
+                    factionTag: 1);
+
+            _units[i + 4] =
+                simulation.Spawn(
+                    UnitType.Colonist,
+                    new Vector3(
+                        centerX + 8f,
+                        centerY + offsets[i],
+                        BaseHeight),
+                    teamTwoForward,
+                    teamTwoForward,
+                    factionTag: 2);
+        }
+    }
+
+    private void SetBattlePositions(
+        UnitSimulation simulation,
+        int centerX,
+        int centerY)
+    {
+        float[] offsets =
+        {
+            -4.5f,
+            -1.5f,
+            1.5f,
+            4.5f
+        };
+
+        for (int i = 0;
+             i < 4;
+             i++)
+        {
+            SetPosition(
+                simulation,
+                _units[i],
+                centerX - 8f,
+                centerY + offsets[i]);
+
+            SetPosition(
+                simulation,
+                _units[i + 4],
+                centerX + 8f,
+                centerY + offsets[i]);
+
+            if (simulation.Units.TryGetIndex(
+                    _units[i],
+                    out int leftIndex))
+            {
+                simulation.Units.HeadNormal[leftIndex] =
+                    new Vector3(
+                        1f,
+                        0f,
+                        0f);
+            }
+
+            if (simulation.Units.TryGetIndex(
+                    _units[i + 4],
+                    out int rightIndex))
+            {
+                simulation.Units.HeadNormal[rightIndex] =
+                    new Vector3(
+                        -1f,
+                        0f,
+                        0f);
+            }
+        }
+    }
+
+    private static void RestoreHealth(
+        UnitSimulation simulation,
+        int unitIndex)
+    {
+        simulation.Health.OverallHitPoints[unitIndex] =
+            simulation.Health.OverallMaxHitPoints[unitIndex];
+
+        int start =
+            unitIndex *
+            simulation.Health.MaxParts;
+
+        int count =
+            simulation.Health.PartCount[unitIndex];
+
+        for (int i = 0;
+             i < count;
+             i++)
+        {
+            int index =
+                start + i;
+
+            simulation.Health.HitPoints[index] =
+                simulation.Health.MaxHitPoints[index];
+        }
+    }
+
+    private static void RestorePrimaryWeapon(
+        UnitSimulation simulation,
+        int unitIndex)
+    {
+        short inventorySlot =
+            simulation.Inventory.GetWeaponEquipment(
+                unitIndex,
+                UnitWeaponSlot.Primary);
+
+        if (inventorySlot < 0)
+            return;
+
+        if (simulation.Inventory.GetItem(
+                unitIndex,
+                inventorySlot) is not WeaponConfig weapon)
+        {
+            return;
+        }
+
+        simulation.Weapons.ConfigureSlot(
+            unitIndex,
+            UnitWeaponSlot.Primary,
+            weapon);
+    }
+
+    private static int CountAlive(
+        UnitSimulation simulation,
+        ushort factionTag)
+    {
+        int alive = 0;
+
+        ReadOnlySpan<int> active =
+            simulation.Units.ActiveIndices;
+
+        for (int i = 0;
+             i < active.Length;
+             i++)
+        {
+            int unitIndex =
+                active[i];
+
+            if (simulation.Units.FactionTag[unitIndex] !=
+                factionTag)
+            {
+                continue;
+            }
+
+            if (simulation.Health.OverallHitPoints[unitIndex] >
+                0f)
+            {
+                alive++;
+            }
+        }
+
+        return alive;
+    }
+
+    private static void SetPosition(
+        UnitSimulation simulation,
+        UnitId id,
+        float x,
+        float y)
+    {
+        if (!simulation.Units.TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        simulation.Units.Position[index] =
+            new Vector3(
+                x,
+                y,
+                simulation.Units.Position[index].Z);
+
+        simulation.Units.Velocity[index] =
+            Vector3.Zero;
+
+        simulation.Units.HasTarget[index] =
+            false;
+    }
+
+    private static void FlattenArea(
+        WorldMap worldMap,
+        int minX,
+        int maxX,
+        int minY,
+        int maxY)
+    {
+        ushort heightUnits =
+            checked(
+                (ushort)MathF.Round(
+                    BaseHeight * 10f));
+
+        for (int y = minY;
+             y <= maxY;
+             y++)
+        {
+            for (int x = minX;
+                 x <= maxX;
+                 x++)
+            {
+                worldMap.SetSolidHeight(
+                    x,
+                    y,
+                    heightUnits,
+                    1);
+            }
+        }
+    }
+
+    private static void ClearWaterArea(
+        WorldMap worldMap,
+        int minX,
+        int maxX,
+        int minY,
+        int maxY)
+    {
+        for (int y = minY;
+             y <= maxY;
+             y++)
+        {
+            for (int x = minX;
+                 x <= maxX;
+                 x++)
+            {
+                for (int z = 0;
+                     z < worldMap.Water.Levels;
+                     z++)
+                {
+                    worldMap.Water.SetAmount(
+                        x,
+                        y,
+                        z,
+                        0);
+                }
+            }
+        }
+    }
+
+    private static void BuildObstacleDebug(
+        WorldMap worldMap,
+        int centerX,
+        int centerY,
+        float tilePixelSize)
+    {
+        _ = worldMap;
+
+        _obstacles.Clear();
+
+        AppendRectangle(
+            _obstacles,
+            (centerX - 11f) *
+            tilePixelSize,
+            (centerY - 9f) *
+            tilePixelSize,
+            (centerX - 9f) *
+            tilePixelSize,
+            (centerY - 5f) *
+            tilePixelSize,
+            new Color(
+                250,
+                205,
+                80,
+                210));
+
+        AppendRectangle(
+            _obstacles,
+            (centerX - 11f) *
+            tilePixelSize,
+            (centerY + 5f) *
+            tilePixelSize,
+            (centerX - 9f) *
+            tilePixelSize,
+            (centerY + 9f) *
+            tilePixelSize,
+            new Color(
+                250,
+                205,
+                80,
+                210));
+
+        AppendRectangle(
+            _obstacles,
+            (centerX + 9f) *
+            tilePixelSize,
+            (centerY - 9f) *
+            tilePixelSize,
+            (centerX + 11f) *
+            tilePixelSize,
+            (centerY - 5f) *
+            tilePixelSize,
+            new Color(
+                250,
+                205,
+                80,
+                210));
+
+        AppendRectangle(
+            _obstacles,
+            (centerX + 9f) *
+            tilePixelSize,
+            (centerY + 5f) *
+            tilePixelSize,
+            (centerX + 11f) *
+            tilePixelSize,
+            (centerY + 9f) *
+            tilePixelSize,
+            new Color(
+                250,
+                205,
+                80,
+                210));
+
+        _ = CoverHeight;
+    }
+
+    public UnitId GetUnit(
+        int index)
+    {
+        return _units[
+            Math.Clamp(
+                index,
+                0,
+                _units.Length - 1)];
+    }
+
+    public void DrawDebug(
+        RenderWindow window)
+    {
+        if (_obstacles.VertexCount <= 0)
+            return;
+
+        window.Draw(
+            _obstacles);
+    }
+
+    private static void AppendRectangle(
+        VertexArray vertices,
+        float minX,
+        float minY,
+        float maxX,
+        float maxY,
+        Color color)
+    {
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    minX,
+                    minY),
+                color));
+
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    maxX,
+                    minY),
+                color));
+
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    maxX,
+                    minY),
+                color));
+
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    maxX,
+                    maxY),
+                color));
+
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    maxX,
+                    maxY),
+                color));
+
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    minX,
+                    maxY),
+                color));
+
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    minX,
+                    maxY),
+                color));
+
+        vertices.Append(
+            new Vertex(
+                new Vector2f(
+                    minX,
+                    minY),
+                color));
+    }
+}
