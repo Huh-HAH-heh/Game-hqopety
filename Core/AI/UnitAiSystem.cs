@@ -116,7 +116,8 @@ public sealed class UnitAiSystem
             UnitId target =
                 Store.Target[unit];
 
-            if (!units.IsAlive(target))
+            if (!units.IsAlive(target) ||
+                health.OverallHitPoints[target.Index] <= 0f)
             {
                 Store.ClearTarget(unit);
                 units.HasTarget[unit] = false;
