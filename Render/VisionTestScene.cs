@@ -75,16 +75,16 @@ public sealed class VisionTestScene
             maxY);
 
         int fullWallMinX =
-            centerX - 11;
+            centerX - 13;
 
         int fullWallMaxX =
-            centerX - 9;
+            centerX - 11;
 
         int fullWallMinY =
-            centerY - 4;
+            centerY - 8;
 
         int fullWallMaxY =
-            centerY + 4;
+            centerY - 5;
 
         SetWall(
             worldMap,
@@ -95,16 +95,16 @@ public sealed class VisionTestScene
             FullWallHeight);
 
         int lowWallMinX =
-            centerX - 11;
+            centerX + 10;
 
         int lowWallMaxX =
-            centerX - 9;
+            centerX + 12;
 
         int lowWallMinY =
-            centerY + 6;
+            centerY + 5;
 
         int lowWallMaxY =
-            centerY + 10;
+            centerY + 8;
 
         SetWall(
             worldMap,
@@ -144,7 +144,7 @@ public sealed class VisionTestScene
 
         _units[2] =
             simulation.Spawn(
-                UnitType.Greenbob,
+                UnitType.Colonist,
                 new Vector3(
                     centerX - 6f,
                     centerY - 6f,
@@ -199,7 +199,7 @@ public sealed class VisionTestScene
 
         _units[7] =
             simulation.Spawn(
-                UnitType.SegmentedMonster,
+                UnitType.Colonist,
                 new Vector3(
                     centerX - 11f,
                     centerY - 9f,
@@ -214,11 +214,11 @@ public sealed class VisionTestScene
 
         simulation.SetFactionTag(
             _units[5],
-            0);
+            2);
 
         simulation.SetFactionTag(
             _units[6],
-            0);
+            2);
 
         simulation.SetFactionTag(
             _units[7],
@@ -235,8 +235,7 @@ public sealed class VisionTestScene
             tilePixelSize);
     }
 
-    private float _aiDemoTimer;
-    private int _aiDemoStage;
+    private float _aiDemoResetTimer;
 
     public void UpdateAiDemo(
         UnitSimulation simulation,
@@ -249,27 +248,27 @@ public sealed class VisionTestScene
             return;
         }
 
-        _aiDemoTimer += deltaTime;
-
-        if (_aiDemoTimer >= 5f &&
-            _aiDemoStage == 0)
-        {
-            EnterCoverStage(
-                simulation);
-
-            _aiDemoStage = 1;
-        }
-        else if (_aiDemoTimer >= 10f &&
-                 _aiDemoStage == 1)
-        {
-            EnterSearchStage(
+        int teamOneAlive =
+            CountAlive(
                 simulation,
-                worldMap);
+                1);
 
-            _aiDemoStage = 2;
+        int teamTwoAlive =
+            CountAlive(
+                simulation,
+                2);
+
+        if (teamOneAlive > 0 &&
+            teamTwoAlive > 0)
+        {
+            _aiDemoResetTimer = 0f;
+            return;
         }
-        else if (_aiDemoTimer >= 15f &&
-                 _aiDemoStage == 2)
+
+        _aiDemoResetTimer +=
+            deltaTime;
+
+        if (_aiDemoResetTimer >= 3f)
         {
             ResetAiDemo(
                 simulation,
@@ -279,68 +278,56 @@ public sealed class VisionTestScene
 
     public string GetAiDemoStage()
     {
-        return _aiDemoStage switch
-        {
-            1 => "COVER",
-            2 => "SEARCH",
-            _ => "ATTACK"
-        };
+        return "BATTLE";
+    }
+
+    public int GetAliveCount(
+        UnitSimulation simulation,
+        ushort factionTag)
+    {
+        return CountAlive(
+            simulation,
+            factionTag);
     }
 
     public void ResetAiDemo(
         UnitSimulation simulation,
         WorldMap worldMap)
     {
-        _aiDemoTimer = 0f;
-        _aiDemoStage = 0;
+        _aiDemoResetTimer = 0f;
 
         SetAiTestPositions(
             simulation,
             worldMap.TileWidth / 2,
             worldMap.TileHeight / 2);
 
-        SetFullHealth(
-            simulation,
-            _units[1]);
-
-        SetPosition(
-            simulation,
-            _units[4],
-            worldMap.TileWidth * 0.5f - 5f,
-            worldMap.TileHeight * 0.5f - 4f);
-
-        simulation.SetFactionTag(
-            _units[4],
-            2);
-    }
-
-    private void EnterCoverStage(
-        UnitSimulation simulation)
-    {
-        ApplyLowHealth(
-            simulation,
-            _units[1]);
-    }
-
-    private void EnterSearchStage(
-        UnitSimulation simulation,
-        WorldMap worldMap)
-    {
-        SetPosition(
-            simulation,
-            _units[4],
-            worldMap.TileWidth * 0.5f - 5f,
-            worldMap.TileHeight * 0.5f);
-
-        if (simulation.Units.TryGetIndex(
-                _units[4],
-                out int enemyIndex))
+        for (int i = 0;
+             i < _units.Length;
+             i++)
         {
-            simulation.Units.HeadNormal[enemyIndex] =
-                new Vector3(
-                    -1f,
-                    0f,
-                    0f);
+            if (!simulation.Units.TryGetIndex(
+                    _units[i],
+                    out int unitIndex))
+            {
+                continue;
+            }
+
+            simulation.SetFactionTag(
+                _units[i],
+                i < 4
+                    ? (ushort)1
+                    : (ushort)2);
+
+            simulation.AI.Store.InitializeUnit(
+                unitIndex);
+
+            RestoreBattleHealth(
+                simulation,
+                unitIndex);
+
+            RestoreBattleWeapon(
+                simulation,
+                unitIndex);
         }
     }
 
@@ -390,6 +377,57 @@ public sealed class VisionTestScene
         }
     }
 
+    private static void RestoreBattleHealth(
+        UnitSimulation simulation,
+        int unitIndex)
+    {
+        simulation.Health.OverallHitPoints[unitIndex] =
+            simulation.Health.OverallMaxHitPoints[unitIndex];
+
+        int start =
+            unitIndex *
+            simulation.Health.MaxParts;
+
+        int count =
+            simulation.Health.PartCount[unitIndex];
+
+        for (int i = 0;
+             i < count;
+             i++)
+        {
+            int partIndex =
+                start + i;
+
+            simulation.Health.HitPoints[partIndex] =
+                simulation.Health.MaxHitPoints[partIndex];
+        }
+    }
+
+    private static void RestoreBattleWeapon(
+        UnitSimulation simulation,
+        int unitIndex)
+    {
+        short inventorySlot =
+            simulation.Inventory.GetWeaponEquipment(
+                unitIndex,
+                UnitWeaponSlot.Primary);
+
+        if (inventorySlot < 0)
+            return;
+
+        if (simulation.Inventory.GetItem(
+                unitIndex,
+                inventorySlot) is not WeaponConfig weapon)
+        {
+            return;
+        }
+
+        simulation.Weapons.ConfigureSlot(
+            unitIndex,
+            UnitWeaponSlot.Primary,
+            weapon);
+    }
+
     private void SetAiTestPositions(
         UnitSimulation simulation,
         int centerX,
@@ -398,50 +436,50 @@ public sealed class VisionTestScene
         SetPosition(
             simulation,
             _units[0],
-            centerX - 20f,
-            centerY - 6f);
+            centerX - 8f,
+            centerY - 4.5f);
 
         SetPosition(
             simulation,
             _units[1],
-            centerX - 18f,
-            centerY - 5.5f);
+            centerX - 8f,
+            centerY - 1.5f);
 
         SetPosition(
             simulation,
             _units[2],
-            centerX - 38f,
-            centerY + 24f);
+            centerX - 8f,
+            centerY + 1.5f);
 
         SetPosition(
             simulation,
             _units[3],
-            centerX - 20f,
-            centerY + 4f);
+            centerX - 8f,
+            centerY + 4.5f);
 
         SetPosition(
             simulation,
             _units[4],
-            centerX - 5f,
-            centerY - 4f);
+            centerX + 8f,
+            centerY - 4.5f);
 
         SetPosition(
             simulation,
             _units[5],
-            centerX - 5f,
-            centerY + 12f);
+            centerX + 8f,
+            centerY - 1.5f);
 
         SetPosition(
             simulation,
             _units[6],
-            centerX + 20f,
-            centerY + 20f);
+            centerX + 8f,
+            centerY + 1.5f);
 
         SetPosition(
             simulation,
             _units[7],
-            centerX + 24f,
-            centerY - 20f);
+            centerX + 8f,
+            centerY + 4.5f);
 
         for (int i = 0;
              i < _units.Length;
