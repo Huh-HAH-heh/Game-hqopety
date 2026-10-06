@@ -254,14 +254,28 @@ public sealed class UnitWeaponSystem
                 muzzle;
         }
 
-        return TryFire(
-            units,
-            inventory,
-            weapons,
-            projectiles,
-            shooter,
-            slot,
-            ballisticDirection);
+        bool fired =
+            TryFire(
+                units,
+                inventory,
+                weapons,
+                projectiles,
+                shooter,
+                slot,
+                ballisticDirection);
+
+        if (fired)
+        {
+            Console.WriteLine(
+                $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
+                $"target={target} " +
+                $"targetPos={targetPoint} " +
+                $"muzzle={muzzle} " +
+                $"dir={ballisticDirection} " +
+                $"ammo={ammo.DefaultName}");
+        }
+
+        return fired;
     }
 
     private static Vector3 GetMuzzlePosition(
