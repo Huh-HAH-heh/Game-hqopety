@@ -213,8 +213,6 @@ public sealed class ProjectileSystem
         float segmentStart = 0f;
 
         int ignoredUnit = -1;
-        UnitHealthPartId ignoredPart =
-            UnitHealthPartId.None;
 
         while (segmentStart < 1f)
         {
@@ -306,10 +304,8 @@ public sealed class ProjectileSystem
                     _unitGrid.GetNextNode(
                         node);
 
-                UnitHealthPartId skipPart =
-                    unitIndex == ignoredUnit
-                        ? ignoredPart
-                        : UnitHealthPartId.None;
+                if (unitIndex == ignoredUnit)
+                    continue;
 
                 if (!_hitSystem.TryHitUnit(
                         units,
@@ -509,11 +505,11 @@ public sealed class ProjectileSystem
                 $"pos={bestHit.Position} " +
                 $"stopped={damage.ProjectileStopped}");
 
+            // A projectile can penetrate a unit, but it must not
+            // repeatedly damage the same body volumes while still
+            // inside the same frame segment.
             ignoredUnit =
                 hitUnit;
-
-            ignoredPart =
-                bestHit.Part;
 
             if (damage.ProjectileStopped)
                 return false;
