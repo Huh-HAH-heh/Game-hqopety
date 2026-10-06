@@ -263,6 +263,20 @@ public sealed class UnitStore
         return true;
     }
 
+    public UnitId GetId(int index)
+    {
+        if (index < 0 ||
+            index >= _count ||
+            _activeSlots[index] < 0)
+        {
+            return default;
+        }
+
+        return new UnitId(
+            index,
+            _generation[index]);
+    }
+
     public bool IsAlive(
         UnitId id)
     {
