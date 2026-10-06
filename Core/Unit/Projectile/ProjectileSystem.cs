@@ -380,10 +380,6 @@ public sealed class ProjectileSystem
                 segmentStart =
                     segmentEnd;
 
-                ignoredUnit = -1;
-                ignoredPart =
-                    UnitHealthPartId.None;
-
                 continue;
             }
 
