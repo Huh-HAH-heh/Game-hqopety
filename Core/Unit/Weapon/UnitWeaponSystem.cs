@@ -68,6 +68,7 @@ public sealed class UnitWeaponSystem
 
                 if (!weapons.Reloading[stateIndex] &&
                     weapons.Ammo[stateIndex] <= 0 &&
+                    weapons.ReserveAmmo[stateIndex] > 0 &&
                     ranged.MagazineSize > 0)
                 {
                     weapons.StartReload(
