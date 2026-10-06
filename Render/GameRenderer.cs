@@ -219,13 +219,26 @@ public sealed class GameRenderer
                 ? "ON"
                 : "OFF";
 
+        string ai =
+            _unitSimulation.AI.Enabled
+                ? "ON"
+                : "OFF";
+
+        string aiState =
+            _unitSimulation.Units.TryGetIndex(
+                _selectedUnit,
+                out int selectedIndex)
+                ? _unitSimulation.AI.Store.State[selectedIndex].ToString()
+                : "None";
+
         return
             $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles} | " +
+            $"AI={ai}:{aiState} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"V=debug TAB=unit G=grid";
+            $"A=AI H=damage F=fire TAB=unit V=vision";
     }
 
     private void InitializeWindow()
@@ -261,6 +274,13 @@ public sealed class GameRenderer
         {
             _showDebugGrid =
                 !_showDebugGrid;
+            return;
+        }
+
+        if (key == Keyboard.Key.A)
+        {
+            _unitSimulation.AI.Enabled =
+                !_unitSimulation.AI.Enabled;
             return;
         }
 
@@ -306,6 +326,15 @@ public sealed class GameRenderer
                 UnitWeaponSlot.Primary,
                 _unitSimulation.Units.HeadNormal[
                     shooterIndex]);
+            return;
+        }
+
+        if (key == Keyboard.Key.H)
+        {
+            _unitSimulation.ApplyDamage(
+                _selectedUnit,
+                UnitHealthPartId.Torso,
+                70f);
             return;
         }
 
