@@ -23,6 +23,7 @@ public sealed class UnitStore
     private float[] _fieldOfView;
 
     private UnitType[] _type;
+    private ushort[] _factionTag;
     private UnitPosture[] _posture;
     private int[] _locationId;
 
@@ -85,6 +86,9 @@ public sealed class UnitStore
     public UnitType[] Type =>
         _type;
 
+    public ushort[] FactionTag =>
+        _factionTag;
+
     public UnitPosture[] Posture =>
         _posture;
 
@@ -130,6 +134,7 @@ public sealed class UnitStore
         _fieldOfView = new float[initialCapacity];
 
         _type = new UnitType[initialCapacity];
+        _factionTag = new ushort[initialCapacity];
         _posture = new UnitPosture[initialCapacity];
         _locationId = new int[initialCapacity];
 
@@ -154,7 +159,8 @@ public sealed class UnitStore
         Vector3 bodyNormal,
         Vector3 headNormal,
         BodyHandle body,
-        int locationId = 0)
+        int locationId = 0,
+        ushort factionTag = 0)
     {
         int index;
 
@@ -203,6 +209,7 @@ public sealed class UnitStore
         _fieldOfView[index] = definition.FieldOfView;
 
         _type[index] = definition.Type;
+        _factionTag[index] = factionTag;
         _posture[index] = UnitPosture.Standing;
         _locationId[index] = locationId;
 
@@ -312,6 +319,20 @@ public sealed class UnitStore
         _velocity[index] = Vector3.Zero;
     }
 
+    public void SetFactionTag(
+        UnitId id,
+        ushort factionTag)
+    {
+        if (!TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        _factionTag[index] = factionTag;
+    }
+
     public void SetPosture(
         UnitId id,
         UnitPosture posture)
@@ -414,6 +435,10 @@ public sealed class UnitStore
 
         Array.Resize(
             ref _type,
+            newCapacity);
+
+        Array.Resize(
+            ref _factionTag,
             newCapacity);
 
         Array.Resize(
