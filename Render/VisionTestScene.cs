@@ -128,7 +128,8 @@ public sealed class VisionTestScene
                     centerY,
                     BaseHeight),
                 forward,
-                forward);
+                forward,
+                factionTag: 1);
 
         _units[1] =
             simulation.Spawn(
@@ -138,7 +139,8 @@ public sealed class VisionTestScene
                     centerY - 8f,
                     BaseHeight),
                 forward,
-                forward);
+                forward,
+                factionTag: 1);
 
         _units[2] =
             simulation.Spawn(
@@ -148,7 +150,8 @@ public sealed class VisionTestScene
                     centerY - 6f,
                     BaseHeight),
                 forward,
-                forward);
+                forward,
+                factionTag: 1);
 
         _units[3] =
             simulation.Spawn(
@@ -158,7 +161,8 @@ public sealed class VisionTestScene
                     centerY,
                     BaseHeight),
                 forward,
-                forward);
+                forward,
+                factionTag: 1);
 
         _units[4] =
             simulation.Spawn(
@@ -168,7 +172,8 @@ public sealed class VisionTestScene
                     centerY + 12f,
                     BaseHeight),
                 forward,
-                forward);
+                forward,
+                factionTag: 1);
 
         _units[5] =
             simulation.Spawn(
@@ -178,7 +183,8 @@ public sealed class VisionTestScene
                     centerY + 12f,
                     BaseHeight),
                 forward,
-                forward);
+                forward,
+                factionTag: 1);
 
         _units[6] =
             simulation.Spawn(
@@ -188,7 +194,8 @@ public sealed class VisionTestScene
                     centerY,
                     BaseHeight),
                 forward,
-                forward);
+                forward,
+                factionTag: 1);
 
         _units[7] =
             simulation.Spawn(
@@ -198,7 +205,8 @@ public sealed class VisionTestScene
                     centerY - 9f,
                     BaseHeight),
                 forward,
-                forward);
+                forward,
+                factionTag: 2);
 
         BuildObstacleDebug(
             centerX,
