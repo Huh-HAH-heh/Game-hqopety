@@ -14,6 +14,7 @@ public sealed class UnitAiSystem
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
 
+    private readonly UnitWeaponSystem _weaponSystem;
     private float _thinkTimer;
 
     public bool Enabled { get; set; }
@@ -26,6 +27,9 @@ public sealed class UnitAiSystem
         Store =
             new UnitAiStore(
                 initialUnitCapacity);
+
+        _weaponSystem =
+            new UnitWeaponSystem();
     }
 
     public void Update(
@@ -140,10 +144,18 @@ public sealed class UnitAiSystem
                     health,
                     unit))
             {
-                if (!Store.HasGoal[unit] ||
+                if (Store.HasGoal[unit] &&
                     ReachedGoal(
                         units.Position[unit],
                         Store.Goal[unit]))
+                {
+                    units.HasTarget[unit] = false;
+                    Store.State[unit] =
+                        UnitAiState.SeekCover;
+                    continue;
+                }
+
+                if (!Store.HasGoal[unit])
                 {
                     if (TryFindCover(
                             units,
@@ -369,7 +381,7 @@ public sealed class UnitAiSystem
         return false;
     }
 
-    private static bool TryFireAnyRangedWeapon(
+    private bool TryFireAnyRangedWeapon(
         UnitStore units,
         UnitInventoryStore inventory,
         UnitWeaponStore weapons,
@@ -429,7 +441,7 @@ public sealed class UnitAiSystem
         return false;
     }
 
-    private static bool TryFire(
+    private bool TryFire(
         UnitStore units,
         UnitInventoryStore inventory,
         UnitWeaponStore weapons,
@@ -453,7 +465,7 @@ public sealed class UnitAiSystem
             return false;
         }
 
-        return new UnitWeaponSystem().TryFireAt(
+        return _weaponSystem.TryFireAt(
             units,
             inventory,
             weapons,
