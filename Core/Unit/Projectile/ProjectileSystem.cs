@@ -321,8 +321,11 @@ public sealed class ProjectileSystem
                     }
                 }
 
-                if (alreadyHit)
+                if (alreadyHit ||
+                    health.OverallHitPoints[unitIndex] <= 0f)
+                {
                     continue;
+                }
 
                 if (!_hitSystem.TryHitUnit(
                         units,
