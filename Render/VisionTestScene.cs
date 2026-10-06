@@ -399,7 +399,7 @@ public sealed class VisionTestScene
             simulation,
             _units[0],
             centerX - 20f,
-            centerY - 4f);
+            centerY - 6f);
 
         SetPosition(
             simulation,
