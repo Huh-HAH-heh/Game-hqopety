@@ -208,10 +208,294 @@ public sealed class VisionTestScene
                 forward,
                 factionTag: 2);
 
+        simulation.SetFactionTag(
+            _units[4],
+            2);
+
+        simulation.SetFactionTag(
+            _units[5],
+            0);
+
+        simulation.SetFactionTag(
+            _units[6],
+            0);
+
+        simulation.SetFactionTag(
+            _units[7],
+            2);
+
+        SetAiTestPositions(
+            simulation,
+            centerX,
+            centerY);
+
         BuildObstacleDebug(
             centerX,
             centerY,
             tilePixelSize);
+    }
+
+    private float _aiDemoTimer;
+    private int _aiDemoStage;
+
+    public void UpdateAiDemo(
+        UnitSimulation simulation,
+        WorldMap worldMap,
+        float deltaTime)
+    {
+        if (!simulation.AI.Enabled ||
+            deltaTime <= 0f)
+        {
+            return;
+        }
+
+        _aiDemoTimer += deltaTime;
+
+        if (_aiDemoTimer >= 5f &&
+            _aiDemoStage == 0)
+        {
+            EnterCoverStage(
+                simulation);
+
+            _aiDemoStage = 1;
+        }
+        else if (_aiDemoTimer >= 10f &&
+                 _aiDemoStage == 1)
+        {
+            EnterSearchStage(
+                simulation,
+                worldMap);
+
+            _aiDemoStage = 2;
+        }
+        else if (_aiDemoTimer >= 15f &&
+                 _aiDemoStage == 2)
+        {
+            ResetAiDemo(
+                simulation,
+                worldMap);
+        }
+    }
+
+    public string GetAiDemoStage()
+    {
+        return _aiDemoStage switch
+        {
+            1 => "COVER",
+            2 => "SEARCH",
+            _ => "ATTACK"
+        };
+    }
+
+    public void ResetAiDemo(
+        UnitSimulation simulation,
+        WorldMap worldMap)
+    {
+        _aiDemoTimer = 0f;
+        _aiDemoStage = 0;
+
+        SetAiTestPositions(
+            simulation,
+            worldMap.TileWidth / 2,
+            worldMap.TileHeight / 2);
+
+        SetFullHealth(
+            simulation,
+            _units[1]);
+
+        SetPosition(
+            simulation,
+            _units[4],
+            worldMap.TileWidth * 0.5f - 5f,
+            worldMap.TileHeight * 0.5f - 4f);
+
+        simulation.SetFactionTag(
+            _units[4],
+            2);
+    }
+
+    private void EnterCoverStage(
+        UnitSimulation simulation)
+    {
+        ApplyLowHealth(
+            simulation,
+            _units[1]);
+    }
+
+    private void EnterSearchStage(
+        UnitSimulation simulation,
+        WorldMap worldMap)
+    {
+        SetPosition(
+            simulation,
+            _units[4],
+            worldMap.TileWidth * 0.5f - 5f,
+            worldMap.TileHeight * 0.5f);
+
+        if (simulation.Units.TryGetIndex(
+                _units[4],
+                out int enemyIndex))
+        {
+            simulation.Units.HeadNormal[enemyIndex] =
+                new Vector3(
+                    -1f,
+                    0f,
+                    0f);
+        }
+    }
+
+    private static void ApplyLowHealth(
+        UnitSimulation simulation,
+        UnitId id)
+    {
+        if (!simulation.Units.TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        simulation.Health.OverallHitPoints[index] = 20f;
+
+        if (simulation.Health.TryFindPart(
+                index,
+                UnitHealthPartId.Torso,
+                out int torso))
+        {
+            simulation.Health.HitPoints[torso] = 10f;
+        }
+    }
+
+    private static void SetFullHealth(
+        UnitSimulation simulation,
+        UnitId id)
+    {
+        if (!simulation.Units.TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        simulation.Health.OverallHitPoints[index] =
+            simulation.Health.OverallMaxHitPoints[index];
+
+        if (simulation.Health.TryFindPart(
+                index,
+                UnitHealthPartId.Torso,
+                out int torso))
+        {
+            simulation.Health.HitPoints[torso] =
+                simulation.Health.MaxHitPoints[torso];
+        }
+    }
+
+    private void SetAiTestPositions(
+        UnitSimulation simulation,
+        int centerX,
+        int centerY)
+    {
+        SetPosition(
+            simulation,
+            _units[0],
+            centerX - 20f,
+            centerY - 4f);
+
+        SetPosition(
+            simulation,
+            _units[1],
+            centerX - 18f,
+            centerY - 5.5f);
+
+        SetPosition(
+            simulation,
+            _units[2],
+            centerX - 38f,
+            centerY + 24f);
+
+        SetPosition(
+            simulation,
+            _units[3],
+            centerX - 20f,
+            centerY + 4f);
+
+        SetPosition(
+            simulation,
+            _units[4],
+            centerX - 5f,
+            centerY - 4f);
+
+        SetPosition(
+            simulation,
+            _units[5],
+            centerX - 5f,
+            centerY + 12f);
+
+        SetPosition(
+            simulation,
+            _units[6],
+            centerX + 20f,
+            centerY + 20f);
+
+        SetPosition(
+            simulation,
+            _units[7],
+            centerX + 24f,
+            centerY - 20f);
+
+        for (int i = 0;
+             i < _units.Length;
+             i++)
+        {
+            if (!simulation.Units.TryGetIndex(
+                    _units[i],
+                    out int index))
+            {
+                continue;
+            }
+
+            simulation.Units.Velocity[index] =
+                Vector3.Zero;
+
+            simulation.Units.HasTarget[index] =
+                false;
+
+            simulation.Units.HeadNormal[index] =
+                i == 4 || i == 7
+                    ? new Vector3(
+                        -1f,
+                        0f,
+                        0f)
+                    : new Vector3(
+                        1f,
+                        0f,
+                        0f);
+        }
+    }
+
+    private static void SetPosition(
+        UnitSimulation simulation,
+        UnitId id,
+        float x,
+        float y)
+    {
+        if (!simulation.Units.TryGetIndex(
+                id,
+                out int index))
+        {
+            return;
+        }
+
+        simulation.Units.Position[index] =
+            new Vector3(
+                x,
+                y,
+                simulation.Units.Position[index].Z);
+
+        simulation.Units.Velocity[index] =
+            Vector3.Zero;
+        simulation.Units.HasTarget[index] =
+            false;
     }
 
     public UnitId GetUnit(
