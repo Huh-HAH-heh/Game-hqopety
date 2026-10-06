@@ -10,6 +10,7 @@ public sealed class UnitWeaponStore
     private float[] _cooldown;
     private float[] _reloadTimer;
     private int[] _ammo;
+    private bool[] _reloading;
     private uint[] _randomState;
 
     public int Capacity =>
@@ -18,6 +19,7 @@ public sealed class UnitWeaponStore
     public float[] Cooldown => _cooldown;
     public float[] ReloadTimer => _reloadTimer;
     public int[] Ammo => _ammo;
+    public bool[] Reloading => _reloading;
 
     public UnitWeaponStore(
         int initialUnitCapacity = DefaultUnitCapacity)
@@ -32,6 +34,7 @@ public sealed class UnitWeaponStore
         _cooldown = new float[capacity];
         _reloadTimer = new float[capacity];
         _ammo = new int[capacity];
+        _reloading = new bool[capacity];
         _randomState = new uint[capacity];
 
         for (int i = 0; i < capacity; i++)
@@ -54,6 +57,7 @@ public sealed class UnitWeaponStore
             _cooldown[index] = 0f;
             _reloadTimer[index] = 0f;
             _ammo[index] = 0;
+            _reloading[index] = false;
             _randomState[index] = Seed(index);
         }
     }
@@ -83,6 +87,7 @@ public sealed class UnitWeaponStore
             weapon is RangedWeaponConfig ranged
                 ? Math.Max(0, ranged.MagazineSize)
                 : 0;
+        _reloading[index] = false;
     }
 
     public void ClearSlot(
@@ -99,6 +104,40 @@ public sealed class UnitWeaponStore
         _cooldown[index] = 0f;
         _reloadTimer[index] = 0f;
         _ammo[index] = 0;
+        _reloading[index] = false;
+    }
+
+    public void StartReload(
+        int unitIndex,
+        UnitWeaponSlot slot,
+        float reloadTime)
+    {
+        int index = GetIndex(unitIndex, slot);
+
+        if (_ammo[index] > 0 ||
+            _reloading[index] ||
+            reloadTime <= 0f)
+            return;
+
+        _reloadTimer[index] = reloadTime;
+        _reloading[index] = true;
+    }
+
+    public void FinishReload(
+        int unitIndex,
+        UnitWeaponSlot slot,
+        int magazineSize)
+    {
+        int index = GetIndex(unitIndex, slot);
+
+        if (!_reloading[index])
+            return;
+
+        if (_reloadTimer[index] > 0f)
+            return;
+
+        _ammo[index] = Math.Max(0, magazineSize);
+        _reloading[index] = false;
     }
 
     public void UpdateTimers(float deltaTime)
@@ -161,6 +200,7 @@ public sealed class UnitWeaponStore
         Array.Resize(ref _cooldown, newLength);
         Array.Resize(ref _reloadTimer, newLength);
         Array.Resize(ref _ammo, newLength);
+        Array.Resize(ref _reloading, newLength);
         Array.Resize(ref _randomState, newLength);
 
         for (int i = oldLength; i < newLength; i++)
@@ -183,7 +223,7 @@ public sealed class UnitWeaponStore
             : x;
     }
 
-    private static int GetIndex(
+    public static int GetIndex(
         int unitIndex,
         UnitWeaponSlot slot)
     {
