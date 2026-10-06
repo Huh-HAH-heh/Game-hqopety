@@ -1,4 +1,5 @@
 using System;
+using Core.Items;
 using Core.Map;
 using Core.Unit;
 using RimClone.Render;
@@ -22,6 +23,7 @@ public sealed class GameRenderer
     private readonly MapRenderSystem _mapRenderer;
     private readonly UnitSimulation _unitSimulation;
     private readonly UnitRenderSystem _unitRenderer;
+    private readonly ProjectileRenderSystem _projectileRenderer;
     private readonly VisionTestScene _visionTestScene;
 
     private UnitId _selectedUnit;
@@ -60,6 +62,9 @@ public sealed class GameRenderer
 
         _unitRenderer =
             new UnitRenderSystem();
+
+        _projectileRenderer =
+            new ProjectileRenderSystem();
 
         _visionTestScene =
             new VisionTestScene();
@@ -142,6 +147,11 @@ public sealed class GameRenderer
             _showVisionDebug,
             false);
 
+        _projectileRenderer.Draw(
+            _window,
+            _unitSimulation.Projectiles,
+            TerrainTilePixelSize);
+
         _window.SetTitle(
             BuildWindowTitle());
 
@@ -154,6 +164,8 @@ public sealed class GameRenderer
         int blocked = 0;
         int outsideFov = 0;
         int outOfRange = 0;
+        int projectiles =
+            _unitSimulation.Projectiles.ActiveCount;
 
         if (_unitSimulation.Units.TryGetIndex(
                 _selectedUnit,
@@ -209,6 +221,7 @@ public sealed class GameRenderer
 
         return
             $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
+            $"Projectiles={projectiles} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
@@ -279,6 +292,23 @@ public sealed class GameRenderer
             return;
         }
 
+        if (key == Keyboard.Key.F)
+        {
+            if (!_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int shooterIndex))
+            {
+                return;
+            }
+
+            _unitSimulation.FireWeapon(
+                _selectedUnit,
+                UnitWeaponSlot.Primary,
+                _unitSimulation.Units.HeadNormal[
+                    shooterIndex]);
+            return;
+        }
+
         if (key == Keyboard.Key.T)
         {
             if (!_unitSimulation.Units.IsAlive(
@@ -311,5 +341,35 @@ public sealed class GameRenderer
 
         _selectedUnit =
             _visionTestScene.Observer;
+
+        ReadOnlySpan<UnitId> units =
+            _visionTestScene.Units;
+
+        for (int i = 0;
+             i < units.Length;
+             i++)
+        {
+            if (!_unitSimulation.Units.TryGetIndex(
+                    units[i],
+                    out int unitIndex) ||
+                _unitSimulation.Units.Type[unitIndex] !=
+                UnitType.Colonist)
+            {
+                continue;
+            }
+
+            int inventorySlot =
+                _unitSimulation.AddInventoryItem(
+                    units[i],
+                    WeaponCatalog.AssaultRifle);
+
+            if (inventorySlot >= 0)
+            {
+                _unitSimulation.EquipWeapon(
+                    units[i],
+                    inventorySlot,
+                    UnitWeaponSlot.Primary);
+            }
+        }
     }
 }
