@@ -205,16 +205,46 @@ public sealed class UnitWeaponSystem
             return false;
         }
 
-        Vector3 aim =
+        Vector3 muzzle =
+            GetMuzzlePosition(
+                units,
+                shooterIndex);
+
+        Vector3 targetPoint =
             units.Position[targetIndex] +
             new Vector3(
                 0f,
                 0f,
                 units.Height[targetIndex] *
-                0.55f) -
-            GetMuzzlePosition(
-                units,
-                shooterIndex);
+                0.55f);
+
+        RangedWeaponConfig? weapon =
+            inventory.GetItem(
+                shooterIndex,
+                inventorySlot) as RangedWeaponConfig;
+
+        if (weapon == null ||
+            weapon.DefaultAmmunition == null)
+        {
+            return false;
+        }
+
+        AmmunitionConfig ammo =
+            weapon.DefaultAmmunition;
+
+        if (!ProjectileBallistics.TrySolveDirection(
+                muzzle,
+                targetPoint,
+                ammo.ProjectileMassKg,
+                ammo.ProjectileDiameterM,
+                ammo.MuzzleVelocity,
+                ammo.DragCoefficient,
+                out Vector3 ballisticDirection))
+        {
+            ballisticDirection =
+                targetPoint -
+                muzzle;
+        }
 
         return TryFire(
             units,
@@ -223,7 +253,7 @@ public sealed class UnitWeaponSystem
             projectiles,
             shooter,
             slot,
-            aim);
+            ballisticDirection);
     }
 
     private static Vector3 GetMuzzlePosition(
