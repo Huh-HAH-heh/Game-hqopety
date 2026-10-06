@@ -60,7 +60,8 @@ public sealed class UnitSimulation
         UnitType type,
         Vector3 position,
         float bodyAngle = 0f,
-        int locationId = 0)
+        int locationId = 0,
+        ushort factionTag = 0)
     {
         Vector3 bodyNormal =
             new Vector3(
@@ -73,7 +74,8 @@ public sealed class UnitSimulation
             position,
             bodyNormal,
             bodyNormal,
-            locationId);
+            locationId,
+            factionTag);
     }
 
     public UnitId Spawn(
@@ -81,7 +83,8 @@ public sealed class UnitSimulation
         Vector3 position,
         Vector3 bodyNormal,
         Vector3 headNormal,
-        int locationId = 0)
+        int locationId = 0,
+        ushort factionTag = 0)
     {
         UnitDefinition definition =
             UnitCatalog.Get(type);
@@ -97,7 +100,8 @@ public sealed class UnitSimulation
                 bodyNormal,
                 headNormal,
                 body,
-                locationId);
+                locationId,
+                factionTag);
 
         Bodies.SetInitialWorldPosition(
             body,
