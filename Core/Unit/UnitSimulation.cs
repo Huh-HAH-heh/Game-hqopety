@@ -13,6 +13,7 @@ public sealed class UnitSimulation
     private readonly VisionSystem _visionSystem;
     private readonly UnitWeaponSystem _weaponSystem;
     private readonly ProjectileSystem _projectileSystem;
+    private readonly UnitAiSystem _aiSystem;
 
     public UnitStore Units { get; }
     public UnitBodyStore Bodies { get; }
@@ -20,6 +21,8 @@ public sealed class UnitSimulation
     public UnitInventoryStore Inventory { get; }
     public UnitWeaponStore Weapons { get; }
     public ProjectileStore Projectiles { get; }
+    public UnitAiSystem AI =>
+        _aiSystem;
     public VisionSystem Vision =>
         _visionSystem;
 
@@ -70,6 +73,10 @@ public sealed class UnitSimulation
 
         _visionSystem =
             new VisionSystem(
+                unitCapacity);
+
+        _aiSystem =
+            new UnitAiSystem(
                 unitCapacity);
     }
 
@@ -137,6 +144,9 @@ public sealed class UnitSimulation
         Weapons.InitializeUnit(
             id.Index);
 
+        _aiSystem.Store.InitializeUnit(
+            id.Index);
+
         return id;
     }
 
@@ -165,6 +175,9 @@ public sealed class UnitSimulation
             index);
 
         Weapons.ClearUnit(
+            index);
+
+        _aiSystem.Store.ClearUnit(
             index);
 
         return Units.Destroy(id);
@@ -384,6 +397,21 @@ public sealed class UnitSimulation
         WorldMap worldMap,
         float deltaTime)
     {
+        _visionSystem.Update(
+            Units,
+            worldMap,
+            deltaTime);
+
+        _aiSystem.Update(
+            Units,
+            Health,
+            Inventory,
+            Weapons,
+            Projectiles,
+            _visionSystem,
+            worldMap,
+            deltaTime);
+
         _movementSystem.Update(
             Units,
             worldMap,
@@ -412,10 +440,5 @@ public sealed class UnitSimulation
         _healthSystem.Update(
             Units,
             Health);
-
-        _visionSystem.Update(
-            Units,
-            worldMap,
-            deltaTime);
     }
 }
