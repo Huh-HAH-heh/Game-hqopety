@@ -11,11 +11,15 @@ public sealed class UnitSimulation
     private readonly UnitHealthSystem _healthSystem;
     private readonly UnitInventorySystem _inventorySystem;
     private readonly VisionSystem _visionSystem;
+    private readonly UnitWeaponSystem _weaponSystem;
+    private readonly ProjectileSystem _projectileSystem;
 
     public UnitStore Units { get; }
     public UnitBodyStore Bodies { get; }
     public UnitHealthStore Health { get; }
     public UnitInventoryStore Inventory { get; }
+    public UnitWeaponStore Weapons { get; }
+    public ProjectileStore Projectiles { get; }
     public VisionSystem Vision =>
         _visionSystem;
 
@@ -50,6 +54,19 @@ public sealed class UnitSimulation
 
         _inventorySystem =
             new UnitInventorySystem();
+
+        Weapons =
+            new UnitWeaponStore(
+                unitCapacity);
+
+        Projectiles =
+            new ProjectileStore();
+
+        _weaponSystem =
+            new UnitWeaponSystem();
+
+        _projectileSystem =
+            new ProjectileSystem();
 
         _visionSystem =
             new VisionSystem(
@@ -117,6 +134,9 @@ public sealed class UnitSimulation
         Inventory.InitializeUnit(
             id.Index);
 
+        Weapons.InitializeUnit(
+            id.Index);
+
         return id;
     }
 
@@ -142,6 +162,9 @@ public sealed class UnitSimulation
             index);
 
         Inventory.ClearUnit(
+            index);
+
+        Weapons.ClearUnit(
             index);
 
         return Units.Destroy(id);
@@ -210,12 +233,66 @@ public sealed class UnitSimulation
         int inventorySlot,
         UnitWeaponSlot slot)
     {
-        return _inventorySystem.EquipWeapon(
+        bool equipped =
+            _inventorySystem.EquipWeapon(
+                Units,
+                Inventory,
+                id,
+                inventorySlot,
+                slot);
+
+        if (!equipped ||
+            !Units.TryGetIndex(
+                id,
+                out int unitIndex))
+        {
+            return equipped;
+        }
+
+        WeaponConfig? weapon =
+            Inventory.GetItem(
+                unitIndex,
+                inventorySlot) as WeaponConfig;
+
+        if (weapon != null)
+        {
+            Weapons.ConfigureSlot(
+                unitIndex,
+                slot,
+                weapon);
+        }
+
+        return true;
+    }
+
+    public bool FireWeapon(
+        UnitId id,
+        UnitWeaponSlot slot,
+        Vector3 direction)
+    {
+        return _weaponSystem.TryFire(
             Units,
             Inventory,
+            Weapons,
+            Projectiles,
             id,
-            inventorySlot,
-            slot);
+            slot,
+            direction);
+    }
+
+    public bool FireWeaponAt(
+        UnitId id,
+        UnitWeaponSlot slot,
+        UnitId target)
+    {
+        return _weaponSystem.TryFireAt(
+            Units,
+            Inventory,
+            Weapons,
+            Projectiles,
+            id,
+            slot,
+            target);
     }
 
     public UnitDamageResult ApplyDamage(
@@ -285,9 +362,24 @@ public sealed class UnitSimulation
             worldMap,
             deltaTime);
 
+        _weaponSystem.Update(
+            Units,
+            Inventory,
+            Weapons,
+            deltaTime);
+
         _bodySystem.Update(
             Units,
             Bodies,
+            deltaTime);
+
+        _projectileSystem.Update(
+            Units,
+            Inventory,
+            Health,
+            _healthSystem,
+            Projectiles,
+            worldMap,
             deltaTime);
 
         _healthSystem.Update(
