@@ -64,6 +64,12 @@ public enum UnitWeaponSlot : byte
 
         public float BleedProtectionChance;
 
+        // Energy loss when a projectile crosses this armor layer.
+        public float EnergyLoss;
+
+        // Projectile penetration budget consumed by this layer.
+        public float PenetrationResistance;
+
         public ArmorCoverage Coverage;
 
         public ArmorLayer Layer;
@@ -81,6 +87,8 @@ public enum UnitWeaponSlot : byte
         public byte BaseDamage;
         public float BleedChance;
         public float FireRate; // Задержка между атаками в секундах
+        public byte MagazineSize;
+        public float ReloadTime;
     }
 
     public sealed class MeleeWeaponConfig : WeaponConfig
@@ -109,6 +117,9 @@ public enum UnitWeaponSlot : byte
 
         // Базовый врожденный разброс оружия (чем меньше, тем точнее, например, АК = 0.02f)
         public float BaseAccuracy;
+
+        // Default cartridge used when this weapon fires.
+        public AmmunitionConfig? DefaultAmmunition;
 
         // Список установленных на пушку модификаций (прицелы, глушители)
         // Чтобы код не падал, сразу инициализируем пустой список
