@@ -212,7 +212,10 @@ public sealed class ProjectileSystem
 
         float segmentStart = 0f;
 
-        int ignoredUnit = -1;
+        Span<int> hitUnits =
+            stackalloc int[32];
+
+        int hitUnitCount = 0;
 
         while (segmentStart < 1f)
         {
@@ -304,7 +307,21 @@ public sealed class ProjectileSystem
                     _unitGrid.GetNextNode(
                         node);
 
-                if (unitIndex == ignoredUnit)
+                bool alreadyHit =
+                    false;
+
+                for (int h = 0;
+                     h < hitUnitCount;
+                     h++)
+                {
+                    if (hitUnits[h] == unitIndex)
+                    {
+                        alreadyHit = true;
+                        break;
+                    }
+                }
+
+                if (alreadyHit)
                     continue;
 
                 if (!_hitSystem.TryHitUnit(
@@ -505,11 +522,13 @@ public sealed class ProjectileSystem
                 $"pos={bestHit.Position} " +
                 $"stopped={damage.ProjectileStopped}");
 
-            // A projectile can penetrate a unit, but it must not
-            // repeatedly damage the same body volumes while still
-            // inside the same frame segment.
-            ignoredUnit =
-                hitUnit;
+            if (hitUnitCount <
+                hitUnits.Length)
+            {
+                hitUnits[
+                    hitUnitCount++] =
+                    hitUnit;
+            }
 
             if (damage.ProjectileStopped)
                 return false;
