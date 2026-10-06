@@ -503,7 +503,7 @@ public sealed class ProjectileSystem
                 $"faction={projectiles.FactionTag[projectileIndex]} " +
                 $"target={target} " +
                 $"part={bestHit.Part} " +
-                $"damage={damage.AppliedDamage:F2} " +
+                $"damage={damage.DamageApplied:F2} " +
                 $"energyLeft={damage.RemainingEnergy:F2} " +
                 $"penetrationLeft={damage.RemainingPenetration:F2} " +
                 $"pos={bestHit.Position} " +
