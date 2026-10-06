@@ -177,6 +177,16 @@ public sealed class GameRenderer
         long hits =
             _unitSimulation.Projectiles.TotalHits;
 
+        int teamOneAlive =
+            _visionTestScene.GetAliveCount(
+                _unitSimulation,
+                1);
+
+        int teamTwoAlive =
+            _visionTestScene.GetAliveCount(
+                _unitSimulation,
+                2);
+
         int idle = 0;
         int attack = 0;
         int cover = 0;
@@ -268,9 +278,10 @@ public sealed class GameRenderer
         return
             $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles} Hits={hits} | " +
+            $"Teams 1:{teamOneAlive} 2:{teamTwoAlive} | " +
             $"AI={ai}:{aiState} | " +
             $"States I={idle} A={attack} C={cover} S={search} D={dead} | " +
-            $"Demo={demoStage} | " +
+            $"Demo={demoStage} LastHit={_unitSimulation.Projectiles.LastHitPart} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
