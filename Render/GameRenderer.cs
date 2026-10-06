@@ -174,6 +174,9 @@ public sealed class GameRenderer
         int projectiles =
             _unitSimulation.Projectiles.ActiveCount;
 
+        long hits =
+            _unitSimulation.Projectiles.TotalHits;
+
         int idle = 0;
         int attack = 0;
         int cover = 0;
@@ -264,14 +267,14 @@ public sealed class GameRenderer
 
         return
             $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
-            $"Projectiles={projectiles} | " +
+            $"Projectiles={projectiles} Hits={hits} | " +
             $"AI={ai}:{aiState} | " +
             $"States I={idle} A={attack} C={cover} S={search} D={dead} | " +
             $"Demo={demoStage} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"A=AI Y=reset TAB=unit V=vision";
+            $"A=AI B=ballistic F=direct Y=reset TAB=unit V=vision";
     }
 
     private void InitializeWindow()
@@ -367,6 +370,30 @@ public sealed class GameRenderer
                 UnitWeaponSlot.Primary,
                 _unitSimulation.Units.HeadNormal[
                     shooterIndex]);
+            return;
+        }
+
+        if (key == Keyboard.Key.B)
+        {
+            if (!_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int shooterIndex) ||
+                !_unitSimulation.AI.Store.HasTarget[shooterIndex])
+            {
+                return;
+            }
+
+            UnitId target =
+                _unitSimulation.AI.Store.Target[shooterIndex];
+
+            if (_unitSimulation.Units.IsAlive(target))
+            {
+                _unitSimulation.FireWeaponAt(
+                    _selectedUnit,
+                    UnitWeaponSlot.Primary,
+                    target);
+            }
+
             return;
         }
 
