@@ -88,7 +88,12 @@ public sealed class UnitSpatialGrid
             float radius =
                 MathF.Max(
                     0.05f,
-                    units.Radius[unit]);
+                    MathF.Max(
+                        units.Radius[unit],
+                        MathF.Max(
+                            units.Width[unit],
+                            units.Length[unit]) *
+                        0.65f));
 
             int minX =
                 Math.Max(
