@@ -70,6 +70,7 @@ public sealed class GameRenderer
             new VisionTestScene();
 
         CreateVisionTestScene();
+        _unitSimulation.AI.Enabled = true;
     }
 
     public void Run()
@@ -105,6 +106,11 @@ public sealed class GameRenderer
 
         _camera.Update(
             _input.MoveDirection,
+            deltaTime);
+
+        _visionTestScene.UpdateAiDemo(
+            _unitSimulation,
+            _worldMap,
             deltaTime);
 
         _unitSimulation.Update(
@@ -145,6 +151,7 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _selectedUnit,
             _showVisionDebug,
+            true,
             false);
 
         _projectileRenderer.Draw(
@@ -166,6 +173,27 @@ public sealed class GameRenderer
         int outOfRange = 0;
         int projectiles =
             _unitSimulation.Projectiles.ActiveCount;
+
+        int idle = 0;
+        int attack = 0;
+        int cover = 0;
+        int search = 0;
+        int dead = 0;
+
+        ReadOnlySpan<int> aiUnits =
+            _unitSimulation.Units.ActiveIndices;
+
+        for (int i = 0; i < aiUnits.Length; i++)
+        {
+            switch (_unitSimulation.AI.Store.State[aiUnits[i]])
+            {
+                case UnitAiState.Attack: attack++; break;
+                case UnitAiState.SeekCover: cover++; break;
+                case UnitAiState.Search: search++; break;
+                case UnitAiState.Dead: dead++; break;
+                default: idle++; break;
+            }
+        }
 
         if (_unitSimulation.Units.TryGetIndex(
                 _selectedUnit,
@@ -235,6 +263,7 @@ public sealed class GameRenderer
             $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles} | " +
             $"AI={ai}:{aiState} | " +
+            $"States I={idle} A={attack} C={cover} S={search} D={dead} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
@@ -281,6 +310,14 @@ public sealed class GameRenderer
         {
             _unitSimulation.AI.Enabled =
                 !_unitSimulation.AI.Enabled;
+            return;
+        }
+
+        if (key == Keyboard.Key.Y)
+        {
+            _visionTestScene.ResetAiDemo(
+                _unitSimulation,
+                _worldMap);
             return;
         }
 
