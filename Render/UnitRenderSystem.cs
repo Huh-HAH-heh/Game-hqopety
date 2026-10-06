@@ -29,6 +29,10 @@ public sealed class UnitRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _aiDebug =
+        new VertexArray(
+            PrimitiveType.Lines);
+
     public void Draw(
         RenderWindow window,
         UnitSimulation simulation,
@@ -37,6 +41,7 @@ public sealed class UnitRenderSystem
         float tilePixelSize,
         UnitId selectedUnit,
         bool showVisionDebug,
+        bool showAiDebug = true,
         bool hideUnseenTargets = false)
     {
         if (tilePixelSize <= 0f)
@@ -46,6 +51,7 @@ public sealed class UnitRenderSystem
         _visionArea.Clear();
         _selection.Clear();
         _visionDebug.Clear();
+        _aiDebug.Clear();
 
         Vector2f center =
             cameraView.Center;
@@ -168,6 +174,22 @@ public sealed class UnitRenderSystem
                     238,
                     238,
                     238);
+
+            UnitAiState aiState =
+                simulation.AI.Store.State[unitIndex];
+
+            if (showAiDebug &&
+                simulation.AI.Enabled)
+            {
+                color =
+                    GetAiColor(aiState);
+
+                AppendAiDebug(
+                    _aiDebug,
+                    simulation,
+                    unitIndex,
+                    tilePixelSize);
+            }
 
             if (types[unitIndex] ==
                 UnitType.Colonist)
@@ -302,6 +324,128 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _visionDebug);
         }
+
+        if (_aiDebug.VertexCount > 0)
+        {
+            window.Draw(
+                _aiDebug);
+        }
+    }
+
+    private static void AppendAiDebug(
+        VertexArray debug,
+        UnitSimulation simulation,
+        int unitIndex,
+        float tilePixelSize)
+    {
+        UnitStore units =
+            simulation.Units;
+
+        Color color =
+            GetAiColor(
+                simulation.AI.Store.State[unitIndex]);
+
+        float x =
+            units.Position[unitIndex].X *
+            tilePixelSize;
+
+        float y =
+            units.Position[unitIndex].Y *
+            tilePixelSize;
+
+        UnitAiStore ai =
+            simulation.AI.Store;
+
+        if (ai.HasTarget[unitIndex])
+        {
+            UnitId target =
+                ai.Target[unitIndex];
+
+            if (units.TryGetIndex(
+                    target,
+                    out int targetIndex))
+            {
+                AppendDebugLine(
+                    debug,
+                    x,
+                    y,
+                    units.Position[targetIndex].X * tilePixelSize,
+                    units.Position[targetIndex].Y * tilePixelSize,
+                    new Color(
+                        color.R,
+                        color.G,
+                        color.B,
+                        140));
+            }
+        }
+
+        if (ai.HasGoal[unitIndex])
+        {
+            float goalX =
+                ai.Goal[unitIndex].X *
+                tilePixelSize;
+
+            float goalY =
+                ai.Goal[unitIndex].Y *
+                tilePixelSize;
+
+            AppendCircleOutline(
+                debug,
+                goalX,
+                goalY,
+                0.42f * tilePixelSize,
+                color,
+                12);
+
+            AppendDebugLine(
+                debug,
+                x,
+                y,
+                goalX,
+                goalY,
+                new Color(
+                    color.R,
+                    color.G,
+                    color.B,
+                    110));
+        }
+    }
+
+    private static Color GetAiColor(
+        UnitAiState state)
+    {
+        return state switch
+        {
+            UnitAiState.Attack =>
+                new Color(
+                    245,
+                    75,
+                    75),
+
+            UnitAiState.SeekCover =>
+                new Color(
+                    75,
+                    175,
+                    255),
+
+            UnitAiState.Search =>
+                new Color(
+                    245,
+                    205,
+                    70),
+
+            UnitAiState.Dead =>
+                new Color(
+                    90,
+                    90,
+                    90),
+
+            _ =>
+                new Color(
+                    210,
+                    210,
+                    210)
+        };
     }
 
     private static void AppendVisionDebug(
