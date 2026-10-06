@@ -94,10 +94,18 @@ public sealed class UnitHealthSystem
         float hitPoints =
             health.HitPoints[partIndex];
 
+        float applied =
+            MathF.Min(
+                amount,
+                hitPoints);
+
         health.HitPoints[partIndex] =
+            hitPoints - applied;
+
+        health.OverallHitPoints[unitIndex] =
             MathF.Max(
                 0f,
-                hitPoints - amount);
+                health.OverallHitPoints[unitIndex] - applied);
 
         return true;
     }
