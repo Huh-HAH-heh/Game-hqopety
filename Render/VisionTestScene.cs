@@ -11,7 +11,7 @@ public sealed class VisionTestScene
 {
     private const float BaseHeight = 10f;
     private const float FullWallHeight = 14f;
-    private const float LowWallHeight = 11.40f;
+    private const float LowWallHeight = 14f;
 
     private readonly UnitId[] _units =
         new UnitId[8];
