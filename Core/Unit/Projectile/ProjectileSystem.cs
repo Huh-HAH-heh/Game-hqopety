@@ -485,6 +485,11 @@ public sealed class ProjectileSystem
                 projectileIndex] =
                 damage.RemainingPenetration;
 
+            projectiles.RegisterHit(
+                target,
+                bestHit.Part,
+                bestHit.Position);
+
             ignoredUnit =
                 hitUnit;
 
@@ -765,63 +770,31 @@ public sealed class ProjectileSystem
         float deltaTime)
     {
         Vector3 velocity =
-            projectiles.Velocity[
-                index];
+            projectiles.Velocity[index];
 
-        velocity.Z -=
-            Gravity *
-            deltaTime;
+        float mass =
+            MathF.Max(
+                0.000001f,
+                projectiles.MassKg[index]);
 
-        float speedSquared =
-            velocity.LengthSquared();
+        float diameter =
+            MathF.Max(
+                0.0001f,
+                projectiles.DiameterM[index]);
 
-        if (speedSquared >
-            0.000001f)
-        {
-            float speed =
-                MathF.Sqrt(
-                    speedSquared);
+        float drag =
+            MathF.Max(
+                0f,
+                projectiles.DragCoefficient[index]);
 
-            float radius =
-                projectiles.DiameterM[
-                    index] *
-                0.5f;
+        ProjectileBallistics.Integrate(
+            ref velocity,
+            mass,
+            diameter,
+            drag,
+            deltaTime);
 
-            float area =
-                MathF.PI *
-                radius *
-                radius;
-
-            float dragAcceleration =
-                0.5f *
-                AirDensity *
-                projectiles.DragCoefficient[
-                    index] *
-                area *
-                speedSquared /
-                projectiles.MassKg[
-                    index];
-
-            float deltaSpeed =
-                dragAcceleration *
-                deltaTime;
-
-            if (deltaSpeed >= speed)
-            {
-                velocity = Vector3.Zero;
-            }
-            else
-            {
-                velocity -=
-                    velocity /
-                    speed *
-                    deltaSpeed;
-            }
-        }
-
-        projectiles.Velocity[
-            index] =
-            velocity;
+        projectiles.Velocity[index] = velocity;
     }
 
     private static Vector3 Normalize(
