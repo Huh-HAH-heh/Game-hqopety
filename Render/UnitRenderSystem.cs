@@ -175,6 +175,17 @@ public sealed class UnitRenderSystem
                     238,
                     238);
 
+            AppendFactionMarker(
+                _selection,
+                units.FactionTag[unitIndex],
+                unitPosition.X * tilePixelSize,
+                unitPosition.Y * tilePixelSize,
+                MathF.Max(
+                    MathF.Max(
+                        widths[unitIndex],
+                        lengths[unitIndex]) * 0.72f,
+                    0.55f) * tilePixelSize);
+
             UnitAiState aiState =
                 simulation.AI.Store.State[unitIndex];
 
@@ -990,6 +1001,38 @@ public sealed class UnitRenderSystem
                 radius,
                 color);
         }
+    }
+
+    private static void AppendFactionMarker(
+        VertexArray vertices,
+        ushort factionTag,
+        float centerX,
+        float centerY,
+        float radius)
+    {
+        if (factionTag == 0)
+            return;
+
+        Color color =
+            factionTag == 1
+                ? new Color(
+                    90,
+                    170,
+                    255,
+                    220)
+                : new Color(
+                    255,
+                    130,
+                    90,
+                    220);
+
+        AppendCircleOutline(
+            vertices,
+            centerX,
+            centerY,
+            radius,
+            color,
+            10);
     }
 
     private static void AppendSelection(
