@@ -315,7 +315,7 @@ public sealed class ProjectileSystem
                         projectiles.DiameterM[
                             projectileIndex] *
                         0.5f,
-                        skipPart,
+                        UnitHealthPartId.None,
                         out UnitHitResult localHit))
                 {
                     continue;
