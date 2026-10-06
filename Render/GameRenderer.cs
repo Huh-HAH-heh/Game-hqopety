@@ -259,15 +259,19 @@ public sealed class GameRenderer
                 ? _unitSimulation.AI.Store.State[selectedIndex].ToString()
                 : "None";
 
+        string demoStage =
+            _visionTestScene.GetAiDemoStage();
+
         return
             $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles} | " +
             $"AI={ai}:{aiState} | " +
             $"States I={idle} A={attack} C={cover} S={search} D={dead} | " +
+            $"Demo={demoStage} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"A=AI H=damage F=fire TAB=unit V=vision";
+            $"A=AI Y=reset TAB=unit V=vision";
     }
 
     private void InitializeWindow()
