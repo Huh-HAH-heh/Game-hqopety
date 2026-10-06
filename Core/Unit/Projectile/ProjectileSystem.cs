@@ -395,6 +395,14 @@ public sealed class ProjectileSystem
                         end,
                         out bool continues))
                 {
+                    Console.WriteLine(
+                        $"[BLOCKED] projectile owner={projectiles.Owner[projectileIndex]} " +
+                        $"faction={projectiles.FactionTag[projectileIndex]} " +
+                        $"terrainMaterial={terrainMaterial} " +
+                        $"pos={start + (end - start) * terrainT} " +
+                        $"energy={projectiles.Energy[projectileIndex]:F2} " +
+                        $"penetration={projectiles.Penetration[projectileIndex]:F2}");
+
                     return false;
                 }
 
@@ -489,6 +497,17 @@ public sealed class ProjectileSystem
                 target,
                 bestHit.Part,
                 bestHit.Position);
+
+            Console.WriteLine(
+                $"[HIT] projectile owner={projectiles.Owner[projectileIndex]} " +
+                $"faction={projectiles.FactionTag[projectileIndex]} " +
+                $"target={target} " +
+                $"part={bestHit.Part} " +
+                $"damage={damage.AppliedDamage:F2} " +
+                $"energyLeft={damage.RemainingEnergy:F2} " +
+                $"penetrationLeft={damage.RemainingPenetration:F2} " +
+                $"pos={bestHit.Position} " +
+                $"stopped={damage.ProjectileStopped}");
 
             ignoredUnit =
                 hitUnit;
