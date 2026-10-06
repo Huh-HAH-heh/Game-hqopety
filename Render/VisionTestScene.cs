@@ -427,6 +427,12 @@ public sealed class VisionTestScene
             unitIndex,
             UnitWeaponSlot.Primary,
             weapon);
+
+        // The battle demo is about combat, not ammunition logistics.
+        simulation.Weapons.AddReserveAmmo(
+            unitIndex,
+            UnitWeaponSlot.Primary,
+            1_000_000);
     }
 
     private void SetAiTestPositions(
