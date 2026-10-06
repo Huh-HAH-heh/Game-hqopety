@@ -293,7 +293,7 @@ public static class ProjectileBallistics
             targetZ;
     }
 
-    private static void Integrate(
+    public static void Integrate(
         ref Vector3 velocity,
         float mass,
         float diameter,
