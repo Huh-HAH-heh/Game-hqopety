@@ -272,7 +272,7 @@ public sealed class UnitWeaponSystem
                 $"targetPos={targetPoint} " +
                 $"muzzle={muzzle} " +
                 $"dir={ballisticDirection} " +
-                $"ammo={ammo.DefaultName}");
+                $"ammo={ammo.Name}");
         }
 
         return fired;
