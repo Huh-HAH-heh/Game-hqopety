@@ -537,6 +537,38 @@ public sealed class VisionTestScene
             false;
     }
 
+    private static int CountAlive(
+        UnitSimulation simulation,
+        ushort factionTag)
+    {
+        int alive = 0;
+
+        ReadOnlySpan<int> active =
+            simulation.Units.ActiveIndices;
+
+        for (int i = 0;
+             i < active.Length;
+             i++)
+        {
+            int unitIndex =
+                active[i];
+
+            if (simulation.Units.FactionTag[unitIndex] !=
+                factionTag)
+            {
+                continue;
+            }
+
+            if (simulation.Health.OverallHitPoints[unitIndex] >
+                0f)
+            {
+                alive++;
+            }
+        }
+
+        return alive;
+    }
+
     public UnitId GetUnit(
         int index)
     {
