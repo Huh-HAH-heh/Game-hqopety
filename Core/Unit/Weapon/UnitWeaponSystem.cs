@@ -205,6 +205,14 @@ public sealed class UnitWeaponSystem
             return false;
         }
 
+        short inventorySlot =
+            inventory.GetWeaponEquipment(
+                shooterIndex,
+                slot);
+
+        if (inventorySlot < 0)
+            return false;
+
         Vector3 muzzle =
             GetMuzzlePosition(
                 units,
