@@ -89,7 +89,7 @@ public sealed class UnitWeaponStore
         _reloadTimer[index] = 0f;
         int magazineSize =
             weapon is RangedWeaponConfig ranged
-                ? Math.Max(0, ranged.MagazineSize)
+                ? Math.Max(0, (int)ranged.MagazineSize)
                 : 0;
 
         _ammo[index] = magazineSize;
