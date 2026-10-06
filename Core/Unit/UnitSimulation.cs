@@ -326,6 +326,33 @@ public sealed class UnitSimulation
             target);
     }
 
+    public void SetFactionTag(
+        UnitId id,
+        ushort factionTag)
+    {
+        Units.SetFactionTag(
+            id,
+            factionTag);
+    }
+
+    public void AddReserveAmmo(
+        UnitId id,
+        UnitWeaponSlot slot,
+        int amount)
+    {
+        if (!Units.TryGetIndex(
+                id,
+                out int unitIndex))
+        {
+            return;
+        }
+
+        Weapons.AddReserveAmmo(
+            unitIndex,
+            slot,
+            amount);
+    }
+
     public void SetPosture(
         UnitId id,
         UnitPosture posture)
