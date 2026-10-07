@@ -17,7 +17,10 @@ public static class ShotAccuracy
         float effectiveRange,
         float aimProgress,
         AimMode aimMode,
-        float circularError)
+        float circularError,
+        float targetSpeed = 0f,
+        float flightTime = 0f,
+        float leadError = 0f)
     {
         float sight = MathF.Max(0.10f, sightEfficiency);
         float skill = MathF.Max(0.10f, aimingAccuracy);
@@ -77,6 +80,20 @@ public static class ShotAccuracy
             suppressionMultiplier);
         spread *= modeFactor;
 
+        float lead =
+            MathF.Max(
+                0f,
+                targetSpeed) *
+            MathF.Max(
+                0f,
+                flightTime) *
+            MathF.Max(
+                0f,
+                leadError) /
+            MathF.Max(
+                1f,
+                effectiveRange);
+
         return
             spread +
             rangeError +
@@ -84,6 +101,7 @@ public static class ShotAccuracy
             recoilError +
             MathF.Max(
                 0f,
-                circularError);
+                circularError) +
+            lead;
     }
 }
