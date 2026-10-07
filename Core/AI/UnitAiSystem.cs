@@ -265,6 +265,12 @@ public sealed class UnitAiSystem
 
                     units.HasTarget[unit] = true;
                 }
+                else if (HasSustainedFireWeapon(
+                             inventory,
+                             unit))
+                {
+                    units.HasTarget[unit] = true;
+                }
                 else
                 {
                     units.HasTarget[unit] = false;
