@@ -128,6 +128,13 @@ public enum UnitWeaponSlot : byte
         // Базовый врожденный разброс оружия (чем меньше, тем точнее, например, АК = 0.02f)
         public float BaseAccuracy;
 
+        // CE-inspired shooting accuracy components.
+        public float AimingAccuracy = 1f;
+        public float SightEfficiency = 1f;
+        public float MovementSpread = 0.12f;
+        public float CircularError;
+        public float LeadError = 0.01f;
+
         // CE-inspired fire control.
         public FireMode DefaultFireMode = FireMode.Single;
         public byte BurstCount = 3;
@@ -140,8 +147,14 @@ public enum UnitWeaponSlot : byte
         public float SnapshotSpreadMultiplier = 2f;
         public float SuppressSpreadMultiplier = 2.5f;
 
+        // Projectile ballistic profile.
+        public float BallisticCoefficient = 1f;
+
         // Default cartridge used when this weapon fires.
         public AmmunitionConfig? DefaultAmmunition;
+
+        // Selectable cartridge family. DefaultAmmunition remains as compatibility fallback.
+        public AmmunitionSet? AmmoSet;
 
         // Список установленных на пушку модификаций (прицелы, глушители)
         // Чтобы код не падал, сразу инициализируем пустой список
