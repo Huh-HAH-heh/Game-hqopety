@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Combat;
 
 namespace Core.Unit;
 
@@ -18,6 +19,9 @@ public sealed class ProjectileStore
     private float[] _massKg;
     private float[] _diameterM;
     private float[] _dragCoefficient;
+    private float[] _suppressionFactor;
+    private DamageType[] _damageType;
+    private float[] _bleedChance;
     private float[] _lifetime;
     private uint[] _generation;
 
@@ -51,6 +55,9 @@ public sealed class ProjectileStore
     public float[] MassKg => _massKg;
     public float[] DiameterM => _diameterM;
     public float[] DragCoefficient => _dragCoefficient;
+    public float[] SuppressionFactor => _suppressionFactor;
+    public DamageType[] DamageType => _damageType;
+    public float[] BleedChance => _bleedChance;
     public float[] Lifetime => _lifetime;
 
     public ReadOnlySpan<int> ActiveIndices =>
@@ -76,6 +83,9 @@ public sealed class ProjectileStore
         _massKg = new float[initialCapacity];
         _diameterM = new float[initialCapacity];
         _dragCoefficient = new float[initialCapacity];
+        _suppressionFactor = new float[initialCapacity];
+        _damageType = new DamageType[initialCapacity];
+        _bleedChance = new float[initialCapacity];
         _lifetime = new float[initialCapacity];
         _generation = new uint[initialCapacity];
 
@@ -99,7 +109,10 @@ public sealed class ProjectileStore
         float dragCoefficient,
         float penetration,
         float baseDamage,
-        float lifetime)
+        float lifetime,
+        DamageType damageType = DamageType.Ballistic,
+        float suppressionFactor = 1f,
+        float bleedChance = 0f)
     {
         int index;
 
@@ -164,6 +177,12 @@ public sealed class ProjectileStore
             MathF.Max(
                 0f,
                 dragCoefficient);
+        _suppressionFactor[index] =
+            MathF.Max(
+                0f,
+                suppressionFactor);
+        _damageType[index] = damageType;
+        _bleedChance[index] = MathF.Max(0f, bleedChance);
         _lifetime[index] =
             MathF.Max(
                 0f,
@@ -303,6 +322,15 @@ public sealed class ProjectileStore
             newCapacity);
         Array.Resize(
             ref _dragCoefficient,
+            newCapacity);
+        Array.Resize(
+            ref _suppressionFactor,
+            newCapacity);
+        Array.Resize(
+            ref _damageType,
+            newCapacity);
+        Array.Resize(
+            ref _bleedChance,
             newCapacity);
         Array.Resize(
             ref _lifetime,

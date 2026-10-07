@@ -38,6 +38,7 @@ public sealed class UnitAiSystem
         UnitInventoryStore inventory,
         UnitWeaponStore weapons,
         ProjectileStore projectiles,
+        UnitSuppressionStore suppression,
         VisionSystem vision,
         WorldMap worldMap,
         float deltaTime)
@@ -83,6 +84,39 @@ public sealed class UnitAiSystem
                 Store.ClearGoal(unit);
                 Store.State[unit] = UnitAiState.Dead;
                 continue;
+            }
+
+            UnitSuppressionState suppressionState =
+                suppression.GetState(unit);
+
+            if (suppressionState == UnitSuppressionState.Panicked)
+            {
+                if (!Store.HasGoal[unit] &&
+                    TryFindSuppressionCover(
+                        units,
+                        vision,
+                        worldMap,
+                        unit,
+                        suppression.Source[unit],
+                        out Vector3 suppressionCover))
+                {
+                    Store.SetGoal(
+                        unit,
+                        suppressionCover);
+                }
+
+                if (Store.HasGoal[unit])
+                {
+                    units.Target[unit] =
+                        Store.Goal[unit];
+
+                    units.HasTarget[unit] = true;
+
+                    Store.State[unit] =
+                        UnitAiState.SeekCover;
+
+                    continue;
+                }
             }
 
             int visibleEnemy =
@@ -211,11 +245,15 @@ public sealed class UnitAiSystem
                         weapons,
                         projectiles,
                         unit,
-                        target);
+                        target,
+                        suppression.GetAccuracyMultiplier(unit));
 
                 if (fired)
                 {
-                    units.HasTarget[unit] = false;
+                    units.HasTarget[unit] =
+                        HasSustainedFireWeapon(
+                            inventory,
+                            unit);
                 }
                 else if (!HasRangedWeapon(
                              units,
@@ -388,7 +426,8 @@ public sealed class UnitAiSystem
         UnitWeaponStore weapons,
         ProjectileStore projectiles,
         int unit,
-        UnitId target)
+        UnitId target,
+        float accuracyMultiplier)
     {
         for (int slot = 0;
              slot < UnitInventoryStore.WeaponSlotCount;
@@ -433,7 +472,8 @@ public sealed class UnitAiSystem
                     projectiles,
                     unit,
                     weaponSlot,
-                    target))
+                    target,
+                    accuracyMultiplier))
             {
                 return true;
             }
@@ -449,7 +489,8 @@ public sealed class UnitAiSystem
         ProjectileStore projectiles,
         int unit,
         UnitWeaponSlot slot,
-        UnitId target)
+        UnitId target,
+        float accuracyMultiplier)
     {
         short inventorySlot =
             inventory.GetWeaponEquipment(
@@ -473,7 +514,42 @@ public sealed class UnitAiSystem
             projectiles,
             units.GetId(unit),
             slot,
-            target);
+            target,
+            accuracyMultiplier);
+    }
+
+    private static bool HasSustainedFireWeapon(
+        UnitInventoryStore inventory,
+        int unit)
+    {
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            short inventorySlot =
+                inventory.GetWeaponEquipment(
+                    unit,
+                    (UnitWeaponSlot)slot);
+
+            if (inventorySlot < 0)
+                continue;
+
+            RangedWeaponConfig? weapon =
+                inventory.GetItem(
+                    unit,
+                    inventorySlot) as RangedWeaponConfig;
+
+            if (weapon == null)
+                continue;
+
+            if (weapon.DefaultFireMode !=
+                Core.Combat.FireMode.Single)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void FaceTarget(
@@ -497,6 +573,111 @@ public sealed class UnitAiSystem
             delta /
             MathF.Sqrt(
                 lengthSquared);
+    }
+
+    private static bool TryFindSuppressionCover(
+        UnitStore units,
+        VisionSystem vision,
+        WorldMap worldMap,
+        int unit,
+        Vector3 threat,
+        out Vector3 cover)
+    {
+        cover = Vector3.Zero;
+
+        Vector3 origin =
+            units.Position[unit];
+
+        float bestDistanceSquared =
+            float.PositiveInfinity;
+
+        for (int direction = 0;
+             direction < CoverDirectionCount;
+             direction++)
+        {
+            float angle =
+                direction *
+                MathF.Tau /
+                CoverDirectionCount;
+
+            Vector2 offset =
+                new Vector2(
+                    MathF.Cos(angle),
+                    MathF.Sin(angle));
+
+            for (float radius = CoverStep;
+                 radius <= CoverSearchRadius;
+                 radius += CoverStep)
+            {
+                Vector3 candidate =
+                    origin +
+                    new Vector3(
+                        offset.X * radius,
+                        offset.Y * radius,
+                        0f);
+
+                int tileX =
+                    (int)MathF.Floor(candidate.X);
+
+                int tileY =
+                    (int)MathF.Floor(candidate.Y);
+
+                if (tileX < 1 ||
+                    tileY < 1 ||
+                    tileX >= worldMap.TileWidth - 1 ||
+                    tileY >= worldMap.TileHeight - 1)
+                    continue;
+
+                candidate.Z =
+                    worldMap.GetSurfaceHeight(
+                        tileX,
+                        tileY);
+
+                Vector3 candidateEye =
+                    candidate +
+                    new Vector3(
+                        0f,
+                        0f,
+                        MathF.Max(
+                            0.05f,
+                            units.Height[unit]));
+
+                Vector3 threatPoint =
+                    threat;
+
+                threatPoint.Z =
+                    MathF.Max(
+                        threatPoint.Z,
+                        units.Height[unit]);
+
+                if (vision.HasLineOfSight(
+                        worldMap,
+                        candidateEye,
+                        threatPoint,
+                        out _))
+                {
+                    continue;
+                }
+
+                float distanceSquared =
+                    (candidate.X - origin.X) *
+                    (candidate.X - origin.X) +
+                    (candidate.Y - origin.Y) *
+                    (candidate.Y - origin.Y);
+
+                if (distanceSquared >= bestDistanceSquared)
+                    continue;
+
+                bestDistanceSquared =
+                    distanceSquared;
+
+                cover =
+                    candidate;
+            }
+        }
+
+        return bestDistanceSquared <
+               float.PositiveInfinity;
     }
 
     private static bool ReachedGoal(

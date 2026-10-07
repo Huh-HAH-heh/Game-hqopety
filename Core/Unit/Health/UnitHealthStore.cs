@@ -15,6 +15,7 @@ public sealed class UnitHealthStore
     private short[] _parent;
     private float[] _maxHitPoints;
     private float[] _hitPoints;
+    private float[] _bleedRate;
     private bool[] _present;
 
     private short[] _partCount;
@@ -42,6 +43,9 @@ public sealed class UnitHealthStore
 
     public float[] HitPoints =>
         _hitPoints;
+
+    public float[] BleedRate =>
+        _bleedRate;
 
     public bool[] Present =>
         _present;
@@ -92,6 +96,9 @@ public sealed class UnitHealthStore
         _hitPoints =
             new float[nodeCapacity];
 
+        _bleedRate =
+            new float[nodeCapacity];
+
         _present =
             new bool[nodeCapacity];
 
@@ -128,6 +135,11 @@ public sealed class UnitHealthStore
 
         Array.Clear(
             _hitPoints,
+            start,
+            MaxPartsPerUnit);
+
+        Array.Clear(
+            _bleedRate,
             start,
             MaxPartsPerUnit);
 
@@ -200,6 +212,11 @@ public sealed class UnitHealthStore
 
         Array.Clear(
             _hitPoints,
+            start,
+            MaxPartsPerUnit);
+
+        Array.Clear(
+            _bleedRate,
             start,
             MaxPartsPerUnit);
 
@@ -315,6 +332,10 @@ public sealed class UnitHealthStore
 
         Array.Resize(
             ref _hitPoints,
+            newNodeCapacity);
+
+        Array.Resize(
+            ref _bleedRate,
             newNodeCapacity);
 
         Array.Resize(

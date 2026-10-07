@@ -200,6 +200,12 @@ public sealed class UnitRenderSystem
                     simulation,
                     unitIndex,
                     tilePixelSize);
+
+                AppendSuppressionDebug(
+                    _aiDebug,
+                    simulation,
+                    unitIndex,
+                    tilePixelSize);
             }
 
             if (types[unitIndex] ==
@@ -341,6 +347,50 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _aiDebug);
         }
+    }
+
+    private static void AppendSuppressionDebug(
+        VertexArray debug,
+        UnitSimulation simulation,
+        int unitIndex,
+        float tilePixelSize)
+    {
+        float suppression =
+            simulation.Suppression.Value[unitIndex];
+
+        if (suppression <= 0.01f)
+            return;
+
+        Vector3 position =
+            simulation.Units.Position[unitIndex];
+
+        Color color =
+            simulation.Suppression.GetState(unitIndex) switch
+            {
+                UnitSuppressionState.Panicked =>
+                    new Color(255, 70, 70, 220),
+
+                UnitSuppressionState.Suppressed =>
+                    new Color(255, 200, 70, 190),
+
+                _ =>
+                    new Color(190, 190, 190, 130)
+            };
+
+        float radius =
+            (0.45f +
+             MathF.Min(
+                 1.0f,
+                 suppression * 0.15f)) *
+            tilePixelSize;
+
+        AppendCircleOutline(
+            debug,
+            position.X * tilePixelSize,
+            position.Y * tilePixelSize,
+            radius,
+            color,
+            14);
     }
 
     private static void AppendAiDebug(

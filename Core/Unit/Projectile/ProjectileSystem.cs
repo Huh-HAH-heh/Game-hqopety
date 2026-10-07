@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using Core.Map;
+using Core.Combat;
 
 namespace Core.Unit;
 
@@ -20,6 +21,7 @@ public sealed class ProjectileSystem
         UnitHealthStore health,
         UnitHealthSystem healthSystem,
         ProjectileStore projectiles,
+        UnitSuppressionStore suppression,
         WorldMap worldMap,
         float deltaTime)
     {
@@ -86,6 +88,7 @@ public sealed class ProjectileSystem
                     health,
                     healthSystem,
                     projectiles,
+                    suppression,
                     worldMap,
                     projectileIndex,
                     start,
@@ -123,6 +126,7 @@ public sealed class ProjectileSystem
         UnitHealthStore health,
         UnitHealthSystem healthSystem,
         ProjectileStore projectiles,
+        UnitSuppressionStore suppression,
         WorldMap worldMap,
         int projectileIndex,
         Vector3 start,
@@ -338,6 +342,21 @@ public sealed class ProjectileSystem
                         UnitHealthPartId.None,
                         out UnitHitResult localHit))
                 {
+                    if (projectiles.Owner[projectileIndex].Index != unitIndex &&
+                        (projectiles.FactionTag[projectileIndex] == 0 ||
+                         units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex]))
+                    {
+                        UnitSuppressionSystem.AddNearMiss(
+                            suppression,
+                            unitIndex,
+                            units.Position[unitIndex],
+                            subStart,
+                            subEnd,
+                            projectiles.BaseDamage[projectileIndex] +
+                            projectiles.Energy[projectileIndex] * 0.005f,
+                            projectiles.SuppressionFactor[projectileIndex]);
+                    }
+
                     continue;
                 }
 
@@ -491,6 +510,10 @@ public sealed class ProjectileSystem
                     projectiles.InitialEnergy[
                         projectileIndex],
                     projectiles.Penetration[
+                        projectileIndex],
+                    projectiles.DamageType[
+                        projectileIndex],
+                    projectiles.BleedChance[
                         projectileIndex]);
 
             ProjectileDamageResult damage =

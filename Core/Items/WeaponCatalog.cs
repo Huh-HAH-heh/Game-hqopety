@@ -1,5 +1,7 @@
 using System;
 
+using Core.Combat;
+
 namespace Core.Items;
 
 public sealed class AmmunitionConfig : ItemConfig
@@ -10,6 +12,8 @@ public sealed class AmmunitionConfig : ItemConfig
     public float DragCoefficient = 0.30f;
     public float Penetration;
     public float DamageMultiplier = 1f;
+    public DamageType DamageType = DamageType.Ballistic;
+    public float SuppressionFactor = 1f;
 }
 
 public static class WeaponCatalog
@@ -52,6 +56,10 @@ public static class WeaponCatalog
             ReloadTime = 2.25f,
             BaseEffectiveRange = 180f,
             BaseAccuracy = 0.012f,
+            DefaultFireMode = FireMode.Auto,
+            BurstCount = 3,
+            BurstInterval = 0.09f,
+            SuppressionFactor = 1.0f,
             DefaultAmmunition = Rifle556
         };
 
@@ -67,6 +75,9 @@ public static class WeaponCatalog
             ReloadTime = 1.65f,
             BaseEffectiveRange = 60f,
             BaseAccuracy = 0.018f,
+            DefaultFireMode = FireMode.Single,
+            BurstCount = 1,
+            SuppressionFactor = 0.8f,
             DefaultAmmunition = Pistol9mm
         };
 }

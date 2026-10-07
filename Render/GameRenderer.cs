@@ -192,6 +192,8 @@ public sealed class GameRenderer
         int cover = 0;
         int search = 0;
         int dead = 0;
+        int suppressed = 0;
+        int panicked = 0;
 
         ReadOnlySpan<int> aiUnits =
             _unitSimulation.Units.ActiveIndices;
@@ -205,6 +207,25 @@ public sealed class GameRenderer
                 case UnitAiState.Search: search++; break;
                 case UnitAiState.Dead: dead++; break;
                 default: idle++; break;
+            }
+        }
+
+        ReadOnlySpan<int> suppressionUnits =
+            _unitSimulation.Units.ActiveIndices;
+
+        for (int i = 0; i < suppressionUnits.Length; i++)
+        {
+            int unit = suppressionUnits[i];
+
+            switch (_unitSimulation.Suppression.GetState(unit))
+            {
+                case UnitSuppressionState.Suppressed:
+                    suppressed++;
+                    break;
+
+                case UnitSuppressionState.Panicked:
+                    panicked++;
+                    break;
             }
         }
 
@@ -281,6 +302,7 @@ public sealed class GameRenderer
             $"Teams 1:{teamOneAlive} 2:{teamTwoAlive} | " +
             $"AI={ai}:{aiState} | " +
             $"States I={idle} A={attack} C={cover} S={search} D={dead} | " +
+            $"Suppression S={suppressed} P={panicked} | " +
             $"Demo={demoStage} LastHit={_unitSimulation.Projectiles.LastHitPart} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +

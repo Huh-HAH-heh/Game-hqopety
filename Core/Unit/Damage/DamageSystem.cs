@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Combat;
 using Core.Items;
 
 namespace Core.Unit;
@@ -15,6 +16,8 @@ public readonly struct DamageEvent
     public float Energy { get; }
     public float InitialEnergy { get; }
     public float Penetration { get; }
+    public DamageType DamageType { get; }
+    public float BleedChance { get; }
 
     public DamageEvent(
         UnitId attacker,
@@ -25,7 +28,9 @@ public readonly struct DamageEvent
         float baseDamage,
         float energy,
         float initialEnergy,
-        float penetration)
+        float penetration,
+        DamageType damageType,
+        float bleedChance)
     {
         Attacker = attacker;
         Target = target;
@@ -36,6 +41,8 @@ public readonly struct DamageEvent
         Energy = energy;
         InitialEnergy = initialEnergy;
         Penetration = penetration;
+        DamageType = damageType;
+        BleedChance = bleedChance;
     }
 }
 
@@ -102,8 +109,7 @@ public sealed class DamageSystem
             damageEvent.BaseDamage *
             (0.35f +
              0.65f *
-             MathF.Sqrt(
-                 energyRatio));
+             MathF.Sqrt(energyRatio));
 
         bool stopped = false;
 
@@ -130,7 +136,8 @@ public sealed class DamageSystem
                 ArmorConfig? armor =
                     inventory.GetItem(
                         targetIndex,
-                        itemSlot) as ArmorConfig;
+                        itemSlot)
+                    as ArmorConfig;
 
                 if (armor == null)
                     continue;
@@ -142,57 +149,43 @@ public sealed class DamageSystem
 
                 if (inventory.Durability[
                         durabilityIndex] <= 0f)
-                    continue;
-
-                float reduction =
-                    Math.Clamp(
-                        armor.DamageAbsorption,
-                        0f,
-                        0.95f);
-
-                float absorbed =
-                    damage *
-                    reduction;
-
-                damage -= absorbed;
-
-                float armorDamage =
-                    absorbed *
-                    Math.Clamp(
-                        armor.ArmorDamageCoefficient,
-                        0f,
-                        1f);
-
-                inventory.Durability[
-                    durabilityIndex] =
-                    MathF.Max(
-                        0f,
-                        inventory.Durability[
-                            durabilityIndex] -
-                        armorDamage);
-
-                float resistance =
-                    MathF.Max(
-                        0f,
-                        armor.PenetrationResistance);
-
-                float energyLoss =
-                    MathF.Max(
-                        0f,
-                        armor.EnergyLoss);
-
-                if (penetration <= resistance ||
-                    energy <= energyLoss)
                 {
-                    damage *= 0.20f;
-                    energy = 0f;
-                    penetration = 0f;
+                    continue;
+                }
+
+                ArmorResolution resolution =
+                    ArmorResolver.ResolveLayer(
+                        damageEvent.DamageType,
+                        damage,
+                        energy,
+                        penetration,
+                        armor);
+
+                damage =
+                    resolution.Damage;
+
+                energy =
+                    resolution.Energy;
+
+                penetration =
+                    resolution.Penetration;
+
+                if (resolution.ArmorDamage > 0f)
+                {
+                    inventory.Durability[
+                        durabilityIndex] =
+                        MathF.Max(
+                            0f,
+                            inventory.Durability[
+                                durabilityIndex] -
+                            resolution.ArmorDamage);
+                }
+
+                if (resolution.Stopped)
+                {
                     stopped = true;
                     break;
                 }
-
-                penetration -= resistance;
-                energy -= energyLoss;
             }
         }
 
@@ -212,11 +205,9 @@ public sealed class DamageSystem
                     GetBodyPenetrationLoss(
                         damageEvent.Part));
 
-            if (energy <= 1f ||
-                penetration <= 0.01f)
-            {
-                stopped = true;
-            }
+            stopped =
+                energy <= 1f ||
+                penetration <= 0.01f;
         }
 
         healthSystem.ApplyDamage(
@@ -225,6 +216,26 @@ public sealed class DamageSystem
             damageEvent.Target,
             damageEvent.Part,
             damage);
+
+        if (damage > 0f &&
+            damageEvent.BleedChance > 0f &&
+            damageEvent.DamageType != DamageType.Blunt)
+        {
+            float bleed =
+                damage *
+                Math.Clamp(
+                    damageEvent.BleedChance,
+                    0f,
+                    1f) *
+                0.05f;
+
+            healthSystem.AddBleed(
+                units,
+                health,
+                damageEvent.Target,
+                damageEvent.Part,
+                bleed);
+        }
 
         return new ProjectileDamageResult(
             damage,
@@ -240,19 +251,14 @@ public sealed class DamageSystem
         {
             UnitHealthPartId.Head => 170f,
             UnitHealthPartId.Torso => 190f,
-
             UnitHealthPartId.LeftArm or
             UnitHealthPartId.RightArm => 90f,
-
             UnitHealthPartId.LeftHand or
             UnitHealthPartId.RightHand => 55f,
-
             UnitHealthPartId.LeftLeg or
             UnitHealthPartId.RightLeg => 105f,
-
             UnitHealthPartId.LeftFoot or
             UnitHealthPartId.RightFoot => 50f,
-
             _ => 160f
         };
     }
@@ -264,19 +270,14 @@ public sealed class DamageSystem
         {
             UnitHealthPartId.Head => 10f,
             UnitHealthPartId.Torso => 12f,
-
             UnitHealthPartId.LeftArm or
             UnitHealthPartId.RightArm => 6f,
-
             UnitHealthPartId.LeftHand or
             UnitHealthPartId.RightHand => 4f,
-
             UnitHealthPartId.LeftLeg or
             UnitHealthPartId.RightLeg => 7f,
-
             UnitHealthPartId.LeftFoot or
             UnitHealthPartId.RightFoot => 4f,
-
             _ => 8f
         };
     }
@@ -287,8 +288,7 @@ public sealed class DamageSystem
         return part switch
         {
             UnitHealthPartId.Head or
-            UnitHealthPartId.Brain =>
-                0,
+            UnitHealthPartId.Brain => 0,
 
             UnitHealthPartId.Torso or
             UnitHealthPartId.Heart or
@@ -297,8 +297,7 @@ public sealed class DamageSystem
             UnitHealthPartId.Stomach or
             UnitHealthPartId.Liver or
             UnitHealthPartId.LeftKidney or
-            UnitHealthPartId.RightKidney =>
-                1,
+            UnitHealthPartId.RightKidney => 1,
 
             UnitHealthPartId.LeftArm => 2,
             UnitHealthPartId.RightArm => 3,

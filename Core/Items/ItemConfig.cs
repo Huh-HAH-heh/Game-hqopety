@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Text;
 
+using Core.Combat;
+
 namespace Core.Items
 {
     
@@ -70,6 +72,9 @@ public enum UnitWeaponSlot : byte
         // Projectile penetration budget consumed by this layer.
         public float PenetrationResistance;
 
+        // CE-inspired deterministic protection threshold. Penetration below it can deflect ballistic/sharp hits.
+        public float ArmorRating;
+
         public ArmorCoverage Coverage;
 
         public ArmorLayer Layer;
@@ -117,6 +122,12 @@ public enum UnitWeaponSlot : byte
 
         // Базовый врожденный разброс оружия (чем меньше, тем точнее, например, АК = 0.02f)
         public float BaseAccuracy;
+
+        // CE-inspired fire control.
+        public FireMode DefaultFireMode = FireMode.Single;
+        public byte BurstCount = 3;
+        public float BurstInterval = 0.08f;
+        public float SuppressionFactor = 1f;
 
         // Default cartridge used when this weapon fires.
         public AmmunitionConfig? DefaultAmmunition;

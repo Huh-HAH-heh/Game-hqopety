@@ -12,6 +12,9 @@ public sealed class UnitWeaponStore
     private int[] _ammo;
     private int[] _reserveAmmo;
     private bool[] _reloading;
+    private byte[] _burstRemaining;
+    private float[] _burstTimer;
+    private UnitId[] _burstTarget;
     private uint[] _randomState;
 
     public int Capacity =>
@@ -22,6 +25,9 @@ public sealed class UnitWeaponStore
     public int[] Ammo => _ammo;
     public int[] ReserveAmmo => _reserveAmmo;
     public bool[] Reloading => _reloading;
+    public byte[] BurstRemaining => _burstRemaining;
+    public float[] BurstTimer => _burstTimer;
+    public UnitId[] BurstTarget => _burstTarget;
 
     public UnitWeaponStore(
         int initialUnitCapacity = DefaultUnitCapacity)
@@ -38,6 +44,9 @@ public sealed class UnitWeaponStore
         _ammo = new int[capacity];
         _reserveAmmo = new int[capacity];
         _reloading = new bool[capacity];
+        _burstRemaining = new byte[capacity];
+        _burstTimer = new float[capacity];
+        _burstTarget = new UnitId[capacity];
         _randomState = new uint[capacity];
 
         for (int i = 0; i < capacity; i++)
@@ -62,6 +71,9 @@ public sealed class UnitWeaponStore
             _ammo[index] = 0;
             _reserveAmmo[index] = 0;
             _reloading[index] = false;
+            _burstRemaining[index] = 0;
+            _burstTimer[index] = 0f;
+            _burstTarget[index] = default;
             _randomState[index] = Seed(index);
         }
     }
@@ -95,6 +107,9 @@ public sealed class UnitWeaponStore
         _ammo[index] = magazineSize;
         _reserveAmmo[index] = magazineSize * 3;
         _reloading[index] = false;
+        _burstRemaining[index] = 0;
+        _burstTimer[index] = 0f;
+        _burstTarget[index] = default;
     }
 
     public void ClearSlot(
@@ -113,6 +128,9 @@ public sealed class UnitWeaponStore
         _ammo[index] = 0;
         _reserveAmmo[index] = 0;
         _reloading[index] = false;
+        _burstRemaining[index] = 0;
+        _burstTimer[index] = 0f;
+        _burstTarget[index] = default;
     }
 
     public void StartReload(
@@ -179,6 +197,28 @@ public sealed class UnitWeaponStore
         }
     }
 
+    public void StartBurst(
+        int unitIndex,
+        UnitWeaponSlot slot,
+        UnitId target,
+        int remaining,
+        float interval)
+    {
+        int index = GetIndex(unitIndex, slot);
+        _burstTarget[index] = target;
+        _burstRemaining[index] = (byte)Math.Clamp(remaining, 0, byte.MaxValue);
+        _burstTimer[index] = MathF.Max(0f, interval);
+    }
+
+    public void AdvanceBurstTimer(float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        for (int i = 0; i < _burstTimer.Length; i++)
+            _burstTimer[i] = MathF.Max(0f, _burstTimer[i] - deltaTime);
+    }
+
     public uint NextRandom(
         int unitIndex,
         UnitWeaponSlot slot)
@@ -237,6 +277,9 @@ public sealed class UnitWeaponStore
         Array.Resize(ref _ammo, newLength);
         Array.Resize(ref _reserveAmmo, newLength);
         Array.Resize(ref _reloading, newLength);
+        Array.Resize(ref _burstRemaining, newLength);
+        Array.Resize(ref _burstTimer, newLength);
+        Array.Resize(ref _burstTarget, newLength);
         Array.Resize(ref _randomState, newLength);
 
         for (int i = oldLength; i < newLength; i++)
