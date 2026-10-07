@@ -153,9 +153,9 @@ public sealed class UnitWeaponStore
         _burstRemaining[index] = 0;
         _burstTimer[index] = 0f;
         _burstTarget[index] = default;
-        _fireMode[index] = weapon is RangedWeaponConfig rangedMode ? rangedMode.DefaultFireMode : FireMode.Single;
-        _aimMode[index] = weapon is RangedWeaponConfig rangedAim ? rangedAim.DefaultAimMode : AimMode.AimedShot;
-        _targetMode[index] = weapon is RangedWeaponConfig rangedTarget ? rangedTarget.DefaultTargetMode : TargetMode.Automatic;
+        _fireMode[index] = FireMode.Single;
+        _aimMode[index] = AimMode.AimedShot;
+        _targetMode[index] = TargetMode.Automatic;
     }
 
     public void StartReload(
