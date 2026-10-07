@@ -128,9 +128,19 @@ public sealed class UnitWeaponStore
         _burstRemaining[index] = 0;
         _burstTimer[index] = 0f;
         _burstTarget[index] = default;
-        _fireMode[index] = FireMode.Single;
-        _aimMode[index] = AimMode.AimedShot;
-        _targetMode[index] = TargetMode.Automatic;
+
+        if (weapon is RangedWeaponConfig ranged)
+        {
+            _fireMode[index] = ranged.DefaultFireMode;
+            _aimMode[index] = ranged.DefaultAimMode;
+            _targetMode[index] = ranged.DefaultTargetMode;
+        }
+        else
+        {
+            _fireMode[index] = FireMode.Single;
+            _aimMode[index] = AimMode.AimedShot;
+            _targetMode[index] = TargetMode.Automatic;
+        }
     }
 
     public void ClearSlot(
