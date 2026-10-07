@@ -11,6 +11,8 @@ public sealed class WaterLayer
     public int Height { get; }
     public int Levels { get; }
 
+    public long Version { get; private set; }
+
     public WaterLayer(
         int width,
         int height,
@@ -43,6 +45,8 @@ public sealed class WaterLayer
         Array.Fill(
             _topLevels,
             (sbyte)-1);
+
+        Version++;
     }
 
     public byte GetAmount(
@@ -67,6 +71,7 @@ public sealed class WaterLayer
 
         int index = GetIndex(x, y, z);
         _water[index] = amount;
+        Version++;
 
         int columnIndex = GetColumnIndex(x, y);
         int top = _topLevels[columnIndex];
@@ -114,6 +119,8 @@ public sealed class WaterLayer
                 _water[index] + amount,
                 0,
                 byte.MaxValue);
+
+        Version++;
 
         if (_water[index] > 0)
         {
