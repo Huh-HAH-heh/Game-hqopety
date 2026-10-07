@@ -511,6 +511,8 @@ public sealed class ProjectileSystem
                         projectileIndex],
                     projectiles.Penetration[
                         projectileIndex],
+                    projectiles.BluntPenetration[
+                        projectileIndex],
                     projectiles.DamageType[
                         projectileIndex],
                     projectiles.BleedChance[
