@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using Core.Items;
 using Core.Map;
+using Core.Unit;
 
 namespace RimClone.Render;
 
@@ -36,8 +37,7 @@ public sealed class MassCombatTestScene
     public float Elapsed =>
         _elapsed;
 
-    public long Hits =>
-        _lastHits;
+    public long Hits { get; private set; }
 
     public void Start(
         UnitSimulation simulation,
@@ -724,6 +724,7 @@ public sealed class MassCombatTestScene
         AliveBlue = blue;
         AliveRed = red;
         AliveUnits = blue + red;
+        Hits = simulation.Projectiles.TotalHits - _hitsAtReset;
         if (_elapsed <= 0.001f)
             _hitsAtReset = simulation.Projectiles.TotalHits;
     }
