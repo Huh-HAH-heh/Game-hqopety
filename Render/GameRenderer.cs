@@ -307,7 +307,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo Y=reset TAB=unit V=vision";
+            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=test Y=reset TAB=unit V=vision";
     }
 
     private void InitializeWindow()
@@ -352,6 +352,13 @@ public sealed class GameRenderer
                 !_unitSimulation.AI.Enabled;
             return;
         }
+
+        if (key == Keyboard.Key.C)
+        {
+            CombatSelfTest.Run();
+            return;
+        }
+
 
         if (key == Keyboard.Key.Y)
         {
