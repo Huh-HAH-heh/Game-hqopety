@@ -77,7 +77,7 @@ public sealed class UnitWeaponSystem
                         weapon.ReloadTime);
                 }
 
-                if (weapons.FireMode[stateIndex] != FireMode.Burst ||
+                if (weapons.CurrentFireMode[stateIndex] != FireMode.Burst ||
                     weapons.BurstRemaining[stateIndex] <= 0 ||
                     weapons.BurstTimer[stateIndex] > 0f)
                 {
@@ -164,7 +164,7 @@ public sealed class UnitWeaponSystem
             weapon.DefaultAmmunition;
 
         float aimMultiplier =
-            weapons.AimMode[stateIndex] switch
+            weapons.CurrentAimMode[stateIndex] switch
             {
                 AimMode.Snapshot => weapon.SnapshotSpreadMultiplier,
                 AimMode.SuppressFire => weapon.SuppressSpreadMultiplier,
@@ -292,7 +292,7 @@ public sealed class UnitWeaponSystem
             return false;
 
         bool continuingBurst =
-            weapons.FireMode[stateIndex] == FireMode.Burst &&
+            weapons.CurrentFireMode[stateIndex] == FireMode.Burst &&
             weapons.BurstRemaining[stateIndex] > 0;
 
         if (continuingBurst)
@@ -339,7 +339,7 @@ public sealed class UnitWeaponSystem
             return false;
         }
 
-        if (weapons.FireMode[stateIndex] == FireMode.Burst)
+        if (weapons.CurrentFireMode[stateIndex] == FireMode.Burst)
         {
             int remaining =
                 continuingBurst
@@ -364,7 +364,7 @@ public sealed class UnitWeaponSystem
 
         Console.WriteLine(
             $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
-            $"target={target} mode={weapons.FireMode[stateIndex]} aim={weapons.AimMode[stateIndex]} targetMode={weapons.TargetMode[stateIndex]} " +
+            $"target={target} mode={weapons.CurrentFireMode[stateIndex]} aim={weapons.CurrentAimMode[stateIndex]} targetMode={weapons.CurrentTargetMode[stateIndex]} " +
             $"targetPos={units.Position[targetIndex]} " +
             $"ammo={weapon.DefaultAmmunition!.Name}");
 
@@ -409,7 +409,7 @@ public sealed class UnitWeaponSystem
             units.Height[targetIndex];
 
         float targetZ =
-            weapons.TargetMode[UnitWeaponStore.GetIndex(shooterIndex, slot)] switch
+            weapons.CurrentTargetMode[UnitWeaponStore.GetIndex(shooterIndex, slot)] switch
             {
                 TargetMode.Head => targetHeight * 0.88f,
                 TargetMode.Legs => targetHeight * 0.22f,
