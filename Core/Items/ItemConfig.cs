@@ -71,6 +71,10 @@ public enum UnitWeaponSlot : byte
 
         // Projectile penetration budget consumed by this layer.
         public float PenetrationResistance;
+        public float SharpRating;
+        public float BluntRating;
+        public bool SoftArmor;
+        public float HardArmorDamageFactor = 0.5f;
 
         // CE-inspired deterministic protection threshold. Penetration below it can deflect ballistic/sharp hits.
         public float ArmorRating;
@@ -128,6 +132,12 @@ public enum UnitWeaponSlot : byte
         public byte BurstCount = 3;
         public float BurstInterval = 0.08f;
         public float SuppressionFactor = 1f;
+        public AimMode DefaultAimMode = AimMode.AimedShot;
+        public TargetMode DefaultTargetMode = TargetMode.Automatic;
+        public float AimTime = 0.2f;
+        public float Recoil = 0.1f;
+        public float SnapshotSpreadMultiplier = 2f;
+        public float SuppressSpreadMultiplier = 2.5f;
 
         // Default cartridge used when this weapon fires.
         public AmmunitionConfig? DefaultAmmunition;
