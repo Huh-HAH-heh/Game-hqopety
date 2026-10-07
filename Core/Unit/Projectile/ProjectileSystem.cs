@@ -423,7 +423,9 @@ public sealed class ProjectileSystem
                 if (!ApplyTerrainImpact(
                         projectiles,
                         projectileIndex,
-                        terrainMaterial,
+                        worldMap,
+                        cellX,
+                        cellY,
                         terrainT,
                         terrainExitT,
                         start,
@@ -607,39 +609,138 @@ public sealed class ProjectileSystem
         return true;
     }
 
+    private readonly struct TerrainMaterialInterval
+    {
+        public float EntryT { get; }
+        public float ExitT { get; }
+        public ushort MaterialId { get; }
+
+        public TerrainMaterialInterval(
+            float entryT,
+            float exitT,
+            ushort materialId)
+        {
+            EntryT = entryT;
+            ExitT = exitT;
+            MaterialId = materialId;
+        }
+    }
+
     private static bool ApplyTerrainImpact(
         ProjectileStore projectiles,
         int projectileIndex,
-        ushort materialId,
+        WorldMap worldMap,
+        int cellX,
+        int cellY,
         float entryT,
         float exitT,
         Vector3 start,
         Vector3 end,
         out bool continues)
     {
-        GetTerrainResistance(
-            materialId,
-            out float penetrationLoss,
-            out float energyLoss);
+        Span<TerrainMaterialInterval> intervals =
+            stackalloc TerrainMaterialInterval[Tile.MaxRanges];
 
-        float pathLength =
-            MathF.Max(
-                0f,
-                (exitT - entryT) *
-                (end - start).Length());
+        int count = 0;
+        float dz = end.Z - start.Z;
 
-        float thickness =
-            MathF.Max(
-                0.25f,
-                pathLength);
+        ReadOnlySpan<TileRange> ranges =
+            worldMap.GetTileRanges(
+                cellX,
+                cellY);
 
-        float penetrationCost =
-            penetrationLoss *
-            thickness;
+        for (int i = 0;
+             i < ranges.Length &&
+             count < intervals.Length;
+             i++)
+        {
+            ref readonly TileRange range =
+                ref ranges[i];
 
-        float energyCost =
-            energyLoss *
-            thickness;
+            if (range.State !=
+                WorldMap.StateSolid)
+            {
+                continue;
+            }
+
+            float rangeMinZ =
+                range.StartZ * 0.1f;
+
+            float rangeMaxZ =
+                range.EndZ * 0.1f;
+
+            float lower = entryT;
+            float upper = exitT;
+
+            if (MathF.Abs(dz) < 0.000001f)
+            {
+                float z = start.Z;
+
+                if (z < rangeMinZ ||
+                    z > rangeMaxZ)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                float t0 =
+                    (rangeMinZ - start.Z) / dz;
+
+                float t1 =
+                    (rangeMaxZ - start.Z) / dz;
+
+                if (t0 > t1)
+                    (t0, t1) = (t1, t0);
+
+                lower =
+                    MathF.Max(
+                        lower,
+                        t0);
+
+                upper =
+                    MathF.Min(
+                        upper,
+                        t1);
+
+                if (upper <= lower)
+                    continue;
+            }
+
+            intervals[count++] =
+                new TerrainMaterialInterval(
+                    lower,
+                    upper,
+                    range.MaterialId);
+        }
+
+        for (int i = 1;
+             i < count;
+             i++)
+        {
+            TerrainMaterialInterval value =
+                intervals[i];
+
+            int j = i - 1;
+
+            while (j >= 0 &&
+                   intervals[j].EntryT >
+                   value.EntryT)
+            {
+                intervals[j + 1] =
+                    intervals[j];
+                j--;
+            }
+
+            intervals[j + 1] =
+                value;
+        }
+
+        Vector3 segment =
+            end - start;
+
+        float segmentLength =
+            segment.Length();
 
         float energy =
             projectiles.Energy[
@@ -649,25 +750,57 @@ public sealed class ProjectileSystem
             projectiles.Penetration[
                 projectileIndex];
 
-        if (penetration <= penetrationCost ||
-            energy <= energyCost)
+        for (int i = 0; i < count; i++)
         {
-            continues = false;
-            return false;
+            TerrainMaterialInterval interval =
+                intervals[i];
+
+            float pathLength =
+                MathF.Max(
+                    0f,
+                    (interval.ExitT -
+                     interval.EntryT) *
+                    segmentLength);
+
+            if (pathLength <= 0.0001f)
+                continue;
+
+            GetTerrainResistance(
+                interval.MaterialId,
+                out float penetrationLoss,
+                out float energyLoss);
+
+            // The ray's actual 3D path through the material already
+            // contains the impact-angle/thickness correction.
+            float penetrationCost =
+                penetrationLoss *
+                pathLength;
+
+            float energyCost =
+                energyLoss *
+                pathLength;
+
+            if (penetration <= penetrationCost ||
+                energy <= energyCost)
+            {
+                continues = false;
+                return false;
+            }
+
+            penetration -= penetrationCost;
+            energy -= energyCost;
         }
 
         projectiles.Penetration[
             projectileIndex] =
-            penetration -
-            penetrationCost;
+            penetration;
 
         projectiles.Energy[
             projectileIndex] =
-            energy -
-            energyCost;
+            energy;
 
-        continues = true;
-        return true;
+        continues = count > 0;
+        return count > 0;
     }
 
     private static void GetTerrainResistance(
