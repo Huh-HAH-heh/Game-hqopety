@@ -24,8 +24,7 @@ public sealed class LongRangeCombatTestScene
     private bool _initialized;
     private float _elapsed;
     private float _fireTimer;
-    private int _nextShooter;
-    private long _hitsAtReset;
+        private long _hitsAtReset;
 
     public bool Initialized =>
         _initialized;
@@ -79,7 +78,7 @@ public sealed class LongRangeCombatTestScene
                 0f,
                 deltaTime);
 
-        if (_fireTimer >= 0.30f)
+        if (_fireTimer >= 1.0f)
         {
             _fireTimer = 0f;
             FireVolley(simulation);
@@ -487,8 +486,7 @@ public sealed class LongRangeCombatTestScene
 
         _elapsed = 0f;
         _fireTimer = 0f;
-        _nextShooter = 0;
-        _hitsAtReset =
+                _hitsAtReset =
             simulation.Projectiles.TotalHits;
 
         simulation.AI.Enabled = false;
@@ -599,26 +597,20 @@ public sealed class LongRangeCombatTestScene
     private void FireVolley(
         UnitSimulation simulation)
     {
-        const int shootersPerVolley = 8;
-
         for (int i = 0;
-             i < shootersPerVolley;
+             i < TotalUnits;
              i++)
         {
-            int shooterSlot =
-                _nextShooter++ %
-                TotalUnits;
-
             UnitId shooter =
-                _units[shooterSlot];
+                _units[i];
 
             if (!simulation.Units.IsAlive(shooter))
                 continue;
 
             int targetSlot =
-                shooterSlot < UnitsPerFaction
-                    ? shooterSlot + UnitsPerFaction
-                    : shooterSlot - UnitsPerFaction;
+                i < UnitsPerFaction
+                    ? i + UnitsPerFaction
+                    : i - UnitsPerFaction;
 
             UnitId target =
                 _units[targetSlot];
