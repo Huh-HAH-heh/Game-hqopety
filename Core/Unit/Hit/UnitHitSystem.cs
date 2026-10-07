@@ -154,6 +154,12 @@ public sealed class UnitHitSystem
                 0.05f,
                 units.Height[unitIndex]);
 
+        if (units.Posture[unitIndex] ==
+            UnitPosture.Crouching)
+        {
+            height *= 0.62f;
+        }
+
         if (units.Type[unitIndex] ==
             UnitType.Greenbob)
         {
