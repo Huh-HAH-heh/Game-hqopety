@@ -16,6 +16,7 @@ public readonly struct DamageEvent
     public float Energy { get; }
     public float InitialEnergy { get; }
     public float Penetration { get; }
+    public float BluntPenetration { get; }
     public DamageType DamageType { get; }
     public float BleedChance { get; }
 
@@ -29,6 +30,7 @@ public readonly struct DamageEvent
         float energy,
         float initialEnergy,
         float penetration,
+        float bluntPenetration,
         DamageType damageType,
         float bleedChance)
     {
@@ -41,6 +43,7 @@ public readonly struct DamageEvent
         Energy = energy;
         InitialEnergy = initialEnergy;
         Penetration = penetration;
+        BluntPenetration = bluntPenetration;
         DamageType = damageType;
         BleedChance = bleedChance;
     }
