@@ -15,6 +15,7 @@ public sealed class ProjectileStore
     private float[] _energy;
     private float[] _initialEnergy;
     private float[] _penetration;
+    private float[] _bluntPenetration;
     private float[] _baseDamage;
     private float[] _massKg;
     private float[] _diameterM;
@@ -51,6 +52,7 @@ public sealed class ProjectileStore
     public float[] Energy => _energy;
     public float[] InitialEnergy => _initialEnergy;
     public float[] Penetration => _penetration;
+    public float[] BluntPenetration => _bluntPenetration;
     public float[] BaseDamage => _baseDamage;
     public float[] MassKg => _massKg;
     public float[] DiameterM => _diameterM;
@@ -79,6 +81,7 @@ public sealed class ProjectileStore
         _energy = new float[initialCapacity];
         _initialEnergy = new float[initialCapacity];
         _penetration = new float[initialCapacity];
+        _bluntPenetration = new float[initialCapacity];
         _baseDamage = new float[initialCapacity];
         _massKg = new float[initialCapacity];
         _diameterM = new float[initialCapacity];
@@ -108,6 +111,7 @@ public sealed class ProjectileStore
         float muzzleVelocity,
         float dragCoefficient,
         float penetration,
+        float bluntPenetration,
         float baseDamage,
         float lifetime,
         DamageType damageType = DamageType.Ballistic,
@@ -164,6 +168,10 @@ public sealed class ProjectileStore
             MathF.Max(
                 0f,
                 penetration);
+        _bluntPenetration[index] =
+            MathF.Max(
+                0f,
+                bluntPenetration);
         _baseDamage[index] =
             MathF.Max(
                 0f,
@@ -310,6 +318,9 @@ public sealed class ProjectileStore
             newCapacity);
         Array.Resize(
             ref _penetration,
+            newCapacity);
+        Array.Resize(
+            ref _bluntPenetration,
             newCapacity);
         Array.Resize(
             ref _baseDamage,
