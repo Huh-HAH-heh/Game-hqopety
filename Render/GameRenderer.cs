@@ -25,7 +25,7 @@ public sealed class GameRenderer
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
     private readonly VisionTestScene _visionTestScene;
-    private readonly MassCombatTestScene _massCombatTestScene;
+    private readonly LongRangeCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
 
@@ -72,7 +72,7 @@ public sealed class GameRenderer
             new VisionTestScene();
 
         _massCombatTestScene =
-            new MassCombatTestScene();
+            new LongRangeCombatTestScene();
 
         CreateVisionTestScene();
         _unitSimulation.AI.Enabled = true;
@@ -167,7 +167,7 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _selectedUnit,
             _showVisionDebug && !_massCombatMode,
-            true,
+            !_massCombatMode,
             false);
 
         _projectileRenderer.Draw(
