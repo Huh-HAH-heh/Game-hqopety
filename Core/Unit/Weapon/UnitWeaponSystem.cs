@@ -291,6 +291,30 @@ public sealed class UnitWeaponSystem
         if (weapon == null)
             return false;
 
+        if (weapons.CurrentAimMode[stateIndex] == AimMode.AimedShot)
+        {
+            bool resetAim =
+                weapons.AimTarget[stateIndex] != target;
+
+            weapons.SetAimTarget(
+                shooterIndex,
+                slot,
+                target,
+                resetAim);
+
+            if (weapons.AimTimer[stateIndex] <
+                MathF.Max(0f, weapon.AimTime))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            weapons.ClearAim(
+                shooterIndex,
+                slot);
+        }
+
         bool continuingBurst =
             weapons.CurrentFireMode[stateIndex] == FireMode.Burst &&
             weapons.BurstRemaining[stateIndex] > 0;
