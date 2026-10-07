@@ -28,6 +28,9 @@ public sealed class MassCombatTestScene
     public bool Initialized =>
         _initialized;
 
+    public UnitId FirstUnit =>
+        _units[0];
+
     public int AliveUnits { get; private set; }
 
     public int AliveBlue { get; private set; }
