@@ -121,7 +121,8 @@ public sealed class UnitWeaponSystem
         float accuracyMultiplier = 1f,
         float shotRange = 0f,
         float lifetimeOverride = 0f,
-        float shotFlightTime = 0f)
+        float shotFlightTime = 0f,
+        float targetSpeed = 0f)
     {
         if (!units.TryGetIndex(
                 shooter,
@@ -193,7 +194,7 @@ public sealed class UnitWeaponSystem
                 aimProgress,
                 weapons.CurrentAimMode[stateIndex],
                 weapon.CircularError,
-                0f,
+                targetSpeed,
                 shotFlightTime,
                 weapon.LeadError) *
             MathF.Max(
@@ -594,7 +595,8 @@ public sealed class UnitWeaponSystem
             MathF.Max(
                 0.5f,
                 solution.TimeOfFlight + 0.25f),
-            solution.TimeOfFlight);
+            solution.TimeOfFlight,
+            units.Velocity[targetIndex].Length());
     }
 
     private static AmmunitionConfig? GetCurrentAmmunition(
