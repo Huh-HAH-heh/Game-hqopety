@@ -22,6 +22,9 @@ public sealed class UnitSimulation
     public UnitWeaponStore Weapons { get; }
     public ProjectileStore Projectiles { get; }
     public UnitSuppressionStore Suppression { get; }
+
+    public bool VisionEnabled { get; set; } = true;
+
     public UnitAiSystem AI =>
         _aiSystem;
     public VisionSystem Vision =>
@@ -429,10 +432,13 @@ public sealed class UnitSimulation
             Units,
             deltaTime);
 
-        _visionSystem.Update(
-            Units,
-            worldMap,
-            deltaTime);
+        if (VisionEnabled)
+        {
+            _visionSystem.Update(
+                Units,
+                worldMap,
+                deltaTime);
+        }
 
         _aiSystem.Update(
             Units,
