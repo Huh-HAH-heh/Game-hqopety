@@ -19,7 +19,7 @@ public sealed class MassCombatTestScene
 
     private bool _initialized;
     private float _elapsed;
-    private long _lastHits;
+    private long _hitsAtReset;
 
     public int UnitCount =>
         TotalUnitCount;
@@ -80,7 +80,7 @@ public sealed class MassCombatTestScene
             $"Red {AliveRed} | " +
             $"Alive {AliveUnits} | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
-            $"Hits {simulation.Projectiles.TotalHits - _lastHits} lastTick | " +
+            $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
     }
 
@@ -346,8 +346,8 @@ public sealed class MassCombatTestScene
                 {
                     float baseX =
                         side == 0
-                            ? centerX - 44f
-                            : centerX + 44f;
+                            ? centerX - 18f
+                            : centerX + 2f;
 
                     float x =
                         baseX +
@@ -531,8 +531,8 @@ public sealed class MassCombatTestScene
 
             float baseX =
                 side == 0
-                    ? centerX - 44f
-                    : centerX + 44f;
+                    ? centerX - 18f
+                    : centerX + 2f;
 
             float x =
                 baseX +
@@ -724,6 +724,7 @@ public sealed class MassCombatTestScene
         AliveBlue = blue;
         AliveRed = red;
         AliveUnits = blue + red;
-        _lastHits = simulation.Projectiles.TotalHits;
+        if (_elapsed <= 0.001f)
+            _hitsAtReset = simulation.Projectiles.TotalHits;
     }
 }
