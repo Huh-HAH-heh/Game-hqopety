@@ -8,20 +8,26 @@ public readonly struct ArmorResolution
     public float Damage { get; }
     public float Energy { get; }
     public float Penetration { get; }
+    public float BluntImpactDamage { get; }
     public float ArmorDamage { get; }
+    public bool Deflected { get; }
     public bool Stopped { get; }
 
     public ArmorResolution(
         float damage,
         float energy,
         float penetration,
+        float bluntImpactDamage,
         float armorDamage,
+        bool deflected,
         bool stopped)
     {
         Damage = damage;
         Energy = energy;
         Penetration = penetration;
+        BluntImpactDamage = bluntImpactDamage;
         ArmorDamage = armorDamage;
+        Deflected = deflected;
         Stopped = stopped;
     }
 }
@@ -33,115 +39,237 @@ public static class ArmorResolver
         float damage,
         float energy,
         float penetration,
+        float bluntPenetration,
         ArmorConfig armor)
     {
         damage = MathF.Max(0f, damage);
         energy = MathF.Max(0f, energy);
         penetration = MathF.Max(0f, penetration);
+        bluntPenetration = MathF.Max(0f, bluntPenetration);
 
-        float resistance =
-            MathF.Max(
-                0f,
-                MathF.Max(
-                    armor.PenetrationResistance,
-                    armor.ArmorRating));
+        bool sharp =
+            damageType == DamageType.Ballistic ||
+            damageType == DamageType.Sharp;
 
-        float energyLoss =
-            MathF.Max(0f, armor.EnergyLoss);
+        float armorAmount =
+            GetArmorAmount(
+                damageType,
+                armor);
 
-        float originalDamage = damage;
+        float originalDamage =
+            damage;
+
+        float newPenetration =
+            penetration -
+            armorAmount;
 
         bool deflected =
-            penetration > 0f &&
-            resistance > 0f &&
-            penetration < resistance &&
-            (damageType == DamageType.Ballistic ||
-             damageType == DamageType.Sharp);
-
-        if (deflected)
-        {
-            float armorDamage =
-                originalDamage *
-                Math.Clamp(
-                    armor.ArmorDamageCoefficient,
-                    0f,
-                    1f);
-
-            return new ArmorResolution(
-                0f,
-                0f,
-                0f,
-                armorDamage,
-                true);
-        }
-
-        float residualPenetration =
-            resistance <= 0.001f
-                ? penetration
-                : MathF.Max(
-                    0f,
-                    penetration - resistance);
+            sharp &&
+            armorAmount > penetration;
 
         float damageMultiplier =
-            resistance <= 0.001f
+            penetration <= 0.001f
                 ? 1f
                 : Math.Clamp(
-                    residualPenetration /
-                    MathF.Max(
-                        penetration,
-                        0.001f),
+                    newPenetration /
+                    penetration,
                     0f,
                     1f);
 
-        float absorption =
-            Math.Clamp(
-                armor.DamageAbsorption,
-                0f,
-                0.95f);
+        if (deflected)
+            damageMultiplier = 0f;
 
-        float penetrationDamage =
+        float newDamage =
             originalDamage *
-            (0.20f +
-             0.80f * damageMultiplier);
-
-        damage =
-            penetrationDamage *
-            (1f - absorption);
+            damageMultiplier;
 
         float absorbed =
             MathF.Max(
                 0f,
-                originalDamage - damage);
+                originalDamage - newDamage);
 
         float armorDamage =
-            absorbed *
-            Math.Clamp(
-                armor.ArmorDamageCoefficient,
-                0f,
-                1f);
+            CalculateArmorDamage(
+                damageType,
+                armor,
+                penetration,
+                armorAmount,
+                originalDamage,
+                newDamage);
 
-        energy =
-            MathF.Max(
-                0f,
-                energy - energyLoss);
+        float bluntImpactDamage = 0f;
+
+        if (deflected)
+        {
+            bluntImpactDamage =
+                CalculateDeflectionBluntDamage(
+                    bluntPenetration);
+
+            newPenetration = 0f;
+            energy = 0f;
+        }
+        else
+        {
+            energy =
+                MathF.Max(
+                    0f,
+                    energy -
+                    MathF.Max(
+                        0f,
+                        armor.EnergyLoss));
+
+            newPenetration =
+                MathF.Max(
+                    0f,
+                    newPenetration);
+
+            if (sharp &&
+                originalDamage > newDamage &&
+                bluntPenetration > 0f)
+            {
+                bluntImpactDamage =
+                    MathF.Min(
+                        originalDamage - newDamage,
+                        CalculateDeflectionBluntDamage(
+                            bluntPenetration) *
+                        0.5f);
+            }
+        }
 
         bool stopped =
-            residualPenetration <= 0.001f ||
+            deflected ||
+            newPenetration <= 0.001f ||
             energy <= 1f;
 
-        if (stopped)
+        if (stopped &&
+            !deflected)
         {
-            damage =
+            newDamage =
                 MathF.Min(
-                    damage,
+                    newDamage,
                     originalDamage * 0.20f);
         }
 
         return new ArmorResolution(
-            damage,
+            newDamage,
             energy,
-            residualPenetration,
+            newPenetration,
+            bluntImpactDamage,
             armorDamage,
+            deflected,
             stopped);
+    }
+
+    private static float GetArmorAmount(
+        DamageType damageType,
+        ArmorConfig armor)
+    {
+        return damageType switch
+        {
+            DamageType.Blunt =>
+                armor.BluntRating > 0f
+                    ? armor.BluntRating
+                    : MathF.Max(
+                        armor.PenetrationResistance,
+                        armor.ArmorRating),
+
+            DamageType.Heat =>
+                armor.HeatRating > 0f
+                    ? armor.HeatRating
+                    : armor.ArmorRating,
+
+            _ =>
+                armor.SharpRating > 0f
+                    ? armor.SharpRating
+                    : MathF.Max(
+                        armor.PenetrationResistance,
+                        armor.ArmorRating)
+        };
+    }
+
+    private static float CalculateArmorDamage(
+        DamageType damageType,
+        ArmorConfig armor,
+        float penetration,
+        float armorAmount,
+        float originalDamage,
+        float newDamage)
+    {
+        if (armorAmount <= 0f)
+            return 0f;
+
+        if (armor.SoftArmor)
+        {
+            if (damageType != DamageType.Ballistic &&
+                damageType != DamageType.Sharp)
+            {
+                return 0f;
+            }
+
+            float absorbed =
+                MathF.Max(
+                    originalDamage * 0.20f,
+                    originalDamage - newDamage);
+
+            return absorbed *
+                Math.Clamp(
+                    armor.ArmorDamageCoefficient,
+                    0f,
+                    1f);
+        }
+
+        if (damageType == DamageType.Blunt &&
+            penetration / armorAmount < 0.5f)
+        {
+            return 0f;
+        }
+
+        float factor =
+            Math.Clamp(
+                armor.HardArmorDamageFactor,
+                0f,
+                1f);
+
+        if (penetration <= 0.001f)
+            return 0f;
+
+        float absorbedDamage =
+            MathF.Max(
+                0f,
+                originalDamage - newDamage);
+
+        float matchedPenDamage =
+            absorbedDamage *
+            MathF.Min(
+                1f,
+                (penetration * penetration) /
+                (armorAmount * armorAmount));
+
+        float overPenDamage =
+            newDamage *
+            Math.Clamp(
+                armorAmount /
+                penetration,
+                0f,
+                1f);
+
+        return
+            (matchedPenDamage +
+             overPenDamage) *
+            factor;
+    }
+
+    private static float CalculateDeflectionBluntDamage(
+        float bluntPenetration)
+    {
+        if (bluntPenetration <= 0f)
+            return 0f;
+
+        return
+            MathF.Pow(
+                bluntPenetration *
+                10000f,
+                1f / 3f) /
+            10f;
     }
 }
