@@ -23,6 +23,8 @@ public sealed class LongRangeCombatTestScene
 
     private bool _initialized;
     private float _elapsed;
+    private float _fireTimer;
+    private int _nextShooter;
     private long _hitsAtReset;
 
     public bool Initialized =>
@@ -47,6 +49,8 @@ public sealed class LongRangeCombatTestScene
             BuildTerrain(worldMap);
             SpawnUnits(simulation, worldMap);
             _initialized = true;
+            simulation.AI.Enabled = false;
+            simulation.VisionEnabled = false;
             _hitsAtReset = simulation.Projectiles.TotalHits;
         }
         else
@@ -69,6 +73,17 @@ public sealed class LongRangeCombatTestScene
             MathF.Max(
                 0f,
                 deltaTime);
+
+        _fireTimer +=
+            MathF.Max(
+                0f,
+                deltaTime);
+
+        if (_fireTimer >= 0.30f)
+        {
+            _fireTimer = 0f;
+            FireVolley(simulation);
+        }
 
         UpdateStats(simulation);
     }
@@ -471,8 +486,14 @@ public sealed class LongRangeCombatTestScene
             worldMap.TileHeight / 2;
 
         _elapsed = 0f;
+        _fireTimer = 0f;
+        _nextShooter = 0;
         _hitsAtReset =
             simulation.Projectiles.TotalHits;
+
+        simulation.AI.Enabled = false;
+        simulation.VisionEnabled = false;
+        simulation.Projectiles.Clear();
 
         for (int i = 0;
              i < TotalUnits;
@@ -572,6 +593,43 @@ public sealed class LongRangeCombatTestScene
             RestoreWeapon(
                 simulation,
                 unit);
+        }
+    }
+
+    private void FireVolley(
+        UnitSimulation simulation)
+    {
+        const int shootersPerVolley = 8;
+
+        for (int i = 0;
+             i < shootersPerVolley;
+             i++)
+        {
+            int shooterSlot =
+                _nextShooter++ %
+                TotalUnits;
+
+            UnitId shooter =
+                _units[shooterSlot];
+
+            if (!simulation.Units.IsAlive(shooter))
+                continue;
+
+            int targetSlot =
+                shooterSlot < UnitsPerFaction
+                    ? shooterSlot + UnitsPerFaction
+                    : shooterSlot - UnitsPerFaction;
+
+            UnitId target =
+                _units[targetSlot];
+
+            if (!simulation.Units.IsAlive(target))
+                continue;
+
+            simulation.FireWeaponAt(
+                shooter,
+                UnitWeaponSlot.Primary,
+                target);
         }
     }
 
