@@ -24,18 +24,18 @@ The second pass corrected several places where an approximation had been present
 
 | CE mechanic | RimClone status | Notes |
 | --- | --- | --- |
-| Ballistic projectile flight | PRESENT | Existing RimClone system already had speed, mass, diameter, drag, gravity and continuous tracing. |
-| Projectile height / 3D trajectory | PRESENT | Existing projectile Z and terrain interval tracing retained. |
+| Ballistic projectile flight | IMPROVED | Shared solver now returns direction, time-of-flight and impact velocity/energy; runtime projectiles use the same drag model. |
+| Projectile height / 3D trajectory | IMPROVED | Solver and runtime projectile use the same 3D trajectory model; terrain traversal is now layered. |
 | Projectile vs body hitboxes | PRESENT | Existing ellipsoid hit volumes retained; crouching now changes effective hitbox height. |
 | Armor penetration / deflection | IMPROVED | Reworked toward CE's deflection + partial penetration model. Separate sharp/blunt penetration is now stored. |
 | Armor damage | IMPROVED | Hard/soft armor behavior is represented; armor durability still uses RimClone's own storage. |
 | Deflected sharp -> blunt impact | PRESENT | Implemented as a portable approximation of CE's conversion. |
 | Partial penetration blunt transfer | PRESENT | Implemented as a portable approximation. |
-| Fire modes | PARTIAL | Single/Burst/Auto are present. Current UI/control switching is not yet implemented. |
-| Aim modes | PARTIAL | Aimed/Snapshot/Suppress are represented through spread behavior, but CE's full warmup/aim-state model is not yet ported. |
+| Fire modes | PRESENT | Single/Burst/Auto are present and debug switching is wired. |
+| Aim modes | IMPROVED | Aimed/Snapshot/Suppress use warmup and the shared accuracy kernel; full CE sight-state details remain simplified. |
 | Target body selection | PARTIAL | Torso/Head/Leg target modes now affect aim point; automatic body-part weighting is not yet CE-level. |
-| Recoil | PARTIAL | Recoil is stored and increases spread; full CE recoil pattern / animation model is not ported. |
-| Sway / sight efficiency / skill handling | MISSING | Needs a dedicated shooter-state accuracy model. |
+| Recoil | IMPROVED | Recoil contributes to shot error and decays over time; full CE recoil pattern animation remains omitted. |
+| Sway / sight efficiency / skill handling | PARTIAL | Shared ShotAccuracy includes sway, sight efficiency and aiming accuracy; dedicated per-unit shooter skill is still missing. |
 | Crouching in combat | PRESENT | Added to posture and used by hitbox / vision height; movement/animation behavior remains simple. |
 | Suppression near-miss | PARTIAL | Near misses now add suppression. CE's richer danger/airborne factors and tactical helper behaviors are not all ported. |
 | Suppression -> reduced accuracy | PRESENT | Suppression modifies spread. |
@@ -45,10 +45,10 @@ The second pass corrected several places where an approximation had been present
 | Smoke as counter to suppression | MISSING | No smoke tactical action yet. |
 | Fire-mode targetting mode UI | MISSING | No player gizmo equivalent yet. |
 | Ammo requirement | PRESENT | Existing weapon magazine/reserve system retained. |
-| Ammo sets / interchangeable ammo | MISSING | Current weapon fires `DefaultAmmunition` only. |
+| Ammo sets / interchangeable ammo | PRESENT | Weapons now expose AmmoSet, store reserve counts per ammo type and can select the current cartridge. |
 | Opportunistic / partial reload | MISSING | Latest CE has opportunistic reload thresholds; not yet ported. |
 | Ammo-specific modifiers | PARTIAL | Projectile now carries penetration, drag, suppression and bleed metadata; broader CE modifier surface is still missing. |
-| Pellets / shotguns | MISSING | `pelletCount` not yet simulated. |
+| Pellets / shotguns | PRESENT | One cartridge can spawn multiple independently-traced projectiles with individual spread. |
 | Secondary damage | MISSING | CE supports chained secondary damage entries. |
 | Explosions / fragments | MISSING | No CE-style fragmentation/explosion kernel yet. |
 | Rockets / fuel acceleration / special trajectories | MISSING | No reusable equivalent yet. |
@@ -72,11 +72,9 @@ This was intentional, but `DamageAbsorption` should now be treated as legacy/com
 ## What should be ported next
 
 ### Tier 1 — core gunplay
-1. Full accuracy model: sway, recoil, movement, aim time and shooter skill.
-2. Proper aim-mode state machine.
-3. Ammo sets and ammo switching.
-4. Pellets / multi-projectile shots.
-5. Secondary damage / explosions / fragments.
+1. Dedicated unit shooter skill / handling stat instead of only weapon-side aiming accuracy.
+2. Full sight-state details and recoil pattern progression.
+3. Secondary damage / explosions / fragments.
 
 ### Tier 2 — combat depth
 1. Shield/interceptor layer.
@@ -101,3 +99,10 @@ Keep the RimClone data-oriented boundary:
 `Weapon/Ammo data -> ProjectileStore -> ProjectileSystem -> Hit -> Armor -> Damage -> Health -> AI`
 
 Game-specific world queries should supply terrain, cover, target geometry and faction rules. The combat kernel should not know about RimWorld's `Pawn`, `Thing`, `Map`, `Verb`, `Job` or `Def`.
+
+
+## Third-pass implementation notes
+
+The follow-up pass now contains the core fixes: shared ballistic flight solution, moving-target prediction, a combined shot-accuracy kernel, layered terrain material penetration, AmmoSet/per-type reserve storage, and pellet projectiles.
+
+Build note: GitHub reports no workflow runs/status checks for the latest branch head, so local `dotnet build` is still required before merge.
