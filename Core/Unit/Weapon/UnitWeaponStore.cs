@@ -34,9 +34,9 @@ public sealed class UnitWeaponStore
     public byte[] BurstRemaining => _burstRemaining;
     public float[] BurstTimer => _burstTimer;
     public UnitId[] BurstTarget => _burstTarget;
-    public FireMode[] FireMode => _fireMode;
-    public AimMode[] AimMode => _aimMode;
-    public TargetMode[] TargetMode => _targetMode;
+    public FireMode[] CurrentFireMode => _fireMode;
+    public AimMode[] CurrentAimMode => _aimMode;
+    public TargetMode[] CurrentTargetMode => _targetMode;
 
     public UnitWeaponStore(
         int initialUnitCapacity = DefaultUnitCapacity)
