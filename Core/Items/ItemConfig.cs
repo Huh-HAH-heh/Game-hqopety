@@ -73,6 +73,7 @@ public enum UnitWeaponSlot : byte
         public float PenetrationResistance;
         public float SharpRating;
         public float BluntRating;
+        public float HeatRating;
         public bool SoftArmor;
         public float HardArmorDamageFactor = 0.5f;
 
