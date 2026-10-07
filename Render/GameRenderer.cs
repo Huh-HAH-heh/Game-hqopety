@@ -492,8 +492,32 @@ public sealed class GameRenderer
                         unitIndex,
                         UnitWeaponSlot.Primary);
 
+                int currentAmmo =
+                    _unitSimulation.Weapons.CurrentAmmoType[stateIndex];
+
                 int nextAmmo =
-                    _unitSimulation.Weapons.CurrentAmmoType[stateIndex] + 1;
+                    currentAmmo + 1;
+
+                short inventorySlot =
+                    _unitSimulation.Inventory.GetWeaponEquipment(
+                        unitIndex,
+                        UnitWeaponSlot.Primary);
+
+                if (inventorySlot >= 0)
+                {
+                    RangedWeaponConfig? weapon =
+                        _unitSimulation.Inventory.GetItem(
+                            unitIndex,
+                            inventorySlot) as RangedWeaponConfig;
+
+                    int ammoCount =
+                        weapon?.AmmoSet?.Count ?? 1;
+
+                    nextAmmo =
+                        ammoCount <= 0
+                            ? 0
+                            : nextAmmo % ammoCount;
+                }
 
                 _unitSimulation.SelectAmmunition(
                     _selectedUnit,
