@@ -11,6 +11,11 @@ public sealed class AmmunitionConfig : ItemConfig
     public float MuzzleVelocity;
     public float DragCoefficient = 0.30f;
     public float Penetration;
+    public float SharpPenetration;
+    public float BluntPenetration;
+    public int PelletCount = 1;
+    public float SpreadMultiplier = 1f;
+    public float RecoilMultiplier = 1f;
     public float DamageMultiplier = 1f;
     public DamageType DamageType = DamageType.Ballistic;
     public float SuppressionFactor = 1f;
@@ -28,6 +33,8 @@ public static class WeaponCatalog
             MuzzleVelocity = 930f,
             DragCoefficient = 0.30f,
             Penetration = 90f,
+            SharpPenetration = 90f,
+            BluntPenetration = 70f,
             DamageMultiplier = 1f
         };
 
@@ -41,6 +48,8 @@ public static class WeaponCatalog
             MuzzleVelocity = 380f,
             DragCoefficient = 0.32f,
             Penetration = 45f,
+            SharpPenetration = 45f,
+            BluntPenetration = 30f,
             DamageMultiplier = 1f
         };
 
