@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
@@ -35,6 +36,12 @@ public sealed class GameRenderer
     private bool _showVisionDebug = true;
     private bool _massCombatMode;
     private int _visionTestIndex;
+
+    private float _perfTimer;
+    private int _perfFrames;
+    private float _fps;
+    private long _workingSetBytes;
+    private long _allocatedBytes;
 
     public GameRenderer(
         WorldMap worldMap)
@@ -110,6 +117,29 @@ public sealed class GameRenderer
         float deltaTime)
     {
         _input.Update();
+
+        _perfTimer += deltaTime;
+        _perfFrames++;
+
+        if (_perfTimer >= 1f)
+        {
+            _fps =
+                _perfFrames /
+                _perfTimer;
+
+            _perfFrames = 0;
+            _perfTimer = 0f;
+
+            using Process process =
+                Process.GetCurrentProcess();
+
+            _workingSetBytes =
+                process.WorkingSet64;
+
+            _allocatedBytes =
+                GC.GetTotalAllocatedBytes(
+                    false);
+        }
 
         _camera.Update(
             _input.MoveDirection,
@@ -326,7 +356,9 @@ public sealed class GameRenderer
                 : "MASS OFF";
 
         return
-            $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
+            $"RimClone | FPS={_fps:0.0} RAM={_workingSetBytes / 1024d / 1024d:0}MB " +
+            $"Alloc={_allocatedBytes / 1024d / 1024d:0}MB | " +
+            $"Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles} Hits={hits} | " +
             $"Teams 1:{teamOneAlive} 2:{teamTwoAlive} | " +
             $"AI={ai}:{aiState} | " +
