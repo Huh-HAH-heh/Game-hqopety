@@ -15,3 +15,25 @@ public enum FireMode : byte
     Burst = 1,
     Auto = 2
 }
+
+public enum AimMode : byte
+{
+    AimedShot = 0,
+    Snapshot = 1,
+    SuppressFire = 2
+}
+
+public enum TargetMode : byte
+{
+    Automatic = 0,
+    Torso = 1,
+    Head = 2,
+    Legs = 3
+}
+
+public enum ArmorClass : byte
+{
+    Sharp = 0,
+    Blunt = 1,
+    Heat = 2
+}
