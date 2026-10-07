@@ -41,6 +41,7 @@ public sealed class GameRenderer
     private int _perfFrames;
     private float _fps;
     private long _workingSetBytes;
+    private long _managedHeapBytes;
     private long _allocatedBytes;
     private float _titleTimer;
     private string _windowTitle = "RimClone";
@@ -138,6 +139,10 @@ public sealed class GameRenderer
 
             _workingSetBytes =
                 process.WorkingSet64;
+
+            _managedHeapBytes =
+                GC.GetTotalMemory(
+                    false);
 
             _allocatedBytes =
                 GC.GetTotalAllocatedBytes(
@@ -364,7 +369,8 @@ public sealed class GameRenderer
 
         return
             $"RimClone | FPS={_fps:0.0} RAM={_workingSetBytes / 1024d / 1024d:0}MB " +
-            $"Alloc={_allocatedBytes / 1024d / 1024d:0}MB | " +
+            $"Heap={_managedHeapBytes / 1024d / 1024d:0}MB " +
+            $"AllocTotal={_allocatedBytes / 1024d / 1024d:0}MB | " +
             $"Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles} Hits={hits} | " +
             $"Teams 1:{teamOneAlive} 2:{teamTwoAlive} | " +
