@@ -219,6 +219,22 @@ public sealed class ProjectileStore
         LastHitPosition = position;
     }
 
+    public void Clear()
+    {
+        while (_activeCount > 0)
+        {
+            int index =
+                _activeIndices[_activeCount - 1];
+
+            DestroyIndex(index);
+        }
+
+        TotalHits = 0;
+        LastHitPosition = Vector3.Zero;
+        LastHitTarget = default;
+        LastHitPart = UnitHealthPartId.None;
+    }
+
     public bool Destroy(
         ProjectileId id)
     {
