@@ -76,6 +76,8 @@ public sealed class GameRenderer
 
         CreateVisionTestScene();
         _unitSimulation.AI.Enabled = true;
+
+        EnterMassCombatMode();
     }
 
     public void Run()
