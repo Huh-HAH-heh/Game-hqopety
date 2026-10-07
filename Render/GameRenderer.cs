@@ -307,7 +307,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"A=AI B=ballistic F=direct M=fire N=aim K=target Y=reset TAB=unit V=vision";
+            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo Y=reset TAB=unit V=vision";
     }
 
     private void InitializeWindow()
@@ -476,6 +476,29 @@ public sealed class GameRenderer
                 _unitSimulation.Weapons.CycleTargetMode(
                     unitIndex,
                     UnitWeaponSlot.Primary);
+            }
+
+            return;
+        }
+
+        if (key == Keyboard.Key.L)
+        {
+            if (_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int unitIndex))
+            {
+                int stateIndex =
+                    UnitWeaponStore.GetIndex(
+                        unitIndex,
+                        UnitWeaponSlot.Primary);
+
+                int nextAmmo =
+                    _unitSimulation.Weapons.CurrentAmmoType[stateIndex] + 1;
+
+                _unitSimulation.SelectAmmunition(
+                    _selectedUnit,
+                    UnitWeaponSlot.Primary,
+                    nextAmmo);
             }
 
             return;
