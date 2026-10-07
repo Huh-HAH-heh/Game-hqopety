@@ -163,11 +163,27 @@ public sealed class UnitWeaponSystem
         AmmunitionConfig ammo =
             weapon.DefaultAmmunition;
 
+        float aimMultiplier =
+            weapon.DefaultAimMode switch
+            {
+                AimMode.Snapshot => weapon.SnapshotSpreadMultiplier,
+                AimMode.SuppressFire => weapon.SuppressSpreadMultiplier,
+                _ => 1f
+            };
+
+        float movementMultiplier =
+            1f +
+            MathF.Min(
+                2f,
+                units.Velocity[unitIndex].Length() * 0.12f);
+
         float spread =
             weapon.GetCurrentSpread() *
-            MathF.Max(
-                1f,
-                accuracyMultiplier);
+            MathF.Max(1f, accuracyMultiplier) *
+            aimMultiplier *
+            movementMultiplier *
+            MathF.Max(0.1f, ammo.SpreadMultiplier) +
+            weapons.Recoil[stateIndex] * 0.015f;
 
         Vector3 shotDirection =
             ApplySpread(
@@ -196,7 +212,8 @@ public sealed class UnitWeaponSystem
         float range =
             MathF.Max(
                 1f,
-                weapon.TotalEffectiveRange);
+                weapon.TotalEffectiveRange) *
+            MathF.Max(0.01f, ammo.SpreadMultiplier > 0f ? 1f : 1f);
 
         float lifetime =
             MathF.Max(
@@ -212,7 +229,9 @@ public sealed class UnitWeaponSystem
             ammo.ProjectileDiameterM,
             ammo.MuzzleVelocity,
             ammo.DragCoefficient,
-            ammo.Penetration,
+            ammo.SharpPenetration > 0f
+                ? ammo.SharpPenetration
+                : ammo.Penetration,
             weapon.BaseDamage *
             ammo.DamageMultiplier,
             lifetime,
@@ -222,6 +241,12 @@ public sealed class UnitWeaponSystem
             weapon.BleedChance);
 
         weapons.Ammo[stateIndex]--;
+        weapons.AddRecoil(
+            unitIndex,
+            slot,
+            weapon.Recoil *
+            MathF.Max(0.1f, ammo.RecoilMultiplier));
+
         weapons.Cooldown[stateIndex] =
             MathF.Max(
                 0f,
@@ -378,15 +403,24 @@ public sealed class UnitWeaponSystem
                 units,
                 shooterIndex);
 
+        float targetHeight =
+            units.Height[targetIndex];
+
+        float targetZ =
+            weapon.DefaultTargetMode switch
+            {
+                TargetMode.Head => targetHeight * 0.88f,
+                TargetMode.Legs => targetHeight * 0.22f,
+                TargetMode.Torso => targetHeight * 0.55f,
+                _ => targetHeight * 0.55f
+            };
+
         Vector3 targetPoint =
             units.Position[targetIndex] +
             new Vector3(
                 0f,
                 0f,
-                MathF.Max(
-                    0.05f,
-                    units.Height[targetIndex] *
-                    0.55f));
+                MathF.Max(0.05f, targetZ));
 
         Vector3 horizontalTargetDelta =
             targetPoint - muzzle;
