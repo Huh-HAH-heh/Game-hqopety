@@ -307,7 +307,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"A=AI B=ballistic F=direct Y=reset TAB=unit V=vision";
+            $"A=AI B=ballistic F=direct M=fire N=aim K=target Y=reset TAB=unit V=vision";
     }
 
     private void InitializeWindow()
@@ -436,6 +436,48 @@ public sealed class GameRenderer
                 _selectedUnit,
                 UnitHealthPartId.Torso,
                 70f);
+            return;
+        }
+
+        if (key == Keyboard.Key.M)
+        {
+            if (_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int unitIndex))
+            {
+                _unitSimulation.Weapons.CycleFireMode(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+            }
+
+            return;
+        }
+
+        if (key == Keyboard.Key.N)
+        {
+            if (_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int unitIndex))
+            {
+                _unitSimulation.Weapons.CycleAimMode(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+            }
+
+            return;
+        }
+
+        if (key == Keyboard.Key.K)
+        {
+            if (_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int unitIndex))
+            {
+                _unitSimulation.Weapons.CycleTargetMode(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+            }
+
             return;
         }
 
