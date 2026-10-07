@@ -175,6 +175,25 @@ public sealed class UnitAiSystem
                     vision.GetVisibleTargets(unit),
                     target.Index);
 
+            bool moving =
+                units.Velocity[unit].LengthSquared() >
+                0.04f;
+
+            if (targetVisible &&
+                !moving &&
+                suppressionState != UnitSuppressionState.Panicked)
+            {
+                units.Posture[unit] =
+                    UnitPosture.Crouching;
+            }
+            else if (moving &&
+                     units.Posture[unit] ==
+                     UnitPosture.Crouching)
+            {
+                units.Posture[unit] =
+                    UnitPosture.Standing;
+            }
+
             if (IsLowHealth(
                     health,
                     unit))
