@@ -358,6 +358,24 @@ public sealed class UnitSimulation
             factionTag);
     }
 
+    public bool SelectAmmunition(
+        UnitId id,
+        UnitWeaponSlot slot,
+        int ammoType)
+    {
+        if (!Units.TryGetIndex(
+                id,
+                out int unitIndex))
+        {
+            return false;
+        }
+
+        return Weapons.SelectAmmunition(
+            unitIndex,
+            slot,
+            ammoType);
+    }
+
     public void AddReserveAmmo(
         UnitId id,
         UnitWeaponSlot slot,
