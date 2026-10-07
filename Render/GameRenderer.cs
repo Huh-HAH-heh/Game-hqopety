@@ -33,6 +33,7 @@ public sealed class GameRenderer
 
     private bool _showDebugGrid;
     private bool _showVisionDebug = true;
+    private bool _massCombatMode;
     private int _visionTestIndex;
 
     public GameRenderer(
@@ -112,10 +113,13 @@ public sealed class GameRenderer
             _input.MoveDirection,
             deltaTime);
 
-        _visionTestScene.UpdateAiDemo(
-            _unitSimulation,
-            _worldMap,
-            deltaTime);
+        if (!_massCombatMode)
+        {
+            _visionTestScene.UpdateAiDemo(
+                _unitSimulation,
+                _worldMap,
+                deltaTime);
+        }
 
         _massCombatTestScene.Update(
             _unitSimulation,
@@ -146,7 +150,8 @@ public sealed class GameRenderer
             _camera.ZoomLevel,
             _showDebugGrid);
 
-        if (_showVisionDebug)
+        if (_showVisionDebug &&
+            !_massCombatMode)
         {
             _visionTestScene.DrawDebug(
                 _window);
@@ -159,7 +164,7 @@ public sealed class GameRenderer
             _camera.View,
             TerrainTilePixelSize,
             _selectedUnit,
-            _showVisionDebug,
+            _showVisionDebug && !_massCombatMode,
             true,
             false);
 
@@ -187,14 +192,18 @@ public sealed class GameRenderer
             _unitSimulation.Projectiles.TotalHits;
 
         int teamOneAlive =
-            _visionTestScene.GetAliveCount(
-                _unitSimulation,
-                1);
+            _massCombatMode
+                ? _massCombatTestScene.AliveBlue
+                : _visionTestScene.GetAliveCount(
+                    _unitSimulation,
+                    1);
 
         int teamTwoAlive =
-            _visionTestScene.GetAliveCount(
-                _unitSimulation,
-                2);
+            _massCombatMode
+                ? _massCombatTestScene.AliveRed
+                : _visionTestScene.GetAliveCount(
+                    _unitSimulation,
+                    2);
 
         int idle = 0;
         int attack = 0;
@@ -238,7 +247,8 @@ public sealed class GameRenderer
             }
         }
 
-        if (_unitSimulation.Units.TryGetIndex(
+        if (!_massCombatMode &&
+            _unitSimulation.Units.TryGetIndex(
                 _selectedUnit,
                 out int observerIndex))
         {
@@ -303,10 +313,12 @@ public sealed class GameRenderer
                 : "None";
 
         string demoStage =
-            _visionTestScene.GetAiDemoStage();
+            _massCombatMode
+                ? "MASS"
+                : _visionTestScene.GetAiDemoStage();
 
         string massCombat =
-            _massCombatTestScene.Initialized
+            _massCombatMode
                 ? _massCombatTestScene.GetStatus(
                     _unitSimulation)
                 : "MASS OFF";
@@ -371,10 +383,7 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.C)
         {
-            _massCombatTestScene.Start(
-                _unitSimulation,
-                _worldMap);
-
+            EnterMassCombatMode();
             return;
         }
 
@@ -396,6 +405,14 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.Tab)
         {
+            if (_massCombatMode)
+            {
+                _selectedUnit =
+                    _massCombatTestScene.FirstUnit;
+
+                return;
+            }
+
             _visionTestIndex =
                 (_visionTestIndex + 1) %
                 _visionTestScene.UnitCount;
@@ -575,6 +592,42 @@ public sealed class GameRenderer
                     centerY - 20f,
                     0f));
         }
+    }
+
+    private void EnterMassCombatMode()
+    {
+        if (!_massCombatMode)
+        {
+            ReadOnlySpan<UnitId> testUnits =
+                _visionTestScene.Units;
+
+            for (int i = 0;
+                 i < testUnits.Length;
+                 i++)
+            {
+                if (_unitSimulation.Units.IsAlive(
+                        testUnits[i]))
+                {
+                    _unitSimulation.Destroy(
+                        testUnits[i]);
+                }
+            }
+
+            _unitSimulation.Projectiles.Clear();
+            _massCombatMode = true;
+            _showVisionDebug = false;
+        }
+
+        _massCombatTestScene.Start(
+            _unitSimulation,
+            _worldMap);
+
+        _selectedUnit =
+            _massCombatTestScene.FirstUnit;
+
+        _camera.CenterOnWorld(
+            TerrainTilePixelSize,
+            _worldMap);
     }
 
     private void CreateVisionTestScene()
