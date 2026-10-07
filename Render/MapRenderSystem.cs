@@ -19,6 +19,18 @@ public sealed class MapRenderSystem
         new VertexArray(
             PrimitiveType.Triangles);
 
+    private bool _mapCacheValid;
+    private bool _gridCacheValid;
+    private bool _waterCacheValid;
+
+    private int _cachedMinTileX;
+    private int _cachedMaxTileX;
+    private int _cachedMinTileY;
+    private int _cachedMaxTileY;
+    private int _cachedLodStep;
+    private long _cachedTerrainVersion;
+    private long _cachedWaterVersion;
+
     private const byte GridAlpha = 90;
 
     public MapRenderSystem(
@@ -59,10 +71,41 @@ public sealed class MapRenderSystem
             center.Y +
             viewSize.Y * 0.5f;
 
-        _mapVertices.Clear();
+        bool mapCacheMatches =
+            _mapCacheValid &&
+            _cachedMinTileX == minTileX &&
+            _cachedMaxTileX == maxTileX &&
+            _cachedMinTileY == minTileY &&
+            _cachedMaxTileY == maxTileY &&
+            _cachedLodStep == lodStep &&
+            _cachedTerrainVersion == worldMap.TerrainVersion;
 
-        if (showGrid)
+        bool gridCacheMatches =
+            _gridCacheValid &&
+            _cachedMinTileX == minTileX &&
+            _cachedMaxTileX == maxTileX &&
+            _cachedMinTileY == minTileY &&
+            _cachedMaxTileY == maxTileY &&
+            _cachedLodStep == lodStep &&
+            _cachedTerrainVersion == worldMap.TerrainVersion;
+
+        bool waterCacheMatches =
+            _waterCacheValid &&
+            _cachedMinTileX == minTileX &&
+            _cachedMaxTileX == maxTileX &&
+            _cachedMinTileY == minTileY &&
+            _cachedMaxTileY == maxTileY &&
+            _cachedLodStep == lodStep &&
+            _cachedWaterVersion == worldMap.Water.Version;
+
+        if (!mapCacheMatches)
+            _mapVertices.Clear();
+
+        if (showGrid && !gridCacheMatches)
             _gridVertices.Clear();
+
+        if (!waterCacheMatches)
+            _waterVertices.Clear();
 
         int lodStep = 1;
 
@@ -115,6 +158,8 @@ public sealed class MapRenderSystem
             (minTileY / lodStep) *
             lodStep;
 
+        if (!mapCacheMatches)
+        {
         for (int y = minTileY;
              y <= maxTileY;
              y += lodStep)
@@ -165,6 +210,16 @@ public sealed class MapRenderSystem
             }
         }
 
+        }
+
+        _mapCacheValid = true;
+        _cachedMinTileX = minTileX;
+        _cachedMaxTileX = maxTileX;
+        _cachedMinTileY = minTileY;
+        _cachedMaxTileY = maxTileY;
+        _cachedLodStep = lodStep;
+        _cachedTerrainVersion = worldMap.TerrainVersion;
+
         if (_mapVertices.VertexCount > 0)
         {
             window.Draw(
@@ -199,8 +254,20 @@ public sealed class MapRenderSystem
         int lodStep,
         float tilePixelSize)
     {
-        _waterVertices.Clear();
+        bool waterCacheMatches =
+            _waterCacheValid &&
+            _cachedMinTileX == minTileX &&
+            _cachedMaxTileX == maxTileX &&
+            _cachedMinTileY == minTileY &&
+            _cachedMaxTileY == maxTileY &&
+            _cachedLodStep == lodStep &&
+            _cachedWaterVersion == worldMap.Water.Version;
 
+        if (!waterCacheMatches)
+            _waterVertices.Clear();
+
+        if (!waterCacheMatches)
+        {
         Color waterColor =
             new Color(25, 45, 55, 190);
 
@@ -229,6 +296,11 @@ public sealed class MapRenderSystem
                     waterColor);
             }
         }
+
+        }
+
+        _waterCacheValid = true;
+        _cachedWaterVersion = worldMap.Water.Version;
 
         if (_waterVertices.VertexCount > 0)
             window.Draw(_waterVertices);
