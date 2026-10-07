@@ -114,7 +114,7 @@ public sealed class ProjectileStore
         float bluntPenetration,
         float baseDamage,
         float lifetime,
-        DamageType damageType = DamageType.Ballistic,
+        DamageType damageType = Core.Combat.DamageType.Ballistic,
         float suppressionFactor = 1f,
         float bleedChance = 0f)
     {
