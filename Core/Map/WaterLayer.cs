@@ -161,6 +161,8 @@ public sealed class WaterLayer
         Array.Fill(
             _topLevels,
             (sbyte)-1);
+
+        Version++;
     }
 
     private int GetColumnIndex(
