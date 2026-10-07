@@ -212,8 +212,7 @@ public sealed class UnitWeaponSystem
         float range =
             MathF.Max(
                 1f,
-                weapon.TotalEffectiveRange) *
-            MathF.Max(0.01f, ammo.SpreadMultiplier > 0f ? 1f : 1f);
+                weapon.TotalEffectiveRange);
 
         float lifetime =
             MathF.Max(
