@@ -7,12 +7,15 @@ namespace Core.Unit;
 public sealed class UnitWeaponStore
 {
     private const int DefaultUnitCapacity = 1024;
+    private const int MaxAmmoTypes = 8;
 
     private float[] _cooldown;
     private float[] _reloadTimer;
     private float[] _recoil;
     private int[] _ammo;
     private int[] _reserveAmmo;
+    private int[] _reserveAmmoByType;
+    private byte[] _ammoType;
     private bool[] _reloading;
     private byte[] _burstRemaining;
     private float[] _burstTimer;
@@ -32,6 +35,7 @@ public sealed class UnitWeaponStore
     public float[] Recoil => _recoil;
     public int[] Ammo => _ammo;
     public int[] ReserveAmmo => _reserveAmmo;
+    public byte[] CurrentAmmoType => _ammoType;
     public bool[] Reloading => _reloading;
     public byte[] BurstRemaining => _burstRemaining;
     public float[] BurstTimer => _burstTimer;
@@ -57,6 +61,8 @@ public sealed class UnitWeaponStore
         _recoil = new float[capacity];
         _ammo = new int[capacity];
         _reserveAmmo = new int[capacity];
+        _reserveAmmoByType = new int[capacity * MaxAmmoTypes];
+        _ammoType = new byte[capacity];
         _reloading = new bool[capacity];
         _burstRemaining = new byte[capacity];
         _burstTimer = new float[capacity];
@@ -90,6 +96,8 @@ public sealed class UnitWeaponStore
             _recoil[index] = 0f;
             _ammo[index] = 0;
             _reserveAmmo[index] = 0;
+            _ammoType[index] = 0;
+            ClearAmmoReserves(index);
             _reloading[index] = false;
             _burstRemaining[index] = 0;
             _burstTimer[index] = 0f;
@@ -131,7 +139,40 @@ public sealed class UnitWeaponStore
                 : 0;
 
         _ammo[index] = magazineSize;
-        _reserveAmmo[index] = magazineSize * 3;
+        _ammoType[index] = 0;
+        ClearAmmoReserves(index);
+
+        if (weapon is RangedWeaponConfig rangedWeapon &&
+            rangedWeapon.AmmoSet != null)
+        {
+            int count =
+                Math.Min(
+                    MaxAmmoTypes,
+                    rangedWeapon.AmmoSet.Count);
+
+            for (int ammoType = 0;
+                 ammoType < count;
+                 ammoType++)
+            {
+                SetAmmoReserve(
+                    index,
+                    ammoType,
+                    magazineSize * 3);
+            }
+        }
+        else
+        {
+            SetAmmoReserve(
+                index,
+                0,
+                magazineSize * 3);
+        }
+
+        _reserveAmmo[index] =
+            GetAmmoReserve(
+                index,
+                _ammoType[index]);
+
         _reloading[index] = false;
         _burstRemaining[index] = 0;
         _burstTimer[index] = 0f;
@@ -169,6 +210,8 @@ public sealed class UnitWeaponStore
         _recoil[index] = 0f;
         _ammo[index] = 0;
         _reserveAmmo[index] = 0;
+        _ammoType[index] = 0;
+        ClearAmmoReserves(index);
         _reloading[index] = false;
         _burstRemaining[index] = 0;
         _burstTimer[index] = 0f;
@@ -222,6 +265,10 @@ public sealed class UnitWeaponStore
 
         _ammo[index] += loaded;
         _reserveAmmo[index] -= loaded;
+        SetAmmoReserve(
+            index,
+            _ammoType[index],
+            _reserveAmmo[index]);
         _reloading[index] = false;
     }
 
@@ -263,6 +310,38 @@ public sealed class UnitWeaponStore
         int index = GetIndex(unitIndex, slot);
         _aimTarget[index] = default;
         _aimTimer[index] = 0f;
+    }
+
+    public bool SelectAmmunition(
+        int unitIndex,
+        UnitWeaponSlot slot,
+        int ammoType)
+    {
+        int index =
+            GetIndex(
+                unitIndex,
+                slot);
+
+        if (_reloading[index] ||
+            _ammo[index] > 0 ||
+            ammoType < 0 ||
+            ammoType >= MaxAmmoTypes)
+        {
+            return false;
+        }
+
+        _ammoType[index] =
+            (byte)ammoType;
+
+        _reserveAmmo[index] =
+            GetAmmoReserve(
+                index,
+                ammoType);
+
+        _aimTimer[index] = 0f;
+        _aimTarget[index] = default;
+
+        return true;
     }
 
     public void CycleFireMode(int unitIndex, UnitWeaponSlot slot)
@@ -365,10 +444,17 @@ public sealed class UnitWeaponStore
             return;
 
         int index = GetIndex(unitIndex, slot);
-        _reserveAmmo[index] =
+        int value =
             Math.Max(
                 0,
                 _reserveAmmo[index] + amount);
+
+        _reserveAmmo[index] = value;
+
+        SetAmmoReserve(
+            index,
+            _ammoType[index],
+            value);
     }
 
     public void EnsureUnitCapacity(int required)
@@ -392,6 +478,8 @@ public sealed class UnitWeaponStore
         Array.Resize(ref _recoil, newLength);
         Array.Resize(ref _ammo, newLength);
         Array.Resize(ref _reserveAmmo, newLength);
+        Array.Resize(ref _reserveAmmoByType, newLength * MaxAmmoTypes);
+        Array.Resize(ref _ammoType, newLength);
         Array.Resize(ref _reloading, newLength);
         Array.Resize(ref _burstRemaining, newLength);
         Array.Resize(ref _burstTimer, newLength);
@@ -405,6 +493,69 @@ public sealed class UnitWeaponStore
 
         for (int i = oldLength; i < newLength; i++)
             _randomState[i] = Seed(i);
+    }
+
+    public void AddReserveAmmo(
+        int unitIndex,
+        UnitWeaponSlot slot,
+        int ammoType,
+        int amount)
+    {
+        if (amount <= 0 ||
+            ammoType < 0 ||
+            ammoType >= MaxAmmoTypes)
+        {
+            return;
+        }
+
+        int index =
+            GetIndex(
+                unitIndex,
+                slot);
+
+        SetAmmoReserve(
+            index,
+            ammoType,
+            GetAmmoReserve(index, ammoType) + amount);
+
+        if (ammoType == _ammoType[index])
+        {
+            _reserveAmmo[index] =
+                GetAmmoReserve(
+                    index,
+                    ammoType);
+        }
+    }
+
+    private int GetAmmoReserve(
+        int weaponIndex,
+        int ammoType)
+    {
+        return _reserveAmmoByType[
+            weaponIndex * MaxAmmoTypes +
+            ammoType];
+    }
+
+    private void SetAmmoReserve(
+        int weaponIndex,
+        int ammoType,
+        int value)
+    {
+        _reserveAmmoByType[
+            weaponIndex * MaxAmmoTypes +
+            ammoType] =
+            Math.Max(
+                0,
+                value);
+    }
+
+    private void ClearAmmoReserves(
+        int weaponIndex)
+    {
+        Array.Clear(
+            _reserveAmmoByType,
+            weaponIndex * MaxAmmoTypes,
+            MaxAmmoTypes);
     }
 
     private static uint Seed(int value)
