@@ -19,6 +19,8 @@ public sealed class UnitWeaponStore
     private FireMode[] _fireMode;
     private AimMode[] _aimMode;
     private TargetMode[] _targetMode;
+    private float[] _aimTimer;
+    private UnitId[] _aimTarget;
     private UnitId[] _burstTarget;
     private uint[] _randomState;
 
@@ -37,6 +39,8 @@ public sealed class UnitWeaponStore
     public FireMode[] CurrentFireMode => _fireMode;
     public AimMode[] CurrentAimMode => _aimMode;
     public TargetMode[] CurrentTargetMode => _targetMode;
+    public float[] AimTimer => _aimTimer;
+    public UnitId[] AimTarget => _aimTarget;
 
     public UnitWeaponStore(
         int initialUnitCapacity = DefaultUnitCapacity)
@@ -60,6 +64,8 @@ public sealed class UnitWeaponStore
         _fireMode = new FireMode[capacity];
         _aimMode = new AimMode[capacity];
         _targetMode = new TargetMode[capacity];
+        _aimTimer = new float[capacity];
+        _aimTarget = new UnitId[capacity];
         _randomState = new uint[capacity];
 
         for (int i = 0; i < capacity; i++)
@@ -91,6 +97,8 @@ public sealed class UnitWeaponStore
             _fireMode[index] = FireMode.Single;
             _aimMode[index] = AimMode.AimedShot;
             _targetMode[index] = TargetMode.Automatic;
+            _aimTimer[index] = 0f;
+            _aimTarget[index] = default;
             _randomState[index] = Seed(index);
         }
     }
@@ -128,6 +136,8 @@ public sealed class UnitWeaponStore
         _burstRemaining[index] = 0;
         _burstTimer[index] = 0f;
         _burstTarget[index] = default;
+        _aimTimer[index] = 0f;
+        _aimTarget[index] = default;
 
         if (weapon is RangedWeaponConfig ranged)
         {
@@ -163,6 +173,8 @@ public sealed class UnitWeaponStore
         _burstRemaining[index] = 0;
         _burstTimer[index] = 0f;
         _burstTarget[index] = default;
+        _aimTimer[index] = 0f;
+        _aimTarget[index] = default;
         _fireMode[index] = FireMode.Single;
         _aimMode[index] = AimMode.AimedShot;
         _targetMode[index] = TargetMode.Automatic;
@@ -221,6 +233,7 @@ public sealed class UnitWeaponStore
         for (int i = 0; i < _ammo.Length; i++)
         {
             _recoil[i] = MathF.Max(0f, _recoil[i] - deltaTime * 0.75f);
+            _aimTimer[i] = MathF.Min(10f, _aimTimer[i] + deltaTime);
 
             _cooldown[i] =
                 MathF.Max(
@@ -232,6 +245,24 @@ public sealed class UnitWeaponStore
                     0f,
                     _reloadTimer[i] - deltaTime);
         }
+    }
+
+    public void SetAimTarget(int unitIndex, UnitWeaponSlot slot, UnitId target, bool reset)
+    {
+        int index = GetIndex(unitIndex, slot);
+
+        if (reset || _aimTarget[index] != target)
+        {
+            _aimTarget[index] = target;
+            _aimTimer[index] = 0f;
+        }
+    }
+
+    public void ClearAim(int unitIndex, UnitWeaponSlot slot)
+    {
+        int index = GetIndex(unitIndex, slot);
+        _aimTarget[index] = default;
+        _aimTimer[index] = 0f;
     }
 
     public void CycleFireMode(int unitIndex, UnitWeaponSlot slot)
@@ -250,6 +281,8 @@ public sealed class UnitWeaponStore
     public void CycleAimMode(int unitIndex, UnitWeaponSlot slot)
     {
         int index = GetIndex(unitIndex, slot);
+        _aimTimer[index] = 0f;
+        _aimTarget[index] = default;
         _aimMode[index] = _aimMode[index] switch
         {
             AimMode.AimedShot => AimMode.Snapshot,
@@ -366,6 +399,8 @@ public sealed class UnitWeaponStore
         Array.Resize(ref _fireMode, newLength);
         Array.Resize(ref _aimMode, newLength);
         Array.Resize(ref _targetMode, newLength);
+        Array.Resize(ref _aimTimer, newLength);
+        Array.Resize(ref _aimTarget, newLength);
         Array.Resize(ref _randomState, newLength);
 
         for (int i = oldLength; i < newLength; i++)
