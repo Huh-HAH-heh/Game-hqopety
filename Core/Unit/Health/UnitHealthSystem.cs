@@ -68,14 +68,38 @@ public sealed class UnitHealthSystem
                     float bleedDamage =
                         bleedRate[index] * deltaTime;
 
-                    float appliedBleed =
+                    float appliedToPart =
                         MathF.Min(
                             bleedDamage,
                             hitPoints[index]);
 
-                    hitPoints[index] -= appliedBleed;
-                    overall[unit] = MathF.Max(0f, overall[unit] - appliedBleed);
-                    bleedRate[index] = MathF.Max(0f, bleedRate[index] - 0.01f * deltaTime);
+                    hitPoints[index] -= appliedToPart;
+
+                    // Internal organs keep bleeding after being destroyed.
+                    // External wounds only consume the remaining local HP.
+                    if (health.Kind[index] ==
+                        UnitHealthPartKind.Organ)
+                    {
+                        overall[unit] =
+                            MathF.Max(
+                                0f,
+                                overall[unit] -
+                                bleedDamage);
+                    }
+                    else
+                    {
+                        overall[unit] =
+                            MathF.Max(
+                                0f,
+                                overall[unit] -
+                                appliedToPart);
+                    }
+
+                    bleedRate[index] =
+                        MathF.Max(
+                            0f,
+                            bleedRate[index] -
+                            0.01f * deltaTime);
                 }
 
                 hitPoints[index] =
