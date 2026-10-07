@@ -231,6 +231,9 @@ public sealed class UnitWeaponSystem
             ammo.SharpPenetration > 0f
                 ? ammo.SharpPenetration
                 : ammo.Penetration,
+            ammo.BluntPenetration > 0f
+                ? ammo.BluntPenetration
+                : ammo.Penetration * 0.75f,
             weapon.BaseDamage *
             ammo.DamageMultiplier,
             lifetime,
