@@ -286,7 +286,13 @@ public sealed class UnitAiSystem
                 }
                 else if (HasSustainedFireWeapon(
                              inventory,
-                             unit))
+                             unit) ||
+                         HasPendingAim(
+                             units,
+                             inventory,
+                             weapons,
+                             unit,
+                             target))
                 {
                     units.HasTarget[unit] = true;
                 }
@@ -541,6 +547,57 @@ public sealed class UnitAiSystem
             slot,
             target,
             accuracyMultiplier);
+    }
+
+    private static bool HasPendingAim(
+        UnitStore units,
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        int unit,
+        UnitId target)
+    {
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            short inventorySlot =
+                inventory.GetWeaponEquipment(
+                    unit,
+                    (UnitWeaponSlot)slot);
+
+            if (inventorySlot < 0)
+                continue;
+
+            RangedWeaponConfig? weapon =
+                inventory.GetItem(
+                    unit,
+                    inventorySlot) as RangedWeaponConfig;
+
+            if (weapon == null)
+                continue;
+
+            int stateIndex =
+                UnitWeaponStore.GetIndex(
+                    unit,
+                    (UnitWeaponSlot)slot);
+
+            if (weapons.CurrentAimMode[stateIndex] !=
+                Core.Combat.AimMode.AimedShot)
+            {
+                continue;
+            }
+
+            if (weapons.AimTarget[stateIndex] == target &&
+                weapons.AimTimer[stateIndex] <
+                MathF.Max(
+                    0f,
+                    weapon.AimTime))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool HasSustainedFireWeapon(
