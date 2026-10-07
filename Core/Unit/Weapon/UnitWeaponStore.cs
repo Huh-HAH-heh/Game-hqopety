@@ -9,6 +9,7 @@ public sealed class UnitWeaponStore
 
     private float[] _cooldown;
     private float[] _reloadTimer;
+    private float[] _recoil;
     private int[] _ammo;
     private int[] _reserveAmmo;
     private bool[] _reloading;
@@ -22,6 +23,7 @@ public sealed class UnitWeaponStore
 
     public float[] Cooldown => _cooldown;
     public float[] ReloadTimer => _reloadTimer;
+    public float[] Recoil => _recoil;
     public int[] Ammo => _ammo;
     public int[] ReserveAmmo => _reserveAmmo;
     public bool[] Reloading => _reloading;
@@ -41,6 +43,7 @@ public sealed class UnitWeaponStore
 
         _cooldown = new float[capacity];
         _reloadTimer = new float[capacity];
+        _recoil = new float[capacity];
         _ammo = new int[capacity];
         _reserveAmmo = new int[capacity];
         _reloading = new bool[capacity];
@@ -68,6 +71,7 @@ public sealed class UnitWeaponStore
             int index = start + i;
             _cooldown[index] = 0f;
             _reloadTimer[index] = 0f;
+            _recoil[index] = 0f;
             _ammo[index] = 0;
             _reserveAmmo[index] = 0;
             _reloading[index] = false;
@@ -99,6 +103,7 @@ public sealed class UnitWeaponStore
 
         _cooldown[index] = 0f;
         _reloadTimer[index] = 0f;
+        _recoil[index] = 0f;
         int magazineSize =
             weapon is RangedWeaponConfig ranged
                 ? Math.Max(0, (int)ranged.MagazineSize)
@@ -125,6 +130,7 @@ public sealed class UnitWeaponStore
 
         _cooldown[index] = 0f;
         _reloadTimer[index] = 0f;
+        _recoil[index] = 0f;
         _ammo[index] = 0;
         _reserveAmmo[index] = 0;
         _reloading[index] = false;
@@ -185,6 +191,8 @@ public sealed class UnitWeaponStore
 
         for (int i = 0; i < _ammo.Length; i++)
         {
+            _recoil[i] = MathF.Max(0f, _recoil[i] - deltaTime * 0.75f);
+
             _cooldown[i] =
                 MathF.Max(
                     0f,
@@ -195,6 +203,15 @@ public sealed class UnitWeaponStore
                     0f,
                     _reloadTimer[i] - deltaTime);
         }
+    }
+
+    public void AddRecoil(
+        int unitIndex,
+        UnitWeaponSlot slot,
+        float amount)
+    {
+        int index = GetIndex(unitIndex, slot);
+        _recoil[index] = MathF.Min(4f, _recoil[index] + MathF.Max(0f, amount));
     }
 
     public void StartBurst(
@@ -274,6 +291,7 @@ public sealed class UnitWeaponStore
 
         Array.Resize(ref _cooldown, newLength);
         Array.Resize(ref _reloadTimer, newLength);
+        Array.Resize(ref _recoil, newLength);
         Array.Resize(ref _ammo, newLength);
         Array.Resize(ref _reserveAmmo, newLength);
         Array.Resize(ref _reloading, newLength);
