@@ -42,6 +42,8 @@ public sealed class GameRenderer
     private float _fps;
     private long _workingSetBytes;
     private long _allocatedBytes;
+    private float _titleTimer;
+    private string _windowTitle = "RimClone";
 
     public GameRenderer(
         WorldMap worldMap)
@@ -205,8 +207,15 @@ public sealed class GameRenderer
             _unitSimulation.Projectiles,
             TerrainTilePixelSize);
 
-        _window.SetTitle(
-            BuildWindowTitle());
+        _titleTimer +=
+            1f / 60f;
+
+        if (_titleTimer >= 0.25f)
+        {
+            _titleTimer = 0f;
+            _windowTitle = BuildWindowTitle();
+            _window.SetTitle(_windowTitle);
+        }
 
         _window.Display();
     }
