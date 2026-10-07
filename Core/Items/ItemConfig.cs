@@ -147,9 +147,6 @@ public enum UnitWeaponSlot : byte
         public float SnapshotSpreadMultiplier = 2f;
         public float SuppressSpreadMultiplier = 2.5f;
 
-        // Projectile ballistic profile.
-        public float BallisticCoefficient = 1f;
-
         // Default cartridge used when this weapon fires.
         public AmmunitionConfig? DefaultAmmunition;
 
