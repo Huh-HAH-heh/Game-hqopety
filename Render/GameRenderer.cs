@@ -25,6 +25,7 @@ public sealed class GameRenderer
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
     private readonly VisionTestScene _visionTestScene;
+    private readonly MassCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
 
@@ -69,6 +70,9 @@ public sealed class GameRenderer
         _visionTestScene =
             new VisionTestScene();
 
+        _massCombatTestScene =
+            new MassCombatTestScene();
+
         CreateVisionTestScene();
         _unitSimulation.AI.Enabled = true;
     }
@@ -109,6 +113,11 @@ public sealed class GameRenderer
             deltaTime);
 
         _visionTestScene.UpdateAiDemo(
+            _unitSimulation,
+            _worldMap,
+            deltaTime);
+
+        _massCombatTestScene.Update(
             _unitSimulation,
             _worldMap,
             deltaTime);
@@ -296,6 +305,12 @@ public sealed class GameRenderer
         string demoStage =
             _visionTestScene.GetAiDemoStage();
 
+        string massCombat =
+            _massCombatTestScene.Initialized
+                ? _massCombatTestScene.GetStatus(
+                    _unitSimulation)
+                : "MASS OFF";
+
         return
             $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles} Hits={hits} | " +
@@ -304,10 +319,11 @@ public sealed class GameRenderer
             $"States I={idle} A={attack} C={cover} S={search} D={dead} | " +
             $"Suppression S={suppressed} P={panicked} | " +
             $"Demo={demoStage} LastHit={_unitSimulation.Projectiles.LastHitPart} | " +
+            $"{massCombat} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=test Y=reset TAB=unit V=vision";
+            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision";
     }
 
     private void InitializeWindow()
@@ -355,7 +371,10 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.C)
         {
-            CombatSelfTest.Run();
+            _massCombatTestScene.Start(
+                _unitSimulation,
+                _worldMap);
+
             return;
         }
 
