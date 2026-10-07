@@ -122,6 +122,7 @@ public sealed class GameRenderer
 
         _perfTimer += deltaTime;
         _perfFrames++;
+        _titleTimer += MathF.Max(0f, deltaTime);
 
         if (_perfTimer >= 1f)
         {
@@ -206,9 +207,6 @@ public sealed class GameRenderer
             _window,
             _unitSimulation.Projectiles,
             TerrainTilePixelSize);
-
-        _titleTimer +=
-            1f / 60f;
 
         if (_titleTimer >= 0.25f)
         {
