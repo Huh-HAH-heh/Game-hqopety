@@ -432,13 +432,16 @@ public sealed class UnitWeaponSystem
                 weapon,
                 weapons.CurrentAmmoType[stateIndex]);
 
-        Console.WriteLine(
-            $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
-            $"target={target} mode={weapons.CurrentFireMode[stateIndex]} " +
-            $"aim={weapons.CurrentAimMode[stateIndex]} " +
-            $"targetMode={weapons.CurrentTargetMode[stateIndex]} " +
-            $"targetPos={units.Position[targetIndex]} " +
-            $"ammo={currentAmmo?.Name ?? "none"}");
+        if (CombatDiagnostics.Enabled)
+        {
+            Console.WriteLine(
+                $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
+                $"target={target} mode={weapons.CurrentFireMode[stateIndex]} " +
+                $"aim={weapons.CurrentAimMode[stateIndex]} " +
+                $"targetMode={weapons.CurrentTargetMode[stateIndex]} " +
+                $"targetPos={units.Position[targetIndex]} " +
+                $"ammo={currentAmmo?.Name ?? "none"}");
+        }
 
         return true;
     }
