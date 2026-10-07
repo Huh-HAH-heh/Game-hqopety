@@ -292,7 +292,7 @@ public sealed class UnitWeaponSystem
             return false;
 
         bool continuingBurst =
-            weapon.DefaultFireMode == FireMode.Burst &&
+            weapons.FireMode[stateIndex] == FireMode.Burst &&
             weapons.BurstRemaining[stateIndex] > 0;
 
         if (continuingBurst)
