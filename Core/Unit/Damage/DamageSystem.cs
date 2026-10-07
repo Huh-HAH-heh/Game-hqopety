@@ -162,6 +162,7 @@ public sealed class DamageSystem
                         damage,
                         energy,
                         penetration,
+                        damageEvent.BluntPenetration,
                         armor);
 
                 damage =
@@ -182,6 +183,20 @@ public sealed class DamageSystem
                             inventory.Durability[
                                 durabilityIndex] -
                             resolution.ArmorDamage);
+                }
+
+                if (resolution.BluntImpactDamage > 0f)
+                {
+                    UnitHealthPartId bluntPart =
+                        GetOuterPart(
+                            damageEvent.Part);
+
+                    healthSystem.ApplyDamage(
+                        units,
+                        health,
+                        damageEvent.Target,
+                        bluntPart,
+                        resolution.BluntImpactDamage);
                 }
 
                 if (resolution.Stopped)
@@ -282,6 +297,24 @@ public sealed class DamageSystem
             UnitHealthPartId.LeftFoot or
             UnitHealthPartId.RightFoot => 4f,
             _ => 8f
+        };
+    }
+
+    private static UnitHealthPartId GetOuterPart(
+        UnitHealthPartId part)
+    {
+        return part switch
+        {
+            UnitHealthPartId.Brain => UnitHealthPartId.Head,
+            UnitHealthPartId.Heart or
+            UnitHealthPartId.LeftLung or
+            UnitHealthPartId.RightLung or
+            UnitHealthPartId.Stomach or
+            UnitHealthPartId.Liver or
+            UnitHealthPartId.LeftKidney or
+            UnitHealthPartId.RightKidney =>
+                UnitHealthPartId.Torso,
+            _ => part
         };
     }
 
