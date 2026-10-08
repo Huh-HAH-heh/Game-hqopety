@@ -24,6 +24,8 @@ public sealed class WorldMap
     public int MaxTileY =>
         TileHeight - 1;
 
+    public long TerrainVersion { get; private set; }
+
     public WaterLayer Water { get; }
 
     private readonly TerrainRegion?[] _regions;
@@ -275,6 +277,8 @@ public sealed class WorldMap
             localX,
             localY,
             ranges);
+
+        TerrainVersion++;
     }
 
     public void ClearTileRanges(
@@ -315,6 +319,8 @@ public sealed class WorldMap
         region.ClearRanges(
             localX,
             localY);
+
+        TerrainVersion++;
     }
 
     public bool TryAddRange(
@@ -353,13 +359,19 @@ public sealed class WorldMap
             globalY %
             TerrainRegion.TilesPerSide;
 
-        return region.TryAddRange(
-            localX,
-            localY,
-            startZ,
-            endZ,
-            materialId,
-            state);
+        bool added =
+            region.TryAddRange(
+                localX,
+                localY,
+                startZ,
+                endZ,
+                materialId,
+                state);
+
+        if (added)
+            TerrainVersion++;
+
+        return added;
     }
 
     // ============================================================
@@ -403,6 +415,8 @@ public sealed class WorldMap
         region.ClearRanges(
             localX,
             localY);
+
+        TerrainVersion++;
 
         if (height == 0)
             return;

@@ -6,7 +6,8 @@ public sealed class UnitHealthSystem
 {
     public void Update(
         UnitStore units,
-        UnitHealthStore health)
+        UnitHealthStore health,
+        float deltaTime)
     {
         ReadOnlySpan<int> active =
             units.ActiveIndices;
@@ -22,6 +23,9 @@ public sealed class UnitHealthSystem
 
         float[] hitPoints =
             health.HitPoints;
+
+        float[] bleedRate =
+            health.BleedRate;
 
         int maxParts =
             health.MaxParts;
@@ -59,6 +63,45 @@ public sealed class UnitHealthSystem
                 int index =
                     start + part;
 
+                if (bleedRate[index] > 0f && deltaTime > 0f)
+                {
+                    float bleedDamage =
+                        bleedRate[index] * deltaTime;
+
+                    float appliedToPart =
+                        MathF.Min(
+                            bleedDamage,
+                            hitPoints[index]);
+
+                    hitPoints[index] -= appliedToPart;
+
+                    // Internal organs keep bleeding after being destroyed.
+                    // External wounds only consume the remaining local HP.
+                    if (health.Kind[index] ==
+                        UnitHealthPartKind.Organ)
+                    {
+                        overall[unit] =
+                            MathF.Max(
+                                0f,
+                                overall[unit] -
+                                bleedDamage);
+                    }
+                    else
+                    {
+                        overall[unit] =
+                            MathF.Max(
+                                0f,
+                                overall[unit] -
+                                appliedToPart);
+                    }
+
+                    bleedRate[index] =
+                        MathF.Max(
+                            0f,
+                            bleedRate[index] -
+                            0.01f * deltaTime);
+                }
+
                 hitPoints[index] =
                     Math.Clamp(
                         hitPoints[index],
@@ -66,6 +109,24 @@ public sealed class UnitHealthSystem
                         max[index]);
             }
         }
+    }
+
+    public void AddBleed(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitId unitId,
+        UnitHealthPartId partId,
+        float amountPerSecond)
+    {
+        if (amountPerSecond <= 0f ||
+            !units.TryGetIndex(unitId, out int unitIndex) ||
+            !health.TryFindPart(unitIndex, partId, out int partIndex))
+            return;
+
+        health.BleedRate[partIndex] =
+            MathF.Min(
+                10f,
+                health.BleedRate[partIndex] + amountPerSecond);
     }
 
     public bool ApplyDamage(

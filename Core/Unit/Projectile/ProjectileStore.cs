@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Combat;
 
 namespace Core.Unit;
 
@@ -14,10 +15,14 @@ public sealed class ProjectileStore
     private float[] _energy;
     private float[] _initialEnergy;
     private float[] _penetration;
+    private float[] _bluntPenetration;
     private float[] _baseDamage;
     private float[] _massKg;
     private float[] _diameterM;
     private float[] _dragCoefficient;
+    private float[] _suppressionFactor;
+    private DamageType[] _damageType;
+    private float[] _bleedChance;
     private float[] _lifetime;
     private uint[] _generation;
 
@@ -47,10 +52,14 @@ public sealed class ProjectileStore
     public float[] Energy => _energy;
     public float[] InitialEnergy => _initialEnergy;
     public float[] Penetration => _penetration;
+    public float[] BluntPenetration => _bluntPenetration;
     public float[] BaseDamage => _baseDamage;
     public float[] MassKg => _massKg;
     public float[] DiameterM => _diameterM;
     public float[] DragCoefficient => _dragCoefficient;
+    public float[] SuppressionFactor => _suppressionFactor;
+    public DamageType[] DamageType => _damageType;
+    public float[] BleedChance => _bleedChance;
     public float[] Lifetime => _lifetime;
 
     public ReadOnlySpan<int> ActiveIndices =>
@@ -72,10 +81,14 @@ public sealed class ProjectileStore
         _energy = new float[initialCapacity];
         _initialEnergy = new float[initialCapacity];
         _penetration = new float[initialCapacity];
+        _bluntPenetration = new float[initialCapacity];
         _baseDamage = new float[initialCapacity];
         _massKg = new float[initialCapacity];
         _diameterM = new float[initialCapacity];
         _dragCoefficient = new float[initialCapacity];
+        _suppressionFactor = new float[initialCapacity];
+        _damageType = new DamageType[initialCapacity];
+        _bleedChance = new float[initialCapacity];
         _lifetime = new float[initialCapacity];
         _generation = new uint[initialCapacity];
 
@@ -98,8 +111,12 @@ public sealed class ProjectileStore
         float muzzleVelocity,
         float dragCoefficient,
         float penetration,
+        float bluntPenetration,
         float baseDamage,
-        float lifetime)
+        float lifetime,
+        DamageType damageType = Core.Combat.DamageType.Ballistic,
+        float suppressionFactor = 1f,
+        float bleedChance = 0f)
     {
         int index;
 
@@ -151,6 +168,10 @@ public sealed class ProjectileStore
             MathF.Max(
                 0f,
                 penetration);
+        _bluntPenetration[index] =
+            MathF.Max(
+                0f,
+                bluntPenetration);
         _baseDamage[index] =
             MathF.Max(
                 0f,
@@ -164,6 +185,12 @@ public sealed class ProjectileStore
             MathF.Max(
                 0f,
                 dragCoefficient);
+        _suppressionFactor[index] =
+            MathF.Max(
+                0f,
+                suppressionFactor);
+        _damageType[index] = damageType;
+        _bleedChance[index] = MathF.Max(0f, bleedChance);
         _lifetime[index] =
             MathF.Max(
                 0f,
@@ -190,6 +217,22 @@ public sealed class ProjectileStore
         LastHitTarget = target;
         LastHitPart = part;
         LastHitPosition = position;
+    }
+
+    public void Clear()
+    {
+        while (_activeCount > 0)
+        {
+            int index =
+                _activeIndices[_activeCount - 1];
+
+            DestroyIndex(index);
+        }
+
+        TotalHits = 0;
+        LastHitPosition = Vector3.Zero;
+        LastHitTarget = default;
+        LastHitPart = UnitHealthPartId.None;
     }
 
     public bool Destroy(
@@ -293,6 +336,9 @@ public sealed class ProjectileStore
             ref _penetration,
             newCapacity);
         Array.Resize(
+            ref _bluntPenetration,
+            newCapacity);
+        Array.Resize(
             ref _baseDamage,
             newCapacity);
         Array.Resize(
@@ -303,6 +349,15 @@ public sealed class ProjectileStore
             newCapacity);
         Array.Resize(
             ref _dragCoefficient,
+            newCapacity);
+        Array.Resize(
+            ref _suppressionFactor,
+            newCapacity);
+        Array.Resize(
+            ref _damageType,
+            newCapacity);
+        Array.Resize(
+            ref _bleedChance,
             newCapacity);
         Array.Resize(
             ref _lifetime,

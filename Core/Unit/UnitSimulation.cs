@@ -21,6 +21,10 @@ public sealed class UnitSimulation
     public UnitInventoryStore Inventory { get; }
     public UnitWeaponStore Weapons { get; }
     public ProjectileStore Projectiles { get; }
+    public UnitSuppressionStore Suppression { get; }
+
+    public bool VisionEnabled { get; set; } = true;
+
     public UnitAiSystem AI =>
         _aiSystem;
     public VisionSystem Vision =>
@@ -64,6 +68,9 @@ public sealed class UnitSimulation
 
         Projectiles =
             new ProjectileStore();
+
+        Suppression =
+            new UnitSuppressionStore(unitCapacity);
 
         _weaponSystem =
             new UnitWeaponSystem();
@@ -144,6 +151,9 @@ public sealed class UnitSimulation
         Weapons.InitializeUnit(
             id.Index);
 
+        Suppression.InitializeUnit(
+            id.Index);
+
         _aiSystem.Store.InitializeUnit(
             id.Index);
 
@@ -175,6 +185,9 @@ public sealed class UnitSimulation
             index);
 
         Weapons.ClearUnit(
+            index);
+
+        Suppression.ClearUnit(
             index);
 
         _aiSystem.Store.ClearUnit(
@@ -348,6 +361,24 @@ public sealed class UnitSimulation
             factionTag);
     }
 
+    public bool SelectAmmunition(
+        UnitId id,
+        UnitWeaponSlot slot,
+        int ammoType)
+    {
+        if (!Units.TryGetIndex(
+                id,
+                out int unitIndex))
+        {
+            return false;
+        }
+
+        return Weapons.SelectAmmunition(
+            unitIndex,
+            slot,
+            ammoType);
+    }
+
     public void AddReserveAmmo(
         UnitId id,
         UnitWeaponSlot slot,
@@ -397,10 +428,17 @@ public sealed class UnitSimulation
         WorldMap worldMap,
         float deltaTime)
     {
-        _visionSystem.Update(
+        Suppression.Update(
             Units,
-            worldMap,
             deltaTime);
+
+        if (VisionEnabled)
+        {
+            _visionSystem.Update(
+                Units,
+                worldMap,
+                deltaTime);
+        }
 
         _aiSystem.Update(
             Units,
@@ -408,6 +446,7 @@ public sealed class UnitSimulation
             Inventory,
             Weapons,
             Projectiles,
+            Suppression,
             _visionSystem,
             worldMap,
             deltaTime);
@@ -421,6 +460,7 @@ public sealed class UnitSimulation
             Units,
             Inventory,
             Weapons,
+            Projectiles,
             deltaTime);
 
         _bodySystem.Update(
@@ -434,11 +474,13 @@ public sealed class UnitSimulation
             Health,
             _healthSystem,
             Projectiles,
+            Suppression,
             worldMap,
             deltaTime);
 
         _healthSystem.Update(
             Units,
-            Health);
+            Health,
+            deltaTime);
     }
 }

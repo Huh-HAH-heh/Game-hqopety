@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
@@ -25,6 +26,7 @@ public sealed class GameRenderer
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
     private readonly VisionTestScene _visionTestScene;
+    private readonly LongRangeCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
 
@@ -32,7 +34,17 @@ public sealed class GameRenderer
 
     private bool _showDebugGrid;
     private bool _showVisionDebug = true;
+    private bool _massCombatMode;
     private int _visionTestIndex;
+
+    private float _perfTimer;
+    private int _perfFrames;
+    private float _fps;
+    private long _workingSetBytes;
+    private long _managedHeapBytes;
+    private long _allocatedBytes;
+    private float _titleTimer;
+    private string _windowTitle = "RimClone";
 
     public GameRenderer(
         WorldMap worldMap)
@@ -69,8 +81,13 @@ public sealed class GameRenderer
         _visionTestScene =
             new VisionTestScene();
 
+        _massCombatTestScene =
+            new LongRangeCombatTestScene();
+
         CreateVisionTestScene();
         _unitSimulation.AI.Enabled = true;
+
+        EnterMassCombatMode();
     }
 
     public void Run()
@@ -104,11 +121,47 @@ public sealed class GameRenderer
     {
         _input.Update();
 
+        _perfTimer += deltaTime;
+        _perfFrames++;
+        _titleTimer += MathF.Max(0f, deltaTime);
+
+        if (_perfTimer >= 1f)
+        {
+            _fps =
+                _perfFrames /
+                _perfTimer;
+
+            _perfFrames = 0;
+            _perfTimer = 0f;
+
+            using Process process =
+                Process.GetCurrentProcess();
+
+            _workingSetBytes =
+                process.WorkingSet64;
+
+            _managedHeapBytes =
+                GC.GetTotalMemory(
+                    false);
+
+            _allocatedBytes =
+                GC.GetTotalAllocatedBytes(
+                    false);
+        }
+
         _camera.Update(
             _input.MoveDirection,
             deltaTime);
 
-        _visionTestScene.UpdateAiDemo(
+        if (!_massCombatMode)
+        {
+            _visionTestScene.UpdateAiDemo(
+                _unitSimulation,
+                _worldMap,
+                deltaTime);
+        }
+
+        _massCombatTestScene.Update(
             _unitSimulation,
             _worldMap,
             deltaTime);
@@ -137,7 +190,8 @@ public sealed class GameRenderer
             _camera.ZoomLevel,
             _showDebugGrid);
 
-        if (_showVisionDebug)
+        if (_showVisionDebug &&
+            !_massCombatMode)
         {
             _visionTestScene.DrawDebug(
                 _window);
@@ -150,8 +204,8 @@ public sealed class GameRenderer
             _camera.View,
             TerrainTilePixelSize,
             _selectedUnit,
-            _showVisionDebug,
-            true,
+            _showVisionDebug && !_massCombatMode,
+            !_massCombatMode,
             false);
 
         _projectileRenderer.Draw(
@@ -159,8 +213,12 @@ public sealed class GameRenderer
             _unitSimulation.Projectiles,
             TerrainTilePixelSize);
 
-        _window.SetTitle(
-            BuildWindowTitle());
+        if (_titleTimer >= 0.25f)
+        {
+            _titleTimer = 0f;
+            _windowTitle = BuildWindowTitle();
+            _window.SetTitle(_windowTitle);
+        }
 
         _window.Display();
     }
@@ -178,20 +236,26 @@ public sealed class GameRenderer
             _unitSimulation.Projectiles.TotalHits;
 
         int teamOneAlive =
-            _visionTestScene.GetAliveCount(
-                _unitSimulation,
-                1);
+            _massCombatMode
+                ? _massCombatTestScene.AliveBlue
+                : _visionTestScene.GetAliveCount(
+                    _unitSimulation,
+                    1);
 
         int teamTwoAlive =
-            _visionTestScene.GetAliveCount(
-                _unitSimulation,
-                2);
+            _massCombatMode
+                ? _massCombatTestScene.AliveRed
+                : _visionTestScene.GetAliveCount(
+                    _unitSimulation,
+                    2);
 
         int idle = 0;
         int attack = 0;
         int cover = 0;
         int search = 0;
         int dead = 0;
+        int suppressed = 0;
+        int panicked = 0;
 
         ReadOnlySpan<int> aiUnits =
             _unitSimulation.Units.ActiveIndices;
@@ -208,7 +272,27 @@ public sealed class GameRenderer
             }
         }
 
-        if (_unitSimulation.Units.TryGetIndex(
+        ReadOnlySpan<int> suppressionUnits =
+            _unitSimulation.Units.ActiveIndices;
+
+        for (int i = 0; i < suppressionUnits.Length; i++)
+        {
+            int unit = suppressionUnits[i];
+
+            switch (_unitSimulation.Suppression.GetState(unit))
+            {
+                case UnitSuppressionState.Suppressed:
+                    suppressed++;
+                    break;
+
+                case UnitSuppressionState.Panicked:
+                    panicked++;
+                    break;
+            }
+        }
+
+        if (!_massCombatMode &&
+            _unitSimulation.Units.TryGetIndex(
                 _selectedUnit,
                 out int observerIndex))
         {
@@ -273,19 +357,32 @@ public sealed class GameRenderer
                 : "None";
 
         string demoStage =
-            _visionTestScene.GetAiDemoStage();
+            _massCombatMode
+                ? "MASS"
+                : _visionTestScene.GetAiDemoStage();
+
+        string massCombat =
+            _massCombatMode
+                ? _massCombatTestScene.GetStatus(
+                    _unitSimulation)
+                : "MASS OFF";
 
         return
-            $"RimClone | Units={_unitSimulation.Units.ActiveCount} | " +
+            $"RimClone | FPS={_fps:0.0} RAM={_workingSetBytes / 1024d / 1024d:0}MB " +
+            $"Heap={_managedHeapBytes / 1024d / 1024d:0}MB " +
+            $"AllocTotal={_allocatedBytes / 1024d / 1024d:0}MB | " +
+            $"Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles} Hits={hits} | " +
             $"Teams 1:{teamOneAlive} 2:{teamTwoAlive} | " +
             $"AI={ai}:{aiState} | " +
             $"States I={idle} A={attack} C={cover} S={search} D={dead} | " +
+            $"Suppression S={suppressed} P={panicked} | " +
             $"Demo={demoStage} LastHit={_unitSimulation.Projectiles.LastHitPart} | " +
+            $"{massCombat} | " +
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"A=AI B=ballistic F=direct Y=reset TAB=unit V=vision";
+            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision";
     }
 
     private void InitializeWindow()
@@ -331,6 +428,13 @@ public sealed class GameRenderer
             return;
         }
 
+        if (key == Keyboard.Key.C)
+        {
+            EnterMassCombatMode();
+            return;
+        }
+
+
         if (key == Keyboard.Key.Y)
         {
             _visionTestScene.ResetAiDemo(
@@ -348,6 +452,14 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.Tab)
         {
+            if (_massCombatMode)
+            {
+                _selectedUnit =
+                    _massCombatTestScene.FirstUnit;
+
+                return;
+            }
+
             _visionTestIndex =
                 (_visionTestIndex + 1) %
                 _visionTestScene.UnitCount;
@@ -417,6 +529,95 @@ public sealed class GameRenderer
             return;
         }
 
+        if (key == Keyboard.Key.M)
+        {
+            if (_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int unitIndex))
+            {
+                _unitSimulation.Weapons.CycleFireMode(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+            }
+
+            return;
+        }
+
+        if (key == Keyboard.Key.N)
+        {
+            if (_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int unitIndex))
+            {
+                _unitSimulation.Weapons.CycleAimMode(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+            }
+
+            return;
+        }
+
+        if (key == Keyboard.Key.K)
+        {
+            if (_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int unitIndex))
+            {
+                _unitSimulation.Weapons.CycleTargetMode(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+            }
+
+            return;
+        }
+
+        if (key == Keyboard.Key.L)
+        {
+            if (_unitSimulation.Units.TryGetIndex(
+                    _selectedUnit,
+                    out int unitIndex))
+            {
+                int stateIndex =
+                    UnitWeaponStore.GetIndex(
+                        unitIndex,
+                        UnitWeaponSlot.Primary);
+
+                int currentAmmo =
+                    _unitSimulation.Weapons.CurrentAmmoType[stateIndex];
+
+                int nextAmmo =
+                    currentAmmo + 1;
+
+                short inventorySlot =
+                    _unitSimulation.Inventory.GetWeaponEquipment(
+                        unitIndex,
+                        UnitWeaponSlot.Primary);
+
+                if (inventorySlot >= 0)
+                {
+                    RangedWeaponConfig? weapon =
+                        _unitSimulation.Inventory.GetItem(
+                            unitIndex,
+                            inventorySlot) as RangedWeaponConfig;
+
+                    int ammoCount =
+                        weapon?.AmmoSet?.Count ?? 1;
+
+                    nextAmmo =
+                        ammoCount <= 0
+                            ? 0
+                            : nextAmmo % ammoCount;
+                }
+
+                _unitSimulation.SelectAmmunition(
+                    _selectedUnit,
+                    UnitWeaponSlot.Primary,
+                    nextAmmo);
+            }
+
+            return;
+        }
+
         if (key == Keyboard.Key.T)
         {
             if (!_unitSimulation.Units.IsAlive(
@@ -438,6 +639,42 @@ public sealed class GameRenderer
                     centerY - 20f,
                     0f));
         }
+    }
+
+    private void EnterMassCombatMode()
+    {
+        if (!_massCombatMode)
+        {
+            ReadOnlySpan<UnitId> testUnits =
+                _visionTestScene.Units;
+
+            for (int i = 0;
+                 i < testUnits.Length;
+                 i++)
+            {
+                if (_unitSimulation.Units.IsAlive(
+                        testUnits[i]))
+                {
+                    _unitSimulation.Destroy(
+                        testUnits[i]);
+                }
+            }
+
+            _unitSimulation.Projectiles.Clear();
+            _massCombatMode = true;
+            _showVisionDebug = false;
+        }
+
+        _massCombatTestScene.Start(
+            _unitSimulation,
+            _worldMap);
+
+        _selectedUnit =
+            _massCombatTestScene.FirstUnit;
+
+        _camera.CenterOnWorld(
+            TerrainTilePixelSize,
+            _worldMap);
     }
 
     private void CreateVisionTestScene()

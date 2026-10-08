@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Combat;
 using Core.Items;
 
 namespace Core.Unit;
@@ -10,19 +11,18 @@ public sealed class UnitWeaponSystem
         UnitStore units,
         UnitInventoryStore inventory,
         UnitWeaponStore weapons,
+        ProjectileStore projectiles,
         float deltaTime)
     {
         weapons.UpdateTimers(deltaTime);
+        weapons.AdvanceBurstTimer(deltaTime);
 
         ReadOnlySpan<int> active =
             units.ActiveIndices;
 
-        for (int i = 0;
-             i < active.Length;
-             i++)
+        for (int i = 0; i < active.Length; i++)
         {
-            int unit =
-                active[i];
+            int unit = active[i];
 
             for (int slot = 0;
                  slot < UnitInventoryStore.WeaponSlotCount;
@@ -31,13 +31,13 @@ public sealed class UnitWeaponSystem
                 UnitWeaponSlot weaponSlot =
                     (UnitWeaponSlot)slot;
 
-                short inventorySlot =
-                    inventory.GetWeaponEquipment(
+                int stateIndex =
+                    UnitWeaponStore.GetIndex(
                         unit,
                         weaponSlot);
 
-                int stateIndex =
-                    UnitWeaponStore.GetIndex(
+                short inventorySlot =
+                    inventory.GetWeaponEquipment(
                         unit,
                         weaponSlot);
 
@@ -49,12 +49,12 @@ public sealed class UnitWeaponSystem
                     continue;
                 }
 
-                RangedWeaponConfig? ranged =
+                RangedWeaponConfig? weapon =
                     inventory.GetItem(
                         unit,
                         inventorySlot) as RangedWeaponConfig;
 
-                if (ranged == null)
+                if (weapon == null)
                     continue;
 
                 if (weapons.Reloading[stateIndex] &&
@@ -63,19 +63,49 @@ public sealed class UnitWeaponSystem
                     weapons.FinishReload(
                         unit,
                         weaponSlot,
-                        ranged.MagazineSize);
+                        weapon.MagazineSize);
                 }
 
                 if (!weapons.Reloading[stateIndex] &&
                     weapons.Ammo[stateIndex] <= 0 &&
                     weapons.ReserveAmmo[stateIndex] > 0 &&
-                    ranged.MagazineSize > 0)
+                    weapon.MagazineSize > 0)
                 {
                     weapons.StartReload(
                         unit,
                         weaponSlot,
-                        ranged.ReloadTime);
+                        weapon.ReloadTime);
                 }
+
+                if (weapons.CurrentFireMode[stateIndex] != FireMode.Burst ||
+                    weapons.BurstRemaining[stateIndex] <= 0 ||
+                    weapons.BurstTimer[stateIndex] > 0f)
+                {
+                    continue;
+                }
+
+                UnitId target =
+                    weapons.BurstTarget[stateIndex];
+
+                if (!units.IsAlive(target))
+                {
+                    weapons.StartBurst(
+                        unit,
+                        weaponSlot,
+                        default,
+                        0,
+                        0f);
+                    continue;
+                }
+
+                TryFireAt(
+                    units,
+                    inventory,
+                    weapons,
+                    projectiles,
+                    units.GetId(unit),
+                    weaponSlot,
+                    target);
             }
         }
     }
@@ -87,7 +117,12 @@ public sealed class UnitWeaponSystem
         ProjectileStore projectiles,
         UnitId shooter,
         UnitWeaponSlot slot,
-        Vector3 direction)
+        Vector3 direction,
+        float accuracyMultiplier = 1f,
+        float shotRange = 0f,
+        float lifetimeOverride = 0f,
+        float shotFlightTime = 0f,
+        float targetSpeed = 0f)
     {
         if (!units.TryGetIndex(
                 shooter,
@@ -110,7 +145,6 @@ public sealed class UnitWeaponSystem
                 inventorySlot) as RangedWeaponConfig;
 
         if (weapon == null ||
-            weapon.DefaultAmmunition == null ||
             weapon.MagazineSize <= 0)
         {
             return false;
@@ -128,19 +162,44 @@ public sealed class UnitWeaponSystem
             return false;
         }
 
-        AmmunitionConfig ammo =
-            weapon.DefaultAmmunition;
+        AmmunitionConfig? ammo =
+            GetCurrentAmmunition(
+                weapon,
+                weapons.CurrentAmmoType[stateIndex]);
 
-        Vector3 shotDirection =
-            ApplySpread(
-                direction,
+        if (ammo == null)
+            return false;
+
+        float aimProgress =
+            weapon.AimTime <= 0f ||
+            weapons.CurrentAimMode[stateIndex] != AimMode.AimedShot
+                ? 1f
+                : Math.Clamp(
+                    weapons.AimTimer[stateIndex] /
+                    weapon.AimTime,
+                    0f,
+                    1f);
+
+        float spread =
+            ShotAccuracy.CalculateSpread(
                 weapon.GetCurrentSpread(),
-                weapons.NextRandom(
-                    unitIndex,
-                    slot),
-                weapons.NextRandom(
-                    unitIndex,
-                    slot));
+                weapon.SightEfficiency,
+                weapon.AimingAccuracy,
+                units.Velocity[unitIndex].Length(),
+                weapon.MovementSpread,
+                weapons.Recoil[stateIndex],
+                accuracyMultiplier,
+                shotRange,
+                weapon.TotalEffectiveRange,
+                aimProgress,
+                weapons.CurrentAimMode[stateIndex],
+                weapon.CircularError,
+                targetSpeed,
+                shotFlightTime,
+                weapon.LeadError) *
+            MathF.Max(
+                0.1f,
+                ammo.SpreadMultiplier);
 
         float velocity =
             MathF.Max(
@@ -155,28 +214,82 @@ public sealed class UnitWeaponSystem
                 units,
                 unitIndex);
 
-        float lifetime =
+        float range =
             MathF.Max(
-                0.5f,
-                weapon.BaseEffectiveRange /
-                velocity *
-                2f);
+                1f,
+                weapon.TotalEffectiveRange);
 
-        projectiles.Create(
-            shooter,
-            units.FactionTag[unitIndex],
-            muzzle,
-            shotDirection,
-            ammo.ProjectileMassKg,
-            ammo.ProjectileDiameterM,
-            ammo.MuzzleVelocity,
-            ammo.DragCoefficient,
-            ammo.Penetration,
-            weapon.BaseDamage *
-            ammo.DamageMultiplier,
-            lifetime);
+        float lifetime =
+            lifetimeOverride > 0f
+                ? lifetimeOverride
+                : MathF.Max(
+                    0.5f,
+                    range / velocity * 2f);
+
+        int pelletCount =
+            Math.Clamp(
+                ammo.PelletCount,
+                1,
+                32);
+
+        float effectiveDrag =
+            ammo.DragCoefficient /
+            MathF.Max(
+                0.01f,
+                ammo.BallisticCoefficient);
+
+        for (int pellet = 0;
+             pellet < pelletCount;
+             pellet++)
+        {
+            Vector3 pelletDirection =
+                ApplySpread(
+                    direction,
+                    pelletCount > 1
+                        ? spread * 1.35f
+                        : spread,
+                    weapons.NextRandom(
+                        unitIndex,
+                        slot),
+                    weapons.NextRandom(
+                        unitIndex,
+                        slot));
+
+            projectiles.Create(
+                shooter,
+                units.FactionTag[unitIndex],
+                muzzle,
+                pelletDirection,
+                ammo.ProjectileMassKg,
+                ammo.ProjectileDiameterM,
+                ammo.MuzzleVelocity,
+                effectiveDrag,
+                ammo.SharpPenetration > 0f
+                    ? ammo.SharpPenetration
+                    : ammo.Penetration,
+                ammo.BluntPenetration > 0f
+                    ? ammo.BluntPenetration
+                    : ammo.Penetration * 0.75f,
+                weapon.BaseDamage *
+                ammo.DamageMultiplier,
+                lifetime,
+                ammo.DamageType,
+                ammo.SuppressionFactor *
+                weapon.SuppressionFactor,
+                weapon.BleedChance > 0f
+                    ? weapon.BleedChance
+                    : ammo.BleedChance);
+        }
 
         weapons.Ammo[stateIndex]--;
+
+        weapons.AddRecoil(
+            unitIndex,
+            slot,
+            weapon.Recoil *
+            MathF.Max(
+                0.1f,
+                ammo.RecoilMultiplier));
 
         weapons.Cooldown[stateIndex] =
             MathF.Max(
@@ -193,7 +306,8 @@ public sealed class UnitWeaponSystem
         ProjectileStore projectiles,
         UnitId shooter,
         UnitWeaponSlot slot,
-        UnitId target)
+        UnitId target,
+        float accuracyMultiplier = 1f)
     {
         if (!units.TryGetIndex(
                 shooter,
@@ -205,12 +319,173 @@ public sealed class UnitWeaponSystem
             return false;
         }
 
-        short inventorySlot =
-            inventory.GetWeaponEquipment(
+        int stateIndex =
+            UnitWeaponStore.GetIndex(
                 shooterIndex,
                 slot);
 
-        if (inventorySlot < 0)
+        RangedWeaponConfig? weapon =
+            GetRangedWeapon(
+                inventory,
+                shooterIndex,
+                slot);
+
+        if (weapon == null)
+            return false;
+
+        if (weapons.CurrentAimMode[stateIndex] == AimMode.AimedShot)
+        {
+            bool resetAim =
+                weapons.AimTarget[stateIndex] != target;
+
+            weapons.SetAimTarget(
+                shooterIndex,
+                slot,
+                target,
+                resetAim);
+
+            if (weapons.AimTimer[stateIndex] <
+                MathF.Max(
+                    0f,
+                    weapon.AimTime))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            weapons.ClearAim(
+                shooterIndex,
+                slot);
+        }
+
+        bool continuingBurst =
+            weapons.CurrentFireMode[stateIndex] == FireMode.Burst &&
+            weapons.BurstRemaining[stateIndex] > 0;
+
+        if (continuingBurst)
+        {
+            UnitId burstTarget =
+                weapons.BurstTarget[stateIndex];
+
+            if (!units.IsAlive(burstTarget))
+                return false;
+
+            target = burstTarget;
+            targetIndex = target.Index;
+        }
+
+        int previousBurstRemaining =
+            weapons.BurstRemaining[stateIndex];
+
+        bool fired =
+            TryFireAtInternal(
+                units,
+                inventory,
+                weapons,
+                projectiles,
+                shooter,
+                slot,
+                target,
+                accuracyMultiplier);
+
+        if (!fired)
+        {
+            if (continuingBurst)
+            {
+                weapons.StartBurst(
+                    shooterIndex,
+                    slot,
+                    default,
+                    0,
+                    0f);
+            }
+
+            return false;
+        }
+
+        if (weapons.CurrentFireMode[stateIndex] == FireMode.Burst)
+        {
+            int remaining =
+                continuingBurst
+                    ? previousBurstRemaining - 1
+                    : Math.Max(
+                        0,
+                        weapon.BurstCount - 1);
+
+            weapons.StartBurst(
+                shooterIndex,
+                slot,
+                remaining > 0
+                    ? target
+                    : default,
+                remaining,
+                remaining > 0
+                    ? MathF.Max(
+                        weapon.BurstInterval,
+                        weapon.FireRate)
+                    : 0f);
+        }
+
+        AmmunitionConfig? currentAmmo =
+            GetCurrentAmmunition(
+                weapon,
+                weapons.CurrentAmmoType[stateIndex]);
+
+        if (CombatDiagnostics.Enabled)
+        {
+            Console.WriteLine(
+                $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
+                $"target={target} mode={weapons.CurrentFireMode[stateIndex]} " +
+                $"aim={weapons.CurrentAimMode[stateIndex]} " +
+                $"targetMode={weapons.CurrentTargetMode[stateIndex]} " +
+                $"targetPos={units.Position[targetIndex]} " +
+                $"ammo={currentAmmo?.Name ?? "none"}");
+        }
+
+        return true;
+    }
+
+    private bool TryFireAtInternal(
+        UnitStore units,
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        ProjectileStore projectiles,
+        UnitId shooter,
+        UnitWeaponSlot slot,
+        UnitId target,
+        float accuracyMultiplier)
+    {
+        if (!units.TryGetIndex(
+                shooter,
+                out int shooterIndex) ||
+            !units.TryGetIndex(
+                target,
+                out int targetIndex))
+        {
+            return false;
+        }
+
+        RangedWeaponConfig? weapon =
+            GetRangedWeapon(
+                inventory,
+                shooterIndex,
+                slot);
+
+        if (weapon == null)
+            return false;
+
+        int stateIndex =
+            UnitWeaponStore.GetIndex(
+                shooterIndex,
+                slot);
+
+        AmmunitionConfig? ammo =
+            GetCurrentAmmunition(
+                weapon,
+                weapons.CurrentAmmoType[stateIndex]);
+
+        if (ammo == null)
             return false;
 
         Vector3 muzzle =
@@ -218,64 +493,149 @@ public sealed class UnitWeaponSystem
                 units,
                 shooterIndex);
 
+        float targetHeight =
+            units.Height[targetIndex];
+
+        float targetZ =
+            weapons.CurrentTargetMode[stateIndex] switch
+            {
+                TargetMode.Head => targetHeight * 0.88f,
+                TargetMode.Legs => targetHeight * 0.22f,
+                TargetMode.Torso => targetHeight * 0.55f,
+                _ => targetHeight * 0.55f
+            };
+
         Vector3 targetPoint =
             units.Position[targetIndex] +
             new Vector3(
                 0f,
                 0f,
-                units.Height[targetIndex] *
-                0.55f);
+                MathF.Max(
+                    0.05f,
+                    targetZ));
 
-        RangedWeaponConfig? weapon =
-            inventory.GetItem(
-                shooterIndex,
-                inventorySlot) as RangedWeaponConfig;
+        Vector3 predictedTarget =
+            targetPoint;
 
-        if (weapon == null ||
-            weapon.DefaultAmmunition == null)
+        BallisticSolution solution =
+            default;
+
+        bool solved = false;
+
+        for (int iteration = 0;
+             iteration < 3;
+             iteration++)
+        {
+            solved =
+                ProjectileBallistics.TrySolve(
+                    muzzle,
+                    predictedTarget,
+                    ammo.ProjectileMassKg,
+                    ammo.ProjectileDiameterM,
+                    ammo.MuzzleVelocity,
+                    ammo.DragCoefficient,
+                    ammo.BallisticCoefficient,
+                    out solution);
+
+            if (!solved)
+                break;
+
+            predictedTarget =
+                targetPoint +
+                units.Velocity[targetIndex] *
+                solution.TimeOfFlight;
+        }
+
+        if (!solved)
+        {
+            predictedTarget =
+                targetPoint;
+
+            if (!ProjectileBallistics.TrySolve(
+                    muzzle,
+                    predictedTarget,
+                    ammo.ProjectileMassKg,
+                    ammo.ProjectileDiameterM,
+                    ammo.MuzzleVelocity,
+                    ammo.DragCoefficient,
+                    ammo.BallisticCoefficient,
+                    out solution))
+            {
+                solution =
+                    new BallisticSolution(
+                        Normalize(
+                            targetPoint - muzzle),
+                        0f,
+                        ammo.MuzzleVelocity,
+                        0f);
+            }
+        }
+
+        Vector3 shotDelta =
+            predictedTarget - muzzle;
+
+        float targetDistance =
+            MathF.Sqrt(
+                shotDelta.X * shotDelta.X +
+                shotDelta.Y * shotDelta.Y);
+
+        if (targetDistance >
+            weapon.TotalEffectiveRange)
         {
             return false;
         }
 
-        AmmunitionConfig ammo =
-            weapon.DefaultAmmunition;
+        return TryFire(
+            units,
+            inventory,
+            weapons,
+            projectiles,
+            shooter,
+            slot,
+            solution.Direction,
+            accuracyMultiplier,
+            targetDistance,
+            MathF.Max(
+                0.5f,
+                solution.TimeOfFlight + 0.25f),
+            solution.TimeOfFlight,
+            units.Velocity[targetIndex].Length());
+    }
 
-        if (!ProjectileBallistics.TrySolveDirection(
-                muzzle,
-                targetPoint,
-                ammo.ProjectileMassKg,
-                ammo.ProjectileDiameterM,
-                ammo.MuzzleVelocity,
-                ammo.DragCoefficient,
-                out Vector3 ballisticDirection))
+    private static AmmunitionConfig? GetCurrentAmmunition(
+        RangedWeaponConfig weapon,
+        int ammoType)
+    {
+        if (weapon.AmmoSet != null)
         {
-            ballisticDirection =
-                targetPoint -
-                muzzle;
+            AmmunitionConfig? selected =
+                weapon.AmmoSet.Get(
+                    ammoType);
+
+            if (selected != null)
+                return selected;
         }
 
-        bool fired =
-            TryFire(
-                units,
-                inventory,
-                weapons,
-                projectiles,
-                shooter,
-                slot,
-                ballisticDirection);
+        return weapon.DefaultAmmunition;
+    }
 
-        if (fired)
-        {
-            Console.WriteLine(
-                $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
-                $"target={target} " +
-                $"targetPos={targetPoint} " +
-                $"muzzle={muzzle} " +
-                $"dir={ballisticDirection} " +
-                $"ammo={ammo.Name}");
-        }
+    private static RangedWeaponConfig? GetRangedWeapon(
+        UnitInventoryStore inventory,
+        int unitIndex,
+        UnitWeaponSlot slot)
+    {
+        short inventorySlot =
+            inventory.GetWeaponEquipment(
+                unitIndex,
+                slot);
 
-        return fired;
+        if (inventorySlot < 0)
+            return null;
+
+        return inventory.GetItem(
+                unitIndex,
+                inventorySlot)
+            as RangedWeaponConfig;
     }
 
     private static Vector3 GetMuzzlePosition(
@@ -349,20 +709,15 @@ public sealed class UnitWeaponSystem
                 direction.X,
                 0f);
 
-        if (right.LengthSquared() <
-            0.000001f)
-        {
-            right =
-                new Vector3(
+        right =
+            right.LengthSquared() <
+            0.000001f
+                ? new Vector3(
                     1f,
                     0f,
-                    0f);
-        }
-        else
-        {
-            right =
-                Normalize(right);
-        }
+                    0f)
+                : Normalize(
+                    right);
 
         Vector3 up =
             Normalize(
@@ -370,33 +725,27 @@ public sealed class UnitWeaponSystem
                     right,
                     direction));
 
-        float u =
-            ToUnitFloat(
-                randomA);
-
-        float v =
-            ToUnitFloat(
-                randomB);
-
         float radius =
-            MathF.Sqrt(u) *
+            MathF.Sqrt(
+                ToUnitFloat(
+                    randomA)) *
             spread;
 
         float angle =
-            v *
+            ToUnitFloat(
+                randomB) *
             MathF.Tau;
 
         Vector3 offset =
             right *
             (MathF.Cos(angle) *
-             radius) +
+            radius) +
             up *
             (MathF.Sin(angle) *
-             radius);
+            radius);
 
         return Normalize(
-            direction +
-            offset);
+            direction + offset);
     }
 
     private static float ToUnitFloat(
@@ -420,7 +769,8 @@ public sealed class UnitWeaponSystem
         float lengthSquared =
             value.LengthSquared();
 
-        if (lengthSquared < 0.000001f)
+        if (lengthSquared <
+            0.000001f)
         {
             return new Vector3(
                 1f,

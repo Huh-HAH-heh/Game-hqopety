@@ -360,16 +360,21 @@ public sealed class VisionSystem
             bodyLength * 0.5f +
             headRadius * 1.15f;
 
+        float eyeHeight =
+            units.Posture[unitIndex] switch
+            {
+                UnitPosture.Lying => height * 0.55f,
+                UnitPosture.Crouching => height * 0.62f,
+                _ => height
+            };
+
         return
             position +
             headNormal * headDistance +
             new Vector3(
                 0f,
                 0f,
-                units.Posture[unitIndex] ==
-                UnitPosture.Lying
-                    ? height * 0.55f
-                    : height);
+                eyeHeight);
     }
 
     public void GetVisibilityPoints(
@@ -416,6 +421,14 @@ public sealed class VisionSystem
         bool lying =
             units.Posture[unitIndex] ==
             UnitPosture.Lying;
+
+        float heightFactor =
+            units.Posture[unitIndex] ==
+            UnitPosture.Crouching
+                ? 0.62f
+                : 1f;
+
+        height *= heightFactor;
 
         float halfWidth =
             width * 0.5f;

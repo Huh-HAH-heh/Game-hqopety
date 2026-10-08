@@ -29,5 +29,6 @@ public enum BodyPartMotion : byte
 public enum UnitPosture : byte
 {
     Standing = 0,
-    Lying = 1
+    Lying = 1,
+    Crouching = 2
 }

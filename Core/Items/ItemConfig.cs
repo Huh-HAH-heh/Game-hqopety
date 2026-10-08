@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Text;
 
+using Core.Combat;
+
 namespace Core.Items
 {
     
@@ -69,6 +71,14 @@ public enum UnitWeaponSlot : byte
 
         // Projectile penetration budget consumed by this layer.
         public float PenetrationResistance;
+        public float SharpRating;
+        public float BluntRating;
+        public float HeatRating;
+        public bool SoftArmor;
+        public float HardArmorDamageFactor = 0.5f;
+
+        // CE-inspired deterministic protection threshold. Penetration below it can deflect ballistic/sharp hits.
+        public float ArmorRating;
 
         public ArmorCoverage Coverage;
 
@@ -118,8 +128,30 @@ public enum UnitWeaponSlot : byte
         // Базовый врожденный разброс оружия (чем меньше, тем точнее, например, АК = 0.02f)
         public float BaseAccuracy;
 
+        // CE-inspired shooting accuracy components.
+        public float AimingAccuracy = 1f;
+        public float SightEfficiency = 1f;
+        public float MovementSpread = 0.12f;
+        public float CircularError;
+        public float LeadError = 0.01f;
+
+        // CE-inspired fire control.
+        public FireMode DefaultFireMode = FireMode.Single;
+        public byte BurstCount = 3;
+        public float BurstInterval = 0.08f;
+        public float SuppressionFactor = 1f;
+        public AimMode DefaultAimMode = AimMode.AimedShot;
+        public TargetMode DefaultTargetMode = TargetMode.Automatic;
+        public float AimTime = 0.2f;
+        public float Recoil = 0.1f;
+        public float SnapshotSpreadMultiplier = 2f;
+        public float SuppressSpreadMultiplier = 2.5f;
+
         // Default cartridge used when this weapon fires.
         public AmmunitionConfig? DefaultAmmunition;
+
+        // Selectable cartridge family. DefaultAmmunition remains as compatibility fallback.
+        public AmmunitionSet? AmmoSet;
 
         // Список установленных на пушку модификаций (прицелы, глушители)
         // Чтобы код не падал, сразу инициализируем пустой список
