@@ -49,6 +49,7 @@ public sealed class MapRenderSystem : IDisposable
     private bool _useTerrainBuffer;
     private bool _terrainShaderChecked;
     private Shader? _terrainLayerShader;
+    private bool _heightMapMode = true;
     private long _frameNumber;
     private long _chunkCacheTerrainVersion = long.MinValue;
     private int _chunkCacheVisibleMaxLayer = -1;
@@ -60,10 +61,12 @@ public sealed class MapRenderSystem : IDisposable
     private const string TerrainVertexShaderSource =
         @"uniform float uVisibleLayer;
 uniform float uLayerScreenOffset;
+uniform float uDisplayMode;
 void main()
 {
     vec4 position = gl_Vertex;
-    position.y -= max(0.0, gl_MultiTexCoord0.x - uVisibleLayer) * uLayerScreenOffset;
+    if (uDisplayMode < 0.5)
+        position.y -= max(0.0, gl_MultiTexCoord0.x - uVisibleLayer) * uLayerScreenOffset;
     gl_Position = gl_ModelViewProjectionMatrix * position;
     gl_TexCoord[0] = gl_MultiTexCoord0;
     gl_FrontColor = gl_Color;
@@ -71,9 +74,15 @@ void main()
 
     private const string TerrainFragmentShaderSource =
         @"uniform float uVisibleLayer;
+uniform float uDisplayMode;
 void main()
 {
-    if (gl_TexCoord[0].y > uVisibleLayer + 0.5)
+    if (uDisplayMode > 0.5)
+    {
+        if (abs(gl_TexCoord[0].x - gl_TexCoord[0].y) > 0.5)
+            discard;
+    }
+    else if (gl_TexCoord[0].y > uVisibleLayer + 0.5)
         discard;
     gl_FragColor = gl_Color;
 }";
@@ -118,6 +127,13 @@ void main()
 
     public bool UsesTerrainLayerShader =>
         _terrainLayerShader != null;
+
+    public bool HeightMapMode => _heightMapMode;
+
+    public void ToggleHeightMapMode()
+    {
+        _heightMapMode = !_heightMapMode;
+    }
 
     public bool UsesTerrainVertexBuffer =>
         _useTerrainBuffer;
@@ -346,10 +362,12 @@ void main()
         int layerCacheKey =
             _terrainLayerShader != null
                 ? -1
-                : visibleMaxLayer;
+                : _heightMapMode
+                    ? -2
+                    : visibleMaxLayer;
 
         int geometryMaxLayer =
-            _terrainLayerShader != null
+            _terrainLayerShader != null || _heightMapMode
                 ? worldMap.LayerCount - 1
                 : visibleMaxLayer;
 
@@ -422,6 +440,7 @@ void main()
         {
             _terrainLayerShader.SetUniform("uVisibleLayer", (float)visibleMaxLayer);
             _terrainLayerShader.SetUniform("uLayerScreenOffset", LayerScreenOffset);
+            _terrainLayerShader.SetUniform("uDisplayMode", _heightMapMode ? 1f : 0f);
             terrainStates = new RenderStates(_terrainLayerShader);
         }
 
@@ -512,6 +531,14 @@ void main()
                         continue;
                     }
 
+                    if (_terrainLayerShader == null &&
+                        _heightMapMode &&
+                        z != topLayer)
+                    {
+                        column++;
+                        continue;
+                    }
+
                     int x = minTileX + column * lodStep;
                     ushort materialId = worldMap.GetMaterialId(x, y, z);
 
@@ -555,8 +582,10 @@ void main()
                         top,
                         right,
                         bottom,
-                        ShadeColor(
-                            GetMaterialColor(materialId),
+                        TerrainHeightPalette.ShadeDepth(
+                            TerrainHeightPalette.GetSurfaceColor(
+                                surfaceLayer,
+                                worldMap.LayerCount),
                             actualDepth),
                         surfaceLayer,
                         z);
@@ -790,33 +819,6 @@ void main()
         _gridVertices.Dispose();
         _waterVertices.Dispose();
         _terrainVertices = Array.Empty<Vertex>();
-    }
-
-    private static Color GetMaterialColor(
-        ushort materialId)
-    {
-        return materialId switch
-        {
-            1 => new Color(42, 41, 35),
-            2 => new Color(34, 36, 33),
-            3 => new Color(58, 57, 51),
-            4 => new Color(73, 61, 41),
-            _ => new Color(45, 47, 46)
-        };
-    }
-
-    private static Color ShadeColor(
-        Color color,
-        float depth)
-    {
-        float factor =
-            1f / (1f + MathF.Max(0f, depth) * 0.12f);
-
-        return new Color(
-            (byte)(color.R * factor),
-            (byte)(color.G * factor),
-            (byte)(color.B * factor),
-            color.A);
     }
 
     private static void AppendQuad(
