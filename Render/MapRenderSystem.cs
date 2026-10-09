@@ -57,7 +57,6 @@ public sealed class MapRenderSystem : IDisposable
     private long _frameNumber;
     private long _chunkCacheTerrainVersion = long.MinValue;
     private int _chunkCacheVisibleMaxLayer = -1;
-    private int _chunkCacheLodStep = -1;
     private float _chunkCacheTilePixelSize = -1f;
 
     private const int ExtraCachedTerrainChunks = 8;
@@ -442,13 +441,11 @@ void main()
 
         if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
             _chunkCacheVisibleMaxLayer != layerCacheKey ||
-            _chunkCacheLodStep != lodStep ||
             _chunkCacheTilePixelSize != tilePixelSize)
         {
             ClearTerrainChunkCache();
             _chunkCacheTerrainVersion = worldMap.TerrainVersion;
             _chunkCacheVisibleMaxLayer = layerCacheKey;
-            _chunkCacheLodStep = lodStep;
             _chunkCacheTilePixelSize = tilePixelSize;
         }
 
@@ -481,7 +478,8 @@ void main()
                  regionX <= maxRegionX;
                  regionX++)
             {
-                int key = regionX + regionY * worldMap.RegionsX;
+                int regionKey = regionX + regionY * worldMap.RegionsX;
+                int key = regionKey * 4 + lodStep;
 
                 if (!_terrainChunks.TryGetValue(key, out TerrainChunkMesh? mesh))
                 {
@@ -775,14 +773,9 @@ void main()
 
             foreach (KeyValuePair<int, TerrainChunkMesh> entry in _terrainChunks)
             {
-                int regionX = entry.Key % worldMap.RegionsX;
-                int regionY = entry.Key / worldMap.RegionsX;
-
-                if (regionX >= minRegionX && regionX <= maxRegionX &&
-                    regionY >= minRegionY && regionY <= maxRegionY)
-                {
+                // Every LOD variant drawn this frame is pinned until the next frame.
+                if (entry.Value.LastUsedFrame == _frameNumber)
                     continue;
-                }
 
                 if (entry.Value.LastUsedFrame < oldestFrame)
                 {
