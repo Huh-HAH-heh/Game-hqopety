@@ -9,6 +9,8 @@ namespace RimClone.Render;
 
 public sealed class MapRenderSystem : IDisposable
 {
+    private readonly record struct TerrainChunkKey(int RegionIndex, int LodStep);
+
     private sealed class TerrainChunkMesh : IDisposable
     {
         public VertexBuffer? Buffer;
@@ -38,7 +40,7 @@ public sealed class MapRenderSystem : IDisposable
     }
 
     // Camera movement rebuilds only chunks entering the view.
-    private readonly Dictionary<int, TerrainChunkMesh> _terrainChunks = new();
+    private readonly Dictionary<TerrainChunkKey, TerrainChunkMesh> _terrainChunks = new();
     private readonly List<TerrainChunkMesh> _visibleTerrainChunks = new();
 
     private Vertex[] _terrainVertices = Array.Empty<Vertex>();
@@ -55,7 +57,6 @@ public sealed class MapRenderSystem : IDisposable
     private long _frameNumber;
     private long _chunkCacheTerrainVersion = long.MinValue;
     private int _chunkCacheVisibleMaxLayer = -1;
-    private int _chunkCacheLodStep = -1;
     private float _chunkCacheTilePixelSize = -1f;
 
     private const int ExtraCachedTerrainChunks = 8;
@@ -388,13 +389,11 @@ void main()
 
         if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
             _chunkCacheVisibleMaxLayer != layerCacheKey ||
-            _chunkCacheLodStep != lodStep ||
             _chunkCacheTilePixelSize != tilePixelSize)
         {
             ClearTerrainChunkCache();
             _chunkCacheTerrainVersion = worldMap.TerrainVersion;
             _chunkCacheVisibleMaxLayer = layerCacheKey;
-            _chunkCacheLodStep = lodStep;
             _chunkCacheTilePixelSize = tilePixelSize;
         }
 
@@ -427,7 +426,8 @@ void main()
                  regionX <= maxRegionX;
                  regionX++)
             {
-                int key = regionX + regionY * worldMap.RegionsX;
+                int regionIndex = regionX + regionY * worldMap.RegionsX;
+                TerrainChunkKey key = new TerrainChunkKey(regionIndex, lodStep);
 
                 if (!_terrainChunks.TryGetValue(key, out TerrainChunkMesh? mesh))
                 {
@@ -474,7 +474,7 @@ void main()
             maxRegionX,
             minRegionY,
             maxRegionY,
-            visibleChunkCount + ExtraCachedTerrainChunks);
+            (visibleChunkCount + ExtraCachedTerrainChunks) * 3);
     }
 
     private TerrainChunkMesh BuildTerrainChunk(
@@ -722,13 +722,13 @@ void main()
     {
         while (_terrainChunks.Count > targetCount)
         {
-            int oldestKey = -1;
+            TerrainChunkKey? oldestKey = null;
             long oldestFrame = long.MaxValue;
 
-            foreach (KeyValuePair<int, TerrainChunkMesh> entry in _terrainChunks)
+            foreach (KeyValuePair<TerrainChunkKey, TerrainChunkMesh> entry in _terrainChunks)
             {
-                int regionX = entry.Key % worldMap.RegionsX;
-                int regionY = entry.Key / worldMap.RegionsX;
+                int regionX = entry.Key.RegionIndex % worldMap.RegionsX;
+                int regionY = entry.Key.RegionIndex / worldMap.RegionsX;
 
                 if (regionX >= minRegionX && regionX <= maxRegionX &&
                     regionY >= minRegionY && regionY <= maxRegionY)
@@ -743,13 +743,13 @@ void main()
                 }
             }
 
-            if (oldestKey < 0)
+            if (!oldestKey.HasValue)
                 break;
 
-            TerrainChunkMesh mesh = _terrainChunks[oldestKey];
+            TerrainChunkMesh mesh = _terrainChunks[oldestKey.Value];
             _cachedTerrainVertexCount -= mesh.VertexCount;
             mesh.Dispose();
-            _terrainChunks.Remove(oldestKey);
+            _terrainChunks.Remove(oldestKey.Value);
         }
     }
 
