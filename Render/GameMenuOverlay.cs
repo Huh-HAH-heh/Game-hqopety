@@ -80,6 +80,11 @@ public sealed class GameMenuOverlay : IDisposable
     private readonly Font? _font;
     private readonly List<Text> _texts = new();
     private readonly List<SliderControl> _sliders = new();
+    private Text?[] _mainMenuTexts = Array.Empty<Text?>();
+    private Text?[] _settingsTexts = Array.Empty<Text?>();
+    private int _lastSelectedResolutionIndex = -1;
+    private uint _lastCurrentWidth;
+    private uint _lastCurrentHeight;
 
     private readonly RectangleShape _backdrop =
         new RectangleShape(new Vector2f(1280f, 720f))
@@ -301,6 +306,36 @@ public sealed class GameMenuOverlay : IDisposable
         _keyboardHelp = CreateText(
             "F2 — меню настроек     Колесо — масштаб     WASD — камера",
             10, new Color(145, 157, 173), Vector2f.Zero);
+
+        _mainMenuTexts = new Text?[]
+        {
+            _mainTitle,
+            _mainSubtitle,
+            _resumeLabel,
+            _settingsLabel,
+            _exitLabel
+        };
+
+        _settingsTexts = new Text?[]
+        {
+            _settingsTitle,
+            _settingsSubtitle,
+            _closeLabel,
+            _resolutionHeading,
+            _resolutionValue,
+            _resolutionCurrent,
+            _previousLabel,
+            _nextLabel,
+            _applyResolutionLabel,
+            _gridLabel,
+            _extremaLabel,
+            _toneHeading,
+            _toneLowLabel,
+            _toneHighLabel,
+            _resetLabel,
+            _backLabel,
+            _keyboardHelp
+        };
     }
 
     public bool IsSliderHit(
@@ -590,17 +625,11 @@ public sealed class GameMenuOverlay : IDisposable
 
         float sliderStartX = settingsX + 22f;
         float sliderWidth = SettingsWidth - 44f;
-        float[] trackYs =
-        {
-            settingsY + 214f,
-            settingsY + 264f,
-            settingsY + 314f,
-            settingsY + 364f,
-            settingsY + 414f
-        };
-
         for (int i = 0; i < _sliders.Count; i++)
-            _sliders[i].Layout(sliderStartX, trackYs[i], sliderWidth);
+        {
+            float trackY = settingsY + 214f + i * 50f;
+            _sliders[i].Layout(sliderStartX, trackY, sliderWidth);
+        }
 
         _gridButton.Position = new Vector2f(settingsX + 22f, settingsY + 442f);
         _extremaButton.Position = new Vector2f(settingsX + 260f, settingsY + 442f);
@@ -624,15 +653,25 @@ public sealed class GameMenuOverlay : IDisposable
         _backLabel!.Position = new Vector2f(settingsX + SettingsWidth - 113f, settingsY + 574f);
         _keyboardHelp!.Position = new Vector2f(settingsX + 22f, settingsY + 544f);
 
-        SetText(
-            _resolutionValue,
-            ref _lastResolution,
-            GetResolution(settings.SelectedResolutionIndex).ToString());
+        if (_lastSelectedResolutionIndex != settings.SelectedResolutionIndex)
+        {
+            _lastSelectedResolutionIndex = settings.SelectedResolutionIndex;
+            SetText(
+                _resolutionValue,
+                ref _lastResolution,
+                GetResolution(settings.SelectedResolutionIndex).ToString());
+        }
 
-        SetText(
-            _resolutionCurrent,
-            ref _lastAppliedResolution,
-            $"Текущее окно: {settings.CurrentWidth} × {settings.CurrentHeight}");
+        if (_lastCurrentWidth != settings.CurrentWidth ||
+            _lastCurrentHeight != settings.CurrentHeight)
+        {
+            _lastCurrentWidth = settings.CurrentWidth;
+            _lastCurrentHeight = settings.CurrentHeight;
+            SetText(
+                _resolutionCurrent,
+                ref _lastAppliedResolution,
+                $"Текущее окно: {settings.CurrentWidth} × {settings.CurrentHeight}");
+        }
 
         SetText(
             _gridLabel,
@@ -665,7 +704,7 @@ public sealed class GameMenuOverlay : IDisposable
         window.Draw(_settingsButton);
         window.Draw(_exitButton);
 
-        DrawText(window, _mainTitle, _mainSubtitle, _resumeLabel, _settingsLabel, _exitLabel);
+        DrawText(window, _mainMenuTexts);
     }
 
     private void DrawSettings(
@@ -730,26 +769,7 @@ public sealed class GameMenuOverlay : IDisposable
         if (_font == null)
             return;
 
-        DrawText(
-            window,
-            _settingsTitle,
-            _settingsSubtitle,
-            _closeLabel,
-            _resolutionValue,
-            _resolutionCurrent,
-            _previousLabel,
-            _nextLabel,
-            _applyResolutionLabel,
-            _gridLabel,
-            _extremaLabel,
-            _toneHeading,
-            _toneLowLabel,
-            _toneHighLabel,
-            _minimumText,
-            _maximumText,
-            _resetLabel,
-            _backLabel,
-            _keyboardHelp);
+        DrawText(window, _settingsTexts);
     }
 
     public bool IsSettingsPanelHit(Vector2i point, GameMenuPage page) =>
@@ -807,7 +827,9 @@ public sealed class GameMenuOverlay : IDisposable
     {
         button.Position = new Vector2f(x, y);
         button.Size = new Vector2f(width, height);
-        label.DisplayedString = text;
+        if (label.DisplayedString != text)
+            label.DisplayedString = text;
+
         FloatRect bounds = label.GetLocalBounds();
         label.Position = new Vector2f(
             x + (width - bounds.Size.X) * 0.5f - bounds.Position.X,
@@ -939,6 +961,8 @@ public sealed class GameMenuOverlay : IDisposable
         private float _startX;
         private float _trackY;
         private float _width;
+        private float _lastValue = float.NaN;
+        private int _lastLayerCount = -1;
 
         public GameMenuActionType ActionType { get; }
         public float MinValue { get; }
@@ -1024,8 +1048,14 @@ public sealed class GameMenuOverlay : IDisposable
 
         public void UpdateValue(float current, int layerCount)
         {
-            if (_value == null)
+            if (_value == null ||
+                (_lastValue == current && _lastLayerCount == layerCount))
+            {
                 return;
+            }
+
+            _lastValue = current;
+            _lastLayerCount = layerCount;
 
             _value.DisplayedString = ActionType switch
             {
