@@ -277,15 +277,12 @@ public sealed class GameRenderer
             _unitSimulation.Projectiles,
             TerrainTilePixelSize);
 
-        if (_terrainStressMode)
-        {
-            _gameMenuOverlay?.DrawWorldMarkers(
-                _window,
-                _worldMap,
-                TerrainTilePixelSize,
-                _camera.ZoomLevel,
-                _showTerrainExtrema);
-        }
+        _gameMenuOverlay?.DrawWorldMarkers(
+            _window,
+            _worldMap,
+            TerrainTilePixelSize,
+            _camera.ZoomLevel,
+            _showTerrainExtrema);
 
         if (_uiView != null)
         {
