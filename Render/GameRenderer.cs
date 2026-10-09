@@ -39,6 +39,7 @@ public sealed class GameRenderer
     private int _selectedResolutionIndex;
     private bool _showTerrainExtrema;
     private bool _showHeightContours = true;
+    private bool _showContourLabels = true;
     private bool _closeRequested;
 
     private bool _showDebugGrid;
@@ -285,7 +286,8 @@ public sealed class GameRenderer
             _showTerrainExtrema,
             _camera.View,
             _visibleMaxLayer,
-            _showHeightContours);
+            _showHeightContours,
+            _showContourLabels);
 
         if (_uiView != null)
         {
@@ -891,6 +893,7 @@ public sealed class GameRenderer
             _showDebugGrid,
             _showTerrainExtrema,
             _showHeightContours,
+            _showContourLabels,
             _mapRenderer.BaseGray,
             _mapRenderer.HeightContrast,
             _worldMap.LayerCount,
@@ -974,11 +977,16 @@ public sealed class GameRenderer
                 _showHeightContours = !_showHeightContours;
                 break;
 
+            case GameMenuActionType.ToggleContourLabels:
+                _showContourLabels = !_showContourLabels;
+                break;
+
             case GameMenuActionType.ResetTerrainSettings:
                 _mapRenderer.ResetVisualSettings();
                 _showDebugGrid = false;
                 _showTerrainExtrema = false;
                 _showHeightContours = true;
+                _showContourLabels = true;
                 _visibleMaxLayer = 0;
                 break;
         }
