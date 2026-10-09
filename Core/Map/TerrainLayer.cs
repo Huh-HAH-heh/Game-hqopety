@@ -45,7 +45,7 @@ public sealed class TerrainLayer
         return _materialIds[x + y * Width];
     }
 
-    public void SetMaterialId(
+    internal void SetMaterialId(
         int x,
         int y,
         ushort materialId)
