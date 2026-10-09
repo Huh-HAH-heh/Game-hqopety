@@ -279,6 +279,7 @@ public sealed class MapRenderSystem : IDisposable
 
         if (columnCount == 0)
         {
+            UploadTerrainMesh();
             LastTerrainBuildMilliseconds = 0d;
             TerrainMeshRebuildCount++;
             return;
