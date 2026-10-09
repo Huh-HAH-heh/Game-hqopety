@@ -1007,6 +1007,11 @@ public sealed class GameRenderer
 
         _camera.Resize(new Vector2f(size.X, size.Y));
 
+        // Keep the selector synchronized with the actual client size, including
+        // manual resize/maximize and any size the OS adjusts after applying it.
+        _selectedResolutionIndex =
+            GameMenuOverlay.FindResolutionIndex(size.X, size.Y);
+
         _uiView?.Dispose();
         _uiView = CreateUiView(size);
     }
