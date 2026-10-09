@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Core.Map;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
@@ -151,6 +152,28 @@ public sealed class GameMenuOverlay : IDisposable
         };
 
     private readonly RectangleShape[] _toneSwatches = new RectangleShape[5];
+
+    private readonly CircleShape _minimumPin = new CircleShape(4f, 20)
+    {
+        FillColor = new Color(225, 229, 235),
+        OutlineColor = new Color(20, 24, 30),
+        OutlineThickness = 1.5f
+    };
+
+    private readonly CircleShape _maximumPin = new CircleShape(4f, 20)
+    {
+        FillColor = new Color(38, 42, 48),
+        OutlineColor = new Color(235, 239, 245),
+        OutlineThickness = 1.5f
+    };
+
+    private long _cachedTerrainVersion = long.MinValue;
+    private ushort _minimumHeightUnits;
+    private ushort _maximumHeightUnits;
+    private int _minimumX;
+    private int _minimumY;
+    private int _maximumX;
+    private int _maximumY;
 
     private readonly Text? _menuButtonLabel;
     private readonly Text? _mainTitle;
@@ -406,6 +429,87 @@ public sealed class GameMenuOverlay : IDisposable
         }
 
         return null;
+    }
+
+    public void DrawWorldMarkers(
+        RenderWindow window,
+        WorldMap worldMap,
+        float tilePixelSize,
+        float zoomLevel,
+        bool showExtrema)
+    {
+        if (!showExtrema)
+            return;
+
+        RefreshExtremes(worldMap);
+
+        float radius = Math.Clamp(4f * zoomLevel, 0.75f, 12f);
+        _minimumPin.Radius = radius;
+        _maximumPin.Radius = radius;
+        _minimumPin.Origin = new Vector2f(radius, radius);
+        _maximumPin.Origin = new Vector2f(radius, radius);
+
+        _minimumPin.Position = new Vector2f(
+            (_minimumX + 0.5f) * tilePixelSize,
+            (_minimumY + 0.5f) * tilePixelSize);
+
+        _maximumPin.Position = new Vector2f(
+            (_maximumX + 0.5f) * tilePixelSize,
+            (_maximumY + 0.5f) * tilePixelSize);
+
+        window.Draw(_minimumPin);
+        window.Draw(_maximumPin);
+    }
+
+    private void RefreshExtremes(WorldMap worldMap)
+    {
+        if (_cachedTerrainVersion == worldMap.TerrainVersion)
+            return;
+
+        _minimumHeightUnits = ushort.MaxValue;
+        _maximumHeightUnits = 0;
+
+        long centerX = worldMap.TileWidth / 2;
+        long centerY = worldMap.TileHeight / 2;
+        long minimumDistance = long.MaxValue;
+        long maximumDistance = long.MaxValue;
+
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < worldMap.TileWidth; x++)
+            {
+                ushort height = worldMap.GetSurfaceHeightUnits(x, y);
+                if (height == 0)
+                    continue;
+
+                long dx = x - centerX;
+                long dy = y - centerY;
+                long distance = dx * dx + dy * dy;
+
+                if (height < _minimumHeightUnits ||
+                    (height == _minimumHeightUnits && distance < minimumDistance))
+                {
+                    _minimumHeightUnits = height;
+                    _minimumX = x;
+                    _minimumY = y;
+                    minimumDistance = distance;
+                }
+
+                if (height > _maximumHeightUnits ||
+                    (height == _maximumHeightUnits && distance < maximumDistance))
+                {
+                    _maximumHeightUnits = height;
+                    _maximumX = x;
+                    _maximumY = y;
+                    maximumDistance = distance;
+                }
+            }
+        }
+
+        if (_minimumHeightUnits == ushort.MaxValue)
+            _minimumHeightUnits = 0;
+
+        _cachedTerrainVersion = worldMap.TerrainVersion;
     }
 
     public bool IsModalOpen(GameMenuPage page) =>
@@ -823,6 +927,8 @@ public sealed class GameMenuOverlay : IDisposable
         _extremaButton.Dispose();
         _resolutionBox.Dispose();
         _divider.Dispose();
+        _minimumPin.Dispose();
+        _maximumPin.Dispose();
 
         for (int i = 0; i < _toneSwatches.Length; i++)
             _toneSwatches[i].Dispose();
