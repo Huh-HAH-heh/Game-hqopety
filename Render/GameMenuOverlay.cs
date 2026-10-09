@@ -30,6 +30,7 @@ public enum GameMenuActionType
     SetLayer,
     ToggleGrid,
     ToggleExtrema,
+    ToggleLowlands,
     ResetTerrainSettings
 }
 
@@ -42,6 +43,7 @@ public readonly record struct GameSettingsSnapshot(
     int VisibleMaxLayer,
     bool ShowGrid,
     bool ShowExtrema,
+    bool ShowLowlands,
     float BaseGray,
     float HeightContrast,
     int LayerCount,
@@ -237,8 +239,9 @@ public sealed class GameMenuOverlay : IDisposable
     private readonly RectangleShape _resolutionPrevious = ButtonShape(34f, 36f);
     private readonly RectangleShape _resolutionNext = ButtonShape(34f, 36f);
     private readonly RectangleShape _applyResolution = ButtonShape(168f, 36f);
-    private readonly RectangleShape _gridButton = ButtonShape(226f, 34f);
-    private readonly RectangleShape _extremaButton = ButtonShape(226f, 34f);
+    private readonly RectangleShape _gridButton = ButtonShape(180f, 34f);
+    private readonly RectangleShape _extremaButton = ButtonShape(180f, 34f);
+    private readonly RectangleShape _lowlandsButton = ButtonShape(180f, 34f);
 
     private readonly RectangleShape _resolutionBox =
         new RectangleShape(new Vector2f(232f, 36f))
@@ -296,6 +299,7 @@ public sealed class GameMenuOverlay : IDisposable
     private readonly Text? _applyResolutionLabel;
     private readonly Text? _gridLabel;
     private readonly Text? _extremaLabel;
+    private readonly Text? _lowlandsLabel;
     private readonly Text? _toneHeading;
     private readonly Text? _toneLowLabel;
     private readonly Text? _toneHighLabel;
@@ -305,6 +309,7 @@ public sealed class GameMenuOverlay : IDisposable
 
     private string _lastGridLabel = string.Empty;
     private string _lastExtremaLabel = string.Empty;
+    private string _lastLowlandsLabel = string.Empty;
     private string _lastResolution = string.Empty;
     private string _lastAppliedResolution = string.Empty;
 
@@ -416,6 +421,8 @@ public sealed class GameMenuOverlay : IDisposable
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _extremaLabel = CreateText(
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _lowlandsLabel = CreateText(
+            "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _toneHeading = CreateText(
             "ПРЕВЬЮ МОНОХРОМНОГО ТОНА", 11,
             new Color(195, 204, 215), new Vector2f(0f, 0f), Text.Styles.Bold);
@@ -453,6 +460,7 @@ public sealed class GameMenuOverlay : IDisposable
             _applyResolutionLabel,
             _gridLabel,
             _extremaLabel,
+            _lowlandsLabel,
             _toneHeading,
             _toneLowLabel,
             _toneHighLabel,
@@ -571,6 +579,11 @@ public sealed class GameMenuOverlay : IDisposable
         if (_extremaButton.GetGlobalBounds().Contains(point))
         {
             return new GameMenuAction(GameMenuActionType.ToggleExtrema);
+        }
+
+        if (_lowlandsButton.GetGlobalBounds().Contains(point))
+        {
+            return new GameMenuAction(GameMenuActionType.ToggleLowlands);
         }
 
         if (_resetButton.GetGlobalBounds().Contains(point))
@@ -756,9 +769,11 @@ public sealed class GameMenuOverlay : IDisposable
         }
 
         _gridButton.Position = new Vector2f(settingsX + 22f, settingsY + 442f);
-        _extremaButton.Position = new Vector2f(settingsX + 260f, settingsY + 442f);
-        _gridLabel!.Position = new Vector2f(settingsX + 56f, settingsY + 451f);
-        _extremaLabel!.Position = new Vector2f(settingsX + 289f, settingsY + 451f);
+        _extremaButton.Position = new Vector2f(settingsX + 210f, settingsY + 442f);
+        _lowlandsButton.Position = new Vector2f(settingsX + 398f, settingsY + 442f);
+        _gridLabel!.Position = new Vector2f(settingsX + 78f, settingsY + 451f);
+        _extremaLabel!.Position = new Vector2f(settingsX + 258f, settingsY + 451f);
+        _lowlandsLabel!.Position = new Vector2f(settingsX + 448f, settingsY + 451f);
 
         _toneHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 488f);
         _toneLowLabel!.Position = new Vector2f(settingsX + 22f, settingsY + 520f);
@@ -807,6 +822,11 @@ public sealed class GameMenuOverlay : IDisposable
             ref _lastExtremaLabel,
             settings.ShowExtrema ? "МАРКЕРЫ: ВКЛ" : "МАРКЕРЫ: ВЫКЛ");
 
+        SetText(
+            _lowlandsLabel,
+            ref _lastLowlandsLabel,
+            settings.ShowLowlands ? "НИЗИНЫ: ВКЛ" : "НИЗИНЫ: ВЫКЛ");
+
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
             _toneSwatches[i].FillColor =
@@ -842,6 +862,7 @@ public sealed class GameMenuOverlay : IDisposable
         UpdateHover(_applyResolution, mouse);
         UpdateHover(_gridButton, mouse);
         UpdateHover(_extremaButton, mouse);
+        UpdateHover(_lowlandsButton, mouse);
         UpdateHover(_resetButton, mouse);
         UpdateHover(_backButton, mouse);
 
@@ -849,6 +870,9 @@ public sealed class GameMenuOverlay : IDisposable
             ? new Color(63, 75, 90)
             : new Color(27, 34, 44);
         _extremaButton.FillColor = settings.ShowExtrema
+            ? new Color(63, 75, 90)
+            : new Color(27, 34, 44);
+        _lowlandsButton.FillColor = settings.ShowLowlands
             ? new Color(63, 75, 90)
             : new Color(27, 34, 44);
 
@@ -862,6 +886,7 @@ public sealed class GameMenuOverlay : IDisposable
         window.Draw(_divider);
         window.Draw(_gridButton);
         window.Draw(_extremaButton);
+        window.Draw(_lowlandsButton);
         window.Draw(_resetButton);
         window.Draw(_backButton);
 
@@ -1046,6 +1071,7 @@ public sealed class GameMenuOverlay : IDisposable
         _applyResolution.Dispose();
         _gridButton.Dispose();
         _extremaButton.Dispose();
+        _lowlandsButton.Dispose();
         _resolutionBox.Dispose();
         _divider.Dispose();
         _minimumPin.Dispose();
