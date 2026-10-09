@@ -854,10 +854,14 @@ public sealed class GameMenuOverlay : IDisposable
                 : new Color(48, 48, 48, 135);
 
             int labelsForHeight = 0;
-            int maxLabelsForHeight = Math.Clamp(
-                (int)(cameraView.Size.X / labelSpacing),
+            int cachedWidth = Math.Max(
                 1,
-                4);
+                maxX - minX + lodStep);
+
+            int maxLabelsForHeight = Math.Clamp(
+                (int)(cachedWidth * tilePixelSize / labelSpacing) + 1,
+                1,
+                8);
 
             float lastLabelX = float.NaN;
             float lastLabelY = float.NaN;
