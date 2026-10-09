@@ -176,6 +176,18 @@ public sealed class GameRenderer
 
             _lastAllocatedBytesSample =
                 _allocatedBytes;
+
+            Console.WriteLine(
+                $"[PERF] FPS={_fps:0.0} " +
+                $"RAM={_workingSetBytes / 1024d / 1024d:0.0}MB " +
+                $"Heap={_managedHeapBytes / 1024d / 1024d:0.0}MB " +
+                $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.00}MB/s " +
+                $"TerrainQ={_mapRenderer.TerrainQuadCount:N0} " +
+                $"V={_mapRenderer.TerrainVertexCount:N0}/{_mapRenderer.TerrainVertexCapacity:N0} " +
+                $"VBO={_mapRenderer.UsesTerrainVertexBuffer} " +
+                $"Build={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
+                $"Rebuilds={_mapRenderer.TerrainMeshRebuildCount} " +
+                $"Projectiles={_unitSimulation.Projectiles.ActiveCount}/{_unitSimulation.Projectiles.Capacity}");
         }
 
         _camera.Update(
