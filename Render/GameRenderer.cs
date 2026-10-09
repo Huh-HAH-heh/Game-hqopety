@@ -184,6 +184,7 @@ public sealed class GameRenderer
                 $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.00}MB/s " +
                 $"TerrainQ={_mapRenderer.TerrainQuadCount:N0} " +
                 $"Chunks={_mapRenderer.TerrainChunkCacheCount} " +
+                $"LayerShader={_mapRenderer.UsesTerrainLayerShader} " +
                 $"V={_mapRenderer.TerrainVertexCount:N0}/{_mapRenderer.TerrainVertexCapacity:N0} " +
                 $"VBO={_mapRenderer.UsesTerrainVertexBuffer} " +
                 $"ChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
@@ -423,7 +424,7 @@ public sealed class GameRenderer
             $"RimClone | FPS={_fps:0.0} RAM={_workingSetBytes / 1024d / 1024d:0}MB " +
             $"Heap={_managedHeapBytes / 1024d / 1024d:0}MB " +
             $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.0}MB/s TotalAlloc={_allocatedBytes / 1024d / 1024d:0}MB | " +
-            $"Terrain={_mapRenderer.TerrainQuadCount:N0} quads Chunks={_mapRenderer.TerrainChunkCacheCount} V={_mapRenderer.TerrainVertexCount:N0}/{_mapRenderer.TerrainVertexCapacity:N0} VBO={_mapRenderer.UsesTerrainVertexBuffer} ChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms ChunkBuilds={_mapRenderer.TerrainMeshRebuildCount} | " +
+            $"Terrain={_mapRenderer.TerrainQuadCount:N0} quads Chunks={_mapRenderer.TerrainChunkCacheCount} LayerShader={_mapRenderer.UsesTerrainLayerShader} V={_mapRenderer.TerrainVertexCount:N0}/{_mapRenderer.TerrainVertexCapacity:N0} VBO={_mapRenderer.UsesTerrainVertexBuffer} ChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms ChunkBuilds={_mapRenderer.TerrainMeshRebuildCount} | " +
             $"Units={_unitSimulation.Units.ActiveCount} | " +
             $"Projectiles={projectiles}/{_unitSimulation.Projectiles.Capacity} Hits={hits} | " +
             $"Teams 1:{teamOneAlive} 2:{teamTwoAlive} | " +
