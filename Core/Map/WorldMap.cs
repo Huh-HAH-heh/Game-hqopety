@@ -8,8 +8,9 @@ public sealed class WorldMap
     public const byte StateEmpty = 0;
     public const byte StateSolid = 1;
 
-    public const int DefaultTerrainLayerCount = 50;
-    public const ushort LayerHeightUnits = 10;
+    public const int DefaultTerrainLayerCount = 500;
+    public const ushort HeightUnitsPerMeter = 10;
+    public const ushort LayerHeightUnits = 1;
 
     public int RegionsX { get; }
     public int RegionsY { get; }
@@ -87,7 +88,8 @@ public sealed class WorldMap
     // ============================================================
     // LAYER -> REGION -> VOXEL STORAGE
     // Every TerrainLayer owns its XY TerrainRegion grid.
-    // Every TerrainRegion owns a dense 48 x 48 grid of 1 m³ voxels.
+    // Each XY cell is 1 m across; each Z layer is 0.1 m tall.
+    // All 500 levels are stored densely to preserve full vertical detail.
     // ID 0 means empty; every other ID identifies a material.
     // ============================================================
 
