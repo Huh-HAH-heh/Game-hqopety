@@ -838,6 +838,8 @@ public sealed class GameMenuOverlay : IDisposable
             tilePixelSize * 24f,
             cameraView.Size.X * 0.28f);
 
+        Span<Vector2f> crossings = stackalloc Vector2f[4];
+
         for (int contourHeight = contourIntervalUnits;
              contourHeight <= maxHeightUnits;
              contourHeight += contourIntervalUnits)
@@ -865,7 +867,6 @@ public sealed class GameMenuOverlay : IDisposable
 
             float lastLabelX = float.NaN;
             float lastLabelY = float.NaN;
-            Span<Vector2f> crossings = stackalloc Vector2f[4];
 
             for (int y = minY; y <= maxY; y += lodStep)
             {
