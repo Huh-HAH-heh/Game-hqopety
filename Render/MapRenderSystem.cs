@@ -114,9 +114,6 @@ void main()
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
 
-    private readonly VertexArray _heightContourVertices =
-        new VertexArray(PrimitiveType.Lines);
-
     private bool _mapCacheValid;
     private bool _gridCacheValid;
     private bool _waterCacheValid;
@@ -130,18 +127,6 @@ void main()
     private int _cachedWaterVisibleMaxLayer = -1;
     private long _cachedTerrainVersion;
     private long _cachedWaterVersion;
-
-    private bool _heightContourCacheValid;
-    private int _contourMinTileX;
-    private int _contourMaxTileX;
-    private int _contourMinTileY;
-    private int _contourMaxTileY;
-    private int _contourLodStep = -1;
-    private int _contourVisibleMaxLayer = -1;
-    private long _contourTerrainVersion = long.MinValue;
-    private float _contourTilePixelSize = -1f;
-
-    private const int ContourMinimumHeightDifference = 2;
 
     private int[] _rowTopLayers = Array.Empty<int>();
     private int[] _rowSurfaceLayers = Array.Empty<int>();
@@ -407,17 +392,6 @@ void main()
             maxLayer);
 
         DrawWater(
-            window,
-            worldMap,
-            minTileX,
-            maxTileX,
-            minTileY,
-            maxTileY,
-            lodStep,
-            tilePixelSize,
-            maxLayer);
-
-        DrawHeightContours(
             window,
             worldMap,
             minTileX,
@@ -830,141 +804,6 @@ void main()
         return topLayer;
     }
 
-    private void DrawHeightContours(
-        RenderWindow window,
-        WorldMap worldMap,
-        int minTileX,
-        int maxTileX,
-        int minTileY,
-        int maxTileY,
-        int lodStep,
-        float tilePixelSize,
-        int visibleMaxLayer)
-    {
-        bool cacheMatches =
-            _heightContourCacheValid &&
-            _contourMinTileX == minTileX &&
-            _contourMaxTileX == maxTileX &&
-            _contourMinTileY == minTileY &&
-            _contourMaxTileY == maxTileY &&
-            _contourLodStep == lodStep &&
-            _contourVisibleMaxLayer == visibleMaxLayer &&
-            _contourTerrainVersion == worldMap.TerrainVersion &&
-            _contourTilePixelSize == tilePixelSize;
-
-        if (!cacheMatches)
-        {
-            _heightContourVertices.Clear();
-
-            for (int y = minTileY; y <= maxTileY; y += lodStep)
-            {
-                for (int x = minTileX; x <= maxTileX; x += lodStep)
-                {
-                    int currentLayer =
-                        FindVisibleTopLayer(
-                            worldMap,
-                            x,
-                            y,
-                            visibleMaxLayer);
-
-                    if (currentLayer < 0)
-                        continue;
-
-                    if (x + lodStep < worldMap.TileWidth)
-                    {
-                        int rightLayer =
-                            FindVisibleTopLayer(
-                                worldMap,
-                                x + lodStep,
-                                y,
-                                visibleMaxLayer);
-
-                        int difference =
-                            Math.Abs(currentLayer - rightLayer);
-
-                        if (rightLayer >= 0 &&
-                            difference >= ContourMinimumHeightDifference)
-                        {
-                            float edgeX = (x + lodStep) * tilePixelSize;
-
-                            AppendHeightContour(
-                                edgeX,
-                                y * tilePixelSize,
-                                edgeX,
-                                (y + lodStep) * tilePixelSize,
-                                difference);
-                        }
-                    }
-
-                    if (y + lodStep < worldMap.TileHeight)
-                    {
-                        int lowerLayer =
-                            FindVisibleTopLayer(
-                                worldMap,
-                                x,
-                                y + lodStep,
-                                visibleMaxLayer);
-
-                        int difference =
-                            Math.Abs(currentLayer - lowerLayer);
-
-                        if (lowerLayer >= 0 &&
-                            difference >= ContourMinimumHeightDifference)
-                        {
-                            float edgeY = (y + lodStep) * tilePixelSize;
-
-                            AppendHeightContour(
-                                x * tilePixelSize,
-                                edgeY,
-                                (x + lodStep) * tilePixelSize,
-                                edgeY,
-                                difference);
-                        }
-                    }
-                }
-            }
-
-            _heightContourCacheValid = true;
-            _contourMinTileX = minTileX;
-            _contourMaxTileX = maxTileX;
-            _contourMinTileY = minTileY;
-            _contourMaxTileY = maxTileY;
-            _contourLodStep = lodStep;
-            _contourVisibleMaxLayer = visibleMaxLayer;
-            _contourTerrainVersion = worldMap.TerrainVersion;
-            _contourTilePixelSize = tilePixelSize;
-        }
-
-        if (_heightContourVertices.VertexCount > 0)
-            window.Draw(_heightContourVertices);
-    }
-
-    private void AppendHeightContour(
-        float x1,
-        float y1,
-        float x2,
-        float y2,
-        int heightDifference)
-    {
-        byte shade = (byte)Math.Clamp(
-            118 + (heightDifference - ContourMinimumHeightDifference) * 12,
-            118,
-            220);
-
-        byte alpha = (byte)Math.Clamp(
-            190 + heightDifference * 5,
-            190,
-            240);
-
-        Color color = new Color(shade, shade, shade, alpha);
-
-        _heightContourVertices.Append(
-            new Vertex(new Vector2f(x1, y1), color));
-
-        _heightContourVertices.Append(
-            new Vertex(new Vector2f(x2, y2), color));
-    }
-
     private void DrawWater(
         RenderWindow window,
         WorldMap worldMap,
@@ -1038,7 +877,6 @@ void main()
         _terrainLayerShader = null;
         _gridVertices.Dispose();
         _waterVertices.Dispose();
-        _heightContourVertices.Dispose();
         _terrainVertices = Array.Empty<Vertex>();
     }
 
