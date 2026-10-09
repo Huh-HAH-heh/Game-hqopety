@@ -178,6 +178,8 @@ public sealed class GameMenuOverlay : IDisposable
     private const float MainWidth = 390f;
     private const float MainHeight = 310f;
 
+    private readonly record struct HeightContourChunkKey(int RegionIndex, int LodStep);
+
     private sealed class HeightContourLevel : IDisposable
     {
         public int HeightUnits { get; }
@@ -242,10 +244,9 @@ void main()
 
     private Shader? _contourShader;
 
-    private readonly Dictionary<int, HeightContourChunk> _contourChunks = new();
+    private readonly Dictionary<HeightContourChunkKey, HeightContourChunk> _contourChunks = new();
     private readonly List<HeightContourChunk> _visibleContourChunks = new();
     private long _contourTerrainVersion = long.MinValue;
-    private int _contourLodStep = -1;
     private long _contourFrame;
 
     private readonly Font? _font;
@@ -472,9 +473,9 @@ void main()
         }
 
         _minimumElevationLabel = CreateText(
-            "", 10, new Color(200, 200, 200), new Vector2f(0f, 0f), Text.Styles.Bold);
+            "", 18, new Color(200, 200, 200), new Vector2f(0f, 0f), Text.Styles.Bold);
         _maximumElevationLabel = CreateText(
-            "", 10, new Color(200, 200, 200), new Vector2f(0f, 0f), Text.Styles.Bold);
+            "", 18, new Color(200, 200, 200), new Vector2f(0f, 0f), Text.Styles.Bold);
 
         _menuButtonLabel = CreateText(
             "•••", 16, Color.White, new Vector2f(21f, 17f), Text.Styles.Bold);
@@ -762,14 +763,11 @@ void main()
         if (label == null)
             return;
 
-        label.CharacterSize = (uint)Math.Clamp(
-            (int)MathF.Round(10f * zoomLevel),
-            1,
-            80);
+        label.Scale = new Vector2f(zoomLevel, zoomLevel);
 
         label.Position = new Vector2f(
             position.X + radius + 2f * zoomLevel,
-            position.Y - label.CharacterSize * 0.75f);
+            position.Y - label.CharacterSize * 0.75f * zoomLevel);
 
         window.Draw(label);
     }
@@ -806,12 +804,10 @@ void main()
             worldMap.MaxTileY,
             (int)MathF.Ceiling(screenMaxY / tilePixelSize) + 1);
 
-        if (_contourTerrainVersion != worldMap.TerrainVersion ||
-            _contourLodStep != lodStep)
+        if (_contourTerrainVersion != worldMap.TerrainVersion)
         {
             ClearContourChunkCache();
             _contourTerrainVersion = worldMap.TerrainVersion;
-            _contourLodStep = lodStep;
         }
 
         int minRegionX = minTileX / TerrainRegion.TilesPerSide;
@@ -832,7 +828,8 @@ void main()
         {
             for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
             {
-                int key = regionX + regionY * worldMap.RegionsX;
+                int regionIndex = regionX + regionY * worldMap.RegionsX;
+                HeightContourChunkKey key = new HeightContourChunkKey(regionIndex, lodStep);
 
                 if (!_contourChunks.TryGetValue(key, out HeightContourChunk? chunk))
                 {
@@ -894,18 +891,10 @@ void main()
                     window.Draw(level.FallbackVertices);
                 }
 
-                uint labelSize = (uint)Math.Clamp(
-                    (int)MathF.Round(9f * zoomLevel),
-                    1,
-                    72);
-
                 for (int labelIndex = 0; labelIndex < level.Labels.Count; labelIndex++)
                 {
                     Text label = level.Labels[labelIndex];
-
-                    if (label.CharacterSize != labelSize)
-                        label.CharacterSize = labelSize;
-
+                    label.Scale = new Vector2f(zoomLevel, zoomLevel);
                     window.Draw(label);
                 }
             }
@@ -917,7 +906,7 @@ void main()
             maxRegionX,
             minRegionY,
             maxRegionY,
-            visibleCount + 8);
+            (visibleCount + 8) * 3);
     }
 
     private HeightContourChunk BuildHeightContourChunk(
@@ -1042,7 +1031,7 @@ void main()
                     Text label = new Text(
                         _font!,
                         $"{contourHeight * 0.1f:0} м",
-                        9)
+                        18)
                     {
                         Position = midpoint,
                         FillColor = new Color(190, 190, 190, 235),
@@ -1088,13 +1077,13 @@ void main()
     {
         while (_contourChunks.Count > targetCount)
         {
-            int oldestKey = -1;
+            HeightContourChunkKey? oldestKey = null;
             long oldestFrame = long.MaxValue;
 
-            foreach (KeyValuePair<int, HeightContourChunk> entry in _contourChunks)
+            foreach (KeyValuePair<HeightContourChunkKey, HeightContourChunk> entry in _contourChunks)
             {
-                int regionX = entry.Key % worldMap.RegionsX;
-                int regionY = entry.Key / worldMap.RegionsX;
+                int regionX = entry.Key.RegionIndex % worldMap.RegionsX;
+                int regionY = entry.Key.RegionIndex / worldMap.RegionsX;
 
                 if (regionX >= minRegionX && regionX <= maxRegionX &&
                     regionY >= minRegionY && regionY <= maxRegionY)
@@ -1109,11 +1098,11 @@ void main()
                 }
             }
 
-            if (oldestKey < 0)
+            if (!oldestKey.HasValue)
                 break;
 
-            _contourChunks[oldestKey].Dispose();
-            _contourChunks.Remove(oldestKey);
+            _contourChunks[oldestKey.Value].Dispose();
+            _contourChunks.Remove(oldestKey.Value);
         }
     }
 
