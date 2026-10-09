@@ -8,8 +8,16 @@ namespace RimClone.Render;
 
 public sealed class MapRenderSystem
 {
+    // Build terrain in managed memory and upload the finished mesh in bulk.
     private readonly VertexArray _mapVertices =
         new VertexArray(PrimitiveType.Triangles);
+
+    private VertexBuffer? _terrainBuffer;
+    private Vertex[] _terrainVertices = Array.Empty<Vertex>();
+    private int _terrainVertexCount;
+    private bool _terrainBufferSupportChecked;
+    private bool _useTerrainBuffer;
+    private int _smallMeshRebuilds;
 
     private readonly VertexArray _gridVertices =
         new VertexArray(PrimitiveType.Lines);
@@ -34,7 +42,7 @@ public sealed class MapRenderSystem
     private int[] _rowTopLayers = Array.Empty<int>();
 
     public int TerrainVertexCount =>
-        (int)_mapVertices.VertexCount;
+        _terrainVertexCount;
 
     public int TerrainQuadCount =>
         TerrainVertexCount / 6;
@@ -62,6 +70,13 @@ public sealed class MapRenderSystem
     {
         if (tilePixelSize <= 0f)
             return;
+
+        if (!_terrainBufferSupportChecked)
+        {
+            // Draw is reached only after the render window/context was created.
+            _useTerrainBuffer = VertexBuffer.Available;
+            _terrainBufferSupportChecked = true;
+        }
 
         int maxLayer =
             visibleMaxLayer < 0
@@ -206,8 +221,21 @@ public sealed class MapRenderSystem
             _cachedTerrainVersion = worldMap.TerrainVersion;
         }
 
-        if (_mapVertices.VertexCount > 0)
-            window.Draw(_mapVertices);
+        if (_terrainVertexCount > 0)
+        {
+            if (_useTerrainBuffer && _terrainBuffer != null)
+            {
+                _terrainBuffer.Draw(
+                    window,
+                    0,
+                    (uint)_terrainVertexCount,
+                    RenderStates.Default);
+            }
+            else if (!_useTerrainBuffer && _mapVertices.VertexCount > 0)
+            {
+                window.Draw(_mapVertices);
+            }
+        }
 
         DrawWater(
             window,
@@ -236,7 +264,10 @@ public sealed class MapRenderSystem
     {
         long started = Stopwatch.GetTimestamp();
 
-        _mapVertices.Clear();
+        _terrainVertexCount = 0;
+
+        if (!_useTerrainBuffer)
+            _mapVertices.Clear();
 
         int columnCount =
             maxTileX < minTileX
@@ -342,8 +373,7 @@ public sealed class MapRenderSystem
                         (y + lodStep) * tilePixelSize +
                         depth * LayerScreenOffset;
 
-                    AppendQuad(
-                        _mapVertices,
+                    AppendTerrainQuad(
                         left,
                         top,
                         right,
@@ -355,10 +385,137 @@ public sealed class MapRenderSystem
             }
         }
 
+        UploadTerrainMesh();
+
         LastTerrainBuildMilliseconds =
             Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
         TerrainMeshRebuildCount++;
+    }
+
+    private void AppendTerrainQuad(
+        float left,
+        float top,
+        float right,
+        float bottom,
+        Color color)
+    {
+        EnsureTerrainVertexCapacity(
+            _terrainVertexCount + 6);
+
+        Vector2f topLeft = new Vector2f(left, top);
+        Vector2f topRight = new Vector2f(right, top);
+        Vector2f bottomRight = new Vector2f(right, bottom);
+        Vector2f bottomLeft = new Vector2f(left, bottom);
+
+        _terrainVertices[_terrainVertexCount++] = new Vertex(topLeft, color);
+        _terrainVertices[_terrainVertexCount++] = new Vertex(topRight, color);
+        _terrainVertices[_terrainVertexCount++] = new Vertex(bottomRight, color);
+        _terrainVertices[_terrainVertexCount++] = new Vertex(topLeft, color);
+        _terrainVertices[_terrainVertexCount++] = new Vertex(bottomRight, color);
+        _terrainVertices[_terrainVertexCount++] = new Vertex(bottomLeft, color);
+    }
+
+    private void EnsureTerrainVertexCapacity(
+        int required)
+    {
+        if (required <= _terrainVertices.Length)
+            return;
+
+        int newCapacity =
+            Math.Max(
+                4096,
+                _terrainVertices.Length * 2);
+
+        while (newCapacity < required)
+            newCapacity *= 2;
+
+        Array.Resize(
+            ref _terrainVertices,
+            newCapacity);
+    }
+
+    private void UploadTerrainMesh()
+    {
+        if (!_useTerrainBuffer)
+        {
+            _mapVertices.Clear();
+
+            for (int i = 0; i < _terrainVertexCount; i++)
+                _mapVertices.Append(_terrainVertices[i]);
+
+            return;
+        }
+
+        if (_terrainVertexCount == 0)
+            return;
+
+        uint requiredCapacity =
+            (uint)_terrainVertices.Length;
+
+        if (_terrainBuffer == null ||
+            _terrainBuffer.VertexCount < requiredCapacity)
+        {
+            _terrainBuffer?.Dispose();
+
+            _terrainBuffer =
+                new VertexBuffer(
+                    requiredCapacity,
+                    PrimitiveType.Triangles,
+                    VertexBuffer.UsageSpecifier.Dynamic);
+        }
+
+        if (!_terrainBuffer.Update(
+                _terrainVertices,
+                (uint)_terrainVertexCount,
+                0))
+        {
+            _terrainBuffer.Dispose();
+            _terrainBuffer = null;
+            _useTerrainBuffer = false;
+            _mapVertices.Clear();
+
+            for (int i = 0; i < _terrainVertexCount; i++)
+                _mapVertices.Append(_terrainVertices[i]);
+        }
+
+        // Release unusually large retained buffers after repeated smaller
+        // rebuilds; a single transient view must not pin peak memory forever.
+        if (_terrainVertices.Length > 32768 &&
+            _terrainVertexCount * 4 < _terrainVertices.Length)
+        {
+            _smallMeshRebuilds++;
+
+            if (_smallMeshRebuilds >= 8)
+            {
+                int newCapacity = 4096;
+
+                while (newCapacity < _terrainVertexCount)
+                    newCapacity *= 2;
+
+                Array.Resize(
+                    ref _terrainVertices,
+                    newCapacity);
+
+                _terrainBuffer?.Dispose();
+                _terrainBuffer =
+                    new VertexBuffer(
+                        (uint)newCapacity,
+                        PrimitiveType.Triangles,
+                        VertexBuffer.UsageSpecifier.Dynamic);
+
+                _terrainBuffer.Update(
+                    _terrainVertices,
+                    (uint)_terrainVertexCount,
+                    0);
+
+                _smallMeshRebuilds = 0;
+            }
+        }
+        else
+        {
+            _smallMeshRebuilds = 0;
+        }
     }
 
     private static int FindVisibleTopLayer(
