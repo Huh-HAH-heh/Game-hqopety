@@ -16,15 +16,15 @@ public sealed class MapRenderSystem : IDisposable
         public int VertexCount;
         public long LastUsedFrame;
 
-        public void Draw(RenderWindow window)
+        public void Draw(RenderWindow window, RenderStates states)
         {
             if (Buffer != null)
             {
-                Buffer.Draw(window, 0, (uint)VertexCount, RenderStates.Default);
+                Buffer.Draw(window, 0, (uint)VertexCount, states);
             }
             else if (Vertices != null && Vertices.VertexCount > 0)
             {
-                window.Draw(Vertices);
+                window.Draw(Vertices, states);
             }
         }
 
@@ -47,6 +47,8 @@ public sealed class MapRenderSystem : IDisposable
     private int _cachedTerrainVertexCapacity;
     private bool _terrainBufferSupportChecked;
     private bool _useTerrainBuffer;
+    private bool _terrainShaderChecked;
+    private Shader? _terrainLayerShader;
     private long _frameNumber;
     private long _chunkCacheTerrainVersion = long.MinValue;
     private int _chunkCacheVisibleMaxLayer = -1;
@@ -54,6 +56,27 @@ public sealed class MapRenderSystem : IDisposable
     private float _chunkCacheTilePixelSize = -1f;
 
     private const int ExtraCachedTerrainChunks = 8;
+
+    private const string TerrainVertexShaderSource =
+        @"uniform float uVisibleLayer;
+uniform float uLayerScreenOffset;
+void main()
+{
+    vec4 position = gl_Vertex;
+    position.y -= max(0.0, gl_MultiTexCoord0.x - uVisibleLayer) * uLayerScreenOffset;
+    gl_Position = gl_ModelViewProjectionMatrix * position;
+    gl_TexCoord[0] = gl_MultiTexCoord0;
+    gl_FrontColor = gl_Color;
+}";
+
+    private const string TerrainFragmentShaderSource =
+        @"uniform float uVisibleLayer;
+void main()
+{
+    if (gl_TexCoord[0].y > uVisibleLayer + 0.5)
+        discard;
+    gl_FragColor = gl_Color;
+}";
 
     private readonly VertexArray _gridVertices =
         new VertexArray(PrimitiveType.Lines);
@@ -90,6 +113,9 @@ public sealed class MapRenderSystem : IDisposable
     public int TerrainChunkCacheCount =>
         _terrainChunks.Count;
 
+    public bool UsesTerrainLayerShader =>
+        _terrainLayerShader != null;
+
     public bool UsesTerrainVertexBuffer =>
         _useTerrainBuffer;
 
@@ -122,6 +148,27 @@ public sealed class MapRenderSystem : IDisposable
             // Draw is reached only after the render window/context was created.
             _useTerrainBuffer = VertexBuffer.Available;
             _terrainBufferSupportChecked = true;
+        }
+
+        if (!_terrainShaderChecked)
+        {
+            _terrainShaderChecked = true;
+
+            if (Shader.IsAvailable)
+            {
+                try
+                {
+                    _terrainLayerShader = Shader.FromString(
+                        TerrainVertexShaderSource,
+                        null,
+                        TerrainFragmentShaderSource);
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine(
+                        $"[TerrainShader] Disabled; using CPU layer rebuilds: {exception.Message}");
+                }
+            }
         }
 
         int maxLayer =
@@ -293,14 +340,24 @@ public sealed class MapRenderSystem : IDisposable
         float tilePixelSize,
         int visibleMaxLayer)
     {
+        int layerCacheKey =
+            _terrainLayerShader != null
+                ? -1
+                : visibleMaxLayer;
+
+        int geometryMaxLayer =
+            _terrainLayerShader != null
+                ? worldMap.LayerCount - 1
+                : visibleMaxLayer;
+
         if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
-            _chunkCacheVisibleMaxLayer != visibleMaxLayer ||
+            _chunkCacheVisibleMaxLayer != layerCacheKey ||
             _chunkCacheLodStep != lodStep ||
             _chunkCacheTilePixelSize != tilePixelSize)
         {
             ClearTerrainChunkCache();
             _chunkCacheTerrainVersion = worldMap.TerrainVersion;
-            _chunkCacheVisibleMaxLayer = visibleMaxLayer;
+            _chunkCacheVisibleMaxLayer = layerCacheKey;
             _chunkCacheLodStep = lodStep;
             _chunkCacheTilePixelSize = tilePixelSize;
         }
@@ -338,7 +395,7 @@ public sealed class MapRenderSystem : IDisposable
                         regionY,
                         lodStep,
                         tilePixelSize,
-                        visibleMaxLayer);
+                        geometryMaxLayer);
 
                     _terrainChunks.Add(key, mesh);
                     _cachedTerrainVertexCapacity += mesh.VertexCount;
@@ -350,8 +407,17 @@ public sealed class MapRenderSystem : IDisposable
             }
         }
 
+        RenderStates terrainStates = RenderStates.Default;
+
+        if (_terrainLayerShader != null)
+        {
+            _terrainLayerShader.SetUniform("uVisibleLayer", (float)visibleMaxLayer);
+            _terrainLayerShader.SetUniform("uLayerScreenOffset", LayerScreenOffset);
+            terrainStates = new RenderStates(_terrainLayerShader);
+        }
+
         for (int i = 0; i < _visibleTerrainChunks.Count; i++)
-            _visibleTerrainChunks[i].Draw(window);
+            _visibleTerrainChunks[i].Draw(window, terrainStates);
 
         if (TerrainMeshRebuildCount != rebuildsBefore)
         {
@@ -482,7 +548,9 @@ public sealed class MapRenderSystem : IDisposable
                         bottom,
                         ShadeColor(
                             GetMaterialColor(materialId),
-                            actualDepth));
+                            actualDepth),
+                        surfaceLayer,
+                        z);
                 }
             }
         }
@@ -533,7 +601,9 @@ public sealed class MapRenderSystem : IDisposable
         float top,
         float right,
         float bottom,
-        Color color)
+        Color color,
+        int surfaceLayer,
+        int voxelLayer)
     {
         EnsureTerrainVertexCapacity(_buildingTerrainVertexCount + 6);
 
@@ -541,13 +611,14 @@ public sealed class MapRenderSystem : IDisposable
         Vector2f topRight = new Vector2f(right, top);
         Vector2f bottomRight = new Vector2f(right, bottom);
         Vector2f bottomLeft = new Vector2f(left, bottom);
+        Vector2f layerData = new Vector2f(surfaceLayer, voxelLayer);
 
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topRight, color);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomRight, color);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomRight, color);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomLeft, color);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color, layerData);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topRight, color, layerData);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomRight, color, layerData);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color, layerData);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomRight, color, layerData);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomLeft, color, layerData);
     }
 
     private void EnsureTerrainVertexCapacity(int required)
@@ -705,6 +776,8 @@ public sealed class MapRenderSystem : IDisposable
     public void Dispose()
     {
         ClearTerrainChunkCache();
+        _terrainLayerShader?.Dispose();
+        _terrainLayerShader = null;
         _gridVertices.Dispose();
         _waterVertices.Dispose();
         _terrainVertices = Array.Empty<Vertex>();
