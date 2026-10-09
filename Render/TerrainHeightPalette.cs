@@ -39,15 +39,17 @@ public static class TerrainHeightPalette
         int band,
         int layerCount)
     {
-        int surfaceLayer = band switch
-        {
-            0 => 0,
-            1 => Math.Max(0, layerCount / 4 - 1),
-            2 => Math.Max(0, layerCount / 2 - 1),
-            3 => Math.Max(0, layerCount * 3 / 4 - 1),
-            _ => Math.Max(0, layerCount - 1)
-        };
+        int startLayer = Math.Clamp(
+            band * layerCount / 5,
+            0,
+            Math.Max(0, layerCount - 1));
 
+        int endLayer = Math.Clamp(
+            (band + 1) * layerCount / 5 - 1,
+            startLayer,
+            Math.Max(0, layerCount - 1));
+
+        int surfaceLayer = (startLayer + endLayer) / 2;
         return GetSurfaceColor(surfaceLayer, layerCount);
     }
 
