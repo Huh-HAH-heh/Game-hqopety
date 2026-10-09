@@ -31,8 +31,8 @@ public static class TerrainHeightPalette
 
         float heightRange = Math.Clamp(
             baseGray + heightContrast * 1.5f,
-            8f,
-            140f);
+            24f,
+            72f);
 
         float gray =
             heightFraction * heightRange -
@@ -41,7 +41,7 @@ public static class TerrainHeightPalette
         byte value = (byte)Math.Clamp(
             (int)MathF.Round(gray),
             0,
-            140);
+            72);
 
         return new Color(value, value, value, 255);
     }
@@ -55,13 +55,13 @@ public static class TerrainHeightPalette
         float gray =
             height * Math.Clamp(
                 baseGray + heightContrast * 1.5f,
-                8f,
-                140f);
+                24f,
+                72f);
 
         byte value = (byte)Math.Clamp(
             (int)MathF.Round(gray),
             0,
-            140);
+            72);
 
         return new Color(value, value, value, 255);
     }
