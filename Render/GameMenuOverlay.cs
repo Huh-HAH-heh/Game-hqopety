@@ -27,8 +27,6 @@ public enum GameMenuActionType
     ApplyResolution,
     SetBaseGray,
     SetHeightContrast,
-    SetDepthShade,
-    SetLayerOffset,
     SetLayer,
     ToggleGrid,
     ToggleExtrema,
@@ -46,8 +44,6 @@ public readonly record struct GameSettingsSnapshot(
     bool ShowExtrema,
     float BaseGray,
     float HeightContrast,
-    float DepthShade,
-    float LayerOffset,
     int LayerCount,
     int SelectedResolutionIndex,
     uint CurrentWidth,
@@ -369,12 +365,6 @@ public sealed class GameMenuOverlay : IDisposable
         _sliders.Add(new SliderControl(
             _font, GameMenuActionType.SetHeightContrast,
             "Контраст перепада высот", 0f, 32f));
-        _sliders.Add(new SliderControl(
-            _font, GameMenuActionType.SetDepthShade,
-            "Затемнение нижних слоёв", 0f, 50f));
-        _sliders.Add(new SliderControl(
-            _font, GameMenuActionType.SetLayerOffset,
-            "Расстояние между Z-слоями", 0f, 0.3f));
         _sliders.Add(new SliderControl(
             _font, GameMenuActionType.SetLayer,
             "Высота среза Z", 0f, WorldMap.DefaultTerrainLayerCount - 1));
@@ -881,8 +871,6 @@ public sealed class GameMenuOverlay : IDisposable
             {
                 GameMenuActionType.SetBaseGray => settings.BaseGray,
                 GameMenuActionType.SetHeightContrast => settings.HeightContrast,
-                GameMenuActionType.SetDepthShade => settings.DepthShade,
-                GameMenuActionType.SetLayerOffset => settings.LayerOffset,
                 GameMenuActionType.SetLayer => settings.VisibleMaxLayer,
                 _ => 0f
             };
@@ -1194,8 +1182,6 @@ public sealed class GameMenuOverlay : IDisposable
             {
                 GameMenuActionType.SetBaseGray => $"{current:0} / 96",
                 GameMenuActionType.SetHeightContrast => $"{current:0} / 32",
-                GameMenuActionType.SetDepthShade => $"{current:0} / 50",
-                GameMenuActionType.SetLayerOffset => $"{current:0.00} px/Z",
                 GameMenuActionType.SetLayer => $"{current * 0.1f:0.0} / {(layerCount - 1) * 0.1f:0.0} м",
                 _ => current.ToString("0.0")
             };
