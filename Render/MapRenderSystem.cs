@@ -59,7 +59,6 @@ public sealed class MapRenderSystem : IDisposable
     private int _chunkCacheVisibleMaxLayer = -1;
     private float _chunkCacheTilePixelSize = -1f;
 
-    private const int ExtraCachedTerrainChunks = 64;
 
     private const string TerrainVertexShaderSource =
         @"void main()
@@ -465,13 +464,8 @@ void main()
                 Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         }
 
-        TrimTerrainChunkCache(
-            worldMap,
-            minRegionX,
-            maxRegionX,
-            minRegionY,
-            maxRegionY,
-            visibleChunkCount + ExtraCachedTerrainChunks);
+        // Keep generated chunk meshes for the lifetime of this terrain version.
+        // Zooming away and back therefore reuses existing GPU buffers.
     }
 
     private TerrainChunkMesh BuildTerrainChunk(
@@ -707,47 +701,6 @@ void main()
             newCapacity *= 2;
 
         Array.Resize(ref _terrainVertices, newCapacity);
-    }
-
-    private void TrimTerrainChunkCache(
-        WorldMap worldMap,
-        int minRegionX,
-        int maxRegionX,
-        int minRegionY,
-        int maxRegionY,
-        int targetCount)
-    {
-        while (_terrainChunks.Count > targetCount)
-        {
-            TerrainChunkKey? oldestKey = null;
-            long oldestFrame = long.MaxValue;
-
-            foreach (KeyValuePair<TerrainChunkKey, TerrainChunkMesh> entry in _terrainChunks)
-            {
-                int regionX = entry.Key.RegionIndex % worldMap.RegionsX;
-                int regionY = entry.Key.RegionIndex / worldMap.RegionsX;
-
-                if (regionX >= minRegionX && regionX <= maxRegionX &&
-                    regionY >= minRegionY && regionY <= maxRegionY)
-                {
-                    continue;
-                }
-
-                if (entry.Value.LastUsedFrame < oldestFrame)
-                {
-                    oldestFrame = entry.Value.LastUsedFrame;
-                    oldestKey = entry.Key;
-                }
-            }
-
-            if (!oldestKey.HasValue)
-                break;
-
-            TerrainChunkMesh mesh = _terrainChunks[oldestKey.Value];
-            _cachedTerrainVertexCount -= mesh.VertexCount;
-            mesh.Dispose();
-            _terrainChunks.Remove(oldestKey.Value);
-        }
     }
 
     private void ClearTerrainChunkCache()
