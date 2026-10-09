@@ -66,7 +66,14 @@ public sealed class WorldMap
         for (int z = 0; z < layerCount; z++)
         {
             _layers[z] =
-                new TerrainLayer(z, width, height);
+                new TerrainLayer(
+                    z,
+                    width,
+                    height,
+                    regionsX,
+                    regionsY,
+                    layerCount,
+                    _regions);
         }
 
         _surfaceHeights = new ushort[columnCount];
@@ -79,9 +86,10 @@ public sealed class WorldMap
     }
 
     // ============================================================
-    // FLAT VOXEL STORAGE
-    // One ushort ID per 1 m x 1 m x 1 m cell.
-    // Each Z level owns a contiguous flat X/Y array.
+    // REGIONAL 3D VOXEL STORAGE
+    // Each 48 x 48 terrain region owns a chunk of the full Z volume.
+    // TerrainLayer is a logical Z slice through those regional cubes.
+    // Empty regions do not allocate their voxel data until first use.
     // ID 0 means empty; every other ID identifies a material.
     // ============================================================
 
@@ -106,8 +114,7 @@ public sealed class WorldMap
             return 0;
         }
 
-        return _layers[z].GetMaterialIdAtIndex(
-            GetColumnIndex(x, y));
+        return _layers[z].GetMaterialId(x, y);
     }
 
     public void SetMaterialId(
@@ -123,14 +130,11 @@ public sealed class WorldMap
             throw new IndexOutOfRangeException();
         }
 
-        GetOrCreateRegion(
-            x / TerrainRegion.TilesPerSide,
-            y / TerrainRegion.TilesPerSide);
-
         int columnIndex = GetColumnIndex(x, y);
 
-        _layers[z].SetMaterialIdAtIndex(
-            columnIndex,
+        _layers[z].SetMaterialId(
+            x,
+            y,
             materialId);
 
         _rangeCache[columnIndex] = null;
@@ -186,8 +190,8 @@ public sealed class WorldMap
 
     // ============================================================
     // REGIONS / TILES
-    // Regions now contain tile/navigation metadata only.
-    // Terrain materials are stored in the flat Z-layer arrays.
+    // A region owns tile/navigation metadata and its local 3D voxel block.
+    // Layer views share the same region array.
     // ============================================================
 
     public TerrainRegion? GetRegion(
@@ -223,7 +227,10 @@ public sealed class WorldMap
         if (region != null)
             return region;
 
-        region = new TerrainRegion(regionX, regionY);
+        region = new TerrainRegion(
+            regionX,
+            regionY,
+            LayerCount);
         _regions[index] = region;
         return region;
     }
