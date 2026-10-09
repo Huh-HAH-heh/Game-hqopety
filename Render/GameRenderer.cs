@@ -7,6 +7,7 @@ using RimClone.Render;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
+using World;
 
 namespace RimClone.Render;
 
