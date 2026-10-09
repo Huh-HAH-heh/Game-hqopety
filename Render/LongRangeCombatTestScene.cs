@@ -60,6 +60,35 @@ public sealed class LongRangeCombatTestScene
         UpdateStats(simulation);
     }
 
+    public void Stop(
+        UnitSimulation simulation)
+    {
+        if (_initialized)
+        {
+            for (int i = 0; i < TotalUnits; i++)
+            {
+                if (simulation.Units.TryGetIndex(
+                        _units[i],
+                        out _))
+                {
+                    simulation.Destroy(_units[i]);
+                }
+
+                _units[i] = default;
+                _side[i] = 0;
+            }
+        }
+
+        simulation.Projectiles.Clear();
+
+        _initialized = false;
+        _elapsed = 0f;
+        _fireTimer = 0f;
+        _hitsAtReset = simulation.Projectiles.TotalHits;
+        AliveBlue = 0;
+        AliveRed = 0;
+    }
+
     public void Update(
         UnitSimulation simulation,
         WorldMap worldMap,
