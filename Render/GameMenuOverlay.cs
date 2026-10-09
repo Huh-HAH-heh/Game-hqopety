@@ -30,7 +30,7 @@ public enum GameMenuActionType
     SetLayer,
     ToggleGrid,
     ToggleExtrema,
-    ToggleLowlands,
+    ToggleHeightContours,
     ResetTerrainSettings
 }
 
@@ -43,7 +43,7 @@ public readonly record struct GameSettingsSnapshot(
     int VisibleMaxLayer,
     bool ShowGrid,
     bool ShowExtrema,
-    bool ShowLowlands,
+    bool ShowHeightContours,
     float BaseGray,
     float HeightContrast,
     int LayerCount,
@@ -179,7 +179,20 @@ public sealed class GameMenuOverlay : IDisposable
 
     private readonly Font? _font;
     private readonly List<Text> _texts = new();
+    private readonly List<Text> _contourLabels = new();
     private readonly List<SliderControl> _sliders = new();
+    private readonly VertexArray _contourVertices = new VertexArray(PrimitiveType.Lines);
+
+    private bool _contourCacheValid;
+    private int _cachedContourMinX = -1;
+    private int _cachedContourMaxX = -1;
+    private int _cachedContourMinY = -1;
+    private int _cachedContourMaxY = -1;
+    private int _cachedContourVisibleLayer = -1;
+    private int _cachedContourLodStep = -1;
+    private float _cachedContourTileSize = -1f;
+    private float _cachedContourViewWidth = -1f;
+    private long _cachedContourTerrainVersion = long.MinValue;
     private Text?[] _mainMenuTexts = Array.Empty<Text?>();
     private Text?[] _settingsTexts = Array.Empty<Text?>();
     private int _lastSelectedResolutionIndex = -1;
@@ -241,7 +254,7 @@ public sealed class GameMenuOverlay : IDisposable
     private readonly RectangleShape _applyResolution = ButtonShape(168f, 36f);
     private readonly RectangleShape _gridButton = ButtonShape(180f, 34f);
     private readonly RectangleShape _extremaButton = ButtonShape(180f, 34f);
-    private readonly RectangleShape _lowlandsButton = ButtonShape(180f, 34f);
+    private readonly RectangleShape _contoursButton = ButtonShape(180f, 34f);
 
     private readonly RectangleShape _resolutionBox =
         new RectangleShape(new Vector2f(232f, 36f))
@@ -273,6 +286,9 @@ public sealed class GameMenuOverlay : IDisposable
         OutlineThickness = 1.5f
     };
 
+    private readonly Text? _minimumElevationLabel;
+    private readonly Text? _maximumElevationLabel;
+
     private long _cachedTerrainVersion = long.MinValue;
     private ushort _minimumHeightUnits;
     private ushort _maximumHeightUnits;
@@ -299,7 +315,7 @@ public sealed class GameMenuOverlay : IDisposable
     private readonly Text? _applyResolutionLabel;
     private readonly Text? _gridLabel;
     private readonly Text? _extremaLabel;
-    private readonly Text? _lowlandsLabel;
+    private readonly Text? _contoursLabel;
     private readonly Text? _toneHeading;
     private readonly Text? _toneLowLabel;
     private readonly Text? _toneHighLabel;
@@ -309,7 +325,7 @@ public sealed class GameMenuOverlay : IDisposable
 
     private string _lastGridLabel = string.Empty;
     private string _lastExtremaLabel = string.Empty;
-    private string _lastLowlandsLabel = string.Empty;
+    private string _lastContoursLabel = string.Empty;
     private string _lastResolution = string.Empty;
     private string _lastAppliedResolution = string.Empty;
 
@@ -381,6 +397,11 @@ public sealed class GameMenuOverlay : IDisposable
             return;
         }
 
+        _minimumElevationLabel = CreateText(
+            "", 10, new Color(200, 200, 200), new Vector2f(0f, 0f), Text.Styles.Bold);
+        _maximumElevationLabel = CreateText(
+            "", 10, new Color(200, 200, 200), new Vector2f(0f, 0f), Text.Styles.Bold);
+
         _menuButtonLabel = CreateText(
             "•••", 16, Color.White, new Vector2f(21f, 17f), Text.Styles.Bold);
 
@@ -421,7 +442,7 @@ public sealed class GameMenuOverlay : IDisposable
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _extremaLabel = CreateText(
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
-        _lowlandsLabel = CreateText(
+        _contoursLabel = CreateText(
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _toneHeading = CreateText(
             "ПРЕВЬЮ МОНОХРОМНОГО ТОНА", 11,
@@ -460,7 +481,7 @@ public sealed class GameMenuOverlay : IDisposable
             _applyResolutionLabel,
             _gridLabel,
             _extremaLabel,
-            _lowlandsLabel,
+            _contoursLabel,
             _toneHeading,
             _toneLowLabel,
             _toneHighLabel,
@@ -581,9 +602,9 @@ public sealed class GameMenuOverlay : IDisposable
             return new GameMenuAction(GameMenuActionType.ToggleExtrema);
         }
 
-        if (_lowlandsButton.GetGlobalBounds().Contains(point))
+        if (_contoursButton.GetGlobalBounds().Contains(point))
         {
-            return new GameMenuAction(GameMenuActionType.ToggleLowlands);
+            return new GameMenuAction(GameMenuActionType.ToggleHeightContours);
         }
 
         if (_resetButton.GetGlobalBounds().Contains(point))
@@ -604,8 +625,22 @@ public sealed class GameMenuOverlay : IDisposable
         WorldMap worldMap,
         float tilePixelSize,
         float zoomLevel,
-        bool showExtrema)
+        bool showExtrema,
+        View cameraView,
+        int visibleMaxLayer,
+        bool showHeightContours)
     {
+        if (showHeightContours)
+        {
+            DrawHeightContours(
+                window,
+                worldMap,
+                tilePixelSize,
+                zoomLevel,
+                cameraView,
+                visibleMaxLayer);
+        }
+
         if (!showExtrema)
             return;
 
@@ -627,6 +662,330 @@ public sealed class GameMenuOverlay : IDisposable
 
         window.Draw(_minimumPin);
         window.Draw(_maximumPin);
+
+        DrawElevationMarkerLabel(
+            window,
+            _minimumElevationLabel,
+            _minimumPin.Position,
+            radius,
+            zoomLevel);
+
+        DrawElevationMarkerLabel(
+            window,
+            _maximumElevationLabel,
+            _maximumPin.Position,
+            radius,
+            zoomLevel);
+    }
+
+    private void DrawElevationMarkerLabel(
+        RenderWindow window,
+        Text? label,
+        Vector2f position,
+        float radius,
+        float zoomLevel)
+    {
+        if (label == null)
+            return;
+
+        label.CharacterSize = (uint)Math.Clamp(
+            (int)MathF.Round(10f * zoomLevel),
+            1,
+            80);
+
+        label.Position = new Vector2f(
+            position.X + radius + 2f * zoomLevel,
+            position.Y - label.CharacterSize * 0.75f);
+
+        window.Draw(label);
+    }
+
+    private void DrawHeightContours(
+        RenderWindow window,
+        WorldMap worldMap,
+        float tilePixelSize,
+        float zoomLevel,
+        View cameraView,
+        int visibleMaxLayer)
+    {
+        float screenMinX = cameraView.Center.X - cameraView.Size.X * 0.5f;
+        float screenMaxX = cameraView.Center.X + cameraView.Size.X * 0.5f;
+        float screenMinY = cameraView.Center.Y - cameraView.Size.Y * 0.5f;
+        float screenMaxY = cameraView.Center.Y + cameraView.Size.Y * 0.5f;
+
+        int lodStep = zoomLevel >= 4.5f
+            ? 3
+            : zoomLevel >= 2.5f
+                ? 2
+                : 1;
+
+        int minX = Math.Max(
+            0,
+            (int)MathF.Floor(screenMinX / tilePixelSize) - 1);
+
+        int maxX = Math.Min(
+            worldMap.MaxTileX - lodStep,
+            (int)MathF.Ceiling(screenMaxX / tilePixelSize) + 1);
+
+        int minY = Math.Max(
+            0,
+            (int)MathF.Floor(screenMinY / tilePixelSize) - 1);
+
+        int maxY = Math.Min(
+            worldMap.MaxTileY - lodStep,
+            (int)MathF.Ceiling(screenMaxY / tilePixelSize) + 1);
+
+        minX = (minX / lodStep) * lodStep;
+        minY = (minY / lodStep) * lodStep;
+
+        bool cacheMatches =
+            _contourCacheValid &&
+            _cachedContourMinX == minX &&
+            _cachedContourMaxX == maxX &&
+            _cachedContourMinY == minY &&
+            _cachedContourMaxY == maxY &&
+            _cachedContourVisibleLayer == visibleMaxLayer &&
+            _cachedContourLodStep == lodStep &&
+            _cachedContourTileSize == tilePixelSize &&
+            _cachedContourViewWidth == cameraView.Size.X &&
+            _cachedContourTerrainVersion == worldMap.TerrainVersion;
+
+        if (!cacheMatches)
+        {
+            RebuildHeightContours(
+                worldMap,
+                tilePixelSize,
+                cameraView,
+                visibleMaxLayer,
+                minX,
+                maxX,
+                minY,
+                maxY,
+                lodStep);
+
+            _cachedContourMinX = minX;
+            _cachedContourMaxX = maxX;
+            _cachedContourMinY = minY;
+            _cachedContourMaxY = maxY;
+            _cachedContourVisibleLayer = visibleMaxLayer;
+            _cachedContourLodStep = lodStep;
+            _cachedContourTileSize = tilePixelSize;
+            _cachedContourViewWidth = cameraView.Size.X;
+            _cachedContourTerrainVersion = worldMap.TerrainVersion;
+            _contourCacheValid = true;
+        }
+
+        if (_contourVertices.VertexCount > 0)
+            window.Draw(_contourVertices);
+
+        for (int i = 0; i < _contourLabels.Count; i++)
+        {
+            Text label = _contourLabels[i];
+            label.CharacterSize = (uint)Math.Clamp(
+                (int)MathF.Round(9f * zoomLevel),
+                1,
+                72);
+
+            window.Draw(label);
+        }
+    }
+
+    private void RebuildHeightContours(
+        WorldMap worldMap,
+        float tilePixelSize,
+        View cameraView,
+        int visibleMaxLayer,
+        int minX,
+        int maxX,
+        int minY,
+        int maxY,
+        int lodStep)
+    {
+        _contourVertices.Clear();
+
+        for (int i = 0; i < _contourLabels.Count; i++)
+            _contourLabels[i].Dispose();
+
+        _contourLabels.Clear();
+
+        if (maxX < minX || maxY < minY)
+            return;
+
+        ushort maxHeightUnits = 0;
+
+        for (int y = minY; y <= maxY + lodStep; y += lodStep)
+        {
+            for (int x = minX; x <= maxX + lodStep; x += lodStep)
+            {
+                ushort height = worldMap.GetSurfaceHeightUnits(x, y);
+
+                if (height > maxHeightUnits)
+                    maxHeightUnits = height;
+            }
+        }
+
+        // Minor contours every 5 m. Index contours are stronger at each 10 m,
+        // with 25 m included as an extra named reference altitude.
+        const int contourIntervalUnits = 50;
+        float labelSpacing = MathF.Max(
+            tilePixelSize * 24f,
+            cameraView.Size.X * 0.28f);
+
+        for (int contourHeight = contourIntervalUnits;
+             contourHeight <= maxHeightUnits;
+             contourHeight += contourIntervalUnits)
+        {
+            if (contourHeight <= visibleMaxLayer)
+                continue;
+
+            bool isIndexContour =
+                contourHeight % 100 == 0 ||
+                contourHeight % 250 == 0;
+
+            Color lineColor = isIndexContour
+                ? new Color(105, 105, 105, 185)
+                : new Color(48, 48, 48, 135);
+
+            int labelsForHeight = 0;
+            int maxLabelsForHeight = Math.Clamp(
+                (int)(cameraView.Size.X / labelSpacing),
+                1,
+                4);
+
+            float lastLabelX = float.NaN;
+            float lastLabelY = float.NaN;
+
+            for (int y = minY; y <= maxY; y += lodStep)
+            {
+                for (int x = minX; x <= maxX; x += lodStep)
+                {
+                    ushort h00 = worldMap.GetSurfaceHeightUnits(x, y);
+                    ushort h10 = worldMap.GetSurfaceHeightUnits(x + lodStep, y);
+                    ushort h11 = worldMap.GetSurfaceHeightUnits(x + lodStep, y + lodStep);
+                    ushort h01 = worldMap.GetSurfaceHeightUnits(x, y + lodStep);
+
+                    // Do not draw fake contours along the edge of the selected
+                    // horizontal slice; all four samples must actually exist there.
+                    if (h00 <= visibleMaxLayer ||
+                        h10 <= visibleMaxLayer ||
+                        h11 <= visibleMaxLayer ||
+                        h01 <= visibleMaxLayer)
+                    {
+                        continue;
+                    }
+
+                    float x0 = (x + 0.5f) * tilePixelSize;
+                    float x1 = (x + lodStep + 0.5f) * tilePixelSize;
+                    float y0 = (y + 0.5f) * tilePixelSize;
+                    float y1 = (y + lodStep + 0.5f) * tilePixelSize;
+
+                    Span<Vector2f> crossings = stackalloc Vector2f[4];
+                    int crossingCount = 0;
+
+                    TryAddContourIntersection(
+                        x0, y0, h00, x1, y0, h10, contourHeight,
+                        crossings, ref crossingCount);
+                    TryAddContourIntersection(
+                        x1, y0, h10, x1, y1, h11, contourHeight,
+                        crossings, ref crossingCount);
+                    TryAddContourIntersection(
+                        x1, y1, h11, x0, y1, h01, contourHeight,
+                        crossings, ref crossingCount);
+                    TryAddContourIntersection(
+                        x0, y1, h01, x0, y0, h00, contourHeight,
+                        crossings, ref crossingCount);
+
+                    if (crossingCount < 2)
+                        continue;
+
+                    AppendContourSegment(
+                        crossings[0],
+                        crossings[1],
+                        lineColor);
+
+                    if (crossingCount >= 4)
+                    {
+                        AppendContourSegment(
+                            crossings[2],
+                            crossings[3],
+                            lineColor);
+                    }
+
+                    if (!isIndexContour ||
+                        _font == null ||
+                        labelsForHeight >= maxLabelsForHeight)
+                    {
+                        continue;
+                    }
+
+                    Vector2f midpoint = new Vector2f(
+                        (crossings[0].X + crossings[1].X) * 0.5f,
+                        (crossings[0].Y + crossings[1].Y) * 0.5f);
+
+                    float dx = midpoint.X - lastLabelX;
+                    float dy = midpoint.Y - lastLabelY;
+
+                    if (labelsForHeight > 0 &&
+                        dx * dx + dy * dy < labelSpacing * labelSpacing)
+                    {
+                        continue;
+                    }
+
+                    Text label = new Text(
+                        _font,
+                        $"{contourHeight * 0.1f:0} м",
+                        9)
+                    {
+                        Position = midpoint,
+                        FillColor = new Color(190, 190, 190, 235),
+                        OutlineColor = Color.Black,
+                        OutlineThickness = 1f,
+                        Style = Text.Styles.Bold
+                    };
+
+                    _contourLabels.Add(label);
+                    lastLabelX = midpoint.X;
+                    lastLabelY = midpoint.Y;
+                    labelsForHeight++;
+                }
+            }
+        }
+    }
+
+    private static void TryAddContourIntersection(
+        float xA,
+        float yA,
+        ushort heightA,
+        float xB,
+        float yB,
+        ushort heightB,
+        int contourHeight,
+        Span<Vector2f> intersections,
+        ref int count)
+    {
+        bool crosses =
+            (heightA < contourHeight && heightB >= contourHeight) ||
+            (heightB < contourHeight && heightA >= contourHeight);
+
+        if (!crosses || heightA == heightB || count >= intersections.Length)
+            return;
+
+        float amount =
+            (contourHeight - heightA) /
+            (float)(heightB - heightA);
+
+        intersections[count++] = new Vector2f(
+            xA + (xB - xA) * amount,
+            yA + (yB - yA) * amount);
+    }
+
+    private void AppendContourSegment(
+        Vector2f start,
+        Vector2f end,
+        Color color)
+    {
+        _contourVertices.Append(new Vertex(start, color));
+        _contourVertices.Append(new Vertex(end, color));
     }
 
     private void RefreshExtremes(WorldMap worldMap)
@@ -676,6 +1035,18 @@ public sealed class GameMenuOverlay : IDisposable
 
         if (_minimumHeightUnits == ushort.MaxValue)
             _minimumHeightUnits = 0;
+
+        if (_minimumElevationLabel != null)
+        {
+            _minimumElevationLabel.DisplayedString =
+                $"MIN {_minimumHeightUnits * 0.1f:0.0} м";
+        }
+
+        if (_maximumElevationLabel != null)
+        {
+            _maximumElevationLabel.DisplayedString =
+                $"MAX {_maximumHeightUnits * 0.1f:0.0} м";
+        }
 
         _cachedTerrainVersion = worldMap.TerrainVersion;
     }
@@ -770,10 +1141,10 @@ public sealed class GameMenuOverlay : IDisposable
 
         _gridButton.Position = new Vector2f(settingsX + 22f, settingsY + 442f);
         _extremaButton.Position = new Vector2f(settingsX + 210f, settingsY + 442f);
-        _lowlandsButton.Position = new Vector2f(settingsX + 398f, settingsY + 442f);
+        _contoursButton.Position = new Vector2f(settingsX + 398f, settingsY + 442f);
         _gridLabel!.Position = new Vector2f(settingsX + 78f, settingsY + 451f);
         _extremaLabel!.Position = new Vector2f(settingsX + 258f, settingsY + 451f);
-        _lowlandsLabel!.Position = new Vector2f(settingsX + 448f, settingsY + 451f);
+        _contoursLabel!.Position = new Vector2f(settingsX + 448f, settingsY + 451f);
 
         _toneHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 488f);
         _toneLowLabel!.Position = new Vector2f(settingsX + 22f, settingsY + 520f);
@@ -823,9 +1194,9 @@ public sealed class GameMenuOverlay : IDisposable
             settings.ShowExtrema ? "МАРКЕРЫ: ВКЛ" : "МАРКЕРЫ: ВЫКЛ");
 
         SetText(
-            _lowlandsLabel,
-            ref _lastLowlandsLabel,
-            settings.ShowLowlands ? "НИЗИНЫ: ВКЛ" : "НИЗИНЫ: ВЫКЛ");
+            _contoursLabel,
+            ref _lastContoursLabel,
+            settings.ShowHeightContours ? "ГОРИЗОНТАЛИ: ВКЛ" : "ГОРИЗОНТАЛИ: ВЫКЛ");
 
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
@@ -862,7 +1233,7 @@ public sealed class GameMenuOverlay : IDisposable
         UpdateHover(_applyResolution, mouse);
         UpdateHover(_gridButton, mouse);
         UpdateHover(_extremaButton, mouse);
-        UpdateHover(_lowlandsButton, mouse);
+        UpdateHover(_contoursButton, mouse);
         UpdateHover(_resetButton, mouse);
         UpdateHover(_backButton, mouse);
 
@@ -872,7 +1243,7 @@ public sealed class GameMenuOverlay : IDisposable
         _extremaButton.FillColor = settings.ShowExtrema
             ? new Color(63, 75, 90)
             : new Color(27, 34, 44);
-        _lowlandsButton.FillColor = settings.ShowLowlands
+        _contoursButton.FillColor = settings.ShowHeightContours
             ? new Color(63, 75, 90)
             : new Color(27, 34, 44);
 
@@ -886,7 +1257,7 @@ public sealed class GameMenuOverlay : IDisposable
         window.Draw(_divider);
         window.Draw(_gridButton);
         window.Draw(_extremaButton);
-        window.Draw(_lowlandsButton);
+        window.Draw(_contoursButton);
         window.Draw(_resetButton);
         window.Draw(_backButton);
 
@@ -1071,11 +1442,15 @@ public sealed class GameMenuOverlay : IDisposable
         _applyResolution.Dispose();
         _gridButton.Dispose();
         _extremaButton.Dispose();
-        _lowlandsButton.Dispose();
+        _contoursButton.Dispose();
         _resolutionBox.Dispose();
         _divider.Dispose();
         _minimumPin.Dispose();
         _maximumPin.Dispose();
+        _contourVertices.Dispose();
+
+        for (int i = 0; i < _contourLabels.Count; i++)
+            _contourLabels[i].Dispose();
 
         for (int i = 0; i < _toneSwatches.Length; i++)
             _toneSwatches[i].Dispose();
