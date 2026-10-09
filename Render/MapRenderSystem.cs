@@ -44,7 +44,7 @@ public sealed class MapRenderSystem : IDisposable
     private Vertex[] _terrainVertices = Array.Empty<Vertex>();
     private int _terrainVertexCount;
     private int _buildingTerrainVertexCount;
-    private int _cachedTerrainVertexCapacity;
+    private int _cachedTerrainVertexCount;
     private bool _terrainBufferSupportChecked;
     private bool _useTerrainBuffer;
     private bool _terrainShaderChecked;
@@ -107,8 +107,11 @@ void main()
     public int TerrainQuadCount =>
         TerrainVertexCount / 6;
 
-    public int TerrainVertexCapacity =>
-        _cachedTerrainVertexCapacity;
+    public int TerrainCachedVertexCount =>
+        _cachedTerrainVertexCount;
+
+    public int TerrainScratchCapacity =>
+        _terrainVertices.Length;
 
     public int TerrainChunkCacheCount =>
         _terrainChunks.Count;
@@ -404,7 +407,7 @@ void main()
                         geometryMaxLayer);
 
                     _terrainChunks.Add(key, mesh);
-                    _cachedTerrainVertexCapacity += mesh.VertexCount;
+                    _cachedTerrainVertexCount += mesh.VertexCount;
                 }
 
                 mesh.LastUsedFrame = _frameNumber;
@@ -675,7 +678,7 @@ void main()
                 break;
 
             TerrainChunkMesh mesh = _terrainChunks[oldestKey];
-            _cachedTerrainVertexCapacity -= mesh.VertexCount;
+            _cachedTerrainVertexCount -= mesh.VertexCount;
             mesh.Dispose();
             _terrainChunks.Remove(oldestKey);
         }
@@ -688,7 +691,7 @@ void main()
 
         _terrainChunks.Clear();
         _visibleTerrainChunks.Clear();
-        _cachedTerrainVertexCapacity = 0;
+        _cachedTerrainVertexCount = 0;
         _terrainVertexCount = 0;
         _buildingTerrainVertexCount = 0;
     }
