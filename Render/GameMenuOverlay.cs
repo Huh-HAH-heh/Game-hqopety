@@ -438,7 +438,7 @@ public sealed class GameMenuOverlay : IDisposable
         _backLabel = CreateText(
             "НАЗАД", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _keyboardHelp = CreateText(
-            "F2 — настройки   PgUp/PgDn — срез Z   Shift+PgUp/PgDn — 1 м   Shift+колесо — Z",
+            "F2 — настройки   PgUp/PgDn — срез Z   Shift+PgUp/PgDn — 1 м   Shift+колесо — Z   Колесо — масштаб   WASD — камера",
             10, new Color(145, 157, 173), new Vector2f(0f, 0f));
 
         _mainMenuTexts = new Text?[]
