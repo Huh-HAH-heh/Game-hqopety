@@ -128,6 +128,10 @@ public sealed class WorldMap
             throw new IndexOutOfRangeException();
         }
 
+        GetOrCreateRegion(
+            x / TerrainRegion.TilesPerSide,
+            y / TerrainRegion.TilesPerSide);
+
         int columnIndex = GetColumnIndex(x, y);
 
         _layers[z].SetMaterialId(
