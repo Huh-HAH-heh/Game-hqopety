@@ -475,7 +475,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Z={_visibleMaxLayer + 1}/{_worldMap.LayerCount} PgUp/PgDn=layer Shift+Wheel=layer F2=terrain settings | " +
+            $"Z={_visibleMaxLayer + 1}/{_worldMap.LayerCount} PgUp/PgDn=layer Shift+Wheel=layer F2=settings •••=menu | " +
             $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision";
     }
 
@@ -560,8 +560,6 @@ public sealed class GameRenderer
                     _gameMenuOverlay.HandleClick(
                         uiPosition,
                         _menuPage,
-                        _selectedResolutionIndex,
-                        _visibleMaxLayer,
                         _worldMap.LayerCount);
 
                 if (action.HasValue)
