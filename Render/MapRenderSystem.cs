@@ -43,6 +43,7 @@ public sealed class MapRenderSystem : IDisposable
 
     private Vertex[] _terrainVertices = Array.Empty<Vertex>();
     private int _terrainVertexCount;
+    private int _buildingTerrainVertexCount;
     private int _cachedTerrainVertexCapacity;
     private bool _terrainBufferSupportChecked;
     private bool _useTerrainBuffer;
@@ -375,7 +376,7 @@ public sealed class MapRenderSystem : IDisposable
         float tilePixelSize,
         int visibleMaxLayer)
     {
-        _terrainVertexCount = 0;
+        _buildingTerrainVertexCount = 0;
 
         int minTileX = regionX * TerrainRegion.TilesPerSide;
         int maxTileX = Math.Min(
@@ -486,7 +487,7 @@ public sealed class MapRenderSystem : IDisposable
             }
         }
 
-        TerrainChunkMesh mesh = CreateTerrainChunkMesh(_terrainVertexCount);
+        TerrainChunkMesh mesh = CreateTerrainChunkMesh(_buildingTerrainVertexCount);
         TerrainMeshRebuildCount++;
         return mesh;
     }
@@ -534,14 +535,14 @@ public sealed class MapRenderSystem : IDisposable
         float bottom,
         Color color)
     {
-        EnsureTerrainVertexCapacity(_terrainVertexCount + 6);
+        EnsureTerrainVertexCapacity(_buildingTerrainVertexCount + 6);
 
         Vector2f topLeft = new Vector2f(left, top);
         Vector2f topRight = new Vector2f(right, top);
         Vector2f bottomRight = new Vector2f(right, bottom);
         Vector2f bottomLeft = new Vector2f(left, bottom);
 
-        _terrainVertices[_terrainVertexCount++] = new Vertex(topLeft, color);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color);
         _terrainVertices[_terrainVertexCount++] = new Vertex(topRight, color);
         _terrainVertices[_terrainVertexCount++] = new Vertex(bottomRight, color);
         _terrainVertices[_terrainVertexCount++] = new Vertex(topLeft, color);
@@ -612,6 +613,7 @@ public sealed class MapRenderSystem : IDisposable
         _visibleTerrainChunks.Clear();
         _cachedTerrainVertexCapacity = 0;
         _terrainVertexCount = 0;
+        _buildingTerrainVertexCount = 0;
     }
 
     private static int FindVisibleTopLayer(
