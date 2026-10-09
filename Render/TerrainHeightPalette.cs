@@ -5,80 +5,51 @@ namespace RimClone.Render;
 
 public static class TerrainHeightPalette
 {
-    public static Color GetSurfaceColor(
+    public static Color GetTerrainColor(
         int surfaceLayer,
-        int layerCount)
+        int voxelLayer,
+        int layerCount,
+        float baseGray,
+        float heightContrast,
+        float depthShade)
     {
-        float height =
-            layerCount <= 1
-                ? 0f
-                : Math.Clamp(
-                    surfaceLayer / (float)(layerCount - 1),
-                    0f,
-                    1f);
+        float maxLayer = Math.Max(1, layerCount - 1);
 
-        Color low = new Color(35, 115, 235);
-        Color cyan = new Color(35, 195, 205);
-        Color green = new Color(85, 205, 95);
-        Color yellow = new Color(245, 205, 55);
-        Color red = new Color(220, 50, 55);
+        float heightFraction = Math.Clamp(
+            surfaceLayer / maxLayer,
+            0f,
+            1f);
 
-        if (height < 0.25f)
-            return Blend(low, cyan, height * 4f);
+        float depthFraction = Math.Clamp(
+            Math.Max(0, surfaceLayer - voxelLayer) / maxLayer,
+            0f,
+            1f);
 
-        if (height < 0.5f)
-            return Blend(cyan, green, (height - 0.25f) * 4f);
+        float gray =
+            baseGray +
+            (heightFraction - 0.5f) * heightContrast -
+            depthFraction * depthShade;
 
-        if (height < 0.75f)
-            return Blend(green, yellow, (height - 0.5f) * 4f);
-
-        return Blend(yellow, red, (height - 0.75f) * 4f);
-    }
-
-    public static Color GetBandColor(
-        int band,
-        int layerCount)
-    {
-        int startLayer = Math.Clamp(
-            band * layerCount / 5,
+        byte value = (byte)Math.Clamp(
+            (int)MathF.Round(gray),
             0,
-            Math.Max(0, layerCount - 1));
+            170);
 
-        int endLayer = Math.Clamp(
-            (band + 1) * layerCount / 5 - 1,
-            startLayer,
-            Math.Max(0, layerCount - 1));
-
-        int surfaceLayer = (startLayer + endLayer) / 2;
-        return GetSurfaceColor(surfaceLayer, layerCount);
+        return new Color(value, value, value, 255);
     }
 
-    public static Color ShadeDepth(
-        Color color,
-        float depth)
+    public static Color GetHeightPreviewColor(
+        int band,
+        float baseGray,
+        float heightContrast)
     {
-        float factor = MathF.Max(
-            0.55f,
-            1f / (1f + MathF.Max(0f, depth) * 0.06f));
+        float height = Math.Clamp(band / 4f, 0f, 1f);
+        float gray = baseGray + (height - 0.5f) * heightContrast;
+        byte value = (byte)Math.Clamp(
+            (int)MathF.Round(gray),
+            0,
+            170);
 
-        return new Color(
-            (byte)(color.R * factor),
-            (byte)(color.G * factor),
-            (byte)(color.B * factor),
-            color.A);
-    }
-
-    private static Color Blend(
-        Color first,
-        Color second,
-        float amount)
-    {
-        amount = Math.Clamp(amount, 0f, 1f);
-
-        return new Color(
-            (byte)(first.R + (second.R - first.R) * amount),
-            (byte)(first.G + (second.G - first.G) * amount),
-            (byte)(first.B + (second.B - first.B) * amount),
-            255);
+        return new Color(value, value, value, 255);
     }
 }
