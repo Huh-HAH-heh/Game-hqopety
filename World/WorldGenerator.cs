@@ -17,7 +17,7 @@ public static class WorldGenerator
         Console.WriteLine(
             "[WorldGenerator] " +
             $"Полнообъёмный тест каньона создан: " +
-            $"{worldMap.LayerCount} уровней, шаг высоты 1 м.");
+            $"{worldMap.LayerCount} уровней, шаг высоты 0,1 м.");
     }
 
     private static void GenerateBaseTerrain(
@@ -33,8 +33,7 @@ public static class WorldGenerator
             worldMap.LayerCount;
 
         // A winding canyon crosses the camera's starting view.
-        // Its floor reaches the bottom layer and each terrace changes
-        // elevation by exactly one 1 m voxel layer.
+        // Its floor reaches the bottom layer. Heights are stored in 0.1 m layers.
         int rampDistance =
             Math.Max(
                 1,
@@ -167,7 +166,10 @@ public static class WorldGenerator
 
                 int heightLayers =
                     Math.Clamp(
-                        (int)MathF.Round(shapedHeight),
+                        (int)MathF.Round(
+                            shapedHeight *
+                            WorldMap.HeightUnitsPerMeter /
+                            WorldMap.LayerHeightUnits),
                         1,
                         layerCount);
 
