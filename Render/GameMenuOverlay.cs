@@ -921,13 +921,8 @@ void main()
             }
         }
 
-        TrimContourChunkCache(
-            worldMap,
-            minRegionX,
-            maxRegionX,
-            minRegionY,
-            maxRegionY,
-            visibleCount + 64);
+        // Keep contour chunks cached until the terrain changes. Switching zoom
+        // levels no longer clears, rebuilds, or evicts the existing line meshes.
     }
 
     private HeightContourChunk BuildHeightContourChunk(
@@ -1086,45 +1081,6 @@ void main()
 
         _contourChunks.Clear();
         _visibleContourChunks.Clear();
-    }
-
-    private void TrimContourChunkCache(
-        WorldMap worldMap,
-        int minRegionX,
-        int maxRegionX,
-        int minRegionY,
-        int maxRegionY,
-        int targetCount)
-    {
-        while (_contourChunks.Count > targetCount)
-        {
-            HeightContourChunkKey? oldestKey = null;
-            long oldestFrame = long.MaxValue;
-
-            foreach (KeyValuePair<HeightContourChunkKey, HeightContourChunk> entry in _contourChunks)
-            {
-                int regionX = entry.Key.RegionIndex % worldMap.RegionsX;
-                int regionY = entry.Key.RegionIndex / worldMap.RegionsX;
-
-                if (regionX >= minRegionX && regionX <= maxRegionX &&
-                    regionY >= minRegionY && regionY <= maxRegionY)
-                {
-                    continue;
-                }
-
-                if (entry.Value.LastUsedFrame < oldestFrame)
-                {
-                    oldestFrame = entry.Value.LastUsedFrame;
-                    oldestKey = entry.Key;
-                }
-            }
-
-            if (!oldestKey.HasValue)
-                break;
-
-            _contourChunks[oldestKey.Value].Dispose();
-            _contourChunks.Remove(oldestKey.Value);
-        }
     }
 
     private static void TryAddContourIntersection(
