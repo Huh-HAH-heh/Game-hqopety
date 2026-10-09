@@ -324,8 +324,8 @@ public sealed class TerrainDebugOverlay : IDisposable
         // The generous hit area includes the slider and its tick labels.
         float sliderLeft = PanelX + SliderStartX - 8f;
         float sliderRight = PanelX + SliderStartX + SliderWidth + 8f;
-        float sliderTop = PanelY + 110f;
-        float sliderBottom = PanelY + 158f;
+        float sliderTop = PanelY + 109f;
+        float sliderBottom = PanelY + 147f;
 
         if (point.X < sliderLeft ||
             point.X > sliderRight ||
@@ -424,19 +424,22 @@ public sealed class TerrainDebugOverlay : IDisposable
         window.Draw(_sliderKnob);
 
         for (int i = 0; i < LegendBands; i++)
-        {
             window.Draw(_legendSwatches[i]);
-            window.Draw(_legendTexts[i]);
+
+        if (_font != null)
+        {
+            for (int i = 0; i < LegendBands; i++)
+                window.Draw(_legendTexts[i]);
+
+            UpdateCursorText(
+                window,
+                worldMap,
+                cameraView,
+                tilePixelSize);
+
+            for (int i = 0; i < _texts.Count; i++)
+                window.Draw(_texts[i]);
         }
-
-        UpdateCursorText(
-            window,
-            worldMap,
-            cameraView,
-            tilePixelSize);
-
-        for (int i = 0; i < _texts.Count; i++)
-            window.Draw(_texts[i]);
     }
 
     private void RefreshStyle(
@@ -573,6 +576,18 @@ public sealed class TerrainDebugOverlay : IDisposable
             return;
 
         Vector2i mouse = Mouse.GetPosition(window);
+
+        if (_panel.GetGlobalBounds().Contains(mouse.X, mouse.Y))
+        {
+            SetText(
+                _cursorText,
+                ref _lastCursor,
+                "КУРСОР  —  наведите на карту, чтобы узнать высоту");
+            _lastMouseCellX = int.MinValue;
+            _lastMouseCellY = int.MinValue;
+            return;
+        }
+
         Vector2u windowSize = window.Size;
 
         if (mouse.X < 0 ||
