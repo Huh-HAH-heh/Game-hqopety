@@ -204,8 +204,6 @@ public sealed class GameMenuOverlay : IDisposable
     private string _lastExtremaLabel = string.Empty;
     private string _lastResolution = string.Empty;
     private string _lastAppliedResolution = string.Empty;
-    private string _lastTerrainLow = string.Empty;
-    private string _lastTerrainHigh = string.Empty;
 
     public static int ResolutionCount => SupportedResolutions.Length;
 
@@ -361,8 +359,6 @@ public sealed class GameMenuOverlay : IDisposable
     public GameMenuAction? HandleClick(
         Vector2i point,
         GameMenuPage page,
-        int selectedResolutionIndex,
-        int visibleMaxLayer,
         int layerCount)
     {
         if (_menuButton.GetGlobalBounds().Contains(point))
@@ -512,9 +508,6 @@ public sealed class GameMenuOverlay : IDisposable
         _cachedTerrainVersion = worldMap.TerrainVersion;
     }
 
-    public bool IsModalOpen(GameMenuPage page) =>
-        page != GameMenuPage.Closed;
-
     public void Draw(
         RenderWindow window,
         uint width,
@@ -658,18 +651,6 @@ public sealed class GameMenuOverlay : IDisposable
                     i, settings.BaseGray, settings.HeightContrast);
         }
 
-        if (_minimumText != null && _maximumText != null)
-        {
-            SetText(
-                _minimumText,
-                ref _lastTerrainLow,
-                $"НИЗИНА  {_minimumHeightUnits * 0.1f:0.#} м  •  X={_minimumX}, Y={_minimumY}");
-
-            SetText(
-                _maximumText,
-                ref _lastTerrainHigh,
-                $"ВЕРШИНА  {_maximumHeightUnits * 0.1f:0.#} м  •  X={_maximumX}, Y={_maximumY}");
-        }
     }
 
     private void DrawMainMenu(RenderWindow window, Vector2i mouse)
@@ -770,9 +751,6 @@ public sealed class GameMenuOverlay : IDisposable
             _backLabel,
             _keyboardHelp);
     }
-
-    public bool IsMenuButtonHit(Vector2i point) =>
-        _menuButton.GetGlobalBounds().Contains(point);
 
     public bool IsSettingsPanelHit(Vector2i point, GameMenuPage page) =>
         page == GameMenuPage.Settings && _panel.GetGlobalBounds().Contains(point);
