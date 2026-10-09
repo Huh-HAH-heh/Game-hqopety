@@ -132,7 +132,12 @@ void main()
 
     public void ToggleHeightMapMode()
     {
-        _heightMapMode = !_heightMapMode;
+        SetHeightMapMode(!_heightMapMode);
+    }
+
+    public void SetHeightMapMode(bool enabled)
+    {
+        _heightMapMode = enabled;
     }
 
     public bool UsesTerrainVertexBuffer =>
