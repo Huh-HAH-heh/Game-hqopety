@@ -731,7 +731,6 @@ public sealed class GameMenuOverlay : IDisposable
         window.Draw(_panel);
         window.Draw(_accent);
         window.Draw(_closeButton);
-        window.Draw(_resolutionHeading!);
         window.Draw(_resolutionPrevious);
         window.Draw(_resolutionBox);
         window.Draw(_resolutionNext);
