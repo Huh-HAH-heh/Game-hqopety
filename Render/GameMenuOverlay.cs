@@ -183,6 +183,8 @@ public sealed class GameMenuOverlay : IDisposable
 
     private readonly record struct HeightContourChunkKey(int RegionIndex);
 
+    private readonly record struct ContourLabelCandidate(Text Label, int HeightUnits);
+
     private sealed class HeightContourLevel : IDisposable
     {
         public int HeightUnits { get; }
@@ -249,6 +251,8 @@ void main()
 
     private readonly Dictionary<HeightContourChunkKey, HeightContourChunk> _contourChunks = new();
     private readonly List<HeightContourChunk> _visibleContourChunks = new();
+    private readonly List<ContourLabelCandidate> _visibleContourLabels = new();
+    private readonly List<FloatRect> _placedContourLabelBounds = new();
     private long _contourTerrainVersion = long.MinValue;
     private long _contourFrame;
 
@@ -834,6 +838,7 @@ void main()
         int maxRegionY = maxTileY / TerrainRegion.TilesPerSide;
         _contourFrame++;
         _visibleContourChunks.Clear();
+        _visibleContourLabels.Clear();
 
         int builtThisFrame = 0;
         long buildStarted = Stopwatch.GetTimestamp();
@@ -912,13 +917,80 @@ void main()
                 {
                     Text label = level.Labels[labelIndex];
                     label.Scale = new Vector2f(zoomLevel, zoomLevel);
-                    window.Draw(label);
+                    _visibleContourLabels.Add(
+                        new ContourLabelCandidate(label, level.HeightUnits));
                 }
             }
         }
 
+        if (drawContourLabels)
+            DrawNonOverlappingContourLabels(window, zoomLevel);
+
         // Keep contour chunks cached until the terrain changes. Switching zoom
         // levels no longer clears, rebuilds, or evicts the existing line meshes.
+    }
+
+    private void DrawNonOverlappingContourLabels(
+        RenderWindow window,
+        float zoomLevel)
+    {
+        _visibleContourLabels.Sort(CompareContourLabelCandidates);
+        _placedContourLabelBounds.Clear();
+
+        float padding = 5f * zoomLevel;
+
+        for (int i = 0; i < _visibleContourLabels.Count; i++)
+        {
+            Text label = _visibleContourLabels[i].Label;
+            FloatRect bounds = label.GetGlobalBounds();
+            bool overlaps = false;
+
+            for (int placedIndex = 0;
+                 placedIndex < _placedContourLabelBounds.Count;
+                 placedIndex++)
+            {
+                FloatRect placed = _placedContourLabelBounds[placedIndex];
+
+                if (bounds.Position.X < placed.Position.X + placed.Size.X + padding &&
+                    bounds.Position.X + bounds.Size.X + padding > placed.Position.X &&
+                    bounds.Position.Y < placed.Position.Y + placed.Size.Y + padding &&
+                    bounds.Position.Y + bounds.Size.Y + padding > placed.Position.Y)
+                {
+                    overlaps = true;
+                    break;
+                }
+            }
+
+            if (overlaps)
+                continue;
+
+            _placedContourLabelBounds.Add(bounds);
+            window.Draw(label);
+        }
+    }
+
+    private static int CompareContourLabelCandidates(
+        ContourLabelCandidate left,
+        ContourLabelCandidate right)
+    {
+        // Prefer 25 m index contours, then 10 m contours, so weaker labels
+        // disappear first when several height lines converge in one spot.
+        int leftPriority = left.HeightUnits % 250 == 0 ? 0 : 1;
+        int rightPriority = right.HeightUnits % 250 == 0 ? 0 : 1;
+        int priorityComparison = leftPriority.CompareTo(rightPriority);
+
+        if (priorityComparison != 0)
+            return priorityComparison;
+
+        int heightComparison = left.HeightUnits.CompareTo(right.HeightUnits);
+
+        if (heightComparison != 0)
+            return heightComparison;
+
+        int yComparison = left.Label.Position.Y.CompareTo(right.Label.Position.Y);
+        return yComparison != 0
+            ? yComparison
+            : left.Label.Position.X.CompareTo(right.Label.Position.X);
     }
 
     private HeightContourChunk BuildHeightContourChunk(
