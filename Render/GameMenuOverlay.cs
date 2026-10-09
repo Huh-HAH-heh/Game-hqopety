@@ -47,6 +47,7 @@ public readonly record struct GameSettingsSnapshot(
     float HeightContrast,
     float DepthShade,
     float LayerOffset,
+    int LayerCount,
     int SelectedResolutionIndex,
     uint CurrentWidth,
     uint CurrentHeight);
@@ -334,7 +335,7 @@ public sealed class GameMenuOverlay : IDisposable
         return new GameMenuAction(sliderType);
     }
 
-    public TerrainSettingsHitResult HandleClick(
+    public GameMenuAction? HandleClick(
         Vector2i point,
         GameMenuPage page,
         int selectedResolutionIndex,
@@ -343,80 +344,68 @@ public sealed class GameMenuOverlay : IDisposable
     {
         if (_menuButton.GetGlobalBounds().Contains(point))
         {
-            return new TerrainSettingsHitResult(
-                new GameMenuAction(GameMenuActionType.OpenMainMenu));
+            return new GameMenuAction(GameMenuActionType.OpenMainMenu);
         }
 
         if (page == GameMenuPage.Closed)
-            return default;
+            return null;
 
         if (page == GameMenuPage.Main)
         {
             if (_resumeButton.GetGlobalBounds().Contains(point))
-                return new TerrainSettingsHitResult(
-                    new GameMenuAction(GameMenuActionType.Resume));
+                return new GameMenuAction(GameMenuActionType.Resume);
 
             if (_settingsButton.GetGlobalBounds().Contains(point))
-                return new TerrainSettingsHitResult(
-                    new GameMenuAction(GameMenuActionType.OpenSettings));
+                return new GameMenuAction(GameMenuActionType.OpenSettings);
 
             if (_exitButton.GetGlobalBounds().Contains(point))
-                return new TerrainSettingsHitResult(
-                    new GameMenuAction(GameMenuActionType.Exit));
+                return new GameMenuAction(GameMenuActionType.Exit);
 
-            return default;
+            return null;
         }
 
         if (_closeButton.GetGlobalBounds().Contains(point) ||
             _backButton.GetGlobalBounds().Contains(point))
         {
-            return new TerrainSettingsHitResult(
-                new GameMenuAction(GameMenuActionType.BackToMainMenu));
+            return new GameMenuAction(GameMenuActionType.BackToMainMenu);
         }
 
         if (_resolutionPrevious.GetGlobalBounds().Contains(point))
         {
-            return new TerrainSettingsHitResult(
-                new GameMenuAction(GameMenuActionType.PreviousResolution));
+            return new GameMenuAction(GameMenuActionType.PreviousResolution);
         }
 
         if (_resolutionNext.GetGlobalBounds().Contains(point))
         {
-            return new TerrainSettingsHitResult(
-                new GameMenuAction(GameMenuActionType.NextResolution));
+            return new GameMenuAction(GameMenuActionType.NextResolution);
         }
 
         if (_applyResolution.GetGlobalBounds().Contains(point))
         {
-            return new TerrainSettingsHitResult(
-                new GameMenuAction(GameMenuActionType.ApplyResolution));
+            return new GameMenuAction(GameMenuActionType.ApplyResolution);
         }
 
         if (_gridButton.GetGlobalBounds().Contains(point))
         {
-            return new TerrainSettingsHitResult(
-                new GameMenuAction(GameMenuActionType.ToggleGrid));
+            return new GameMenuAction(GameMenuActionType.ToggleGrid);
         }
 
         if (_extremaButton.GetGlobalBounds().Contains(point))
         {
-            return new TerrainSettingsHitResult(
-                new GameMenuAction(GameMenuActionType.ToggleExtrema));
+            return new GameMenuAction(GameMenuActionType.ToggleExtrema);
         }
 
         if (_resetButton.GetGlobalBounds().Contains(point))
         {
-            return new TerrainSettingsHitResult(
-                new GameMenuAction(GameMenuActionType.ResetTerrainSettings));
+            return new GameMenuAction(GameMenuActionType.ResetTerrainSettings);
         }
 
         if (IsSliderHit(page, point, out GameMenuActionType sliderType))
         {
-            return new TerrainSettingsHitResult(
-                GetSliderAction(sliderType, point.X, layerCount));
+            return GetSliderAction(sliderType, point.X, layerCount);
         }
 
-        return default;
+        return null;
     }
 
     public bool IsModalOpen(GameMenuPage page) =>
@@ -599,7 +588,6 @@ public sealed class GameMenuOverlay : IDisposable
         GameSettingsSnapshot settings,
         Vector2i mouse)
     {
-        RefreshExtremes(settings);
         UpdateHover(_closeButton, mouse);
         UpdateHover(_resolutionPrevious, mouse);
         UpdateHover(_resolutionNext, mouse);
@@ -644,7 +632,9 @@ public sealed class GameMenuOverlay : IDisposable
 
             float maximum = _sliders[i].MaxValue;
             if (_sliders[i].ActionType == GameMenuActionType.SetLayer)
-                maximum = Math.Max(0, TerrainLayers(settings));
+                maximum = Math.Max(0, settings.LayerCount - 1);
+
+            _sliders[i].UpdateValue(current, settings.LayerCount);
 
             _sliders[i].Draw(window, current, maximum);
         }
@@ -677,22 +667,11 @@ public sealed class GameMenuOverlay : IDisposable
             _keyboardHelp);
     }
 
-    // layer count is encoded in the slider's dynamic max at Draw time.
-    // The renderer clamps every resulting action to the real world layer range.
-    private static int TerrainLayers(GameSettingsSnapshot settings) =>
-        Math.Max(0, settings.VisibleMaxLayer);
-
     public bool IsMenuButtonHit(Vector2i point) =>
         _menuButton.GetGlobalBounds().Contains(point);
 
     public bool IsSettingsPanelHit(Vector2i point, GameMenuPage page) =>
         page == GameMenuPage.Settings && _panel.GetGlobalBounds().Contains(point);
-
-    private void RefreshExtremes(GameSettingsSnapshot settings)
-    {
-        _minimumHeightUnits = 0;
-        _maximumHeightUnits = 0;
-    }
 
     public void SetExtremes(
         ushort minimumHeightUnits,
@@ -761,14 +740,6 @@ public sealed class GameMenuOverlay : IDisposable
                 window.Draw(texts[i]!);
         }
 
-        for (int i = 0; i < _texts.Count; i++)
-        {
-            Text text = _texts[i];
-            if (Array.IndexOf(texts, text) >= 0)
-                continue;
-
-            window.Draw(text);
-        }
     }
 
     private Text CreateText(
@@ -992,9 +963,4 @@ public sealed class GameMenuOverlay : IDisposable
             _value?.Dispose();
         }
     }
-}
-
-public readonly record struct TerrainSettingsHitResult(GameMenuAction Action)
-{
-    public bool HasAction { get; init; } = true;
 }
