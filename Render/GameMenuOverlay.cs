@@ -374,10 +374,10 @@ public sealed class GameMenuOverlay : IDisposable
             "Затемнение нижних слоёв", 0f, 50f));
         _sliders.Add(new SliderControl(
             _font, GameMenuActionType.SetLayerOffset,
-            "Расстояние между Z-слоями", 0f, 3f));
+            "Расстояние между Z-слоями", 0f, 0.3f));
         _sliders.Add(new SliderControl(
             _font, GameMenuActionType.SetLayer,
-            "Верхняя граница среза Z", 0f, 49f));
+            "Высота среза Z", 0f, WorldMap.DefaultTerrainLayerCount - 1));
 
         if (_font == null)
         {
@@ -438,7 +438,7 @@ public sealed class GameMenuOverlay : IDisposable
         _backLabel = CreateText(
             "НАЗАД", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _keyboardHelp = CreateText(
-            "F2 — меню настроек     Колесо — масштаб     WASD — камера",
+            "F2 — настройки   PgUp/PgDn — срез Z   Shift+PgUp/PgDn — 1 м   Shift+колесо — Z",
             10, new Color(145, 157, 173), new Vector2f(0f, 0f));
 
         _mainMenuTexts = new Text?[]
@@ -1195,8 +1195,8 @@ public sealed class GameMenuOverlay : IDisposable
                 GameMenuActionType.SetBaseGray => $"{current:0} / 96",
                 GameMenuActionType.SetHeightContrast => $"{current:0} / 32",
                 GameMenuActionType.SetDepthShade => $"{current:0} / 50",
-                GameMenuActionType.SetLayerOffset => $"{current:0.0} px/Z",
-                GameMenuActionType.SetLayer => $"{(int)current + 1} / {layerCount} м",
+                GameMenuActionType.SetLayerOffset => $"{current:0.00} px/Z",
+                GameMenuActionType.SetLayer => $"{current * 0.1f:0.0} / {(layerCount - 1) * 0.1f:0.0} м",
                 _ => current.ToString("0.0")
             };
         }
