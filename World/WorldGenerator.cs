@@ -46,24 +46,24 @@ public static class WorldGenerator
         float[] canyonFloorY =
             new float[worldMap.TileWidth];
 
-        // Main canyon centerline: broad bends remain legible, with finer
-        // deterministic noise breaking the repeating wave pattern.
+        // Large, slowly winding canyon belts: lower frequencies make the
+        // landforms span hundreds of tiles rather than looking like small noise.
         for (int x = 0; x < worldMap.TileWidth; x++)
         {
             float dx =
                 x - centerX;
 
             float broadBend =
-                FractalNoise(x, centerY, 0.0045f, 17) * 18f;
+                FractalNoise(x, centerY, 0.0025f, 17) * 30f;
 
             float smallBend =
-                FractalNoise(x, centerY, 0.018f, 43) * 6f;
+                FractalNoise(x, centerY, 0.009f, 43) * 11f;
 
             canyonFloorY[x] =
                 centerY +
-                MathF.Sin(dx * 0.018f) * 8f +
-                MathF.Sin(dx * 0.006f) * 16f +
-                MathF.Sin(dx * 0.061f) * 2f +
+                MathF.Sin(dx * 0.010f) * 13f +
+                MathF.Sin(dx * 0.0035f) * 28f +
+                MathF.Sin(dx * 0.032f) * 3f +
                 broadBend +
                 smallBend;
         }
@@ -73,20 +73,19 @@ public static class WorldGenerator
             for (int x = 0; x < worldMap.TileWidth; x++)
             {
                 float broadRelief =
-                    FractalNoise(x, y, 0.0045f, 101);
+                    FractalNoise(x, y, 0.0028f, 101);
 
                 float mediumRelief =
-                    FractalNoise(x, y, 0.017f, 211);
+                    FractalNoise(x, y, 0.0085f, 211);
 
                 float fineRelief =
-                    ValueNoise(x * 0.055f, y * 0.055f, 307);
+                    ValueNoise(x * 0.032f, y * 0.032f, 307);
 
-                // Warp the canyon bands, then add rolling plateaus, ridges,
-                // and smaller surface breaks. Heights remain 1 m voxel steps.
+                // Distort the winding canyon path without softening its cliffs.
                 float warpedOffset =
                     y - canyonFloorY[x] +
-                    broadRelief * 11f +
-                    mediumRelief * 4f;
+                    broadRelief * 15f +
+                    mediumRelief * 6f;
 
                 float nearestCanyonOffset =
                     MathF.Round(
@@ -99,26 +98,76 @@ public static class WorldGenerator
                         warpedOffset -
                         nearestCanyonOffset);
 
-                float ridgeRelief =
-                    (1f - MathF.Abs(mediumRelief)) * 2.5f;
+                // Narrow low canyon floor, a short and steep escarpment,
+                // then a broad high plateau. The one-meter vertical grid stays intact.
+                float floorWidth =
+                    rampDistance * 0.22f;
 
-                float shapedDistance =
-                    distanceFromFloor +
-                    broadRelief * 5f +
-                    mediumRelief * 3f +
-                    fineRelief * 2f +
-                    ridgeRelief;
+                float cliffEnd =
+                    rampDistance * 0.36f;
+
+                float shapedHeight;
+
+                if (distanceFromFloor < floorWidth)
+                {
+                    shapedHeight =
+                        2f +
+                        distanceFromFloor / floorWidth * 3f;
+                }
+                else if (distanceFromFloor < cliffEnd)
+                {
+                    float amount =
+                        (distanceFromFloor - floorWidth) /
+                        (cliffEnd - floorWidth);
+
+                    shapedHeight =
+                        Lerp(5f, 38f, amount);
+                }
+                else
+                {
+                    float amount =
+                        (distanceFromFloor - cliffEnd) /
+                        (rampDistance - cliffEnd);
+
+                    shapedHeight =
+                        Lerp(38f, 48f, amount);
+                }
+
+                shapedHeight +=
+                    broadRelief * 2.5f +
+                    mediumRelief * 2f +
+                    fineRelief * 1.2f;
+
+                // Large flat-topped mesa to one side of the central canyon.
+                shapedHeight =
+                    ApplyMesa(
+                        x,
+                        y,
+                        centerX + 58f,
+                        centerY - 9f,
+                        48f,
+                        36f,
+                        shapedHeight,
+                        mediumRelief,
+                        fineRelief);
+
+                // Deep basin with a raised, steep outer rim on the opposite side.
+                shapedHeight =
+                    ApplyRimmedBasin(
+                        x,
+                        y,
+                        centerX - 61f,
+                        centerY + 19f,
+                        40f,
+                        29f,
+                        shapedHeight,
+                        broadRelief,
+                        mediumRelief,
+                        fineRelief);
 
                 int heightLayers =
-                    1 +
-                    (int)(
-                        shapedDistance *
-                        (layerCount - 1) /
-                        rampDistance);
-
-                heightLayers =
                     Math.Clamp(
-                        heightLayers,
+                        (int)MathF.Round(shapedHeight),
                         1,
                         layerCount);
 
@@ -132,6 +181,102 @@ public static class WorldGenerator
                     BaseMaterialId);
             }
         }
+    }
+
+    private static float ApplyMesa(
+        int x,
+        int y,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float currentHeight,
+        float mediumRelief,
+        float fineRelief)
+    {
+        float dx = (x - centerX) / radiusX;
+        float dy = (y - centerY) / radiusY;
+        float distance = MathF.Sqrt(dx * dx + dy * dy);
+
+        if (distance >= 1f)
+            return currentHeight;
+
+        float topHeight =
+            43f +
+            mediumRelief * 1.5f +
+            fineRelief;
+
+        if (distance <= 0.62f)
+            return topHeight;
+
+        if (distance <= 0.76f)
+        {
+            float amount = (distance - 0.62f) / 0.14f;
+            return Lerp(topHeight, 12f, amount);
+        }
+
+        if (distance <= 0.88f)
+        {
+            float amount = (distance - 0.76f) / 0.12f;
+            return Lerp(12f, 7f, amount);
+        }
+
+        return Lerp(
+            7f,
+            currentHeight,
+            (distance - 0.88f) / 0.12f);
+    }
+
+    private static float ApplyRimmedBasin(
+        int x,
+        int y,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float currentHeight,
+        float broadRelief,
+        float mediumRelief,
+        float fineRelief)
+    {
+        float dx = (x - centerX) / radiusX;
+        float dy = (y - centerY) / radiusY;
+        float distance = MathF.Sqrt(dx * dx + dy * dy);
+
+        if (distance >= 1f)
+            return currentHeight;
+
+        if (distance <= 0.52f)
+        {
+            return
+                4f +
+                broadRelief * 1.5f +
+                mediumRelief +
+                fineRelief;
+        }
+
+        if (distance <= 0.70f)
+        {
+            float amount = (distance - 0.52f) / 0.18f;
+            return Lerp(5f, 40f, amount);
+        }
+
+        if (distance <= 0.80f)
+        {
+            float amount = (distance - 0.70f) / 0.10f;
+            return Lerp(40f, 34f, amount);
+        }
+
+        if (distance <= 0.92f)
+        {
+            float amount = (distance - 0.80f) / 0.12f;
+            return Lerp(34f, 11f, amount);
+        }
+
+        return Lerp(
+            11f,
+            currentHeight,
+            (distance - 0.92f) / 0.08f);
     }
 
     private static float FractalNoise(
