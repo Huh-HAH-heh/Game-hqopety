@@ -1058,7 +1058,7 @@ void main()
 
             bool hasGeometry = _contourShader != null
                 ? chunk.Vertices.VertexCount > chunkVertexStart
-                : (level.FallbackVertices?.VertexCount ?? 0) > fallbackVertexStart;
+                : (level.FallbackVertices?.VertexCount ?? 0u) > fallbackVertexStart;
 
             if (hasGeometry || level.Labels.Count > 0)
                 chunk.Levels.Add(level);
