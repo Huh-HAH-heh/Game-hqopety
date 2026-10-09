@@ -202,31 +202,34 @@ public sealed class GameRenderer
                 $"Projectiles={_unitSimulation.Projectiles.ActiveCount}/{_unitSimulation.Projectiles.Capacity}");
         }
 
-        _camera.Update(
-            _input.MoveDirection,
-            deltaTime);
-
-        if (!_terrainStressMode && !_massCombatMode)
+        if (_menuPage == GameMenuPage.Closed)
         {
-            _visionTestScene.UpdateAiDemo(
-                _unitSimulation,
-                _worldMap,
+            _camera.Update(
+                _input.MoveDirection,
                 deltaTime);
-        }
 
-        if (_massCombatMode)
-        {
-            _massCombatTestScene.Update(
-                _unitSimulation,
-                _worldMap,
-                deltaTime);
-        }
+            if (!_terrainStressMode && !_massCombatMode)
+            {
+                _visionTestScene.UpdateAiDemo(
+                    _unitSimulation,
+                    _worldMap,
+                    deltaTime);
+            }
 
-        if (!_terrainStressMode)
-        {
-            _unitSimulation.Update(
-                _worldMap,
-                deltaTime);
+            if (_massCombatMode)
+            {
+                _massCombatTestScene.Update(
+                    _unitSimulation,
+                    _worldMap,
+                    deltaTime);
+            }
+
+            if (!_terrainStressMode)
+            {
+                _unitSimulation.Update(
+                    _worldMap,
+                    deltaTime);
+            }
         }
     }
 
