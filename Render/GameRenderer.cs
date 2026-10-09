@@ -284,13 +284,20 @@ public sealed class GameRenderer
             {
                 _window.SetView(_uiView);
 
+                Vector2i mousePixels = Mouse.GetPosition(_window);
+                Vector2f uiMouseCoordinates =
+                    _window.MapPixelToCoords(mousePixels, _uiView);
+
                 _terrainDebugOverlay?.DrawScreen(
                     _window,
                     _worldMap,
                     _camera.View,
                     TerrainTilePixelSize,
                     _mapRenderer.HeightMapMode,
-                    _visibleMaxLayer);
+                    _visibleMaxLayer,
+                    new Vector2i(
+                        (int)uiMouseCoordinates.X,
+                        (int)uiMouseCoordinates.Y));
             }
         }
 
