@@ -310,8 +310,10 @@ public sealed class MapRenderSystem : IDisposable
                 _rowSurfaceLayers[column] = surfaceLayer;
 
                 int topLayer =
-                    Math.Min(
-                        surfaceLayer,
+                    FindVisibleTopLayer(
+                        worldMap,
+                        x,
+                        y,
                         visibleMaxLayer);
 
                 _rowTopLayers[column] = topLayer;
