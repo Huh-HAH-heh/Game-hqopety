@@ -9,7 +9,7 @@ namespace RimClone.Render;
 
 public sealed class MapRenderSystem : IDisposable
 {
-    private readonly record struct TerrainChunkKey(int RegionIndex, int LodStep);
+    private readonly record struct TerrainChunkKey(int RegionIndex);
 
     private sealed class TerrainChunkMesh : IDisposable
     {
@@ -59,7 +59,7 @@ public sealed class MapRenderSystem : IDisposable
     private int _chunkCacheVisibleMaxLayer = -1;
     private float _chunkCacheTilePixelSize = -1f;
 
-    private const int ExtraCachedTerrainChunks = 8;
+    private const int ExtraCachedTerrainChunks = 64;
 
     private const string TerrainVertexShaderSource =
         @"void main()
@@ -232,12 +232,9 @@ void main()
         float screenMinY = center.Y - viewSize.Y * 0.5f;
         float screenMaxY = center.Y + viewSize.Y * 0.5f;
 
-        int lodStep = 1;
-
-        if (zoomLevel >= 4.5f)
-            lodStep = 3;
-        else if (zoomLevel >= 2.5f)
-            lodStep = 2;
+        // Keep one baked terrain detail level across zoom changes.
+        // Existing chunk meshes are reused instead of rebuilt at each LOD threshold.
+        const int lodStep = 1;
 
         int minTileX =
             Math.Max(
@@ -427,7 +424,7 @@ void main()
                  regionX++)
             {
                 int regionIndex = regionX + regionY * worldMap.RegionsX;
-                TerrainChunkKey key = new TerrainChunkKey(regionIndex, lodStep);
+                TerrainChunkKey key = new TerrainChunkKey(regionIndex);
 
                 if (!_terrainChunks.TryGetValue(key, out TerrainChunkMesh? mesh))
                 {
@@ -474,7 +471,7 @@ void main()
             maxRegionX,
             minRegionY,
             maxRegionY,
-            (visibleChunkCount + ExtraCachedTerrainChunks) * 3);
+            visibleChunkCount + ExtraCachedTerrainChunks);
     }
 
     private TerrainChunkMesh BuildTerrainChunk(
