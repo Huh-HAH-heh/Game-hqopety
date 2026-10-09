@@ -20,6 +20,9 @@ public sealed class TerrainRegion
     private readonly ushort[] _materialIds =
         new ushort[TotalTiles];
 
+    public ReadOnlySpan<ushort> MaterialIds =>
+        _materialIds;
+
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly int _regionIndex;
 
