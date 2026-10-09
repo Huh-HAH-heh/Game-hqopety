@@ -1,5 +1,4 @@
 using System;
-using Core.Map;
 using SFML.Graphics;
 
 namespace RimClone.Render;
@@ -13,8 +12,7 @@ public static class TerrainHeightPalette
         int layerCount,
         float baseGray,
         float heightContrast,
-        float depthShade,
-        bool isDetailed = true)
+        float depthShade)
     {
         float maxLayer = Math.Max(1, layerCount - 1);
 
@@ -35,20 +33,10 @@ public static class TerrainHeightPalette
             (heightFraction - 0.5f) * heightContrast -
             depthFraction * depthShade;
 
-        int macroStep = WorldMap.MacroBlockHeightUnits / WorldMap.LayerHeightUnits;
-        bool sliceHit = isDetailed
-            ? voxelLayer == visibleMaxLayer
-            : voxelLayer % macroStep == 0 &&
-              voxelLayer <= visibleMaxLayer &&
-              visibleMaxLayer < voxelLayer + macroStep;
-
-        if (sliceHit)
-            gray = Math.Min(202f, gray + 32f);
-
         byte value = (byte)Math.Clamp(
             (int)MathF.Round(gray),
             0,
-            202);
+            170);
 
         return new Color(value, value, value, 255);
     }
