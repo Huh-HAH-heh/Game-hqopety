@@ -1356,10 +1356,6 @@ void main()
         _extremaButton.Position = new Vector2f(settingsX + 166f, settingsY + 442f);
         _contoursButton.Position = new Vector2f(settingsX + 310f, settingsY + 442f);
         _contourLabelsButton.Position = new Vector2f(settingsX + 454f, settingsY + 442f);
-        _gridLabel!.Position = new Vector2f(settingsX + 58f, settingsY + 451f);
-        _extremaLabel!.Position = new Vector2f(settingsX + 201f, settingsY + 451f);
-        _contoursLabel!.Position = new Vector2f(settingsX + 335f, settingsY + 451f);
-        _contourLabelsLabel!.Position = new Vector2f(settingsX + 493f, settingsY + 451f);
 
         _toneHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 488f);
         _toneLowLabel!.Position = new Vector2f(settingsX + 22f, settingsY + 520f);
@@ -1417,6 +1413,11 @@ void main()
             _contourLabelsLabel,
             ref _lastContourLabelsLabel,
             settings.ShowContourLabels ? "ЦИФРЫ: ВКЛ" : "ЦИФРЫ: ВЫКЛ");
+
+        CenterButtonLabel(_gridButton, _gridLabel!);
+        CenterButtonLabel(_extremaButton, _extremaLabel!);
+        CenterButtonLabel(_contoursButton, _contoursLabel!);
+        CenterButtonLabel(_contourLabelsButton, _contourLabelsLabel!);
 
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
@@ -1548,6 +1549,14 @@ void main()
             OutlineColor = new Color(74, 88, 106),
             OutlineThickness = 1f
         };
+    }
+
+    private static void CenterButtonLabel(RectangleShape button, Text label)
+    {
+        FloatRect bounds = label.GetLocalBounds();
+        label.Position = new Vector2f(
+            button.Position.X + (button.Size.X - bounds.Size.X) * 0.5f - bounds.Position.X,
+            button.Position.Y + (button.Size.Y - bounds.Size.Y) * 0.5f - bounds.Position.Y - 1f);
     }
 
     private static void UpdateHover(RectangleShape button, Vector2i mouse)
