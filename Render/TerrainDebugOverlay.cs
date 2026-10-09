@@ -405,7 +405,11 @@ public sealed class TerrainDebugOverlay : IDisposable
         int visibleMaxLayer)
     {
         RefreshExtremes(worldMap);
-        RefreshStyle(heightMapMode, visibleMaxLayer, worldMap.LayerCount);
+        RefreshStyle(
+            heightMapMode,
+            visibleMaxLayer,
+            worldMap.LayerCount,
+            Mouse.GetPosition(window));
 
         window.Draw(_panel);
         window.Draw(_accent);
@@ -438,13 +442,24 @@ public sealed class TerrainDebugOverlay : IDisposable
     private void RefreshStyle(
         bool heightMapMode,
         int visibleMaxLayer,
-        int layerCount)
+        int layerCount,
+        Vector2i mouse)
     {
         bool mapHovered = _heightModeButton.GetGlobalBounds().Contains(
-            Mouse.GetPositionFromDesktop().X,
-            Mouse.GetPositionFromDesktop().Y);
+            mouse.X,
+            mouse.Y);
 
-        Vector2i mouse = _lastMousePosition;
+        bool sliceHovered = _sliceModeButton.GetGlobalBounds().Contains(
+            mouse.X,
+            mouse.Y);
+
+        bool minusHovered = _minusButton.GetGlobalBounds().Contains(
+            mouse.X,
+            mouse.Y);
+
+        bool plusHovered = _plusButton.GetGlobalBounds().Contains(
+            mouse.X,
+            mouse.Y);
         bool heightSelected = heightMapMode;
         bool sliceSelected = !heightMapMode;
 
@@ -460,11 +475,21 @@ public sealed class TerrainDebugOverlay : IDisposable
 
         _sliceModeButton.FillColor = sliceSelected
             ? new Color(35, 91, 170)
-            : new Color(23, 32, 44);
+            : sliceHovered
+                ? new Color(35, 48, 64)
+                : new Color(23, 32, 44);
 
         _sliceModeButton.OutlineColor = sliceSelected
             ? new Color(104, 171, 255)
             : new Color(61, 79, 99);
+
+        _minusButton.FillColor = minusHovered
+            ? new Color(51, 68, 88)
+            : new Color(31, 43, 57);
+
+        _plusButton.FillColor = plusHovered
+            ? new Color(51, 68, 88)
+            : new Color(31, 43, 57);
 
         _minusButton.OutlineColor = visibleMaxLayer > 0
             ? new Color(76, 96, 118)
@@ -494,13 +519,10 @@ public sealed class TerrainDebugOverlay : IDisposable
             _lastHeightMapMode = heightMapMode;
             SetText(
                 _modeDescription,
-                ref _lastCursor,
+                ref _lastModeDescription,
                 heightMapMode
                     ? "Высота поверхности: СИНИЙ = низко  →  КРАСНЫЙ = высоко"
                     : "Срез: цвет = высота поверхности; сдвиг вниз = глубже в грунте");
-
-            // Use a dedicated cache for the description rather than the cursor readout.
-            _lastModeDescription = heightMapMode;
         }
 
         if (_lastLayerCount != layerCount)
@@ -522,8 +544,7 @@ public sealed class TerrainDebugOverlay : IDisposable
             if (_layerMaxTick != null)
                 _layerMaxTick.DisplayedString = $"{layerCount} м";
 
-            _layerMidTick?.Dispose();
-            _layerMaxTick?.Dispose();
+
         }
 
         if (_minimumHeightUnits > 0)
@@ -540,7 +561,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         }
     }
 
-    private bool? _lastModeDescription;
+    private string _lastModeDescription = string.Empty;
 
     private void UpdateCursorText(
         RenderWindow window,
