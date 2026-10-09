@@ -33,6 +33,7 @@ public sealed class GameRenderer
     private RenderWindow _window = null!;
 
     private bool _showDebugGrid;
+    private int _visibleMaxLayer;
     private bool _showVisionDebug = true;
     private bool _massCombatMode;
     private int _visionTestIndex;
@@ -51,6 +52,9 @@ public sealed class GameRenderer
     {
         _worldMap =
             worldMap;
+
+        _visibleMaxLayer =
+            Math.Max(0, worldMap.GetHighestOccupiedLayer());
 
         _camera =
             new GameCamera(
@@ -188,7 +192,8 @@ public sealed class GameRenderer
             _camera.View,
             TerrainTilePixelSize,
             _camera.ZoomLevel,
-            _showDebugGrid);
+            _showDebugGrid,
+            _visibleMaxLayer);
 
         if (_showVisionDebug &&
             !_massCombatMode)
@@ -382,6 +387,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
+            $"Layers={_visibleMaxLayer + 1}/{_worldMap.LayerCount} PgUp/PgDn=layer Shift+Wheel=layer | " +
             $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision";
     }
 
@@ -403,8 +409,20 @@ public sealed class GameRenderer
 
         _window.MouseWheelScrolled +=
             (_, e) =>
-                _camera.HandleZoom(
-                    e.Delta);
+            {
+                bool shiftPressed =
+                    Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                    Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+
+                if (shiftPressed)
+                {
+                    ScrollTerrainLayers(
+                        e.Delta > 0f ? 1 : -1);
+                    return;
+                }
+
+                _camera.HandleZoom(e.Delta);
+            };
 
         _window.KeyPressed +=
             (_, e) =>
@@ -414,6 +432,18 @@ public sealed class GameRenderer
     private void HandleKey(
         Keyboard.Key key)
     {
+        if (key == Keyboard.Key.PageUp)
+        {
+            ScrollTerrainLayers(1);
+            return;
+        }
+
+        if (key == Keyboard.Key.PageDown)
+        {
+            ScrollTerrainLayers(-1);
+            return;
+        }
+
         if (key == Keyboard.Key.G)
         {
             _showDebugGrid =
@@ -639,6 +669,16 @@ public sealed class GameRenderer
                     centerY - 20f,
                     0f));
         }
+    }
+
+    private void ScrollTerrainLayers(
+        int direction)
+    {
+        _visibleMaxLayer =
+            Math.Clamp(
+                _visibleMaxLayer + direction,
+                0,
+                _worldMap.LayerCount - 1);
     }
 
     private void EnterMassCombatMode()

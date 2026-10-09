@@ -516,31 +516,61 @@ public sealed class VisionSystem
         Vector3 end,
         out Vector3 blockingPoint)
     {
-        blockingPoint =
-            Vector3.Zero;
+        blockingPoint = Vector3.Zero;
 
-        float dx =
-            end.X - start.X;
-
-        float dy =
-            end.Y - start.Y;
-
-        float dz =
-            end.Z - start.Z;
+        float dx = end.X - start.X;
+        float dy = end.Y - start.Y;
+        float dz = end.Z - start.Z;
 
         float horizontalLengthSquared =
-            dx * dx +
-            dy * dy;
+            dx * dx + dy * dy;
 
-        if (horizontalLengthSquared <
-            0.000001f)
+        if (horizontalLengthSquared < 0.000001f)
         {
-            return
-                end.Z >=
-                worldMap.GetSurfaceHeight(
-                    (int)MathF.Floor(end.X),
-                    (int)MathF.Floor(end.Y)) -
-                Epsilon;
+            int cellX = (int)MathF.Floor(end.X);
+            int cellY = (int)MathF.Floor(end.Y);
+
+            float lowZ = MathF.Min(start.Z, end.Z);
+            float highZ = MathF.Max(start.Z, end.Z);
+
+            int firstZ = Math.Max(0, (int)MathF.Floor(lowZ));
+            int lastZ = Math.Min(
+                worldMap.LayerCount - 1,
+                (int)MathF.Floor(highZ));
+
+            for (int z = firstZ; z <= lastZ; z++)
+            {
+                if (worldMap.GetMaterialId(cellX, cellY, z) == 0)
+                    continue;
+
+                bool intersects =
+                    MathF.Abs(dz) < 0.000001f
+                        ? start.Z >= z - Epsilon &&
+                          start.Z < z + 1f - Epsilon
+                        : highZ > z + Epsilon &&
+                          lowZ < z + 1f - Epsilon;
+
+                if (!intersects)
+                    continue;
+
+                float boundaryZ =
+                    dz < 0f ? z + 1f : z;
+
+                float hitT =
+                    MathF.Abs(dz) < 0.000001f
+                        ? 0f
+                        : Math.Clamp(
+                            (boundaryZ - start.Z) / dz,
+                            0f,
+                            1f);
+
+                blockingPoint =
+                    start + (end - start) * hitT;
+
+                return false;
+            }
+
+            return true;
         }
 
         int cellX =
@@ -555,27 +585,17 @@ public sealed class VisionSystem
         int targetCellY =
             (int)MathF.Floor(end.Y);
 
-        int stepX =
-            Math.Sign(dx);
+        int stepX = Math.Sign(dx);
+        int stepY = Math.Sign(dy);
 
-        int stepY =
-            Math.Sign(dy);
-
-        // A ray that starts exactly on a cell boundary and travels
-        // in the negative direction is immediately inside the
-        // previous cell, not the one returned by Floor().
         if (stepX < 0 &&
-            MathF.Abs(start.X -
-                     MathF.Round(start.X)) <
-            Epsilon)
+            MathF.Abs(start.X - MathF.Round(start.X)) < Epsilon)
         {
             cellX--;
         }
 
         if (stepY < 0 &&
-            MathF.Abs(start.Y -
-                     MathF.Round(start.Y)) <
-            Epsilon)
+            MathF.Abs(start.Y - MathF.Round(start.Y)) < Epsilon)
         {
             cellY--;
         }
@@ -591,14 +611,10 @@ public sealed class VisionSystem
                 : MathF.Abs(1f / dy);
 
         float nextBoundaryX =
-            stepX > 0
-                ? cellX + 1f
-                : cellX;
+            stepX > 0 ? cellX + 1f : cellX;
 
         float nextBoundaryY =
-            stepY > 0
-                ? cellY + 1f
-                : cellY;
+            stepY > 0 ? cellY + 1f : cellY;
 
         float tMaxX =
             stepX == 0
@@ -610,23 +626,17 @@ public sealed class VisionSystem
                 ? float.PositiveInfinity
                 : (nextBoundaryY - start.Y) / dy;
 
-        float segmentStart =
-            0f;
+        float segmentStart = 0f;
 
         while (segmentStart < 1f)
         {
             float segmentEnd =
                 MathF.Min(
                     1f,
-                    MathF.Min(
-                        tMaxX,
-                        tMaxY));
+                    MathF.Min(tMaxX, tMaxY));
 
-            if (segmentEnd <=
-                segmentStart)
-            {
+            if (segmentEnd <= segmentStart)
                 break;
-            }
 
             float checkEnd =
                 segmentEnd >= 1f
@@ -635,43 +645,48 @@ public sealed class VisionSystem
 
             if (checkEnd > segmentStart)
             {
-                float z0 =
-                    start.Z +
-                    dz * segmentStart;
+                float z0 = start.Z + dz * segmentStart;
+                float z1 = start.Z + dz * checkEnd;
+                float lowZ = MathF.Min(z0, z1);
+                float highZ = MathF.Max(z0, z1);
 
-                float z1 =
-                    start.Z +
-                    dz * checkEnd;
+                int firstZ = Math.Max(0, (int)MathF.Floor(lowZ));
+                int lastZ = Math.Min(
+                    worldMap.LayerCount - 1,
+                    (int)MathF.Floor(highZ));
 
-                float rayLowestZ =
-                    MathF.Min(
-                        z0,
-                        z1);
-
-                float terrainHeight =
-                    worldMap.GetSurfaceHeight(
-                        cellX,
-                        cellY);
-
-                if (terrainHeight >
-                    rayLowestZ +
-                    Epsilon)
+                for (int z = firstZ; z <= lastZ; z++)
                 {
-                    float hitT =
-                        FindTerrainHit(
-                            start.Z,
-                            dz,
-                            terrainHeight,
+                    if (worldMap.GetMaterialId(cellX, cellY, z) == 0)
+                        continue;
+
+                    bool intersects =
+                        MathF.Abs(dz) < 0.000001f
+                            ? z0 >= z - Epsilon &&
+                              z0 < z + 1f - Epsilon
+                            : highZ > z + Epsilon &&
+                              lowZ < z + 1f - Epsilon;
+
+                    if (!intersects)
+                        continue;
+
+                    float hitT;
+
+                    if (MathF.Abs(dz) < 0.000001f)
+                    {
+                        hitT = segmentStart;
+                    }
+                    else
+                    {
+                        float entryZ = dz > 0f ? z : z + 1f;
+                        hitT = Math.Clamp(
+                            (entryZ - start.Z) / dz,
                             segmentStart,
                             checkEnd);
+                    }
 
                     blockingPoint =
-                        start +
-                        (end - start) *
-                        hitT;
-
-                    blockingPoint.Z =
-                        terrainHeight;
+                        start + (end - start) * hitT;
 
                     return false;
                 }
@@ -680,14 +695,12 @@ public sealed class VisionSystem
             if (segmentEnd >= 1f)
                 break;
 
-            if (tMaxX <
-                tMaxY)
+            if (tMaxX < tMaxY)
             {
                 cellX += stepX;
                 tMaxX += tDeltaX;
             }
-            else if (tMaxY <
-                     tMaxX)
+            else if (tMaxY < tMaxX)
             {
                 cellY += stepY;
                 tMaxY += tDeltaY;
@@ -715,36 +728,10 @@ public sealed class VisionSystem
                 break;
             }
 
-            segmentStart =
-                segmentEnd;
+            segmentStart = segmentEnd;
         }
 
         return true;
-    }
-
-    private static float FindTerrainHit(
-        float startZ,
-        float deltaZ,
-        float terrainZ,
-        float minT,
-        float maxT)
-    {
-        if (MathF.Abs(deltaZ) <
-            0.000001f)
-        {
-            return
-                (minT + maxT) *
-                0.5f;
-        }
-
-        float t =
-            (terrainZ - startZ) /
-            deltaZ;
-
-        return Math.Clamp(
-            t,
-            minT,
-            maxT);
     }
 
     private void AppendVisibleTarget(

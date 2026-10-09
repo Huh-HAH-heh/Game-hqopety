@@ -1,186 +1,87 @@
-﻿namespace Core.Map;
+using System;
+
+namespace Core.Map;
 
 public sealed class TerrainLayer
 {
+    private readonly ushort[] _materialIds;
+
     public int ZLevel { get; }
+    public int Width { get; }
+    public int Height { get; }
 
-    public int RegionsX { get; }
-    public int RegionsY { get; }
-
-    private readonly TerrainRegion?[] _regions;
+    public ReadOnlySpan<ushort> MaterialIds =>
+        _materialIds;
 
     public TerrainLayer(
         int zLevel,
-        int regionsX,
-        int regionsY)
+        int width,
+        int height)
     {
-        if (regionsX <= 0)
-            throw new ArgumentOutOfRangeException(
-                nameof(regionsX));
+        if (zLevel < 0)
+            throw new ArgumentOutOfRangeException(nameof(zLevel));
 
-        if (regionsY <= 0)
-            throw new ArgumentOutOfRangeException(
-                nameof(regionsY));
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        if (height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(height));
 
         ZLevel = zLevel;
+        Width = width;
+        Height = height;
 
-        RegionsX = regionsX;
-        RegionsY = regionsY;
-
-        _regions =
-            new TerrainRegion?[
-                regionsX *
-                regionsY];
+        _materialIds =
+            new ushort[checked(width * height)];
     }
 
-    public TerrainRegion? GetRegion(
-        int regionX,
-        int regionY)
+    public ushort GetMaterialId(
+        int x,
+        int y)
     {
-        if (regionX < 0 ||
-            regionX >= RegionsX ||
-            regionY < 0 ||
-            regionY >= RegionsY)
-        {
-            return null;
-        }
+        if (!IsInside(x, y))
+            return 0;
 
-        return _regions[
-            regionX +
-            regionY * RegionsX];
+        return _materialIds[x + y * Width];
     }
 
-    public TerrainRegion GetOrCreateRegion(
-        int regionX,
-        int regionY)
+    public void SetMaterialId(
+        int x,
+        int y,
+        ushort materialId)
     {
-        if (regionX < 0 ||
-            regionX >= RegionsX ||
-            regionY < 0 ||
-            regionY >= RegionsY)
-        {
+        if (!IsInside(x, y))
             throw new IndexOutOfRangeException();
-        }
 
-        int index =
-            regionX +
-            regionY * RegionsX;
-
-        TerrainRegion? region =
-            _regions[index];
-
-        if (region != null)
-            return region;
-
-        region =
-            new TerrainRegion(
-                regionX,
-                regionY);
-
-        _regions[index] =
-            region;
-
-        return region;
+        _materialIds[x + y * Width] = materialId;
     }
 
-    public bool TryGetTile(
-        int globalX,
-        int globalY,
-        out Tile tile)
+    internal ushort GetMaterialIdAtIndex(
+        int index)
     {
-        tile = default;
-
-        int tileWidth =
-            RegionsX *
-            TerrainRegion.TilesPerSide;
-
-        int tileHeight =
-            RegionsY *
-            TerrainRegion.TilesPerSide;
-
-        if (globalX < 0 ||
-            globalY < 0 ||
-            globalX >= tileWidth ||
-            globalY >= tileHeight)
-        {
-            return false;
-        }
-
-        int regionX =
-            globalX /
-            TerrainRegion.TilesPerSide;
-
-        int regionY =
-            globalY /
-            TerrainRegion.TilesPerSide;
-
-        TerrainRegion? region =
-            GetRegion(
-                regionX,
-                regionY);
-
-        if (region == null)
-            return false;
-
-        int localX =
-            globalX %
-            TerrainRegion.TilesPerSide;
-
-        int localY =
-            globalY %
-            TerrainRegion.TilesPerSide;
-
-        tile =
-            region.GetLocalTile(
-                localX,
-                localY);
-
-        return true;
+        return _materialIds[index];
     }
 
-    public ref Tile GetOrCreateTile(
-        int globalX,
-        int globalY)
+    internal void SetMaterialIdAtIndex(
+        int index,
+        ushort materialId)
     {
-        int tileWidth =
-            RegionsX *
-            TerrainRegion.TilesPerSide;
+        _materialIds[index] = materialId;
+    }
 
-        int tileHeight =
-            RegionsY *
-            TerrainRegion.TilesPerSide;
+    internal void Clear()
+    {
+        Array.Clear(_materialIds);
+    }
 
-        if (globalX < 0 ||
-            globalY < 0 ||
-            globalX >= tileWidth ||
-            globalY >= tileHeight)
-        {
-            throw new IndexOutOfRangeException();
-        }
-
-        int regionX =
-            globalX /
-            TerrainRegion.TilesPerSide;
-
-        int regionY =
-            globalY /
-            TerrainRegion.TilesPerSide;
-
-        TerrainRegion region =
-            GetOrCreateRegion(
-                regionX,
-                regionY);
-
-        int localX =
-            globalX %
-            TerrainRegion.TilesPerSide;
-
-        int localY =
-            globalY %
-            TerrainRegion.TilesPerSide;
-
-        return ref region.GetLocalTile(
-            localX,
-            localY);
+    private bool IsInside(
+        int x,
+        int y)
+    {
+        return
+            x >= 0 &&
+            y >= 0 &&
+            x < Width &&
+            y < Height;
     }
 }
