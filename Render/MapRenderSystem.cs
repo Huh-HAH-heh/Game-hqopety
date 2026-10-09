@@ -66,7 +66,11 @@ void main()
 {
     vec4 position = gl_Vertex;
     if (uDisplayMode < 0.5)
-        position.y -= max(0.0, gl_MultiTexCoord0.x - uVisibleLayer) * uLayerScreenOffset;
+    {
+        float cutSurface = min(gl_MultiTexCoord0.x, uVisibleLayer);
+        float voxelDepth = max(0.0, cutSurface - gl_MultiTexCoord0.y);
+        position.y -= voxelDepth * uLayerScreenOffset;
+    }
     gl_Position = gl_ModelViewProjectionMatrix * position;
     gl_TexCoord[0] = gl_MultiTexCoord0;
     gl_FrontColor = gl_Color;
