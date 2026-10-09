@@ -606,7 +606,7 @@ void main()
                     {
                         int nextX = minTileX + column * lodStep;
 
-                        if (worldMap.GetMaterialId(nextX, y, z) != materialId)
+                        if (worldMap.GetMaterialId(nextX, y, z) == 0)
                             break;
 
                         column++;
