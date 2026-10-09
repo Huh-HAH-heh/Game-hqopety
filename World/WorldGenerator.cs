@@ -41,6 +41,9 @@ public static class WorldGenerator
                 1,
                 worldMap.TileHeight / 12);
 
+        float canyonSpacing =
+            rampDistance * 2f;
+
         float[] canyonFloorY =
             new float[worldMap.TileWidth];
 
@@ -62,8 +65,19 @@ public static class WorldGenerator
         {
             for (int x = 0; x < worldMap.TileWidth; x++)
             {
+                float offsetFromCanyonCenter =
+                    y - canyonFloorY[x];
+
+                float nearestCanyonOffset =
+                    MathF.Round(
+                        offsetFromCanyonCenter /
+                        canyonSpacing) *
+                    canyonSpacing;
+
                 float distanceFromFloor =
-                    MathF.Abs(y - canyonFloorY[x]);
+                    MathF.Abs(
+                        offsetFromCanyonCenter -
+                        nearestCanyonOffset);
 
                 int heightLayers =
                     1 +
