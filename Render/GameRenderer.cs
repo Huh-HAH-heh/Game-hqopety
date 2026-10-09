@@ -432,7 +432,10 @@ public sealed class GameRenderer
 
         _window.Closed +=
             (_, _) =>
+            {
+                _mapRenderer.Dispose();
                 _window.Close();
+            };
 
         _window.MouseWheelScrolled +=
             (_, e) =>
