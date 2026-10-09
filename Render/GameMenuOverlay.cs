@@ -863,9 +863,20 @@ void main()
             }
         }
 
+        RenderStates contourStates = RenderStates.Default;
+
+        if (_contourShader != null)
+        {
+            _contourShader.SetUniform("uVisibleLayer", (float)visibleMaxLayer);
+            contourStates = new RenderStates(_contourShader);
+        }
+
         for (int i = 0; i < _visibleContourChunks.Count; i++)
         {
             HeightContourChunk chunk = _visibleContourChunks[i];
+
+            if (_contourShader != null && chunk.Vertices.VertexCount > 0)
+                window.Draw(chunk.Vertices, contourStates);
 
             for (int levelIndex = 0; levelIndex < chunk.Levels.Count; levelIndex++)
             {
@@ -897,20 +908,6 @@ void main()
 
                     window.Draw(label);
                 }
-            }
-        }
-
-        if (_contourShader != null)
-        {
-            _contourShader.SetUniform("uVisibleLayer", (float)visibleMaxLayer);
-            RenderStates contourStates = new RenderStates(_contourShader);
-
-            for (int i = 0; i < _visibleContourChunks.Count; i++)
-            {
-                HeightContourChunk chunk = _visibleContourChunks[i];
-
-                if (chunk.Vertices.VertexCount > 0)
-                    window.Draw(chunk.Vertices, contourStates);
             }
         }
 
@@ -972,6 +969,9 @@ void main()
             HeightContourLevel level = new HeightContourLevel(
                 contourHeight,
                 _contourShader == null);
+
+            int chunkVertexStart = chunk.Vertices.VertexCount;
+            int fallbackVertexStart = level.FallbackVertices?.VertexCount ?? 0;
 
             bool isIndexContour =
                 contourHeight % 100 == 0 ||
@@ -1056,7 +1056,11 @@ void main()
                 }
             }
 
-            if (level.Vertices.VertexCount > 0 || level.Labels.Count > 0)
+            bool hasGeometry = _contourShader != null
+                ? chunk.Vertices.VertexCount > chunkVertexStart
+                : (level.FallbackVertices?.VertexCount ?? 0) > fallbackVertexStart;
+
+            if (hasGeometry || level.Labels.Count > 0)
                 chunk.Levels.Add(level);
             else
                 level.Dispose();
