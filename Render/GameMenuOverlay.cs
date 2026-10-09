@@ -970,8 +970,8 @@ void main()
                 contourHeight,
                 _contourShader == null);
 
-            int chunkVertexStart = chunk.Vertices.VertexCount;
-            int fallbackVertexStart = level.FallbackVertices?.VertexCount ?? 0;
+            uint chunkVertexStart = chunk.Vertices.VertexCount;
+            uint fallbackVertexStart = level.FallbackVertices?.VertexCount ?? 0u;
 
             bool isIndexContour =
                 contourHeight % 100 == 0 ||
