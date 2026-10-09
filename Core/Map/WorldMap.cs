@@ -501,23 +501,20 @@ public sealed class WorldMap
             _rangeCache[columnIndex] = null;
 
         int filledLayers =
-            (clampedHeight + LayerHeightUnits - 1) /
-            LayerHeightUnits;
-
-        ushort value =
-            clampedHeight > 0
-                ? materialId
-                : (ushort)0;
+            clampedHeight > 0 && materialId != 0
+                ? (clampedHeight + LayerHeightUnits - 1) /
+                  LayerHeightUnits
+                : 0;
 
         for (int z = 0; z < filledLayers; z++)
         {
             _layers[z].SetMaterialIdAtIndex(
                 columnIndex,
-                value);
+                materialId);
         }
 
         _surfaceHeights[columnIndex] =
-            (ushort)clampedHeight;
+            (ushort)(filledLayers > 0 ? clampedHeight : 0);
 
         TerrainVersion++;
     }
