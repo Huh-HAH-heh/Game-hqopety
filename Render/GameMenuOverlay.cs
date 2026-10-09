@@ -832,10 +832,6 @@ void main()
         int maxRegionX = maxTileX / TerrainRegion.TilesPerSide;
         int minRegionY = minTileY / TerrainRegion.TilesPerSide;
         int maxRegionY = maxTileY / TerrainRegion.TilesPerSide;
-        int visibleCount =
-            (maxRegionX - minRegionX + 1) *
-            (maxRegionY - minRegionY + 1);
-
         _contourFrame++;
         _visibleContourChunks.Clear();
 
