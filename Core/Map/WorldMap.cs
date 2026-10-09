@@ -11,10 +11,6 @@ public sealed class WorldMap
     public const int DefaultTerrainLayerCount = 50;
     public const ushort LayerHeightUnits = 10;
 
-    // 15 map tiles span roughly 5 m; macro blocks are 5 m tall.
-    public const int MacroBlockTileSpan = 15;
-    public const ushort MacroBlockHeightUnits = 5 * LayerHeightUnits;
-
     public int RegionsX { get; }
     public int RegionsY { get; }
 
@@ -29,33 +25,13 @@ public sealed class WorldMap
 
     public int LayerCount => _layers.Length;
 
-    public int MacroBlocksX =>
-        (TileWidth + MacroBlockTileSpan - 1) / MacroBlockTileSpan;
-
-    public int MacroBlocksY =>
-        (TileHeight + MacroBlockTileSpan - 1) / MacroBlockTileSpan;
-
     public long TerrainVersion { get; private set; }
 
     public WaterLayer Water { get; }
 
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly TerrainLayer[] _layers;
-    private sealed class DetailedTerrainColumn
-    {
-        public readonly ushort[] Materials;
-        public ushort SurfaceHeight;
-        public ushort SurfaceMaterialId;
-
-        public DetailedTerrainColumn(int layerCount)
-        {
-            Materials = new ushort[layerCount];
-        }
-    }
-
-    private readonly ushort[] _macroSurfaceHeights;
-    private readonly ushort[] _macroSurfaceMaterials;
-    private readonly Dictionary<int, DetailedTerrainColumn> _detailedColumns = new();
+    private readonly ushort[] _surfaceHeights;
     private readonly TileRange[]?[] _rangeCache;
 
     public WorldMap(
@@ -65,8 +41,10 @@ public sealed class WorldMap
     {
         if (regionsX <= 0)
             throw new ArgumentOutOfRangeException(nameof(regionsX));
+
         if (regionsY <= 0)
             throw new ArgumentOutOfRangeException(nameof(regionsY));
+
         if (layerCount <= 0 ||
             layerCount > ushort.MaxValue / LayerHeightUnits)
         {
@@ -79,30 +57,38 @@ public sealed class WorldMap
         int width = TileWidth;
         int height = TileHeight;
         int columnCount = checked(width * height);
-        int macroColumnCount = checked(MacroBlocksX * MacroBlocksY);
-        int regionCount = checked(regionsX * regionsY);
 
-        _tileRegions = new TerrainTileRegion?[regionCount];
-        _macroSurfaceHeights = new ushort[macroColumnCount];
-        _macroSurfaceMaterials = new ushort[macroColumnCount];
-        _rangeCache = new TileRange[]?[columnCount];
+        _tileRegions =
+            new TerrainTileRegion?[checked(regionsX * regionsY)];
+
         _layers = new TerrainLayer[layerCount];
 
         for (int z = 0; z < layerCount; z++)
         {
-            int layerZ = z;
-            _layers[z] = new TerrainLayer(
-                z, width, height, regionsX, regionsY, _tileRegions,
-                (x, y) => GetMaterialId(x, y, layerZ));
+            _layers[z] =
+                new TerrainLayer(
+                    z,
+                    width,
+                    height,
+                    regionsX,
+                    regionsY,
+                    _tileRegions);
         }
 
-        Water = new WaterLayer(width, height);
+        _surfaceHeights = new ushort[columnCount];
+        _rangeCache = new TileRange[]?[columnCount];
+
+        Water =
+            new WaterLayer(
+                width,
+                height);
     }
 
-    // COARSE MACRO-BLOCKS + LAZY 1 m³ DETAIL
-    // Ordinary terrain is stored as one height/material pair per 5 m block.
-    // A fine vertical material array exists only for explicitly edited columns.
-    // TerrainLayer is a compatibility view over this storage.
+    // ============================================================
+    // LAYER -> REGION -> VOXEL STORAGE
+    // Every TerrainLayer owns its XY TerrainRegion grid.
+    // Every TerrainRegion owns a dense 48 x 48 grid of 1 m³ voxels.
+    // ID 0 means empty; every other ID identifies a material.
     // ============================================================
 
     public TerrainLayer GetLayer(
@@ -114,90 +100,94 @@ public sealed class WorldMap
         return _layers[z];
     }
 
-    public ushort GetMaterialId(int x, int y, int z)
+    public ushort GetMaterialId(
+        int x,
+        int y,
+        int z)
     {
-        if (!IsInside(x, y) || z < 0 || z >= LayerCount)
+        if (!IsInside(x, y) ||
+            z < 0 ||
+            z >= LayerCount)
+        {
             return 0;
+        }
 
-        int columnIndex = GetColumnIndex(x, y);
-        if (_detailedColumns.TryGetValue(columnIndex, out DetailedTerrainColumn? detailed))
-            return detailed.Materials[z];
-
-        int macroIndex = GetMacroIndex(x, y);
-        return z * LayerHeightUnits < _macroSurfaceHeights[macroIndex]
-            ? _macroSurfaceMaterials[macroIndex]
-            : (ushort)0;
+        return _layers[z].GetMaterialId(x, y);
     }
 
-    // Renderer representation: draw one face per 5 m macro-block,
-    // while detailed columns continue to render every 1 m level.
-    public ushort GetRenderMaterialId(int x, int y, int z)
+    public void SetMaterialId(
+        int x,
+        int y,
+        int z,
+        ushort materialId)
     {
-        if (!IsInside(x, y) || z < 0 || z >= LayerCount)
-            return 0;
-
-        int columnIndex = GetColumnIndex(x, y);
-        if (_detailedColumns.TryGetValue(columnIndex, out DetailedTerrainColumn? detailed))
-            return detailed.Materials[z];
-
-        int blockStep = MacroBlockHeightUnits / LayerHeightUnits;
-        if (z % blockStep != 0)
-            return 0;
-
-        return GetMaterialId(x, y, z);
-    }
-
-    public bool IsDetailedColumn(int x, int y)
-    {
-        return IsInside(x, y) &&
-            _detailedColumns.ContainsKey(GetColumnIndex(x, y));
-    }
-
-    public void SetMaterialId(int x, int y, int z, ushort materialId)
-    {
-        if (!IsInside(x, y) || z < 0 || z >= LayerCount)
+        if (!IsInside(x, y) ||
+            z < 0 ||
+            z >= LayerCount)
+        {
             throw new IndexOutOfRangeException();
+        }
+
+        GetOrCreateRegion(
+            x / TerrainRegion.TilesPerSide,
+            y / TerrainRegion.TilesPerSide);
 
         int columnIndex = GetColumnIndex(x, y);
-        DetailedTerrainColumn detailed = GetOrCreateDetailedColumn(columnIndex);
-        detailed.Materials[z] = materialId;
+
+        _layers[z].SetMaterialId(
+            x,
+            y,
+            materialId);
+
         _rangeCache[columnIndex] = null;
         RecalculateSurfaceHeight(columnIndex);
         TerrainVersion++;
     }
 
-    public int GetSurfaceLayer(int x, int y)
+    public int GetSurfaceLayer(
+        int x,
+        int y)
     {
-        ushort height = GetSurfaceHeightUnits(x, y);
+        if (!IsInside(x, y))
+            return -1;
+
+        ushort height =
+            _surfaceHeights[GetColumnIndex(x, y)];
+
         if (height == 0)
             return -1;
 
-        int layer = (height + LayerHeightUnits - 1) / LayerHeightUnits - 1;
-        return Math.Min(LayerCount - 1, layer);
+        int layer =
+            (height + LayerHeightUnits - 1) /
+            LayerHeightUnits - 1;
+
+        return Math.Min(
+            LayerCount - 1,
+            layer);
     }
 
     public int GetHighestOccupiedLayer()
     {
         int highest = -1;
-        for (int i = 0; i < _macroSurfaceHeights.Length; i++)
+
+        for (int i = 0; i < _surfaceHeights.Length; i++)
         {
-            ushort height = _macroSurfaceHeights[i];
+            ushort height = _surfaceHeights[i];
+
             if (height == 0)
                 continue;
 
-            int layer = (height + LayerHeightUnits - 1) / LayerHeightUnits - 1;
+            int layer =
+                (height + LayerHeightUnits - 1) /
+                LayerHeightUnits - 1;
+
             if (layer > highest)
                 highest = layer;
         }
 
-        foreach (DetailedTerrainColumn column in _detailedColumns.Values)
-        {
-            int layer = (column.SurfaceHeight + LayerHeightUnits - 1) / LayerHeightUnits - 1;
-            if (layer > highest)
-                highest = layer;
-        }
-
-        return Math.Min(LayerCount - 1, highest);
+        return Math.Min(
+            LayerCount - 1,
+            highest);
     }
 
     // ============================================================
@@ -298,37 +288,50 @@ public sealed class WorldMap
     // No range data is stored in TerrainRegion.
     // ============================================================
 
-    public ReadOnlySpan<TileRange> GetTileRanges(int globalX, int globalY)
+    public ReadOnlySpan<TileRange> GetTileRanges(
+        int globalX,
+        int globalY)
     {
         if (!IsInside(globalX, globalY))
             return ReadOnlySpan<TileRange>.Empty;
 
         int columnIndex = GetColumnIndex(globalX, globalY);
         TileRange[]? cached = _rangeCache[columnIndex];
+
         if (cached != null)
             return cached;
 
-        List<TileRange> ranges = new List<TileRange>(LayerCount);
+        List<TileRange> ranges =
+            new List<TileRange>(LayerCount);
+
         int runStart = 0;
-        ushort runMaterial = GetMaterialId(globalX, globalY, 0);
+        ushort runMaterial =
+            _layers[0].GetMaterialIdAtIndex(columnIndex);
 
         for (int z = 1; z <= LayerCount; z++)
         {
-            if (z < LayerCount && GetMaterialId(globalX, globalY, z) == runMaterial)
-                continue;
-
-            ranges.Add(new TileRange
+            if (z < LayerCount &&
+                _layers[z].GetMaterialIdAtIndex(columnIndex) == runMaterial)
             {
-                StartZ = (ushort)(runStart * LayerHeightUnits),
-                EndZ = (ushort)(z * LayerHeightUnits),
-                MaterialId = runMaterial,
-                State = runMaterial == 0 ? StateEmpty : StateSolid
-            });
+                continue;
+            }
+
+            ranges.Add(
+                new TileRange
+                {
+                    StartZ = (ushort)(runStart * LayerHeightUnits),
+                    EndZ = (ushort)(z * LayerHeightUnits),
+                    MaterialId = runMaterial,
+                    State = runMaterial == 0
+                        ? StateEmpty
+                        : StateSolid
+                });
 
             if (z < LayerCount)
             {
                 runStart = z;
-                runMaterial = GetMaterialId(globalX, globalY, z);
+                runMaterial =
+                    _layers[z].GetMaterialIdAtIndex(columnIndex);
             }
         }
 
@@ -337,86 +340,160 @@ public sealed class WorldMap
         return cached;
     }
 
-    public void SetRanges(int globalX, int globalY, ReadOnlySpan<TileRange> ranges)
+    public void SetRanges(
+        int globalX,
+        int globalY,
+        ReadOnlySpan<TileRange> ranges)
     {
         if (!IsInside(globalX, globalY))
             throw new IndexOutOfRangeException();
 
-        for (int i = 0; i < ranges.Length; i++)
-        {
-            if (ranges[i].StartZ > ranges[i].EndZ)
-                throw new ArgumentException("StartZ не может быть больше EndZ.", nameof(ranges));
-        }
+        GetOrCreateRegion(
+            globalX / TerrainRegion.TilesPerSide,
+            globalY / TerrainRegion.TilesPerSide);
 
         int columnIndex = GetColumnIndex(globalX, globalY);
-        DetailedTerrainColumn detailed = ClearColumn(globalX, globalY);
+        ClearColumn(globalX, globalY);
+
+        int regionX = globalX / TerrainRegion.TilesPerSide;
+        int regionY = globalY / TerrainRegion.TilesPerSide;
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
+
         int surfaceHeight = 0;
 
         for (int i = 0; i < ranges.Length; i++)
         {
             ref readonly TileRange range = ref ranges[i];
-            int startLayer = Math.Clamp(range.StartZ / LayerHeightUnits, 0, LayerCount);
-            int endLayer = Math.Clamp(
-                (range.EndZ + LayerHeightUnits - 1) / LayerHeightUnits, 0, LayerCount);
-            ushort materialId = range.State == StateSolid ? range.MaterialId : (ushort)0;
+
+            if (range.StartZ > range.EndZ)
+                throw new ArgumentException(
+                    "StartZ не может быть больше EndZ.",
+                    nameof(ranges));
+
+            int startLayer =
+                Math.Clamp(
+                    range.StartZ / LayerHeightUnits,
+                    0,
+                    LayerCount);
+
+            int endLayer =
+                Math.Clamp(
+                    (range.EndZ + LayerHeightUnits - 1) /
+                    LayerHeightUnits,
+                    0,
+                    LayerCount);
+
+            ushort materialId =
+                range.State == StateSolid
+                    ? range.MaterialId
+                    : (ushort)0;
 
             for (int z = startLayer; z < endLayer; z++)
-                detailed.Materials[z] = materialId;
+            {
+                _layers[z].GetRegion(regionX, regionY)!
+                    .SetMaterialIdAtIndex(
+                        localIndex,
+                        materialId);
+            }
 
-            if (range.State == StateSolid && materialId != 0)
-                surfaceHeight = Math.Max(surfaceHeight,
-                    Math.Min(range.EndZ, LayerCount * LayerHeightUnits));
+            if (range.State == StateSolid &&
+                materialId != 0)
+            {
+                surfaceHeight = Math.Max(
+                    surfaceHeight,
+                    Math.Min(
+                        range.EndZ,
+                        LayerCount * LayerHeightUnits));
+            }
         }
 
-        detailed.SurfaceHeight = (ushort)surfaceHeight;
-        detailed.SurfaceMaterialId = surfaceHeight > 0
-            ? detailed.Materials[Math.Clamp(
-                (surfaceHeight + LayerHeightUnits - 1) / LayerHeightUnits - 1,
-                0, LayerCount - 1)]
-            : (ushort)0;
-
+        _surfaceHeights[columnIndex] = (ushort)surfaceHeight;
         _rangeCache[columnIndex] = null;
         TerrainVersion++;
     }
 
-    public void ClearTileRanges(int globalX, int globalY)
+    public void ClearTileRanges(
+        int globalX,
+        int globalY)
     {
         if (!IsInside(globalX, globalY))
             return;
 
+        int columnIndex = GetColumnIndex(globalX, globalY);
         ClearColumn(globalX, globalY);
         TerrainVersion++;
     }
 
     public bool TryAddRange(
-        int globalX, int globalY, ushort startZ, ushort endZ,
-        ushort materialId, byte state)
+        int globalX,
+        int globalY,
+        ushort startZ,
+        ushort endZ,
+        ushort materialId,
+        byte state)
     {
         if (!IsInside(globalX, globalY))
             return false;
+
         if (startZ > endZ)
-            throw new ArgumentException("StartZ не может быть больше EndZ.");
+            throw new ArgumentException(
+                "StartZ не может быть больше EndZ.");
+
+        GetOrCreateRegion(
+            globalX / TerrainRegion.TilesPerSide,
+            globalY / TerrainRegion.TilesPerSide);
 
         int columnIndex = GetColumnIndex(globalX, globalY);
-        DetailedTerrainColumn detailed = GetOrCreateDetailedColumn(columnIndex);
-        int startLayer = Math.Clamp(startZ / LayerHeightUnits, 0, LayerCount);
-        int endLayer = Math.Clamp(
-            (endZ + LayerHeightUnits - 1) / LayerHeightUnits, 0, LayerCount);
-        ushort value = state == StateSolid ? materialId : (ushort)0;
+        int regionX = globalX / TerrainRegion.TilesPerSide;
+        int regionY = globalY / TerrainRegion.TilesPerSide;
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
+
+        int startLayer =
+            Math.Clamp(
+                startZ / LayerHeightUnits,
+                0,
+                LayerCount);
+
+        int endLayer =
+            Math.Clamp(
+                (endZ + LayerHeightUnits - 1) /
+                LayerHeightUnits,
+                0,
+                LayerCount);
+
+        ushort value =
+            state == StateSolid
+                ? materialId
+                : (ushort)0;
 
         for (int z = startLayer; z < endLayer; z++)
-            detailed.Materials[z] = value;
+        {
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(
+                    localIndex,
+                    value);
+        }
 
         if (state == StateSolid && value != 0)
         {
-            int rangeEnd = Math.Min(endZ, LayerCount * LayerHeightUnits);
-            if (rangeEnd > detailed.SurfaceHeight)
+            int rangeEnd =
+                Math.Min(
+                    endZ,
+                    LayerCount * LayerHeightUnits);
+
+            if (rangeEnd > _surfaceHeights[columnIndex])
             {
-                detailed.SurfaceHeight = (ushort)rangeEnd;
-                detailed.SurfaceMaterialId = value;
+                _surfaceHeights[columnIndex] =
+                    (ushort)rangeEnd;
             }
         }
-        else if (detailed.SurfaceHeight > startZ)
+        else if (_surfaceHeights[columnIndex] > startZ)
         {
             RecalculateSurfaceHeight(columnIndex);
         }
@@ -426,78 +503,65 @@ public sealed class WorldMap
         return true;
     }
 
-    public void SetSolidHeight(int globalX, int globalY, ushort height, ushort materialId)
+    public void SetSolidHeight(
+        int globalX,
+        int globalY,
+        ushort height,
+        ushort materialId)
     {
         if (!IsInside(globalX, globalY))
             throw new IndexOutOfRangeException();
 
+        GetOrCreateRegion(
+            globalX / TerrainRegion.TilesPerSide,
+            globalY / TerrainRegion.TilesPerSide);
+
         int columnIndex = GetColumnIndex(globalX, globalY);
-        int clampedHeight = Math.Min(height, LayerCount * LayerHeightUnits);
-        DetailedTerrainColumn detailed = new DetailedTerrainColumn(LayerCount);
+        int regionX = globalX / TerrainRegion.TilesPerSide;
+        int regionY = globalY / TerrainRegion.TilesPerSide;
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
 
-        if (clampedHeight > 0 && materialId != 0)
-        {
-            int filledLayers = (clampedHeight + LayerHeightUnits - 1) / LayerHeightUnits;
-            for (int z = 0; z < filledLayers; z++)
-                detailed.Materials[z] = materialId;
+        int clampedHeight =
+            Math.Min(
+                height,
+                LayerCount * LayerHeightUnits);
 
-            detailed.SurfaceHeight = (ushort)clampedHeight;
-            detailed.SurfaceMaterialId = materialId;
-        }
+        int previousLayers =
+            (_surfaceHeights[columnIndex] +
+             LayerHeightUnits - 1) /
+            LayerHeightUnits;
 
-        _detailedColumns[columnIndex] = detailed;
+        int filledLayers =
+            clampedHeight > 0 && materialId != 0
+                ? (clampedHeight + LayerHeightUnits - 1) /
+                  LayerHeightUnits
+                : 0;
+
         _rangeCache[columnIndex] = null;
-        TerrainVersion++;
-    }
 
-    public void SetMacroSolidHeight(
-        int macroX, int macroY, ushort height, ushort materialId)
-    {
-        if (macroX < 0 || macroX >= MacroBlocksX ||
-            macroY < 0 || macroY >= MacroBlocksY)
-            throw new IndexOutOfRangeException();
+        // Only touch the old/new occupied height span.
+        // This avoids clearing all 50 voxels and then refilling the column
+        // whenever a terrain generator replaces its height.
+        int layersToUpdate =
+            Math.Max(
+                previousLayers,
+                filledLayers);
 
-        int macroIndex = macroX + macroY * MacroBlocksX;
-        int clampedHeight = Math.Min(height, LayerCount * LayerHeightUnits);
-        int blockHeight = clampedHeight > 0 && materialId != 0
-            ? Math.Min(
-                ((clampedHeight + MacroBlockHeightUnits - 1) / MacroBlockHeightUnits) *
-                MacroBlockHeightUnits,
-                LayerCount * LayerHeightUnits)
-            : 0;
-
-        _macroSurfaceHeights[macroIndex] = (ushort)blockHeight;
-        _macroSurfaceMaterials[macroIndex] = blockHeight > 0 ? materialId : (ushort)0;
-
-        int startX = macroX * MacroBlockTileSpan;
-        int startY = macroY * MacroBlockTileSpan;
-        int endX = Math.Min(TileWidth, startX + MacroBlockTileSpan);
-        int endY = Math.Min(TileHeight, startY + MacroBlockTileSpan);
-
-        // Make navigation metadata available for all map regions occupied
-        // by this coarse block (a macro block can cross a 48-tile region edge).
-        int firstRegionX = startX / TerrainRegion.TilesPerSide;
-        int firstRegionY = startY / TerrainRegion.TilesPerSide;
-        int lastRegionX = (endX - 1) / TerrainRegion.TilesPerSide;
-        int lastRegionY = (endY - 1) / TerrainRegion.TilesPerSide;
-
-        for (int regionY = firstRegionY; regionY <= lastRegionY; regionY++)
+        for (int z = 0; z < layersToUpdate; z++)
         {
-            for (int regionX = firstRegionX; regionX <= lastRegionX; regionX++)
-                GetOrCreateRegion(regionX, regionY);
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(
+                    localIndex,
+                    z < filledLayers
+                        ? materialId
+                        : (ushort)0);
         }
 
-        // Changing a macro block invalidates both existing local edits and
-        // any cached range for every fine tile that it covers.
-        for (int y = startY; y < endY; y++)
-        {
-            for (int x = startX; x < endX; x++)
-            {
-                int index = GetColumnIndex(x, y);
-                _detailedColumns.Remove(index);
-                _rangeCache[index] = null;
-            }
-        }
+        _surfaceHeights[columnIndex] =
+            (ushort)(filledLayers > 0 ? clampedHeight : 0);
 
         TerrainVersion++;
     }
@@ -508,81 +572,94 @@ public sealed class WorldMap
     // One layer represents one meter; height units remain decimeters.
     // ============================================================
 
-    public ushort GetSurfaceHeightUnits(int globalX, int globalY)
+    public ushort GetSurfaceHeightUnits(
+        int globalX,
+        int globalY)
     {
         if (!IsInside(globalX, globalY))
             return 0;
 
-        int columnIndex = GetColumnIndex(globalX, globalY);
-        if (_detailedColumns.TryGetValue(columnIndex, out DetailedTerrainColumn? detailed))
-            return detailed.SurfaceHeight;
-
-        return _macroSurfaceHeights[GetMacroIndex(globalX, globalY)];
+        return _surfaceHeights[
+            GetColumnIndex(globalX, globalY)];
     }
 
-    public float GetSurfaceHeight(int globalX, int globalY)
+    public float GetSurfaceHeight(
+        int globalX,
+        int globalY)
     {
         return GetSurfaceHeightUnits(globalX, globalY) * 0.1f;
     }
 
-    private DetailedTerrainColumn ClearColumn(int globalX, int globalY)
+    private void ClearColumn(
+        int globalX,
+        int globalY)
     {
-        int columnIndex = GetColumnIndex(globalX, globalY);
-        DetailedTerrainColumn detailed = new DetailedTerrainColumn(LayerCount);
-        _detailedColumns[columnIndex] = detailed;
+        int regionX =
+            globalX / TerrainRegion.TilesPerSide;
+
+        int regionY =
+            globalY / TerrainRegion.TilesPerSide;
+
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
+
+        for (int z = 0; z < LayerCount; z++)
+        {
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(
+                    localIndex,
+                    0);
+        }
+
+        int columnIndex =
+            GetColumnIndex(globalX, globalY);
+
+        _surfaceHeights[columnIndex] = 0;
         _rangeCache[columnIndex] = null;
-        return detailed;
     }
 
-    private void RecalculateSurfaceHeight(int columnIndex)
+    private void RecalculateSurfaceHeight(
+        int columnIndex)
     {
-        if (!_detailedColumns.TryGetValue(columnIndex, out DetailedTerrainColumn? detailed))
-            return;
+        int globalX =
+            columnIndex % TileWidth;
+
+        int globalY =
+            columnIndex / TileWidth;
+
+        int regionX =
+            globalX / TerrainRegion.TilesPerSide;
+
+        int regionY =
+            globalY / TerrainRegion.TilesPerSide;
+
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
 
         for (int z = LayerCount - 1; z >= 0; z--)
         {
-            ushort materialId = detailed.Materials[z];
-            if (materialId == 0)
+            if (_layers[z].GetRegion(regionX, regionY)!
+                    .GetMaterialIdAtIndex(localIndex) == 0)
+            {
                 continue;
+            }
 
-            detailed.SurfaceHeight = (ushort)((z + 1) * LayerHeightUnits);
-            detailed.SurfaceMaterialId = materialId;
+            _surfaceHeights[columnIndex] =
+                (ushort)((z + 1) * LayerHeightUnits);
+
             return;
         }
 
-        detailed.SurfaceHeight = 0;
-        detailed.SurfaceMaterialId = 0;
+        _surfaceHeights[columnIndex] = 0;
     }
 
-    private DetailedTerrainColumn GetOrCreateDetailedColumn(int columnIndex)
-    {
-        if (_detailedColumns.TryGetValue(columnIndex, out DetailedTerrainColumn? detailed))
-            return detailed;
-
-        detailed = new DetailedTerrainColumn(LayerCount);
-        int x = columnIndex % TileWidth;
-        int y = columnIndex / TileWidth;
-        int macroIndex = GetMacroIndex(x, y);
-        int filledLayers =
-            (_macroSurfaceHeights[macroIndex] + LayerHeightUnits - 1) / LayerHeightUnits;
-        ushort materialId = _macroSurfaceMaterials[macroIndex];
-
-        for (int z = 0; z < filledLayers; z++)
-            detailed.Materials[z] = materialId;
-
-        detailed.SurfaceHeight = _macroSurfaceHeights[macroIndex];
-        detailed.SurfaceMaterialId = materialId;
-        _detailedColumns.Add(columnIndex, detailed);
-        return detailed;
-    }
-
-    private int GetMacroIndex(int x, int y)
-    {
-        return x / MacroBlockTileSpan +
-            (y / MacroBlockTileSpan) * MacroBlocksX;
-    }
-
-    private int GetColumnIndex(int x, int y)
+    private int GetColumnIndex(
+        int x,
+        int y)
     {
         return x + y * TileWidth;
     }
