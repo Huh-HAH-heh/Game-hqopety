@@ -28,15 +28,22 @@ public static class TerrainHeightPalette
             0f,
             1f);
 
+        float baseAdjustment =
+            (baseGray - 48f) * 0.35f;
+
+        float heightRange =
+            54f + heightContrast * 1.5f;
+
         float gray =
-            baseGray +
-            (heightFraction - 0.5f) * heightContrast -
-            depthFraction * depthShade;
+            3f +
+            heightFraction * heightRange +
+            baseAdjustment -
+            depthFraction * (depthShade * 0.7f);
 
         byte value = (byte)Math.Clamp(
             (int)MathF.Round(gray),
             0,
-            170);
+            135);
 
         return new Color(value, value, value, 255);
     }
@@ -47,11 +54,15 @@ public static class TerrainHeightPalette
         float heightContrast)
     {
         float height = Math.Clamp(band / 4f, 0f, 1f);
-        float gray = baseGray + (height - 0.5f) * heightContrast;
+        float gray =
+            3f +
+            height * (54f + heightContrast * 1.5f) +
+            (baseGray - 48f) * 0.35f;
+
         byte value = (byte)Math.Clamp(
             (int)MathF.Round(gray),
             0,
-            170);
+            135);
 
         return new Color(value, value, value, 255);
     }
