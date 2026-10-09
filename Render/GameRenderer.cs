@@ -34,6 +34,7 @@ public sealed class GameRenderer
     private RenderWindow _window = null!;
     private View? _uiView;
     private TerrainDebugOverlay? _terrainDebugOverlay;
+    private bool _draggingTerrainSlider;
     private bool _closeRequested;
 
     private bool _showDebugGrid;
@@ -514,14 +515,42 @@ public sealed class GameRenderer
                     return;
                 }
 
+                _draggingTerrainSlider =
+                    _terrainDebugOverlay.IsSliderHit(e.Position);
+
                 TerrainOverlayAction? action =
                     _terrainDebugOverlay.HandleClick(
-                        Mouse.GetPosition(_window),
+                        e.Position,
                         _visibleMaxLayer,
                         _worldMap.LayerCount);
 
                 if (action.HasValue)
                     ApplyTerrainOverlayAction(action.Value);
+            };
+
+        _window.MouseMoved +=
+            (_, e) =>
+            {
+                if (!_draggingTerrainSlider ||
+                    !_terrainStressMode ||
+                    _terrainDebugOverlay == null)
+                {
+                    return;
+                }
+
+                ApplyTerrainOverlayAction(
+                    new TerrainOverlayAction(
+                        TerrainOverlayActionType.SetLayer,
+                        _terrainDebugOverlay.GetSliderLayerFromX(
+                            e.Position.X,
+                            _worldMap.LayerCount)));
+            };
+
+        _window.MouseButtonReleased +=
+            (_, e) =>
+            {
+                if (e.Button == Mouse.Button.Left)
+                    _draggingTerrainSlider = false;
             };
 
         _window.KeyPressed +=
