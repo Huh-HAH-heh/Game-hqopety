@@ -38,6 +38,7 @@ public sealed class GameRenderer
     private GameMenuPage _menuPage;
     private int _selectedResolutionIndex;
     private bool _showTerrainExtrema;
+    private bool _showLowlands = true;
     private bool _closeRequested;
 
     private bool _showDebugGrid;
@@ -250,7 +251,8 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _camera.ZoomLevel,
             _showDebugGrid,
-            _visibleMaxLayer);
+            _visibleMaxLayer,
+            _showLowlands);
 
         if (_showVisionDebug &&
             !_massCombatMode &&
@@ -886,6 +888,7 @@ public sealed class GameRenderer
             _visibleMaxLayer,
             _showDebugGrid,
             _showTerrainExtrema,
+            _showLowlands,
             _mapRenderer.BaseGray,
             _mapRenderer.HeightContrast,
             _worldMap.LayerCount,
@@ -965,10 +968,15 @@ public sealed class GameRenderer
                 _showTerrainExtrema = !_showTerrainExtrema;
                 break;
 
+            case GameMenuActionType.ToggleLowlands:
+                _showLowlands = !_showLowlands;
+                break;
+
             case GameMenuActionType.ResetTerrainSettings:
                 _mapRenderer.ResetVisualSettings();
                 _showDebugGrid = false;
                 _showTerrainExtrema = false;
+                _showLowlands = true;
                 _visibleMaxLayer = 0;
                 break;
         }
@@ -1044,6 +1052,7 @@ public sealed class GameRenderer
         _mapRenderer.ResetVisualSettings();
         _showDebugGrid = false;
         _showTerrainExtrema = false;
+        _showLowlands = true;
         _menuPage = GameMenuPage.Closed;
         _draggingMenuSlider = null;
 
