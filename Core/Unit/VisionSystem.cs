@@ -527,8 +527,8 @@ public sealed class VisionSystem
 
         if (horizontalLengthSquared < 0.000001f)
         {
-            int cellX = (int)MathF.Floor(end.X);
-            int cellY = (int)MathF.Floor(end.Y);
+            int verticalCellX = (int)MathF.Floor(end.X);
+            int verticalCellY = (int)MathF.Floor(end.Y);
 
             float lowZ = MathF.Min(start.Z, end.Z);
             float highZ = MathF.Max(start.Z, end.Z);
@@ -540,7 +540,7 @@ public sealed class VisionSystem
 
             for (int z = firstZ; z <= lastZ; z++)
             {
-                if (worldMap.GetMaterialId(cellX, cellY, z) == 0)
+                if (worldMap.GetMaterialId(verticalCellX, verticalCellY, z) == 0)
                     continue;
 
                 bool intersects =
