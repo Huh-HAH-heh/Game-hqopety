@@ -52,8 +52,6 @@ public sealed class MapRenderSystem : IDisposable
 
     private float _baseGray = 48f;
     private float _heightContrast = 14f;
-    private float _depthShade = 22f;
-    private float _layerScreenOffset = 0.11f;
     private long _frameNumber;
     private long _chunkCacheTerrainVersion = long.MinValue;
     private int _chunkCacheVisibleMaxLayer = -1;
@@ -63,26 +61,17 @@ public sealed class MapRenderSystem : IDisposable
     private const int ExtraCachedTerrainChunks = 8;
 
     private const string TerrainVertexShaderSource =
-        @"uniform float uVisibleLayer;
-uniform float uLayerScreenOffset;
-void main()
+        @"void main()
 {
-    vec4 position = gl_Vertex;
-    float surfaceLayer = gl_MultiTexCoord0.x;
-    float voxelLayer = gl_MultiTexCoord0.y;
-    float voxelDepth = max(0.0, surfaceLayer - voxelLayer);
-    position.y += voxelDepth * uLayerScreenOffset;
-    gl_Position = gl_ModelViewProjectionMatrix * position;
+    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
     gl_TexCoord[0] = gl_MultiTexCoord0;
     gl_FrontColor = gl_Color;
 }";
 
     private const string TerrainFragmentShaderSource =
         @"uniform float uVisibleLayer;
-uniform float uLayerCount;
 uniform float uBaseGray;
 uniform float uHeightContrast;
-uniform float uDepthShade;
 void main()
 {
     float surfaceLayer = gl_TexCoord[0].x;
@@ -91,14 +80,10 @@ void main()
     if (abs(voxelLayer - uVisibleLayer) > 0.5)
         discard;
 
-    float layerRange = max(1.0, uLayerCount - 1.0);
     float cyclePosition = mod(surfaceLayer, 100.0);
     float heightFraction = cyclePosition / 99.0;
-    float depthFraction = clamp(max(0.0, surfaceLayer - voxelLayer) / layerRange, 0.0, 1.0);
-
     float heightRange = clamp(uBaseGray + uHeightContrast * 1.5, 24.0, 72.0);
-    float gray = heightFraction * heightRange
-        - depthFraction * (uDepthShade * 0.7);
+    float gray = heightFraction * heightRange;
 
     gray = clamp(gray, 0.0, 72.0) / 255.0;
     gl_FragColor = vec4(gray, gray, gray, 1.0);
@@ -149,44 +134,31 @@ void main()
 
     public float HeightContrast => _heightContrast;
 
-    public float DepthShade => _depthShade;
-
-    public float LayerScreenOffset => _layerScreenOffset;
-
     public void SetVisualSettings(
         float baseGray,
-        float heightContrast,
-        float depthShade,
-        float layerScreenOffset)
+        float heightContrast)
     {
         baseGray = Math.Clamp(baseGray, 8f, 96f);
         heightContrast = Math.Clamp(heightContrast, 0f, 32f);
-        depthShade = Math.Clamp(depthShade, 0f, 50f);
-        layerScreenOffset = Math.Clamp(layerScreenOffset, 0f, 0.3f);
 
         bool changed =
             _baseGray != baseGray ||
-            _heightContrast != heightContrast ||
-            _depthShade != depthShade ||
-            _layerScreenOffset != layerScreenOffset;
+            _heightContrast != heightContrast;
 
         if (!changed)
             return;
 
         _baseGray = baseGray;
         _heightContrast = heightContrast;
-        _depthShade = depthShade;
-        _layerScreenOffset = layerScreenOffset;
 
-        // The shader uses live uniforms. CPU fallback bakes color and offset
-        // into vertices, so only that path needs to invalidate cached chunks.
+        // Shader uniforms are live; only the CPU fallback bakes vertex colors.
         if (_terrainLayerShader == null)
             ClearTerrainChunkCache();
     }
 
     public void ResetVisualSettings()
     {
-        SetVisualSettings(48f, 14f, 22f, 0.11f);
+        SetVisualSettings(48f, 14f);
     }
 
     public bool UsesTerrainVertexBuffer =>
@@ -278,17 +250,10 @@ void main()
                 (int)MathF.Ceiling(screenMaxX / tilePixelSize) +
                 lodStep);
 
-        // Include rows shifted down by the visible Z layers.
-        float maximumLayerOffset =
-            Math.Max(0, worldMap.LayerCount - 1 - maxLayer) *
-            _layerScreenOffset;
-
         int minTileY =
             Math.Max(
                 0,
-                (int)MathF.Floor(
-                    (screenMinY - maximumLayerOffset) /
-                    tilePixelSize) - lodStep);
+                (int)MathF.Floor(screenMinY / tilePixelSize) - lodStep);
 
         int maxTileY =
             Math.Min(
@@ -485,11 +450,8 @@ void main()
         if (_terrainLayerShader != null)
         {
             _terrainLayerShader.SetUniform("uVisibleLayer", (float)visibleMaxLayer);
-            _terrainLayerShader.SetUniform("uLayerCount", (float)worldMap.LayerCount);
-            _terrainLayerShader.SetUniform("uLayerScreenOffset", _layerScreenOffset);
             _terrainLayerShader.SetUniform("uBaseGray", _baseGray);
             _terrainLayerShader.SetUniform("uHeightContrast", _heightContrast);
-            _terrainLayerShader.SetUniform("uDepthShade", _depthShade);
             terrainStates = new RenderStates(_terrainLayerShader);
         }
 
@@ -609,17 +571,10 @@ void main()
                         (minTileX + runStart * lodStep) * tilePixelSize;
                     float right =
                         (minTileX + column * lodStep) * tilePixelSize;
-                    float screenDepth = surfaceLayer - z;
-                    float cpuLayerOffset =
-                        _terrainLayerShader == null
-                            ? screenDepth * _layerScreenOffset
-                            : 0f;
                     float top =
-                        y * tilePixelSize +
-                        cpuLayerOffset;
+                        y * tilePixelSize;
                     float bottom =
-                        (y + lodStep) * tilePixelSize +
-                        cpuLayerOffset;
+                        (y + lodStep) * tilePixelSize;
 
                     AppendTerrainQuad(
                         left,
@@ -630,12 +585,8 @@ void main()
                             ? Color.White
                             : TerrainHeightPalette.GetTerrainColor(
                                 surfaceLayer,
-                                z,
-                                visibleMaxLayer,
-                                worldMap.LayerCount,
                                 _baseGray,
-                                _heightContrast,
-                                _depthShade),
+                                _heightContrast),
                         surfaceLayer,
                         z);
                 }
