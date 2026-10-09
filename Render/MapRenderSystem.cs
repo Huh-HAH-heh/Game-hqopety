@@ -499,10 +499,10 @@ void main()
                 if (worldMap.GetMaterialId(x, y, visibleMaxLayer) == 0)
                     continue;
 
-                float topLeftHeight = GetSmoothedSurfaceLayer(worldMap, x, y);
-                float topRightHeight = GetSmoothedSurfaceLayer(worldMap, x + lodStep, y);
-                float bottomRightHeight = GetSmoothedSurfaceLayer(worldMap, x + lodStep, y + lodStep);
-                float bottomLeftHeight = GetSmoothedSurfaceLayer(worldMap, x, y + lodStep);
+                float topLeftHeight = GetSmoothedSurfaceLayer(worldMap, x, y, visibleMaxLayer);
+                float topRightHeight = GetSmoothedSurfaceLayer(worldMap, x + lodStep, y, visibleMaxLayer);
+                float bottomRightHeight = GetSmoothedSurfaceLayer(worldMap, x + lodStep, y + lodStep, visibleMaxLayer);
+                float bottomLeftHeight = GetSmoothedSurfaceLayer(worldMap, x, y + lodStep, visibleMaxLayer);
 
                 float left = x * tilePixelSize;
                 float top = y * tilePixelSize;
@@ -530,7 +530,8 @@ void main()
     private static float GetSmoothedSurfaceLayer(
         WorldMap worldMap,
         int vertexX,
-        int vertexY)
+        int vertexY,
+        int visibleMaxLayer)
     {
         float heightSum = 0f;
         int sampleCount = 0;
@@ -541,7 +542,7 @@ void main()
             {
                 int surfaceLayer = worldMap.GetSurfaceLayer(x, y);
 
-                if (surfaceLayer < 0)
+                if (surfaceLayer < visibleMaxLayer)
                     continue;
 
                 heightSum += surfaceLayer;
