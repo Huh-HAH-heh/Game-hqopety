@@ -7,37 +7,22 @@ public static class TerrainHeightPalette
 {
     public static Color GetTerrainColor(
         int surfaceLayer,
-        int voxelLayer,
-        int visibleMaxLayer,
-        int layerCount,
         float baseGray,
-        float heightContrast,
-        float depthShade)
+        float heightContrast)
     {
-        float maxLayer = Math.Max(1, layerCount - 1);
-
         int cyclePosition =
             Math.Clamp(surfaceLayer, 0, int.MaxValue) % 100;
 
         float heightFraction =
             cyclePosition / 99f;
 
-        float depthFraction = Math.Clamp(
-            Math.Max(0, surfaceLayer - voxelLayer) / maxLayer,
-            0f,
-            1f);
-
         float heightRange = Math.Clamp(
             baseGray + heightContrast * 1.5f,
             24f,
             72f);
 
-        float gray =
-            heightFraction * heightRange -
-            depthFraction * (depthShade * 0.7f);
-
         byte value = (byte)Math.Clamp(
-            (int)MathF.Round(gray),
+            (int)MathF.Round(heightFraction * heightRange),
             0,
             72);
 
