@@ -64,11 +64,11 @@ public sealed class GameMenuOverlay : IDisposable
 {
     private static readonly GameResolution[] SupportedResolutions =
     {
+        new(1024, 768),
         new(1280, 720),
         new(1366, 768),
         new(1600, 900),
-        new(1920, 1080),
-        new(2560, 1440)
+        new(1920, 1080)
     };
 
     private const float MenuButtonSize = 38f;
@@ -629,7 +629,7 @@ public sealed class GameMenuOverlay : IDisposable
         _backButton.Position = new Vector2f(settingsX + SettingsWidth - 150f, settingsY + 565f);
         _resetLabel!.Position = new Vector2f(settingsX + 38f, settingsY + 574f);
         _backLabel!.Position = new Vector2f(settingsX + SettingsWidth - 113f, settingsY + 574f);
-        _keyboardHelp!.Position = new Vector2f(settingsX + 22f, settingsY + SettingsHeight - 25f);
+        _keyboardHelp!.Position = new Vector2f(settingsX + 22f, settingsY + 544f);
 
         SetText(
             _resolutionValue,
