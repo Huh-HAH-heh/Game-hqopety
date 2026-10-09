@@ -16,10 +16,11 @@ public static class TerrainHeightPalette
     {
         float maxLayer = Math.Max(1, layerCount - 1);
 
-        float heightFraction = Math.Clamp(
-            surfaceLayer / maxLayer,
-            0f,
-            1f);
+        int cyclePosition =
+            Math.Clamp(surfaceLayer, 0, int.MaxValue) % 10;
+
+        float heightFraction =
+            cyclePosition / 9f;
 
         int cutSurface = Math.Min(surfaceLayer, visibleMaxLayer);
 
@@ -28,22 +29,19 @@ public static class TerrainHeightPalette
             0f,
             1f);
 
-        float baseAdjustment =
-            (baseGray - 48f) * 0.35f;
-
-        float heightRange =
-            54f + heightContrast * 1.5f;
+        float heightRange = Math.Clamp(
+            baseGray + heightContrast * 1.5f,
+            8f,
+            140f);
 
         float gray =
-            3f +
-            heightFraction * heightRange +
-            baseAdjustment -
+            heightFraction * heightRange -
             depthFraction * (depthShade * 0.7f);
 
         byte value = (byte)Math.Clamp(
             (int)MathF.Round(gray),
             0,
-            135);
+            140);
 
         return new Color(value, value, value, 255);
     }
@@ -55,14 +53,15 @@ public static class TerrainHeightPalette
     {
         float height = Math.Clamp(band / 4f, 0f, 1f);
         float gray =
-            3f +
-            height * (54f + heightContrast * 1.5f) +
-            (baseGray - 48f) * 0.35f;
+            height * Math.Clamp(
+                baseGray + heightContrast * 1.5f,
+                8f,
+                140f);
 
         byte value = (byte)Math.Clamp(
             (int)MathF.Round(gray),
             0,
-            135);
+            140);
 
         return new Color(value, value, value, 255);
     }
