@@ -524,6 +524,9 @@ void main()
                     }
                 }
 
+                if (mesh == null)
+                    continue;
+
                 mesh.LastUsedFrame = _frameNumber;
                 _visibleTerrainChunks.Add(mesh);
                 _terrainVertexCount += mesh.VertexCount;
@@ -553,7 +556,6 @@ void main()
         }
 
         TrimTerrainChunkCache(
-            worldMap,
             visibleChunkCount + ExtraCachedTerrainChunks);
     }
 
@@ -784,7 +786,6 @@ void main()
     }
 
     private void TrimTerrainChunkCache(
-        WorldMap worldMap,
         int targetCount)
     {
         while (_terrainChunks.Count > targetCount)
