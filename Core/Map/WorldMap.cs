@@ -563,7 +563,11 @@ public sealed class WorldMap
         return detailed;
     }
 
-    private int GetColumnIndex(
+    private int GetColumnIndex(int x, int y)
+    {
+        return x + y * TileWidth;
+    }
+
     private bool IsInside(
         int x,
         int y)
