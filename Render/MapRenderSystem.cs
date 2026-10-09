@@ -95,6 +95,22 @@ void main()
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
 
+    private readonly VertexArray _lowlandVertices =
+        new VertexArray(PrimitiveType.Triangles);
+
+    private bool _lowlandCacheValid;
+    private int _cachedLowlandMinTileX = -1;
+    private int _cachedLowlandMaxTileX = -1;
+    private int _cachedLowlandMinTileY = -1;
+    private int _cachedLowlandMaxTileY = -1;
+    private int _cachedLowlandLodStep = -1;
+    private int _cachedLowlandVisibleLayer = -1;
+    private float _cachedLowlandTilePixelSize = -1f;
+    private long _cachedLowlandTerrainVersion = long.MinValue;
+
+    private byte[] _lowlandMask = Array.Empty<byte>();
+    private long _lowlandMaskTerrainVersion = long.MinValue;
+
     private bool _mapCacheValid;
     private bool _gridCacheValid;
     private bool _waterCacheValid;
@@ -182,7 +198,8 @@ void main()
         float tilePixelSize,
         float zoomLevel,
         bool showGrid,
-        int visibleMaxLayer = -1)
+        int visibleMaxLayer = -1,
+        bool showLowlands = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -352,6 +369,20 @@ void main()
             lodStep,
             tilePixelSize,
             maxLayer);
+
+        if (showLowlands)
+        {
+            DrawLowlandOverlay(
+                window,
+                worldMap,
+                minTileX,
+                maxTileX,
+                minTileY,
+                maxTileY,
+                lodStep,
+                tilePixelSize,
+                maxLayer);
+        }
 
         DrawWater(
             window,
@@ -745,6 +776,135 @@ void main()
         return topLayer;
     }
 
+    private void DrawLowlandOverlay(
+        RenderWindow window,
+        WorldMap worldMap,
+        int minTileX,
+        int maxTileX,
+        int minTileY,
+        int maxTileY,
+        int lodStep,
+        float tilePixelSize,
+        int visibleMaxLayer)
+    {
+        RefreshLowlandMask(worldMap);
+
+        bool cacheMatches =
+            _lowlandCacheValid &&
+            _cachedLowlandMinTileX == minTileX &&
+            _cachedLowlandMaxTileX == maxTileX &&
+            _cachedLowlandMinTileY == minTileY &&
+            _cachedLowlandMaxTileY == maxTileY &&
+            _cachedLowlandLodStep == lodStep &&
+            _cachedLowlandVisibleLayer == visibleMaxLayer &&
+            _cachedLowlandTilePixelSize == tilePixelSize &&
+            _cachedLowlandTerrainVersion == worldMap.TerrainVersion;
+
+        if (!cacheMatches)
+        {
+            _lowlandVertices.Clear();
+
+            Color lowlandColor = new Color(18, 82, 100, 105);
+
+            for (int y = minTileY; y <= maxTileY; y += lodStep)
+            {
+                for (int x = minTileX; x <= maxTileX; x += lodStep)
+                {
+                    int maskIndex = x + y * worldMap.TileWidth;
+
+                    if (_lowlandMask[maskIndex] == 0 ||
+                        worldMap.GetSurfaceLayer(x, y) < visibleMaxLayer)
+                    {
+                        continue;
+                    }
+
+                    float left = x * tilePixelSize;
+                    float top = y * tilePixelSize;
+                    float right = (x + lodStep) * tilePixelSize;
+                    float bottom = (y + lodStep) * tilePixelSize;
+
+                    AppendQuad(
+                        _lowlandVertices,
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        lowlandColor);
+                }
+            }
+
+            _cachedLowlandMinTileX = minTileX;
+            _cachedLowlandMaxTileX = maxTileX;
+            _cachedLowlandMinTileY = minTileY;
+            _cachedLowlandMaxTileY = maxTileY;
+            _cachedLowlandLodStep = lodStep;
+            _cachedLowlandVisibleLayer = visibleMaxLayer;
+            _cachedLowlandTilePixelSize = tilePixelSize;
+            _cachedLowlandTerrainVersion = worldMap.TerrainVersion;
+            _lowlandCacheValid = true;
+        }
+
+        if (_lowlandVertices.VertexCount > 0)
+            window.Draw(_lowlandVertices);
+    }
+
+    private void RefreshLowlandMask(WorldMap worldMap)
+    {
+        int cellCount = checked(worldMap.TileWidth * worldMap.TileHeight);
+
+        if (_lowlandMaskTerrainVersion == worldMap.TerrainVersion &&
+            _lowlandMask.Length == cellCount)
+        {
+            return;
+        }
+
+        if (_lowlandMask.Length != cellCount)
+            _lowlandMask = new byte[cellCount];
+        else
+            Array.Clear(_lowlandMask);
+
+        ushort minimumHeight = ushort.MaxValue;
+        ushort maximumHeight = 0;
+
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < worldMap.TileWidth; x++)
+            {
+                ushort height = worldMap.GetSurfaceHeightUnits(x, y);
+
+                if (height == 0)
+                    continue;
+
+                minimumHeight = Math.Min(minimumHeight, height);
+                maximumHeight = Math.Max(maximumHeight, height);
+            }
+        }
+
+        _lowlandMaskTerrainVersion = worldMap.TerrainVersion;
+        _lowlandCacheValid = false;
+
+        if (minimumHeight == ushort.MaxValue ||
+            maximumHeight <= minimumHeight)
+        {
+            return;
+        }
+
+        // Highlight the lowest quarter of the map's vertical range.
+        int lowlandLimit =
+            minimumHeight + Math.Max(1, (maximumHeight - minimumHeight) / 4);
+
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < worldMap.TileWidth; x++)
+            {
+                ushort height = worldMap.GetSurfaceHeightUnits(x, y);
+
+                if (height != 0 && height <= lowlandLimit)
+                    _lowlandMask[x + y * worldMap.TileWidth] = 1;
+            }
+        }
+    }
+
     private void DrawWater(
         RenderWindow window,
         WorldMap worldMap,
@@ -816,6 +976,7 @@ void main()
         _terrainLayerShader = null;
         _gridVertices.Dispose();
         _waterVertices.Dispose();
+        _lowlandVertices.Dispose();
         _terrainVertices = Array.Empty<Vertex>();
     }
 
