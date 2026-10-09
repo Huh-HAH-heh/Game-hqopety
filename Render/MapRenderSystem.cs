@@ -80,10 +80,10 @@ void main()
     if (abs(voxelLayer - uVisibleLayer) > 0.5)
         discard;
 
-    float cyclePosition = mod(surfaceLayer, 100.0);
-    float heightFraction = cyclePosition / 99.0;
+    float heightFraction = clamp(surfaceLayer, 0.0, 499.0) / 499.0;
+    float tonalFraction = pow(heightFraction, 1.8);
     float heightRange = clamp(uBaseGray + uHeightContrast * 1.5, 24.0, 72.0);
-    float gray = heightFraction * heightRange;
+    float gray = tonalFraction * heightRange;
 
     gray = clamp(gray, 0.0, 72.0) / 255.0;
     gl_FragColor = vec4(gray, gray, gray, 1.0);
@@ -95,23 +95,7 @@ void main()
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
 
-    private readonly VertexArray _lowlandVertices =
-        new VertexArray(PrimitiveType.Triangles);
-
-    private bool _lowlandCacheValid;
-    private int _cachedLowlandMinTileX = -1;
-    private int _cachedLowlandMaxTileX = -1;
-    private int _cachedLowlandMinTileY = -1;
-    private int _cachedLowlandMaxTileY = -1;
-    private int _cachedLowlandLodStep = -1;
-    private int _cachedLowlandVisibleLayer = -1;
-    private float _cachedLowlandTilePixelSize = -1f;
-    private long _cachedLowlandTerrainVersion = long.MinValue;
-
-    private byte[] _lowlandMask = Array.Empty<byte>();
-    private long _lowlandMaskTerrainVersion = long.MinValue;
-
-    private bool _mapCacheValid;
+     private bool _mapCacheValid;
     private bool _gridCacheValid;
     private bool _waterCacheValid;
 
@@ -125,9 +109,7 @@ void main()
     private long _cachedTerrainVersion;
     private long _cachedWaterVersion;
 
-    private int[] _rowTopLayers = Array.Empty<int>();
-    private int[] _rowSurfaceLayers = Array.Empty<int>();
-
+ 
     public int TerrainVertexCount =>
         _terrainVertexCount;
 
@@ -198,8 +180,7 @@ void main()
         float tilePixelSize,
         float zoomLevel,
         bool showGrid,
-        int visibleMaxLayer = -1,
-        bool showLowlands = false)
+        int visibleMaxLayer = -1)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -370,21 +351,7 @@ void main()
             tilePixelSize,
             maxLayer);
 
-        if (showLowlands)
-        {
-            DrawLowlandOverlay(
-                window,
-                worldMap,
-                minTileX,
-                maxTileX,
-                minTileY,
-                maxTileY,
-                lodStep,
-                tilePixelSize,
-                maxLayer);
-        }
-
-        DrawWater(
+         DrawWater(
             window,
             worldMap,
             minTileX,
@@ -523,110 +490,68 @@ void main()
             worldMap.MaxTileY,
             minTileY + TerrainRegion.TilesPerSide - 1);
 
-        int columnCount = (maxTileX - minTileX) / lodStep + 1;
-
-        if (_rowTopLayers.Length < columnCount)
-        {
-            Array.Resize(ref _rowTopLayers, columnCount);
-            Array.Resize(ref _rowSurfaceLayers, columnCount);
-        }
-
         for (int y = minTileY; y <= maxTileY; y += lodStep)
         {
-            int rowMaxLayer = -1;
-
-            for (int column = 0; column < columnCount; column++)
+            for (int x = minTileX; x <= maxTileX; x += lodStep)
             {
-                int x = minTileX + column * lodStep;
-                int surfaceLayer = FindVisibleTopLayer(
-                    worldMap,
-                    x,
-                    y,
-                    worldMap.LayerCount - 1);
+                // A flat Z slice needs one surface quad per occupied XY cell,
+                // not every voxel below that surface.
+                if (worldMap.GetMaterialId(x, y, visibleMaxLayer) == 0)
+                    continue;
 
-                _rowSurfaceLayers[column] = surfaceLayer;
+                float topLeftHeight = GetSmoothedSurfaceLayer(worldMap, x, y);
+                float topRightHeight = GetSmoothedSurfaceLayer(worldMap, x + lodStep, y);
+                float bottomRightHeight = GetSmoothedSurfaceLayer(worldMap, x + lodStep, y + lodStep);
+                float bottomLeftHeight = GetSmoothedSurfaceLayer(worldMap, x, y + lodStep);
 
-                int topLayer = FindVisibleTopLayer(
-                    worldMap,
-                    x,
-                    y,
+                float left = x * tilePixelSize;
+                float top = y * tilePixelSize;
+                float right = (x + lodStep) * tilePixelSize;
+                float bottom = (y + lodStep) * tilePixelSize;
+
+                AppendTerrainQuad(
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    topLeftHeight,
+                    topRightHeight,
+                    bottomRightHeight,
+                    bottomLeftHeight,
                     visibleMaxLayer);
-
-                _rowTopLayers[column] = topLayer;
-
-                if (topLayer > rowMaxLayer)
-                    rowMaxLayer = topLayer;
-            }
-
-            // Merge adjacent equal-height/equal-material cells inside this region.
-            for (int z = visibleMaxLayer; z <= rowMaxLayer; z++)
-            {
-                int column = 0;
-
-                while (column < columnCount)
-                {
-                    int topLayer = _rowTopLayers[column];
-
-                    if (topLayer < z)
-                    {
-                        column++;
-                        continue;
-                    }
-
-                    int x = minTileX + column * lodStep;
-                    ushort materialId = worldMap.GetMaterialId(x, y, z);
-
-                    if (materialId == 0)
-                    {
-                        column++;
-                        continue;
-                    }
-
-                    int runStart = column;
-                    int surfaceLayer = _rowSurfaceLayers[runStart];
-                    column++;
-
-                    while (column < columnCount &&
-                           _rowTopLayers[column] == topLayer &&
-                           _rowSurfaceLayers[column] == surfaceLayer)
-                    {
-                        int nextX = minTileX + column * lodStep;
-
-                        if (worldMap.GetMaterialId(nextX, y, z) == 0)
-                            break;
-
-                        column++;
-                    }
-
-                    float left =
-                        (minTileX + runStart * lodStep) * tilePixelSize;
-                    float right =
-                        (minTileX + column * lodStep) * tilePixelSize;
-                    float top =
-                        y * tilePixelSize;
-                    float bottom =
-                        (y + lodStep) * tilePixelSize;
-
-                    AppendTerrainQuad(
-                        left,
-                        top,
-                        right,
-                        bottom,
-                        _terrainLayerShader != null
-                            ? Color.White
-                            : TerrainHeightPalette.GetTerrainColor(
-                                surfaceLayer,
-                                _baseGray,
-                                _heightContrast),
-                        surfaceLayer,
-                        z);
-                }
             }
         }
 
         TerrainChunkMesh mesh = CreateTerrainChunkMesh(_buildingTerrainVertexCount);
         TerrainMeshRebuildCount++;
         return mesh;
+    }
+
+    private static float GetSmoothedSurfaceLayer(
+        WorldMap worldMap,
+        int vertexX,
+        int vertexY)
+    {
+        float heightSum = 0f;
+        int sampleCount = 0;
+
+        for (int y = vertexY - 1; y <= vertexY; y++)
+        {
+            for (int x = vertexX - 1; x <= vertexX; x++)
+            {
+                int surfaceLayer = worldMap.GetSurfaceLayer(x, y);
+
+                if (surfaceLayer < 0)
+                    continue;
+
+                heightSum += surfaceLayer;
+                sampleCount++;
+            }
+        }
+
+        return sampleCount > 0
+            ? heightSum / sampleCount
+            : 0f;
     }
 
     private TerrainChunkMesh CreateTerrainChunkMesh(int vertexCount)
@@ -670,24 +595,51 @@ void main()
         float top,
         float right,
         float bottom,
-        Color color,
-        int surfaceLayer,
+        float topLeftHeight,
+        float topRightHeight,
+        float bottomRightHeight,
+        float bottomLeftHeight,
         int voxelLayer)
     {
         EnsureTerrainVertexCapacity(_buildingTerrainVertexCount + 6);
+
+        Color topLeftColor = GetTerrainVertexColor(topLeftHeight);
+        Color topRightColor = GetTerrainVertexColor(topRightHeight);
+        Color bottomRightColor = GetTerrainVertexColor(bottomRightHeight);
+        Color bottomLeftColor = GetTerrainVertexColor(bottomLeftHeight);
 
         Vector2f topLeft = new Vector2f(left, top);
         Vector2f topRight = new Vector2f(right, top);
         Vector2f bottomRight = new Vector2f(right, bottom);
         Vector2f bottomLeft = new Vector2f(left, bottom);
-        Vector2f layerData = new Vector2f(surfaceLayer, voxelLayer);
 
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color, layerData);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topRight, color, layerData);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomRight, color, layerData);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color, layerData);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomRight, color, layerData);
-        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomLeft, color, layerData);
+        Vector2f topLeftData = new Vector2f(topLeftHeight, voxelLayer);
+        Vector2f topRightData = new Vector2f(topRightHeight, voxelLayer);
+        Vector2f bottomRightData = new Vector2f(bottomRightHeight, voxelLayer);
+        Vector2f bottomLeftData = new Vector2f(bottomLeftHeight, voxelLayer);
+
+        _terrainVertices[_buildingTerrainVertexCount++] =
+            new Vertex(topLeft, topLeftColor, topLeftData);
+        _terrainVertices[_buildingTerrainVertexCount++] =
+            new Vertex(topRight, topRightColor, topRightData);
+        _terrainVertices[_buildingTerrainVertexCount++] =
+            new Vertex(bottomRight, bottomRightColor, bottomRightData);
+        _terrainVertices[_buildingTerrainVertexCount++] =
+            new Vertex(topLeft, topLeftColor, topLeftData);
+        _terrainVertices[_buildingTerrainVertexCount++] =
+            new Vertex(bottomRight, bottomRightColor, bottomRightData);
+        _terrainVertices[_buildingTerrainVertexCount++] =
+            new Vertex(bottomLeft, bottomLeftColor, bottomLeftData);
+    }
+
+    private Color GetTerrainVertexColor(float surfaceLayer)
+    {
+        return _terrainLayerShader != null
+            ? Color.White
+            : TerrainHeightPalette.GetTerrainColor(
+                surfaceLayer,
+                _baseGray,
+                _heightContrast);
     }
 
     private void EnsureTerrainVertexCapacity(int required)
@@ -776,135 +728,6 @@ void main()
         return topLayer;
     }
 
-    private void DrawLowlandOverlay(
-        RenderWindow window,
-        WorldMap worldMap,
-        int minTileX,
-        int maxTileX,
-        int minTileY,
-        int maxTileY,
-        int lodStep,
-        float tilePixelSize,
-        int visibleMaxLayer)
-    {
-        RefreshLowlandMask(worldMap);
-
-        bool cacheMatches =
-            _lowlandCacheValid &&
-            _cachedLowlandMinTileX == minTileX &&
-            _cachedLowlandMaxTileX == maxTileX &&
-            _cachedLowlandMinTileY == minTileY &&
-            _cachedLowlandMaxTileY == maxTileY &&
-            _cachedLowlandLodStep == lodStep &&
-            _cachedLowlandVisibleLayer == visibleMaxLayer &&
-            _cachedLowlandTilePixelSize == tilePixelSize &&
-            _cachedLowlandTerrainVersion == worldMap.TerrainVersion;
-
-        if (!cacheMatches)
-        {
-            _lowlandVertices.Clear();
-
-            Color lowlandColor = new Color(18, 82, 100, 105);
-
-            for (int y = minTileY; y <= maxTileY; y += lodStep)
-            {
-                for (int x = minTileX; x <= maxTileX; x += lodStep)
-                {
-                    int maskIndex = x + y * worldMap.TileWidth;
-
-                    if (_lowlandMask[maskIndex] == 0 ||
-                        worldMap.GetSurfaceLayer(x, y) < visibleMaxLayer)
-                    {
-                        continue;
-                    }
-
-                    float left = x * tilePixelSize;
-                    float top = y * tilePixelSize;
-                    float right = (x + lodStep) * tilePixelSize;
-                    float bottom = (y + lodStep) * tilePixelSize;
-
-                    AppendQuad(
-                        _lowlandVertices,
-                        left,
-                        top,
-                        right,
-                        bottom,
-                        lowlandColor);
-                }
-            }
-
-            _cachedLowlandMinTileX = minTileX;
-            _cachedLowlandMaxTileX = maxTileX;
-            _cachedLowlandMinTileY = minTileY;
-            _cachedLowlandMaxTileY = maxTileY;
-            _cachedLowlandLodStep = lodStep;
-            _cachedLowlandVisibleLayer = visibleMaxLayer;
-            _cachedLowlandTilePixelSize = tilePixelSize;
-            _cachedLowlandTerrainVersion = worldMap.TerrainVersion;
-            _lowlandCacheValid = true;
-        }
-
-        if (_lowlandVertices.VertexCount > 0)
-            window.Draw(_lowlandVertices);
-    }
-
-    private void RefreshLowlandMask(WorldMap worldMap)
-    {
-        int cellCount = checked(worldMap.TileWidth * worldMap.TileHeight);
-
-        if (_lowlandMaskTerrainVersion == worldMap.TerrainVersion &&
-            _lowlandMask.Length == cellCount)
-        {
-            return;
-        }
-
-        if (_lowlandMask.Length != cellCount)
-            _lowlandMask = new byte[cellCount];
-        else
-            Array.Clear(_lowlandMask, 0, _lowlandMask.Length);
-
-        ushort minimumHeight = ushort.MaxValue;
-        ushort maximumHeight = 0;
-
-        for (int y = 0; y < worldMap.TileHeight; y++)
-        {
-            for (int x = 0; x < worldMap.TileWidth; x++)
-            {
-                ushort height = worldMap.GetSurfaceHeightUnits(x, y);
-
-                if (height == 0)
-                    continue;
-
-                minimumHeight = Math.Min(minimumHeight, height);
-                maximumHeight = Math.Max(maximumHeight, height);
-            }
-        }
-
-        _lowlandMaskTerrainVersion = worldMap.TerrainVersion;
-        _lowlandCacheValid = false;
-
-        if (minimumHeight == ushort.MaxValue ||
-            maximumHeight <= minimumHeight)
-        {
-            return;
-        }
-
-        // Highlight the lowest quarter of the map's vertical range.
-        int lowlandLimit =
-            minimumHeight + Math.Max(1, (maximumHeight - minimumHeight) / 4);
-
-        for (int y = 0; y < worldMap.TileHeight; y++)
-        {
-            for (int x = 0; x < worldMap.TileWidth; x++)
-            {
-                ushort height = worldMap.GetSurfaceHeightUnits(x, y);
-
-                if (height != 0 && height <= lowlandLimit)
-                    _lowlandMask[x + y * worldMap.TileWidth] = 1;
-            }
-        }
-    }
-
     private void DrawWater(
         RenderWindow window,
         WorldMap worldMap,
@@ -976,8 +799,7 @@ void main()
         _terrainLayerShader = null;
         _gridVertices.Dispose();
         _waterVertices.Dispose();
-        _lowlandVertices.Dispose();
-        _terrainVertices = Array.Empty<Vertex>();
+         _terrainVertices = Array.Empty<Vertex>();
     }
 
     private static void AppendQuad(
