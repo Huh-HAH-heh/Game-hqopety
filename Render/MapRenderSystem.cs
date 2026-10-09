@@ -47,6 +47,9 @@ public sealed class MapRenderSystem
     public int TerrainQuadCount =>
         TerrainVertexCount / 6;
 
+    public int TerrainVertexCapacity =>
+        _terrainVertices.Length;
+
     public long TerrainMeshRebuildCount { get; private set; }
 
     public double LastTerrainBuildMilliseconds { get; private set; }
@@ -477,11 +480,15 @@ public sealed class MapRenderSystem
 
             for (int i = 0; i < _terrainVertexCount; i++)
                 _mapVertices.Append(_terrainVertices[i]);
+
+            return;
         }
 
         // Release unusually large retained buffers after repeated smaller
         // rebuilds; a single transient view must not pin peak memory forever.
-        if (_terrainVertices.Length > 32768 &&
+        if (_useTerrainBuffer &&
+            _terrainBuffer != null &&
+            _terrainVertices.Length > 32768 &&
             _terrainVertexCount * 4 < _terrainVertices.Length)
         {
             _smallMeshRebuilds++;
