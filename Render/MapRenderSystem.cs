@@ -1,7 +1,8 @@
+using System;
+using System.Diagnostics;
 using Core.Map;
 using SFML.Graphics;
 using SFML.System;
-using System;
 
 namespace RimClone.Render;
 
@@ -29,6 +30,18 @@ public sealed class MapRenderSystem
     private int _cachedWaterVisibleMaxLayer = -1;
     private long _cachedTerrainVersion;
     private long _cachedWaterVersion;
+
+    private int[] _rowTopLayers = Array.Empty<int>();
+
+    public int TerrainVertexCount =>
+        (int)_mapVertices.VertexCount;
+
+    public int TerrainQuadCount =>
+        TerrainVertexCount / 6;
+
+    public long TerrainMeshRebuildCount { get; private set; }
+
+    public double LastTerrainBuildMilliseconds { get; private set; }
 
     private const byte GridAlpha = 90;
     private const float LayerScreenOffset = 1.1f;
@@ -128,51 +141,16 @@ public sealed class MapRenderSystem
         {
             // Terrain bounds or layer visibility changed; water uses the same view bounds.
             _waterCacheValid = false;
-            _mapVertices.Clear();
 
-            for (int y = minTileY; y <= maxTileY; y += lodStep)
-            {
-                for (int x = minTileX; x <= maxTileX; x += lodStep)
-                {
-                    int topLayer =
-                        FindVisibleTopLayer(
-                            worldMap,
-                            x,
-                            y,
-                            maxLayer);
-
-                    if (topLayer < 0)
-                        continue;
-
-                    float left = x * tilePixelSize;
-                    float right = (x + lodStep) * tilePixelSize;
-                    float bottomBase = (y + lodStep) * tilePixelSize;
-
-                    for (int z = 0; z <= topLayer; z++)
-                    {
-                        ushort materialId =
-                            worldMap.GetMaterialId(x, y, z);
-
-                        if (materialId == 0)
-                            continue;
-
-                        float depth = topLayer - z;
-                        float top =
-                            y * tilePixelSize +
-                            depth * LayerScreenOffset;
-
-                        AppendQuad(
-                            _mapVertices,
-                            left,
-                            top,
-                            right,
-                            bottomBase + depth * LayerScreenOffset,
-                            ShadeColor(
-                                GetMaterialColor(materialId),
-                                depth));
-                    }
-                }
-            }
+            BuildTerrainMesh(
+                worldMap,
+                minTileX,
+                maxTileX,
+                minTileY,
+                maxTileY,
+                lodStep,
+                tilePixelSize,
+                maxLayer);
 
             _mapCacheValid = true;
             _cachedMinTileX = minTileX;
@@ -244,6 +222,143 @@ public sealed class MapRenderSystem
 
         if (showGrid && _gridVertices.VertexCount > 0)
             window.Draw(_gridVertices);
+    }
+
+    private void BuildTerrainMesh(
+        WorldMap worldMap,
+        int minTileX,
+        int maxTileX,
+        int minTileY,
+        int maxTileY,
+        int lodStep,
+        float tilePixelSize,
+        int visibleMaxLayer)
+    {
+        long started = Stopwatch.GetTimestamp();
+
+        _mapVertices.Clear();
+
+        int columnCount =
+            maxTileX < minTileX
+                ? 0
+                : (maxTileX - minTileX) / lodStep + 1;
+
+        if (columnCount == 0)
+        {
+            LastTerrainBuildMilliseconds = 0d;
+            TerrainMeshRebuildCount++;
+            return;
+        }
+
+        if (_rowTopLayers.Length < columnCount)
+            Array.Resize(ref _rowTopLayers, columnCount);
+
+        for (int y = minTileY; y <= maxTileY; y += lodStep)
+        {
+            int rowMaxLayer = -1;
+
+            for (int column = 0; column < columnCount; column++)
+            {
+                int x = minTileX + column * lodStep;
+
+                int topLayer =
+                    FindVisibleTopLayer(
+                        worldMap,
+                        x,
+                        y,
+                        visibleMaxLayer);
+
+                _rowTopLayers[column] = topLayer;
+
+                if (topLayer > rowMaxLayer)
+                    rowMaxLayer = topLayer;
+            }
+
+            // Group adjacent equal-height/equal-material cells into one
+            // wide quad. This preserves the image while avoiding six native
+            // VertexArray.Append calls for every individual voxel.
+            for (int z = 0; z <= rowMaxLayer; z++)
+            {
+                int column = 0;
+
+                while (column < columnCount)
+                {
+                    int topLayer =
+                        _rowTopLayers[column];
+
+                    if (topLayer < z)
+                    {
+                        column++;
+                        continue;
+                    }
+
+                    int x = minTileX + column * lodStep;
+
+                    ushort materialId =
+                        worldMap.GetMaterialId(x, y, z);
+
+                    if (materialId == 0)
+                    {
+                        column++;
+                        continue;
+                    }
+
+                    int runStart = column;
+                    column++;
+
+                    while (column < columnCount &&
+                           _rowTopLayers[column] == topLayer)
+                    {
+                        int nextX =
+                            minTileX + column * lodStep;
+
+                        if (worldMap.GetMaterialId(
+                                nextX,
+                                y,
+                                z) != materialId)
+                        {
+                            break;
+                        }
+
+                        column++;
+                    }
+
+                    float left =
+                        (minTileX + runStart * lodStep) *
+                        tilePixelSize;
+
+                    float right =
+                        (minTileX + column * lodStep) *
+                        tilePixelSize;
+
+                    float depth =
+                        topLayer - z;
+
+                    float top =
+                        y * tilePixelSize +
+                        depth * LayerScreenOffset;
+
+                    float bottom =
+                        (y + lodStep) * tilePixelSize +
+                        depth * LayerScreenOffset;
+
+                    AppendQuad(
+                        _mapVertices,
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        ShadeColor(
+                            GetMaterialColor(materialId),
+                            depth));
+                }
+            }
+        }
+
+        LastTerrainBuildMilliseconds =
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+
+        TerrainMeshRebuildCount++;
     }
 
     private static int FindVisibleTopLayer(
