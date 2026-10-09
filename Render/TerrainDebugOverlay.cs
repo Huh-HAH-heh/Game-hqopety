@@ -304,6 +304,29 @@ public sealed class TerrainDebugOverlay : IDisposable
         }
     }
 
+    public bool IsSliderHit(Vector2i point)
+    {
+        return point.X >= SliderStartX - 8f &&
+               point.X <= SliderStartX + SliderWidth + 8f &&
+               point.Y >= PanelY + 90f &&
+               point.Y <= PanelY + 132f;
+    }
+
+    public int GetSliderLayerFromX(
+        int screenX,
+        int layerCount)
+    {
+        if (layerCount <= 1)
+            return 0;
+
+        float amount = Math.Clamp(
+            (screenX - SliderStartX) / SliderWidth,
+            0f,
+            1f);
+
+        return (int)MathF.Round(amount * (layerCount - 1));
+    }
+
     public TerrainOverlayAction? HandleClick(
         Vector2i point,
         int currentLayer,
@@ -346,17 +369,9 @@ public sealed class TerrainDebugOverlay : IDisposable
             return null;
         }
 
-        float amount = Math.Clamp(
-            (point.X - SliderStartX) / SliderWidth,
-            0f,
-            1f);
-
-        int selectedLayer = (int)MathF.Round(
-            amount * (layerCount - 1));
-
         return new TerrainOverlayAction(
             TerrainOverlayActionType.SetLayer,
-            selectedLayer);
+            GetSliderLayerFromX(point.X, layerCount));
     }
 
     public void DrawWorldMarkers(
