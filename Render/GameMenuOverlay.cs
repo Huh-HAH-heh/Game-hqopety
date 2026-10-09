@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using Core.Map;
 using SFML.Graphics;
@@ -177,22 +178,53 @@ public sealed class GameMenuOverlay : IDisposable
     private const float MainWidth = 390f;
     private const float MainHeight = 310f;
 
+    private sealed class HeightContourLevel : IDisposable
+    {
+        public int HeightUnits { get; }
+        public VertexArray Vertices { get; } = new VertexArray(PrimitiveType.Lines);
+        public List<Text> Labels { get; } = new();
+
+        public HeightContourLevel(int heightUnits)
+        {
+            HeightUnits = heightUnits;
+        }
+
+        public void Dispose()
+        {
+            Vertices.Dispose();
+
+            for (int i = 0; i < Labels.Count; i++)
+                Labels[i].Dispose();
+
+            Labels.Clear();
+        }
+    }
+
+    private sealed class HeightContourChunk : IDisposable
+    {
+        public readonly List<HeightContourLevel> Levels = new();
+        public long LastUsedFrame;
+
+        public void Dispose()
+        {
+            for (int i = 0; i < Levels.Count; i++)
+                Levels[i].Dispose();
+
+            Levels.Clear();
+        }
+    }
+
+    private const int MaxContourChunksBuiltPerFrame = 3;
+
+    private readonly Dictionary<int, HeightContourChunk> _contourChunks = new();
+    private readonly List<HeightContourChunk> _visibleContourChunks = new();
+    private long _contourTerrainVersion = long.MinValue;
+    private int _contourLodStep = -1;
+    private long _contourFrame;
+
     private readonly Font? _font;
     private readonly List<Text> _texts = new();
-    private readonly List<Text> _contourLabels = new();
     private readonly List<SliderControl> _sliders = new();
-    private readonly VertexArray _contourVertices = new VertexArray(PrimitiveType.Lines);
-
-    private bool _contourCacheValid;
-    private int _cachedContourMinX = -1;
-    private int _cachedContourMaxX = -1;
-    private int _cachedContourMinY = -1;
-    private int _cachedContourMaxY = -1;
-    private int _cachedContourVisibleLayer = -1;
-    private int _cachedContourLodStep = -1;
-    private float _cachedContourTileSize = -1f;
-    private float _cachedContourViewWidth = -1f;
-    private long _cachedContourTerrainVersion = long.MinValue;
     private Text?[] _mainMenuTexts = Array.Empty<Text?>();
     private Text?[] _settingsTexts = Array.Empty<Text?>();
     private int _lastSelectedResolutionIndex = -1;
@@ -719,104 +751,142 @@ public sealed class GameMenuOverlay : IDisposable
                 ? 2
                 : 1;
 
-        int minX = Math.Max(
+        int minTileX = Math.Max(
             0,
             (int)MathF.Floor(screenMinX / tilePixelSize) - 1);
-
-        int maxX = Math.Min(
-            worldMap.MaxTileX - lodStep,
+        int maxTileX = Math.Min(
+            worldMap.MaxTileX,
             (int)MathF.Ceiling(screenMaxX / tilePixelSize) + 1);
-
-        int minY = Math.Max(
+        int minTileY = Math.Max(
             0,
             (int)MathF.Floor(screenMinY / tilePixelSize) - 1);
-
-        int maxY = Math.Min(
-            worldMap.MaxTileY - lodStep,
+        int maxTileY = Math.Min(
+            worldMap.MaxTileY,
             (int)MathF.Ceiling(screenMaxY / tilePixelSize) + 1);
 
-        const int contourChunkSize = TerrainRegion.TilesPerSide;
-        minX = (minX / contourChunkSize) * contourChunkSize;
-        minY = (minY / contourChunkSize) * contourChunkSize;
-        maxX = Math.Min(
-            worldMap.MaxTileX - lodStep,
-            ((maxX / contourChunkSize) + 1) * contourChunkSize - lodStep);
-        maxY = Math.Min(
-            worldMap.MaxTileY - lodStep,
-            ((maxY / contourChunkSize) + 1) * contourChunkSize - lodStep);
-
-        bool cacheMatches =
-            _contourCacheValid &&
-            _cachedContourMinX == minX &&
-            _cachedContourMaxX == maxX &&
-            _cachedContourMinY == minY &&
-            _cachedContourMaxY == maxY &&
-            _cachedContourVisibleLayer == visibleMaxLayer &&
-            _cachedContourLodStep == lodStep &&
-            _cachedContourTileSize == tilePixelSize &&
-            _cachedContourViewWidth == cameraView.Size.X &&
-            _cachedContourTerrainVersion == worldMap.TerrainVersion;
-
-        if (!cacheMatches)
+        if (_contourTerrainVersion != worldMap.TerrainVersion ||
+            _contourLodStep != lodStep)
         {
-            RebuildHeightContours(
-                worldMap,
-                tilePixelSize,
-                cameraView,
-                visibleMaxLayer,
-                minX,
-                maxX,
-                minY,
-                maxY,
-                lodStep);
-
-            _cachedContourMinX = minX;
-            _cachedContourMaxX = maxX;
-            _cachedContourMinY = minY;
-            _cachedContourMaxY = maxY;
-            _cachedContourVisibleLayer = visibleMaxLayer;
-            _cachedContourLodStep = lodStep;
-            _cachedContourTileSize = tilePixelSize;
-            _cachedContourViewWidth = cameraView.Size.X;
-            _cachedContourTerrainVersion = worldMap.TerrainVersion;
-            _contourCacheValid = true;
+            ClearContourChunkCache();
+            _contourTerrainVersion = worldMap.TerrainVersion;
+            _contourLodStep = lodStep;
         }
 
-        if (_contourVertices.VertexCount > 0)
-            window.Draw(_contourVertices);
+        int minRegionX = minTileX / TerrainRegion.TilesPerSide;
+        int maxRegionX = maxTileX / TerrainRegion.TilesPerSide;
+        int minRegionY = minTileY / TerrainRegion.TilesPerSide;
+        int maxRegionY = maxTileY / TerrainRegion.TilesPerSide;
+        int visibleCount =
+            (maxRegionX - minRegionX + 1) *
+            (maxRegionY - minRegionY + 1);
 
-        for (int i = 0; i < _contourLabels.Count; i++)
+        _contourFrame++;
+        _visibleContourChunks.Clear();
+
+        int builtThisFrame = 0;
+        long buildStarted = Stopwatch.GetTimestamp();
+
+        for (int regionY = minRegionY; regionY <= maxRegionY; regionY++)
         {
-            Text label = _contourLabels[i];
-            label.CharacterSize = (uint)Math.Clamp(
-                (int)MathF.Round(9f * zoomLevel),
-                1,
-                72);
+            for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
+            {
+                int key = regionX + regionY * worldMap.RegionsX;
 
-            window.Draw(label);
+                if (!_contourChunks.TryGetValue(key, out HeightContourChunk? chunk))
+                {
+                    double buildMilliseconds =
+                        Stopwatch.GetElapsedTime(buildStarted).TotalMilliseconds;
+
+                    // Spread cache warm-up over several frames so panning into
+                    // a new map area cannot trigger one large contour rebuild.
+                    if (builtThisFrame >= MaxContourChunksBuiltPerFrame ||
+                        (builtThisFrame > 0 && buildMilliseconds >= 2.0))
+                    {
+                        continue;
+                    }
+
+                    chunk = BuildHeightContourChunk(
+                        worldMap,
+                        tilePixelSize,
+                        regionX,
+                        regionY,
+                        lodStep);
+
+                    _contourChunks.Add(key, chunk);
+                    builtThisFrame++;
+                }
+
+                chunk.LastUsedFrame = _contourFrame;
+                _visibleContourChunks.Add(chunk);
+            }
         }
+
+        for (int i = 0; i < _visibleContourChunks.Count; i++)
+        {
+            HeightContourChunk chunk = _visibleContourChunks[i];
+
+            for (int levelIndex = 0; levelIndex < chunk.Levels.Count; levelIndex++)
+            {
+                HeightContourLevel level = chunk.Levels[levelIndex];
+
+                // Contours below the currently selected horizontal slice
+                // are hidden, but the contour geometry itself stays cached.
+                if (level.HeightUnits <= visibleMaxLayer)
+                    continue;
+
+                if (level.Vertices.VertexCount > 0)
+                    window.Draw(level.Vertices);
+
+                uint labelSize = (uint)Math.Clamp(
+                    (int)MathF.Round(9f * zoomLevel),
+                    1,
+                    72);
+
+                for (int labelIndex = 0; labelIndex < level.Labels.Count; labelIndex++)
+                {
+                    Text label = level.Labels[labelIndex];
+
+                    if (label.CharacterSize != labelSize)
+                        label.CharacterSize = labelSize;
+
+                    window.Draw(label);
+                }
+            }
+        }
+
+        TrimContourChunkCache(
+            worldMap,
+            minRegionX,
+            maxRegionX,
+            minRegionY,
+            maxRegionY,
+            visibleCount + 8);
     }
 
-    private void RebuildHeightContours(
+    private HeightContourChunk BuildHeightContourChunk(
         WorldMap worldMap,
         float tilePixelSize,
-        View cameraView,
-        int visibleMaxLayer,
-        int minX,
-        int maxX,
-        int minY,
-        int maxY,
+        int regionX,
+        int regionY,
         int lodStep)
     {
-        _contourVertices.Clear();
+        HeightContourChunk chunk = new HeightContourChunk();
 
-        for (int i = 0; i < _contourLabels.Count; i++)
-            _contourLabels[i].Dispose();
-
-        _contourLabels.Clear();
+        int regionStartX = regionX * TerrainRegion.TilesPerSide;
+        int regionStartY = regionY * TerrainRegion.TilesPerSide;
+        int minX =
+            ((regionStartX + lodStep - 1) / lodStep) * lodStep;
+        int minY =
+            ((regionStartY + lodStep - 1) / lodStep) * lodStep;
+        int maxX = Math.Min(
+            worldMap.MaxTileX - lodStep,
+            regionStartX + TerrainRegion.TilesPerSide - 1);
+        int maxY = Math.Min(
+            worldMap.MaxTileY - lodStep,
+            regionStartY + TerrainRegion.TilesPerSide - 1);
 
         if (maxX < minX || maxY < minY)
-            return;
+            return chunk;
 
         ushort maxHeightUnits = 0;
 
@@ -831,42 +901,25 @@ public sealed class GameMenuOverlay : IDisposable
             }
         }
 
-        // Minor contours every 5 m. Index contours are stronger at each 10 m,
-        // with 25 m included as an extra named reference altitude.
         const int contourIntervalUnits = 50;
-        float labelSpacing = MathF.Max(
-            tilePixelSize * 24f,
-            cameraView.Size.X * 0.28f);
-
+        bool allowLabels = _font != null && ((regionX + regionY * 2) % 3 == 0);
         Span<Vector2f> crossings = stackalloc Vector2f[4];
 
         for (int contourHeight = contourIntervalUnits;
              contourHeight <= maxHeightUnits;
              contourHeight += contourIntervalUnits)
         {
-            if (contourHeight <= visibleMaxLayer)
-                continue;
+            HeightContourLevel level = new HeightContourLevel(contourHeight);
 
             bool isIndexContour =
                 contourHeight % 100 == 0 ||
                 contourHeight % 250 == 0;
 
+            bool labelAdded = false;
+
             Color lineColor = isIndexContour
                 ? new Color(105, 105, 105, 185)
                 : new Color(48, 48, 48, 135);
-
-            int labelsForHeight = 0;
-            int cachedWidth = Math.Max(
-                1,
-                maxX - minX + lodStep);
-
-            int maxLabelsForHeight = Math.Clamp(
-                (int)(cachedWidth * tilePixelSize / labelSpacing) + 1,
-                1,
-                8);
-
-            float lastLabelX = float.NaN;
-            float lastLabelY = float.NaN;
 
             for (int y = minY; y <= maxY; y += lodStep)
             {
@@ -876,16 +929,6 @@ public sealed class GameMenuOverlay : IDisposable
                     ushort h10 = worldMap.GetSurfaceHeightUnits(x + lodStep, y);
                     ushort h11 = worldMap.GetSurfaceHeightUnits(x + lodStep, y + lodStep);
                     ushort h01 = worldMap.GetSurfaceHeightUnits(x, y + lodStep);
-
-                    // Do not draw fake contours along the edge of the selected
-                    // horizontal slice; all four samples must actually exist there.
-                    if (h00 <= visibleMaxLayer ||
-                        h10 <= visibleMaxLayer ||
-                        h11 <= visibleMaxLayer ||
-                        h01 <= visibleMaxLayer)
-                    {
-                        continue;
-                    }
 
                     float x0 = (x + 0.5f) * tilePixelSize;
                     float x1 = (x + lodStep + 0.5f) * tilePixelSize;
@@ -910,41 +953,22 @@ public sealed class GameMenuOverlay : IDisposable
                     if (crossingCount < 2)
                         continue;
 
-                    AppendContourSegment(
-                        crossings[0],
-                        crossings[1],
-                        lineColor);
+                    AppendContourSegment(level, crossings[0], crossings[1], lineColor);
 
                     if (crossingCount >= 4)
                     {
-                        AppendContourSegment(
-                            crossings[2],
-                            crossings[3],
-                            lineColor);
+                        AppendContourSegment(level, crossings[2], crossings[3], lineColor);
                     }
 
-                    if (!isIndexContour ||
-                        _font == null ||
-                        labelsForHeight >= maxLabelsForHeight)
-                    {
+                    if (!isIndexContour || !allowLabels || labelAdded)
                         continue;
-                    }
 
                     Vector2f midpoint = new Vector2f(
                         (crossings[0].X + crossings[1].X) * 0.5f,
                         (crossings[0].Y + crossings[1].Y) * 0.5f);
 
-                    float dx = midpoint.X - lastLabelX;
-                    float dy = midpoint.Y - lastLabelY;
-
-                    if (labelsForHeight > 0 &&
-                        dx * dx + dy * dy < labelSpacing * labelSpacing)
-                    {
-                        continue;
-                    }
-
                     Text label = new Text(
-                        _font,
+                        _font!,
                         $"{contourHeight * 0.1f:0} м",
                         9)
                     {
@@ -955,12 +979,65 @@ public sealed class GameMenuOverlay : IDisposable
                         Style = Text.Styles.Bold
                     };
 
-                    _contourLabels.Add(label);
-                    lastLabelX = midpoint.X;
-                    lastLabelY = midpoint.Y;
-                    labelsForHeight++;
+                    level.Labels.Add(label);
+                    labelAdded = true;
                 }
             }
+
+            if (level.Vertices.VertexCount > 0 || level.Labels.Count > 0)
+                chunk.Levels.Add(level);
+            else
+                level.Dispose();
+        }
+
+        return chunk;
+    }
+
+    private void ClearContourChunkCache()
+    {
+        foreach (HeightContourChunk chunk in _contourChunks.Values)
+            chunk.Dispose();
+
+        _contourChunks.Clear();
+        _visibleContourChunks.Clear();
+    }
+
+    private void TrimContourChunkCache(
+        WorldMap worldMap,
+        int minRegionX,
+        int maxRegionX,
+        int minRegionY,
+        int maxRegionY,
+        int targetCount)
+    {
+        while (_contourChunks.Count > targetCount)
+        {
+            int oldestKey = -1;
+            long oldestFrame = long.MaxValue;
+
+            foreach (KeyValuePair<int, HeightContourChunk> entry in _contourChunks)
+            {
+                int regionX = entry.Key % worldMap.RegionsX;
+                int regionY = entry.Key / worldMap.RegionsX;
+
+                if (regionX >= minRegionX && regionX <= maxRegionX &&
+                    regionY >= minRegionY && regionY <= maxRegionY)
+                {
+                    continue;
+                }
+
+                if (entry.Value.LastUsedFrame < oldestFrame)
+                {
+                    oldestFrame = entry.Value.LastUsedFrame;
+                    oldestKey = entry.Key;
+                }
+            }
+
+            if (oldestKey < 0)
+                break;
+
+            _contourChunks[oldestKey].Dispose();
+            _contourChunks.Remove(oldestKey);
         }
     }
 
@@ -1002,13 +1079,14 @@ public sealed class GameMenuOverlay : IDisposable
         intersections[count++] = point;
     }
 
-    private void AppendContourSegment(
+    private static void AppendContourSegment(
+        HeightContourLevel level,
         Vector2f start,
         Vector2f end,
         Color color)
     {
-        _contourVertices.Append(new Vertex(start, color));
-        _contourVertices.Append(new Vertex(end, color));
+        level.Vertices.Append(new Vertex(start, color));
+        level.Vertices.Append(new Vertex(end, color));
     }
 
     private void RefreshExtremes(WorldMap worldMap)
@@ -1444,9 +1522,6 @@ public sealed class GameMenuOverlay : IDisposable
         for (int i = 0; i < _texts.Count; i++)
             _texts[i].Dispose();
 
-        for (int i = 0; i < _contourLabels.Count; i++)
-            _contourLabels[i].Dispose();
-
         for (int i = 0; i < _sliders.Count; i++)
             _sliders[i].Dispose();
 
@@ -1473,7 +1548,7 @@ public sealed class GameMenuOverlay : IDisposable
         _divider.Dispose();
         _minimumPin.Dispose();
         _maximumPin.Dispose();
-        _contourVertices.Dispose();
+        ClearContourChunkCache();
 
         for (int i = 0; i < _toneSwatches.Length; i++)
             _toneSwatches[i].Dispose();
