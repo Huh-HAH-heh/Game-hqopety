@@ -257,55 +257,55 @@ public sealed class GameMenuOverlay : IDisposable
 
         _mainTitle = CreateText(
             "ГЛАВНОЕ МЕНЮ", 19, new Color(241, 245, 250),
-            Vector2f.Zero, Text.Styles.Bold);
+            new Vector2f(0f, 0f), Text.Styles.Bold);
         _mainSubtitle = CreateText(
             "RIMCLONE  •  ТЕСТ РЕЛЬЕФА", 11, new Color(154, 168, 185),
-            Vector2f.Zero);
+            new Vector2f(0f, 0f));
         _resumeLabel = CreateText(
-            "ПРОДОЛЖИТЬ", 13, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "ПРОДОЛЖИТЬ", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _settingsLabel = CreateText(
-            "НАСТРОЙКИ", 13, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "НАСТРОЙКИ", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _exitLabel = CreateText(
-            "ВЫХОД", 13, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "ВЫХОД", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
 
         _settingsTitle = CreateText(
             "НАСТРОЙКИ", 19, new Color(241, 245, 250),
-            Vector2f.Zero, Text.Styles.Bold);
+            new Vector2f(0f, 0f), Text.Styles.Bold);
         _settingsSubtitle = CreateText(
-            "Графика и окно игры", 11, new Color(154, 168, 185), Vector2f.Zero);
+            "Графика и окно игры", 11, new Color(154, 168, 185), new Vector2f(0f, 0f));
         _closeLabel = CreateText(
-            "×", 19, Color.White, Vector2f.Zero);
+            "×", 19, Color.White, new Vector2f(0f, 0f));
         _resolutionHeading = CreateText(
             "РАЗРЕШЕНИЕ ОКНА", 12, new Color(216, 224, 234),
-            Vector2f.Zero, Text.Styles.Bold);
+            new Vector2f(0f, 0f), Text.Styles.Bold);
         _resolutionValue = CreateText(
-            "", 13, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _resolutionCurrent = CreateText(
-            "", 10, new Color(154, 168, 185), Vector2f.Zero);
+            "", 10, new Color(154, 168, 185), new Vector2f(0f, 0f));
         _previousLabel = CreateText(
-            "‹", 22, Color.White, Vector2f.Zero);
+            "‹", 22, Color.White, new Vector2f(0f, 0f));
         _nextLabel = CreateText(
-            "›", 22, Color.White, Vector2f.Zero);
+            "›", 22, Color.White, new Vector2f(0f, 0f));
         _applyResolutionLabel = CreateText(
-            "ПРИМЕНИТЬ", 11, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "ПРИМЕНИТЬ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _gridLabel = CreateText(
-            "", 11, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _extremaLabel = CreateText(
-            "", 11, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _toneHeading = CreateText(
             "ПРЕВЬЮ МОНОХРОМНОГО ТОНА", 11,
-            new Color(195, 204, 215), Vector2f.Zero, Text.Styles.Bold);
+            new Color(195, 204, 215), new Vector2f(0f, 0f), Text.Styles.Bold);
         _toneLowLabel = CreateText(
-            "НИЗИНА", 10, new Color(157, 168, 182), Vector2f.Zero);
+            "НИЗИНА", 10, new Color(157, 168, 182), new Vector2f(0f, 0f));
         _toneHighLabel = CreateText(
-            "ВЫСОТА", 10, new Color(205, 213, 222), Vector2f.Zero);
+            "ВЫСОТА", 10, new Color(205, 213, 222), new Vector2f(0f, 0f));
         _resetLabel = CreateText(
-            "СБРОСИТЬ ГРАФИКУ", 11, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "СБРОСИТЬ ГРАФИКУ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _backLabel = CreateText(
-            "НАЗАД", 11, Color.White, Vector2f.Zero, Text.Styles.Bold);
+            "НАЗАД", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _keyboardHelp = CreateText(
             "F2 — меню настроек     Колесо — масштаб     WASD — камера",
-            10, new Color(145, 157, 173), Vector2f.Zero);
+            10, new Color(145, 157, 173), new Vector2f(0f, 0f));
 
         _mainMenuTexts = new Text?[]
         {
