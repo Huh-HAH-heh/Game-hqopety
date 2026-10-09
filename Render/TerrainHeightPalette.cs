@@ -17,15 +17,15 @@ public static class TerrainHeightPalette
         float maxLayer = Math.Max(1, layerCount - 1);
 
         int cyclePosition =
-            Math.Clamp(surfaceLayer, 0, int.MaxValue) % 10;
+            Math.Clamp(surfaceLayer, 0, int.MaxValue) % 100;
 
         float heightFraction =
-            cyclePosition / 9f;
+            cyclePosition / 99f;
 
         int cutSurface = Math.Min(surfaceLayer, visibleMaxLayer);
 
         float depthFraction = Math.Clamp(
-            Math.Max(0, cutSurface - voxelLayer) / maxLayer,
+            Math.Max(0, surfaceLayer - voxelLayer) / maxLayer,
             0f,
             1f);
 
