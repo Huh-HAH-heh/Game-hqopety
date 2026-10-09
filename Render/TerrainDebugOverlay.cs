@@ -27,7 +27,7 @@ public sealed class TerrainDebugOverlay : IDisposable
     private const float PanelHeight = 294f;
 
     private const float SliderStartX = 82f;
-    private const float SliderWidth = 340f;
+    private const float SliderWidth = 326f
     private const float SliderY = 130f;
     private const int LegendBands = 5;
 
@@ -143,7 +143,6 @@ public sealed class TerrainDebugOverlay : IDisposable
     private string _lastLayerValue = string.Empty;
 
     private bool? _lastHeightMapMode;
-    private int _lastVisibleLayer = -1;
     private int _lastLayerCount = -1;
 
     public TerrainDebugOverlay()
@@ -295,26 +294,26 @@ public sealed class TerrainDebugOverlay : IDisposable
         int currentLayer,
         int layerCount)
     {
-        if (_heightModeButton.GetGlobalBounds().Contains(point.X, point.Y))
+        if (_heightModeButton.GetGlobalBounds().Contains(point))
         {
             return new TerrainOverlayAction(
                 TerrainOverlayActionType.SelectHeightMap);
         }
 
-        if (_sliceModeButton.GetGlobalBounds().Contains(point.X, point.Y))
+        if (_sliceModeButton.GetGlobalBounds().Contains(point))
         {
             return new TerrainOverlayAction(
                 TerrainOverlayActionType.SelectVolumeSlice);
         }
 
-        if (_minusButton.GetGlobalBounds().Contains(point.X, point.Y))
+        if (_minusButton.GetGlobalBounds().Contains(point))
         {
             return new TerrainOverlayAction(
                 TerrainOverlayActionType.SetLayer,
                 Math.Clamp(currentLayer - 1, 0, layerCount - 1));
         }
 
-        if (_plusButton.GetGlobalBounds().Contains(point.X, point.Y))
+        if (_plusButton.GetGlobalBounds().Contains(point))
         {
             return new TerrainOverlayAction(
                 TerrainOverlayActionType.SetLayer,
@@ -448,21 +447,13 @@ public sealed class TerrainDebugOverlay : IDisposable
         int layerCount,
         Vector2i mouse)
     {
-        bool mapHovered = _heightModeButton.GetGlobalBounds().Contains(
-            mouse.X,
-            mouse.Y);
+        bool mapHovered = _heightModeButton.GetGlobalBounds().Contains(mouse);
 
-        bool sliceHovered = _sliceModeButton.GetGlobalBounds().Contains(
-            mouse.X,
-            mouse.Y);
+        bool sliceHovered = _sliceModeButton.GetGlobalBounds().Contains(mouse);
 
-        bool minusHovered = _minusButton.GetGlobalBounds().Contains(
-            mouse.X,
-            mouse.Y);
+        bool minusHovered = _minusButton.GetGlobalBounds().Contains(mouse);
 
-        bool plusHovered = _plusButton.GetGlobalBounds().Contains(
-            mouse.X,
-            mouse.Y);
+        bool plusHovered = _plusButton.GetGlobalBounds().Contains(mouse);
         bool heightSelected = heightMapMode;
         bool sliceSelected = !heightMapMode;
 
@@ -577,7 +568,7 @@ public sealed class TerrainDebugOverlay : IDisposable
 
         Vector2i mouse = Mouse.GetPosition(window);
 
-        if (_panel.GetGlobalBounds().Contains(mouse.X, mouse.Y))
+        if (_panel.GetGlobalBounds().Contains(mouse))
         {
             SetText(
                 _cursorText,
