@@ -279,8 +279,7 @@ void main()
                 (int)MathF.Ceiling(screenMaxX / tilePixelSize) +
                 lodStep);
 
-        // In height-map mode surfaces are rendered on the XY plane.
-        // Only the volume slice needs extra rows for layers shifted down in screen space.
+        // Include rows shifted down by the visible Z layers.
         float maximumLayerOffset =
             maxLayer * _layerScreenOffset;
 
@@ -639,6 +638,7 @@ void main()
                             : TerrainHeightPalette.GetTerrainColor(
                                 surfaceLayer,
                                 z,
+                                visibleMaxLayer,
                                 worldMap.LayerCount,
                                 _baseGray,
                                 _heightContrast,
