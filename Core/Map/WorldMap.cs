@@ -349,7 +349,14 @@ public sealed class WorldMap
             globalY / TerrainRegion.TilesPerSide);
 
         int columnIndex = GetColumnIndex(globalX, globalY);
-        ClearColumn(columnIndex);
+        ClearColumn(globalX, globalY);
+
+        int regionX = globalX / TerrainRegion.TilesPerSide;
+        int regionY = globalY / TerrainRegion.TilesPerSide;
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
 
         int surfaceHeight = 0;
 
@@ -382,9 +389,10 @@ public sealed class WorldMap
 
             for (int z = startLayer; z < endLayer; z++)
             {
-                _layers[z].SetMaterialIdAtIndex(
-                    columnIndex,
-                    materialId);
+                _layers[z].GetRegion(regionX, regionY)!
+                    .SetMaterialIdAtIndex(
+                        localIndex,
+                        materialId);
             }
 
             if (range.State == StateSolid &&
@@ -411,7 +419,7 @@ public sealed class WorldMap
             return;
 
         int columnIndex = GetColumnIndex(globalX, globalY);
-        ClearColumn(columnIndex);
+        ClearColumn(globalX, globalY);
         TerrainVersion++;
     }
 
@@ -435,6 +443,13 @@ public sealed class WorldMap
             globalY / TerrainRegion.TilesPerSide);
 
         int columnIndex = GetColumnIndex(globalX, globalY);
+        int regionX = globalX / TerrainRegion.TilesPerSide;
+        int regionY = globalY / TerrainRegion.TilesPerSide;
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
+
         int startLayer =
             Math.Clamp(
                 startZ / LayerHeightUnits,
@@ -455,9 +470,10 @@ public sealed class WorldMap
 
         for (int z = startLayer; z < endLayer; z++)
         {
-            _layers[z].SetMaterialIdAtIndex(
-                columnIndex,
-                value);
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(
+                    localIndex,
+                    value);
         }
 
         if (state == StateSolid && value != 0)
@@ -497,13 +513,20 @@ public sealed class WorldMap
             globalY / TerrainRegion.TilesPerSide);
 
         int columnIndex = GetColumnIndex(globalX, globalY);
+        int regionX = globalX / TerrainRegion.TilesPerSide;
+        int regionY = globalY / TerrainRegion.TilesPerSide;
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
+
         int clampedHeight =
             Math.Min(
                 height,
                 LayerCount * LayerHeightUnits);
 
         if (_surfaceHeights[columnIndex] != 0)
-            ClearColumn(columnIndex);
+            ClearColumn(globalX, globalY);
         else
             _rangeCache[columnIndex] = null;
 
@@ -515,9 +538,10 @@ public sealed class WorldMap
 
         for (int z = 0; z < filledLayers; z++)
         {
-            _layers[z].SetMaterialIdAtIndex(
-                columnIndex,
-                materialId);
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(
+                    localIndex,
+                    materialId);
         }
 
         _surfaceHeights[columnIndex] =
@@ -551,14 +575,30 @@ public sealed class WorldMap
     }
 
     private void ClearColumn(
-        int columnIndex)
+        int globalX,
+        int globalY)
     {
+        int regionX =
+            globalX / TerrainRegion.TilesPerSide;
+
+        int regionY =
+            globalY / TerrainRegion.TilesPerSide;
+
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
+
         for (int z = 0; z < LayerCount; z++)
         {
-            _layers[z].SetMaterialIdAtIndex(
-                columnIndex,
-                0);
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(
+                    localIndex,
+                    0);
         }
+
+        int columnIndex =
+            GetColumnIndex(globalX, globalY);
 
         _surfaceHeights[columnIndex] = 0;
         _rangeCache[columnIndex] = null;
@@ -567,10 +607,30 @@ public sealed class WorldMap
     private void RecalculateSurfaceHeight(
         int columnIndex)
     {
+        int globalX =
+            columnIndex % TileWidth;
+
+        int globalY =
+            columnIndex / TileWidth;
+
+        int regionX =
+            globalX / TerrainRegion.TilesPerSide;
+
+        int regionY =
+            globalY / TerrainRegion.TilesPerSide;
+
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) *
+            TerrainRegion.TilesPerSide;
+
         for (int z = LayerCount - 1; z >= 0; z--)
         {
-            if (_layers[z].GetMaterialIdAtIndex(columnIndex) == 0)
+            if (_layers[z].GetRegion(regionX, regionY)!
+                    .GetMaterialIdAtIndex(localIndex) == 0)
+            {
                 continue;
+            }
 
             _surfaceHeights[columnIndex] =
                 (ushort)((z + 1) * LayerHeightUnits);
