@@ -63,13 +63,104 @@ public readonly record struct GameResolution(
 public sealed class GameMenuOverlay : IDisposable
 {
     private static readonly GameResolution[] SupportedResolutions =
+        BuildSupportedResolutions();
+
+    private static GameResolution[] BuildSupportedResolutions()
     {
-        new(1024, 768),
-        new(1280, 720),
-        new(1366, 768),
-        new(1600, 900),
-        new(1920, 1080)
-    };
+        var modes = new HashSet<GameResolution>();
+
+        uint desktopWidth = 1920;
+        uint desktopHeight = 1080;
+
+        try
+        {
+            VideoMode desktopMode = VideoMode.DesktopMode;
+            desktopWidth = desktopMode.Size.X;
+            desktopHeight = desktopMode.Size.Y;
+
+            // SFML provides the actual display modes reported by the active
+            // monitor. Use these instead of a capped hard-coded list.
+            VideoMode[] fullscreenModes = VideoMode.FullscreenModes;
+
+            for (int i = 0; i < fullscreenModes.Length; i++)
+            {
+                uint width = fullscreenModes[i].Size.X;
+                uint height = fullscreenModes[i].Size.Y;
+
+                if (IsUsableResolution(width, height, desktopWidth, desktopHeight))
+                    modes.Add(new GameResolution(width, height));
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(
+                $"[Display] Could not query native display modes; using desktop-based window sizes: {exception.Message}");
+        }
+
+        // Add common windowed sizes even if a driver omits them from the
+        // fullscreen mode list. Never offer a size larger than the desktop.
+        GameResolution[] common =
+        {
+            new(1024, 768),
+            new(1280, 720),
+            new(1280, 800),
+            new(1366, 768),
+            new(1440, 900),
+            new(1600, 900),
+            new(1680, 1050),
+            new(1920, 1080),
+            new(1920, 1200),
+            new(2048, 1080),
+            new(2560, 1080),
+            new(2560, 1440),
+            new(3440, 1440),
+            new(3840, 2160)
+        };
+
+        for (int i = 0; i < common.Length; i++)
+        {
+            GameResolution resolution = common[i];
+
+            if (IsUsableResolution(
+                    resolution.Width,
+                    resolution.Height,
+                    desktopWidth,
+                    desktopHeight))
+            {
+                modes.Add(resolution);
+            }
+        }
+
+        // Always keep a sensible fallback if display mode enumeration failed.
+        if (modes.Count == 0)
+        {
+            modes.Add(new GameResolution(1024, 768));
+            modes.Add(new GameResolution(1280, 720));
+        }
+
+        var result = new List<GameResolution>(modes);
+        result.Sort(static (left, right) =>
+        {
+            int widthOrder = left.Width.CompareTo(right.Width);
+            return widthOrder != 0
+                ? widthOrder
+                : left.Height.CompareTo(right.Height);
+        });
+
+        return result.ToArray();
+    }
+
+    private static bool IsUsableResolution(
+        uint width,
+        uint height,
+        uint desktopWidth,
+        uint desktopHeight)
+    {
+        return width >= 960 &&
+               height >= 540 &&
+               width <= desktopWidth &&
+               height <= desktopHeight;
+    }
 
     private const float MenuButtonSize = 38f;
     private const float SettingsWidth = 620f;
@@ -214,6 +305,38 @@ public sealed class GameMenuOverlay : IDisposable
 
     public static GameResolution GetResolution(int index) =>
         SupportedResolutions[Math.Clamp(index, 0, SupportedResolutions.Length - 1)];
+
+    public static int FindResolutionIndex(uint width, uint height)
+    {
+        for (int i = 0; i < SupportedResolutions.Length; i++)
+        {
+            if (SupportedResolutions[i].Width == width &&
+                SupportedResolutions[i].Height == height)
+            {
+                return i;
+            }
+        }
+
+        int nearestIndex = 0;
+        ulong nearestDistance = ulong.MaxValue;
+
+        for (int i = 0; i < SupportedResolutions.Length; i++)
+        {
+            GameResolution resolution = SupportedResolutions[i];
+
+            long widthDelta = (long)resolution.Width - width;
+            long heightDelta = (long)resolution.Height - height;
+            ulong distance = (ulong)(widthDelta * widthDelta + heightDelta * heightDelta);
+
+            if (distance >= nearestDistance)
+                continue;
+
+            nearestDistance = distance;
+            nearestIndex = i;
+        }
+
+        return nearestIndex;
+    }
 
     public GameMenuOverlay()
     {
