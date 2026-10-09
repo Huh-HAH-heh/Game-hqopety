@@ -225,8 +225,12 @@ void main()
                 (int)MathF.Ceiling(screenMaxX / tilePixelSize) +
                 lodStep);
 
+        // In height-map mode surfaces are rendered on the XY plane.
+        // Only the volume slice needs extra rows for layers shifted down in screen space.
         float maximumLayerOffset =
-            maxLayer * LayerScreenOffset;
+            _heightMapMode
+                ? 0f
+                : maxLayer * LayerScreenOffset;
 
         int minTileY =
             Math.Max(
