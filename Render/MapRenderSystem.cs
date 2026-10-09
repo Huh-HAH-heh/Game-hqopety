@@ -53,7 +53,7 @@ public sealed class MapRenderSystem : IDisposable
     private float _baseGray = 48f;
     private float _heightContrast = 14f;
     private float _depthShade = 22f;
-    private float _layerScreenOffset = 1.1f;
+    private float _layerScreenOffset = 0.11f;
     private long _frameNumber;
     private long _chunkCacheTerrainVersion = long.MinValue;
     private int _chunkCacheVisibleMaxLayer = -1;
@@ -70,8 +70,7 @@ void main()
     vec4 position = gl_Vertex;
     float surfaceLayer = gl_MultiTexCoord0.x;
     float voxelLayer = gl_MultiTexCoord0.y;
-    float cutSurface = min(surfaceLayer, uVisibleLayer);
-    float voxelDepth = max(0.0, cutSurface - voxelLayer);
+    float voxelDepth = max(0.0, surfaceLayer - voxelLayer);
     position.y += voxelDepth * uLayerScreenOffset;
     gl_Position = gl_ModelViewProjectionMatrix * position;
     gl_TexCoord[0] = gl_MultiTexCoord0;
@@ -89,14 +88,13 @@ void main()
     float surfaceLayer = gl_TexCoord[0].x;
     float voxelLayer = gl_TexCoord[0].y;
 
-    if (voxelLayer > uVisibleLayer + 0.5)
+    if (abs(voxelLayer - uVisibleLayer) > 0.5)
         discard;
 
     float layerRange = max(1.0, uLayerCount - 1.0);
-    float cyclePosition = mod(surfaceLayer, 10.0);
-    float heightFraction = cyclePosition / 9.0;
-    float cutSurface = min(surfaceLayer, uVisibleLayer);
-    float depthFraction = clamp(max(0.0, cutSurface - voxelLayer) / layerRange, 0.0, 1.0);
+    float cyclePosition = mod(surfaceLayer, 100.0);
+    float heightFraction = cyclePosition / 99.0;
+    float depthFraction = clamp(max(0.0, surfaceLayer - voxelLayer) / layerRange, 0.0, 1.0);
 
     float heightRange = clamp(uBaseGray + uHeightContrast * 1.5, 24.0, 72.0);
     float gray = heightFraction * heightRange
@@ -164,7 +162,7 @@ void main()
         baseGray = Math.Clamp(baseGray, 8f, 96f);
         heightContrast = Math.Clamp(heightContrast, 0f, 32f);
         depthShade = Math.Clamp(depthShade, 0f, 50f);
-        layerScreenOffset = Math.Clamp(layerScreenOffset, 0f, 3f);
+        layerScreenOffset = Math.Clamp(layerScreenOffset, 0f, 0.3f);
 
         bool changed =
             _baseGray != baseGray ||
@@ -188,7 +186,7 @@ void main()
 
     public void ResetVisualSettings()
     {
-        SetVisualSettings(48f, 14f, 22f, 1.1f);
+        SetVisualSettings(48f, 14f, 22f, 0.11f);
     }
 
     public bool UsesTerrainVertexBuffer =>
@@ -282,7 +280,8 @@ void main()
 
         // Include rows shifted down by the visible Z layers.
         float maximumLayerOffset =
-            maxLayer * _layerScreenOffset;
+            Math.Max(0, worldMap.LayerCount - 1 - maxLayer) *
+            _layerScreenOffset;
 
         int minTileY =
             Math.Max(
@@ -415,15 +414,8 @@ void main()
         float tilePixelSize,
         int visibleMaxLayer)
     {
-        int layerCacheKey =
-            _terrainLayerShader != null
-                ? -1
-                : visibleMaxLayer;
-
-        int geometryMaxLayer =
-            _terrainLayerShader != null
-                ? worldMap.LayerCount - 1
-                : visibleMaxLayer;
+        int layerCacheKey = visibleMaxLayer;
+        int geometryMaxLayer = visibleMaxLayer;
 
         if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
             _chunkCacheVisibleMaxLayer != layerCacheKey ||
@@ -574,7 +566,7 @@ void main()
             }
 
             // Merge adjacent equal-height/equal-material cells inside this region.
-            for (int z = 0; z <= rowMaxLayer; z++)
+            for (int z = visibleMaxLayer; z <= rowMaxLayer; z++)
             {
                 int column = 0;
 
@@ -617,7 +609,7 @@ void main()
                         (minTileX + runStart * lodStep) * tilePixelSize;
                     float right =
                         (minTileX + column * lodStep) * tilePixelSize;
-                    float screenDepth = topLayer - z;
+                    float screenDepth = surfaceLayer - z;
                     float cpuLayerOffset =
                         _terrainLayerShader == null
                             ? screenDepth * _layerScreenOffset
@@ -833,9 +825,7 @@ void main()
             {
                 for (int x = minTileX; x <= maxTileX; x += lodStep)
                 {
-                    int waterZ = worldMap.Water.GetTopLevel(x, y);
-
-                    if (waterZ < 0 || waterZ > visibleMaxLayer)
+                    if (worldMap.Water.GetAmount(x, y, visibleMaxLayer) == 0)
                         continue;
 
                     float left = x * tilePixelSize;
