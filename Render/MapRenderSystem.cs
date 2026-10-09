@@ -6,7 +6,7 @@ using SFML.System;
 
 namespace RimClone.Render;
 
-public sealed class MapRenderSystem
+public sealed class MapRenderSystem : IDisposable
 {
     // Build terrain in managed memory and upload the finished mesh in bulk.
     private readonly VertexArray _mapVertices =
@@ -451,7 +451,26 @@ public sealed class MapRenderSystem
         }
 
         if (_terrainVertexCount == 0)
+        {
+            if (_useTerrainBuffer &&
+                _terrainBuffer != null &&
+                _terrainVertices.Length > 32768)
+            {
+                _smallMeshRebuilds++;
+
+                if (_smallMeshRebuilds >= 8)
+                {
+                    _terrainBuffer.Dispose();
+                    _terrainBuffer = null;
+                    Array.Resize(
+                        ref _terrainVertices,
+                        4096);
+                    _smallMeshRebuilds = 0;
+                }
+            }
+
             return;
+        }
 
         uint requiredCapacity =
             (uint)_terrainVertices.Length;
@@ -609,6 +628,16 @@ public sealed class MapRenderSystem
 
         if (_waterVertices.VertexCount > 0)
             window.Draw(_waterVertices);
+    }
+
+    public void Dispose()
+    {
+        _terrainBuffer?.Dispose();
+        _terrainBuffer = null;
+
+        _mapVertices.Dispose();
+        _gridVertices.Dispose();
+        _waterVertices.Dispose();
     }
 
     private static Color GetMaterialColor(
