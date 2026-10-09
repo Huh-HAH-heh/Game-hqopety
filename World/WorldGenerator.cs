@@ -6,7 +6,6 @@ namespace World;
 public static class WorldGenerator
 {
     private const ushort BaseMaterialId = 1;
-    private const int HorizontalStepWidth = 4;
 
     public static void Generate(
         WorldMap worldMap)
@@ -18,59 +17,66 @@ public static class WorldGenerator
 
         Console.WriteLine(
             "[WorldGenerator] " +
-            $"Полнообъёмный тест-рельеф создан: " +
+            $"Полнообъёмный тест каньона создан: " +
             $"{worldMap.LayerCount} уровней, шаг высоты 1 м.");
     }
 
     private static void GenerateBaseTerrain(
         WorldMap worldMap)
     {
-        int layerCount = worldMap.LayerCount;
-        int maxHeight = layerCount;
+        int centerX =
+            worldMap.TileWidth / 2;
+
+        int centerY =
+            worldMap.TileHeight / 2;
+
+        int layerCount =
+            worldMap.LayerCount;
+
+        // A winding canyon crosses the camera's starting view.
+        // Its floor reaches the bottom layer and each terrace changes
+        // elevation by exactly one 1 m voxel layer.
+        int rampDistance =
+            Math.Max(
+                1,
+                worldMap.TileHeight / 12);
 
         for (int y = 0; y < worldMap.TileHeight; y++)
         {
-            // A broad offset bends the contour of the long stair bands,
-            // while their elevation still changes in exact 1 m steps.
-            int continentOffset =
-                (int)MathF.Round(
-                    MathF.Sin(y * 0.010f) * 4f +
-                    MathF.Cos(y * 0.013f) * 5f +
-                    MathF.Sin(y * 0.004f) * 3f);
-
             for (int x = 0; x < worldMap.TileWidth; x++)
             {
-                float broadShape =
-                    MathF.Sin(x * 0.008f) * 2.5f +
-                    MathF.Cos(y * 0.010f) * 2.0f +
-                    MathF.Sin((x + y) * 0.005f) * 1.5f;
+                float dx =
+                    x - centerX;
 
-                int terrainStep =
-                    x / HorizontalStepWidth +
-                    continentOffset +
-                    (int)MathF.Round(broadShape);
+                float canyonCenterY =
+                    centerY +
+                    MathF.Sin(dx * 0.018f) * 8f +
+                    MathF.Sin(dx * 0.006f) * 16f +
+                    MathF.Sin(dx * 0.061f) * 2f;
 
-                terrainStep %= layerCount;
+                float distanceFromFloor =
+                    MathF.Abs(y - canyonCenterY);
 
-                if (terrainStep < 0)
-                    terrainStep += layerCount;
-
-                // Surface height runs from 1 m to the lowest/highest
-                // configured layer. Every column is solid from Z=0
-                // up to that height; no floating surface-only terrain.
                 int heightLayers =
-                    maxHeight - terrainStep;
+                    1 +
+                    (int)(
+                        distanceFromFloor *
+                        (layerCount - 1) /
+                        rampDistance);
 
-                ushort heightUnits =
-                    checked(
-                        (ushort)(
-                            heightLayers *
-                            WorldMap.LayerHeightUnits));
+                heightLayers =
+                    Math.Clamp(
+                        heightLayers,
+                        1,
+                        layerCount);
 
                 worldMap.SetSolidHeight(
                     x,
                     y,
-                    heightUnits,
+                    checked(
+                        (ushort)(
+                            heightLayers *
+                            WorldMap.LayerHeightUnits)),
                     BaseMaterialId);
             }
         }
