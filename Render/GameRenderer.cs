@@ -32,6 +32,8 @@ public sealed class GameRenderer
     private UnitId _selectedUnit;
 
     private RenderWindow _window = null!;
+    private View? _uiView;
+    private TerrainDebugOverlay? _terrainDebugOverlay;
     private bool _closeRequested;
 
     private bool _showDebugGrid;
@@ -59,7 +61,7 @@ public sealed class GameRenderer
             worldMap;
 
         _visibleMaxLayer =
-            Math.Max(0, worldMap.GetHighestOccupiedLayer());
+            Math.Max(0, worldMap.LayerCount / 2 - 1);
 
         _camera =
             new GameCamera(
@@ -131,8 +133,10 @@ public sealed class GameRenderer
             Draw();
         }
 
-        // Release terrain VBOs while the window's graphics context still exists.
+        // Release GPU resources while the graphics context still exists.
         _mapRenderer.Dispose();
+        _terrainDebugOverlay?.Dispose();
+        _uiView?.Dispose();
         _window.Close();
     }
 
@@ -265,6 +269,27 @@ public sealed class GameRenderer
             _window,
             _unitSimulation.Projectiles,
             TerrainTilePixelSize);
+
+        _terrainDebugOverlay?.DrawWorldMarkers(
+            _window,
+            _worldMap,
+            TerrainTilePixelSize,
+            _camera.ZoomLevel,
+            _mapRenderer.HeightMapMode);
+
+        if (_uiView != null)
+        {
+            _window.SetView(_uiView);
+
+            _terrainDebugOverlay?.DrawScreen(
+                _window,
+                _worldMap,
+                _camera.View,
+                TerrainTilePixelSize,
+                _camera.ZoomLevel,
+                _visibleMaxLayer,
+                _mapRenderer.HeightMapMode);
+        }
 
         if (_titleTimer >= 0.25f)
         {
@@ -453,6 +478,8 @@ public sealed class GameRenderer
                 "RimClone");
 
         _window.SetFramerateLimit(60);
+        _uiView = _window.DefaultView;
+        _terrainDebugOverlay = new TerrainDebugOverlay();
 
         _window.Closed +=
             (_, _) =>
@@ -499,6 +526,12 @@ public sealed class GameRenderer
         {
             _showDebugGrid =
                 !_showDebugGrid;
+            return;
+        }
+
+        if (key == Keyboard.Key.H && _terrainStressMode)
+        {
+            _mapRenderer.ToggleHeightMapMode();
             return;
         }
 
@@ -728,6 +761,11 @@ public sealed class GameRenderer
     private void ScrollTerrainLayers(
         int direction)
     {
+        // PageUp/PageDown switch from the complete height map into the
+        // selected-Z volume slice so the key press always changes the view.
+        if (_mapRenderer.HeightMapMode)
+            _mapRenderer.ToggleHeightMapMode();
+
         _visibleMaxLayer =
             Math.Clamp(
                 _visibleMaxLayer + direction,
