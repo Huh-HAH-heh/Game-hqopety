@@ -475,7 +475,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Layers={_visibleMaxLayer + 1}/{_worldMap.LayerCount} PgUp/PgDn=layer Shift+Wheel=layer | " +
+            $"Z={_visibleMaxLayer + 1}/{_worldMap.LayerCount} PgUp/PgDn=layer Shift+Wheel=layer F2=terrain settings | " +
             $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision";
     }
 
@@ -500,6 +500,22 @@ public sealed class GameRenderer
         _window.MouseWheelScrolled +=
             (_, e) =>
             {
+                Vector2f uiCoordinates =
+                    _uiView != null
+                        ? _window.MapPixelToCoords(e.Position, _uiView)
+                        : new Vector2f(e.Position.X, e.Position.Y);
+
+                Vector2i uiPosition = new Vector2i(
+                    (int)uiCoordinates.X,
+                    (int)uiCoordinates.Y);
+
+                if (_terrainStressMode &&
+                    _terrainSettingsOpen &&
+                    _terrainDebugOverlay?.IsSettingsPanelHit(uiPosition) == true)
+                {
+                    return;
+                }
+
                 bool shiftPressed =
                     Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
                     Keyboard.IsKeyPressed(Keyboard.Key.RShift);
