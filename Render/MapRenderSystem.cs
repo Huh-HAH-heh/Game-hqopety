@@ -40,6 +40,7 @@ public sealed class MapRenderSystem : IDisposable
     private long _cachedWaterVersion;
 
     private int[] _rowTopLayers = Array.Empty<int>();
+    private int[] _rowSurfaceLayers = Array.Empty<int>();
 
     public int TerrainVertexCount =>
         _terrainVertexCount;
@@ -286,7 +287,10 @@ public sealed class MapRenderSystem : IDisposable
         }
 
         if (_rowTopLayers.Length < columnCount)
+        {
             Array.Resize(ref _rowTopLayers, columnCount);
+            Array.Resize(ref _rowSurfaceLayers, columnCount);
+        }
 
         for (int y = minTileY; y <= maxTileY; y += lodStep)
         {
@@ -296,11 +300,18 @@ public sealed class MapRenderSystem : IDisposable
             {
                 int x = minTileX + column * lodStep;
 
-                int topLayer =
+                int surfaceLayer =
                     FindVisibleTopLayer(
                         worldMap,
                         x,
                         y,
+                        worldMap.LayerCount - 1);
+
+                _rowSurfaceLayers[column] = surfaceLayer;
+
+                int topLayer =
+                    Math.Min(
+                        surfaceLayer,
                         visibleMaxLayer);
 
                 _rowTopLayers[column] = topLayer;
@@ -339,10 +350,14 @@ public sealed class MapRenderSystem : IDisposable
                     }
 
                     int runStart = column;
+                    int surfaceLayer =
+                        _rowSurfaceLayers[runStart];
+
                     column++;
 
                     while (column < columnCount &&
-                           _rowTopLayers[column] == topLayer)
+                           _rowTopLayers[column] == topLayer &&
+                           _rowSurfaceLayers[column] == surfaceLayer)
                     {
                         int nextX =
                             minTileX + column * lodStep;
@@ -366,16 +381,19 @@ public sealed class MapRenderSystem : IDisposable
                         (minTileX + column * lodStep) *
                         tilePixelSize;
 
-                    float depth =
+                    float screenDepth =
                         topLayer - z;
+
+                    float actualDepth =
+                        surfaceLayer - z;
 
                     float top =
                         y * tilePixelSize +
-                        depth * LayerScreenOffset;
+                        screenDepth * LayerScreenOffset;
 
                     float bottom =
                         (y + lodStep) * tilePixelSize +
-                        depth * LayerScreenOffset;
+                        screenDepth * LayerScreenOffset;
 
                     AppendTerrainQuad(
                         left,
@@ -384,7 +402,7 @@ public sealed class MapRenderSystem : IDisposable
                         bottom,
                         ShadeColor(
                             GetMaterialColor(materialId),
-                            depth));
+                            actualDepth));
                 }
             }
         }
