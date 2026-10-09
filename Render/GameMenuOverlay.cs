@@ -97,6 +97,17 @@ public sealed class GameMenuOverlay : IDisposable
                 $"[Display] Could not query native display modes; using desktop-based window sizes: {exception.Message}");
         }
 
+        // Always expose the display's current native resolution, even if
+        // a graphics driver leaves it out of its mode list.
+        if (IsUsableResolution(
+                desktopWidth,
+                desktopHeight,
+                desktopWidth,
+                desktopHeight))
+        {
+            modes.Add(new GameResolution(desktopWidth, desktopHeight));
+        }
+
         // Add common windowed sizes even if a driver omits them from the
         // fullscreen mode list. Never offer a size larger than the desktop.
         GameResolution[] common =
