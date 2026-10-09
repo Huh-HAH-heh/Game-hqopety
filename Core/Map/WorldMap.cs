@@ -29,7 +29,7 @@ public sealed class WorldMap
 
     public WaterLayer Water { get; }
 
-    private readonly TerrainTileRegion?[] _regions;
+    private readonly TerrainTileRegion?[] _tileRegions;
     private readonly TerrainLayer[] _layers;
     private readonly ushort[] _surfaceHeights;
     private readonly TileRange[]?[] _rangeCache;
@@ -58,7 +58,7 @@ public sealed class WorldMap
         int height = TileHeight;
         int columnCount = checked(width * height);
 
-        _regions =
+        _tileRegions =
             new TerrainTileRegion?[checked(regionsX * regionsY)];
 
         _layers = new TerrainLayer[layerCount];
@@ -72,7 +72,7 @@ public sealed class WorldMap
                     height,
                     regionsX,
                     regionsY,
-                    _regions);
+                    _tileRegions);
         }
 
         _surfaceHeights = new ushort[columnCount];
@@ -205,7 +205,7 @@ public sealed class WorldMap
 
         int index = regionX + regionY * RegionsX;
 
-        if (_regions[index] == null)
+        if (_tileRegions[index] == null)
             return null;
 
         return _layers[0].GetRegion(regionX, regionY);
@@ -225,7 +225,7 @@ public sealed class WorldMap
 
         int index = regionX + regionY * RegionsX;
 
-        _regions[index] ??=
+        _tileRegions[index] ??=
             new TerrainTileRegion(
                 regionX,
                 regionY);
