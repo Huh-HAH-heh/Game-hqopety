@@ -32,6 +32,7 @@ public sealed class GameRenderer
     private UnitId _selectedUnit;
 
     private RenderWindow _window = null!;
+    private bool _closeRequested;
 
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
@@ -113,9 +114,12 @@ public sealed class GameRenderer
         Clock clock =
             new Clock();
 
-        while (_window.IsOpen)
+        while (_window.IsOpen && !_closeRequested)
         {
             _window.DispatchEvents();
+
+            if (_closeRequested)
+                break;
 
             float deltaTime =
                 clock.Restart().AsSeconds();
@@ -126,6 +130,10 @@ public sealed class GameRenderer
             Update(deltaTime);
             Draw();
         }
+
+        // Release terrain VBOs while the window's graphics context still exists.
+        _mapRenderer.Dispose();
+        _window.Close();
     }
 
     private void Update(
@@ -432,10 +440,7 @@ public sealed class GameRenderer
 
         _window.Closed +=
             (_, _) =>
-            {
-                _mapRenderer.Dispose();
-                _window.Close();
-            };
+                _closeRequested = true;
 
         _window.MouseWheelScrolled +=
             (_, e) =>
