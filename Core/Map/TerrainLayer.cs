@@ -18,6 +18,8 @@ public sealed class TerrainLayer
     public int Height { get; }
     public int RegionsX => _regionsX;
     public int RegionsY => _regionsY;
+    public ReadOnlySpan<TerrainRegion> Regions =>
+        _regions;
 
     public TerrainLayer(
         int zLevel,
