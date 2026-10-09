@@ -181,17 +181,20 @@ public sealed class GameMenuOverlay : IDisposable
     private sealed class HeightContourLevel : IDisposable
     {
         public int HeightUnits { get; }
-        public VertexArray Vertices { get; } = new VertexArray(PrimitiveType.Lines);
+        public VertexArray? FallbackVertices { get; }
         public List<Text> Labels { get; } = new();
 
-        public HeightContourLevel(int heightUnits)
+        public HeightContourLevel(int heightUnits, bool useFallback)
         {
             HeightUnits = heightUnits;
+
+            if (useFallback)
+                FallbackVertices = new VertexArray(PrimitiveType.Lines);
         }
 
         public void Dispose()
         {
-            Vertices.Dispose();
+            FallbackVertices?.Dispose();
 
             for (int i = 0; i < Labels.Count; i++)
                 Labels[i].Dispose();
@@ -202,11 +205,14 @@ public sealed class GameMenuOverlay : IDisposable
 
     private sealed class HeightContourChunk : IDisposable
     {
+        public readonly VertexArray Vertices = new VertexArray(PrimitiveType.Lines);
         public readonly List<HeightContourLevel> Levels = new();
         public long LastUsedFrame;
 
         public void Dispose()
         {
+            Vertices.Dispose();
+
             for (int i = 0; i < Levels.Count; i++)
                 Levels[i].Dispose();
 
@@ -215,6 +221,26 @@ public sealed class GameMenuOverlay : IDisposable
     }
 
     private const int MaxContourChunksBuiltPerFrame = 3;
+
+    private const string ContourVertexShaderSource =
+        @"void main()
+{
+    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+    gl_TexCoord[0] = gl_MultiTexCoord0;
+    gl_FrontColor = gl_Color;
+}";
+
+    private const string ContourFragmentShaderSource =
+        @"uniform float uVisibleLayer;
+void main()
+{
+    if (gl_TexCoord[0].x <= uVisibleLayer)
+        discard;
+
+    gl_FragColor = gl_Color;
+}";
+
+    private Shader? _contourShader;
 
     private readonly Dictionary<int, HeightContourChunk> _contourChunks = new();
     private readonly List<HeightContourChunk> _visibleContourChunks = new();
@@ -401,6 +427,22 @@ public sealed class GameMenuOverlay : IDisposable
     public GameMenuOverlay()
     {
         _font = LoadFont();
+
+        if (Shader.IsAvailable)
+        {
+            try
+            {
+                _contourShader = Shader.FromString(
+                    ContourVertexShaderSource,
+                    null,
+                    ContourFragmentShaderSource);
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine(
+                    $"[TerrainContours] Shader disabled; using per-level fallback: {exception.Message}");
+            }
+        }
 
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
@@ -834,8 +876,12 @@ public sealed class GameMenuOverlay : IDisposable
                 if (level.HeightUnits <= visibleMaxLayer)
                     continue;
 
-                if (level.Vertices.VertexCount > 0)
-                    window.Draw(level.Vertices);
+                if (_contourShader == null &&
+                    level.FallbackVertices != null &&
+                    level.FallbackVertices.VertexCount > 0)
+                {
+                    window.Draw(level.FallbackVertices);
+                }
 
                 uint labelSize = (uint)Math.Clamp(
                     (int)MathF.Round(9f * zoomLevel),
@@ -851,6 +897,20 @@ public sealed class GameMenuOverlay : IDisposable
 
                     window.Draw(label);
                 }
+            }
+        }
+
+        if (_contourShader != null)
+        {
+            _contourShader.SetUniform("uVisibleLayer", (float)visibleMaxLayer);
+            RenderStates contourStates = new RenderStates(_contourShader);
+
+            for (int i = 0; i < _visibleContourChunks.Count; i++)
+            {
+                HeightContourChunk chunk = _visibleContourChunks[i];
+
+                if (chunk.Vertices.VertexCount > 0)
+                    window.Draw(chunk.Vertices, contourStates);
             }
         }
 
@@ -909,7 +969,9 @@ public sealed class GameMenuOverlay : IDisposable
              contourHeight <= maxHeightUnits;
              contourHeight += contourIntervalUnits)
         {
-            HeightContourLevel level = new HeightContourLevel(contourHeight);
+            HeightContourLevel level = new HeightContourLevel(
+                contourHeight,
+                _contourShader == null);
 
             bool isIndexContour =
                 contourHeight % 100 == 0 ||
@@ -953,11 +1015,21 @@ public sealed class GameMenuOverlay : IDisposable
                     if (crossingCount < 2)
                         continue;
 
-                    AppendContourSegment(level, crossings[0], crossings[1], lineColor);
+                    AppendContourSegment(
+                        chunk,
+                        level,
+                        crossings[0],
+                        crossings[1],
+                        lineColor);
 
                     if (crossingCount >= 4)
                     {
-                        AppendContourSegment(level, crossings[2], crossings[3], lineColor);
+                        AppendContourSegment(
+                            chunk,
+                            level,
+                            crossings[2],
+                            crossings[3],
+                            lineColor);
                     }
 
                     if (!isIndexContour || !allowLabels || labelAdded)
@@ -1079,14 +1151,25 @@ public sealed class GameMenuOverlay : IDisposable
         intersections[count++] = point;
     }
 
-    private static void AppendContourSegment(
+    private void AppendContourSegment(
+        HeightContourChunk chunk,
         HeightContourLevel level,
         Vector2f start,
         Vector2f end,
         Color color)
     {
-        level.Vertices.Append(new Vertex(start, color));
-        level.Vertices.Append(new Vertex(end, color));
+        if (_contourShader != null)
+        {
+            Vector2f levelData = new Vector2f(level.HeightUnits, 0f);
+            chunk.Vertices.Append(new Vertex(start, color, levelData));
+            chunk.Vertices.Append(new Vertex(end, color, levelData));
+        }
+
+        if (level.FallbackVertices != null)
+        {
+            level.FallbackVertices.Append(new Vertex(start, color));
+            level.FallbackVertices.Append(new Vertex(end, color));
+        }
     }
 
     private void RefreshExtremes(WorldMap worldMap)
@@ -1522,6 +1605,8 @@ public sealed class GameMenuOverlay : IDisposable
         for (int i = 0; i < _texts.Count; i++)
             _texts[i].Dispose();
 
+        ClearContourChunkCache();
+
         for (int i = 0; i < _sliders.Count; i++)
             _sliders[i].Dispose();
 
@@ -1548,7 +1633,8 @@ public sealed class GameMenuOverlay : IDisposable
         _divider.Dispose();
         _minimumPin.Dispose();
         _maximumPin.Dispose();
-        ClearContourChunkCache();
+        _contourShader?.Dispose();
+        _contourShader = null;
 
         for (int i = 0; i < _toneSwatches.Length; i++)
             _toneSwatches[i].Dispose();
