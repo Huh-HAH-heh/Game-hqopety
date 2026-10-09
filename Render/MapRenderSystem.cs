@@ -93,18 +93,16 @@ void main()
         discard;
 
     float layerRange = max(1.0, uLayerCount - 1.0);
-    float heightFraction = clamp(surfaceLayer / layerRange, 0.0, 1.0);
+    float cyclePosition = mod(surfaceLayer, 10.0);
+    float heightFraction = cyclePosition / 9.0;
     float cutSurface = min(surfaceLayer, uVisibleLayer);
     float depthFraction = clamp(max(0.0, cutSurface - voxelLayer) / layerRange, 0.0, 1.0);
 
-    float baseAdjustment = (uBaseGray - 48.0) * 0.35;
-    float heightRange = 54.0 + uHeightContrast * 1.5;
-    float gray = 3.0
-        + heightFraction * heightRange
-        + baseAdjustment
+    float heightRange = clamp(uBaseGray + uHeightContrast * 1.5, 8.0, 140.0);
+    float gray = heightFraction * heightRange
         - depthFraction * (uDepthShade * 0.7);
 
-    gray = clamp(gray, 0.0, 135.0) / 255.0;
+    gray = clamp(gray, 0.0, 140.0) / 255.0;
     gl_FragColor = vec4(gray, gray, gray, 1.0);
 }";
 
