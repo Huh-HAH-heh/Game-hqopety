@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using Core.Map;
 using SFML.Graphics;
 using SFML.System;
@@ -8,16 +9,50 @@ namespace RimClone.Render;
 
 public sealed class MapRenderSystem : IDisposable
 {
-    // Build terrain in managed memory and upload the finished mesh in bulk.
-    private VertexArray _mapVertices =
-        new VertexArray(PrimitiveType.Triangles);
+    private sealed class TerrainChunkMesh : IDisposable
+    {
+        public VertexBuffer? Buffer;
+        public VertexArray? Vertices;
+        public int VertexCount;
+        public long LastUsedFrame;
 
-    private VertexBuffer? _terrainBuffer;
+        public void Draw(RenderWindow window)
+        {
+            if (Buffer != null)
+            {
+                Buffer.Draw(window, 0, (uint)VertexCount, RenderStates.Default);
+            }
+            else if (Vertices != null && Vertices.VertexCount > 0)
+            {
+                window.Draw(Vertices);
+            }
+        }
+
+        public void Dispose()
+        {
+            Buffer?.Dispose();
+            Buffer = null;
+            Vertices?.Dispose();
+            Vertices = null;
+        }
+    }
+
+    // Camera movement rebuilds only chunks entering the view.
+    private readonly Dictionary<int, TerrainChunkMesh> _terrainChunks = new();
+    private readonly List<TerrainChunkMesh> _visibleTerrainChunks = new();
+
     private Vertex[] _terrainVertices = Array.Empty<Vertex>();
     private int _terrainVertexCount;
+    private int _cachedTerrainVertexCapacity;
     private bool _terrainBufferSupportChecked;
     private bool _useTerrainBuffer;
-    private int _smallMeshRebuilds;
+    private long _frameNumber;
+    private long _chunkCacheTerrainVersion = long.MinValue;
+    private int _chunkCacheVisibleMaxLayer = -1;
+    private int _chunkCacheLodStep = -1;
+    private float _chunkCacheTilePixelSize = -1f;
+
+    private const int ExtraCachedTerrainChunks = 8;
 
     private readonly VertexArray _gridVertices =
         new VertexArray(PrimitiveType.Lines);
@@ -49,7 +84,10 @@ public sealed class MapRenderSystem : IDisposable
         TerrainVertexCount / 6;
 
     public int TerrainVertexCapacity =>
-        _terrainVertices.Length;
+        _cachedTerrainVertexCapacity;
+
+    public int TerrainChunkCacheCount =>
+        _terrainChunks.Count;
 
     public bool UsesTerrainVertexBuffer =>
         _useTerrainBuffer;
@@ -161,19 +199,9 @@ public sealed class MapRenderSystem : IDisposable
 
         if (!mapCacheMatches)
         {
-            // Terrain bounds or layer visibility changed; water uses the same view bounds.
+            // Water and debug-grid caches still depend on viewport bounds.
+            // Terrain geometry is cached independently per XY region.
             _waterCacheValid = false;
-
-            BuildTerrainMesh(
-                worldMap,
-                minTileX,
-                maxTileX,
-                minTileY,
-                maxTileY,
-                lodStep,
-                tilePixelSize,
-                maxLayer);
-
             _mapCacheValid = true;
             _cachedMinTileX = minTileX;
             _cachedMaxTileX = maxTileX;
@@ -182,7 +210,6 @@ public sealed class MapRenderSystem : IDisposable
             _cachedLodStep = lodStep;
             _cachedVisibleMaxLayer = maxLayer;
             _cachedTerrainVersion = worldMap.TerrainVersion;
-
             _gridCacheValid = false;
         }
 
@@ -228,21 +255,16 @@ public sealed class MapRenderSystem : IDisposable
             _cachedTerrainVersion = worldMap.TerrainVersion;
         }
 
-        if (_terrainVertexCount > 0)
-        {
-            if (_useTerrainBuffer && _terrainBuffer != null)
-            {
-                _terrainBuffer.Draw(
-                    window,
-                    0,
-                    (uint)_terrainVertexCount,
-                    RenderStates.Default);
-            }
-            else if (!_useTerrainBuffer && _mapVertices.VertexCount > 0)
-            {
-                window.Draw(_mapVertices);
-            }
-        }
+        DrawTerrainChunks(
+            window,
+            worldMap,
+            minTileX,
+            maxTileX,
+            minTileY,
+            maxTileY,
+            lodStep,
+            tilePixelSize,
+            maxLayer);
 
         DrawWater(
             window,
@@ -259,7 +281,8 @@ public sealed class MapRenderSystem : IDisposable
             window.Draw(_gridVertices);
     }
 
-    private void BuildTerrainMesh(
+    private void DrawTerrainChunks(
+        RenderWindow window,
         WorldMap worldMap,
         int minTileX,
         int maxTileX,
@@ -269,25 +292,101 @@ public sealed class MapRenderSystem : IDisposable
         float tilePixelSize,
         int visibleMaxLayer)
     {
-        long started = Stopwatch.GetTimestamp();
+        if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
+            _chunkCacheVisibleMaxLayer != visibleMaxLayer ||
+            _chunkCacheLodStep != lodStep ||
+            _chunkCacheTilePixelSize != tilePixelSize)
+        {
+            ClearTerrainChunkCache();
+            _chunkCacheTerrainVersion = worldMap.TerrainVersion;
+            _chunkCacheVisibleMaxLayer = visibleMaxLayer;
+            _chunkCacheLodStep = lodStep;
+            _chunkCacheTilePixelSize = tilePixelSize;
+        }
 
+        _frameNumber++;
+        _visibleTerrainChunks.Clear();
         _terrainVertexCount = 0;
 
-        if (!_useTerrainBuffer)
-            _mapVertices.Clear();
+        int minRegionX = minTileX / TerrainRegion.TilesPerSide;
+        int maxRegionX = maxTileX / TerrainRegion.TilesPerSide;
+        int minRegionY = minTileY / TerrainRegion.TilesPerSide;
+        int maxRegionY = maxTileY / TerrainRegion.TilesPerSide;
+        int visibleChunkCount =
+            (maxRegionX - minRegionX + 1) *
+            (maxRegionY - minRegionY + 1);
 
-        int columnCount =
-            maxTileX < minTileX
-                ? 0
-                : (maxTileX - minTileX) / lodStep + 1;
+        long rebuildsBefore = TerrainMeshRebuildCount;
+        long started = Stopwatch.GetTimestamp();
 
-        if (columnCount == 0)
+        for (int regionY = minRegionY;
+             regionY <= maxRegionY;
+             regionY++)
         {
-            UploadTerrainMesh();
-            LastTerrainBuildMilliseconds = 0d;
-            TerrainMeshRebuildCount++;
-            return;
+            for (int regionX = minRegionX;
+                 regionX <= maxRegionX;
+                 regionX++)
+            {
+                int key = regionX + regionY * worldMap.RegionsX;
+
+                if (!_terrainChunks.TryGetValue(key, out TerrainChunkMesh? mesh))
+                {
+                    mesh = BuildTerrainChunk(
+                        worldMap,
+                        regionX,
+                        regionY,
+                        lodStep,
+                        tilePixelSize,
+                        visibleMaxLayer);
+
+                    _terrainChunks.Add(key, mesh);
+                    _cachedTerrainVertexCapacity += mesh.VertexCount;
+                }
+
+                mesh.LastUsedFrame = _frameNumber;
+                _visibleTerrainChunks.Add(mesh);
+                _terrainVertexCount += mesh.VertexCount;
+            }
         }
+
+        for (int i = 0; i < _visibleTerrainChunks.Count; i++)
+            _visibleTerrainChunks[i].Draw(window);
+
+        if (TerrainMeshRebuildCount != rebuildsBefore)
+        {
+            LastTerrainBuildMilliseconds =
+                Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        }
+
+        TrimTerrainChunkCache(
+            worldMap,
+            minRegionX,
+            maxRegionX,
+            minRegionY,
+            maxRegionY,
+            visibleChunkCount + ExtraCachedTerrainChunks);
+    }
+
+    private TerrainChunkMesh BuildTerrainChunk(
+        WorldMap worldMap,
+        int regionX,
+        int regionY,
+        int lodStep,
+        float tilePixelSize,
+        int visibleMaxLayer)
+    {
+        _terrainVertexCount = 0;
+
+        int minTileX = regionX * TerrainRegion.TilesPerSide;
+        int maxTileX = Math.Min(
+            worldMap.MaxTileX,
+            minTileX + TerrainRegion.TilesPerSide - 1);
+        int minTileY = regionY * TerrainRegion.TilesPerSide;
+        int maxTileY = Math.Min(
+            worldMap.MaxTileY,
+            minTileY + TerrainRegion.TilesPerSide - 1);
+
+        int columnCount = (maxTileX - minTileX) / lodStep + 1;
 
         if (_rowTopLayers.Length < columnCount)
         {
@@ -302,22 +401,19 @@ public sealed class MapRenderSystem : IDisposable
             for (int column = 0; column < columnCount; column++)
             {
                 int x = minTileX + column * lodStep;
-
-                int surfaceLayer =
-                    FindVisibleTopLayer(
-                        worldMap,
-                        x,
-                        y,
-                        worldMap.LayerCount - 1);
+                int surfaceLayer = FindVisibleTopLayer(
+                    worldMap,
+                    x,
+                    y,
+                    worldMap.LayerCount - 1);
 
                 _rowSurfaceLayers[column] = surfaceLayer;
 
-                int topLayer =
-                    FindVisibleTopLayer(
-                        worldMap,
-                        x,
-                        y,
-                        visibleMaxLayer);
+                int topLayer = FindVisibleTopLayer(
+                    worldMap,
+                    x,
+                    y,
+                    visibleMaxLayer);
 
                 _rowTopLayers[column] = topLayer;
 
@@ -325,17 +421,14 @@ public sealed class MapRenderSystem : IDisposable
                     rowMaxLayer = topLayer;
             }
 
-            // Group adjacent equal-height/equal-material cells into one
-            // wide quad. This preserves the image while avoiding six native
-            // VertexArray.Append calls for every individual voxel.
+            // Merge adjacent equal-height/equal-material cells inside this region.
             for (int z = 0; z <= rowMaxLayer; z++)
             {
                 int column = 0;
 
                 while (column < columnCount)
                 {
-                    int topLayer =
-                        _rowTopLayers[column];
+                    int topLayer = _rowTopLayers[column];
 
                     if (topLayer < z)
                     {
@@ -344,9 +437,7 @@ public sealed class MapRenderSystem : IDisposable
                     }
 
                     int x = minTileX + column * lodStep;
-
-                    ushort materialId =
-                        worldMap.GetMaterialId(x, y, z);
+                    ushort materialId = worldMap.GetMaterialId(x, y, z);
 
                     if (materialId == 0)
                     {
@@ -355,47 +446,30 @@ public sealed class MapRenderSystem : IDisposable
                     }
 
                     int runStart = column;
-                    int surfaceLayer =
-                        _rowSurfaceLayers[runStart];
-
+                    int surfaceLayer = _rowSurfaceLayers[runStart];
                     column++;
 
                     while (column < columnCount &&
                            _rowTopLayers[column] == topLayer &&
                            _rowSurfaceLayers[column] == surfaceLayer)
                     {
-                        int nextX =
-                            minTileX + column * lodStep;
+                        int nextX = minTileX + column * lodStep;
 
-                        if (worldMap.GetMaterialId(
-                                nextX,
-                                y,
-                                z) != materialId)
-                        {
+                        if (worldMap.GetMaterialId(nextX, y, z) != materialId)
                             break;
-                        }
 
                         column++;
                     }
 
                     float left =
-                        (minTileX + runStart * lodStep) *
-                        tilePixelSize;
-
+                        (minTileX + runStart * lodStep) * tilePixelSize;
                     float right =
-                        (minTileX + column * lodStep) *
-                        tilePixelSize;
-
-                    float screenDepth =
-                        topLayer - z;
-
-                    float actualDepth =
-                        surfaceLayer - z;
-
+                        (minTileX + column * lodStep) * tilePixelSize;
+                    float screenDepth = topLayer - z;
+                    float actualDepth = surfaceLayer - z;
                     float top =
                         y * tilePixelSize +
                         screenDepth * LayerScreenOffset;
-
                     float bottom =
                         (y + lodStep) * tilePixelSize +
                         screenDepth * LayerScreenOffset;
@@ -412,12 +486,45 @@ public sealed class MapRenderSystem : IDisposable
             }
         }
 
-        UploadTerrainMesh();
-
-        LastTerrainBuildMilliseconds =
-            Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-
+        TerrainChunkMesh mesh = CreateTerrainChunkMesh(_terrainVertexCount);
         TerrainMeshRebuildCount++;
+        return mesh;
+    }
+
+    private TerrainChunkMesh CreateTerrainChunkMesh(int vertexCount)
+    {
+        TerrainChunkMesh mesh = new TerrainChunkMesh
+        {
+            VertexCount = vertexCount
+        };
+
+        if (vertexCount == 0)
+            return mesh;
+
+        if (_useTerrainBuffer)
+        {
+            VertexBuffer buffer = new VertexBuffer(
+                (uint)vertexCount,
+                PrimitiveType.Triangles,
+                VertexBuffer.UsageSpecifier.Dynamic);
+
+            if (buffer.Update(_terrainVertices, (uint)vertexCount, 0))
+            {
+                mesh.Buffer = buffer;
+                return mesh;
+            }
+
+            buffer.Dispose();
+            _useTerrainBuffer = false;
+        }
+
+        VertexArray vertices = new VertexArray(PrimitiveType.Triangles);
+
+        for (int i = 0; i < vertexCount; i++)
+            vertices.Append(_terrainVertices[i]);
+
+        mesh.Vertices = vertices;
+        return mesh;
     }
 
     private void AppendTerrainQuad(
@@ -427,8 +534,7 @@ public sealed class MapRenderSystem : IDisposable
         float bottom,
         Color color)
     {
-        EnsureTerrainVertexCapacity(
-            _terrainVertexCount + 6);
+        EnsureTerrainVertexCapacity(_terrainVertexCount + 6);
 
         Vector2f topLeft = new Vector2f(left, top);
         Vector2f topRight = new Vector2f(right, top);
@@ -443,141 +549,69 @@ public sealed class MapRenderSystem : IDisposable
         _terrainVertices[_terrainVertexCount++] = new Vertex(bottomLeft, color);
     }
 
-    private void EnsureTerrainVertexCapacity(
-        int required)
+    private void EnsureTerrainVertexCapacity(int required)
     {
         if (required <= _terrainVertices.Length)
             return;
 
-        int newCapacity =
-            Math.Max(
-                4096,
-                _terrainVertices.Length * 2);
+        int newCapacity = Math.Max(4096, _terrainVertices.Length * 2);
 
         while (newCapacity < required)
             newCapacity *= 2;
 
-        Array.Resize(
-            ref _terrainVertices,
-            newCapacity);
+        Array.Resize(ref _terrainVertices, newCapacity);
     }
 
-    private void UploadTerrainMesh()
+    private void TrimTerrainChunkCache(
+        WorldMap worldMap,
+        int minRegionX,
+        int maxRegionX,
+        int minRegionY,
+        int maxRegionY,
+        int targetCount)
     {
-        if (!_useTerrainBuffer)
+        while (_terrainChunks.Count > targetCount)
         {
-            _mapVertices.Clear();
+            int oldestKey = -1;
+            long oldestFrame = long.MaxValue;
 
-            for (int i = 0; i < _terrainVertexCount; i++)
-                _mapVertices.Append(_terrainVertices[i]);
-
-            TryShrinkTerrainMesh();
-            return;
-        }
-
-        if (_terrainVertexCount == 0)
-        {
-            TryShrinkTerrainMesh();
-            return;
-        }
-
-        uint requiredCapacity =
-            (uint)_terrainVertices.Length;
-
-        if (_terrainBuffer == null ||
-            _terrainBuffer.VertexCount < requiredCapacity)
-        {
-            _terrainBuffer?.Dispose();
-
-            _terrainBuffer =
-                new VertexBuffer(
-                    requiredCapacity,
-                    PrimitiveType.Triangles,
-                    VertexBuffer.UsageSpecifier.Dynamic);
-        }
-
-        if (!_terrainBuffer.Update(
-                _terrainVertices,
-                (uint)_terrainVertexCount,
-                0))
-        {
-            _terrainBuffer.Dispose();
-            _terrainBuffer = null;
-            _useTerrainBuffer = false;
-            _mapVertices.Clear();
-
-            for (int i = 0; i < _terrainVertexCount; i++)
-                _mapVertices.Append(_terrainVertices[i]);
-
-            TryShrinkTerrainMesh();
-            return;
-        }
-
-        TryShrinkTerrainMesh();
-    }
-
-    private void TryShrinkTerrainMesh()
-    {
-        if (_terrainVertices.Length <= 32768 ||
-            _terrainVertexCount * 4 >= _terrainVertices.Length)
-        {
-            _smallMeshRebuilds = 0;
-            return;
-        }
-
-        _smallMeshRebuilds++;
-
-        if (_smallMeshRebuilds < 8)
-            return;
-
-        int newCapacity = 4096;
-
-        while (newCapacity < _terrainVertexCount)
-            newCapacity *= 2;
-
-        if (newCapacity >= _terrainVertices.Length)
-        {
-            _smallMeshRebuilds = 0;
-            return;
-        }
-
-        Array.Resize(
-            ref _terrainVertices,
-            newCapacity);
-
-        if (_useTerrainBuffer)
-        {
-            _terrainBuffer?.Dispose();
-
-            _terrainBuffer =
-                new VertexBuffer(
-                    (uint)newCapacity,
-                    PrimitiveType.Triangles,
-                    VertexBuffer.UsageSpecifier.Dynamic);
-
-            if (_terrainVertexCount > 0 &&
-                !_terrainBuffer.Update(
-                    _terrainVertices,
-                    (uint)_terrainVertexCount,
-                    0))
+            foreach (KeyValuePair<int, TerrainChunkMesh> entry in _terrainChunks)
             {
-                _terrainBuffer.Dispose();
-                _terrainBuffer = null;
-                _useTerrainBuffer = false;
+                int regionX = entry.Key % worldMap.RegionsX;
+                int regionY = entry.Key / worldMap.RegionsX;
+
+                if (regionX >= minRegionX && regionX <= maxRegionX &&
+                    regionY >= minRegionY && regionY <= maxRegionY)
+                {
+                    continue;
+                }
+
+                if (entry.Value.LastUsedFrame < oldestFrame)
+                {
+                    oldestFrame = entry.Value.LastUsedFrame;
+                    oldestKey = entry.Key;
+                }
             }
+
+            if (oldestKey < 0)
+                break;
+
+            TerrainChunkMesh mesh = _terrainChunks[oldestKey];
+            _cachedTerrainVertexCapacity -= mesh.VertexCount;
+            mesh.Dispose();
+            _terrainChunks.Remove(oldestKey);
         }
+    }
 
-        if (!_useTerrainBuffer)
-        {
-            _mapVertices.Dispose();
-            _mapVertices =
-                new VertexArray(PrimitiveType.Triangles);
+    private void ClearTerrainChunkCache()
+    {
+        foreach (TerrainChunkMesh mesh in _terrainChunks.Values)
+            mesh.Dispose();
 
-            for (int i = 0; i < _terrainVertexCount; i++)
-                _mapVertices.Append(_terrainVertices[i]);
-        }
-
-        _smallMeshRebuilds = 0;
+        _terrainChunks.Clear();
+        _visibleTerrainChunks.Clear();
+        _cachedTerrainVertexCapacity = 0;
+        _terrainVertexCount = 0;
     }
 
     private static int FindVisibleTopLayer(
@@ -668,12 +702,10 @@ public sealed class MapRenderSystem : IDisposable
 
     public void Dispose()
     {
-        _terrainBuffer?.Dispose();
-        _terrainBuffer = null;
-
-        _mapVertices.Dispose();
+        ClearTerrainChunkCache();
         _gridVertices.Dispose();
         _waterVertices.Dispose();
+        _terrainVertices = Array.Empty<Vertex>();
     }
 
     private static Color GetMaterialColor(
