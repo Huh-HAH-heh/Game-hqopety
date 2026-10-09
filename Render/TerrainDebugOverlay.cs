@@ -122,7 +122,14 @@ public sealed class TerrainDebugOverlay : IDisposable
         for (int i = 0; i < LegendBands; i++)
         {
             _legendTexts[i] =
-                CreateText(labels[i], 13, new Color(225, 235, 242));
+                CreateText(
+                    labels[i],
+                    13,
+                    new Color(225, 235, 242),
+                    trackForCommonDraw: false);
+
+            _legendTexts[i].Position =
+                new Vector2f(24f + i * 112f, 98f);
         }
 
         SetText(
@@ -405,7 +412,8 @@ public sealed class TerrainDebugOverlay : IDisposable
     private Text CreateText(
         string value,
         uint characterSize,
-        Color color)
+        Color color,
+        bool trackForCommonDraw = true)
     {
         Text text = new Text(_font!, value, characterSize)
         {
@@ -414,7 +422,9 @@ public sealed class TerrainDebugOverlay : IDisposable
             OutlineThickness = 1f
         };
 
-        _texts.Add(text);
+        if (trackForCommonDraw)
+            _texts.Add(text);
+
         return text;
     }
 
