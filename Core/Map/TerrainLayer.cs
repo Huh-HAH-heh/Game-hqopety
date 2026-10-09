@@ -4,7 +4,7 @@ namespace Core.Map;
 
 /// <summary>
 /// One editable Z level. Every layer owns its own grid of TerrainRegion chunks.
-/// Each region stores a dense 48 x 48 array of 1 m³ voxel material IDs.
+/// Each region stores a dense 48 x 48 array of 1 m x 1 m x 0.1 m cells.
 /// </summary>
 public sealed class TerrainLayer
 {
