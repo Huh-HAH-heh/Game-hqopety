@@ -72,7 +72,6 @@ public sealed class WorldMap
                     height,
                     regionsX,
                     regionsY,
-                    layerCount,
                     _regions);
         }
 
