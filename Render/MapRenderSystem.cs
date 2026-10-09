@@ -103,9 +103,17 @@ void main()
 
     gray = clamp(gray, 0.0, 170.0);
 
-    // Do not cut geometry at the slice: make the occupied block at the
-    // selected Z level brighter while retaining its own height shading.
-    if (abs(voxelLayer - uVisibleLayer) < 0.5)
+    // The vertex alpha marks coarse macro-block faces; they highlight
+    // when the selected slice intersects their 5 m vertical span.
+    bool sliceHit = abs(voxelLayer - uVisibleLayer) < 0.5;
+    if (gl_Color.a < 0.75)
+    {
+        float macroStep = 5.0;
+        float macroBase = floor(uVisibleLayer / macroStep) * macroStep;
+        sliceHit = abs(voxelLayer - macroBase) < 0.5;
+    }
+
+    if (sliceHit)
         gray = min(202.0, gray + 32.0);
 
     gray = gray / 255.0;
@@ -134,6 +142,7 @@ void main()
 
     private int[] _rowTopLayers = Array.Empty<int>();
     private int[] _rowSurfaceLayers = Array.Empty<int>();
+    private bool[] _rowDetailedColumns = Array.Empty<bool>();
 
     public int TerrainVertexCount =>
         _terrainVertexCount;
@@ -550,6 +559,7 @@ void main()
         {
             Array.Resize(ref _rowTopLayers, columnCount);
             Array.Resize(ref _rowSurfaceLayers, columnCount);
+            Array.Resize(ref _rowDetailedColumns, columnCount);
         }
 
         for (int y = minTileY; y <= maxTileY; y += lodStep)
@@ -566,6 +576,7 @@ void main()
                     worldMap.LayerCount - 1);
 
                 _rowSurfaceLayers[column] = surfaceLayer;
+                _rowDetailedColumns[column] = worldMap.IsDetailedColumn(x, y);
 
                 int topLayer = FindVisibleTopLayer(
                     worldMap,
@@ -595,7 +606,16 @@ void main()
                     }
 
                     int x = minTileX + column * lodStep;
-                    ushort materialId = worldMap.GetMaterialId(x, y, z);
+                    bool detailedColumn = _rowDetailedColumns[column];
+                    int macroStep = WorldMap.MacroBlockHeightUnits / WorldMap.LayerHeightUnits;
+
+                    if (!detailedColumn && z % macroStep != 0)
+                    {
+                        column++;
+                        continue;
+                    }
+
+                    ushort materialId = worldMap.GetRenderMaterialId(x, y, z);
 
                     if (materialId == 0)
                     {
@@ -609,11 +629,13 @@ void main()
 
                     while (column < columnCount &&
                            _rowTopLayers[column] == topLayer &&
-                           _rowSurfaceLayers[column] == surfaceLayer)
+                           _rowSurfaceLayers[column] == surfaceLayer &&
+                           _rowDetailedColumns[column] == detailedColumn)
                     {
                         int nextX = minTileX + column * lodStep;
+                        ushort nextMaterialId = worldMap.GetRenderMaterialId(nextX, y, z);
 
-                        if (worldMap.GetMaterialId(nextX, y, z) == 0)
+                        if (nextMaterialId == 0 || nextMaterialId != materialId)
                             break;
 
                         column++;
@@ -641,7 +663,9 @@ void main()
                         right,
                         bottom,
                         _terrainLayerShader != null
-                            ? Color.White
+                            ? detailedColumn
+                                ? Color.White
+                                : new Color(255, 255, 255, 128)
                             : TerrainHeightPalette.GetTerrainColor(
                                 surfaceLayer,
                                 z,
@@ -649,7 +673,8 @@ void main()
                                 worldMap.LayerCount,
                                 _baseGray,
                                 _heightContrast,
-                                _depthShade),
+                                _depthShade,
+                                detailedColumn),
                         surfaceLayer,
                         z);
                 }
