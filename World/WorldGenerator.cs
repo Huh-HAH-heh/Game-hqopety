@@ -16,43 +16,28 @@ public static class WorldGenerator
 
         Console.WriteLine(
             "[WorldGenerator] " +
-            $"Полнообъёмный тест каньона создан: " +
-            $"{worldMap.LayerCount} уровней, шаг высоты 1 м.");
+            $"Каньон создан на сетке макроблоков 5 м: " +
+            $"{worldMap.MacroBlocksX}x{worldMap.MacroBlocksY}, " +
+            $"{worldMap.LayerCount} уровней.");
     }
 
     private static void GenerateBaseTerrain(
         WorldMap worldMap)
     {
-        int centerX =
-            worldMap.TileWidth / 2;
+        int centerX = worldMap.TileWidth / 2;
+        int centerY = worldMap.TileHeight / 2;
+        int layerCount = worldMap.LayerCount;
+        int blockSpan = WorldMap.MacroBlockTileSpan;
 
-        int centerY =
-            worldMap.TileHeight / 2;
+        // The surface is generated directly at macro-block resolution.
+        // Fine cells are allocated only when a local terrain edit needs them.
+        int rampDistance = Math.Max(1, worldMap.TileHeight / 12);
+        float canyonSpacing = rampDistance * 2f;
+        float[] canyonFloorY = new float[worldMap.TileWidth];
 
-        int layerCount =
-            worldMap.LayerCount;
-
-        // A winding canyon crosses the camera's starting view.
-        // Its floor reaches the bottom layer and each terrace changes
-        // elevation by exactly one 1 m voxel layer.
-        int rampDistance =
-            Math.Max(
-                1,
-                worldMap.TileHeight / 12);
-
-        float canyonSpacing =
-            rampDistance * 2f;
-
-        float[] canyonFloorY =
-            new float[worldMap.TileWidth];
-
-        // The centerline depends only on X; compute it once rather than
-        // evaluating three trigonometric functions for every map cell.
         for (int x = 0; x < worldMap.TileWidth; x++)
         {
-            float dx =
-                x - centerX;
-
+            float dx = x - centerX;
             canyonFloorY[x] =
                 centerY +
                 MathF.Sin(dx * 0.018f) * 8f +
@@ -60,23 +45,27 @@ public static class WorldGenerator
                 MathF.Sin(dx * 0.061f) * 2f;
         }
 
-        for (int y = 0; y < worldMap.TileHeight; y++)
+        for (int macroY = 0; macroY < worldMap.MacroBlocksY; macroY++)
         {
-            for (int x = 0; x < worldMap.TileWidth; x++)
+            int sampleY = Math.Min(
+                worldMap.TileHeight - 1,
+                macroY * blockSpan + blockSpan / 2);
+
+            for (int macroX = 0; macroX < worldMap.MacroBlocksX; macroX++)
             {
+                int sampleX = Math.Min(
+                    worldMap.TileWidth - 1,
+                    macroX * blockSpan + blockSpan / 2);
+
                 float offsetFromCanyonCenter =
-                    y - canyonFloorY[x];
+                    sampleY - canyonFloorY[sampleX];
 
                 float nearestCanyonOffset =
-                    MathF.Round(
-                        offsetFromCanyonCenter /
-                        canyonSpacing) *
+                    MathF.Round(offsetFromCanyonCenter / canyonSpacing) *
                     canyonSpacing;
 
                 float distanceFromFloor =
-                    MathF.Abs(
-                        offsetFromCanyonCenter -
-                        nearestCanyonOffset);
+                    MathF.Abs(offsetFromCanyonCenter - nearestCanyonOffset);
 
                 int heightLayers =
                     1 +
@@ -85,19 +74,12 @@ public static class WorldGenerator
                         (layerCount - 1) /
                         rampDistance);
 
-                heightLayers =
-                    Math.Clamp(
-                        heightLayers,
-                        1,
-                        layerCount);
+                heightLayers = Math.Clamp(heightLayers, 1, layerCount);
 
-                worldMap.SetSolidHeight(
-                    x,
-                    y,
-                    checked(
-                        (ushort)(
-                            heightLayers *
-                            WorldMap.LayerHeightUnits)),
+                worldMap.SetMacroSolidHeight(
+                    macroX,
+                    macroY,
+                    checked((ushort)(heightLayers * WorldMap.LayerHeightUnits)),
                     BaseMaterialId);
             }
         }
