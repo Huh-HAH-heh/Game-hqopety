@@ -888,8 +888,6 @@ public sealed class GameRenderer
             _showTerrainExtrema,
             _mapRenderer.BaseGray,
             _mapRenderer.HeightContrast,
-            _mapRenderer.DepthShade,
-            _mapRenderer.LayerScreenOffset,
             _worldMap.LayerCount,
             _selectedResolutionIndex,
             currentSize.X,
@@ -943,32 +941,12 @@ public sealed class GameRenderer
             case GameMenuActionType.SetBaseGray:
                 _mapRenderer.SetVisualSettings(
                     action.Value,
-                    _mapRenderer.HeightContrast,
-                    _mapRenderer.DepthShade,
-                    _mapRenderer.LayerScreenOffset);
+                    _mapRenderer.HeightContrast);
                 break;
 
             case GameMenuActionType.SetHeightContrast:
                 _mapRenderer.SetVisualSettings(
                     _mapRenderer.BaseGray,
-                    action.Value,
-                    _mapRenderer.DepthShade,
-                    _mapRenderer.LayerScreenOffset);
-                break;
-
-            case GameMenuActionType.SetDepthShade:
-                _mapRenderer.SetVisualSettings(
-                    _mapRenderer.BaseGray,
-                    _mapRenderer.HeightContrast,
-                    action.Value,
-                    _mapRenderer.LayerScreenOffset);
-                break;
-
-            case GameMenuActionType.SetLayerOffset:
-                _mapRenderer.SetVisualSettings(
-                    _mapRenderer.BaseGray,
-                    _mapRenderer.HeightContrast,
-                    _mapRenderer.DepthShade,
                     action.Value);
                 break;
 
