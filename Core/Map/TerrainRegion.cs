@@ -4,7 +4,7 @@ namespace Core.Map;
 
 /// <summary>
 /// A region owned by exactly one TerrainLayer (one Z level).
-/// Each entry is a 1 x 1 x 1 meter voxel's material ID.
+/// Each entry is a 1 x 1 x 0.1 meter terrain cell's material ID.
 /// </summary>
 public sealed class TerrainRegion
 {
