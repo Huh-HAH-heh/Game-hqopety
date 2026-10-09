@@ -9,7 +9,7 @@ namespace RimClone.Render;
 public sealed class MapRenderSystem : IDisposable
 {
     // Build terrain in managed memory and upload the finished mesh in bulk.
-    private readonly VertexArray _mapVertices =
+    private VertexArray _mapVertices =
         new VertexArray(PrimitiveType.Triangles);
 
     private VertexBuffer? _terrainBuffer;
@@ -50,6 +50,9 @@ public sealed class MapRenderSystem : IDisposable
 
     public int TerrainVertexCapacity =>
         _terrainVertices.Length;
+
+    public bool UsesTerrainVertexBuffer =>
+        _useTerrainBuffer;
 
     public long TerrainMeshRebuildCount { get; private set; }
 
@@ -468,28 +471,13 @@ public sealed class MapRenderSystem : IDisposable
             for (int i = 0; i < _terrainVertexCount; i++)
                 _mapVertices.Append(_terrainVertices[i]);
 
+            TryShrinkTerrainMesh();
             return;
         }
 
         if (_terrainVertexCount == 0)
         {
-            if (_useTerrainBuffer &&
-                _terrainBuffer != null &&
-                _terrainVertices.Length > 32768)
-            {
-                _smallMeshRebuilds++;
-
-                if (_smallMeshRebuilds >= 8)
-                {
-                    _terrainBuffer.Dispose();
-                    _terrainBuffer = null;
-                    Array.Resize(
-                        ref _terrainVertices,
-                        4096);
-                    _smallMeshRebuilds = 0;
-                }
-            }
-
+            TryShrinkTerrainMesh();
             return;
         }
 
@@ -521,48 +509,75 @@ public sealed class MapRenderSystem : IDisposable
             for (int i = 0; i < _terrainVertexCount; i++)
                 _mapVertices.Append(_terrainVertices[i]);
 
+            TryShrinkTerrainMesh();
             return;
         }
 
-        // Release unusually large retained buffers after repeated smaller
-        // rebuilds; a single transient view must not pin peak memory forever.
-        if (_useTerrainBuffer &&
-            _terrainBuffer != null &&
-            _terrainVertices.Length > 32768 &&
-            _terrainVertexCount * 4 < _terrainVertices.Length)
-        {
-            _smallMeshRebuilds++;
+        TryShrinkTerrainMesh();
+    }
 
-            if (_smallMeshRebuilds >= 8)
-            {
-                int newCapacity = 4096;
-
-                while (newCapacity < _terrainVertexCount)
-                    newCapacity *= 2;
-
-                Array.Resize(
-                    ref _terrainVertices,
-                    newCapacity);
-
-                _terrainBuffer?.Dispose();
-                _terrainBuffer =
-                    new VertexBuffer(
-                        (uint)newCapacity,
-                        PrimitiveType.Triangles,
-                        VertexBuffer.UsageSpecifier.Dynamic);
-
-                _terrainBuffer.Update(
-                    _terrainVertices,
-                    (uint)_terrainVertexCount,
-                    0);
-
-                _smallMeshRebuilds = 0;
-            }
-        }
-        else
+    private void TryShrinkTerrainMesh()
+    {
+        if (_terrainVertices.Length <= 32768 ||
+            _terrainVertexCount * 4 >= _terrainVertices.Length)
         {
             _smallMeshRebuilds = 0;
+            return;
         }
+
+        _smallMeshRebuilds++;
+
+        if (_smallMeshRebuilds < 8)
+            return;
+
+        int newCapacity = 4096;
+
+        while (newCapacity < _terrainVertexCount)
+            newCapacity *= 2;
+
+        if (newCapacity >= _terrainVertices.Length)
+        {
+            _smallMeshRebuilds = 0;
+            return;
+        }
+
+        Array.Resize(
+            ref _terrainVertices,
+            newCapacity);
+
+        if (_useTerrainBuffer)
+        {
+            _terrainBuffer?.Dispose();
+
+            _terrainBuffer =
+                new VertexBuffer(
+                    (uint)newCapacity,
+                    PrimitiveType.Triangles,
+                    VertexBuffer.UsageSpecifier.Dynamic);
+
+            if (_terrainVertexCount > 0 &&
+                !_terrainBuffer.Update(
+                    _terrainVertices,
+                    (uint)_terrainVertexCount,
+                    0))
+            {
+                _terrainBuffer.Dispose();
+                _terrainBuffer = null;
+                _useTerrainBuffer = false;
+            }
+        }
+
+        if (!_useTerrainBuffer)
+        {
+            _mapVertices.Dispose();
+            _mapVertices =
+                new VertexArray(PrimitiveType.Triangles);
+
+            for (int i = 0; i < _terrainVertexCount; i++)
+                _mapVertices.Append(_terrainVertices[i]);
+        }
+
+        _smallMeshRebuilds = 0;
     }
 
     private static int FindVisibleTopLayer(
