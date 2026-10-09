@@ -186,6 +186,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         }
 
         _sliders.Add(new SliderControl(
+            _font,
             TerrainOverlayActionType.SetBaseGray,
             "Базовый тон грунта",
             8f,
@@ -195,6 +196,7 @@ public sealed class TerrainDebugOverlay : IDisposable
             PanelWidth - 36f));
 
         _sliders.Add(new SliderControl(
+            _font,
             TerrainOverlayActionType.SetHeightContrast,
             "Разница тона по высоте",
             0f,
@@ -204,6 +206,7 @@ public sealed class TerrainDebugOverlay : IDisposable
             PanelWidth - 36f));
 
         _sliders.Add(new SliderControl(
+            _font,
             TerrainOverlayActionType.SetDepthShade,
             "Затемнение нижних слоёв",
             0f,
@@ -213,6 +216,7 @@ public sealed class TerrainDebugOverlay : IDisposable
             PanelWidth - 36f));
 
         _sliders.Add(new SliderControl(
+            _font,
             TerrainOverlayActionType.SetLayerOffset,
             "Расстояние между слоями",
             0f,
@@ -222,6 +226,7 @@ public sealed class TerrainDebugOverlay : IDisposable
             PanelWidth - 36f));
 
         _sliders.Add(new SliderControl(
+            _font,
             TerrainOverlayActionType.SetLayer,
             "Верхняя граница среза Z",
             0f,
@@ -473,6 +478,8 @@ public sealed class TerrainDebugOverlay : IDisposable
 
         RefreshExtremes(worldMap);
         RefreshStyle(settings, worldMap.LayerCount, uiMousePosition);
+        UpdateValueTexts(settings, worldMap.LayerCount);
+        UpdateCursorText(window, worldMap, cameraView, tilePixelSize, uiMousePosition);
 
         window.Draw(_panel);
         window.Draw(_accent);
@@ -516,9 +523,6 @@ public sealed class TerrainDebugOverlay : IDisposable
 
         for (int i = 0; i < _texts.Count; i++)
             window.Draw(_texts[i]);
-
-        UpdateValueTexts(settings, worldMap.LayerCount);
-        UpdateCursorText(window, worldMap, cameraView, tilePixelSize, uiMousePosition);
     }
 
     private void RefreshStyle(
@@ -806,6 +810,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         public float MaxValue { get; }
 
         public SliderControl(
+            Font? font,
             TerrainOverlayActionType actionType,
             string label,
             float minValue,
@@ -841,29 +846,23 @@ public sealed class TerrainDebugOverlay : IDisposable
                 OutlineThickness = 1.5f
             };
 
-            _label = LoadFontForControl() is Font font
+            _label = font != null
                 ? new Text(font, label, 12)
                 {
-                    Position = new Vector2f(PanelX + 18f, trackY - PanelY + PanelY - 21f),
+                    Position = new Vector2f(PanelX + 18f, trackY - 21f),
                     FillColor = new Color(209, 217, 226)
                 }
                 : null;
 
             // Value is rendered at the right end of the label row.
-            _value = _label != null
-                ? new Text(_label.Font, "", 12)
+            _value = font != null
+                ? new Text(font, "", 12)
                 {
-                    Position = new Vector2f(PanelX + PanelWidth - 98f, trackY - 21f),
+                    Position = new Vector2f(PanelX + PanelWidth - 112f, trackY - 21f),
                     FillColor = new Color(232, 237, 243),
                     Style = Text.Styles.Bold
                 }
                 : null;
-
-            if (_label != null)
-                SharedTextRegistry.Add(_label);
-
-            if (_value != null)
-                SharedTextRegistry.Add(_value);
         }
 
         public bool HitTest(Vector2i point)
@@ -900,6 +899,12 @@ public sealed class TerrainDebugOverlay : IDisposable
             window.Draw(_track);
             window.Draw(_fill);
             window.Draw(_knob);
+
+            if (_label != null)
+                window.Draw(_label);
+
+            if (_value != null)
+                window.Draw(_value);
         }
 
         public void UpdateValue(float current, int layerCount)
@@ -925,28 +930,8 @@ public sealed class TerrainDebugOverlay : IDisposable
             _track.Dispose();
             _fill.Dispose();
             _knob.Dispose();
-            // Slider texts are disposed by the overlay's shared text list.
-        }
-
-        private static Font? LoadFontForControl()
-        {
-            return SharedTextRegistry.Font;
-        }
-    }
-
-    private static class SharedTextRegistry
-    {
-        public static Font? Font { get; set; }
-        private static readonly List<Text> Items = new();
-
-        public static void Add(Text text) => Items.Add(text);
-
-        public static void Dispose()
-        {
-            for (int i = 0; i < Items.Count; i++)
-                Items[i].Dispose();
-
-            Items.Clear();
+            _label?.Dispose();
+            _value?.Dispose();
         }
     }
 }
