@@ -3,19 +3,21 @@ using System;
 namespace Core.Map;
 
 /// <summary>
-/// A logical horizontal Z slice over the map's chunked 3D terrain regions.
-/// Voxel storage belongs to TerrainRegion, not to a map-sized layer array.
+/// One editable Z level. Every layer owns its own grid of TerrainRegion chunks.
+/// Each region stores a dense 48 x 48 array of 1 m³ voxel material IDs.
 /// </summary>
 public sealed class TerrainLayer
 {
-    private readonly TerrainRegion?[] _regions;
+    private readonly TerrainRegion[] _regions;
+    private readonly TerrainTileRegion?[] _tileRegions;
     private readonly int _regionsX;
     private readonly int _regionsY;
-    private readonly int _layerCount;
 
     public int ZLevel { get; }
     public int Width { get; }
     public int Height { get; }
+    public int RegionsX => _regionsX;
+    public int RegionsY => _regionsY;
 
     public TerrainLayer(
         int zLevel,
@@ -29,15 +31,7 @@ public sealed class TerrainLayer
                 TerrainRegion.TilesPerSide,
             (height + TerrainRegion.TilesPerSide - 1) /
                 TerrainRegion.TilesPerSide,
-            Math.Max(
-                WorldMap.DefaultTerrainLayerCount,
-                zLevel + 1),
-            new TerrainRegion?[
-                checked(
-                    ((width + TerrainRegion.TilesPerSide - 1) /
-                        TerrainRegion.TilesPerSide) *
-                    ((height + TerrainRegion.TilesPerSide - 1) /
-                        TerrainRegion.TilesPerSide))])
+            null)
     {
     }
 
@@ -47,10 +41,9 @@ public sealed class TerrainLayer
         int height,
         int regionsX,
         int regionsY,
-        int layerCount,
-        TerrainRegion?[] regions)
+        TerrainTileRegion?[]? sharedTileRegions)
     {
-        if (zLevel < 0 || zLevel >= layerCount)
+        if (zLevel < 0)
             throw new ArgumentOutOfRangeException(nameof(zLevel));
 
         if (width <= 0)
@@ -65,18 +58,63 @@ public sealed class TerrainLayer
         if (regionsY <= 0)
             throw new ArgumentOutOfRangeException(nameof(regionsY));
 
-        if (regions.Length != checked(regionsX * regionsY))
+        int expectedRegionsX =
+            (width + TerrainRegion.TilesPerSide - 1) /
+            TerrainRegion.TilesPerSide;
+
+        int expectedRegionsY =
+            (height + TerrainRegion.TilesPerSide - 1) /
+            TerrainRegion.TilesPerSide;
+
+        if (regionsX != expectedRegionsX ||
+            regionsY != expectedRegionsY)
+        {
             throw new ArgumentException(
-                "Размер массива регионов не соответствует их сетке.",
-                nameof(regions));
+                "Сетка регионов не соответствует размеру слоя.");
+        }
+
+        int regionCount =
+            checked(regionsX * regionsY);
+
+        if (sharedTileRegions != null &&
+            sharedTileRegions.Length != regionCount)
+        {
+            throw new ArgumentException(
+                "Массив метаданных регионов имеет неверный размер.",
+                nameof(sharedTileRegions));
+        }
 
         ZLevel = zLevel;
         Width = width;
         Height = height;
         _regionsX = regionsX;
         _regionsY = regionsY;
-        _layerCount = layerCount;
-        _regions = regions;
+
+        // Voxel chunks are explicit and dense: one region for every
+        // XY chunk on every Z level. No sparse or lazy voxel arrays.
+        _tileRegions =
+            sharedTileRegions ??
+            new TerrainTileRegion?[regionCount];
+
+        _regions =
+            new TerrainRegion[regionCount];
+
+        for (int regionY = 0; regionY < _regionsY; regionY++)
+        {
+            for (int regionX = 0; regionX < _regionsX; regionX++)
+            {
+                int index =
+                    regionX + regionY * _regionsX;
+
+                _regions[index] =
+                    new TerrainRegion(
+                        regionX,
+                        regionY,
+                        ZLevel,
+                        _tileRegions,
+                        index);
+            }
+        }
     }
 
     public ushort GetMaterialId(
@@ -86,15 +124,9 @@ public sealed class TerrainLayer
         if (!IsInside(x, y))
             return 0;
 
-        TerrainRegion? region =
-            GetRegion(x, y);
-
-        return region == null
-            ? (ushort)0
-            : region.GetMaterialId(
-                x % TerrainRegion.TilesPerSide,
-                y % TerrainRegion.TilesPerSide,
-                ZLevel);
+        return GetRegionForCell(x, y).GetMaterialId(
+            x % TerrainRegion.TilesPerSide,
+            y % TerrainRegion.TilesPerSide);
     }
 
     internal void SetMaterialId(
@@ -105,36 +137,9 @@ public sealed class TerrainLayer
         if (!IsInside(x, y))
             throw new IndexOutOfRangeException();
 
-        int regionX =
-            x / TerrainRegion.TilesPerSide;
-
-        int regionY =
-            y / TerrainRegion.TilesPerSide;
-
-        int regionIndex =
-            regionX + regionY * _regionsX;
-
-        TerrainRegion? region =
-            _regions[regionIndex];
-
-        if (region == null)
-        {
-            if (materialId == 0)
-                return;
-
-            region =
-                new TerrainRegion(
-                    regionX,
-                    regionY,
-                    _layerCount);
-
-            _regions[regionIndex] = region;
-        }
-
-        region.SetMaterialId(
+        GetRegionForCell(x, y).SetMaterialId(
             x % TerrainRegion.TilesPerSide,
             y % TerrainRegion.TilesPerSide,
-            ZLevel,
             materialId);
     }
 
@@ -162,13 +167,40 @@ public sealed class TerrainLayer
             materialId);
     }
 
+    public TerrainRegion? GetRegion(
+        int regionX,
+        int regionY)
+    {
+        if (regionX < 0 ||
+            regionX >= _regionsX ||
+            regionY < 0 ||
+            regionY >= _regionsY)
+        {
+            return null;
+        }
+
+        return _regions[
+            regionX + regionY * _regionsX];
+    }
+
+    public TerrainRegion GetOrCreateRegion(
+        int regionX,
+        int regionY)
+    {
+        TerrainRegion? region =
+            GetRegion(regionX, regionY);
+
+        return region ??
+            throw new IndexOutOfRangeException();
+    }
+
     internal void Clear()
     {
         for (int i = 0; i < _regions.Length; i++)
-            _regions[i]?.ClearLayer(ZLevel);
+            _regions[i].Clear();
     }
 
-    private TerrainRegion? GetRegion(
+    private TerrainRegion GetRegionForCell(
         int x,
         int y)
     {
@@ -177,14 +209,6 @@ public sealed class TerrainLayer
 
         int regionY =
             y / TerrainRegion.TilesPerSide;
-
-        if (regionX < 0 ||
-            regionX >= _regionsX ||
-            regionY < 0 ||
-            regionY >= _regionsY)
-        {
-            return null;
-        }
 
         return _regions[
             regionX + regionY * _regionsX];
