@@ -8,6 +8,7 @@ public static class TerrainHeightPalette
     public static Color GetTerrainColor(
         int surfaceLayer,
         int voxelLayer,
+        int visibleMaxLayer,
         int layerCount,
         float baseGray,
         float heightContrast,
@@ -20,8 +21,10 @@ public static class TerrainHeightPalette
             0f,
             1f);
 
+        int cutSurface = Math.Min(surfaceLayer, visibleMaxLayer);
+
         float depthFraction = Math.Clamp(
-            Math.Max(0, surfaceLayer - voxelLayer) / maxLayer,
+            Math.Max(0, cutSurface - voxelLayer) / maxLayer,
             0f,
             1f);
 
