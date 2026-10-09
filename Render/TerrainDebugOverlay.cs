@@ -135,7 +135,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         SetText(
             _controlsText,
             ref _lastControls,
-            "H — карта высот / объёмный срез   |   PgUp/PgDn — уровень Z   |   колесо — масштаб");
+            "H — карта/срез | PgUp/PgDn — слой | колёсико — зум | WASD — камера");
     }
 
     public void DrawWorldMarkers(
@@ -150,7 +150,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         if (!heightMapMode)
             return;
 
-        float markerRadius = Math.Clamp(4.5f * zoomLevel, 1.5f, 22f);
+        float markerRadius = Math.Clamp(4.5f * zoomLevel, 0.25f, 22f);
         _minimumPin.Radius = markerRadius;
         _maximumPin.Radius = markerRadius;
         _minimumPin.Origin = new Vector2f(markerRadius, markerRadius);
