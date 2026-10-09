@@ -95,7 +95,7 @@ void main()
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
 
-     private bool _mapCacheValid;
+    private bool _mapCacheValid;
     private bool _gridCacheValid;
     private bool _waterCacheValid;
 
