@@ -60,6 +60,7 @@ public sealed class MapRenderSystem : IDisposable
     private float _chunkCacheTilePixelSize = -1f;
 
     private const int ExtraCachedTerrainChunks = 8;
+    private const int MaxTerrainChunkBuildsPerFrame = 2;
 
     private const string TerrainVertexShaderSource =
         @"uniform float uVisibleLayer;
@@ -469,6 +470,7 @@ void main()
 
         long rebuildsBefore = TerrainMeshRebuildCount;
         long started = Stopwatch.GetTimestamp();
+        int chunkBuildsThisFrame = 0;
 
         for (int regionY = minRegionY;
              regionY <= maxRegionY;
@@ -483,16 +485,43 @@ void main()
 
                 if (!_terrainChunks.TryGetValue(key, out TerrainChunkMesh? mesh))
                 {
-                    mesh = BuildTerrainChunk(
-                        worldMap,
-                        regionX,
-                        regionY,
-                        lodStep,
-                        tilePixelSize,
-                        geometryMaxLayer);
+                    if (chunkBuildsThisFrame < MaxTerrainChunkBuildsPerFrame)
+                    {
+                        mesh = BuildTerrainChunk(
+                            worldMap,
+                            regionX,
+                            regionY,
+                            lodStep,
+                            tilePixelSize,
+                            geometryMaxLayer);
 
-                    _terrainChunks.Add(key, mesh);
-                    _cachedTerrainVertexCount += mesh.VertexCount;
+                        _terrainChunks.Add(key, mesh);
+                        _cachedTerrainVertexCount += mesh.VertexCount;
+                        chunkBuildsThisFrame++;
+                    }
+                    else
+                    {
+                        // Keep an already-built LOD variant on screen while
+                        // the desired detail is prepared over following frames.
+                        mesh = null;
+
+                        for (int fallbackLod = 3; fallbackLod >= 1; fallbackLod--)
+                        {
+                            if (fallbackLod == lodStep)
+                                continue;
+
+                            if (_terrainChunks.TryGetValue(
+                                regionKey * 4 + fallbackLod,
+                                out TerrainChunkMesh? fallback))
+                            {
+                                mesh = fallback;
+                                break;
+                            }
+                        }
+
+                        if (mesh == null)
+                            continue;
+                    }
                 }
 
                 mesh.LastUsedFrame = _frameNumber;
@@ -525,10 +554,6 @@ void main()
 
         TrimTerrainChunkCache(
             worldMap,
-            minRegionX,
-            maxRegionX,
-            minRegionY,
-            maxRegionY,
             visibleChunkCount + ExtraCachedTerrainChunks);
     }
 
@@ -760,10 +785,6 @@ void main()
 
     private void TrimTerrainChunkCache(
         WorldMap worldMap,
-        int minRegionX,
-        int maxRegionX,
-        int minRegionY,
-        int maxRegionY,
         int targetCount)
     {
         while (_terrainChunks.Count > targetCount)
