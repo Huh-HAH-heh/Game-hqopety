@@ -5,16 +5,33 @@ namespace RimClone.Render;
 
 public static class TerrainHeightPalette
 {
+    // The full 50 m terrain range gets one grayscale cycle.
+    public const int ColorCycleLayerCount = 500;
+
+    private const float ShadowBias = 1.8f;
+
     public static Color GetTerrainColor(
         int surfaceLayer,
         float baseGray,
         float heightContrast)
     {
-        int cyclePosition =
-            Math.Clamp(surfaceLayer, 0, int.MaxValue) % 100;
+        return GetTerrainColor(
+            (float)surfaceLayer,
+            baseGray,
+            heightContrast);
+    }
 
+    public static Color GetTerrainColor(
+        float surfaceLayer,
+        float baseGray,
+        float heightContrast)
+    {
         float heightFraction =
-            cyclePosition / 99f;
+            Math.Clamp(surfaceLayer, 0f, ColorCycleLayerCount - 1f) /
+            (ColorCycleLayerCount - 1f);
+
+        float tonalFraction =
+            MathF.Pow(heightFraction, ShadowBias);
 
         float heightRange = Math.Clamp(
             baseGray + heightContrast * 1.5f,
@@ -22,7 +39,7 @@ public static class TerrainHeightPalette
             72f);
 
         byte value = (byte)Math.Clamp(
-            (int)MathF.Round(heightFraction * heightRange),
+            (int)MathF.Round(tonalFraction * heightRange),
             0,
             72);
 
@@ -35,8 +52,10 @@ public static class TerrainHeightPalette
         float heightContrast)
     {
         float height = Math.Clamp(band / 4f, 0f, 1f);
+        float tonalFraction = MathF.Pow(height, ShadowBias);
+
         float gray =
-            height * Math.Clamp(
+            tonalFraction * Math.Clamp(
                 baseGray + heightContrast * 1.5f,
                 24f,
                 72f);
