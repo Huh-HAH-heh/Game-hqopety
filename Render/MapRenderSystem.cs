@@ -198,7 +198,6 @@ void main()
     public double LastTerrainBuildMilliseconds { get; private set; }
 
     private const byte GridAlpha = 90;
-    private const float LayerScreenOffset = 1.1f;
 
     public MapRenderSystem(
         float tilePixelSize)
