@@ -21,19 +21,16 @@ public readonly record struct TerrainOverlayAction(
 
 public sealed class TerrainDebugOverlay : IDisposable
 {
-    private const float PanelX = 16f;
-    private const float PanelY = 16f;
-    private const float PanelWidth = 500f;
-    private const float PanelHeight = 294f;
-
-    private const float SliderStartX = 82f;
-    private const float SliderWidth = 326f
-    private const float SliderY = 130f;
+    private const float PanelX = 12f;
+    private const float PanelY = 12f;
+    private const float PanelWidth = 306f;
+    private const float PanelHeight = 280f;
     private const int LegendBands = 5;
+    private const float SliderStartX = PanelX + 52f;
+    private const float SliderWidth = 184f;
 
     private readonly Font? _font;
     private readonly List<Text> _texts = new();
-
     private readonly RectangleShape _panel =
         new RectangleShape(new Vector2f(PanelWidth, PanelHeight))
         {
@@ -51,32 +48,36 @@ public sealed class TerrainDebugOverlay : IDisposable
         };
 
     private readonly RectangleShape _heightModeButton =
-        new RectangleShape(new Vector2f(220f, 34f))
+        new RectangleShape(new Vector2f(132f, 32f))
         {
-            Position = new Vector2f(PanelX + 14f, PanelY + 38f),
+            Position = new Vector2f(PanelX + 12f, PanelY + 36f),
+            FillColor = new Color(23, 32, 44),
+            OutlineColor = new Color(61, 79, 99),
             OutlineThickness = 1f
         };
 
     private readonly RectangleShape _sliceModeButton =
-        new RectangleShape(new Vector2f(232f, 34f))
+        new RectangleShape(new Vector2f(144f, 32f))
         {
-            Position = new Vector2f(PanelX + 242f, PanelY + 38f),
+            Position = new Vector2f(PanelX + 150f, PanelY + 36f),
+            FillColor = new Color(23, 32, 44),
+            OutlineColor = new Color(61, 79, 99),
             OutlineThickness = 1f
         };
 
     private readonly RectangleShape _minusButton =
-        new RectangleShape(new Vector2f(36f, 30f))
+        new RectangleShape(new Vector2f(30f, 28f))
         {
-            Position = new Vector2f(PanelX + 14f, PanelY + 100f),
+            Position = new Vector2f(PanelX + 12f, PanelY + 94f),
             FillColor = new Color(31, 43, 57),
             OutlineColor = new Color(76, 96, 118),
             OutlineThickness = 1f
         };
 
     private readonly RectangleShape _plusButton =
-        new RectangleShape(new Vector2f(36f, 30f))
+        new RectangleShape(new Vector2f(30f, 28f))
         {
-            Position = new Vector2f(PanelX + 418f, PanelY + 100f),
+            Position = new Vector2f(PanelX + 260f, PanelY + 94f),
             FillColor = new Color(31, 43, 57),
             OutlineColor = new Color(76, 96, 118),
             OutlineThickness = 1f
@@ -85,20 +86,20 @@ public sealed class TerrainDebugOverlay : IDisposable
     private readonly RectangleShape _sliderTrack =
         new RectangleShape(new Vector2f(SliderWidth, 4f))
         {
-            Position = new Vector2f(PanelX + SliderStartX, PanelY + SliderY),
+            Position = new Vector2f(SliderStartX, PanelY + 106f),
             FillColor = new Color(65, 78, 93)
         };
 
     private readonly RectangleShape _sliderProgress =
         new RectangleShape(new Vector2f(0f, 4f))
         {
-            Position = new Vector2f(PanelX + SliderStartX, PanelY + SliderY),
+            Position = new Vector2f(SliderStartX, PanelY + 106f),
             FillColor = new Color(67, 145, 255)
         };
 
-    private readonly CircleShape _sliderKnob = new CircleShape(7f, 24)
+    private readonly CircleShape _sliderKnob = new CircleShape(6f, 24)
     {
-        Origin = new Vector2f(7f, 7f),
+        Origin = new Vector2f(6f, 6f),
         FillColor = new Color(238, 246, 255),
         OutlineColor = new Color(67, 145, 255),
         OutlineThickness = 2f
@@ -106,6 +107,20 @@ public sealed class TerrainDebugOverlay : IDisposable
 
     private readonly RectangleShape[] _legendSwatches =
         new RectangleShape[LegendBands];
+
+    private readonly CircleShape _minimumPin = new CircleShape(4.5f, 20)
+    {
+        FillColor = new Color(35, 145, 255),
+        OutlineColor = Color.White,
+        OutlineThickness = 1.5f
+    };
+
+    private readonly CircleShape _maximumPin = new CircleShape(4.5f, 20)
+    {
+        FillColor = new Color(245, 55, 65),
+        OutlineColor = Color.White,
+        OutlineThickness = 1.5f
+    };
 
     private readonly Text? _titleText;
     private readonly Text? _subtitleText;
@@ -141,7 +156,7 @@ public sealed class TerrainDebugOverlay : IDisposable
     private string _lastMaximum = string.Empty;
     private string _lastCursor = string.Empty;
     private string _lastLayerValue = string.Empty;
-
+    private string _lastModeDescription = string.Empty;
     private bool? _lastHeightMapMode;
     private int _lastLayerCount = -1;
 
@@ -152,11 +167,11 @@ public sealed class TerrainDebugOverlay : IDisposable
         for (int i = 0; i < LegendBands; i++)
         {
             _legendSwatches[i] =
-                new RectangleShape(new Vector2f(84f, 12f))
+                new RectangleShape(new Vector2f(50f, 10f))
                 {
                     Position = new Vector2f(
-                        PanelX + 14f + i * 94f,
-                        PanelY + 168f),
+                        PanelX + 12f + i * 56f,
+                        PanelY + 160f),
                     OutlineColor = new Color(220, 230, 242, 175),
                     OutlineThickness = 1f
                 };
@@ -165,110 +180,110 @@ public sealed class TerrainDebugOverlay : IDisposable
         if (_font == null)
         {
             Console.WriteLine(
-                "[TerrainDebugOverlay] System font unavailable; terrain controls will still be clickable.");
+                "[TerrainDebugOverlay] System font unavailable; terrain buttons remain clickable but text labels cannot be rendered.");
             return;
         }
 
         _titleText = CreateText(
             "РЕЛЬЕФ",
-            18,
+            17,
             new Color(245, 248, 252),
-            new Vector2f(PanelX + 14f, PanelY + 9f),
+            new Vector2f(PanelX + 12f, PanelY + 8f),
             Text.Styles.Bold);
 
         _subtitleText = CreateText(
-            "ТЕСТ ВЫСОТ  •  1–50 м",
-            12,
+            "ТЕСТ ВЫСОТ • 1–50 м",
+            11,
             new Color(151, 169, 190),
-            new Vector2f(PanelX + 112f, PanelY + 14f));
+            new Vector2f(PanelX + 104f, PanelY + 13f));
 
         _heightModeLabel = CreateText(
             "КАРТА ВЫСОТ",
-            13,
+            11,
             Color.White,
-            new Vector2f(PanelX + 67f, PanelY + 48f),
+            new Vector2f(PanelX + 29f, PanelY + 45f),
             Text.Styles.Bold);
 
         _sliceModeLabel = CreateText(
             "ОБЪЁМНЫЙ СРЕЗ",
-            13,
+            11,
             Color.White,
-            new Vector2f(PanelX + 289f, PanelY + 48f),
+            new Vector2f(PanelX + 163f, PanelY + 45f),
             Text.Styles.Bold);
 
         _layerLabel = CreateText(
-            "УРОВЕНЬ СРЕЗА Z",
-            12,
+            "ВЕРХНИЙ УРОВЕНЬ",
+            11,
             new Color(192, 207, 223),
-            new Vector2f(PanelX + 14f, PanelY + 79f),
+            new Vector2f(PanelX + 12f, PanelY + 76f),
             Text.Styles.Bold);
 
         _minusLabel = CreateText(
             "−",
-            19,
+            18,
             Color.White,
-            new Vector2f(PanelX + 26f, PanelY + 101f));
+            new Vector2f(PanelX + 22f, PanelY + 94f));
 
         _plusLabel = CreateText(
             "+",
-            18,
+            17,
             Color.White,
-            new Vector2f(PanelX + 429f, PanelY + 101f));
+            new Vector2f(PanelX + 269f, PanelY + 94f));
 
         _layerMinTick = CreateText(
             "1 м",
-            11,
+            9,
             new Color(149, 166, 185),
-            new Vector2f(PanelX + SliderStartX, PanelY + 135f));
+            new Vector2f(SliderStartX, PanelY + 116f));
 
         _layerMidTick = CreateText(
             "25 м",
-            11,
+            9,
             new Color(149, 166, 185),
-            new Vector2f(PanelX + SliderStartX + SliderWidth * 0.49f, PanelY + 135f));
+            new Vector2f(SliderStartX + SliderWidth * 0.48f, PanelY + 116f));
 
         _layerMaxTick = CreateText(
             "50 м",
-            11,
+            9,
             new Color(149, 166, 185),
-            new Vector2f(PanelX + SliderStartX + SliderWidth - 28f, PanelY + 135f));
+            new Vector2f(SliderStartX + SliderWidth - 22f, PanelY + 116f));
 
         _layerValue = CreateText(
             "",
-            12,
+            11,
             new Color(106, 181, 255),
-            new Vector2f(PanelX + 360f, PanelY + 79f),
+            new Vector2f(PanelX + 213f, PanelY + 76f),
             Text.Styles.Bold);
 
         _modeDescription = CreateText(
             "",
-            12,
+            10,
             new Color(193, 207, 221),
-            new Vector2f(PanelX + 14f, PanelY + 151f));
+            new Vector2f(PanelX + 12f, PanelY + 139f));
 
         _minimumText = CreateText(
             "",
-            12,
+            10,
             new Color(113, 187, 255),
-            new Vector2f(PanelX + 14f, PanelY + 205f));
+            new Vector2f(PanelX + 12f, PanelY + 196f));
 
         _maximumText = CreateText(
             "",
-            12,
+            10,
             new Color(255, 130, 139),
-            new Vector2f(PanelX + 14f, PanelY + 221f));
+            new Vector2f(PanelX + 12f, PanelY + 212f));
 
         _cursorText = CreateText(
             "",
-            12,
+            10,
             Color.White,
-            new Vector2f(PanelX + 14f, PanelY + 238f));
+            new Vector2f(PanelX + 12f, PanelY + 229f));
 
         _helpText = CreateText(
-            "H — карта/срез   •   PgUp/PgDn — уровень   •   колесо — масштаб",
-            11,
+            "Колесо — масштаб • WASD — камера • H — карта/срез",
+            10,
             new Color(155, 173, 192),
-            new Vector2f(PanelX + 14f, PanelY + 260f));
+            new Vector2f(PanelX + 12f, PanelY + 252f));
 
         string[] labels =
         {
@@ -283,9 +298,9 @@ public sealed class TerrainDebugOverlay : IDisposable
         {
             _legendTexts[i] = CreateText(
                 labels[i],
-                11,
+                9,
                 new Color(225, 234, 244),
-                new Vector2f(PanelX + 14f + i * 94f, PanelY + 183f));
+                new Vector2f(PanelX + 12f + i * 56f, PanelY + 173f));
         }
     }
 
@@ -295,16 +310,13 @@ public sealed class TerrainDebugOverlay : IDisposable
         int layerCount)
     {
         if (_heightModeButton.GetGlobalBounds().Contains(point))
-        {
-            return new TerrainOverlayAction(
-                TerrainOverlayActionType.SelectHeightMap);
-        }
+            return new TerrainOverlayAction(TerrainOverlayActionType.SelectHeightMap);
 
         if (_sliceModeButton.GetGlobalBounds().Contains(point))
-        {
-            return new TerrainOverlayAction(
-                TerrainOverlayActionType.SelectVolumeSlice);
-        }
+            return new TerrainOverlayAction(TerrainOverlayActionType.SelectVolumeSlice);
+
+        if (layerCount <= 0)
+            return null;
 
         if (_minusButton.GetGlobalBounds().Contains(point))
         {
@@ -320,11 +332,10 @@ public sealed class TerrainDebugOverlay : IDisposable
                 Math.Clamp(currentLayer + 1, 0, layerCount - 1));
         }
 
-        // The generous hit area includes the slider and its tick labels.
-        float sliderLeft = PanelX + SliderStartX - 8f;
-        float sliderRight = PanelX + SliderStartX + SliderWidth + 8f;
-        float sliderTop = PanelY + 109f;
-        float sliderBottom = PanelY + 147f;
+        float sliderLeft = SliderStartX - 8f;
+        float sliderRight = SliderStartX + SliderWidth + 8f;
+        float sliderTop = PanelY + 90f;
+        float sliderBottom = PanelY + 132f;
 
         if (point.X < sliderLeft ||
             point.X > sliderRight ||
@@ -336,7 +347,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         }
 
         float amount = Math.Clamp(
-            (point.X - (PanelX + SliderStartX)) / SliderWidth,
+            (point.X - SliderStartX) / SliderWidth,
             0f,
             1f);
 
@@ -360,10 +371,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         if (!heightMapMode)
             return;
 
-        float radius = Math.Clamp(4.5f * zoomLevel, 0.25f, 22f);
-
-        // The coordinate card gives the exact location; these pins only mark
-        // the low and high extrema on the map without adding large map labels.
+        float radius = Math.Clamp(4.5f * zoomLevel, 0.75f, 13f);
         _minimumPin.Radius = radius;
         _maximumPin.Radius = radius;
         _minimumPin.Origin = new Vector2f(radius, radius);
@@ -380,20 +388,6 @@ public sealed class TerrainDebugOverlay : IDisposable
         window.Draw(_minimumPin);
         window.Draw(_maximumPin);
     }
-
-    private readonly CircleShape _minimumPin = new CircleShape(4.5f, 20)
-    {
-        FillColor = new Color(35, 145, 255),
-        OutlineColor = Color.White,
-        OutlineThickness = 1.5f
-    };
-
-    private readonly CircleShape _maximumPin = new CircleShape(4.5f, 20)
-    {
-        FillColor = new Color(245, 55, 65),
-        OutlineColor = Color.White,
-        OutlineThickness = 1.5f
-    };
 
     public void DrawScreen(
         RenderWindow window,
@@ -412,12 +406,10 @@ public sealed class TerrainDebugOverlay : IDisposable
 
         window.Draw(_panel);
         window.Draw(_accent);
-
         window.Draw(_heightModeButton);
         window.Draw(_sliceModeButton);
         window.Draw(_minusButton);
         window.Draw(_plusButton);
-
         window.Draw(_sliderTrack);
         window.Draw(_sliderProgress);
         window.Draw(_sliderKnob);
@@ -425,20 +417,16 @@ public sealed class TerrainDebugOverlay : IDisposable
         for (int i = 0; i < LegendBands; i++)
             window.Draw(_legendSwatches[i]);
 
-        if (_font != null)
-        {
-            for (int i = 0; i < LegendBands; i++)
-                window.Draw(_legendTexts[i]);
+        if (_font == null)
+            return;
 
-            UpdateCursorText(
-                window,
-                worldMap,
-                cameraView,
-                tilePixelSize);
+        for (int i = 0; i < LegendBands; i++)
+            window.Draw(_legendTexts[i]);
 
-            for (int i = 0; i < _texts.Count; i++)
-                window.Draw(_texts[i]);
-        }
+        UpdateCursorText(window, worldMap, cameraView, tilePixelSize);
+
+        for (int i = 0; i < _texts.Count; i++)
+            window.Draw(_texts[i]);
     }
 
     private void RefreshStyle(
@@ -448,32 +436,23 @@ public sealed class TerrainDebugOverlay : IDisposable
         Vector2i mouse)
     {
         bool mapHovered = _heightModeButton.GetGlobalBounds().Contains(mouse);
-
         bool sliceHovered = _sliceModeButton.GetGlobalBounds().Contains(mouse);
-
         bool minusHovered = _minusButton.GetGlobalBounds().Contains(mouse);
-
         bool plusHovered = _plusButton.GetGlobalBounds().Contains(mouse);
-        bool heightSelected = heightMapMode;
-        bool sliceSelected = !heightMapMode;
 
-        _heightModeButton.FillColor = heightSelected
+        _heightModeButton.FillColor = heightMapMode
             ? new Color(35, 91, 170)
-            : mapHovered
-                ? new Color(35, 48, 64)
-                : new Color(23, 32, 44);
+            : mapHovered ? new Color(35, 48, 64) : new Color(23, 32, 44);
 
-        _heightModeButton.OutlineColor = heightSelected
+        _heightModeButton.OutlineColor = heightMapMode
             ? new Color(104, 171, 255)
             : new Color(61, 79, 99);
 
-        _sliceModeButton.FillColor = sliceSelected
+        _sliceModeButton.FillColor = !heightMapMode
             ? new Color(35, 91, 170)
-            : sliceHovered
-                ? new Color(35, 48, 64)
-                : new Color(23, 32, 44);
+            : sliceHovered ? new Color(35, 48, 64) : new Color(23, 32, 44);
 
-        _sliceModeButton.OutlineColor = sliceSelected
+        _sliceModeButton.OutlineColor = !heightMapMode
             ? new Color(104, 171, 255)
             : new Color(61, 79, 99);
 
@@ -499,14 +478,14 @@ public sealed class TerrainDebugOverlay : IDisposable
             ? 0f
             : visibleMaxLayer / (float)(safeLayerCount - 1);
 
-        float knobX = PanelX + SliderStartX + amount * SliderWidth;
+        float knobX = SliderStartX + amount * SliderWidth;
         _sliderProgress.Size = new Vector2f(amount * SliderWidth, 4f);
-        _sliderKnob.Position = new Vector2f(knobX, PanelY + SliderY + 2f);
+        _sliderKnob.Position = new Vector2f(knobX, PanelY + 108f);
 
         SetText(
             _layerValue,
             ref _lastLayerValue,
-            $"Z = {visibleMaxLayer + 1} м");
+            $"до Z = {visibleMaxLayer + 1} м");
 
         if (_lastHeightMapMode != heightMapMode)
         {
@@ -515,8 +494,8 @@ public sealed class TerrainDebugOverlay : IDisposable
                 _modeDescription,
                 ref _lastModeDescription,
                 heightMapMode
-                    ? "Высота поверхности: СИНИЙ = низко  →  КРАСНЫЙ = высоко"
-                    : "Срез: цвет = высота поверхности; сдвиг вниз = глубже в грунте");
+                    ? "Карта высот: СИНИЙ = низко  •  КРАСНЫЙ = высоко"
+                    : "Срез: цвет = высота  •  сдвиг вниз = глубже");
         }
 
         if (_lastLayerCount != layerCount)
@@ -524,10 +503,8 @@ public sealed class TerrainDebugOverlay : IDisposable
             _lastLayerCount = layerCount;
 
             for (int i = 0; i < LegendBands; i++)
-            {
                 _legendSwatches[i].FillColor =
                     TerrainHeightPalette.GetBandColor(i, layerCount);
-            }
 
             if (_layerMinTick != null)
                 _layerMinTick.DisplayedString = "1 м";
@@ -537,8 +514,6 @@ public sealed class TerrainDebugOverlay : IDisposable
 
             if (_layerMaxTick != null)
                 _layerMaxTick.DisplayedString = $"{layerCount} м";
-
-
         }
 
         if (_minimumHeightUnits > 0)
@@ -546,16 +521,14 @@ public sealed class TerrainDebugOverlay : IDisposable
             SetText(
                 _minimumText,
                 ref _lastMinimum,
-                $"● НИЗИНА  {_minimumHeightUnits * 0.1f:0.#} м    X={_minimumX}  Y={_minimumY}");
+                $"● НИЗИНА {_minimumHeightUnits * 0.1f:0.#} м  X={_minimumX} Y={_minimumY}");
 
             SetText(
                 _maximumText,
                 ref _lastMaximum,
-                $"● ВЕРШИНА  {_maximumHeightUnits * 0.1f:0.#} м    X={_maximumX}  Y={_maximumY}");
+                $"● ВЕРШИНА {_maximumHeightUnits * 0.1f:0.#} м  X={_maximumX} Y={_maximumY}");
         }
     }
-
-    private string _lastModeDescription = string.Empty;
 
     private void UpdateCursorText(
         RenderWindow window,
@@ -573,25 +546,21 @@ public sealed class TerrainDebugOverlay : IDisposable
             SetText(
                 _cursorText,
                 ref _lastCursor,
-                "КУРСОР  —  наведите на карту, чтобы узнать высоту");
+                "КУРСОР — наведите на карту, чтобы узнать высоту");
             _lastMouseCellX = int.MinValue;
             _lastMouseCellY = int.MinValue;
             return;
         }
 
         Vector2u windowSize = window.Size;
-
-        if (mouse.X < 0 ||
-            mouse.Y < 0 ||
-            mouse.X >= windowSize.X ||
-            mouse.Y >= windowSize.Y ||
-            windowSize.X == 0 ||
-            windowSize.Y == 0)
+        if (windowSize.X == 0 || windowSize.Y == 0 ||
+            mouse.X < 0 || mouse.Y < 0 ||
+            mouse.X >= windowSize.X || mouse.Y >= windowSize.Y)
         {
             SetText(
                 _cursorText,
                 ref _lastCursor,
-                "Курсор: наведите на карту, чтобы узнать высоту.");
+                "КУРСОР — наведите на карту, чтобы узнать высоту");
             _lastMouseCellX = int.MinValue;
             _lastMouseCellY = int.MinValue;
             return;
@@ -600,12 +569,10 @@ public sealed class TerrainDebugOverlay : IDisposable
         Vector2f center = cameraView.Center;
         Vector2f viewSize = cameraView.Size;
 
-        float worldX =
-            center.X - viewSize.X * 0.5f +
+        float worldX = center.X - viewSize.X * 0.5f +
             mouse.X * viewSize.X / windowSize.X;
 
-        float worldY =
-            center.Y - viewSize.Y * 0.5f +
+        float worldY = center.Y - viewSize.Y * 0.5f +
             mouse.Y * viewSize.Y / windowSize.Y;
 
         int x = (int)MathF.Floor(worldX / tilePixelSize);
@@ -629,7 +596,7 @@ public sealed class TerrainDebugOverlay : IDisposable
             SetText(
                 _cursorText,
                 ref _lastCursor,
-                "КУРСОР  —  ВНЕ ПРЕДЕЛОВ КАРТЫ");
+                "КУРСОР — вне границ карты");
             return;
         }
 
@@ -639,7 +606,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         SetText(
             _cursorText,
             ref _lastCursor,
-            $"КУРСОР  X={x}  Y={y}   •   ВЫСОТА {heightMeters:0.#} м");
+            $"КУРСОР X={x} Y={y}  •  ВЫСОТА {heightMeters:0.#} м");
     }
 
     private void RefreshExtremes(WorldMap worldMap)
@@ -660,7 +627,6 @@ public sealed class TerrainDebugOverlay : IDisposable
             for (int x = 0; x < worldMap.TileWidth; x++)
             {
                 ushort height = worldMap.GetSurfaceHeightUnits(x, y);
-
                 if (height == 0)
                     continue;
 
@@ -733,17 +699,11 @@ public sealed class TerrainDebugOverlay : IDisposable
         string fontsDirectory =
             Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
 
-        string[] candidates =
-        {
-            "segoeui.ttf",
-            "arial.ttf",
-            "tahoma.ttf"
-        };
+        string[] candidates = { "segoeui.ttf", "arial.ttf", "tahoma.ttf" };
 
         for (int i = 0; i < candidates.Length; i++)
         {
             string path = Path.Combine(fontsDirectory, candidates[i]);
-
             if (!File.Exists(path))
                 continue;
 
@@ -753,7 +713,7 @@ public sealed class TerrainDebugOverlay : IDisposable
             }
             catch
             {
-                // Fall through to the next installed font.
+                // Try the next installed system font.
             }
         }
 
