@@ -34,8 +34,9 @@ public sealed class GameRenderer
 
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
-    private bool _showVisionDebug = true;
+    private bool _showVisionDebug;
     private bool _massCombatMode;
+    private bool _terrainStressMode = true;
     private int _visionTestIndex;
 
     private float _perfTimer;
@@ -44,6 +45,8 @@ public sealed class GameRenderer
     private long _workingSetBytes;
     private long _managedHeapBytes;
     private long _allocatedBytes;
+    private long _lastAllocatedBytesSample;
+    private double _allocatedBytesPerSecond;
     private float _titleTimer;
     private string _windowTitle = "RimClone";
 
@@ -88,10 +91,14 @@ public sealed class GameRenderer
         _massCombatTestScene =
             new LongRangeCombatTestScene();
 
-        CreateVisionTestScene();
-        _unitSimulation.AI.Enabled = true;
-
-        EnterMassCombatMode();
+        // Start in a terrain-only stress test. The 160-unit combat test
+        // is still available via C, but must not contaminate idle render
+        // profiling with periodic volleys and projectile simulation.
+        _unitSimulation.AI.Enabled = false;
+        _unitSimulation.VisionEnabled = false;
+        _showVisionDebug = false;
+        _lastAllocatedBytesSample =
+            GC.GetTotalAllocatedBytes(false);
     }
 
     public void Run()
@@ -131,9 +138,11 @@ public sealed class GameRenderer
 
         if (_perfTimer >= 1f)
         {
+            float sampleSeconds = _perfTimer;
+
             _fps =
                 _perfFrames /
-                _perfTimer;
+                sampleSeconds;
 
             _perfFrames = 0;
             _perfTimer = 0f;
@@ -145,19 +154,26 @@ public sealed class GameRenderer
                 process.WorkingSet64;
 
             _managedHeapBytes =
-                GC.GetTotalMemory(
-                    false);
+                GC.GetTotalMemory(false);
 
             _allocatedBytes =
-                GC.GetTotalAllocatedBytes(
-                    false);
+                GC.GetTotalAllocatedBytes(false);
+
+            _allocatedBytesPerSecond =
+                Math.Max(
+                    0L,
+                    _allocatedBytes - _lastAllocatedBytesSample) /
+                sampleSeconds;
+
+            _lastAllocatedBytesSample =
+                _allocatedBytes;
         }
 
         _camera.Update(
             _input.MoveDirection,
             deltaTime);
 
-        if (!_massCombatMode)
+        if (!_terrainStressMode && !_massCombatMode)
         {
             _visionTestScene.UpdateAiDemo(
                 _unitSimulation,
@@ -165,14 +181,20 @@ public sealed class GameRenderer
                 deltaTime);
         }
 
-        _massCombatTestScene.Update(
-            _unitSimulation,
-            _worldMap,
-            deltaTime);
+        if (_massCombatMode)
+        {
+            _massCombatTestScene.Update(
+                _unitSimulation,
+                _worldMap,
+                deltaTime);
+        }
 
-        _unitSimulation.Update(
-            _worldMap,
-            deltaTime);
+        if (!_terrainStressMode)
+        {
+            _unitSimulation.Update(
+                _worldMap,
+                deltaTime);
+        }
     }
 
     private void Draw()
@@ -196,7 +218,8 @@ public sealed class GameRenderer
             _visibleMaxLayer);
 
         if (_showVisionDebug &&
-            !_massCombatMode)
+            !_massCombatMode &&
+            !_terrainStressMode)
         {
             _visionTestScene.DrawDebug(
                 _window);
@@ -362,9 +385,11 @@ public sealed class GameRenderer
                 : "None";
 
         string demoStage =
-            _massCombatMode
-                ? "MASS"
-                : _visionTestScene.GetAiDemoStage();
+            _terrainStressMode
+                ? "TERRAIN STRESS"
+                : _massCombatMode
+                    ? "MASS"
+                    : _visionTestScene.GetAiDemoStage();
 
         string massCombat =
             _massCombatMode
@@ -375,9 +400,10 @@ public sealed class GameRenderer
         return
             $"RimClone | FPS={_fps:0.0} RAM={_workingSetBytes / 1024d / 1024d:0}MB " +
             $"Heap={_managedHeapBytes / 1024d / 1024d:0}MB " +
-            $"AllocTotal={_allocatedBytes / 1024d / 1024d:0}MB | " +
+            $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.0}MB/s TotalAlloc={_allocatedBytes / 1024d / 1024d:0}MB | " +
+            $"Terrain={_mapRenderer.TerrainQuadCount:N0} quads MeshBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms Rebuilds={_mapRenderer.TerrainMeshRebuildCount} | " +
             $"Units={_unitSimulation.Units.ActiveCount} | " +
-            $"Projectiles={projectiles} Hits={hits} | " +
+            $"Projectiles={projectiles}/{_unitSimulation.Projectiles.Capacity} Hits={hits} | " +
             $"Teams 1:{teamOneAlive} 2:{teamTwoAlive} | " +
             $"AI={ai}:{aiState} | " +
             $"States I={idle} A={attack} C={cover} S={search} D={dead} | " +
@@ -460,13 +486,16 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.C)
         {
-            EnterMassCombatMode();
+            ToggleTerrainCombatTest();
             return;
         }
 
 
         if (key == Keyboard.Key.Y)
         {
+            if (_terrainStressMode || _massCombatMode)
+                return;
+
             _visionTestScene.ResetAiDemo(
                 _unitSimulation,
                 _worldMap);
@@ -679,6 +708,41 @@ public sealed class GameRenderer
                 _visibleMaxLayer + direction,
                 0,
                 _worldMap.LayerCount - 1);
+    }
+
+    private void ToggleTerrainCombatTest()
+    {
+        if (_terrainStressMode)
+        {
+            _terrainStressMode = false;
+            EnterMassCombatMode();
+            return;
+        }
+
+        if (!_massCombatMode)
+            return;
+
+        _massCombatTestScene.Stop(_unitSimulation);
+        _massCombatMode = false;
+        _terrainStressMode = true;
+        _showVisionDebug = false;
+
+        _unitSimulation.AI.Enabled = false;
+        _unitSimulation.VisionEnabled = false;
+        _unitSimulation.Projectiles.Clear();
+
+        WorldGenerator.Generate(_worldMap);
+
+        _visibleMaxLayer =
+            Math.Max(
+                0,
+                _worldMap.GetHighestOccupiedLayer());
+
+        _selectedUnit = default;
+
+        _camera.CenterOnWorld(
+            TerrainTilePixelSize,
+            _worldMap);
     }
 
     private void EnterMassCombatMode()
