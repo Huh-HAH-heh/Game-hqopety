@@ -34,7 +34,9 @@ public sealed class GameRenderer
     private RenderWindow _window = null!;
     private View? _uiView;
     private TerrainDebugOverlay? _terrainDebugOverlay;
-    private bool _draggingTerrainSlider;
+    private TerrainOverlayActionType? _draggingTerrainSlider;
+    private bool _terrainSettingsOpen;
+    private bool _showTerrainExtrema;
     private bool _closeRequested;
 
     private bool _showDebugGrid;
@@ -62,7 +64,7 @@ public sealed class GameRenderer
             worldMap;
 
         _visibleMaxLayer =
-            Math.Max(0, worldMap.LayerCount / 2 - 1);
+            Math.Max(0, worldMap.LayerCount - 1);
 
         _camera =
             new GameCamera(
@@ -278,7 +280,7 @@ public sealed class GameRenderer
                 _worldMap,
                 TerrainTilePixelSize,
                 _camera.ZoomLevel,
-                _mapRenderer.HeightMapMode);
+                _showTerrainExtrema);
 
             if (_uiView != null)
             {
@@ -293,8 +295,8 @@ public sealed class GameRenderer
                     _worldMap,
                     _camera.View,
                     TerrainTilePixelSize,
-                    _mapRenderer.HeightMapMode,
-                    _visibleMaxLayer,
+                    GetTerrainSettingsSnapshot(),
+                    _terrainSettingsOpen,
                     new Vector2i(
                         (int)uiMouseCoordinates.X,
                         (int)uiMouseCoordinates.Y));
@@ -531,12 +533,26 @@ public sealed class GameRenderer
                     (int)uiCoordinates.X,
                     (int)uiCoordinates.Y);
 
-                _draggingTerrainSlider =
-                    _terrainDebugOverlay.IsSliderHit(uiPosition);
+                if (_terrainSettingsOpen &&
+                    _terrainDebugOverlay.IsSliderHit(
+                        uiPosition,
+                        out TerrainOverlayActionType sliderType))
+                {
+                    _draggingTerrainSlider = sliderType;
+                    ApplyTerrainOverlayAction(
+                        _terrainDebugOverlay.GetSliderAction(
+                            sliderType,
+                            uiPosition.X,
+                            _worldMap.LayerCount));
+                    return;
+                }
+
+                _draggingTerrainSlider = null;
 
                 TerrainOverlayAction? action =
                     _terrainDebugOverlay.HandleClick(
                         uiPosition,
+                        _terrainSettingsOpen,
                         _visibleMaxLayer,
                         _worldMap.LayerCount);
 
@@ -547,7 +563,8 @@ public sealed class GameRenderer
         _window.MouseMoved +=
             (_, e) =>
             {
-                if (!_draggingTerrainSlider ||
+                if (!_draggingTerrainSlider.HasValue ||
+                    !_terrainSettingsOpen ||
                     !_terrainStressMode ||
                     _terrainDebugOverlay == null)
                 {
@@ -560,18 +577,17 @@ public sealed class GameRenderer
                         : new Vector2f(e.Position.X, e.Position.Y);
 
                 ApplyTerrainOverlayAction(
-                    new TerrainOverlayAction(
-                        TerrainOverlayActionType.SetLayer,
-                        _terrainDebugOverlay.GetSliderLayerFromX(
-                            (int)uiCoordinates.X,
-                            _worldMap.LayerCount)));
+                    _terrainDebugOverlay.GetSliderAction(
+                        _draggingTerrainSlider.Value,
+                        (int)uiCoordinates.X,
+                        _worldMap.LayerCount));
             };
 
         _window.MouseButtonReleased +=
             (_, e) =>
             {
                 if (e.Button == Mouse.Button.Left)
-                    _draggingTerrainSlider = false;
+                    _draggingTerrainSlider = null;
             };
 
         _window.KeyPressed +=
@@ -601,9 +617,10 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.H && _terrainStressMode)
+        if (key == Keyboard.Key.F2 && _terrainStressMode)
         {
-            _mapRenderer.ToggleHeightMapMode();
+            _terrainSettingsOpen = !_terrainSettingsOpen;
+            _draggingTerrainSlider = null;
             return;
         }
 
@@ -830,26 +847,86 @@ public sealed class GameRenderer
         }
     }
 
+    private TerrainSettingsSnapshot GetTerrainSettingsSnapshot()
+    {
+        return new TerrainSettingsSnapshot(
+            _visibleMaxLayer,
+            _showDebugGrid,
+            _showTerrainExtrema,
+            _mapRenderer.BaseGray,
+            _mapRenderer.HeightContrast,
+            _mapRenderer.DepthShade,
+            _mapRenderer.LayerScreenOffset);
+    }
+
     private void ApplyTerrainOverlayAction(
         TerrainOverlayAction action)
     {
         switch (action.Type)
         {
-            case TerrainOverlayActionType.SelectHeightMap:
-                _mapRenderer.SetHeightMapMode(true);
+            case TerrainOverlayActionType.ToggleWindow:
+                _terrainSettingsOpen = !_terrainSettingsOpen;
+                _draggingTerrainSlider = null;
                 break;
 
-            case TerrainOverlayActionType.SelectVolumeSlice:
-                _mapRenderer.SetHeightMapMode(false);
+            case TerrainOverlayActionType.CloseWindow:
+                _terrainSettingsOpen = false;
+                _draggingTerrainSlider = null;
+                break;
+
+            case TerrainOverlayActionType.SetBaseGray:
+                _mapRenderer.SetVisualSettings(
+                    action.Value,
+                    _mapRenderer.HeightContrast,
+                    _mapRenderer.DepthShade,
+                    _mapRenderer.LayerScreenOffset);
+                break;
+
+            case TerrainOverlayActionType.SetHeightContrast:
+                _mapRenderer.SetVisualSettings(
+                    _mapRenderer.BaseGray,
+                    action.Value,
+                    _mapRenderer.DepthShade,
+                    _mapRenderer.LayerScreenOffset);
+                break;
+
+            case TerrainOverlayActionType.SetDepthShade:
+                _mapRenderer.SetVisualSettings(
+                    _mapRenderer.BaseGray,
+                    _mapRenderer.HeightContrast,
+                    action.Value,
+                    _mapRenderer.LayerScreenOffset);
+                break;
+
+            case TerrainOverlayActionType.SetLayerOffset:
+                _mapRenderer.SetVisualSettings(
+                    _mapRenderer.BaseGray,
+                    _mapRenderer.HeightContrast,
+                    _mapRenderer.DepthShade,
+                    action.Value);
                 break;
 
             case TerrainOverlayActionType.SetLayer:
-                _mapRenderer.SetHeightMapMode(false);
                 _visibleMaxLayer =
                     Math.Clamp(
                         action.Layer,
                         0,
                         _worldMap.LayerCount - 1);
+                break;
+
+            case TerrainOverlayActionType.ToggleGrid:
+                _showDebugGrid = !_showDebugGrid;
+                break;
+
+            case TerrainOverlayActionType.ToggleExtrema:
+                _showTerrainExtrema = !_showTerrainExtrema;
+                break;
+
+            case TerrainOverlayActionType.ResetSettings:
+                _mapRenderer.ResetVisualSettings();
+                _showDebugGrid = false;
+                _showTerrainExtrema = false;
+                _visibleMaxLayer = _worldMap.LayerCount - 1;
                 break;
         }
     }
@@ -857,9 +934,6 @@ public sealed class GameRenderer
     private void ScrollTerrainLayers(
         int direction)
     {
-        // Keyboard layer navigation switches to the cutaway mode explicitly.
-        _mapRenderer.SetHeightMapMode(false);
-
         _visibleMaxLayer =
             Math.Clamp(
                 _visibleMaxLayer + direction,
@@ -893,10 +967,13 @@ public sealed class GameRenderer
         _visibleMaxLayer =
             Math.Max(
                 0,
-                _worldMap.LayerCount / 2 - 1);
+                _worldMap.LayerCount - 1);
 
-        if (!_mapRenderer.HeightMapMode)
-            _mapRenderer.ToggleHeightMapMode();
+        _mapRenderer.ResetVisualSettings();
+        _showDebugGrid = false;
+        _showTerrainExtrema = false;
+        _terrainSettingsOpen = false;
+        _draggingTerrainSlider = null;
 
         _selectedUnit = default;
 
