@@ -15,9 +15,9 @@ public sealed class TerrainRegion
     private readonly int _layerCount;
     private readonly Tile[] _tiles;
 
-    // Packed as one contiguous 48 x 48 x Z voxel block.
-    // Allocated only when a non-empty voxel is written.
-    private ushort[]? _materialIds;
+    // The region is a logical 48 x 48 x Z voxel volume.
+    // Each horizontal Z slice is allocated only when it contains a solid voxel.
+    private readonly ushort[]?[] _materialLayers;
 
     public TerrainRegion(
         int regionX,
@@ -30,6 +30,7 @@ public sealed class TerrainRegion
         RegionX = regionX;
         RegionY = regionY;
         _layerCount = layerCount;
+        _materialLayers = new ushort[]?[layerCount];
 
         _tiles = new Tile[TotalTiles];
 
@@ -55,15 +56,12 @@ public sealed class TerrainRegion
             return 0;
         }
 
-        ushort[]? data = _materialIds;
+        ushort[]? layer =
+            _materialLayers[z];
 
-        if (data == null)
-            return 0;
-
-        int localIndex =
-            localX + localY * TilesPerSide;
-
-        return data[z * TotalTiles + localIndex];
+        return layer == null
+            ? (ushort)0
+            : layer[localX + localY * TilesPerSide];
     }
 
     internal ushort GetMaterialIdAtIndex(
@@ -78,11 +76,12 @@ public sealed class TerrainRegion
             return 0;
         }
 
-        ushort[]? data = _materialIds;
+        ushort[]? layer =
+            _materialLayers[z];
 
-        return data == null
+        return layer == null
             ? (ushort)0
-            : data[z * TotalTiles + localIndex];
+            : layer[localIndex];
     }
 
     internal void SetMaterialId(
@@ -113,17 +112,21 @@ public sealed class TerrainRegion
             throw new IndexOutOfRangeException();
         }
 
-        if (_materialIds == null)
+        ushort[]? layer =
+            _materialLayers[z];
+
+        if (layer == null)
         {
             if (materialId == 0)
                 return;
 
-            _materialIds =
-                new ushort[checked(TotalTiles * _layerCount)];
+            layer =
+                new ushort[TotalTiles];
+
+            _materialLayers[z] = layer;
         }
 
-        _materialIds[z * TotalTiles + localIndex] =
-            materialId;
+        layer[localIndex] = materialId;
     }
 
     internal void ClearColumn(
@@ -132,13 +135,14 @@ public sealed class TerrainRegion
         if (localIndex < 0 || localIndex >= TotalTiles)
             throw new IndexOutOfRangeException();
 
-        ushort[]? data = _materialIds;
-
-        if (data == null)
-            return;
-
         for (int z = 0; z < _layerCount; z++)
-            data[z * TotalTiles + localIndex] = 0;
+        {
+            ushort[]? layer =
+                _materialLayers[z];
+
+            if (layer != null)
+                layer[localIndex] = 0;
+        }
     }
 
     internal void ClearLayer(
@@ -147,15 +151,8 @@ public sealed class TerrainRegion
         if (z < 0 || z >= _layerCount)
             throw new IndexOutOfRangeException();
 
-        ushort[]? data = _materialIds;
-
-        if (data == null)
-            return;
-
-        Array.Clear(
-            data,
-            z * TotalTiles,
-            TotalTiles);
+        // Releasing the slice also releases its 48 x 48 storage.
+        _materialLayers[z] = null;
     }
 
     public ref Tile GetLocalTile(
