@@ -33,10 +33,13 @@ public static class TerrainHeightPalette
             (heightFraction - 0.5f) * heightContrast -
             depthFraction * depthShade;
 
+        if (voxelLayer == visibleMaxLayer)
+            gray = Math.Min(202f, gray + 32f);
+
         byte value = (byte)Math.Clamp(
             (int)MathF.Round(gray),
             0,
-            170);
+            202);
 
         return new Color(value, value, value, 255);
     }
