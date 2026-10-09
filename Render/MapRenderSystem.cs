@@ -861,7 +861,7 @@ void main()
         if (_lowlandMask.Length != cellCount)
             _lowlandMask = new byte[cellCount];
         else
-            Array.Clear(_lowlandMask);
+            Array.Clear(_lowlandMask, 0, _lowlandMask.Length);
 
         ushort minimumHeight = ushort.MaxValue;
         ushort maximumHeight = 0;
