@@ -8,22 +8,379 @@ using SFML.Window;
 
 namespace RimClone.Render;
 
+public enum TerrainOverlayActionType
+{
+    SelectHeightMap,
+    SelectVolumeSlice,
+    SetLayer
+}
+
+public readonly record struct TerrainOverlayAction(
+    TerrainOverlayActionType Type,
+    int Layer = 0);
+
 public sealed class TerrainDebugOverlay : IDisposable
 {
+    private const float PanelX = 16f;
+    private const float PanelY = 16f;
+    private const float PanelWidth = 500f;
+    private const float PanelHeight = 294f;
+
+    private const float SliderStartX = 82f;
+    private const float SliderWidth = 340f;
+    private const float SliderY = 130f;
     private const int LegendBands = 5;
 
     private readonly Font? _font;
+    private readonly List<Text> _texts = new();
+
     private readonly RectangleShape _panel =
-        new RectangleShape(new Vector2f(610f, 229f))
+        new RectangleShape(new Vector2f(PanelWidth, PanelHeight))
         {
-            Position = new Vector2f(12f, 12f),
-            FillColor = new Color(8, 12, 17, 232),
-            OutlineColor = new Color(110, 130, 145, 220),
+            Position = new Vector2f(PanelX, PanelY),
+            FillColor = new Color(13, 19, 28, 246),
+            OutlineColor = new Color(56, 76, 98, 245),
             OutlineThickness = 1f
         };
 
+    private readonly RectangleShape _accent =
+        new RectangleShape(new Vector2f(PanelWidth - 2f, 3f))
+        {
+            Position = new Vector2f(PanelX + 1f, PanelY + 1f),
+            FillColor = new Color(67, 145, 255)
+        };
+
+    private readonly RectangleShape _heightModeButton =
+        new RectangleShape(new Vector2f(220f, 34f))
+        {
+            Position = new Vector2f(PanelX + 14f, PanelY + 38f),
+            OutlineThickness = 1f
+        };
+
+    private readonly RectangleShape _sliceModeButton =
+        new RectangleShape(new Vector2f(232f, 34f))
+        {
+            Position = new Vector2f(PanelX + 242f, PanelY + 38f),
+            OutlineThickness = 1f
+        };
+
+    private readonly RectangleShape _minusButton =
+        new RectangleShape(new Vector2f(36f, 30f))
+        {
+            Position = new Vector2f(PanelX + 14f, PanelY + 100f),
+            FillColor = new Color(31, 43, 57),
+            OutlineColor = new Color(76, 96, 118),
+            OutlineThickness = 1f
+        };
+
+    private readonly RectangleShape _plusButton =
+        new RectangleShape(new Vector2f(36f, 30f))
+        {
+            Position = new Vector2f(PanelX + 418f, PanelY + 100f),
+            FillColor = new Color(31, 43, 57),
+            OutlineColor = new Color(76, 96, 118),
+            OutlineThickness = 1f
+        };
+
+    private readonly RectangleShape _sliderTrack =
+        new RectangleShape(new Vector2f(SliderWidth, 4f))
+        {
+            Position = new Vector2f(PanelX + SliderStartX, PanelY + SliderY),
+            FillColor = new Color(65, 78, 93)
+        };
+
+    private readonly RectangleShape _sliderProgress =
+        new RectangleShape(new Vector2f(0f, 4f))
+        {
+            Position = new Vector2f(PanelX + SliderStartX, PanelY + SliderY),
+            FillColor = new Color(67, 145, 255)
+        };
+
+    private readonly CircleShape _sliderKnob = new CircleShape(7f, 24)
+    {
+        Origin = new Vector2f(7f, 7f),
+        FillColor = new Color(238, 246, 255),
+        OutlineColor = new Color(67, 145, 255),
+        OutlineThickness = 2f
+    };
+
     private readonly RectangleShape[] _legendSwatches =
         new RectangleShape[LegendBands];
+
+    private readonly Text? _titleText;
+    private readonly Text? _subtitleText;
+    private readonly Text? _heightModeLabel;
+    private readonly Text? _sliceModeLabel;
+    private readonly Text? _layerLabel;
+    private readonly Text? _minusLabel;
+    private readonly Text? _plusLabel;
+    private readonly Text? _layerMinTick;
+    private readonly Text? _layerMidTick;
+    private readonly Text? _layerMaxTick;
+    private readonly Text? _layerValue;
+    private readonly Text? _modeDescription;
+    private readonly Text? _minimumText;
+    private readonly Text? _maximumText;
+    private readonly Text? _cursorText;
+    private readonly Text? _helpText;
+    private readonly Text[] _legendTexts = new Text[LegendBands];
+
+    private long _cachedTerrainVersion = long.MinValue;
+    private ushort _minimumHeightUnits;
+    private ushort _maximumHeightUnits;
+    private int _minimumX;
+    private int _minimumY;
+    private int _maximumX;
+    private int _maximumY;
+
+    private int _lastMouseCellX = int.MinValue;
+    private int _lastMouseCellY = int.MinValue;
+    private long _lastMouseTerrainVersion = long.MinValue;
+
+    private string _lastMinimum = string.Empty;
+    private string _lastMaximum = string.Empty;
+    private string _lastCursor = string.Empty;
+    private string _lastLayerValue = string.Empty;
+
+    private bool? _lastHeightMapMode;
+    private int _lastVisibleLayer = -1;
+    private int _lastLayerCount = -1;
+
+    public TerrainDebugOverlay()
+    {
+        _font = LoadFont();
+
+        for (int i = 0; i < LegendBands; i++)
+        {
+            _legendSwatches[i] =
+                new RectangleShape(new Vector2f(84f, 12f))
+                {
+                    Position = new Vector2f(
+                        PanelX + 14f + i * 94f,
+                        PanelY + 168f),
+                    OutlineColor = new Color(220, 230, 242, 175),
+                    OutlineThickness = 1f
+                };
+        }
+
+        if (_font == null)
+        {
+            Console.WriteLine(
+                "[TerrainDebugOverlay] System font unavailable; terrain controls will still be clickable.");
+            return;
+        }
+
+        _titleText = CreateText(
+            "РЕЛЬЕФ",
+            18,
+            new Color(245, 248, 252),
+            new Vector2f(PanelX + 14f, PanelY + 9f),
+            Text.Styles.Bold);
+
+        _subtitleText = CreateText(
+            "ТЕСТ ВЫСОТ  •  1–50 м",
+            12,
+            new Color(151, 169, 190),
+            new Vector2f(PanelX + 112f, PanelY + 14f));
+
+        _heightModeLabel = CreateText(
+            "КАРТА ВЫСОТ",
+            13,
+            Color.White,
+            new Vector2f(PanelX + 67f, PanelY + 48f),
+            Text.Styles.Bold);
+
+        _sliceModeLabel = CreateText(
+            "ОБЪЁМНЫЙ СРЕЗ",
+            13,
+            Color.White,
+            new Vector2f(PanelX + 289f, PanelY + 48f),
+            Text.Styles.Bold);
+
+        _layerLabel = CreateText(
+            "УРОВЕНЬ СРЕЗА Z",
+            12,
+            new Color(192, 207, 223),
+            new Vector2f(PanelX + 14f, PanelY + 79f),
+            Text.Styles.Bold);
+
+        _minusLabel = CreateText(
+            "−",
+            19,
+            Color.White,
+            new Vector2f(PanelX + 26f, PanelY + 101f));
+
+        _plusLabel = CreateText(
+            "+",
+            18,
+            Color.White,
+            new Vector2f(PanelX + 429f, PanelY + 101f));
+
+        _layerMinTick = CreateText(
+            "1 м",
+            11,
+            new Color(149, 166, 185),
+            new Vector2f(PanelX + SliderStartX, PanelY + 135f));
+
+        _layerMidTick = CreateText(
+            "25 м",
+            11,
+            new Color(149, 166, 185),
+            new Vector2f(PanelX + SliderStartX + SliderWidth * 0.49f, PanelY + 135f));
+
+        _layerMaxTick = CreateText(
+            "50 м",
+            11,
+            new Color(149, 166, 185),
+            new Vector2f(PanelX + SliderStartX + SliderWidth - 28f, PanelY + 135f));
+
+        _layerValue = CreateText(
+            "",
+            12,
+            new Color(106, 181, 255),
+            new Vector2f(PanelX + 360f, PanelY + 79f),
+            Text.Styles.Bold);
+
+        _modeDescription = CreateText(
+            "",
+            12,
+            new Color(193, 207, 221),
+            new Vector2f(PanelX + 14f, PanelY + 151f));
+
+        _minimumText = CreateText(
+            "",
+            12,
+            new Color(113, 187, 255),
+            new Vector2f(PanelX + 14f, PanelY + 205f));
+
+        _maximumText = CreateText(
+            "",
+            12,
+            new Color(255, 130, 139),
+            new Vector2f(PanelX + 14f, PanelY + 221f));
+
+        _cursorText = CreateText(
+            "",
+            12,
+            Color.White,
+            new Vector2f(PanelX + 14f, PanelY + 238f));
+
+        _helpText = CreateText(
+            "H — карта/срез   •   PgUp/PgDn — уровень   •   колесо — масштаб",
+            11,
+            new Color(155, 173, 192),
+            new Vector2f(PanelX + 14f, PanelY + 260f));
+
+        string[] labels =
+        {
+            "1–10 м",
+            "11–20 м",
+            "21–30 м",
+            "31–40 м",
+            "41–50 м"
+        };
+
+        for (int i = 0; i < LegendBands; i++)
+        {
+            _legendTexts[i] = CreateText(
+                labels[i],
+                11,
+                new Color(225, 234, 244),
+                new Vector2f(PanelX + 14f + i * 94f, PanelY + 183f));
+        }
+    }
+
+    public TerrainOverlayAction? HandleClick(
+        Vector2i point,
+        int currentLayer,
+        int layerCount)
+    {
+        if (_heightModeButton.GetGlobalBounds().Contains(point.X, point.Y))
+        {
+            return new TerrainOverlayAction(
+                TerrainOverlayActionType.SelectHeightMap);
+        }
+
+        if (_sliceModeButton.GetGlobalBounds().Contains(point.X, point.Y))
+        {
+            return new TerrainOverlayAction(
+                TerrainOverlayActionType.SelectVolumeSlice);
+        }
+
+        if (_minusButton.GetGlobalBounds().Contains(point.X, point.Y))
+        {
+            return new TerrainOverlayAction(
+                TerrainOverlayActionType.SetLayer,
+                Math.Clamp(currentLayer - 1, 0, layerCount - 1));
+        }
+
+        if (_plusButton.GetGlobalBounds().Contains(point.X, point.Y))
+        {
+            return new TerrainOverlayAction(
+                TerrainOverlayActionType.SetLayer,
+                Math.Clamp(currentLayer + 1, 0, layerCount - 1));
+        }
+
+        // The generous hit area includes the slider and its tick labels.
+        float sliderLeft = PanelX + SliderStartX - 8f;
+        float sliderRight = PanelX + SliderStartX + SliderWidth + 8f;
+        float sliderTop = PanelY + 110f;
+        float sliderBottom = PanelY + 158f;
+
+        if (point.X < sliderLeft ||
+            point.X > sliderRight ||
+            point.Y < sliderTop ||
+            point.Y > sliderBottom ||
+            layerCount <= 1)
+        {
+            return null;
+        }
+
+        float amount = Math.Clamp(
+            (point.X - (PanelX + SliderStartX)) / SliderWidth,
+            0f,
+            1f);
+
+        int selectedLayer = (int)MathF.Round(
+            amount * (layerCount - 1));
+
+        return new TerrainOverlayAction(
+            TerrainOverlayActionType.SetLayer,
+            selectedLayer);
+    }
+
+    public void DrawWorldMarkers(
+        RenderWindow window,
+        WorldMap worldMap,
+        float tilePixelSize,
+        float zoomLevel,
+        bool heightMapMode)
+    {
+        RefreshExtremes(worldMap);
+
+        if (!heightMapMode)
+            return;
+
+        float radius = Math.Clamp(4.5f * zoomLevel, 0.25f, 22f);
+
+        // The coordinate card gives the exact location; these pins only mark
+        // the low and high extrema on the map without adding large map labels.
+        _minimumPin.Radius = radius;
+        _maximumPin.Radius = radius;
+        _minimumPin.Origin = new Vector2f(radius, radius);
+        _maximumPin.Origin = new Vector2f(radius, radius);
+
+        _minimumPin.Position = new Vector2f(
+            (_minimumX + 0.5f) * tilePixelSize,
+            (_minimumY + 0.5f) * tilePixelSize);
+
+        _maximumPin.Position = new Vector2f(
+            (_maximumX + 0.5f) * tilePixelSize,
+            (_maximumY + 0.5f) * tilePixelSize);
+
+        window.Draw(_minimumPin);
+        window.Draw(_maximumPin);
+    }
 
     private readonly CircleShape _minimumPin = new CircleShape(4.5f, 20)
     {
@@ -39,217 +396,28 @@ public sealed class TerrainDebugOverlay : IDisposable
         OutlineThickness = 1.5f
     };
 
-    private readonly List<Text> _texts = new();
-
-    private Text? _titleText;
-    private Text? _modeText;
-    private Text? _minimumText;
-    private Text? _maximumText;
-    private Text? _cursorText;
-    private Text? _meaningText;
-    private Text? _controlsText;
-    private readonly Text[] _legendTexts = new Text[LegendBands];
-    private Text? _minimumMapLabel;
-    private Text? _maximumMapLabel;
-
-    private long _cachedTerrainVersion = long.MinValue;
-    private int _minimumX;
-    private int _minimumY;
-    private int _maximumX;
-    private int _maximumY;
-    private ushort _minimumHeightUnits;
-    private ushort _maximumHeightUnits;
-
-    private string _lastMode = string.Empty;
-    private string _lastMinimum = string.Empty;
-    private string _lastMaximum = string.Empty;
-    private string _lastCursor = string.Empty;
-    private string _lastMeaning = string.Empty;
-    private string _lastControls = string.Empty;
-    private string _lastMinimumMapLabel = string.Empty;
-    private string _lastMaximumMapLabel = string.Empty;
-
-    private int _lastMouseCellX = int.MinValue;
-    private int _lastMouseCellY = int.MinValue;
-    private long _lastMouseTerrainVersion = long.MinValue;
-
-    public TerrainDebugOverlay()
-    {
-        _font = LoadFont();
-
-        _minimumPin.Origin = new Vector2f(4.5f, 4.5f);
-        _maximumPin.Origin = new Vector2f(4.5f, 4.5f);
-
-        for (int i = 0; i < LegendBands; i++)
-        {
-            _legendSwatches[i] =
-                new RectangleShape(new Vector2f(88f, 11f))
-                {
-                    Position = new Vector2f(24f + i * 112f, 82f),
-                    FillColor = TerrainHeightPalette.GetBandColor(i, WorldMap.DefaultTerrainLayerCount),
-                    OutlineColor = new Color(235, 240, 245, 180),
-                    OutlineThickness = 1f
-                };
-        }
-
-        if (_font == null)
-        {
-            Console.WriteLine(
-                "[TerrainDebugOverlay] Не найден системный шрифт. Цветовая карта и маркеры останутся доступны.");
-            return;
-        }
-
-        _titleText = CreateText("ТЕСТ РЕЛЬЕФА", 17, new Color(245, 248, 250));
-        _titleText.Style = Text.Styles.Bold;
-        _modeText = CreateText("", 14, new Color(225, 235, 245));
-        _minimumText = CreateText("", 14, new Color(110, 190, 255));
-        _maximumText = CreateText("", 14, new Color(255, 120, 125));
-        _cursorText = CreateText("", 14, Color.White);
-        _meaningText = CreateText("", 14, new Color(235, 215, 150));
-        _controlsText = CreateText("", 13, new Color(190, 205, 218));
-        _minimumMapLabel = CreateText("", 13, Color.White);
-        _maximumMapLabel = CreateText("", 13, Color.White);
-
-        string[] labels =
-        {
-            "1–10 м",
-            "11–20 м",
-            "21–30 м",
-            "31–40 м",
-            "41–50 м"
-        };
-
-        for (int i = 0; i < LegendBands; i++)
-        {
-            _legendTexts[i] =
-                CreateText(
-                    labels[i],
-                    13,
-                    new Color(225, 235, 242),
-                    trackForCommonDraw: false);
-
-            _legendTexts[i].Position =
-                new Vector2f(24f + i * 112f, 98f);
-        }
-
-        SetText(
-            _controlsText,
-            ref _lastControls,
-            "H — карта/срез | PgUp/PgDn — слой | колёсико — зум | WASD — камера");
-    }
-
-    public void DrawWorldMarkers(
-        RenderWindow window,
-        WorldMap worldMap,
-        float tilePixelSize,
-        float zoomLevel,
-        bool heightMapMode)
-    {
-        RefreshExtremes(worldMap);
-
-        if (!heightMapMode)
-            return;
-
-        float markerRadius = Math.Clamp(4.5f * zoomLevel, 0.25f, 22f);
-        _minimumPin.Radius = markerRadius;
-        _maximumPin.Radius = markerRadius;
-        _minimumPin.Origin = new Vector2f(markerRadius, markerRadius);
-        _maximumPin.Origin = new Vector2f(markerRadius, markerRadius);
-
-        Vector2f minimumPosition = new Vector2f(
-            (_minimumX + 0.5f) * tilePixelSize,
-            (_minimumY + 0.5f) * tilePixelSize);
-
-        Vector2f maximumPosition = new Vector2f(
-            (_maximumX + 0.5f) * tilePixelSize,
-            (_maximumY + 0.5f) * tilePixelSize);
-
-        _minimumPin.Position = minimumPosition;
-        _maximumPin.Position = maximumPosition;
-
-        window.Draw(_minimumPin);
-        window.Draw(_maximumPin);
-
-        if (_font == null ||
-            _minimumMapLabel == null ||
-            _maximumMapLabel == null)
-        {
-            return;
-        }
-
-        uint characterSize =
-            (uint)Math.Clamp(
-                Math.Round(13f * zoomLevel),
-                1d,
-                96d);
-
-        _minimumMapLabel.CharacterSize = characterSize;
-        _maximumMapLabel.CharacterSize = characterSize;
-
-        SetText(
-            _minimumMapLabel,
-            ref _lastMinimumMapLabel,
-            $"НИЗИНА {_minimumHeightUnits * 0.1f:0.#} м");
-
-        SetText(
-            _maximumMapLabel,
-            ref _lastMaximumMapLabel,
-            $"ВЕРШИНА {_maximumHeightUnits * 0.1f:0.#} м");
-
-        float labelOffset = 8f * zoomLevel;
-        _minimumMapLabel.Position = minimumPosition + new Vector2f(labelOffset, -labelOffset);
-        _maximumMapLabel.Position = maximumPosition + new Vector2f(labelOffset, -labelOffset);
-
-        window.Draw(_minimumMapLabel);
-        window.Draw(_maximumMapLabel);
-    }
-
     public void DrawScreen(
         RenderWindow window,
         WorldMap worldMap,
         View cameraView,
         float tilePixelSize,
-        float zoomLevel,
-        int visibleMaxLayer,
-        bool heightMapMode)
+        bool heightMapMode,
+        int visibleMaxLayer)
     {
         RefreshExtremes(worldMap);
-
-        if (_font == null)
-            return;
-
-        SetText(
-            _modeText!,
-            ref _lastMode,
-            heightMapMode
-                ? "Режим: КАРТА ВЫСОТ — цвет показывает поверхность целиком."
-                : $"Режим: ОБЪЁМНЫЙ СРЕЗ до Z={visibleMaxLayer + 1} м.");
-
-        SetText(
-            _minimumText!,
-            ref _lastMinimum,
-            $"НИЖНЯЯ ТОЧКА: {_minimumHeightUnits * 0.1f:0.#} м   |   X={_minimumX}, Y={_minimumY}");
-
-        SetText(
-            _maximumText!,
-            ref _lastMaximum,
-            $"ВЕРХНЯЯ ТОЧКА: {_maximumHeightUnits * 0.1f:0.#} м   |   X={_maximumX}, Y={_maximumY}");
-
-        SetText(
-            _meaningText!,
-            ref _lastMeaning,
-            heightMapMode
-                ? "СИНИЙ = низко, КРАСНЫЙ = высоко. Чёрный цвет не используется для обозначения высоты."
-                : "Цвет = высота поверхности; потемнение = слой глубже под поверхностью. Тёмное ≠ низина.");
-
-        UpdateCursorText(
-            window,
-            worldMap,
-            cameraView,
-            tilePixelSize,
-            heightMapMode);
+        RefreshStyle(heightMapMode, visibleMaxLayer, worldMap.LayerCount);
 
         window.Draw(_panel);
+        window.Draw(_accent);
+
+        window.Draw(_heightModeButton);
+        window.Draw(_sliceModeButton);
+        window.Draw(_minusButton);
+        window.Draw(_plusButton);
+
+        window.Draw(_sliderTrack);
+        window.Draw(_sliderProgress);
+        window.Draw(_sliderKnob);
 
         for (int i = 0; i < LegendBands; i++)
         {
@@ -257,55 +425,131 @@ public sealed class TerrainDebugOverlay : IDisposable
             window.Draw(_legendTexts[i]);
         }
 
-        for (int i = 0; i < _texts.Count; i++)
-        {
-            Text text = _texts[i];
+        UpdateCursorText(
+            window,
+            worldMap,
+            cameraView,
+            tilePixelSize);
 
-            if (text == _minimumMapLabel ||
-                text == _maximumMapLabel)
+        for (int i = 0; i < _texts.Count; i++)
+            window.Draw(_texts[i]);
+    }
+
+    private void RefreshStyle(
+        bool heightMapMode,
+        int visibleMaxLayer,
+        int layerCount)
+    {
+        bool mapHovered = _heightModeButton.GetGlobalBounds().Contains(
+            Mouse.GetPositionFromDesktop().X,
+            Mouse.GetPositionFromDesktop().Y);
+
+        Vector2i mouse = _lastMousePosition;
+        bool heightSelected = heightMapMode;
+        bool sliceSelected = !heightMapMode;
+
+        _heightModeButton.FillColor = heightSelected
+            ? new Color(35, 91, 170)
+            : mapHovered
+                ? new Color(35, 48, 64)
+                : new Color(23, 32, 44);
+
+        _heightModeButton.OutlineColor = heightSelected
+            ? new Color(104, 171, 255)
+            : new Color(61, 79, 99);
+
+        _sliceModeButton.FillColor = sliceSelected
+            ? new Color(35, 91, 170)
+            : new Color(23, 32, 44);
+
+        _sliceModeButton.OutlineColor = sliceSelected
+            ? new Color(104, 171, 255)
+            : new Color(61, 79, 99);
+
+        _minusButton.OutlineColor = visibleMaxLayer > 0
+            ? new Color(76, 96, 118)
+            : new Color(46, 55, 66);
+
+        _plusButton.OutlineColor = visibleMaxLayer < layerCount - 1
+            ? new Color(76, 96, 118)
+            : new Color(46, 55, 66);
+
+        int safeLayerCount = Math.Max(1, layerCount);
+        visibleMaxLayer = Math.Clamp(visibleMaxLayer, 0, safeLayerCount - 1);
+        float amount = safeLayerCount <= 1
+            ? 0f
+            : visibleMaxLayer / (float)(safeLayerCount - 1);
+
+        float knobX = PanelX + SliderStartX + amount * SliderWidth;
+        _sliderProgress.Size = new Vector2f(amount * SliderWidth, 4f);
+        _sliderKnob.Position = new Vector2f(knobX, PanelY + SliderY + 2f);
+
+        SetText(
+            _layerValue,
+            ref _lastLayerValue,
+            $"Z = {visibleMaxLayer + 1} м");
+
+        if (_lastHeightMapMode != heightMapMode)
+        {
+            _lastHeightMapMode = heightMapMode;
+            SetText(
+                _modeDescription,
+                ref _lastCursor,
+                heightMapMode
+                    ? "Высота поверхности: СИНИЙ = низко  →  КРАСНЫЙ = высоко"
+                    : "Срез: цвет = высота поверхности; сдвиг вниз = глубже в грунте");
+
+            // Use a dedicated cache for the description rather than the cursor readout.
+            _lastModeDescription = heightMapMode;
+        }
+
+        if (_lastLayerCount != layerCount)
+        {
+            _lastLayerCount = layerCount;
+
+            for (int i = 0; i < LegendBands; i++)
             {
-                continue;
+                _legendSwatches[i].FillColor =
+                    TerrainHeightPalette.GetBandColor(i, layerCount);
             }
 
-            text.Position = text == _titleText
-                ? new Vector2f(24f, 18f)
-                : text == _modeText
-                    ? new Vector2f(24f, 44f)
-                    : text == _minimumText
-                        ? new Vector2f(24f, 119f)
-                        : text == _maximumText
-                            ? new Vector2f(24f, 141f)
-                            : text == _cursorText
-                                ? new Vector2f(24f, 163f)
-                                : text == _meaningText
-                                    ? new Vector2f(24f, 185f)
-                                    : text == _controlsText
-                                        ? new Vector2f(24f, 207f)
-                                        : new Vector2f(24f, 18f);
+            if (_layerMinTick != null)
+                _layerMinTick.DisplayedString = "1 м";
 
-            if (text != null)
-                window.Draw(text);
+            if (_layerMidTick != null)
+                _layerMidTick.DisplayedString = $"{(layerCount + 1) / 2} м";
+
+            if (_layerMaxTick != null)
+                _layerMaxTick.DisplayedString = $"{layerCount} м";
+
+            _layerMidTick?.Dispose();
+            _layerMaxTick?.Dispose();
+        }
+
+        if (_minimumHeightUnits > 0)
+        {
+            SetText(
+                _minimumText,
+                ref _lastMinimum,
+                $"● НИЗИНА  {_minimumHeightUnits * 0.1f:0.#} м    X={_minimumX}  Y={_minimumY}");
+
+            SetText(
+                _maximumText,
+                ref _lastMaximum,
+                $"● ВЕРШИНА  {_maximumHeightUnits * 0.1f:0.#} м    X={_maximumX}  Y={_maximumY}");
         }
     }
+
+    private bool? _lastModeDescription;
 
     private void UpdateCursorText(
         RenderWindow window,
         WorldMap worldMap,
         View cameraView,
-        float tilePixelSize,
-        bool heightMapMode)
+        float tilePixelSize)
     {
         if (_cursorText == null)
             return;
-
-        if (!heightMapMode)
-        {
-            SetText(
-                _cursorText,
-                ref _lastCursor,
-                "Высота под курсором доступна в режиме «Карта высот» (H).");
-            return;
-        }
 
         Vector2i mouse = Mouse.GetPosition(window);
         Vector2u windowSize = window.Size;
@@ -351,12 +595,14 @@ public sealed class TerrainDebugOverlay : IDisposable
         _lastMouseCellY = y;
         _lastMouseTerrainVersion = worldMap.TerrainVersion;
 
-        if (x < 0 || y < 0 || x >= worldMap.TileWidth || y >= worldMap.TileHeight)
+        if (x < 0 || y < 0 ||
+            x >= worldMap.TileWidth ||
+            y >= worldMap.TileHeight)
         {
             SetText(
                 _cursorText,
                 ref _lastCursor,
-                "Курсор: за пределами карты.");
+                "КУРСОР  —  ВНЕ ПРЕДЕЛОВ КАРТЫ");
             return;
         }
 
@@ -366,7 +612,7 @@ public sealed class TerrainDebugOverlay : IDisposable
         SetText(
             _cursorText,
             ref _lastCursor,
-            $"КУРСОР: X={x}, Y={y}   |   ВЫСОТА ПОВЕРХНОСТИ: {heightMeters:0.#} м");
+            $"КУРСОР  X={x}  Y={y}   •   ВЫСОТА {heightMeters:0.#} м");
     }
 
     private void RefreshExtremes(WorldMap worldMap)
@@ -382,15 +628,11 @@ public sealed class TerrainDebugOverlay : IDisposable
         long nearestMinimumDistance = long.MaxValue;
         long nearestMaximumDistance = long.MaxValue;
 
-        // Prefer extrema nearest to the center of the test camera instead of
-        // arbitrarily picking one at the map edge. This makes both markers
-        // visible immediately on launch.
         for (int y = 0; y < worldMap.TileHeight; y++)
         {
             for (int x = 0; x < worldMap.TileWidth; x++)
             {
-                ushort height =
-                    worldMap.GetSurfaceHeightUnits(x, y);
+                ushort height = worldMap.GetSurfaceHeightUnits(x, y);
 
                 if (height == 0)
                     continue;
@@ -401,8 +643,7 @@ public sealed class TerrainDebugOverlay : IDisposable
 
                 if (height < _minimumHeightUnits ||
                     (height == _minimumHeightUnits &&
-                     (distance < nearestMinimumDistance ||
-                      (distance == nearestMinimumDistance && y > _minimumY))))
+                     distance < nearestMinimumDistance))
                 {
                     _minimumHeightUnits = height;
                     _minimumX = x;
@@ -412,8 +653,7 @@ public sealed class TerrainDebugOverlay : IDisposable
 
                 if (height > _maximumHeightUnits ||
                     (height == _maximumHeightUnits &&
-                     (distance < nearestMaximumDistance ||
-                      (distance == nearestMaximumDistance && y > _maximumY))))
+                     distance < nearestMaximumDistance))
                 {
                     _maximumHeightUnits = height;
                     _maximumX = x;
@@ -433,18 +673,19 @@ public sealed class TerrainDebugOverlay : IDisposable
         string value,
         uint characterSize,
         Color color,
-        bool trackForCommonDraw = true)
+        Vector2f position,
+        Text.Styles style = Text.Styles.Regular)
     {
         Text text = new Text(_font!, value, characterSize)
         {
+            Position = position,
             FillColor = color,
-            OutlineColor = new Color(0, 0, 0, 230),
-            OutlineThickness = 1f
+            OutlineColor = new Color(0, 0, 0, 180),
+            OutlineThickness = 0.5f,
+            Style = style
         };
 
-        if (trackForCommonDraw)
-            _texts.Add(text);
-
+        _texts.Add(text);
         return text;
     }
 
@@ -467,8 +708,8 @@ public sealed class TerrainDebugOverlay : IDisposable
 
         string[] candidates =
         {
-            "arial.ttf",
             "segoeui.ttf",
+            "arial.ttf",
             "tahoma.ttf"
         };
 
@@ -485,7 +726,7 @@ public sealed class TerrainDebugOverlay : IDisposable
             }
             catch
             {
-                // Try the next installed system font.
+                // Fall through to the next installed font.
             }
         }
 
@@ -499,14 +740,18 @@ public sealed class TerrainDebugOverlay : IDisposable
 
         _font?.Dispose();
         _panel.Dispose();
+        _accent.Dispose();
+        _heightModeButton.Dispose();
+        _sliceModeButton.Dispose();
+        _minusButton.Dispose();
+        _plusButton.Dispose();
+        _sliderTrack.Dispose();
+        _sliderProgress.Dispose();
+        _sliderKnob.Dispose();
+        _minimumPin.Dispose();
+        _maximumPin.Dispose();
 
         for (int i = 0; i < _legendSwatches.Length; i++)
             _legendSwatches[i].Dispose();
-
-        for (int i = 0; i < _legendTexts.Length; i++)
-            _legendTexts[i]?.Dispose();
-
-        _minimumPin.Dispose();
-        _maximumPin.Dispose();
     }
 }
