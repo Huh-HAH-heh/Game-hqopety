@@ -492,7 +492,7 @@ public sealed class GameRenderer
         _window.SetFramerateLimit(60);
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
-        _selectedResolutionIndex = 0;
+        _selectedResolutionIndex = 1;
 
         _window.Closed +=
             (_, _) =>
