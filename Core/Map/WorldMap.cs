@@ -29,7 +29,7 @@ public sealed class WorldMap
 
     public WaterLayer Water { get; }
 
-    private readonly TerrainRegion?[] _regions;
+    private readonly TerrainTileRegion?[] _regions;
     private readonly TerrainLayer[] _layers;
     private readonly ushort[] _surfaceHeights;
     private readonly TileRange[]?[] _rangeCache;
@@ -59,7 +59,7 @@ public sealed class WorldMap
         int columnCount = checked(width * height);
 
         _regions =
-            new TerrainRegion?[checked(regionsX * regionsY)];
+            new TerrainTileRegion?[checked(regionsX * regionsY)];
 
         _layers = new TerrainLayer[layerCount];
 
@@ -86,10 +86,9 @@ public sealed class WorldMap
     }
 
     // ============================================================
-    // REGIONAL 3D VOXEL STORAGE
-    // Each 48 x 48 terrain region owns a chunk of the full Z volume.
-    // TerrainLayer is a logical Z slice through those regional cubes.
-    // Empty regions do not allocate their voxel data until first use.
+    // LAYER -> REGION -> VOXEL STORAGE
+    // Every TerrainLayer owns its XY TerrainRegion grid.
+    // Every TerrainRegion owns a dense 48 x 48 grid of 1 m³ voxels.
     // ID 0 means empty; every other ID identifies a material.
     // ============================================================
 
@@ -189,9 +188,8 @@ public sealed class WorldMap
     }
 
     // ============================================================
-    // REGIONS / TILES
-    // A region owns tile/navigation metadata and its local 3D voxel block.
-    // Layer views share the same region array.
+    // Tile/navigation metadata is shared between Z levels.
+    // Voxel regions themselves belong to exactly one TerrainLayer.
     // ============================================================
 
     public TerrainRegion? GetRegion(
@@ -206,7 +204,12 @@ public sealed class WorldMap
             return null;
         }
 
-        return _regions[regionX + regionY * RegionsX];
+        int index = regionX + regionY * RegionsX;
+
+        if (_regions[index] == null)
+            return null;
+
+        return _layers[0].GetRegion(regionX, regionY);
     }
 
     public TerrainRegion GetOrCreateRegion(
@@ -222,17 +225,15 @@ public sealed class WorldMap
         }
 
         int index = regionX + regionY * RegionsX;
-        TerrainRegion? region = _regions[index];
 
-        if (region != null)
-            return region;
+        _regions[index] ??=
+            new TerrainTileRegion(
+                regionX,
+                regionY);
 
-        region = new TerrainRegion(
+        return _layers[0].GetOrCreateRegion(
             regionX,
-            regionY,
-            LayerCount);
-        _regions[index] = region;
-        return region;
+            regionY);
     }
 
     public bool TryGetTile(
