@@ -57,10 +57,10 @@ public sealed class MapRenderSystem : IDisposable
     private long _frameNumber;
     private long _chunkCacheTerrainVersion = long.MinValue;
     private int _chunkCacheVisibleMaxLayer = -1;
+    private int _chunkCacheLodStep = -1;
     private float _chunkCacheTilePixelSize = -1f;
 
     private const int ExtraCachedTerrainChunks = 8;
-    private const int MaxTerrainChunkBuildsPerFrame = 2;
 
     private const string TerrainVertexShaderSource =
         @"uniform float uVisibleLayer;
@@ -101,22 +101,7 @@ void main()
         + (heightFraction - 0.5) * uHeightContrast
         - depthFraction * uDepthShade;
 
-    gray = clamp(gray, 0.0, 170.0);
-
-    // The vertex alpha marks coarse macro-block faces; they highlight
-    // when the selected slice intersects their 5 m vertical span.
-    bool sliceHit = abs(voxelLayer - uVisibleLayer) < 0.5;
-    if (gl_Color.a < 0.75)
-    {
-        float macroStep = 5.0;
-        float macroBase = floor(uVisibleLayer / macroStep) * macroStep;
-        sliceHit = abs(voxelLayer - macroBase) < 0.5;
-    }
-
-    if (sliceHit)
-        gray = min(202.0, gray + 32.0);
-
-    gray = gray / 255.0;
+    gray = clamp(gray, 0.0, 170.0) / 255.0;
     gl_FragColor = vec4(gray, gray, gray, 1.0);
 }";
 
@@ -142,7 +127,6 @@ void main()
 
     private int[] _rowTopLayers = Array.Empty<int>();
     private int[] _rowSurfaceLayers = Array.Empty<int>();
-    private bool[] _rowDetailedColumns = Array.Empty<bool>();
 
     public int TerrainVertexCount =>
         _terrainVertexCount;
@@ -442,11 +426,13 @@ void main()
 
         if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
             _chunkCacheVisibleMaxLayer != layerCacheKey ||
+            _chunkCacheLodStep != lodStep ||
             _chunkCacheTilePixelSize != tilePixelSize)
         {
             ClearTerrainChunkCache();
             _chunkCacheTerrainVersion = worldMap.TerrainVersion;
             _chunkCacheVisibleMaxLayer = layerCacheKey;
+            _chunkCacheLodStep = lodStep;
             _chunkCacheTilePixelSize = tilePixelSize;
         }
 
@@ -470,7 +456,6 @@ void main()
 
         long rebuildsBefore = TerrainMeshRebuildCount;
         long started = Stopwatch.GetTimestamp();
-        int chunkBuildsThisFrame = 0;
 
         for (int regionY = minRegionY;
              regionY <= maxRegionY;
@@ -480,52 +465,21 @@ void main()
                  regionX <= maxRegionX;
                  regionX++)
             {
-                int regionKey = regionX + regionY * worldMap.RegionsX;
-                int key = regionKey * 4 + lodStep;
+                int key = regionX + regionY * worldMap.RegionsX;
 
                 if (!_terrainChunks.TryGetValue(key, out TerrainChunkMesh? mesh))
                 {
-                    if (chunkBuildsThisFrame < MaxTerrainChunkBuildsPerFrame)
-                    {
-                        mesh = BuildTerrainChunk(
-                            worldMap,
-                            regionX,
-                            regionY,
-                            lodStep,
-                            tilePixelSize,
-                            geometryMaxLayer);
+                    mesh = BuildTerrainChunk(
+                        worldMap,
+                        regionX,
+                        regionY,
+                        lodStep,
+                        tilePixelSize,
+                        geometryMaxLayer);
 
-                        _terrainChunks.Add(key, mesh);
-                        _cachedTerrainVertexCount += mesh.VertexCount;
-                        chunkBuildsThisFrame++;
-                    }
-                    else
-                    {
-                        // Keep an already-built LOD variant on screen while
-                        // the desired detail is prepared over following frames.
-                        mesh = null;
-
-                        for (int fallbackLod = 3; fallbackLod >= 1; fallbackLod--)
-                        {
-                            if (fallbackLod == lodStep)
-                                continue;
-
-                            if (_terrainChunks.TryGetValue(
-                                regionKey * 4 + fallbackLod,
-                                out TerrainChunkMesh? fallback))
-                            {
-                                mesh = fallback;
-                                break;
-                            }
-                        }
-
-                        if (mesh == null)
-                            continue;
-                    }
+                    _terrainChunks.Add(key, mesh);
+                    _cachedTerrainVertexCount += mesh.VertexCount;
                 }
-
-                if (mesh == null)
-                    continue;
 
                 mesh.LastUsedFrame = _frameNumber;
                 _visibleTerrainChunks.Add(mesh);
@@ -556,6 +510,11 @@ void main()
         }
 
         TrimTerrainChunkCache(
+            worldMap,
+            minRegionX,
+            maxRegionX,
+            minRegionY,
+            maxRegionY,
             visibleChunkCount + ExtraCachedTerrainChunks);
     }
 
@@ -584,7 +543,6 @@ void main()
         {
             Array.Resize(ref _rowTopLayers, columnCount);
             Array.Resize(ref _rowSurfaceLayers, columnCount);
-            Array.Resize(ref _rowDetailedColumns, columnCount);
         }
 
         for (int y = minTileY; y <= maxTileY; y += lodStep)
@@ -601,7 +559,6 @@ void main()
                     worldMap.LayerCount - 1);
 
                 _rowSurfaceLayers[column] = surfaceLayer;
-                _rowDetailedColumns[column] = worldMap.IsDetailedColumn(x, y);
 
                 int topLayer = FindVisibleTopLayer(
                     worldMap,
@@ -631,16 +588,7 @@ void main()
                     }
 
                     int x = minTileX + column * lodStep;
-                    bool detailedColumn = _rowDetailedColumns[column];
-                    int macroStep = WorldMap.MacroBlockHeightUnits / WorldMap.LayerHeightUnits;
-
-                    if (!detailedColumn && z % macroStep != 0)
-                    {
-                        column++;
-                        continue;
-                    }
-
-                    ushort materialId = worldMap.GetRenderMaterialId(x, y, z);
+                    ushort materialId = worldMap.GetMaterialId(x, y, z);
 
                     if (materialId == 0)
                     {
@@ -654,13 +602,11 @@ void main()
 
                     while (column < columnCount &&
                            _rowTopLayers[column] == topLayer &&
-                           _rowSurfaceLayers[column] == surfaceLayer &&
-                           _rowDetailedColumns[column] == detailedColumn)
+                           _rowSurfaceLayers[column] == surfaceLayer)
                     {
                         int nextX = minTileX + column * lodStep;
-                        ushort nextMaterialId = worldMap.GetRenderMaterialId(nextX, y, z);
 
-                        if (nextMaterialId == 0 || nextMaterialId != materialId)
+                        if (worldMap.GetMaterialId(nextX, y, z) == 0)
                             break;
 
                         column++;
@@ -688,9 +634,7 @@ void main()
                         right,
                         bottom,
                         _terrainLayerShader != null
-                            ? detailedColumn
-                                ? Color.White
-                                : new Color(255, 255, 255, 128)
+                            ? Color.White
                             : TerrainHeightPalette.GetTerrainColor(
                                 surfaceLayer,
                                 z,
@@ -698,8 +642,7 @@ void main()
                                 worldMap.LayerCount,
                                 _baseGray,
                                 _heightContrast,
-                                _depthShade,
-                                detailedColumn),
+                                _depthShade),
                         surfaceLayer,
                         z);
                 }
@@ -786,6 +729,11 @@ void main()
     }
 
     private void TrimTerrainChunkCache(
+        WorldMap worldMap,
+        int minRegionX,
+        int maxRegionX,
+        int minRegionY,
+        int maxRegionY,
         int targetCount)
     {
         while (_terrainChunks.Count > targetCount)
@@ -795,9 +743,14 @@ void main()
 
             foreach (KeyValuePair<int, TerrainChunkMesh> entry in _terrainChunks)
             {
-                // Every LOD variant drawn this frame is pinned until the next frame.
-                if (entry.Value.LastUsedFrame == _frameNumber)
+                int regionX = entry.Key % worldMap.RegionsX;
+                int regionY = entry.Key / worldMap.RegionsX;
+
+                if (regionX >= minRegionX && regionX <= maxRegionX &&
+                    regionY >= minRegionY && regionY <= maxRegionY)
+                {
                     continue;
+                }
 
                 if (entry.Value.LastUsedFrame < oldestFrame)
                 {
