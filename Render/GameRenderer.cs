@@ -186,8 +186,8 @@ public sealed class GameRenderer
                 $"Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"V={_mapRenderer.TerrainVertexCount:N0}/{_mapRenderer.TerrainVertexCapacity:N0} " +
                 $"VBO={_mapRenderer.UsesTerrainVertexBuffer} " +
-                $"Build={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
-                $"Rebuilds={_mapRenderer.TerrainMeshRebuildCount} " +
+                $"ChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
+                $"ChunkBuilds={_mapRenderer.TerrainMeshRebuildCount} " +
                 $"Projectiles={_unitSimulation.Projectiles.ActiveCount}/{_unitSimulation.Projectiles.Capacity}");
         }
 
