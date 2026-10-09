@@ -101,7 +101,14 @@ void main()
         + (heightFraction - 0.5) * uHeightContrast
         - depthFraction * uDepthShade;
 
-    gray = clamp(gray, 0.0, 170.0) / 255.0;
+    gray = clamp(gray, 0.0, 170.0);
+
+    // Do not cut geometry at the slice: make the occupied block at the
+    // selected Z level brighter while retaining its own height shading.
+    if (abs(voxelLayer - uVisibleLayer) < 0.5)
+        gray = min(202.0, gray + 32.0);
+
+    gray = gray / 255.0;
     gl_FragColor = vec4(gray, gray, gray, 1.0);
 }";
 
