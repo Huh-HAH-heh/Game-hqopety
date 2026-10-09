@@ -986,9 +986,20 @@ public sealed class GameMenuOverlay : IDisposable
             (contourHeight - heightA) /
             (float)(heightB - heightA);
 
-        intersections[count++] = new Vector2f(
+        Vector2f point = new Vector2f(
             xA + (xB - xA) * amount,
             yA + (yB - yA) * amount);
+
+        for (int i = 0; i < count; i++)
+        {
+            if (MathF.Abs(intersections[i].X - point.X) < 0.001f &&
+                MathF.Abs(intersections[i].Y - point.Y) < 0.001f)
+            {
+                return;
+            }
+        }
+
+        intersections[count++] = point;
     }
 
     private void AppendContourSegment(
@@ -1433,6 +1444,9 @@ public sealed class GameMenuOverlay : IDisposable
         for (int i = 0; i < _texts.Count; i++)
             _texts[i].Dispose();
 
+        for (int i = 0; i < _contourLabels.Count; i++)
+            _contourLabels[i].Dispose();
+
         for (int i = 0; i < _sliders.Count; i++)
             _sliders[i].Dispose();
 
@@ -1460,9 +1474,6 @@ public sealed class GameMenuOverlay : IDisposable
         _minimumPin.Dispose();
         _maximumPin.Dispose();
         _contourVertices.Dispose();
-
-        for (int i = 0; i < _contourLabels.Count; i++)
-            _contourLabels[i].Dispose();
 
         for (int i = 0; i < _toneSwatches.Length; i++)
             _toneSwatches[i].Dispose();
