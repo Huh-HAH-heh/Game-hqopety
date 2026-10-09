@@ -525,10 +525,10 @@ public sealed class WorldMap
                 height,
                 LayerCount * LayerHeightUnits);
 
-        if (_surfaceHeights[columnIndex] != 0)
-            ClearColumn(globalX, globalY);
-        else
-            _rangeCache[columnIndex] = null;
+        int previousLayers =
+            (_surfaceHeights[columnIndex] +
+             LayerHeightUnits - 1) /
+            LayerHeightUnits;
 
         int filledLayers =
             clampedHeight > 0 && materialId != 0
@@ -536,12 +536,24 @@ public sealed class WorldMap
                   LayerHeightUnits
                 : 0;
 
-        for (int z = 0; z < filledLayers; z++)
+        _rangeCache[columnIndex] = null;
+
+        // Only touch the old/new occupied height span.
+        // This avoids clearing all 50 voxels and then refilling the column
+        // whenever a terrain generator replaces its height.
+        int layersToUpdate =
+            Math.Max(
+                previousLayers,
+                filledLayers);
+
+        for (int z = 0; z < layersToUpdate; z++)
         {
             _layers[z].GetRegion(regionX, regionY)!
                 .SetMaterialIdAtIndex(
                     localIndex,
-                    materialId);
+                    z < filledLayers
+                        ? materialId
+                        : (ushort)0);
         }
 
         _surfaceHeights[columnIndex] =
