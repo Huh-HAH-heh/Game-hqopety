@@ -543,11 +543,11 @@ public sealed class MapRenderSystem : IDisposable
         Vector2f bottomLeft = new Vector2f(left, bottom);
 
         _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color);
-        _terrainVertices[_terrainVertexCount++] = new Vertex(topRight, color);
-        _terrainVertices[_terrainVertexCount++] = new Vertex(bottomRight, color);
-        _terrainVertices[_terrainVertexCount++] = new Vertex(topLeft, color);
-        _terrainVertices[_terrainVertexCount++] = new Vertex(bottomRight, color);
-        _terrainVertices[_terrainVertexCount++] = new Vertex(bottomLeft, color);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topRight, color);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomRight, color);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(topLeft, color);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomRight, color);
+        _terrainVertices[_buildingTerrainVertexCount++] = new Vertex(bottomLeft, color);
     }
 
     private void EnsureTerrainVertexCapacity(int required)
