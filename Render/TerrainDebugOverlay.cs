@@ -340,6 +340,11 @@ public sealed class TerrainDebugOverlay : IDisposable
             Text.Styles.Bold);
     }
 
+    public bool IsSettingsPanelHit(Vector2i point)
+    {
+        return _panel.GetGlobalBounds().Contains(point);
+    }
+
     public bool IsSliderHit(
         Vector2i point,
         out TerrainOverlayActionType sliderType)
@@ -468,6 +473,11 @@ public sealed class TerrainDebugOverlay : IDisposable
         bool settingsOpen,
         Vector2i uiMousePosition)
     {
+        _toolbar.FillColor =
+            _toolbar.GetGlobalBounds().Contains(uiMousePosition)
+                ? new Color(34, 45, 59, 250)
+                : new Color(20, 28, 38, 245);
+
         window.Draw(_toolbar);
 
         if (_font != null && _toolbarLabel != null)
