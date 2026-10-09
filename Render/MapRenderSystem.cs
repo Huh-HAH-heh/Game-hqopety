@@ -77,7 +77,7 @@ void main()
     float surfaceLayer = gl_TexCoord[0].x;
     float voxelLayer = gl_TexCoord[0].y;
 
-    if (abs(voxelLayer - uVisibleLayer) > 0.5)
+    if (voxelLayer < uVisibleLayer)
         discard;
 
     float heightFraction = clamp(surfaceLayer, 0.0, 499.0) / 499.0;
@@ -94,6 +94,8 @@ void main()
 
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
+
+    private float[] _smoothedChunkHeights = Array.Empty<float>();
 
     private bool _mapCacheValid;
     private bool _gridCacheValid;
@@ -377,7 +379,11 @@ void main()
         float tilePixelSize,
         int visibleMaxLayer)
     {
-        int layerCacheKey = visibleMaxLayer;
+        // Shader filtering keeps cached terrain geometry valid across Z-slices.
+        int layerCacheKey =
+            _terrainLayerShader == null
+                ? visibleMaxLayer
+                : -1;
         int geometryMaxLayer = visibleMaxLayer;
 
         if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
@@ -490,19 +496,69 @@ void main()
             worldMap.MaxTileY,
             minTileY + TerrainRegion.TilesPerSide - 1);
 
-        for (int y = minTileY; y <= maxTileY; y += lodStep)
+        int columnCount = (maxTileX - minTileX) / lodStep + 1;
+        int rowCount = (maxTileY - minTileY) / lodStep + 1;
+        int vertexStride = TerrainRegion.TilesPerSide + 4;
+        int requiredSmoothCapacity = vertexStride * vertexStride;
+
+        if (_smoothedChunkHeights.Length < requiredSmoothCapacity)
+            Array.Resize(ref _smoothedChunkHeights, requiredSmoothCapacity);
+
+        // Cache each shared corner once per chunk. Without this scratch grid,
+        // four neighbouring cells repeatedly sample the same four heights.
+        int smoothingLayer =
+            _terrainLayerShader != null
+                ? 0
+                : visibleMaxLayer;
+
+        for (int row = 0; row <= rowCount; row++)
         {
-            for (int x = minTileX; x <= maxTileX; x += lodStep)
+            int y = minTileY + row * lodStep;
+            int offset = row * vertexStride;
+
+            for (int column = 0; column <= columnCount; column++)
             {
-                // A flat Z slice needs one surface quad per occupied XY cell,
-                // not every voxel below that surface.
-                if (worldMap.GetMaterialId(x, y, visibleMaxLayer) == 0)
+                int x = minTileX + column * lodStep;
+
+                _smoothedChunkHeights[offset + column] =
+                    GetSmoothedSurfaceLayer(
+                        worldMap,
+                        x,
+                        y,
+                        smoothingLayer);
+            }
+        }
+
+        for (int row = 0; row < rowCount; row++)
+        {
+            int y = minTileY + row * lodStep;
+            int topOffset = row * vertexStride;
+            int bottomOffset = (row + 1) * vertexStride;
+
+            for (int column = 0; column < columnCount; column++)
+            {
+                int x = minTileX + column * lodStep;
+                int surfaceLayer = worldMap.GetSurfaceLayer(x, y);
+
+                if (surfaceLayer < 0)
                     continue;
 
-                float topLeftHeight = GetSmoothedSurfaceLayer(worldMap, x, y, visibleMaxLayer);
-                float topRightHeight = GetSmoothedSurfaceLayer(worldMap, x + lodStep, y, visibleMaxLayer);
-                float bottomRightHeight = GetSmoothedSurfaceLayer(worldMap, x + lodStep, y + lodStep, visibleMaxLayer);
-                float bottomLeftHeight = GetSmoothedSurfaceLayer(worldMap, x, y + lodStep, visibleMaxLayer);
+                // The generated terrain fills each column from ground to its
+                // surface. The CPU fallback still checks the exact selected layer.
+                if (_terrainLayerShader == null &&
+                    worldMap.GetMaterialId(x, y, visibleMaxLayer) == 0)
+                {
+                    continue;
+                }
+
+                float topLeftHeight =
+                    _smoothedChunkHeights[topOffset + column];
+                float topRightHeight =
+                    _smoothedChunkHeights[topOffset + column + 1];
+                float bottomRightHeight =
+                    _smoothedChunkHeights[bottomOffset + column + 1];
+                float bottomLeftHeight =
+                    _smoothedChunkHeights[bottomOffset + column];
 
                 float left = x * tilePixelSize;
                 float top = y * tilePixelSize;
@@ -518,7 +574,7 @@ void main()
                     topRightHeight,
                     bottomRightHeight,
                     bottomLeftHeight,
-                    visibleMaxLayer);
+                    surfaceLayer);
             }
         }
 
@@ -801,6 +857,7 @@ void main()
         _gridVertices.Dispose();
         _waterVertices.Dispose();
          _terrainVertices = Array.Empty<Vertex>();
+        _smoothedChunkHeights = Array.Empty<float>();
     }
 
     private static void AppendQuad(
