@@ -129,6 +129,30 @@ public sealed class WorldMap
             : (ushort)0;
     }
 
+    // Renderer representation: draw one face per 5 m macro-block,
+    // while detailed columns continue to render every 1 m level.
+    public ushort GetRenderMaterialId(int x, int y, int z)
+    {
+        if (!IsInside(x, y) || z < 0 || z >= LayerCount)
+            return 0;
+
+        int columnIndex = GetColumnIndex(x, y);
+        if (_detailedColumns.TryGetValue(columnIndex, out DetailedTerrainColumn? detailed))
+            return detailed.Materials[z];
+
+        int blockStep = MacroBlockHeightUnits / LayerHeightUnits;
+        if (z % blockStep != 0)
+            return 0;
+
+        return GetMaterialId(x, y, z);
+    }
+
+    public bool IsDetailedColumn(int x, int y)
+    {
+        return IsInside(x, y) &&
+            _detailedColumns.ContainsKey(GetColumnIndex(x, y));
+    }
+
     public void SetMaterialId(int x, int y, int z, ushort materialId)
     {
         if (!IsInside(x, y) || z < 0 || z >= LayerCount)
