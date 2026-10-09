@@ -64,8 +64,8 @@ public sealed class GameMenuOverlay : IDisposable
 {
     private static readonly GameResolution[] SupportedResolutions =
     {
-        new(1024, 768),
         new(1280, 720),
+        new(1024, 768),
         new(1366, 768),
         new(1600, 900),
         new(1920, 1080)
