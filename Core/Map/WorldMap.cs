@@ -545,7 +545,7 @@ public sealed class WorldMap
         _rangeCache[columnIndex] = null;
 
         // Only touch the old/new occupied height span.
-        // This avoids clearing all 50 voxels and then refilling the column
+        // This avoids clearing and refilling unused vertical layers
         // whenever a terrain generator replaces its height.
         int layersToUpdate =
             Math.Max(
@@ -571,7 +571,7 @@ public sealed class WorldMap
     // ============================================================
     // SURFACE HEIGHT CACHE
     // Height remains available to movement / ballistic systems.
-    // One layer represents one meter; height units remain decimeters.
+    // One Z layer represents 0.1 m; stored height units remain decimeters.
     // ============================================================
 
     public ushort GetSurfaceHeightUnits(
