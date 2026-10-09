@@ -41,21 +41,29 @@ public static class WorldGenerator
                 1,
                 worldMap.TileHeight / 12);
 
+        float[] canyonFloorY =
+            new float[worldMap.TileWidth];
+
+        // The centerline depends only on X; compute it once rather than
+        // evaluating three trigonometric functions for every map cell.
+        for (int x = 0; x < worldMap.TileWidth; x++)
+        {
+            float dx =
+                x - centerX;
+
+            canyonFloorY[x] =
+                centerY +
+                MathF.Sin(dx * 0.018f) * 8f +
+                MathF.Sin(dx * 0.006f) * 16f +
+                MathF.Sin(dx * 0.061f) * 2f;
+        }
+
         for (int y = 0; y < worldMap.TileHeight; y++)
         {
             for (int x = 0; x < worldMap.TileWidth; x++)
             {
-                float dx =
-                    x - centerX;
-
-                float canyonCenterY =
-                    centerY +
-                    MathF.Sin(dx * 0.018f) * 8f +
-                    MathF.Sin(dx * 0.006f) * 16f +
-                    MathF.Sin(dx * 0.061f) * 2f;
-
                 float distanceFromFloor =
-                    MathF.Abs(y - canyonCenterY);
+                    MathF.Abs(y - canyonFloorY[x]);
 
                 int heightLayers =
                     1 +
