@@ -33,9 +33,10 @@ public sealed class GameRenderer
 
     private RenderWindow _window = null!;
     private View? _uiView;
-    private TerrainDebugOverlay? _terrainDebugOverlay;
-    private TerrainOverlayActionType? _draggingTerrainSlider;
-    private bool _terrainSettingsOpen;
+    private GameMenuOverlay? _gameMenuOverlay;
+    private GameMenuActionType? _draggingMenuSlider;
+    private GameMenuPage _menuPage;
+    private int _selectedResolutionIndex;
     private bool _showTerrainExtrema;
     private bool _closeRequested;
 
@@ -138,7 +139,7 @@ public sealed class GameRenderer
 
         // Release GPU resources while the graphics context still exists.
         _mapRenderer.Dispose();
-        _terrainDebugOverlay?.Dispose();
+        _gameMenuOverlay?.Dispose();
         _uiView?.Dispose();
         _window.Close();
     }
@@ -275,32 +276,31 @@ public sealed class GameRenderer
 
         if (_terrainStressMode)
         {
-            _terrainDebugOverlay?.DrawWorldMarkers(
+            _gameMenuOverlay?.DrawWorldMarkers(
                 _window,
                 _worldMap,
                 TerrainTilePixelSize,
                 _camera.ZoomLevel,
                 _showTerrainExtrema);
+        }
 
-            if (_uiView != null)
-            {
-                _window.SetView(_uiView);
+        if (_uiView != null)
+        {
+            _window.SetView(_uiView);
 
-                Vector2i mousePixels = Mouse.GetPosition(_window);
-                Vector2f uiMouseCoordinates =
-                    _window.MapPixelToCoords(mousePixels, _uiView);
+            Vector2i mousePixels = Mouse.GetPosition(_window);
+            Vector2f uiMouseCoordinates =
+                _window.MapPixelToCoords(mousePixels, _uiView);
 
-                _terrainDebugOverlay?.DrawScreen(
-                    _window,
-                    _worldMap,
-                    _camera.View,
-                    TerrainTilePixelSize,
-                    GetTerrainSettingsSnapshot(),
-                    _terrainSettingsOpen,
-                    new Vector2i(
-                        (int)uiMouseCoordinates.X,
-                        (int)uiMouseCoordinates.Y));
-            }
+            _gameMenuOverlay?.Draw(
+                _window,
+                _window.Size.X,
+                _window.Size.Y,
+                _menuPage,
+                GetGameSettingsSnapshot(),
+                new Vector2i(
+                    (int)uiMouseCoordinates.X,
+                    (int)uiMouseCoordinates.Y));
         }
 
         if (_titleTimer >= 0.25f)
@@ -490,31 +490,23 @@ public sealed class GameRenderer
                 "RimClone");
 
         _window.SetFramerateLimit(60);
-        _uiView = _window.DefaultView;
-        _terrainDebugOverlay = new TerrainDebugOverlay();
+        _uiView = CreateUiView(_window.Size);
+        _gameMenuOverlay = new GameMenuOverlay();
+        _selectedResolutionIndex = 0;
 
         _window.Closed +=
             (_, _) =>
                 _closeRequested = true;
 
+        _window.Resized +=
+            (_, e) =>
+                UpdateWindowViews(e.Size);
+
         _window.MouseWheelScrolled +=
             (_, e) =>
             {
-                Vector2f uiCoordinates =
-                    _uiView != null
-                        ? _window.MapPixelToCoords(e.Position, _uiView)
-                        : new Vector2f(e.Position.X, e.Position.Y);
-
-                Vector2i uiPosition = new Vector2i(
-                    (int)uiCoordinates.X,
-                    (int)uiCoordinates.Y);
-
-                if (_terrainStressMode &&
-                    _terrainSettingsOpen &&
-                    _terrainDebugOverlay?.IsSettingsPanelHit(uiPosition) == true)
-                {
+                if (_menuPage != GameMenuPage.Closed)
                     return;
-                }
 
                 bool shiftPressed =
                     Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
@@ -534,8 +526,7 @@ public sealed class GameRenderer
             (_, e) =>
             {
                 if (e.Button != Mouse.Button.Left ||
-                    !_terrainStressMode ||
-                    _terrainDebugOverlay == null)
+                    _gameMenuOverlay == null)
                 {
                     return;
                 }
@@ -549,40 +540,40 @@ public sealed class GameRenderer
                     (int)uiCoordinates.X,
                     (int)uiCoordinates.Y);
 
-                if (_terrainSettingsOpen &&
-                    _terrainDebugOverlay.IsSliderHit(
+                if (_gameMenuOverlay.IsSliderHit(
+                        _menuPage,
                         uiPosition,
-                        out TerrainOverlayActionType sliderType))
+                        out GameMenuActionType sliderType))
                 {
-                    _draggingTerrainSlider = sliderType;
-                    ApplyTerrainOverlayAction(
-                        _terrainDebugOverlay.GetSliderAction(
+                    _draggingMenuSlider = sliderType;
+                    ApplyGameMenuAction(
+                        _gameMenuOverlay.GetSliderAction(
                             sliderType,
                             uiPosition.X,
                             _worldMap.LayerCount));
                     return;
                 }
 
-                _draggingTerrainSlider = null;
+                _draggingMenuSlider = null;
 
-                TerrainOverlayAction? action =
-                    _terrainDebugOverlay.HandleClick(
+                GameMenuAction? action =
+                    _gameMenuOverlay.HandleClick(
                         uiPosition,
-                        _terrainSettingsOpen,
+                        _menuPage,
+                        _selectedResolutionIndex,
                         _visibleMaxLayer,
                         _worldMap.LayerCount);
 
                 if (action.HasValue)
-                    ApplyTerrainOverlayAction(action.Value);
+                    ApplyGameMenuAction(action.Value);
             };
 
         _window.MouseMoved +=
             (_, e) =>
             {
-                if (!_draggingTerrainSlider.HasValue ||
-                    !_terrainSettingsOpen ||
-                    !_terrainStressMode ||
-                    _terrainDebugOverlay == null)
+                if (!_draggingMenuSlider.HasValue ||
+                    _menuPage != GameMenuPage.Settings ||
+                    _gameMenuOverlay == null)
                 {
                     return;
                 }
@@ -592,9 +583,9 @@ public sealed class GameRenderer
                         ? _window.MapPixelToCoords(e.Position, _uiView)
                         : new Vector2f(e.Position.X, e.Position.Y);
 
-                ApplyTerrainOverlayAction(
-                    _terrainDebugOverlay.GetSliderAction(
-                        _draggingTerrainSlider.Value,
+                ApplyGameMenuAction(
+                    _gameMenuOverlay.GetSliderAction(
+                        _draggingMenuSlider.Value,
                         (int)uiCoordinates.X,
                         _worldMap.LayerCount));
             };
@@ -603,7 +594,7 @@ public sealed class GameRenderer
             (_, e) =>
             {
                 if (e.Button == Mouse.Button.Left)
-                    _draggingTerrainSlider = null;
+                    _draggingMenuSlider = null;
             };
 
         _window.KeyPressed +=
@@ -633,10 +624,24 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.F2 && _terrainStressMode)
+        if (key == Keyboard.Key.F2)
         {
-            _terrainSettingsOpen = !_terrainSettingsOpen;
-            _draggingTerrainSlider = null;
+            _menuPage = _menuPage == GameMenuPage.Settings
+                ? GameMenuPage.Closed
+                : GameMenuPage.Settings;
+            _draggingMenuSlider = null;
+            return;
+        }
+
+        if (key == Keyboard.Key.Escape)
+        {
+            _menuPage = _menuPage switch
+            {
+                GameMenuPage.Settings => GameMenuPage.Main,
+                GameMenuPage.Main => GameMenuPage.Closed,
+                _ => GameMenuPage.Closed
+            };
+            _draggingMenuSlider = null;
             return;
         }
 
@@ -863,34 +868,69 @@ public sealed class GameRenderer
         }
     }
 
-    private TerrainSettingsSnapshot GetTerrainSettingsSnapshot()
+    private GameSettingsSnapshot GetGameSettingsSnapshot()
     {
-        return new TerrainSettingsSnapshot(
+        Vector2u currentSize = _window.Size;
+
+        return new GameSettingsSnapshot(
             _visibleMaxLayer,
             _showDebugGrid,
             _showTerrainExtrema,
             _mapRenderer.BaseGray,
             _mapRenderer.HeightContrast,
             _mapRenderer.DepthShade,
-            _mapRenderer.LayerScreenOffset);
+            _mapRenderer.LayerScreenOffset,
+            _worldMap.LayerCount,
+            _selectedResolutionIndex,
+            currentSize.X,
+            currentSize.Y);
     }
 
-    private void ApplyTerrainOverlayAction(
-        TerrainOverlayAction action)
+    private void ApplyGameMenuAction(GameMenuAction action)
     {
         switch (action.Type)
         {
-            case TerrainOverlayActionType.ToggleWindow:
-                _terrainSettingsOpen = !_terrainSettingsOpen;
-                _draggingTerrainSlider = null;
+            case GameMenuActionType.OpenMainMenu:
+                _menuPage = GameMenuPage.Main;
+                _draggingMenuSlider = null;
                 break;
 
-            case TerrainOverlayActionType.CloseWindow:
-                _terrainSettingsOpen = false;
-                _draggingTerrainSlider = null;
+            case GameMenuActionType.Resume:
+                _menuPage = GameMenuPage.Closed;
+                _draggingMenuSlider = null;
                 break;
 
-            case TerrainOverlayActionType.SetBaseGray:
+            case GameMenuActionType.OpenSettings:
+                _menuPage = GameMenuPage.Settings;
+                _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.BackToMainMenu:
+                _menuPage = GameMenuPage.Main;
+                _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.Exit:
+                _closeRequested = true;
+                break;
+
+            case GameMenuActionType.PreviousResolution:
+                _selectedResolutionIndex =
+                    (_selectedResolutionIndex - 1 + GameMenuOverlay.ResolutionCount) %
+                    GameMenuOverlay.ResolutionCount;
+                break;
+
+            case GameMenuActionType.NextResolution:
+                _selectedResolutionIndex =
+                    (_selectedResolutionIndex + 1) %
+                    GameMenuOverlay.ResolutionCount;
+                break;
+
+            case GameMenuActionType.ApplyResolution:
+                ApplySelectedResolution();
+                break;
+
+            case GameMenuActionType.SetBaseGray:
                 _mapRenderer.SetVisualSettings(
                     action.Value,
                     _mapRenderer.HeightContrast,
@@ -898,7 +938,7 @@ public sealed class GameRenderer
                     _mapRenderer.LayerScreenOffset);
                 break;
 
-            case TerrainOverlayActionType.SetHeightContrast:
+            case GameMenuActionType.SetHeightContrast:
                 _mapRenderer.SetVisualSettings(
                     _mapRenderer.BaseGray,
                     action.Value,
@@ -906,7 +946,7 @@ public sealed class GameRenderer
                     _mapRenderer.LayerScreenOffset);
                 break;
 
-            case TerrainOverlayActionType.SetDepthShade:
+            case GameMenuActionType.SetDepthShade:
                 _mapRenderer.SetVisualSettings(
                     _mapRenderer.BaseGray,
                     _mapRenderer.HeightContrast,
@@ -914,7 +954,7 @@ public sealed class GameRenderer
                     _mapRenderer.LayerScreenOffset);
                 break;
 
-            case TerrainOverlayActionType.SetLayerOffset:
+            case GameMenuActionType.SetLayerOffset:
                 _mapRenderer.SetVisualSettings(
                     _mapRenderer.BaseGray,
                     _mapRenderer.HeightContrast,
@@ -922,29 +962,55 @@ public sealed class GameRenderer
                     action.Value);
                 break;
 
-            case TerrainOverlayActionType.SetLayer:
-                _visibleMaxLayer =
-                    Math.Clamp(
-                        action.Layer,
-                        0,
-                        _worldMap.LayerCount - 1);
+            case GameMenuActionType.SetLayer:
+                _visibleMaxLayer = Math.Clamp(
+                    action.Layer,
+                    0,
+                    _worldMap.LayerCount - 1);
                 break;
 
-            case TerrainOverlayActionType.ToggleGrid:
+            case GameMenuActionType.ToggleGrid:
                 _showDebugGrid = !_showDebugGrid;
                 break;
 
-            case TerrainOverlayActionType.ToggleExtrema:
+            case GameMenuActionType.ToggleExtrema:
                 _showTerrainExtrema = !_showTerrainExtrema;
                 break;
 
-            case TerrainOverlayActionType.ResetSettings:
+            case GameMenuActionType.ResetTerrainSettings:
                 _mapRenderer.ResetVisualSettings();
                 _showDebugGrid = false;
                 _showTerrainExtrema = false;
                 _visibleMaxLayer = _worldMap.LayerCount - 1;
                 break;
         }
+    }
+
+    private void ApplySelectedResolution()
+    {
+        GameResolution resolution =
+            GameMenuOverlay.GetResolution(_selectedResolutionIndex);
+
+        _window.Size = new Vector2u(resolution.Width, resolution.Height);
+        UpdateWindowViews(_window.Size);
+    }
+
+    private static View CreateUiView(Vector2u size)
+    {
+        return new View(
+            new Vector2f(size.X * 0.5f, size.Y * 0.5f),
+            new Vector2f(size.X, size.Y));
+    }
+
+    private void UpdateWindowViews(Vector2u size)
+    {
+        if (size.X == 0 || size.Y == 0)
+            return;
+
+        _camera.Resize(new Vector2f(size.X, size.Y));
+
+        _uiView?.Dispose();
+        _uiView = CreateUiView(size);
     }
 
     private void ScrollTerrainLayers(
@@ -988,8 +1054,8 @@ public sealed class GameRenderer
         _mapRenderer.ResetVisualSettings();
         _showDebugGrid = false;
         _showTerrainExtrema = false;
-        _terrainSettingsOpen = false;
-        _draggingTerrainSlider = null;
+        _menuPage = GameMenuPage.Closed;
+        _draggingMenuSlider = null;
 
         _selectedUnit = default;
 
