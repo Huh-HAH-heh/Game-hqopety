@@ -735,8 +735,15 @@ public sealed class GameMenuOverlay : IDisposable
             worldMap.MaxTileY - lodStep,
             (int)MathF.Ceiling(screenMaxY / tilePixelSize) + 1);
 
-        minX = (minX / lodStep) * lodStep;
-        minY = (minY / lodStep) * lodStep;
+        const int contourChunkSize = TerrainRegion.TilesPerSide;
+        minX = (minX / contourChunkSize) * contourChunkSize;
+        minY = (minY / contourChunkSize) * contourChunkSize;
+        maxX = Math.Min(
+            worldMap.MaxTileX - lodStep,
+            ((maxX / contourChunkSize) + 1) * contourChunkSize - lodStep);
+        maxY = Math.Min(
+            worldMap.MaxTileY - lodStep,
+            ((maxY / contourChunkSize) + 1) * contourChunkSize - lodStep);
 
         bool cacheMatches =
             _contourCacheValid &&
@@ -854,6 +861,7 @@ public sealed class GameMenuOverlay : IDisposable
 
             float lastLabelX = float.NaN;
             float lastLabelY = float.NaN;
+            Span<Vector2f> crossings = stackalloc Vector2f[4];
 
             for (int y = minY; y <= maxY; y += lodStep)
             {
@@ -879,7 +887,6 @@ public sealed class GameMenuOverlay : IDisposable
                     float y0 = (y + 0.5f) * tilePixelSize;
                     float y1 = (y + lodStep + 0.5f) * tilePixelSize;
 
-                    Span<Vector2f> crossings = stackalloc Vector2f[4];
                     int crossingCount = 0;
 
                     TryAddContourIntersection(
