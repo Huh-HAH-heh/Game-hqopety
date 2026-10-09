@@ -410,14 +410,15 @@ public sealed class TerrainDebugOverlay : IDisposable
         View cameraView,
         float tilePixelSize,
         bool heightMapMode,
-        int visibleMaxLayer)
+        int visibleMaxLayer,
+        Vector2i uiMousePosition)
     {
         RefreshExtremes(worldMap);
         RefreshStyle(
             heightMapMode,
             visibleMaxLayer,
             worldMap.LayerCount,
-            Mouse.GetPosition(window));
+            uiMousePosition);
 
         window.Draw(_panel);
         window.Draw(_accent);
