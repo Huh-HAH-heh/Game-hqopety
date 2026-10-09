@@ -32,6 +32,7 @@ public enum GameMenuActionType
     ToggleGrid,
     ToggleExtrema,
     ToggleHeightContours,
+    ToggleContourLabels,
     ResetTerrainSettings
 }
 
@@ -45,6 +46,7 @@ public readonly record struct GameSettingsSnapshot(
     bool ShowGrid,
     bool ShowExtrema,
     bool ShowHeightContours,
+    bool ShowContourLabels,
     float BaseGray,
     float HeightContrast,
     int LayerCount,
@@ -177,6 +179,7 @@ public sealed class GameMenuOverlay : IDisposable
     private const float SettingsHeight = 620f;
     private const float MainWidth = 390f;
     private const float MainHeight = 310f;
+    private const float MaxContourLabelZoom = 2.5f;
 
     private readonly record struct HeightContourChunkKey(int RegionIndex, int LodStep);
 
@@ -311,9 +314,10 @@ void main()
     private readonly RectangleShape _resolutionPrevious = ButtonShape(34f, 36f);
     private readonly RectangleShape _resolutionNext = ButtonShape(34f, 36f);
     private readonly RectangleShape _applyResolution = ButtonShape(168f, 36f);
-    private readonly RectangleShape _gridButton = ButtonShape(180f, 34f);
-    private readonly RectangleShape _extremaButton = ButtonShape(180f, 34f);
-    private readonly RectangleShape _contoursButton = ButtonShape(180f, 34f);
+    private readonly RectangleShape _gridButton = ButtonShape(136f, 34f);
+    private readonly RectangleShape _extremaButton = ButtonShape(136f, 34f);
+    private readonly RectangleShape _contoursButton = ButtonShape(136f, 34f);
+    private readonly RectangleShape _contourLabelsButton = ButtonShape(136f, 34f);
 
     private readonly RectangleShape _resolutionBox =
         new RectangleShape(new Vector2f(232f, 36f))
@@ -375,6 +379,7 @@ void main()
     private readonly Text? _gridLabel;
     private readonly Text? _extremaLabel;
     private readonly Text? _contoursLabel;
+    private readonly Text? _contourLabelsLabel;
     private readonly Text? _toneHeading;
     private readonly Text? _toneLowLabel;
     private readonly Text? _toneHighLabel;
@@ -385,6 +390,7 @@ void main()
     private string _lastGridLabel = string.Empty;
     private string _lastExtremaLabel = string.Empty;
     private string _lastContoursLabel = string.Empty;
+    private string _lastContourLabelsLabel = string.Empty;
     private string _lastResolution = string.Empty;
     private string _lastAppliedResolution = string.Empty;
 
@@ -519,6 +525,8 @@ void main()
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _contoursLabel = CreateText(
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _contourLabelsLabel = CreateText(
+            "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _toneHeading = CreateText(
             "ПРЕВЬЮ МОНОХРОМНОГО ТОНА", 11,
             new Color(195, 204, 215), new Vector2f(0f, 0f), Text.Styles.Bold);
@@ -557,6 +565,7 @@ void main()
             _gridLabel,
             _extremaLabel,
             _contoursLabel,
+            _contourLabelsLabel,
             _toneHeading,
             _toneLowLabel,
             _toneHighLabel,
@@ -682,6 +691,11 @@ void main()
             return new GameMenuAction(GameMenuActionType.ToggleHeightContours);
         }
 
+        if (_contourLabelsButton.GetGlobalBounds().Contains(point))
+        {
+            return new GameMenuAction(GameMenuActionType.ToggleContourLabels);
+        }
+
         if (_resetButton.GetGlobalBounds().Contains(point))
         {
             return new GameMenuAction(GameMenuActionType.ResetTerrainSettings);
@@ -703,7 +717,8 @@ void main()
         bool showExtrema,
         View cameraView,
         int visibleMaxLayer,
-        bool showHeightContours)
+        bool showHeightContours,
+        bool showContourLabels)
     {
         if (showHeightContours)
         {
@@ -713,7 +728,8 @@ void main()
                 tilePixelSize,
                 zoomLevel,
                 cameraView,
-                visibleMaxLayer);
+                visibleMaxLayer,
+                showContourLabels);
         }
 
         if (!showExtrema)
@@ -778,8 +794,12 @@ void main()
         float tilePixelSize,
         float zoomLevel,
         View cameraView,
-        int visibleMaxLayer)
+        int visibleMaxLayer,
+        bool showContourLabels)
     {
+        bool drawContourLabels =
+            showContourLabels && zoomLevel < MaxContourLabelZoom;
+
         float screenMinX = cameraView.Center.X - cameraView.Size.X * 0.5f;
         float screenMaxX = cameraView.Center.X + cameraView.Size.X * 0.5f;
         float screenMinY = cameraView.Center.Y - cameraView.Size.Y * 0.5f;
@@ -891,6 +911,9 @@ void main()
                     window.Draw(level.FallbackVertices);
                 }
 
+                if (!drawContourLabels)
+                    continue;
+
                 for (int labelIndex = 0; labelIndex < level.Labels.Count; labelIndex++)
                 {
                     Text label = level.Labels[labelIndex];
@@ -948,7 +971,8 @@ void main()
         }
 
         const int contourIntervalUnits = 50;
-        bool allowLabels = _font != null && ((regionX + regionY * 2) % 3 == 0);
+        bool allowLabels = _font != null;
+        float minLabelSpacing = TerrainRegion.TilesPerSide * tilePixelSize * 0.65f;
         Span<Vector2f> crossings = stackalloc Vector2f[4];
 
         for (int contourHeight = contourIntervalUnits;
@@ -966,7 +990,9 @@ void main()
                 contourHeight % 100 == 0 ||
                 contourHeight % 250 == 0;
 
-            bool labelAdded = false;
+            int labelsAdded = 0;
+            Vector2f lastLabelPosition = default;
+            bool hasLastLabelPosition = false;
 
             Color lineColor = isIndexContour
                 ? new Color(105, 105, 105, 185)
@@ -1021,12 +1047,20 @@ void main()
                             lineColor);
                     }
 
-                    if (!isIndexContour || !allowLabels || labelAdded)
+                    if (!isIndexContour || !allowLabels || labelsAdded >= 3)
                         continue;
 
                     Vector2f midpoint = new Vector2f(
                         (crossings[0].X + crossings[1].X) * 0.5f,
                         (crossings[0].Y + crossings[1].Y) * 0.5f);
+
+                    if (hasLastLabelPosition)
+                    {
+                        float dx = midpoint.X - lastLabelPosition.X;
+                        float dy = midpoint.Y - lastLabelPosition.Y;
+                        if (dx * dx + dy * dy < minLabelSpacing * minLabelSpacing)
+                            continue;
+                    }
 
                     Text label = new Text(
                         _font!,
@@ -1041,7 +1075,9 @@ void main()
                     };
 
                     level.Labels.Add(label);
-                    labelAdded = true;
+                    lastLabelPosition = midpoint;
+                    hasLastLabelPosition = true;
+                    labelsAdded++;
                 }
             }
 
@@ -1317,11 +1353,13 @@ void main()
         }
 
         _gridButton.Position = new Vector2f(settingsX + 22f, settingsY + 442f);
-        _extremaButton.Position = new Vector2f(settingsX + 210f, settingsY + 442f);
-        _contoursButton.Position = new Vector2f(settingsX + 398f, settingsY + 442f);
-        _gridLabel!.Position = new Vector2f(settingsX + 78f, settingsY + 451f);
-        _extremaLabel!.Position = new Vector2f(settingsX + 258f, settingsY + 451f);
-        _contoursLabel!.Position = new Vector2f(settingsX + 448f, settingsY + 451f);
+        _extremaButton.Position = new Vector2f(settingsX + 166f, settingsY + 442f);
+        _contoursButton.Position = new Vector2f(settingsX + 310f, settingsY + 442f);
+        _contourLabelsButton.Position = new Vector2f(settingsX + 454f, settingsY + 442f);
+        _gridLabel!.Position = new Vector2f(settingsX + 58f, settingsY + 451f);
+        _extremaLabel!.Position = new Vector2f(settingsX + 201f, settingsY + 451f);
+        _contoursLabel!.Position = new Vector2f(settingsX + 335f, settingsY + 451f);
+        _contourLabelsLabel!.Position = new Vector2f(settingsX + 493f, settingsY + 451f);
 
         _toneHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 488f);
         _toneLowLabel!.Position = new Vector2f(settingsX + 22f, settingsY + 520f);
@@ -1373,7 +1411,12 @@ void main()
         SetText(
             _contoursLabel,
             ref _lastContoursLabel,
-            settings.ShowHeightContours ? "ГОРИЗОНТАЛИ: ВКЛ" : "ГОРИЗОНТАЛИ: ВЫКЛ");
+            settings.ShowHeightContours ? "ЛИНИИ: ВКЛ" : "ЛИНИИ: ВЫКЛ");
+
+        SetText(
+            _contourLabelsLabel,
+            ref _lastContourLabelsLabel,
+            settings.ShowContourLabels ? "ЦИФРЫ: ВКЛ" : "ЦИФРЫ: ВЫКЛ");
 
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
@@ -1411,6 +1454,7 @@ void main()
         UpdateHover(_gridButton, mouse);
         UpdateHover(_extremaButton, mouse);
         UpdateHover(_contoursButton, mouse);
+        UpdateHover(_contourLabelsButton, mouse);
         UpdateHover(_resetButton, mouse);
         UpdateHover(_backButton, mouse);
 
@@ -1421,6 +1465,9 @@ void main()
             ? new Color(63, 75, 90)
             : new Color(27, 34, 44);
         _contoursButton.FillColor = settings.ShowHeightContours
+            ? new Color(63, 75, 90)
+            : new Color(27, 34, 44);
+        _contourLabelsButton.FillColor = settings.ShowContourLabels
             ? new Color(63, 75, 90)
             : new Color(27, 34, 44);
 
@@ -1435,6 +1482,7 @@ void main()
         window.Draw(_gridButton);
         window.Draw(_extremaButton);
         window.Draw(_contoursButton);
+        window.Draw(_contourLabelsButton);
         window.Draw(_resetButton);
         window.Draw(_backButton);
 
