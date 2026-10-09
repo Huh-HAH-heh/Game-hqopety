@@ -377,6 +377,14 @@ public sealed class TerrainDebugOverlay : IDisposable
         _minimumHeightUnits = ushort.MaxValue;
         _maximumHeightUnits = 0;
 
+        long centerX = worldMap.TileWidth / 2;
+        long centerY = worldMap.TileHeight / 2;
+        long nearestMinimumDistance = long.MaxValue;
+        long nearestMaximumDistance = long.MaxValue;
+
+        // Prefer extrema nearest to the center of the test camera instead of
+        // arbitrarily picking one at the map edge. This makes both markers
+        // visible immediately on launch.
         for (int y = 0; y < worldMap.TileHeight; y++)
         {
             for (int x = 0; x < worldMap.TileWidth; x++)
@@ -387,18 +395,30 @@ public sealed class TerrainDebugOverlay : IDisposable
                 if (height == 0)
                     continue;
 
-                if (height < _minimumHeightUnits)
+                long dx = x - centerX;
+                long dy = y - centerY;
+                long distance = dx * dx + dy * dy;
+
+                if (height < _minimumHeightUnits ||
+                    (height == _minimumHeightUnits &&
+                     (distance < nearestMinimumDistance ||
+                      (distance == nearestMinimumDistance && y > _minimumY))))
                 {
                     _minimumHeightUnits = height;
                     _minimumX = x;
                     _minimumY = y;
+                    nearestMinimumDistance = distance;
                 }
 
-                if (height > _maximumHeightUnits)
+                if (height > _maximumHeightUnits ||
+                    (height == _maximumHeightUnits &&
+                     (distance < nearestMaximumDistance ||
+                      (distance == nearestMaximumDistance && y > _maximumY))))
                 {
                     _maximumHeightUnits = height;
                     _maximumX = x;
                     _maximumY = y;
+                    nearestMaximumDistance = distance;
                 }
             }
         }
