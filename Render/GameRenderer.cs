@@ -288,9 +288,8 @@ public sealed class GameRenderer
                     _worldMap,
                     _camera.View,
                     TerrainTilePixelSize,
-                    _camera.ZoomLevel,
-                    _visibleMaxLayer,
-                    _mapRenderer.HeightMapMode);
+                    _mapRenderer.HeightMapMode,
+                    _visibleMaxLayer);
             }
         }
 
@@ -503,6 +502,26 @@ public sealed class GameRenderer
                 }
 
                 _camera.HandleZoom(e.Delta);
+            };
+
+        _window.MouseButtonPressed +=
+            (_, e) =>
+            {
+                if (e.Button != Mouse.Button.Left ||
+                    !_terrainStressMode ||
+                    _terrainDebugOverlay == null)
+                {
+                    return;
+                }
+
+                TerrainOverlayAction? action =
+                    _terrainDebugOverlay.HandleClick(
+                        Mouse.GetPosition(_window),
+                        _visibleMaxLayer,
+                        _worldMap.LayerCount);
+
+                if (action.HasValue)
+                    ApplyTerrainOverlayAction(action.Value);
             };
 
         _window.KeyPressed +=
@@ -761,13 +780,35 @@ public sealed class GameRenderer
         }
     }
 
+    private void ApplyTerrainOverlayAction(
+        TerrainOverlayAction action)
+    {
+        switch (action.Type)
+        {
+            case TerrainOverlayActionType.SelectHeightMap:
+                _mapRenderer.SetHeightMapMode(true);
+                break;
+
+            case TerrainOverlayActionType.SelectVolumeSlice:
+                _mapRenderer.SetHeightMapMode(false);
+                break;
+
+            case TerrainOverlayActionType.SetLayer:
+                _mapRenderer.SetHeightMapMode(false);
+                _visibleMaxLayer =
+                    Math.Clamp(
+                        action.Layer,
+                        0,
+                        _worldMap.LayerCount - 1);
+                break;
+        }
+    }
+
     private void ScrollTerrainLayers(
         int direction)
     {
-        // PageUp/PageDown switch from the complete height map into the
-        // selected-Z volume slice so the key press always changes the view.
-        if (_mapRenderer.HeightMapMode)
-            _mapRenderer.ToggleHeightMapMode();
+        // Keyboard layer navigation switches to the cutaway mode explicitly.
+        _mapRenderer.SetHeightMapMode(false);
 
         _visibleMaxLayer =
             Math.Clamp(
