@@ -252,7 +252,7 @@ void main()
     private readonly Dictionary<HeightContourChunkKey, HeightContourChunk> _contourChunks = new();
     private readonly List<HeightContourChunk> _visibleContourChunks = new();
     private readonly List<ContourLabelCandidate> _visibleContourLabels = new();
-    private readonly List<FloatRect> _placedContourLabelBounds = new();
+    private readonly Dictionary<(int X, int Y), List<FloatRect>> _contourLabelSpatialCells = new();
     private long _contourTerrainVersion = long.MinValue;
     private long _contourFrame;
 
@@ -935,38 +935,81 @@ void main()
         float zoomLevel)
     {
         _visibleContourLabels.Sort(CompareContourLabelCandidates);
-        _placedContourLabelBounds.Clear();
+
+        foreach (List<FloatRect> cell in _contourLabelSpatialCells.Values)
+            cell.Clear();
 
         float padding = 5f * zoomLevel;
+        float cellSize = 64f * zoomLevel;
 
         for (int i = 0; i < _visibleContourLabels.Count; i++)
         {
             Text label = _visibleContourLabels[i].Label;
             FloatRect bounds = label.GetGlobalBounds();
+
+            float left = bounds.Position.X - padding;
+            float top = bounds.Position.Y - padding;
+            float right = bounds.Position.X + bounds.Size.X + padding;
+            float bottom = bounds.Position.Y + bounds.Size.Y + padding;
+
+            int minCellX = (int)MathF.Floor(left / cellSize);
+            int maxCellX = (int)MathF.Floor(right / cellSize);
+            int minCellY = (int)MathF.Floor(top / cellSize);
+            int maxCellY = (int)MathF.Floor(bottom / cellSize);
             bool overlaps = false;
 
-            for (int placedIndex = 0;
-                 placedIndex < _placedContourLabelBounds.Count;
-                 placedIndex++)
+            for (int cellY = minCellY; cellY <= maxCellY && !overlaps; cellY++)
             {
-                FloatRect placed = _placedContourLabelBounds[placedIndex];
-
-                if (bounds.Position.X < placed.Position.X + placed.Size.X + padding &&
-                    bounds.Position.X + bounds.Size.X + padding > placed.Position.X &&
-                    bounds.Position.Y < placed.Position.Y + placed.Size.Y + padding &&
-                    bounds.Position.Y + bounds.Size.Y + padding > placed.Position.Y)
+                for (int cellX = minCellX; cellX <= maxCellX && !overlaps; cellX++)
                 {
-                    overlaps = true;
-                    break;
+                    if (!_contourLabelSpatialCells.TryGetValue(
+                            (cellX, cellY), out List<FloatRect>? cell))
+                    {
+                        continue;
+                    }
+
+                    for (int placedIndex = 0; placedIndex < cell.Count; placedIndex++)
+                    {
+                        if (OverlapsWithPadding(bounds, cell[placedIndex], padding))
+                        {
+                            overlaps = true;
+                            break;
+                        }
+                    }
                 }
             }
 
             if (overlaps)
                 continue;
 
-            _placedContourLabelBounds.Add(bounds);
+            for (int cellY = minCellY; cellY <= maxCellY; cellY++)
+            {
+                for (int cellX = minCellX; cellX <= maxCellX; cellX++)
+                {
+                    if (!_contourLabelSpatialCells.TryGetValue(
+                            (cellX, cellY), out List<FloatRect>? cell))
+                    {
+                        cell = new List<FloatRect>(4);
+                        _contourLabelSpatialCells.Add((cellX, cellY), cell);
+                    }
+
+                    cell.Add(bounds);
+                }
+            }
+
             window.Draw(label);
         }
+    }
+
+    private static bool OverlapsWithPadding(
+        FloatRect left,
+        FloatRect right,
+        float padding)
+    {
+        return left.Position.X < right.Position.X + right.Size.X + padding &&
+               left.Position.X + left.Size.X + padding > right.Position.X &&
+               left.Position.Y < right.Position.Y + right.Size.Y + padding &&
+               left.Position.Y + left.Size.Y + padding > right.Position.Y;
     }
 
     private static int CompareContourLabelCandidates(
