@@ -515,12 +515,21 @@ public sealed class GameRenderer
                     return;
                 }
 
+                Vector2f uiCoordinates =
+                    _uiView != null
+                        ? _window.MapPixelToCoords(e.Position, _uiView)
+                        : new Vector2f(e.Position.X, e.Position.Y);
+
+                Vector2i uiPosition = new Vector2i(
+                    (int)uiCoordinates.X,
+                    (int)uiCoordinates.Y);
+
                 _draggingTerrainSlider =
-                    _terrainDebugOverlay.IsSliderHit(e.Position);
+                    _terrainDebugOverlay.IsSliderHit(uiPosition);
 
                 TerrainOverlayAction? action =
                     _terrainDebugOverlay.HandleClick(
-                        e.Position,
+                        uiPosition,
                         _visibleMaxLayer,
                         _worldMap.LayerCount);
 
@@ -538,11 +547,16 @@ public sealed class GameRenderer
                     return;
                 }
 
+                Vector2f uiCoordinates =
+                    _uiView != null
+                        ? _window.MapPixelToCoords(e.Position, _uiView)
+                        : new Vector2f(e.Position.X, e.Position.Y);
+
                 ApplyTerrainOverlayAction(
                     new TerrainOverlayAction(
                         TerrainOverlayActionType.SetLayer,
                         _terrainDebugOverlay.GetSliderLayerFromX(
-                            e.Position.X,
+                            (int)uiCoordinates.X,
                             _worldMap.LayerCount)));
             };
 
