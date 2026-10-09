@@ -270,25 +270,28 @@ public sealed class GameRenderer
             _unitSimulation.Projectiles,
             TerrainTilePixelSize);
 
-        _terrainDebugOverlay?.DrawWorldMarkers(
-            _window,
-            _worldMap,
-            TerrainTilePixelSize,
-            _camera.ZoomLevel,
-            _mapRenderer.HeightMapMode);
-
-        if (_uiView != null)
+        if (_terrainStressMode)
         {
-            _window.SetView(_uiView);
-
-            _terrainDebugOverlay?.DrawScreen(
+            _terrainDebugOverlay?.DrawWorldMarkers(
                 _window,
                 _worldMap,
-                _camera.View,
                 TerrainTilePixelSize,
                 _camera.ZoomLevel,
-                _visibleMaxLayer,
                 _mapRenderer.HeightMapMode);
+
+            if (_uiView != null)
+            {
+                _window.SetView(_uiView);
+
+                _terrainDebugOverlay?.DrawScreen(
+                    _window,
+                    _worldMap,
+                    _camera.View,
+                    TerrainTilePixelSize,
+                    _camera.ZoomLevel,
+                    _visibleMaxLayer,
+                    _mapRenderer.HeightMapMode);
+            }
         }
 
         if (_titleTimer >= 0.25f)
@@ -799,7 +802,10 @@ public sealed class GameRenderer
         _visibleMaxLayer =
             Math.Max(
                 0,
-                _worldMap.GetHighestOccupiedLayer());
+                _worldMap.LayerCount / 2 - 1);
+
+        if (!_mapRenderer.HeightMapMode)
+            _mapRenderer.ToggleHeightMapMode();
 
         _selectedUnit = default;
 
