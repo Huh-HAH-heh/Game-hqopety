@@ -169,6 +169,8 @@ public sealed class TerrainDebugOverlay : IDisposable
     private string _lastMinimum = string.Empty;
     private string _lastMaximum = string.Empty;
     private string _lastCursor = string.Empty;
+    private string _lastGridLabel = string.Empty;
+    private string _lastExtremaLabel = string.Empty;
 
     public TerrainDebugOverlay()
     {
@@ -544,6 +546,16 @@ public sealed class TerrainDebugOverlay : IDisposable
         _toolbar.FillColor = toolbarHovered
             ? new Color(34, 45, 59, 250)
             : new Color(20, 28, 38, 245);
+
+        SetText(
+            _gridLabel,
+            ref _lastGridLabel,
+            settings.ShowGrid ? "СЕТКА: ВКЛ" : "СЕТКА: ВЫКЛ");
+
+        SetText(
+            _extremaLabel,
+            ref _lastExtremaLabel,
+            settings.ShowExtrema ? "КРАЙНИЕ ТОЧКИ: ВКЛ" : "КРАЙНИЕ ТОЧКИ: ВЫКЛ");
 
         bool closeHovered = _closeButton.GetGlobalBounds().Contains(mouse);
         _closeButton.FillColor = closeHovered
