@@ -98,11 +98,11 @@ void main()
     float cutSurface = min(surfaceLayer, uVisibleLayer);
     float depthFraction = clamp(max(0.0, cutSurface - voxelLayer) / layerRange, 0.0, 1.0);
 
-    float heightRange = clamp(uBaseGray + uHeightContrast * 1.5, 8.0, 140.0);
+    float heightRange = clamp(uBaseGray + uHeightContrast * 1.5, 24.0, 72.0);
     float gray = heightFraction * heightRange
         - depthFraction * (uDepthShade * 0.7);
 
-    gray = clamp(gray, 0.0, 140.0) / 255.0;
+    gray = clamp(gray, 0.0, 72.0) / 255.0;
     gl_FragColor = vec4(gray, gray, gray, 1.0);
 }";
 
