@@ -181,7 +181,7 @@ public sealed class GameMenuOverlay : IDisposable
     private const float MainHeight = 310f;
     private const float MaxContourLabelZoom = 2.5f;
 
-    private readonly record struct HeightContourChunkKey(int RegionIndex, int LodStep);
+    private readonly record struct HeightContourChunkKey(int RegionIndex);
 
     private sealed class HeightContourLevel : IDisposable
     {
@@ -805,11 +805,9 @@ void main()
         float screenMinY = cameraView.Center.Y - cameraView.Size.Y * 0.5f;
         float screenMaxY = cameraView.Center.Y + cameraView.Size.Y * 0.5f;
 
-        int lodStep = zoomLevel >= 4.5f
-            ? 3
-            : zoomLevel >= 2.5f
-                ? 2
-                : 1;
+        // Build contour geometry once per region. Zoom only changes the view,
+        // never the contour mesh detail or its cache key.
+        const int lodStep = 1;
 
         int minTileX = Math.Max(
             0,
@@ -849,7 +847,7 @@ void main()
             for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
             {
                 int regionIndex = regionX + regionY * worldMap.RegionsX;
-                HeightContourChunkKey key = new HeightContourChunkKey(regionIndex, lodStep);
+                HeightContourChunkKey key = new HeightContourChunkKey(regionIndex);
 
                 if (!_contourChunks.TryGetValue(key, out HeightContourChunk? chunk))
                 {
@@ -929,7 +927,7 @@ void main()
             maxRegionX,
             minRegionY,
             maxRegionY,
-            (visibleCount + 8) * 3);
+            visibleCount + 64);
     }
 
     private HeightContourChunk BuildHeightContourChunk(
@@ -971,8 +969,7 @@ void main()
         }
 
         const int contourIntervalUnits = 50;
-        bool allowLabels = _font != null;
-        float minLabelSpacing = TerrainRegion.TilesPerSide * tilePixelSize * 0.65f;
+        bool allowLabels = _font != null && ((regionX + regionY * 2) % 3 == 0);
         Span<Vector2f> crossings = stackalloc Vector2f[4];
 
         for (int contourHeight = contourIntervalUnits;
@@ -990,9 +987,7 @@ void main()
                 contourHeight % 100 == 0 ||
                 contourHeight % 250 == 0;
 
-            int labelsAdded = 0;
-            Vector2f lastLabelPosition = default;
-            bool hasLastLabelPosition = false;
+            bool labelAdded = false;
 
             Color lineColor = isIndexContour
                 ? new Color(105, 105, 105, 185)
@@ -1047,20 +1042,12 @@ void main()
                             lineColor);
                     }
 
-                    if (!isIndexContour || !allowLabels || labelsAdded >= 3)
+                    if (!isIndexContour || !allowLabels || labelAdded)
                         continue;
 
                     Vector2f midpoint = new Vector2f(
                         (crossings[0].X + crossings[1].X) * 0.5f,
                         (crossings[0].Y + crossings[1].Y) * 0.5f);
-
-                    if (hasLastLabelPosition)
-                    {
-                        float dx = midpoint.X - lastLabelPosition.X;
-                        float dy = midpoint.Y - lastLabelPosition.Y;
-                        if (dx * dx + dy * dy < minLabelSpacing * minLabelSpacing)
-                            continue;
-                    }
 
                     Text label = new Text(
                         _font!,
@@ -1075,9 +1062,7 @@ void main()
                     };
 
                     level.Labels.Add(label);
-                    lastLabelPosition = midpoint;
-                    hasLastLabelPosition = true;
-                    labelsAdded++;
+                    labelAdded = true;
                 }
             }
 
