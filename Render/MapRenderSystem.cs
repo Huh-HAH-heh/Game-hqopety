@@ -126,6 +126,8 @@ public sealed class MapRenderSystem
 
         if (!mapCacheMatches)
         {
+            // Terrain bounds or layer visibility changed; water uses the same view bounds.
+            _waterCacheValid = false;
             _mapVertices.Clear();
 
             for (int y = minTileY; y <= maxTileY; y += lodStep)
