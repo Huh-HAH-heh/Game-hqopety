@@ -34,7 +34,7 @@ public static class WorldGenerator
             // while their elevation still changes in exact 1 m steps.
             int continentOffset =
                 (int)MathF.Round(
-                    MathF.Sin(xSafe(y) * 0.010f) * 4f +
+                    MathF.Sin(y * 0.010f) * 4f +
                     MathF.Cos(y * 0.013f) * 5f +
                     MathF.Sin(y * 0.004f) * 3f);
 
@@ -74,13 +74,6 @@ public static class WorldGenerator
                     BaseMaterialId);
             }
         }
-    }
-
-    private static int xSafe(int y)
-    {
-        // Keeps the broad contour phase deterministic and independent
-        // of local terrain-step generation.
-        return y;
     }
 
     private static void GenerateWater(
