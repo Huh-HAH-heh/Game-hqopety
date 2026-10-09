@@ -366,6 +366,12 @@ void main()
         _visibleTerrainChunks.Clear();
         _terrainVertexCount = 0;
 
+        if (maxTileX < minTileX || maxTileY < minTileY)
+        {
+            ClearTerrainChunkCache();
+            return;
+        }
+
         int minRegionX = minTileX / TerrainRegion.TilesPerSide;
         int maxRegionX = maxTileX / TerrainRegion.TilesPerSide;
         int minRegionY = minTileY / TerrainRegion.TilesPerSide;
