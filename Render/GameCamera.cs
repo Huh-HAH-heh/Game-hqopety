@@ -58,6 +58,16 @@ public sealed class GameCamera
             _targetPosition;
     }
 
+    public void Resize(Vector2f windowSize)
+    {
+        if (windowSize.X <= 0f || windowSize.Y <= 0f)
+            return;
+
+        _view.Size = new Vector2f(
+            windowSize.X * _zoomLevel,
+            windowSize.Y * _zoomLevel);
+    }
+
     public void HandleZoom(
         float delta)
     {

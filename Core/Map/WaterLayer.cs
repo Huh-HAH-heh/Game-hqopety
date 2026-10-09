@@ -5,7 +5,7 @@ namespace Core.Map;
 public sealed class WaterLayer
 {
     private readonly byte[] _water;
-    private readonly sbyte[] _topLevels;
+    private readonly short[] _topLevels;
 
     public int Width { get; }
     public int Height { get; }
@@ -16,7 +16,7 @@ public sealed class WaterLayer
     public WaterLayer(
         int width,
         int height,
-        int levels = 32)
+        int levels = 320)
     {
         if (width <= 0)
             throw new ArgumentOutOfRangeException(nameof(width));
@@ -24,7 +24,7 @@ public sealed class WaterLayer
         if (height <= 0)
             throw new ArgumentOutOfRangeException(nameof(height));
 
-        if (levels <= 0 || levels > sbyte.MaxValue)
+        if (levels <= 0 || levels > short.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(levels));
 
         Width = width;
@@ -38,13 +38,13 @@ public sealed class WaterLayer
                 levels];
 
         _topLevels =
-            new sbyte[
+            new short[
                 width *
                 height];
 
         Array.Fill(
             _topLevels,
-            (sbyte)-1);
+            (short)-1);
 
         Version++;
     }
@@ -79,7 +79,7 @@ public sealed class WaterLayer
         if (amount > 0)
         {
             if (z > top)
-                _topLevels[columnIndex] = (sbyte)z;
+                _topLevels[columnIndex] = (short)z;
 
             return;
         }
@@ -94,7 +94,7 @@ public sealed class WaterLayer
             if (_water[GetIndex(x, y, level)] > 0)
             {
                 _topLevels[columnIndex] =
-                    (sbyte)level;
+                    (short)level;
 
                 return;
             }
@@ -127,7 +127,7 @@ public sealed class WaterLayer
             int columnIndex = GetColumnIndex(x, y);
 
             if (z > _topLevels[columnIndex])
-                _topLevels[columnIndex] = (sbyte)z;
+                _topLevels[columnIndex] = (short)z;
         }
     }
 
@@ -160,7 +160,7 @@ public sealed class WaterLayer
 
         Array.Fill(
             _topLevels,
-            (sbyte)-1);
+            (short)-1);
 
         Version++;
     }
