@@ -64,8 +64,7 @@ public sealed class GameRenderer
         _worldMap =
             worldMap;
 
-        _visibleMaxLayer =
-            Math.Max(0, worldMap.LayerCount - 1);
+        _visibleMaxLayer = 0;
 
         _camera =
             new GameCamera(
@@ -475,7 +474,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Z={_visibleMaxLayer + 1}/{_worldMap.LayerCount} PgUp/PgDn=layer Shift+Wheel=layer F2=settings •••=menu | " +
+            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
             $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision";
     }
 
@@ -483,13 +482,14 @@ public sealed class GameRenderer
     {
         _window =
             new RenderWindow(
-                new VideoMode(
-                    new Vector2u(
-                        1280,
-                        720)),
+                VideoMode.DesktopMode,
                 "RimClone");
 
         _window.SetFramerateLimit(60);
+        _camera.Resize(
+            new Vector2f(
+                _window.Size.X,
+                _window.Size.Y));
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
@@ -605,13 +605,25 @@ public sealed class GameRenderer
     {
         if (key == Keyboard.Key.PageUp)
         {
-            ScrollTerrainLayers(1);
+            int step =
+                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                Keyboard.IsKeyPressed(Keyboard.Key.RShift)
+                    ? 10
+                    : 1;
+
+            ScrollTerrainLayers(step);
             return;
         }
 
         if (key == Keyboard.Key.PageDown)
         {
-            ScrollTerrainLayers(-1);
+            int step =
+                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                Keyboard.IsKeyPressed(Keyboard.Key.RShift)
+                    ? 10
+                    : 1;
+
+            ScrollTerrainLayers(-step);
             return;
         }
 
@@ -979,7 +991,7 @@ public sealed class GameRenderer
                 _mapRenderer.ResetVisualSettings();
                 _showDebugGrid = false;
                 _showTerrainExtrema = false;
-                _visibleMaxLayer = _worldMap.LayerCount - 1;
+                _visibleMaxLayer = 0;
                 break;
         }
     }
@@ -1049,10 +1061,7 @@ public sealed class GameRenderer
 
         WorldGenerator.Generate(_worldMap);
 
-        _visibleMaxLayer =
-            Math.Max(
-                0,
-                _worldMap.LayerCount - 1);
+        _visibleMaxLayer = 0;
 
         _mapRenderer.ResetVisualSettings();
         _showDebugGrid = false;
