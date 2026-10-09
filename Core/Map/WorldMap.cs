@@ -99,10 +99,10 @@ public sealed class WorldMap
         Water = new WaterLayer(width, height);
     }
 
-    // LAYER -> REGION -> VOXEL STORAGE
-    // Every TerrainLayer owns its XY TerrainRegion grid.
-    // Every TerrainRegion owns a dense 48 x 48 grid of 1 m³ voxels.
-    // ID 0 means empty; every other ID identifies a material.
+    // COARSE MACRO-BLOCKS + LAZY 1 m³ DETAIL
+    // Ordinary terrain is stored as one height/material pair per 5 m block.
+    // A fine vertical material array exists only for explicitly edited columns.
+    // TerrainLayer is a compatibility view over this storage.
     // ============================================================
 
     public TerrainLayer GetLayer(
@@ -469,20 +469,33 @@ public sealed class WorldMap
         _macroSurfaceHeights[macroIndex] = (ushort)blockHeight;
         _macroSurfaceMaterials[macroIndex] = blockHeight > 0 ? materialId : (ushort)0;
 
-        if (_detailedColumns.Count > 0)
+        int startX = macroX * MacroBlockTileSpan;
+        int startY = macroY * MacroBlockTileSpan;
+        int endX = Math.Min(TileWidth, startX + MacroBlockTileSpan);
+        int endY = Math.Min(TileHeight, startY + MacroBlockTileSpan);
+
+        // Make navigation metadata available for all map regions occupied
+        // by this coarse block (a macro block can cross a 48-tile region edge).
+        int firstRegionX = startX / TerrainRegion.TilesPerSide;
+        int firstRegionY = startY / TerrainRegion.TilesPerSide;
+        int lastRegionX = (endX - 1) / TerrainRegion.TilesPerSide;
+        int lastRegionY = (endY - 1) / TerrainRegion.TilesPerSide;
+
+        for (int regionY = firstRegionY; regionY <= lastRegionY; regionY++)
         {
-            int startX = macroX * MacroBlockTileSpan;
-            int startY = macroY * MacroBlockTileSpan;
-            int endX = Math.Min(TileWidth, startX + MacroBlockTileSpan);
-            int endY = Math.Min(TileHeight, startY + MacroBlockTileSpan);
-            for (int y = startY; y < endY; y++)
+            for (int regionX = firstRegionX; regionX <= lastRegionX; regionX++)
+                GetOrCreateRegion(regionX, regionY);
+        }
+
+        // Changing a macro block invalidates both existing local edits and
+        // any cached range for every fine tile that it covers.
+        for (int y = startY; y < endY; y++)
+        {
+            for (int x = startX; x < endX; x++)
             {
-                for (int x = startX; x < endX; x++)
-                {
-                    int index = GetColumnIndex(x, y);
-                    _detailedColumns.Remove(index);
-                    _rangeCache[index] = null;
-                }
+                int index = GetColumnIndex(x, y);
+                _detailedColumns.Remove(index);
+                _rangeCache[index] = null;
             }
         }
 
