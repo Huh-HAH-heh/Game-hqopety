@@ -94,7 +94,8 @@ public sealed class UnitBodySystem
 
             if (types[unit] ==
                 UnitType.Colonist &&
-                count >= 2)
+                count >= 2 &&
+                !bodies.IsCustomBody(start))
             {
                 UpdateColonist(
                     unit,
