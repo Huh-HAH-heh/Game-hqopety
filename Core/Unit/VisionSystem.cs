@@ -60,7 +60,6 @@ public sealed class VisionSystem
     private int _candidatePairCount;
     private int _lineOfSightChecks;
     private int _targetEvaluationCount;
-    private long _visionUpdateSequence;
 
     public double LastUpdateMilliseconds { get; private set; }
     public int LastCandidatePairs { get; private set; }
@@ -147,7 +146,6 @@ public sealed class VisionSystem
         _candidatePairCount = 0;
         _lineOfSightChecks = 0;
         _targetEvaluationCount = 0;
-        _visionUpdateSequence++;
 
         ReadOnlySpan<int> active = units.ActiveIndices;
         Vector3[] positions = units.Position;
