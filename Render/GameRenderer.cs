@@ -203,6 +203,8 @@ public sealed class GameRenderer
                 $"RAM={_workingSetBytes / 1024d / 1024d:0.0}MB " +
                 $"Heap={_managedHeapBytes / 1024d / 1024d:0.0}MB " +
                 $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.00}MB/s " +
+                $"TotalAlloc={_allocatedBytes / 1024d / 1024d:0.0}MB " +
+                $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
                 $"Units={_unitSimulation.Units.ActiveCount} " +
                 $"Sim={_unitSimulation.LastSimulationUpdateMilliseconds:0.0}ms " +
                 $"Vision={visionMetrics} " +
@@ -210,6 +212,10 @@ public sealed class GameRenderer
                 $"Move={_unitSimulation.LastMovementUpdateMilliseconds:0.0}ms " +
                 $"Weapons={_unitSimulation.LastWeaponUpdateMilliseconds:0.0}ms " +
                 $"Ballistics={_unitSimulation.LastProjectileUpdateMilliseconds:0.0}ms " +
+                $"Grid={_unitSimulation.LastProjectileGridBuildMilliseconds:0.0}ms " +
+                $"P={_unitSimulation.LastProjectilesVisited} " +
+                $"TraceCells={_unitSimulation.LastProjectileTerrainCellsTraced} " +
+                $"UnitCandidates={_unitSimulation.LastProjectileUnitCandidates} " +
                 $"Health={_unitSimulation.LastHealthUpdateMilliseconds:0.0}ms " +
                 $"Nav={_unitSimulation.Navigation.RoutesBuiltThisUpdate} built/" +
                     $"{_unitSimulation.Navigation.RoutesFailedThisUpdate} failed/" +
