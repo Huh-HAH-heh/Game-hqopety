@@ -553,7 +553,15 @@ public sealed class UnitSimulation
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();
-        _weaponSystem.Update(Units, Inventory, Weapons, Projectiles, deltaTime, Health);
+        _weaponSystem.Update(
+            Units,
+            Inventory,
+            Weapons,
+            Projectiles,
+            deltaTime,
+            Health,
+            _visionSystem,
+            worldMap);
         LastWeaponUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
