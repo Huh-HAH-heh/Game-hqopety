@@ -434,8 +434,8 @@ public sealed class UnitNavigationSystem
         int dx,
         int dy)
     {
-        if (worldMap.GetSurfaceLayer(x, y) < 0 ||
-            worldMap.GetSurfaceLayer(nx, ny) < 0)
+        if (!IsSurface(worldMap, x, y) ||
+            !IsSurface(worldMap, nx, ny))
         {
             return false;
         }
@@ -474,8 +474,11 @@ public sealed class UnitNavigationSystem
                 int cellX = x + offsetX;
                 int cellY = y + offsetY;
 
-                if (worldMap.GetSurfaceLayer(cellX, cellY) < 0)
+                if (worldMap.IsNavigationBlocked(cellX, cellY) ||
+                    worldMap.GetSurfaceLayer(cellX, cellY) < 0)
+                {
                     return false;
+                }
 
                 if (MathF.Abs(
                         worldMap.GetSurfaceHeight(cellX, cellY) - centerHeight) >
@@ -503,8 +506,8 @@ public sealed class UnitNavigationSystem
         int nx,
         int ny)
     {
-        if (worldMap.GetSurfaceLayer(x, y) < 0 ||
-            worldMap.GetSurfaceLayer(nx, ny) < 0)
+        if (!IsSurface(worldMap, x, y) ||
+            !IsSurface(worldMap, nx, ny))
         {
             return false;
         }
@@ -516,7 +519,8 @@ public sealed class UnitNavigationSystem
 
     private static bool IsSurface(WorldMap worldMap, int x, int y)
     {
-        return worldMap.GetSurfaceLayer(x, y) >= 0;
+        return !worldMap.IsNavigationBlocked(x, y) &&
+               worldMap.GetSurfaceLayer(x, y) >= 0;
     }
 
     private bool IsInside(int x, int y)
