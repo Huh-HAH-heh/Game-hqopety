@@ -7,6 +7,16 @@ namespace Core.Unit;
 
 public sealed class UnitWeaponSystem
 {
+    public long TotalShotsFired { get; private set; }
+    public long TotalRoundsConsumed { get; private set; }
+    public long TotalProjectilesSpawned { get; private set; }
+    public int ShotsFiredThisFrame { get; private set; }
+
+    public void BeginMetricsFrame()
+    {
+        ShotsFiredThisFrame = 0;
+    }
+
     public void Update(
         UnitStore units,
         UnitInventoryStore inventory,
@@ -289,6 +299,11 @@ public sealed class UnitWeaponSystem
         }
 
         weapons.Ammo[stateIndex]--;
+
+        TotalShotsFired++;
+        TotalRoundsConsumed++;
+        TotalProjectilesSpawned += pelletCount;
+        ShotsFiredThisFrame++;
 
         weapons.AddRecoil(
             unitIndex,
