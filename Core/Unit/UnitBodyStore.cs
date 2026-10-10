@@ -18,6 +18,7 @@ public sealed class UnitBodyStore
     private int[] _parent;
     private BodyPrimitive[] _primitive;
     private BodyPartMotion[] _motion;
+    private BodyPartAnchor[] _anchor;
     private bool[] _definitionBodyRoots;
 
     private int _count;
@@ -56,6 +57,9 @@ public sealed class UnitBodyStore
     public BodyPartMotion[] Motion =>
         _motion;
 
+    public BodyPartAnchor[] Anchor =>
+        _anchor;
+
     public bool UsesBodyDefinition(int start) =>
         (uint)start < (uint)_definitionBodyRoots.Length &&
         _definitionBodyRoots[start];
@@ -80,6 +84,7 @@ public sealed class UnitBodyStore
         _parent = new int[initialCapacity];
         _primitive = new BodyPrimitive[initialCapacity];
         _motion = new BodyPartMotion[initialCapacity];
+        _anchor = new BodyPartAnchor[initialCapacity];
         _definitionBodyRoots = new bool[initialCapacity];
     }
 
@@ -125,7 +130,8 @@ public sealed class UnitBodyStore
                 part.FollowDistance,
                 part.ParentIndex < 0 ? -1 : start + part.ParentIndex,
                 part.Primitive,
-                part.Motion);
+                part.Motion,
+                part.Anchor);
         }
 
         _definitionBodyRoots[start] = true;
@@ -153,53 +159,33 @@ public sealed class UnitBodyStore
     public void SetInitialWorldPosition(
         BodyHandle handle,
         Vector3 unitPosition,
-        float unitRotation)
+        float unitRotation,
+        float headRotation)
     {
         int end =
             handle.Start +
             handle.Count;
 
-        if (UsesBodyDefinition(handle.Start))
+        for (int i = handle.Start; i < end; i++)
         {
-            for (int i = handle.Start; i < end; i++)
+            int parent = _parent[i];
+            Vector3 origin = unitPosition;
+            float rotation = unitRotation;
+
+            if (_anchor[i] == BodyPartAnchor.UnitHead)
             {
-                int parent = _parent[i];
-                Vector3 origin = unitPosition;
-                float rotation = unitRotation;
-
-                if (parent >= handle.Start)
-                {
-                    origin = _worldPosition[parent];
-                    rotation = _worldRotation[parent];
-                }
-
-                _worldPosition[i] =
-                    origin + Rotate2D(_localPosition[i], rotation);
-                _worldRotation[i] = rotation + _localRotation[i];
+                rotation = headRotation;
+            }
+            else if (_anchor[i] == BodyPartAnchor.Parent &&
+                     parent >= handle.Start)
+            {
+                origin = _worldPosition[parent];
+                rotation = _worldRotation[parent];
             }
 
-            return;
-        }
-
-        for (int i = handle.Start;
-             i < end;
-             i++)
-        {
-            Vector3 local =
-                _localPosition[i];
-
-            Vector3 rotated =
-                Rotate2D(
-                    local,
-                    unitRotation);
-
             _worldPosition[i] =
-                unitPosition +
-                rotated;
-
-            _worldRotation[i] =
-                unitRotation +
-                _localRotation[i];
+                origin + Rotate2D(_localPosition[i], rotation);
+            _worldRotation[i] = rotation + _localRotation[i];
         }
     }
 
@@ -218,7 +204,8 @@ public sealed class UnitBodyStore
         float followDistance,
         int parent,
         BodyPrimitive primitive,
-        BodyPartMotion motion)
+        BodyPartMotion motion,
+        BodyPartAnchor anchor)
     {
         int index = _writeIndex++;
 
@@ -238,6 +225,7 @@ public sealed class UnitBodyStore
         _parent[index] = parent;
         _primitive[index] = primitive;
         _motion[index] = motion;
+        _anchor[index] = anchor;
     }
 
     private void EnsureCapacityAt(
@@ -293,6 +281,10 @@ public sealed class UnitBodyStore
 
         Array.Resize(
             ref _motion,
+            newCapacity);
+
+        Array.Resize(
+            ref _anchor,
             newCapacity);
 
         Array.Resize(
