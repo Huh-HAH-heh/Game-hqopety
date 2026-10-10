@@ -48,6 +48,7 @@ public sealed class UnitNavigationSystem
     public int SearchesThisUpdate { get; private set; }
     public long CellsExpandedThisUpdate { get; private set; }
     public double SearchMillisecondsThisUpdate { get; private set; }
+    public double NavigationGridBuildMilliseconds { get; private set; }
 
     private int _lastSearchCellsExpanded;
 
@@ -59,6 +60,10 @@ public sealed class UnitNavigationSystem
 
     private float[] _gScore = Array.Empty<float>();
     private float[] _fScore = Array.Empty<float>();
+    private float[] _navigationHeights = Array.Empty<float>();
+    private bool[] _navigationPassable = Array.Empty<bool>();
+    private byte[] _navigationNeighbors = Array.Empty<byte>();
+    private long _navigationGridTerrainVersion = long.MinValue;
     private int[] _parent = Array.Empty<int>();
     private int[] _seenStamp = Array.Empty<int>();
     private int[] _closedStamp = Array.Empty<int>();
@@ -71,6 +76,8 @@ public sealed class UnitNavigationSystem
     {
         EnsureUnitCapacity(units.Capacity);
         EnsureWorkspace(worldMap);
+        NavigationGridBuildMilliseconds = 0d;
+        EnsureNavigationGrid(worldMap);
         _routeBuildsRemaining = MaxRouteBuildsPerUpdate;
         RoutesBuiltThisUpdate = 0;
         RoutesFailedThisUpdate = 0;
@@ -357,8 +364,8 @@ public sealed class UnitNavigationSystem
                 Touch(neighbor, stamp);
 
                 float heightDifference = MathF.Abs(
-                    worldMap.GetSurfaceHeight(x, y) -
-                    worldMap.GetSurfaceHeight(nx, ny));
+                    _navigationHeights[current] -
+                    _navigationHeights[neighbor]);
 
                 float stepCost =
                     dx != 0 && dy != 0
@@ -400,7 +407,18 @@ public sealed class UnitNavigationSystem
         int footprintRadiusY)
     {
         if (footprintRadiusX == 0 && footprintRadiusY == 0)
-            return CanStepCell(worldMap, x, y, nx, ny, dx, dy);
+        {
+            int direction = dy == 0
+                ? (dx > 0 ? 0 : 1)
+                : dx == 0
+                    ? (dy > 0 ? 2 : 3)
+                    : dx > 0
+                        ? (dy > 0 ? 4 : 5)
+                        : (dy > 0 ? 6 : 7);
+
+            int cell = x + y * _width;
+            return (_navigationNeighbors[cell] & (1 << direction)) != 0;
+        }
 
         // Check the full rectangular footprint, not just the unit's center.
         // Every footprint cell must have a surface and be traversable.
@@ -725,6 +743,10 @@ public sealed class UnitNavigationSystem
 
         _gScore = new float[_cellCount];
         _fScore = new float[_cellCount];
+        _navigationHeights = new float[_cellCount];
+        _navigationPassable = new bool[_cellCount];
+        _navigationNeighbors = new byte[_cellCount];
+        _navigationGridTerrainVersion = long.MinValue;
         _parent = new int[_cellCount];
         _seenStamp = new int[_cellCount];
         _closedStamp = new int[_cellCount];
@@ -736,5 +758,120 @@ public sealed class UnitNavigationSystem
         Array.Clear(_pathCursor);
         Array.Clear(_routeOwner);
         _searchStamp = 0;
+    }
+
+    // Cache surface heights and legal 8-way steps once per terrain version.
+    // A* expands many thousands of nodes per route; asking WorldMap to validate
+    // every edge repeatedly was dominating mass-movement updates.
+    private void EnsureNavigationGrid(WorldMap worldMap)
+    {
+        if (_navigationGridTerrainVersion == worldMap.TerrainVersion)
+            return;
+
+        long started = Stopwatch.GetTimestamp();
+
+        for (int y = 0; y < _height; y++)
+        {
+            int row = y * _width;
+
+            for (int x = 0; x < _width; x++)
+            {
+                int cell = row + x;
+                bool passable =
+                    !worldMap.IsNavigationBlocked(x, y) &&
+                    worldMap.GetSurfaceLayer(x, y) >= 0;
+
+                _navigationPassable[cell] = passable;
+                _navigationHeights[cell] = worldMap.GetSurfaceHeight(x, y);
+                _navigationNeighbors[cell] = 0;
+            }
+        }
+
+        // First build the cardinal edges.
+        for (int y = 0; y < _height; y++)
+        {
+            int row = y * _width;
+
+            for (int x = 0; x < _width; x++)
+            {
+                int cell = row + x;
+                if (!_navigationPassable[cell])
+                    continue;
+
+                float height = _navigationHeights[cell];
+                byte mask = 0;
+
+                if (x + 1 < _width &&
+                    _navigationPassable[cell + 1] &&
+                    MathF.Abs(height - _navigationHeights[cell + 1]) <= MaxStepHeight)
+                    mask |= 1 << 0;
+
+                if (x > 0 &&
+                    _navigationPassable[cell - 1] &&
+                    MathF.Abs(height - _navigationHeights[cell - 1]) <= MaxStepHeight)
+                    mask |= 1 << 1;
+
+                if (y + 1 < _height &&
+                    _navigationPassable[cell + _width] &&
+                    MathF.Abs(height - _navigationHeights[cell + _width]) <= MaxStepHeight)
+                    mask |= 1 << 2;
+
+                if (y > 0 &&
+                    _navigationPassable[cell - _width] &&
+                    MathF.Abs(height - _navigationHeights[cell - _width]) <= MaxStepHeight)
+                    mask |= 1 << 3;
+
+                _navigationNeighbors[cell] = mask;
+            }
+        }
+
+        // A diagonal is legal only when both orthogonal routes around its
+        // corner exist, matching the old no-corner-cutting rule.
+        for (int y = 0; y < _height; y++)
+        {
+            int row = y * _width;
+
+            for (int x = 0; x < _width; x++)
+            {
+                int cell = row + x;
+                byte mask = _navigationNeighbors[cell];
+                if (!_navigationPassable[cell])
+                    continue;
+
+                if (x + 1 < _width && y + 1 < _height &&
+                    (mask & (1 << 0)) != 0 &&
+                    (mask & (1 << 2)) != 0 &&
+                    (_navigationNeighbors[cell + 1] & (1 << 2)) != 0 &&
+                    (_navigationNeighbors[cell + _width] & (1 << 0)) != 0)
+                    mask |= 1 << 4;
+
+                if (x + 1 < _width && y > 0 &&
+                    (mask & (1 << 0)) != 0 &&
+                    (mask & (1 << 3)) != 0 &&
+                    (_navigationNeighbors[cell + 1] & (1 << 3)) != 0 &&
+                    (_navigationNeighbors[cell - _width] & (1 << 0)) != 0)
+                    mask |= 1 << 5;
+
+                if (x > 0 && y + 1 < _height &&
+                    (mask & (1 << 1)) != 0 &&
+                    (mask & (1 << 2)) != 0 &&
+                    (_navigationNeighbors[cell - 1] & (1 << 2)) != 0 &&
+                    (_navigationNeighbors[cell + _width] & (1 << 1)) != 0)
+                    mask |= 1 << 6;
+
+                if (x > 0 && y > 0 &&
+                    (mask & (1 << 1)) != 0 &&
+                    (mask & (1 << 3)) != 0 &&
+                    (_navigationNeighbors[cell - 1] & (1 << 3)) != 0 &&
+                    (_navigationNeighbors[cell - _width] & (1 << 1)) != 0)
+                    mask |= 1 << 7;
+
+                _navigationNeighbors[cell] = mask;
+            }
+        }
+
+        _navigationGridTerrainVersion = worldMap.TerrainVersion;
+        NavigationGridBuildMilliseconds =
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds;
     }
 }
