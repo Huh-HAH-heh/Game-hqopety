@@ -13,7 +13,8 @@ public sealed class UnitMovementSystem
     public void Update(
         UnitStore units,
         WorldMap worldMap,
-        float deltaTime)
+        float deltaTime,
+        UnitHealthStore? health = null)
     {
         if (deltaTime <= 0f || units.ActiveCount == 0)
             return;
@@ -32,6 +33,14 @@ public sealed class UnitMovementSystem
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
+
+            if (health != null && health.OverallHitPoints[unit] <= 0f)
+            {
+                hasTarget[unit] = false;
+                velocities[unit] = Vector3.Zero;
+                _navigation.ClearRoute(unit);
+                continue;
+            }
 
             if (!hasTarget[unit])
             {
