@@ -160,6 +160,18 @@ public sealed class UnitRenderSystem
             Vector3 unitPosition =
                 positions[unitIndex];
 
+            // A shooter can be outside the camera while its target is visible.
+            // Aim state is simulation data, so collect it before view culling.
+            if (simulation.Health.OverallHitPoints[unitIndex] > 0f)
+            {
+                AppendAimProgress(
+                    _aiming,
+                    simulation,
+                    unitIndex,
+                    tilePixelSize,
+                    _aimTargetDrawn);
+            }
+
             if (hideUnseenTargets &&
                 hasSelection &&
                 unitIndex != selectedIndex)
@@ -215,13 +227,6 @@ public sealed class UnitRenderSystem
 
             UnitAiState aiState =
                 simulation.AI.Store.State[unitIndex];
-
-            AppendAimProgress(
-                _aiming,
-                simulation,
-                unitIndex,
-                tilePixelSize,
-                _aimTargetDrawn);
 
             if (showAiDebug &&
                 simulation.AI.Enabled)
@@ -428,89 +433,81 @@ public sealed class UnitRenderSystem
         float tilePixelSize,
         bool[] targetDrawn)
     {
-        if (!simulation.AI.Enabled)
-            return;
-
-        UnitAiStore ai = simulation.AI.Store;
-        if (ai.State[shooterIndex] != UnitAiState.Attack ||
-            !ai.HasTarget[shooterIndex])
-        {
-            return;
-        }
-
-        UnitId combatTarget = ai.Target[shooterIndex];
-
-        if (!simulation.Units.TryGetIndex(
-                combatTarget,
-                out int targetIndex) ||
-            targetDrawn[targetIndex] ||
-            simulation.Health.OverallHitPoints[targetIndex] <= 0f ||
-            !simulation.Vision.IsRecentlyVisible(
-                shooterIndex,
-                targetIndex,
-                simulation.Units))
-        {
-            return;
-        }
-
+        UnitStore units = simulation.Units;
+        UnitInventoryStore inventory = simulation.Inventory;
         UnitWeaponStore weapons = simulation.Weapons;
 
-        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
         {
             UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
             int stateIndex = UnitWeaponStore.GetIndex(shooterIndex, weaponSlot);
 
-            if (weapons.CurrentAimMode[stateIndex] != AimMode.AimedShot ||
-                weapons.AimTarget[stateIndex] != combatTarget)
+            if (!weapons.AimIndicatorActive[stateIndex] ||
+                weapons.AimTimer[stateIndex] <= 0f)
             {
                 continue;
             }
 
-            short inventorySlot = simulation.Inventory.GetWeaponEquipment(
+            UnitId combatTarget = weapons.AimTarget[stateIndex];
+
+            if (!units.TryGetIndex(combatTarget, out int targetIndex) ||
+                targetDrawn[targetIndex] ||
+                simulation.Health.OverallHitPoints[targetIndex] <= 0f)
+            {
+                continue;
+            }
+
+            short inventorySlot = inventory.GetWeaponEquipment(
                 shooterIndex,
                 weaponSlot);
 
             if (inventorySlot < 0 ||
-                simulation.Inventory.GetItem(
-                    shooterIndex,
-                    inventorySlot) is not RangedWeaponConfig weapon ||
-                weapon.AimTime <= 0f)
+                inventory.GetItem(shooterIndex, inventorySlot) is not RangedWeaponConfig weapon)
             {
                 continue;
             }
 
-            float aimTimer = weapons.AimTimer[stateIndex];
-            if (aimTimer <= 0f || aimTimer >= weapon.AimTime)
+            Vector3 aimPoint = weapons.AimPoint[stateIndex];
+            if (aimPoint == Vector3.Zero)
+                continue;
+
+            Vector3 shooterPosition = units.Position[shooterIndex];
+            float dx = aimPoint.X - shooterPosition.X;
+            float dy = aimPoint.Y - shooterPosition.Y;
+            float distance = MathF.Sqrt(dx * dx + dy * dy);
+
+            float duration = UnitWeaponSystem.GetAimDuration(
+                weapon,
+                weapons.CurrentAimMode[stateIndex],
+                distance);
+
+            if (duration <= 0f)
                 continue;
 
             float progress = Math.Clamp(
-                aimTimer / weapon.AimTime,
+                weapons.AimTimer[stateIndex] / duration,
                 0f,
                 1f);
 
-            // A quiet, rim-like targeting ring collapses as the pawn finishes
-            // aiming, then fades completely before the shot is emitted.
+            // One muted ring per target. It shrinks as the active weapon warms
+            // up, then fades almost to nothing until the shot clears the state.
             float radius = tilePixelSize * (0.82f - 0.66f * progress);
             byte alpha = (byte)Math.Clamp(
-                (int)(68f * (1f - progress)),
+                (int)(62f * (1f - progress) + 4f),
                 0,
-                68);
-
-            if (alpha < 5)
-                continue;
-
-            Vector3 targetPosition = simulation.Units.Position[targetIndex];
+                66);
 
             AppendCircleOutline(
                 aiming,
-                targetPosition.X * tilePixelSize,
-                targetPosition.Y * tilePixelSize,
-                radius,
-                new Color(215, 225, 232, alpha),
+                aimPoint.X * tilePixelSize,
+                aimPoint.Y * tilePixelSize,
+                MathF.Max(0.08f * tilePixelSize, radius),
+                new Color(205, 218, 232, alpha),
                 20);
 
-            // A target selected by several pawns only needs one indicator;
-            // this prevents their semi-transparent rings from becoming opaque.
+            // Several shooters aiming at the same pawn should not stack opacity.
             targetDrawn[targetIndex] = true;
             return;
         }
