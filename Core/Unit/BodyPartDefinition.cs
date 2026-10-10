@@ -9,8 +9,18 @@ public enum BodyPartAnchor : byte
     UnitHead
 }
 
+/// <summary>Where a part's transform origin sits along its local +X axis.</summary>
+public enum BodyPartPivot : byte
+{
+    Center,
+    Start
+}
+
 /// <summary>
 /// Geometry and attachment data for one renderable anatomical part.
+/// LocalPosition is relative to the unit or parent transform. Scale.X/Y are
+/// rendered half-extents. Start-pivot parts are positioned from their proximal
+/// joint; their render center is offset by Scale.X along the part's own axis.
 /// Parents must precede their children in a definition.
 /// </summary>
 public readonly struct BodyPartDefinition
@@ -24,6 +34,7 @@ public readonly struct BodyPartDefinition
     public BodyPartMotion Motion { get; }
     public BodyPartAnchor Anchor { get; }
     public BodyPartRole Role { get; }
+    public BodyPartPivot Pivot { get; }
 
     public BodyPartDefinition(
         Vector3 localPosition,
@@ -34,7 +45,8 @@ public readonly struct BodyPartDefinition
         BodyPartMotion motion = BodyPartMotion.StaticRelative,
         float followDistance = 0f,
         BodyPartAnchor anchor = BodyPartAnchor.Parent,
-        BodyPartRole role = BodyPartRole.Generic)
+        BodyPartRole role = BodyPartRole.Generic,
+        BodyPartPivot pivot = BodyPartPivot.Center)
     {
         LocalPosition = localPosition;
         Scale = scale;
@@ -45,5 +57,6 @@ public readonly struct BodyPartDefinition
         FollowDistance = followDistance;
         Anchor = anchor;
         Role = role;
+        Pivot = pivot;
     }
 }
