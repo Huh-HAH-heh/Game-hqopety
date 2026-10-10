@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
 using Core.Combat;
@@ -15,6 +16,12 @@ public sealed class ProjectileSystem
     private readonly UnitHitSystem _hitSystem = new UnitHitSystem();
     private readonly DamageSystem _damageSystem = new DamageSystem();
 
+    public double LastUpdateMilliseconds { get; private set; }
+    public double LastGridBuildMilliseconds { get; private set; }
+    public int LastProjectilesVisited { get; private set; }
+    public int LastTerrainCellsTraced { get; private set; }
+    public int LastUnitCandidates { get; private set; }
+
     public void Update(
         UnitStore units,
         UnitInventoryStore inventory,
@@ -25,16 +32,27 @@ public sealed class ProjectileSystem
         WorldMap worldMap,
         float deltaTime)
     {
-        if (deltaTime <= 0f ||
-            projectiles.ActiveCount == 0)
+        if (deltaTime <= 0f || projectiles.ActiveCount == 0)
+        {
+            LastUpdateMilliseconds = 0d;
+            LastGridBuildMilliseconds = 0d;
+            LastProjectilesVisited = 0;
+            LastTerrainCellsTraced = 0;
+            LastUnitCandidates = 0;
             return;
+        }
 
-        _unitGrid.Ensure(
-            worldMap,
-            units.Capacity);
+        long updateStarted = Stopwatch.GetTimestamp();
+        LastProjectilesVisited = 0;
+        LastTerrainCellsTraced = 0;
+        LastUnitCandidates = 0;
 
-        _unitGrid.Build(
-            units);
+        _unitGrid.Ensure(worldMap, units.Capacity);
+
+        long gridStarted = Stopwatch.GetTimestamp();
+        _unitGrid.Build(units);
+        LastGridBuildMilliseconds =
+            Stopwatch.GetElapsedTime(gridStarted).TotalMilliseconds;
 
         int activeSlot = 0;
 
@@ -44,6 +62,8 @@ public sealed class ProjectileSystem
             int projectileIndex =
                 projectiles.ActiveIndices[
                     activeSlot];
+
+            LastProjectilesVisited++;
 
             projectiles.Lifetime[
                 projectileIndex] -=
@@ -118,6 +138,9 @@ public sealed class ProjectileSystem
 
             activeSlot++;
         }
+
+        LastUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(updateStarted).TotalMilliseconds;
     }
 
     private bool Trace(
@@ -223,6 +246,7 @@ public sealed class ProjectileSystem
 
         while (segmentStart < 1f)
         {
+            LastTerrainCellsTraced++;
             float segmentEnd =
                 MathF.Min(
                     1f,
@@ -306,6 +330,8 @@ public sealed class ProjectileSystem
                 int unitIndex =
                     _unitGrid.GetNodeUnit(
                         node);
+
+                LastUnitCandidates++;
 
                 node =
                     _unitGrid.GetNextNode(
