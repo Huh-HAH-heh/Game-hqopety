@@ -81,6 +81,7 @@ public sealed class UnitAiSystem
             if (health.OverallMaxHitPoints[unit] <= 0f ||
                 health.OverallHitPoints[unit] <= 0f)
             {
+                ClearAiming(weapons, unit);
                 units.HasTarget[unit] = false;
                 Store.ClearGoal(unit);
                 Store.State[unit] = UnitAiState.Dead;
@@ -109,6 +110,7 @@ public sealed class UnitAiSystem
 
                 if (Store.HasGoal[unit])
                 {
+                    ClearAiming(weapons, unit);
                     units.Target[unit] =
                         Store.Goal[unit];
 
@@ -163,6 +165,8 @@ public sealed class UnitAiSystem
 
             if (!Store.HasTarget[unit])
             {
+                ClearAiming(weapons, unit);
+
                 // Keep the scenario's existing march order until it is reached.
                 // Afterward patrol forward and laterally instead of standing idle
                 // forever waiting for an enemy to enter the current line of sight.
@@ -208,6 +212,7 @@ public sealed class UnitAiSystem
             if (!units.IsAlive(target) ||
                 health.OverallHitPoints[target.Index] <= 0f)
             {
+                ClearAiming(weapons, unit);
                 Store.ClearTarget(unit);
                 units.HasTarget[unit] = false;
                 Store.State[unit] = UnitAiState.Idle;
@@ -219,6 +224,7 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index))
             {
+                ClearAiming(weapons, unit);
                 Store.ClearTarget(unit);
                 units.HasTarget[unit] = false;
                 Store.State[unit] = UnitAiState.Idle;
@@ -230,6 +236,9 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index,
                     units);
+
+            if (!targetVisible)
+                ClearAiming(weapons, unit);
 
             bool moving =
                 units.Velocity[unit].LengthSquared() >
@@ -259,6 +268,7 @@ public sealed class UnitAiSystem
                         units.Position[unit],
                         Store.Goal[unit]))
                 {
+                    ClearAiming(weapons, unit);
                     units.HasTarget[unit] = false;
                     Store.State[unit] =
                         UnitAiState.SeekCover;
@@ -287,6 +297,7 @@ public sealed class UnitAiSystem
 
                 if (Store.HasGoal[unit])
                 {
+                    ClearAiming(weapons, unit);
                     units.Target[unit] =
                         Store.Goal[unit];
 
@@ -330,6 +341,7 @@ public sealed class UnitAiSystem
                 {
                     // The cache is a detection memory, not permission to shoot
                     // through a newly discovered obstruction.
+                    ClearAiming(weapons, unit);
                     vision.ForgetVisibleTarget(unit, target.Index);
                     Store.ClearTarget(unit);
                     units.HasTarget[unit] = false;
@@ -791,6 +803,18 @@ public sealed class UnitAiSystem
         }
 
         return false;
+    }
+
+    private static void ClearAiming(
+        UnitWeaponStore weapons,
+        int unit)
+    {
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            weapons.ClearAim(unit, (UnitWeaponSlot)slot);
+        }
     }
 
     private static bool HasSustainedFireWeapon(
