@@ -1805,7 +1805,7 @@ public static class CombatSelfTest
 
         Vector3 headPosition = definitions.WorldPosition[definitionHead];
         if (MathF.Abs(headPosition.X) > 0.001f ||
-            MathF.Abs(headPosition.Y - 0.235f) > 0.001f)
+            MathF.Abs(headPosition.Y - 0.195f) > 0.001f)
         {
             return false;
         }
@@ -1866,14 +1866,56 @@ public static class CombatSelfTest
             BodyPartMotion.WalkCycleOpposite);
 
         float swing = MathF.Sin(1.1f) * 0.32f;
-        return leftThigh >= 0 &&
-               rightThigh >= 0 &&
-               MathF.Abs(
-                   simulation.Bodies.WorldRotation[leftThigh] -
-                   (MathF.PI - 0.18f + swing)) < 0.001f &&
-               MathF.Abs(
-                   simulation.Bodies.WorldRotation[rightThigh] -
-                   (-MathF.PI + 0.18f - swing)) < 0.001f;
+        bool gaitCorrect =
+            leftThigh >= 0 &&
+            rightThigh >= 0 &&
+            MathF.Abs(
+                simulation.Bodies.WorldRotation[leftThigh] -
+                (MathF.PI - 0.12f + swing)) < 0.001f &&
+            MathF.Abs(
+                simulation.Bodies.WorldRotation[rightThigh] -
+                (-MathF.PI + 0.12f - swing)) < 0.001f;
+
+        if (!gaitCorrect)
+            return false;
+
+        int walkingArm = FindBodyRole(
+            simulation.Bodies,
+            new BodyHandle(start, count),
+            BodyPartRole.UpperArm,
+            BodyPartMotion.WalkCycle);
+
+        if (walkingArm < 0)
+            return false;
+
+        float standingArmRotation =
+            simulation.Bodies.WorldRotation[walkingArm];
+
+        simulation.SetPosture(colonist, UnitPosture.Crouching);
+        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        float crouchingArmRotation =
+            simulation.Bodies.WorldRotation[walkingArm];
+
+        if (crouchingArmRotation >= standingArmRotation - 0.20f)
+            return false;
+
+        simulation.SetPosture(colonist, UnitPosture.Lying);
+        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        float lyingArmRotation =
+            simulation.Bodies.WorldRotation[walkingArm];
+
+        if (lyingArmRotation <= standingArmRotation + 0.10f)
+            return false;
+
+        // A moving body faces its travel vector, while head aim remains independent.
+        simulation.Units.Velocity[colonist.Index] =
+            new Vector3(0f, 1f, 0f);
+        simulation.SetPosture(colonist, UnitPosture.Standing);
+        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+
+        Vector3 bodyNormal = simulation.Units.BodyNormal[colonist.Index];
+        return MathF.Abs(bodyNormal.X) < 0.001f &&
+               MathF.Abs(bodyNormal.Y - 1f) < 0.001f;
     }
 
     private static int CountBodyRole(
