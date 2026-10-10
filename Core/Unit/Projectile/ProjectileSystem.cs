@@ -583,7 +583,8 @@ public sealed class ProjectileSystem
                 CombatDiagnostics.WriteLine(
                     $"[HIT] projectile owner={projectiles.Owner[projectileIndex]} " +
                     $"faction={projectiles.FactionTag[projectileIndex]} " +
-                    $"target={target} " +
+                    $"target={target} targetFaction={units.FactionTag[hitUnit]} " +
+                    $"friendly={units.FactionTag[hitUnit] == projectiles.FactionTag[projectileIndex]} " +
                     $"part={bestHit.Part} " +
                     $"damage={damage.DamageApplied:F2} " +
                     $"energyLeft={damage.RemainingEnergy:F2} " +
