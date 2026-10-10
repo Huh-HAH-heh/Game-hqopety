@@ -298,6 +298,10 @@ public sealed class UnitWeaponSystem
                     : ammo.BleedChance);
         }
 
+        projectiles.RegisterImpact(
+            muzzle,
+            ProjectileImpactKind.MuzzleFlash);
+
         weapons.Ammo[stateIndex]--;
 
         TotalShotsFired++;
@@ -456,7 +460,7 @@ public sealed class UnitWeaponSystem
 
         if (CombatDiagnostics.Enabled)
         {
-            Console.WriteLine(
+            CombatDiagnostics.WriteLine(
                 $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
                 $"target={target} mode={weapons.CurrentFireMode[stateIndex]} " +
                 $"aim={weapons.CurrentAimMode[stateIndex]} " +
