@@ -37,6 +37,8 @@ public sealed class UnitBodySystem
         BodyPartMotion[] motions = bodies.Motion;
         BodyPartAnchor[] anchors = bodies.Anchor;
         BodyPartRole[] roles = bodies.Role;
+        BodyPartPivot[] pivots = bodies.Pivot;
+        Vector3[] scales = bodies.Scale;
 
         for (int i = 0; i < active.Length; i++)
         {
@@ -66,6 +68,8 @@ public sealed class UnitBodySystem
                 motions,
                 anchors,
                 roles,
+                pivots,
+                scales,
                 followDistances,
                 followAlpha);
         }
@@ -90,6 +94,8 @@ public sealed class UnitBodySystem
         BodyPartMotion[] motions,
         BodyPartAnchor[] anchors,
         BodyPartRole[] roles,
+        BodyPartPivot[] pivots,
+        Vector3[] scales,
         float[] followDistances,
         float followAlpha)
     {
@@ -122,14 +128,18 @@ public sealed class UnitBodySystem
             int parent = parents[part];
             Vector3 localPosition = localPositions[part];
             float localRotation = localRotations[part];
-            ApplyPosture(posture, roles[part], ref localPosition, ref localRotation);
+            ApplyPosture(posture, roles[part], pivots[part],
+                ref localPosition, ref localRotation);
 
             Vector3 origin = unitPositions[unit];
-            float rotation = bodyRotation;
+            float positionRotation = bodyRotation;
+            float partBaseRotation = bodyRotation;
 
             if (anchors[part] == BodyPartAnchor.UnitHead)
             {
-                rotation = headRotation;
+                // Keep the head center anchored ahead of the torso even when
+                // its facing direction changes independently.
+                partBaseRotation = headRotation;
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      motions[part] == BodyPartMotion.FollowParent &&
@@ -148,7 +158,8 @@ public sealed class UnitBodySystem
                      parent >= start)
             {
                 origin = worldPositions[parent];
-                rotation = worldRotations[parent];
+                positionRotation = worldRotations[parent];
+                partBaseRotation = worldRotations[parent];
             }
 
             float gaitRotation = motions[part] switch
@@ -162,90 +173,90 @@ public sealed class UnitBodySystem
                 _ => 0f
             };
 
-            // The hip/shoulder anchor stays attached to its parent.
-            // Gait rotates the limb itself; child segments inherit that pose.
-            worldPositions[part] =
-                origin + Rotate2D(localPosition, rotation);
-            worldRotations[part] =
-                rotation + localRotation + gaitRotation;
+            float worldRotation =
+                partBaseRotation + localRotation + gaitRotation;
+
+            Vector3 joint =
+                origin + Rotate2D(localPosition, positionRotation);
+
+            // Rotating a limb around its center makes the shoulder/hip drift
+            // away from the torso. Start-pivot parts are instead positioned
+            // from their proximal joint, then offset to their visual center.
+            if (pivots[part] == BodyPartPivot.Start)
+            {
+                joint += Rotate2D(
+                    new Vector3(MathF.Abs(scales[part].X), 0f, 0f),
+                    worldRotation);
+            }
+
+            worldPositions[part] = joint;
+            worldRotations[part] = worldRotation;
         }
     }
 
     private static void ApplyPosture(
         UnitPosture posture,
         BodyPartRole role,
+        BodyPartPivot pivot,
         ref Vector3 localPosition,
         ref float localRotation)
     {
         if (posture == UnitPosture.Standing)
             return;
 
+        // Joint offsets remain untouched: children must stay on the exact
+        // endpoint of their parent. Only root attachment points and angles
+        // are adjusted for the pose.
         if (posture == UnitPosture.Crouching)
         {
             switch (role)
             {
                 case BodyPartRole.UpperArm:
-                    localPosition.Y *= 0.78f;
-                    localRotation *= 0.76f;
+                    localPosition.Y *= 0.82f;
+                    localRotation *= 0.84f;
                     break;
 
                 case BodyPartRole.Forearm:
-                    localRotation *= 1.15f;
-                    break;
-
-                case BodyPartRole.Elbow:
-                case BodyPartRole.Hand:
-                    localPosition.X *= 0.88f;
+                    localRotation = MathF.CopySign(1.25f, localRotation);
                     break;
 
                 case BodyPartRole.Thigh:
-                    localPosition.X *= 0.92f;
-                    localPosition.Y *= 0.78f;
-                    if (MathF.Abs(localRotation) > 2.5f)
-                        localRotation -= MathF.Sign(localRotation) * 0.30f;
+                    localPosition.X *= 1.05f;
+                    localPosition.Y *= 0.82f;
+                    localRotation -= MathF.Sign(localRotation) * 0.12f;
                     break;
 
-                case BodyPartRole.Knee:
                 case BodyPartRole.Shin:
-                case BodyPartRole.Foot:
-                    localPosition.X *= 0.85f;
+                    localRotation = MathF.CopySign(0.45f, localRotation);
                     break;
             }
 
             return;
         }
 
-        // Prone pawns have a wider, flatter limb silhouette. Their head and
-        // torso still face the same world direction; this is not a 90-degree
-        // side-view rotation.
+        // Prone is still an overhead silhouette: arms open out and the legs
+        // extend back. It never rotates the pawn into a side-on presentation.
         switch (role)
         {
             case BodyPartRole.UpperArm:
-                localPosition.Y *= 1.18f;
+                localPosition.Y *= 1.12f;
                 localRotation = MathF.CopySign(
                     MathF.Max(MathF.Abs(localRotation), 1.34f),
                     localRotation);
                 break;
 
             case BodyPartRole.Forearm:
-                localRotation *= 0.45f;
-                break;
-
-            case BodyPartRole.Elbow:
-            case BodyPartRole.Hand:
-                localPosition.X *= 1.05f;
+                localRotation = MathF.CopySign(1.55f, localRotation);
                 break;
 
             case BodyPartRole.Thigh:
+                localPosition.X *= 1.08f;
                 localPosition.Y *= 1.18f;
-                if (MathF.Abs(localRotation) > 2.5f)
-                    localRotation = MathF.CopySign(MathF.PI, localRotation);
+                localRotation = MathF.CopySign(MathF.PI - 0.12f, localRotation);
                 break;
 
-            case BodyPartRole.Knee:
             case BodyPartRole.Shin:
-            case BodyPartRole.Foot:
-                localPosition.X *= 1.05f;
+                localRotation *= 0.5f;
                 break;
         }
     }
