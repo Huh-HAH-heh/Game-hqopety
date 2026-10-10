@@ -51,6 +51,14 @@ public sealed class GameRenderer
 
     private float _perfTimer;
     private int _perfFrames;
+    private float _perfFrameTimeSum;
+    private float _maxFrameMs;
+    private int _framesOver16Ms;
+    private int _framesOver33Ms;
+    private int _framesOver50Ms;
+    private long _lastShotsSample;
+    private long _lastRoundsSample;
+    private long _lastProjectilesSpawnedSample;
     private float _fps;
     private long _workingSetBytes;
     private long _managedHeapBytes;
@@ -134,13 +142,14 @@ public sealed class GameRenderer
             if (_closeRequested)
                 break;
 
-            float deltaTime =
+            float rawDeltaTime =
                 clock.Restart().AsSeconds();
+            float deltaTime = rawDeltaTime;
 
             if (deltaTime > 0.1f)
                 deltaTime = 0.1f;
 
-            Update(deltaTime);
+            Update(deltaTime, rawDeltaTime);
             Draw();
         }
 
@@ -152,23 +161,44 @@ public sealed class GameRenderer
     }
 
     private void Update(
-        float deltaTime)
+        float deltaTime,
+        float rawDeltaTime)
     {
+        _unitSimulation.BeginMetricsFrame();
         _input.Update();
 
-        _perfTimer += deltaTime;
+        rawDeltaTime = MathF.Max(0f, rawDeltaTime);
+        _perfTimer += rawDeltaTime;
         _perfFrames++;
+        _perfFrameTimeSum += rawDeltaTime;
+        float frameMs = rawDeltaTime * 1000f;
+        _maxFrameMs = MathF.Max(_maxFrameMs, frameMs);
+
+        if (frameMs > 16.67f) _framesOver16Ms++;
+        if (frameMs > 33.33f) _framesOver33Ms++;
+        if (frameMs > 50f) _framesOver50Ms++;
+
         _titleTimer += MathF.Max(0f, deltaTime);
 
         if (_perfTimer >= 1f)
         {
             float sampleSeconds = _perfTimer;
 
-            _fps =
-                _perfFrames /
-                sampleSeconds;
+            _fps = _perfFrameTimeSum > 0f
+                ? _perfFrames / _perfFrameTimeSum
+                : 0f;
+
+            int framesOver16Ms = _framesOver16Ms;
+            int framesOver33Ms = _framesOver33Ms;
+            int framesOver50Ms = _framesOver50Ms;
+            float maxFrameMs = _maxFrameMs;
 
             _perfFrames = 0;
+            _perfFrameTimeSum = 0f;
+            _maxFrameMs = 0f;
+            _framesOver16Ms = 0;
+            _framesOver33Ms = 0;
+            _framesOver50Ms = 0;
             _perfTimer = 0f;
 
             using Process process =
@@ -192,6 +222,21 @@ public sealed class GameRenderer
             _lastAllocatedBytesSample =
                 _allocatedBytes;
 
+            long totalShots = _unitSimulation.TotalShotsFired;
+            long totalRounds = _unitSimulation.TotalRoundsConsumed;
+            long totalProjectilesSpawned = _unitSimulation.TotalProjectilesSpawned;
+
+            double shotsPerSecond =
+                (totalShots - _lastShotsSample) / sampleSeconds;
+            double roundsPerSecond =
+                (totalRounds - _lastRoundsSample) / sampleSeconds;
+            double projectilesPerSecond =
+                (totalProjectilesSpawned - _lastProjectilesSpawnedSample) / sampleSeconds;
+
+            _lastShotsSample = totalShots;
+            _lastRoundsSample = totalRounds;
+            _lastProjectilesSpawnedSample = totalProjectilesSpawned;
+
             string visionMetrics = _unitSimulation.VisionEnabled
                 ? $"{_unitSimulation.Vision.LastUpdateMilliseconds:0.0}ms " +
                   $"{_unitSimulation.Vision.LastCandidatePairs:N0} pairs " +
@@ -200,6 +245,7 @@ public sealed class GameRenderer
 
             Console.WriteLine(
                 $"[PERF] FPS={_fps:0.0} " +
+                $"FrameMax={maxFrameMs:0.0}ms >16={framesOver16Ms} >33={framesOver33Ms} >50={framesOver50Ms} " +
                 $"RAM={_workingSetBytes / 1024d / 1024d:0.0}MB " +
                 $"Heap={_managedHeapBytes / 1024d / 1024d:0.0}MB " +
                 $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.00}MB/s " +
@@ -216,6 +262,8 @@ public sealed class GameRenderer
                 $"P={_unitSimulation.LastProjectilesVisited} " +
                 $"TraceCells={_unitSimulation.LastProjectileTerrainCellsTraced} " +
                 $"UnitCandidates={_unitSimulation.LastProjectileUnitCandidates} " +
+                $"Shots/s={shotsPerSecond:0} Rounds/s={roundsPerSecond:0} " +
+                $"ProjectileSpawn/s={projectilesPerSecond:0} " +
                 $"Health={_unitSimulation.LastHealthUpdateMilliseconds:0.0}ms " +
                 $"Nav={_unitSimulation.Navigation.RoutesBuiltThisUpdate} built/" +
                     $"{_unitSimulation.Navigation.RoutesFailedThisUpdate} failed/" +
