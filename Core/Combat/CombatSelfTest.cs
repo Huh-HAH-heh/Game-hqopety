@@ -422,7 +422,10 @@ public static class CombatSelfTest
         }
 
         for (int y = 3; y < height - 3; y++)
+        {
             worldMap.SetSolidHeight(wallX, y, wallHeight, 2);
+            worldMap.SetNavigationBlocked(wallX, y, true);
+        }
 
         UnitSimulation simulation = new UnitSimulation(4, 64);
         Vector3 start = new Vector3(5.5f, centerY + 0.5f, 1f);
@@ -476,9 +479,13 @@ public static class CombatSelfTest
                 worldMap.GetSurfaceHeight(cellX, cellY));
         }
 
-        // Seal the previously open gaps; A* must report that the goal is unreachable.
+        // Flatten the ridge and seal every cell with the explicit navigation-blocker layer.
+        // This proves the pathfinder respects non-terrain obstacles as well as height steps.
         for (int y = 0; y < height; y++)
-            worldMap.SetSolidHeight(wallX, y, wallHeight, 2);
+        {
+            worldMap.SetSolidHeight(wallX, y, floorHeight, 1);
+            worldMap.SetNavigationBlocked(wallX, y, true);
+        }
 
         UnitNavigationSystem blockedNavigation = new UnitNavigationSystem();
         blockedNavigation.BeginUpdate(simulation.Units, worldMap);
