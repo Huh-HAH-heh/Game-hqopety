@@ -33,6 +33,7 @@ public sealed class WorldMap
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly TerrainLayer[] _layers;
     private readonly ushort[] _surfaceHeights;
+    private readonly bool[] _navigationBlocked;
     private readonly TileRange[]?[] _rangeCache;
 
     public WorldMap(
@@ -77,6 +78,7 @@ public sealed class WorldMap
         }
 
         _surfaceHeights = new ushort[columnCount];
+        _navigationBlocked = new bool[columnCount];
         _rangeCache = new TileRange[]?[columnCount];
 
         Water =
@@ -143,6 +145,28 @@ public sealed class WorldMap
 
         _rangeCache[columnIndex] = null;
         RecalculateSurfaceHeight(columnIndex);
+        TerrainVersion++;
+    }
+
+    public bool IsNavigationBlocked(int x, int y)
+    {
+        if (!IsInside(x, y))
+            return true;
+
+        return _navigationBlocked[GetColumnIndex(x, y)];
+    }
+
+    public void SetNavigationBlocked(int x, int y, bool blocked)
+    {
+        if (!IsInside(x, y))
+            throw new IndexOutOfRangeException();
+
+        int index = GetColumnIndex(x, y);
+
+        if (_navigationBlocked[index] == blocked)
+            return;
+
+        _navigationBlocked[index] = blocked;
         TerrainVersion++;
     }
 
