@@ -31,6 +31,8 @@ public static class CombatSelfTest
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
+        RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
+        RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
@@ -600,6 +602,72 @@ public static class CombatSelfTest
 
         return simulation.Units.Position[index].X > startX + 3f &&
                simulation.AI.Store.State[index] == UnitAiState.Search;
+    }
+
+    private static bool TestTerrainRegionCompression()
+    {
+        TerrainRegion region = new TerrainRegion(
+            0,
+            0,
+            0,
+            new TerrainTileRegion?[1],
+            0);
+
+        if (region.HasDenseMaterialBuffer)
+            return false;
+
+        region.SetMaterialIdAtIndex(0, 1);
+
+        if (!region.HasDenseMaterialBuffer)
+            return false;
+
+        for (int i = 1; i < TerrainRegion.TotalTiles; i++)
+            region.SetMaterialIdAtIndex(i, 1);
+
+        if (region.HasDenseMaterialBuffer ||
+            region.GetMaterialIdAtIndex(0) != 1 ||
+            region.GetMaterialIdAtIndex(TerrainRegion.TotalTiles - 1) != 1)
+        {
+            return false;
+        }
+
+        region.SetMaterialIdAtIndex(0, 0);
+
+        return region.HasDenseMaterialBuffer &&
+               region.GetMaterialIdAtIndex(0) == 0 &&
+               region.GetMaterialIdAtIndex(1) == 1;
+    }
+
+    private static bool TestTerrainRangeCacheAllocations()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: WorldMap.DefaultTerrainLayerCount);
+
+        worldMap.SetSolidHeight(5, 5, 100, 1);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ReadOnlySpan<TileRange> ranges = worldMap.GetTileRanges(5, 5);
+        long allocatedBytes =
+            GC.GetAllocatedBytesForCurrentThread() - before;
+
+        if (ranges.Length != 2 ||
+            ranges[0].StartZ != 0 ||
+            ranges[0].EndZ != 100 ||
+            ranges[0].MaterialId != 1 ||
+            ranges[0].State != WorldMap.StateSolid ||
+            ranges[1].StartZ != 100 ||
+            ranges[1].EndZ != WorldMap.DefaultTerrainLayerCount ||
+            ranges[1].State != WorldMap.StateEmpty ||
+            allocatedBytes >= 1024)
+        {
+            return false;
+        }
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        _ = worldMap.GetTileRanges(5, 5);
+        return GC.GetAllocatedBytesForCurrentThread() == before;
     }
 
     private static bool TestVisionSpatialIndex()
