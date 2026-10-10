@@ -298,9 +298,13 @@ public sealed class UnitWeaponSystem
                     : ammo.BleedChance);
         }
 
-        projectiles.RegisterImpact(
-            muzzle,
-            ProjectileImpactKind.MuzzleFlash);
+        // Show a representative muzzle flash instead of one marker per round.
+        if (TotalShotsFired % 5 == 0)
+        {
+            projectiles.RegisterImpact(
+                muzzle,
+                ProjectileImpactKind.MuzzleFlash);
+        }
 
         weapons.Ammo[stateIndex]--;
 
