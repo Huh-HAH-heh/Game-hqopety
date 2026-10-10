@@ -56,6 +56,8 @@ public sealed class VisionSystem
     private const int MaxTargetCandidatesPerObserver = 64;
     private const int TargetScanStride = 97;
     private const int TargetObserverOffset = 37;
+    private const int MaxNearbyUnitsPerCell = 4;
+    private const int NearbyCellRadius = 1;
 
     private float _updateTimer;
     private int _candidatePairCount;
@@ -66,6 +68,13 @@ public sealed class VisionSystem
     private int _visibilityCapacity;
     private int _visionUpdateSequence;
     private long _visibilityTerrainVersion = long.MinValue;
+
+    private int _spatialWidth;
+    private int _spatialHeight;
+    private int[] _spatialCellCounts = Array.Empty<int>();
+    private int[] _spatialCellStarts = Array.Empty<int>();
+    private int[] _spatialCellWriteCursors = Array.Empty<int>();
+    private int[] _spatialUnits = Array.Empty<int>();
 
     public double LastUpdateMilliseconds { get; private set; }
     public int LastCandidatePairs { get; private set; }
@@ -189,6 +198,9 @@ public sealed class VisionSystem
         Vector3[] positions = units.Position;
         float[] ranges = units.ViewRange;
 
+        EnsureSpatialGrid(worldMap, units.Capacity);
+        BuildSpatialGrid(units, active);
+
         // Scan a bounded rolling window instead of enumerating every hostile
         // in every observer's radius. The spatial-cell walk still degenerated
         // into O(units^2) in dense firefights. Every window moves through the
@@ -200,6 +212,7 @@ public sealed class VisionSystem
         Span<int> candidateTargets = stackalloc int[CandidateSlots];
         Span<float> candidateDistances = stackalloc float[CandidateSlots];
         Span<int> rotationDistances = stackalloc int[SectorCount];
+        Span<int> sampledTargets = stackalloc int[MaxTargetCandidatesPerObserver];
 
         for (int i = 0; i < active.Length; i++)
         {
@@ -228,22 +241,47 @@ public sealed class VisionSystem
                 rotationDistances[sector] = int.MaxValue;
             }
 
+            int sampledCount = CollectNearbyTargets(
+                observer,
+                position,
+                sampledTargets);
+
+            // Nearby spatial targets have priority. Fill the remaining slots
+            // from a rolling global window so distant enemies are still found
+            // without restoring the all-pairs scan.
             int scanCount = Math.Min(
                 active.Length,
-                MaxTargetCandidatesPerObserver);
+                MaxTargetCandidatesPerObserver + sampledCount);
             int scanStart = (int)(
                 ((long)observer * TargetObserverOffset +
                  (long)_visionUpdateSequence * TargetScanStride) %
                 active.Length);
 
-            for (int sample = 0; sample < scanCount; sample++)
+            for (int sample = 0;
+                 sample < scanCount &&
+                 sampledCount < MaxTargetCandidatesPerObserver;
+                 sample++)
             {
-                LastActiveCandidatesScanned++;
                 int activeSlot = scanStart + sample;
                 if (activeSlot >= active.Length)
                     activeSlot -= active.Length;
 
                 int target = active[activeSlot];
+                if (target == observer ||
+                    ContainsTarget(sampledTargets[..sampledCount], target))
+                {
+                    continue;
+                }
+
+                sampledTargets[sampledCount++] = target;
+            }
+
+            LastActiveCandidatesScanned += sampledCount;
+
+            for (int sample = 0; sample < sampledCount; sample++)
+            {
+                int target = sampledTargets[sample];
+
                 if (target == observer ||
                     (health != null && health.OverallHitPoints[target] <= 0f))
                 {
@@ -296,7 +334,7 @@ public sealed class VisionSystem
                 int slot = sector * CandidatesPerSector;
 
                 // Keep the nearest sampled target and one rotating candidate
-                // in each sector. Total pair discovery is bounded to 64 checks/unit.
+                // in each sector, with close targets sampled first.
                 if (distanceSquared < candidateDistances[slot])
                 {
                     candidateTargets[slot] = target;
@@ -1070,6 +1108,155 @@ public sealed class VisionSystem
         }
 
         return true;
+    }
+
+    private void EnsureSpatialGrid(
+        WorldMap worldMap,
+        int unitCapacity)
+    {
+        int width = worldMap.TileWidth;
+        int height = worldMap.TileHeight;
+
+        if (_spatialWidth != width || _spatialHeight != height)
+        {
+            int cellCount = checked(width * height);
+            _spatialCellCounts = new int[cellCount];
+            _spatialCellStarts = new int[cellCount];
+            _spatialCellWriteCursors = new int[cellCount];
+            _spatialWidth = width;
+            _spatialHeight = height;
+        }
+        else
+        {
+            Array.Clear(_spatialCellCounts);
+        }
+
+        if (_spatialUnits.Length < unitCapacity)
+            Array.Resize(ref _spatialUnits, unitCapacity);
+    }
+
+    private void BuildSpatialGrid(
+        UnitStore units,
+        ReadOnlySpan<int> active)
+    {
+        Vector3[] positions = units.Position;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            Vector3 position = positions[active[i]];
+            int x = (int)MathF.Floor(position.X);
+            int y = (int)MathF.Floor(position.Y);
+
+            if (x < 0 || y < 0 || x >= _spatialWidth || y >= _spatialHeight)
+                continue;
+
+            _spatialCellCounts[x + y * _spatialWidth]++;
+        }
+
+        int offset = 0;
+        for (int cell = 0; cell < _spatialCellCounts.Length; cell++)
+        {
+            _spatialCellStarts[cell] = offset;
+            _spatialCellWriteCursors[cell] = offset;
+            offset += _spatialCellCounts[cell];
+        }
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            Vector3 position = positions[unit];
+            int x = (int)MathF.Floor(position.X);
+            int y = (int)MathF.Floor(position.Y);
+
+            if (x < 0 || y < 0 || x >= _spatialWidth || y >= _spatialHeight)
+                continue;
+
+            int cell = x + y * _spatialWidth;
+            _spatialUnits[_spatialCellWriteCursors[cell]++] = unit;
+        }
+    }
+
+    private int CollectNearbyTargets(
+        int observer,
+        Vector3 position,
+        Span<int> targets)
+    {
+        int centerX = (int)MathF.Floor(position.X);
+        int centerY = (int)MathF.Floor(position.Y);
+
+        if (centerX < 0 || centerY < 0 ||
+            centerX >= _spatialWidth || centerY >= _spatialHeight)
+        {
+            return 0;
+        }
+
+        int count = 0;
+
+        for (int radius = 0; radius <= NearbyCellRadius; radius++)
+        {
+            for (int dy = -radius; dy <= radius; dy++)
+            {
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != radius)
+                        continue;
+
+                    int x = centerX + dx;
+                    int y = centerY + dy;
+
+                    if (x < 0 || y < 0 ||
+                        x >= _spatialWidth || y >= _spatialHeight)
+                    {
+                        continue;
+                    }
+
+                    int cell = x + y * _spatialWidth;
+                    int cellCount = _spatialCellCounts[cell];
+
+                    if (cellCount == 0 || count >= targets.Length)
+                        continue;
+
+                    int take = Math.Min(
+                        Math.Min(cellCount, MaxNearbyUnitsPerCell),
+                        targets.Length - count);
+
+                    int offset = (int)(
+                        ((long)observer * TargetObserverOffset +
+                         (long)_visionUpdateSequence * TargetScanStride +
+                         cell) % cellCount);
+
+                    int cellStart = _spatialCellStarts[cell];
+
+                    for (int i = 0; i < take; i++)
+                    {
+                        int slot = offset + i;
+                        if (slot >= cellCount)
+                            slot -= cellCount;
+
+                        int target = _spatialUnits[cellStart + slot];
+                        if (target == observer)
+                            continue;
+
+                        targets[count++] = target;
+                    }
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static bool ContainsTarget(
+        ReadOnlySpan<int> targets,
+        int target)
+    {
+        for (int i = 0; i < targets.Length; i++)
+        {
+            if (targets[i] == target)
+                return true;
+        }
+
+        return false;
     }
 
     private void BuildVisibleTargetList(
