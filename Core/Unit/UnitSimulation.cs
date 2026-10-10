@@ -55,6 +55,7 @@ public sealed class UnitSimulation
     public long TotalShotsFired => _weaponSystem.TotalShotsFired;
     public long TotalRoundsConsumed => _weaponSystem.TotalRoundsConsumed;
     public long TotalProjectilesSpawned => _weaponSystem.TotalProjectilesSpawned;
+    public int ShotsFiredThisFrame => _weaponSystem.ShotsFiredThisFrame;
 
     public void BeginMetricsFrame()
     {
