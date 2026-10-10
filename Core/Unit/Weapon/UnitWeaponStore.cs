@@ -120,6 +120,24 @@ public sealed class UnitWeaponStore
         InitializeUnit(unitIndex);
     }
 
+    public void CancelActions(int unitIndex)
+    {
+        if (unitIndex < 0 || unitIndex >= Capacity)
+            return;
+
+        int start = unitIndex * UnitInventoryStore.WeaponSlotCount;
+
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            int index = start + slot;
+            _burstRemaining[index] = 0;
+            _burstTimer[index] = 0f;
+            _burstTarget[index] = default;
+            _aimTimer[index] = 0f;
+            _aimTarget[index] = default;
+        }
+    }
+
     public void ConfigureSlot(
         int unitIndex,
         UnitWeaponSlot slot,
