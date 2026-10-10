@@ -4,11 +4,22 @@ using Core.Combat;
 
 namespace Core.Unit;
 
+public enum ProjectileImpactKind : byte
+{
+    MuzzleFlash,
+    UnitHit,
+    TerrainHit
+}
+
 public sealed class ProjectileStore
 {
     private const int DefaultCapacity = 8192;
+    private const int ImpactCapacity = 256;
+    private const int TraceCapacity = 512;
+    public const float TraceLifetimeSeconds = 0.035f;
 
     private Vector3[] _position;
+    private Vector3[] _previousPosition;
     private Vector3[] _velocity;
     private UnitId[] _owner;
     private ushort[] _factionTag;
@@ -25,6 +36,19 @@ public sealed class ProjectileStore
     private float[] _bleedChance;
     private float[] _lifetime;
     private uint[] _generation;
+    private bool[] _showTracer;
+    private uint _projectileSpawnSequence;
+
+    private readonly Vector3[] _impactPositions = new Vector3[ImpactCapacity];
+    private readonly float[] _impactLifetimes = new float[ImpactCapacity];
+    private readonly ProjectileImpactKind[] _impactKinds =
+        new ProjectileImpactKind[ImpactCapacity];
+    private readonly Vector3[] _traceStarts = new Vector3[TraceCapacity];
+    private readonly Vector3[] _traceEnds = new Vector3[TraceCapacity];
+    private readonly ushort[] _traceFactions = new ushort[TraceCapacity];
+    private readonly float[] _traceLifetimes = new float[TraceCapacity];
+    private int _nextImpact;
+    private int _nextTrace;
 
     private int[] _activeIndices;
     private int[] _activeSlots;
@@ -46,7 +70,17 @@ public sealed class ProjectileStore
         _position.Length;
 
     public Vector3[] Position => _position;
+    public Vector3[] PreviousPosition => _previousPosition;
     public Vector3[] Velocity => _velocity;
+    public Vector3[] ImpactPositions => _impactPositions;
+    public float[] ImpactLifetimes => _impactLifetimes;
+    public ProjectileImpactKind[] ImpactKinds => _impactKinds;
+    public int ImpactCapacityCount => ImpactCapacity;
+    public Vector3[] TraceStarts => _traceStarts;
+    public Vector3[] TraceEnds => _traceEnds;
+    public ushort[] TraceFactions => _traceFactions;
+    public float[] TraceLifetimes => _traceLifetimes;
+    public int TraceCapacityCount => TraceCapacity;
     public UnitId[] Owner => _owner;
     public ushort[] FactionTag => _factionTag;
     public float[] Energy => _energy;
@@ -61,6 +95,7 @@ public sealed class ProjectileStore
     public DamageType[] DamageType => _damageType;
     public float[] BleedChance => _bleedChance;
     public float[] Lifetime => _lifetime;
+    public bool[] ShowTracer => _showTracer;
 
     public ReadOnlySpan<int> ActiveIndices =>
         _activeIndices.AsSpan(
@@ -75,6 +110,7 @@ public sealed class ProjectileStore
                 nameof(initialCapacity));
 
         _position = new Vector3[initialCapacity];
+        _previousPosition = new Vector3[initialCapacity];
         _velocity = new Vector3[initialCapacity];
         _owner = new UnitId[initialCapacity];
         _factionTag = new ushort[initialCapacity];
@@ -91,6 +127,7 @@ public sealed class ProjectileStore
         _bleedChance = new float[initialCapacity];
         _lifetime = new float[initialCapacity];
         _generation = new uint[initialCapacity];
+        _showTracer = new bool[initialCapacity];
 
         _activeIndices = new int[initialCapacity];
         _activeSlots = new int[initialCapacity];
@@ -157,6 +194,7 @@ public sealed class ProjectileStore
             velocityValue;
 
         _position[index] = position;
+        _previousPosition[index] = position;
         _velocity[index] =
             direction *
             velocityValue;
@@ -195,6 +233,7 @@ public sealed class ProjectileStore
             MathF.Max(
                 0f,
                 lifetime);
+        _showTracer[index] = (_projectileSpawnSequence++ % 5u) == 0;
 
         _activeSlots[index] =
             _activeCount;
@@ -208,6 +247,48 @@ public sealed class ProjectileStore
             _generation[index]);
     }
 
+    public void RegisterImpact(
+        Vector3 position,
+        ProjectileImpactKind kind)
+    {
+        int index = _nextImpact;
+        _impactPositions[index] = position;
+        _impactKinds[index] = kind;
+        _impactLifetimes[index] = kind switch
+        {
+            ProjectileImpactKind.MuzzleFlash => 0.055f,
+            ProjectileImpactKind.UnitHit => 0.16f,
+            _ => 0.12f
+        };
+
+        _nextImpact = (index + 1) % ImpactCapacity;
+    }
+
+    public void RegisterTrace(
+        Vector3 start,
+        Vector3 end,
+        ushort faction)
+    {
+        int index = _nextTrace;
+        _traceStarts[index] = start;
+        _traceEnds[index] = end;
+        _traceFactions[index] = faction;
+        _traceLifetimes[index] = TraceLifetimeSeconds;
+        _nextTrace = (index + 1) % TraceCapacity;
+    }
+
+    public void UpdateImpactEffects(float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        for (int i = 0; i < ImpactCapacity; i++)
+            _impactLifetimes[i] = MathF.Max(0f, _impactLifetimes[i] - deltaTime);
+
+        for (int i = 0; i < TraceCapacity; i++)
+            _traceLifetimes[i] = MathF.Max(0f, _traceLifetimes[i] - deltaTime);
+    }
+
     public void RegisterHit(
         UnitId target,
         UnitHealthPartId part,
@@ -217,6 +298,7 @@ public sealed class ProjectileStore
         LastHitTarget = target;
         LastHitPart = part;
         LastHitPosition = position;
+        RegisterImpact(position, ProjectileImpactKind.UnitHit);
     }
 
     public void Clear()
@@ -233,6 +315,15 @@ public sealed class ProjectileStore
         LastHitPosition = Vector3.Zero;
         LastHitTarget = default;
         LastHitPart = UnitHealthPartId.None;
+        Array.Clear(_impactLifetimes);
+        Array.Clear(_impactPositions);
+        Array.Clear(_impactKinds);
+        Array.Clear(_traceStarts);
+        Array.Clear(_traceEnds);
+        Array.Clear(_traceLifetimes);
+        Array.Clear(_traceFactions);
+        _nextImpact = 0;
+        _nextTrace = 0;
     }
 
     public bool Destroy(
@@ -318,6 +409,9 @@ public sealed class ProjectileStore
             ref _position,
             newCapacity);
         Array.Resize(
+            ref _previousPosition,
+            newCapacity);
+        Array.Resize(
             ref _velocity,
             newCapacity);
         Array.Resize(
@@ -364,6 +458,9 @@ public sealed class ProjectileStore
             newCapacity);
         Array.Resize(
             ref _generation,
+            newCapacity);
+        Array.Resize(
+            ref _showTracer,
             newCapacity);
         Array.Resize(
             ref _activeIndices,

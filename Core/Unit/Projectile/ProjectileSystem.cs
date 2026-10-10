@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
 using Core.Combat;
@@ -15,6 +16,12 @@ public sealed class ProjectileSystem
     private readonly UnitHitSystem _hitSystem = new UnitHitSystem();
     private readonly DamageSystem _damageSystem = new DamageSystem();
 
+    public double LastUpdateMilliseconds { get; private set; }
+    public double LastGridBuildMilliseconds { get; private set; }
+    public int LastProjectilesVisited { get; private set; }
+    public int LastTerrainCellsTraced { get; private set; }
+    public int LastUnitCandidates { get; private set; }
+
     public void Update(
         UnitStore units,
         UnitInventoryStore inventory,
@@ -25,16 +32,29 @@ public sealed class ProjectileSystem
         WorldMap worldMap,
         float deltaTime)
     {
-        if (deltaTime <= 0f ||
-            projectiles.ActiveCount == 0)
+        projectiles.UpdateImpactEffects(deltaTime);
+
+        if (deltaTime <= 0f || projectiles.ActiveCount == 0)
+        {
+            LastUpdateMilliseconds = 0d;
+            LastGridBuildMilliseconds = 0d;
+            LastProjectilesVisited = 0;
+            LastTerrainCellsTraced = 0;
+            LastUnitCandidates = 0;
             return;
+        }
 
-        _unitGrid.Ensure(
-            worldMap,
-            units.Capacity);
+        long updateStarted = Stopwatch.GetTimestamp();
+        LastProjectilesVisited = 0;
+        LastTerrainCellsTraced = 0;
+        LastUnitCandidates = 0;
 
-        _unitGrid.Build(
-            units);
+        _unitGrid.Ensure(worldMap, units.Capacity);
+
+        long gridStarted = Stopwatch.GetTimestamp();
+        _unitGrid.Build(units, health);
+        LastGridBuildMilliseconds =
+            Stopwatch.GetElapsedTime(gridStarted).TotalMilliseconds;
 
         int activeSlot = 0;
 
@@ -44,6 +64,8 @@ public sealed class ProjectileSystem
             int projectileIndex =
                 projectiles.ActiveIndices[
                     activeSlot];
+
+            LastProjectilesVisited++;
 
             projectiles.Lifetime[
                 projectileIndex] -=
@@ -75,11 +97,23 @@ public sealed class ProjectileSystem
                 projectiles.Position[
                     projectileIndex];
 
+            projectiles.PreviousPosition[projectileIndex] = start;
+
             Vector3 end =
                 start +
                 projectiles.Velocity[
                     projectileIndex] *
                 deltaTime;
+
+            // Only a sample of bullets is rendered as tracers. Every bullet
+            // still follows the full ballistic/collision simulation.
+            if (projectiles.ShowTracer[projectileIndex])
+            {
+                projectiles.RegisterTrace(
+                    start,
+                    end,
+                    projectiles.FactionTag[projectileIndex]);
+            }
 
             bool alive =
                 Trace(
@@ -118,6 +152,9 @@ public sealed class ProjectileSystem
 
             activeSlot++;
         }
+
+        LastUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(updateStarted).TotalMilliseconds;
     }
 
     private bool Trace(
@@ -223,6 +260,7 @@ public sealed class ProjectileSystem
 
         while (segmentStart < 1f)
         {
+            LastTerrainCellsTraced++;
             float segmentEnd =
                 MathF.Min(
                     1f,
@@ -306,6 +344,8 @@ public sealed class ProjectileSystem
                 int unitIndex =
                     _unitGrid.GetNodeUnit(
                         node);
+
+                LastUnitCandidates++;
 
                 node =
                     _unitGrid.GetNextNode(
@@ -420,6 +460,10 @@ public sealed class ProjectileSystem
 
             if (terrainT <= unitT)
             {
+                projectiles.RegisterImpact(
+                    start + (end - start) * terrainT,
+                    ProjectileImpactKind.TerrainHit);
+
                 if (!ApplyTerrainImpact(
                         projectiles,
                         projectileIndex,
@@ -434,7 +478,7 @@ public sealed class ProjectileSystem
                 {
                     if (CombatDiagnostics.Enabled)
                     {
-                        Console.WriteLine(
+                        CombatDiagnostics.WriteLine(
                             $"[BLOCKED] projectile owner={projectiles.Owner[projectileIndex]} " +
                             $"faction={projectiles.FactionTag[projectileIndex]} " +
                             $"terrainMaterial={terrainMaterial} " +
@@ -546,10 +590,11 @@ public sealed class ProjectileSystem
 
             if (CombatDiagnostics.Enabled)
             {
-                Console.WriteLine(
+                CombatDiagnostics.WriteLine(
                     $"[HIT] projectile owner={projectiles.Owner[projectileIndex]} " +
                     $"faction={projectiles.FactionTag[projectileIndex]} " +
-                    $"target={target} " +
+                    $"target={target} targetFaction={units.FactionTag[hitUnit]} " +
+                    $"friendly={units.FactionTag[hitUnit] == projectiles.FactionTag[projectileIndex]} " +
                     $"part={bestHit.Part} " +
                     $"damage={damage.DamageApplied:F2} " +
                     $"energyLeft={damage.RemainingEnergy:F2} " +

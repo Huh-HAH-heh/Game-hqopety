@@ -2,17 +2,31 @@ using System;
 using System.Numerics;
 using Core.Combat;
 using Core.Items;
+using Core.Map;
 
 namespace Core.Unit;
 
 public sealed class UnitWeaponSystem
 {
+    public long TotalShotsFired { get; private set; }
+    public long TotalRoundsConsumed { get; private set; }
+    public long TotalProjectilesSpawned { get; private set; }
+    public int ShotsFiredThisFrame { get; private set; }
+
+    public void BeginMetricsFrame()
+    {
+        ShotsFiredThisFrame = 0;
+    }
+
     public void Update(
         UnitStore units,
         UnitInventoryStore inventory,
         UnitWeaponStore weapons,
         ProjectileStore projectiles,
-        float deltaTime)
+        float deltaTime,
+        UnitHealthStore? health = null,
+        VisionSystem? vision = null,
+        WorldMap? worldMap = null)
     {
         weapons.UpdateTimers(deltaTime);
         weapons.AdvanceBurstTimer(deltaTime);
@@ -23,6 +37,9 @@ public sealed class UnitWeaponSystem
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
+
+            if (health != null && health.OverallHitPoints[unit] <= 0f)
+                continue;
 
             for (int slot = 0;
                  slot < UnitInventoryStore.WeaponSlotCount;
@@ -43,9 +60,7 @@ public sealed class UnitWeaponSystem
 
                 if (inventorySlot < 0)
                 {
-                    weapons.ClearSlot(
-                        unit,
-                        weaponSlot);
+                    weapons.ClearSlot(unit, weaponSlot);
                     continue;
                 }
 
@@ -77,24 +92,75 @@ public sealed class UnitWeaponSystem
                         weapon.ReloadTime);
                 }
 
-                if (weapons.CurrentFireMode[stateIndex] != FireMode.Burst ||
-                    weapons.BurstRemaining[stateIndex] <= 0 ||
-                    weapons.BurstTimer[stateIndex] > 0f)
+                bool burstReady =
+                    weapons.CurrentFireMode[stateIndex] == FireMode.Burst &&
+                    weapons.BurstRemaining[stateIndex] > 0 &&
+                    weapons.BurstTimer[stateIndex] <= 0f &&
+                    weapons.Cooldown[stateIndex] <= 0f;
+
+                if (burstReady)
+                {
+                    UnitId burstTarget = weapons.BurstTarget[stateIndex];
+
+                    if (!IsLivingTarget(units, health, burstTarget))
+                    {
+                        weapons.StartBurst(unit, weaponSlot, default, 0, 0f);
+                        weapons.ClearAim(unit, weaponSlot);
+                        continue;
+                    }
+
+                    if (!HasCurrentLineOfSight(
+                            units,
+                            weapons,
+                            vision,
+                            worldMap,
+                            unit,
+                            stateIndex))
+                    {
+                        weapons.StartBurst(unit, weaponSlot, default, 0, 0f);
+                        weapons.ClearAim(unit, weaponSlot);
+                        continue;
+                    }
+
+                    TryFireAt(
+                        units,
+                        inventory,
+                        weapons,
+                        projectiles,
+                        units.GetId(unit),
+                        weaponSlot,
+                        burstTarget,
+                        aimPoint: weapons.AimPoint[stateIndex]);
+
+                    continue;
+                }
+
+                // Automatic fire runs on weapon cooldown ticks, not on the
+                // slower AI decision interval. Target selection stays in AI.
+                if (weapons.CurrentFireMode[stateIndex] != FireMode.Auto ||
+                    weapons.Cooldown[stateIndex] > 0f ||
+                    weapons.Reloading[stateIndex] ||
+                    weapons.Ammo[stateIndex] <= 0)
                 {
                     continue;
                 }
 
-                UnitId target =
-                    weapons.BurstTarget[stateIndex];
-
-                if (!units.IsAlive(target))
+                UnitId target = weapons.AimTarget[stateIndex];
+                if (!IsLivingTarget(units, health, target))
                 {
-                    weapons.StartBurst(
+                    weapons.ClearAim(unit, weaponSlot);
+                    continue;
+                }
+
+                if (!HasCurrentLineOfSight(
+                        units,
+                        weapons,
+                        vision,
+                        worldMap,
                         unit,
-                        weaponSlot,
-                        default,
-                        0,
-                        0f);
+                        stateIndex))
+                {
+                    weapons.ClearAim(unit, weaponSlot);
                     continue;
                 }
 
@@ -105,9 +171,45 @@ public sealed class UnitWeaponSystem
                     projectiles,
                     units.GetId(unit),
                     weaponSlot,
-                    target);
+                    target,
+                    aimPoint: weapons.AimPoint[stateIndex]);
             }
         }
+    }
+
+    private static bool IsLivingTarget(
+        UnitStore units,
+        UnitHealthStore? health,
+        UnitId target)
+    {
+        return units.IsAlive(target) &&
+               (health == null || health.OverallHitPoints[target.Index] > 0f);
+    }
+
+    private static bool HasCurrentLineOfSight(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        VisionSystem? vision,
+        WorldMap? worldMap,
+        int unit,
+        int stateIndex)
+    {
+        if (weapons.CurrentAimMode[stateIndex] == AimMode.SuppressFire ||
+            vision == null ||
+            worldMap == null)
+        {
+            return true;
+        }
+
+        Vector3 aimPoint = weapons.AimPoint[stateIndex];
+        if (aimPoint == Vector3.Zero)
+            return false;
+
+        return vision.HasLineOfSight(
+            worldMap,
+            GetMuzzlePosition(units, unit),
+            aimPoint,
+            out _);
     }
 
     public bool TryFire(
@@ -170,13 +272,17 @@ public sealed class UnitWeaponSystem
         if (ammo == null)
             return false;
 
+        float aimDuration = GetAimDuration(
+            weapon,
+            weapons.CurrentAimMode[stateIndex],
+            shotRange);
+
         float aimProgress =
-            weapon.AimTime <= 0f ||
-            weapons.CurrentAimMode[stateIndex] != AimMode.AimedShot
+            aimDuration <= 0f
                 ? 1f
                 : Math.Clamp(
                     weapons.AimTimer[stateIndex] /
-                    weapon.AimTime,
+                    aimDuration,
                     0f,
                     1f);
 
@@ -281,7 +387,20 @@ public sealed class UnitWeaponSystem
                     : ammo.BleedChance);
         }
 
+        // Show a representative muzzle flash instead of one marker per round.
+        if (TotalShotsFired % 5 == 0)
+        {
+            projectiles.RegisterImpact(
+                muzzle,
+                ProjectileImpactKind.MuzzleFlash);
+        }
+
         weapons.Ammo[stateIndex]--;
+
+        TotalShotsFired++;
+        TotalRoundsConsumed++;
+        TotalProjectilesSpawned += pelletCount;
+        ShotsFiredThisFrame++;
 
         weapons.AddRecoil(
             unitIndex,
@@ -307,57 +426,19 @@ public sealed class UnitWeaponSystem
         UnitId shooter,
         UnitWeaponSlot slot,
         UnitId target,
-        float accuracyMultiplier = 1f)
+        float accuracyMultiplier = 1f,
+        Vector3? aimPoint = null)
     {
-        if (!units.TryGetIndex(
-                shooter,
-                out int shooterIndex) ||
-            !units.TryGetIndex(
-                target,
-                out int targetIndex))
+        if (!units.TryGetIndex(shooter, out int shooterIndex) ||
+            !units.TryGetIndex(target, out int targetIndex))
         {
             return false;
         }
 
-        int stateIndex =
-            UnitWeaponStore.GetIndex(
-                shooterIndex,
-                slot);
-
-        RangedWeaponConfig? weapon =
-            GetRangedWeapon(
-                inventory,
-                shooterIndex,
-                slot);
-
+        int stateIndex = UnitWeaponStore.GetIndex(shooterIndex, slot);
+        RangedWeaponConfig? weapon = GetRangedWeapon(inventory, shooterIndex, slot);
         if (weapon == null)
             return false;
-
-        if (weapons.CurrentAimMode[stateIndex] == AimMode.AimedShot)
-        {
-            bool resetAim =
-                weapons.AimTarget[stateIndex] != target;
-
-            weapons.SetAimTarget(
-                shooterIndex,
-                slot,
-                target,
-                resetAim);
-
-            if (weapons.AimTimer[stateIndex] <
-                MathF.Max(
-                    0f,
-                    weapon.AimTime))
-            {
-                return false;
-            }
-        }
-        else
-        {
-            weapons.ClearAim(
-                shooterIndex,
-                slot);
-        }
 
         bool continuingBurst =
             weapons.CurrentFireMode[stateIndex] == FireMode.Burst &&
@@ -365,29 +446,58 @@ public sealed class UnitWeaponSystem
 
         if (continuingBurst)
         {
-            UnitId burstTarget =
-                weapons.BurstTarget[stateIndex];
+            target = weapons.BurstTarget[stateIndex];
 
-            if (!units.IsAlive(burstTarget))
+            if (!units.TryGetIndex(target, out targetIndex))
                 return false;
-
-            target = burstTarget;
-            targetIndex = target.Index;
         }
 
-        int previousBurstRemaining =
-            weapons.BurstRemaining[stateIndex];
+        float targetHeight = MathF.Max(0.05f, units.Height[targetIndex]);
+        float targetHeightFactor = weapons.CurrentTargetMode[stateIndex] switch
+        {
+            TargetMode.Head => 0.88f,
+            TargetMode.Legs => 0.22f,
+            TargetMode.Torso => 0.55f,
+            _ => 0.55f
+        };
 
-        bool fired =
-            TryFireAtInternal(
-                units,
-                inventory,
-                weapons,
-                projectiles,
-                shooter,
-                slot,
-                target,
-                accuracyMultiplier);
+        Vector3 requestedAimPoint = aimPoint ??
+            (units.Position[targetIndex] +
+             new Vector3(0f, 0f, targetHeight * targetHeightFactor));
+
+        Vector3 shooterPosition = units.Position[shooterIndex];
+        float dx = requestedAimPoint.X - shooterPosition.X;
+        float dy = requestedAimPoint.Y - shooterPosition.Y;
+        float targetDistance = MathF.Sqrt(dx * dx + dy * dy);
+
+        bool resetAim = weapons.AimTarget[stateIndex] != target;
+        weapons.SetAimTarget(
+            shooterIndex,
+            slot,
+            target,
+            resetAim,
+            requestedAimPoint);
+
+        float aimDuration = GetAimDuration(
+            weapon,
+            weapons.CurrentAimMode[stateIndex],
+            targetDistance);
+
+        if (weapons.AimTimer[stateIndex] < aimDuration)
+            return false;
+
+        int previousBurstRemaining = weapons.BurstRemaining[stateIndex];
+
+        bool fired = TryFireAtInternal(
+            units,
+            inventory,
+            weapons,
+            projectiles,
+            shooter,
+            slot,
+            target,
+            accuracyMultiplier,
+            requestedAimPoint);
 
         if (!fired)
         {
@@ -406,44 +516,77 @@ public sealed class UnitWeaponSystem
 
         if (weapons.CurrentFireMode[stateIndex] == FireMode.Burst)
         {
-            int remaining =
-                continuingBurst
-                    ? previousBurstRemaining - 1
-                    : Math.Max(
-                        0,
-                        weapon.BurstCount - 1);
+            int remaining = continuingBurst
+                ? previousBurstRemaining - 1
+                : Math.Max(0, weapon.BurstCount - 1);
 
             weapons.StartBurst(
                 shooterIndex,
                 slot,
-                remaining > 0
-                    ? target
-                    : default,
+                remaining > 0 ? target : default,
                 remaining,
                 remaining > 0
-                    ? MathF.Max(
-                        weapon.BurstInterval,
-                        weapon.FireRate)
+                    ? MathF.Max(weapon.BurstInterval, weapon.FireRate)
                     : 0f);
         }
 
-        AmmunitionConfig? currentAmmo =
-            GetCurrentAmmunition(
-                weapon,
-                weapons.CurrentAmmoType[stateIndex]);
+        weapons.MarkAimComplete(shooterIndex, slot);
+
+        // A burst is one firing action. The next burst must start a new
+        // range-dependent warmup instead of inheriting the previous timer.
+        if (weapons.CurrentFireMode[stateIndex] == FireMode.Single ||
+            (weapons.CurrentFireMode[stateIndex] == FireMode.Burst &&
+             weapons.BurstRemaining[stateIndex] == 0))
+        {
+            weapons.ClearAim(shooterIndex, slot);
+        }
+
+        AmmunitionConfig? currentAmmo = GetCurrentAmmunition(
+            weapon,
+            weapons.CurrentAmmoType[stateIndex]);
 
         if (CombatDiagnostics.Enabled)
         {
-            Console.WriteLine(
+            CombatDiagnostics.WriteLine(
                 $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
-                $"target={target} mode={weapons.CurrentFireMode[stateIndex]} " +
+                $"target={target} targetFaction={units.FactionTag[targetIndex]} " +
+                $"mode={weapons.CurrentFireMode[stateIndex]} " +
                 $"aim={weapons.CurrentAimMode[stateIndex]} " +
                 $"targetMode={weapons.CurrentTargetMode[stateIndex]} " +
                 $"targetPos={units.Position[targetIndex]} " +
+                $"aimPoint={requestedAimPoint} " +
                 $"ammo={currentAmmo?.Name ?? "none"}");
         }
 
         return true;
+    }
+
+    public static float GetAimDuration(
+        RangedWeaponConfig weapon,
+        AimMode mode,
+        float distance)
+    {
+        float configuredTime = MathF.Max(0f, weapon.AimTime);
+
+        return mode switch
+        {
+            // CE uses 30-240 ticks (0.5-4 seconds), with warmup scaling by range.
+            AimMode.AimedShot => MathF.Max(
+                configuredTime,
+                0.5f + 3.5f * Math.Clamp(MathF.Max(0f, distance) / 100f, 0f, 1f)),
+
+            AimMode.Snapshot => Math.Clamp(
+                configuredTime * 0.45f,
+                0.18f,
+                0.35f),
+
+            AimMode.SuppressFire => Math.Clamp(
+                configuredTime * 0.30f,
+                0.12f,
+                0.22f),
+
+            _ => configuredTime
+        };
     }
 
     private bool TryFireAtInternal(
@@ -454,7 +597,8 @@ public sealed class UnitWeaponSystem
         UnitId shooter,
         UnitWeaponSlot slot,
         UnitId target,
-        float accuracyMultiplier)
+        float accuracyMultiplier,
+        Vector3? aimPoint = null)
     {
         if (!units.TryGetIndex(
                 shooter,
@@ -506,13 +650,14 @@ public sealed class UnitWeaponSystem
             };
 
         Vector3 targetPoint =
-            units.Position[targetIndex] +
-            new Vector3(
-                0f,
-                0f,
-                MathF.Max(
-                    0.05f,
-                    targetZ));
+            aimPoint ??
+            (units.Position[targetIndex] +
+             new Vector3(
+                 0f,
+                 0f,
+                 MathF.Max(
+                     0.05f,
+                     targetZ)));
 
         Vector3 predictedTarget =
             targetPoint;
@@ -521,9 +666,13 @@ public sealed class UnitWeaponSystem
             default;
 
         bool solved = false;
+        bool suppressing =
+            weapons.CurrentAimMode[stateIndex] == AimMode.SuppressFire;
 
+        // Suppressive fire targets the last known point, not the target's
+        // current movement vector. Aimed shots and snapshots still lead targets.
         for (int iteration = 0;
-             iteration < 3;
+             !suppressing && iteration < 3;
              iteration++)
         {
             solved =

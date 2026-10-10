@@ -6,138 +6,225 @@ using SFML.System;
 
 namespace RimClone.Render;
 
-public sealed class ProjectileRenderSystem
+public sealed class ProjectileRenderSystem : IDisposable
 {
-    private readonly VertexArray _vertices =
-        new VertexArray(
-            PrimitiveType.Lines);
+    private readonly VertexArray _tracers =
+        new VertexArray(PrimitiveType.Lines);
 
-    private readonly VertexArray _hitMarker =
-        new VertexArray(
-            PrimitiveType.Lines);
+    private readonly VertexArray _impacts =
+        new VertexArray(PrimitiveType.Lines);
 
     public void Draw(
         RenderWindow window,
         ProjectileStore projectiles,
-        float tilePixelSize)
+        float tilePixelSize,
+        bool showTracers = true)
     {
-        _vertices.Clear();
-        _hitMarker.Clear();
+        _tracers.Clear();
+        _impacts.Clear();
 
-        ReadOnlySpan<int> active =
-            projectiles.ActiveIndices;
-
-        for (int i = 0;
-             i < active.Length;
-             i++)
+        if (showTracers)
         {
-            int projectile =
-                active[i];
+            Vector3[] starts = projectiles.TraceStarts;
+            Vector3[] ends = projectiles.TraceEnds;
+            ushort[] factions = projectiles.TraceFactions;
+            float[] traceLifetimes = projectiles.TraceLifetimes;
 
-            Vector3 position =
-                projectiles.Position[
-                    projectile];
-
-            Vector3 velocity =
-                projectiles.Velocity[
-                    projectile];
-
-            float speed =
-                velocity.Length();
-
-            if (speed < 0.001f)
+        for (int i = 0; i < projectiles.TraceCapacityCount; i++)
+        {
+            if (traceLifetimes[i] <= 0f)
                 continue;
 
-            Vector3 direction =
-                velocity /
-                speed;
+            Vector3 start = starts[i];
+            Vector3 end = ends[i];
+            Vector2 delta = new Vector2(end.X - start.X, end.Y - start.Y);
+            if (delta.LengthSquared() < 0.025f)
+                continue;
 
-            float trail =
-                MathF.Min(
-                    0.45f,
-                    speed * 0.0015f);
+            GetTeamColors(factions[i], out Color trail, out Color head);
 
-            Vector3 start =
-                position -
-                direction *
-                trail;
+            // Fade old segments instead of losing a fast bullet the same frame it hits.
+            byte fade = (byte)(255f * Math.Clamp(
+                traceLifetimes[i] / ProjectileStore.TraceLifetimeSeconds, 0f, 1f));
+            trail = new Color(trail.R, trail.G, trail.B,
+                (byte)(trail.A * fade / 255));
+            head = new Color(head.R, head.G, head.B,
+                (byte)(head.A * fade / 255));
 
-            _vertices.Append(
-                new Vertex(
-                    new Vector2f(
-                        start.X *
-                        tilePixelSize,
-                        start.Y *
-                        tilePixelSize),
-                    new Color(
-                        255,
-                        235,
-                        130,
-                        220)));
+            Vector2 screenStart = new Vector2(
+                start.X * tilePixelSize,
+                start.Y * tilePixelSize);
+            Vector2 screenEnd = new Vector2(
+                end.X * tilePixelSize,
+                end.Y * tilePixelSize);
 
-            _vertices.Append(
-                new Vertex(
-                    new Vector2f(
-                        position.X *
-                        tilePixelSize,
-                        position.Y *
-                        tilePixelSize),
-                    new Color(
-                        255,
-                        255,
-                        220,
-                        255)));
+            _tracers.Append(new Vertex(
+                new Vector2f(screenStart.X, screenStart.Y),
+                trail));
+            _tracers.Append(new Vertex(
+                new Vector2f(screenEnd.X, screenEnd.Y),
+                head));
+
+            Vector2 coreStart = screenEnd - delta * tilePixelSize * 0.22f;
+            _tracers.Append(new Vertex(
+                new Vector2f(coreStart.X, coreStart.Y),
+                new Color(255, 246, 210, fade)));
+            _tracers.Append(new Vertex(
+                new Vector2f(screenEnd.X, screenEnd.Y),
+                new Color(255, 255, 245, fade)));
+            }
         }
 
-        if (_vertices.VertexCount > 0)
-            window.Draw(_vertices);
+        if (_tracers.VertexCount > 0)
+            window.Draw(_tracers);
 
-        if (projectiles.TotalHits > 0)
+        AppendImpacts(projectiles, tilePixelSize);
+        if (_impacts.VertexCount > 0)
+            window.Draw(_impacts);
+    }
+
+    private void AppendImpacts(
+        ProjectileStore projectiles,
+        float tilePixelSize)
+    {
+        Vector3[] positions = projectiles.ImpactPositions;
+        float[] lifetimes = projectiles.ImpactLifetimes;
+        ProjectileImpactKind[] kinds = projectiles.ImpactKinds;
+
+        for (int i = 0; i < projectiles.ImpactCapacityCount; i++)
         {
-            AppendHitMarker(
-                _hitMarker,
-                projectiles.LastHitPosition,
-                tilePixelSize);
+            float remaining = lifetimes[i];
+            if (remaining <= 0f)
+                continue;
 
-            window.Draw(_hitMarker);
+            ProjectileImpactKind kind = kinds[i];
+            float duration = kind switch
+            {
+                ProjectileImpactKind.MuzzleFlash => 0.10f,
+                ProjectileImpactKind.UnitHit => 0.30f,
+                _ => 0.24f
+            };
+
+            float age = 1f - Math.Clamp(remaining / duration, 0f, 1f);
+            Vector3 position = positions[i];
+            float x = position.X * tilePixelSize;
+            float y = position.Y * tilePixelSize;
+
+            if (kind == ProjectileImpactKind.MuzzleFlash)
+            {
+                AppendFlash(x, y, tilePixelSize, age);
+            }
+            else if (kind == ProjectileImpactKind.UnitHit)
+            {
+                AppendRing(x, y, tilePixelSize, age,
+                    new Color(255, 72, 52, (byte)(255f * (1f - age))));
+            }
+            else
+            {
+                AppendRing(x, y, tilePixelSize, age,
+                    new Color(255, 190, 90, (byte)(230f * (1f - age))));
+            }
         }
     }
 
-    private static void AppendHitMarker(
-        VertexArray vertices,
-        Vector3 position,
-        float tilePixelSize)
+    private void AppendFlash(
+        float x,
+        float y,
+        float tilePixelSize,
+        float age)
     {
-        const int segments = 12;
+        float radius = tilePixelSize * (0.18f + age * 0.42f);
+        byte alpha = (byte)(255f * (1f - age));
 
-        float radius =
-            0.35f * tilePixelSize;
-
-        for (int i = 0; i < segments; i++)
+        for (int ray = 0; ray < 8; ray++)
         {
-            float a0 =
-                i * MathF.Tau / segments;
+            float angle = ray * MathF.Tau / 8f;
+            float inner = radius * 0.18f;
+            float outer = radius * (0.75f + ((ray & 1) == 0 ? 0.7f : 0.25f));
 
-            float a1 =
-                (i + 1) * MathF.Tau / segments;
-
-            vertices.Append(
-                new Vertex(
-                    new Vector2f(
-                        position.X * tilePixelSize +
-                        MathF.Cos(a0) * radius,
-                        position.Y * tilePixelSize +
-                        MathF.Sin(a0) * radius),
-                    new Color(255, 80, 80, 230)));
-
-            vertices.Append(
-                new Vertex(
-                    new Vector2f(
-                        position.X * tilePixelSize +
-                        MathF.Cos(a1) * radius,
-                        position.Y * tilePixelSize +
-                        MathF.Sin(a1) * radius),
-                    new Color(255, 190, 80, 230)));
+            AppendLine(
+                x + MathF.Cos(angle) * inner,
+                y + MathF.Sin(angle) * inner,
+                x + MathF.Cos(angle) * outer,
+                y + MathF.Sin(angle) * outer,
+                new Color(255, 245, 190, alpha));
         }
+    }
+
+    private void AppendRing(
+        float x,
+        float y,
+        float tilePixelSize,
+        float age,
+        Color color)
+    {
+        const int segments = 8;
+        float radius = tilePixelSize * (0.13f + age * 0.31f);
+        float innerRadius = radius * 0.55f;
+
+        for (int segment = 0; segment < segments; segment++)
+        {
+            float a0 = segment * MathF.Tau / segments;
+            float a1 = (segment + 1) * MathF.Tau / segments;
+
+            AppendLine(
+                x + MathF.Cos(a0) * radius,
+                y + MathF.Sin(a0) * radius,
+                x + MathF.Cos(a1) * radius,
+                y + MathF.Sin(a1) * radius,
+                color);
+        }
+
+        // Four short radial sparks make impacts legible when the ring is tiny.
+        for (int ray = 0; ray < 4; ray++)
+        {
+            float angle = ray * MathF.PI / 2f + MathF.PI / 4f;
+            AppendLine(
+                x + MathF.Cos(angle) * innerRadius,
+                y + MathF.Sin(angle) * innerRadius,
+                x + MathF.Cos(angle) * (radius * 1.25f),
+                y + MathF.Sin(angle) * (radius * 1.25f),
+                color);
+        }
+    }
+
+    private void AppendLine(
+        float x0,
+        float y0,
+        float x1,
+        float y1,
+        Color color)
+    {
+        _impacts.Append(new Vertex(new Vector2f(x0, y0), color));
+        _impacts.Append(new Vertex(new Vector2f(x1, y1), color));
+    }
+
+    private static void GetTeamColors(
+        ushort faction,
+        out Color trail,
+        out Color head)
+    {
+        if (faction == 1)
+        {
+            trail = new Color(45, 140, 255, 50);
+            head = new Color(80, 200, 255, 245);
+            return;
+        }
+
+        if (faction == 2)
+        {
+            trail = new Color(255, 72, 42, 50);
+            head = new Color(255, 128, 68, 245);
+            return;
+        }
+
+        trail = new Color(255, 220, 115, 45);
+        head = new Color(255, 255, 215, 240);
+    }
+
+    public void Dispose()
+    {
+        _tracers.Dispose();
+        _impacts.Dispose();
     }
 }

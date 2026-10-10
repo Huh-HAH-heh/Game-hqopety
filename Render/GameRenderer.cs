@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using Core.Items;
+using Core.Combat;
 using Core.Map;
 using Core.Unit;
 using RimClone.Render;
@@ -27,6 +28,7 @@ public sealed class GameRenderer
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
     private readonly VisionTestScene _visionTestScene;
+    private CombatStatusOverlay? _combatStatusOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
@@ -46,11 +48,27 @@ public sealed class GameRenderer
     private int _visibleMaxLayer;
     private bool _showVisionDebug;
     private bool _massCombatMode;
-    private bool _terrainStressMode = true;
+    private bool _simulationPaused;
+    private bool _terrainStressMode;
+    private bool _showCombatTracers = true;
+    private bool _showCombatHud = true;
+    private bool _showAiStateDebug = true;
     private int _visionTestIndex;
 
     private float _perfTimer;
     private int _perfFrames;
+    private float _perfFrameTimeSum;
+    private float _maxFrameMs;
+    private int _framesOver16Ms;
+    private int _framesOver33Ms;
+    private int _framesOver50Ms;
+    private long _lastShotsSample;
+    private long _lastRoundsSample;
+    private long _lastProjectilesSpawnedSample;
+    private long _lastHitsSample;
+    private double _combatShotsPerSecond;
+    private double _combatHitEventsPerSecond;
+    private double _combatHitEventsPerRound;
     private float _fps;
     private long _workingSetBytes;
     private long _managedHeapBytes;
@@ -100,12 +118,21 @@ public sealed class GameRenderer
         _massCombatTestScene =
             new LongRangeCombatTestScene();
 
-        // Start in a terrain-only stress test. The 160-unit combat test
-        // is still available via C, but must not contaminate idle render
-        // profiling with periodic volleys and projectile simulation.
-        _unitSimulation.AI.Enabled = false;
-        _unitSimulation.VisionEnabled = false;
+        // Always produce a rate-limited [SHOT]/[HIT]/[BLOCKED] combat trace.
+        CombatDiagnostics.Enabled = true;
+
+        // The battlefield is a live micro-AI demonstration by default.
+        // A is idempotent: it only enables AI and cannot switch it off.
+        _unitSimulation.AI.Enabled = true;
+        _unitSimulation.VisionEnabled = true;
         _showVisionDebug = false;
+
+        // Launch directly into the 800-unit navigation/combat test.
+        _terrainStressMode = false;
+        EnterMassCombatMode();
+        for (int i = 0; i < 3; i++)
+            _camera.HandleZoom(-1f);
+
         _lastAllocatedBytesSample =
             GC.GetTotalAllocatedBytes(false);
     }
@@ -128,41 +155,65 @@ public sealed class GameRenderer
             if (_closeRequested)
                 break;
 
-            float deltaTime =
+            float rawDeltaTime =
                 clock.Restart().AsSeconds();
+            float deltaTime = rawDeltaTime;
 
             if (deltaTime > 0.1f)
                 deltaTime = 0.1f;
 
-            Update(deltaTime);
+            Update(deltaTime, rawDeltaTime);
             Draw();
         }
 
         // Release GPU resources while the graphics context still exists.
         _mapRenderer.Dispose();
+        _projectileRenderer.Dispose();
         _gameMenuOverlay?.Dispose();
+        _combatStatusOverlay?.Dispose();
         _uiView?.Dispose();
         _window.Close();
     }
 
     private void Update(
-        float deltaTime)
+        float deltaTime,
+        float rawDeltaTime)
     {
+        _unitSimulation.BeginMetricsFrame();
         _input.Update();
 
-        _perfTimer += deltaTime;
+        rawDeltaTime = MathF.Max(0f, rawDeltaTime);
+        _perfTimer += rawDeltaTime;
         _perfFrames++;
+        _perfFrameTimeSum += rawDeltaTime;
+        float frameMs = rawDeltaTime * 1000f;
+        _maxFrameMs = MathF.Max(_maxFrameMs, frameMs);
+
+        if (frameMs > 16.67f) _framesOver16Ms++;
+        if (frameMs > 33.33f) _framesOver33Ms++;
+        if (frameMs > 50f) _framesOver50Ms++;
+
         _titleTimer += MathF.Max(0f, deltaTime);
 
         if (_perfTimer >= 1f)
         {
             float sampleSeconds = _perfTimer;
 
-            _fps =
-                _perfFrames /
-                sampleSeconds;
+            _fps = _perfFrameTimeSum > 0f
+                ? _perfFrames / _perfFrameTimeSum
+                : 0f;
+
+            int framesOver16Ms = _framesOver16Ms;
+            int framesOver33Ms = _framesOver33Ms;
+            int framesOver50Ms = _framesOver50Ms;
+            float maxFrameMs = _maxFrameMs;
 
             _perfFrames = 0;
+            _perfFrameTimeSum = 0f;
+            _maxFrameMs = 0f;
+            _framesOver16Ms = 0;
+            _framesOver33Ms = 0;
+            _framesOver50Ms = 0;
             _perfTimer = 0f;
 
             using Process process =
@@ -186,12 +237,75 @@ public sealed class GameRenderer
             _lastAllocatedBytesSample =
                 _allocatedBytes;
 
+            long totalShots = _unitSimulation.TotalShotsFired;
+            long totalRounds = _unitSimulation.TotalRoundsConsumed;
+            long totalProjectilesSpawned = _unitSimulation.TotalProjectilesSpawned;
+            long totalHits = _unitSimulation.Projectiles.TotalHits;
+
+            long shotsDelta = Math.Max(0L, totalShots - _lastShotsSample);
+            long roundsDelta = Math.Max(0L, totalRounds - _lastRoundsSample);
+            long projectilesDelta = Math.Max(0L, totalProjectilesSpawned - _lastProjectilesSpawnedSample);
+            long hitsDelta = totalHits >= _lastHitsSample
+                ? totalHits - _lastHitsSample
+                : totalHits;
+
+            double shotsPerSecond = shotsDelta / sampleSeconds;
+            double roundsPerSecond = roundsDelta / sampleSeconds;
+            double projectilesPerSecond = projectilesDelta / sampleSeconds;
+            _combatShotsPerSecond = shotsDelta / sampleSeconds;
+            _combatHitEventsPerSecond = hitsDelta / sampleSeconds;
+            _combatHitEventsPerRound = roundsDelta > 0
+                ? hitsDelta / (double)roundsDelta
+                : 0d;
+
+            _lastShotsSample = totalShots;
+            _lastRoundsSample = totalRounds;
+            _lastProjectilesSpawnedSample = totalProjectilesSpawned;
+            _lastHitsSample = totalHits;
+
+            string visionMetrics = _unitSimulation.VisionEnabled
+                ? $"{_unitSimulation.Vision.LastUpdateMilliseconds:0.0}ms " +
+                  $"{_unitSimulation.Vision.LastCandidatePairs:N0} pairs " +
+                  $"{_unitSimulation.Vision.LastTargetEvaluations:N0} targets " +
+                  $"{_unitSimulation.Vision.LastLineOfSightChecks:N0} LOS " +
+                  $"sampled={_unitSimulation.Vision.LastActiveCandidatesScanned:N0} " +
+                  $"cache={_unitSimulation.Vision.LastVisibilityMemoryEntriesScanned:N0}"
+                : "OFF";
+
             Console.WriteLine(
                 $"[PERF] FPS={_fps:0.0} " +
+                $"FrameMax={maxFrameMs:0.0}ms >16={framesOver16Ms} >33={framesOver33Ms} >50={framesOver50Ms} " +
                 $"RAM={_workingSetBytes / 1024d / 1024d:0.0}MB " +
                 $"Heap={_managedHeapBytes / 1024d / 1024d:0.0}MB " +
                 $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.00}MB/s " +
-                $"TerrainQ={_mapRenderer.TerrainQuadCount:N0} " +
+                $"TotalAlloc={_allocatedBytes / 1024d / 1024d:0.0}MB " +
+                $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
+                $"Units={_unitSimulation.Units.ActiveCount} " +
+                $"SimPaused={_simulationPaused} " +
+                $"Sim={_unitSimulation.LastSimulationUpdateMilliseconds:0.0}ms " +
+                $"Vision={visionMetrics} " +
+                $"AI={_unitSimulation.LastAIUpdateMilliseconds:0.0}ms " +
+                $"Move={_unitSimulation.LastMovementUpdateMilliseconds:0.0}ms " +
+                $"Weapons={_unitSimulation.LastWeaponUpdateMilliseconds:0.0}ms " +
+                $"Ballistics={_unitSimulation.LastProjectileUpdateMilliseconds:0.0}ms " +
+                $"Grid={_unitSimulation.LastProjectileGridBuildMilliseconds:0.0}ms " +
+                $"P={_unitSimulation.LastProjectilesVisited} " +
+                $"TraceCells={_unitSimulation.LastProjectileTerrainCellsTraced} " +
+                $"UnitCandidates={_unitSimulation.LastProjectileUnitCandidates} " +
+                $"Shots/s={shotsPerSecond:0} Rounds/s={roundsPerSecond:0} " +
+                $"ProjectileSpawn/s={projectilesPerSecond:0} " +
+                $"HitEvents/s={_combatHitEventsPerSecond:0} " +
+                $"Events/Round={_combatHitEventsPerRound:0.00} TotalHitEvents={totalHits} " +
+                $"Health={_unitSimulation.LastHealthUpdateMilliseconds:0.0}ms " +
+                $"Nav={_unitSimulation.Navigation.RoutesBuiltThisUpdate} built/" +
+                    $"{_unitSimulation.Navigation.RoutesFailedThisUpdate} failed/" +
+                    $"{_unitSimulation.Navigation.SearchesThisUpdate} A*/" +
+                    $"{_unitSimulation.Navigation.CellsExpandedThisUpdate:N0} nodes/" +
+                    $"{_unitSimulation.Navigation.SearchMillisecondsThisUpdate:0.0}ms " +
+                $"NavGrid={_unitSimulation.Navigation.NavigationGridBuildMilliseconds:0.0}ms " +
+                $"RouteReuse={_unitSimulation.Navigation.RoutesBuiltUsingPriorRoutesThisUpdate}/" +
+                    $"{_unitSimulation.Navigation.RouteTrafficCellsConsideredThisUpdate:N0} " +
+                $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} " +
                 $"Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"LayerShader={_mapRenderer.UsesTerrainLayerShader} " +
                 $"VisibleV={_mapRenderer.TerrainVertexCount:N0} " +
@@ -209,27 +323,30 @@ public sealed class GameRenderer
                 _input.MoveDirection,
                 deltaTime);
 
-            if (!_terrainStressMode && !_massCombatMode)
+            if (!_simulationPaused)
             {
-                _visionTestScene.UpdateAiDemo(
-                    _unitSimulation,
-                    _worldMap,
-                    deltaTime);
-            }
+                if (!_terrainStressMode && !_massCombatMode)
+                {
+                    _visionTestScene.UpdateAiDemo(
+                        _unitSimulation,
+                        _worldMap,
+                        deltaTime);
+                }
 
-            if (_massCombatMode)
-            {
-                _massCombatTestScene.Update(
-                    _unitSimulation,
-                    _worldMap,
-                    deltaTime);
-            }
+                if (_massCombatMode)
+                {
+                    _massCombatTestScene.Update(
+                        _unitSimulation,
+                        _worldMap,
+                        deltaTime);
+                }
 
-            if (!_terrainStressMode)
-            {
-                _unitSimulation.Update(
-                    _worldMap,
-                    deltaTime);
+                if (!_terrainStressMode)
+                {
+                    _unitSimulation.Update(
+                        _worldMap,
+                        deltaTime);
+                }
             }
         }
     }
@@ -270,13 +387,14 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _selectedUnit,
             _showVisionDebug && !_massCombatMode,
-            !_massCombatMode,
+            _showAiStateDebug && _unitSimulation.AI.Enabled,
             false);
 
         _projectileRenderer.Draw(
             _window,
             _unitSimulation.Projectiles,
-            TerrainTilePixelSize);
+            TerrainTilePixelSize,
+            _showCombatTracers);
 
         _gameMenuOverlay?.DrawWorldMarkers(
             _window,
@@ -292,6 +410,15 @@ public sealed class GameRenderer
         if (_uiView != null)
         {
             _window.SetView(_uiView);
+
+            _combatStatusOverlay?.Draw(
+                _window,
+                _unitSimulation,
+                _combatShotsPerSecond,
+                _combatHitEventsPerSecond,
+                _combatHitEventsPerRound,
+                _showCombatTracers,
+                _showAiStateDebug);
 
             Vector2i mousePixels = Mouse.GetPosition(_window);
             Vector2f uiMouseCoordinates =
@@ -481,7 +608,7 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
-            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision";
+            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
     }
 
     private void InitializeWindow()
@@ -498,6 +625,7 @@ public sealed class GameRenderer
                 _window.Size.Y));
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
+        _combatStatusOverlay = new CombatStatusOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
         _window.Closed +=
@@ -506,7 +634,24 @@ public sealed class GameRenderer
 
         _window.Resized +=
             (_, e) =>
+            {
+                if (e.Size.X == 0 || e.Size.Y == 0)
+                    return;
+
                 UpdateWindowViews(e.Size);
+            };
+
+        _window.GainedFocus +=
+            (_, _) =>
+            {
+                Vector2u size = _window.Size;
+                if (size.X > 0 && size.Y > 0)
+                    UpdateWindowViews(size);
+
+                _mapRenderer.InvalidateGraphicsResources();
+                Console.WriteLine(
+                    "[Render] Window focus restored; terrain GPU cache will rebuild.");
+            };
 
         _window.MouseWheelScrolled +=
             (_, e) =>
@@ -663,8 +808,72 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.A)
         {
-            _unitSimulation.AI.Enabled =
-                !_unitSimulation.AI.Enabled;
+            bool wasEnabled = _unitSimulation.AI.Enabled;
+            _unitSimulation.AI.Enabled = true;
+            _unitSimulation.VisionEnabled = true;
+            CombatDiagnostics.Enabled = true;
+
+            Console.WriteLine(
+                wasEnabled
+                    ? "[TEST] AI is already enabled; A never disables it."
+                    : "[TEST] AI enabled; vision and combat diagnostics enabled. A will not turn AI off.");
+            return;
+        }
+
+        if (key == Keyboard.Key.T)
+        {
+            _showCombatTracers = !_showCombatTracers;
+            Console.WriteLine($"[TEST] Tracers={_showCombatTracers}");
+            return;
+        }
+
+        if (key == Keyboard.Key.F9)
+        {
+            _showCombatHud = !_showCombatHud;
+            if (_combatStatusOverlay != null)
+                _combatStatusOverlay.Visible = _showCombatHud;
+            return;
+        }
+
+        if (key == Keyboard.Key.I)
+        {
+            _showAiStateDebug = !_showAiStateDebug;
+            Console.WriteLine($"[TEST] AI state markers={_showAiStateDebug}");
+            return;
+        }
+
+        if (key == Keyboard.Key.F6)
+        {
+            _unitSimulation.VisionEnabled =
+                !_unitSimulation.VisionEnabled;
+
+            Console.WriteLine(
+                $"[TEST] Vision simulation={_unitSimulation.VisionEnabled}");
+            return;
+        }
+
+        if (key == Keyboard.Key.F7)
+        {
+            _simulationPaused = !_simulationPaused;
+            Console.WriteLine(
+                $"[TEST] Simulation paused={_simulationPaused}; rendering remains active");
+            return;
+        }
+
+        if (key == Keyboard.Key.F8)
+        {
+            if (!_massCombatMode)
+                return;
+
+            _massCombatTestScene.CycleScale(
+                _unitSimulation,
+                _worldMap);
+
+            _selectedUnit = _massCombatTestScene.FirstUnit;
+            _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
+
+            Console.WriteLine(
+                $"[TEST] {_massCombatTestScene.GetStatus(_unitSimulation)}");
             return;
         }
 
@@ -781,6 +990,15 @@ public sealed class GameRenderer
                 _unitSimulation.Weapons.CycleFireMode(
                     unitIndex,
                     UnitWeaponSlot.Primary);
+
+                int stateIndex = UnitWeaponStore.GetIndex(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+
+                Console.WriteLine(
+                    $"[FIRE CONTROL] Unit[{unitIndex}] " +
+                    $"Fire={_unitSimulation.Weapons.CurrentFireMode[stateIndex]} " +
+                    $"Aim={_unitSimulation.Weapons.CurrentAimMode[stateIndex]}");
             }
 
             return;
@@ -795,6 +1013,15 @@ public sealed class GameRenderer
                 _unitSimulation.Weapons.CycleAimMode(
                     unitIndex,
                     UnitWeaponSlot.Primary);
+
+                int stateIndex = UnitWeaponStore.GetIndex(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+
+                Console.WriteLine(
+                    $"[FIRE CONTROL] Unit[{unitIndex}] " +
+                    $"Fire={_unitSimulation.Weapons.CurrentFireMode[stateIndex]} " +
+                    $"Aim={_unitSimulation.Weapons.CurrentAimMode[stateIndex]}");
             }
 
             return;

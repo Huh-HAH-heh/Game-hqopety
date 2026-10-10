@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Combat;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
@@ -8,23 +9,29 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    private const int UnitsPerFaction = 80;
-    private const int TotalUnits = UnitsPerFaction * 2;
-    private const int Columns = 4;
-    private const int Rows = UnitsPerFaction / Columns;
-    private const float CombatDistance = 176f;
+    private const int InitialUnitsPerFaction = 400;
+    private const int Columns = 40;
+
+    private int _unitsPerFaction = InitialUnitsPerFaction;
+    private int UnitsPerFaction => _unitsPerFaction;
+    private int TotalUnits => _unitsPerFaction * 2;
+    private int Rows => _unitsPerFaction / Columns;
+    private const float CombatDistance = 90f;
     private const float BaseHeight = 6f;
+    private const float TerrainScale = 2.25f;
+    private const float AdvanceDistance = 25f;
+    private const float VisionStressRange = 85f;
 
-    private readonly UnitId[] _units =
-        new UnitId[TotalUnits];
+    private UnitId[] _units =
+        new UnitId[InitialUnitsPerFaction * 2];
 
-    private readonly byte[] _side =
-        new byte[TotalUnits];
+    private byte[] _side =
+        new byte[InitialUnitsPerFaction * 2];
 
     private bool _initialized;
     private float _elapsed;
     private float _fireTimer;
-        private long _hitsAtReset;
+    private long _hitsAtReset;
 
     public bool Initialized =>
         _initialized;
@@ -48,8 +55,7 @@ public sealed class LongRangeCombatTestScene
             BuildTerrain(worldMap);
             SpawnUnits(simulation, worldMap);
             _initialized = true;
-            simulation.AI.Enabled = false;
-            simulation.VisionEnabled = false;
+            // AI/vision are controlled by the user, not reset by scene setup.
             _hitsAtReset = simulation.Projectiles.TotalHits;
         }
         else
@@ -58,6 +64,26 @@ public sealed class LongRangeCombatTestScene
         }
 
         UpdateStats(simulation);
+    }
+
+    public void CycleScale(
+        UnitSimulation simulation,
+        WorldMap worldMap)
+    {
+        int nextUnitsPerFaction = _unitsPerFaction switch
+        {
+            80 => 400,
+            400 => 800,
+            _ => 80
+        };
+
+        Stop(simulation);
+
+        _unitsPerFaction = nextUnitsPerFaction;
+        _units = new UnitId[TotalUnits];
+        _side = new byte[TotalUnits];
+
+        Start(simulation, worldMap);
     }
 
     public void Stop(
@@ -102,15 +128,21 @@ public sealed class LongRangeCombatTestScene
                 0f,
                 deltaTime);
 
-        _fireTimer +=
-            MathF.Max(
-                0f,
-                deltaTime);
-
-        if (_fireTimer >= 1.0f)
+        // Scripted volleys keep the opening fight active until AI is enabled.
+        // The two fire drivers never fire at once.
+        if (simulation.AI.Enabled)
         {
             _fireTimer = 0f;
-            FireVolley(simulation);
+        }
+        else
+        {
+            _fireTimer += MathF.Max(0f, deltaTime);
+
+            if (_fireTimer >= 0.24f)
+            {
+                _fireTimer -= 0.24f;
+                FireVolley(simulation);
+            }
         }
 
         UpdateStats(simulation);
@@ -122,11 +154,14 @@ public sealed class LongRangeCombatTestScene
         UpdateStats(simulation);
 
         return
-            $"LONG-RANGE {TotalUnits} | " +
+            $"FIREFIGHT {TotalUnits} | " +
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
-            $"Range {CombatDistance:0}m/180m | " +
+            $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
+            $"Fire mode {(simulation.AI.Enabled ? "AI" : "scripted volley")} | " +
+            $"Vision {(simulation.VisionEnabled ? "ON" : "OFF")} | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
+            $"Routes {simulation.Navigation.RoutesBuilt} built/{simulation.Navigation.RoutesFailed} failed | " +
             $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
     }
@@ -143,22 +178,22 @@ public sealed class LongRangeCombatTestScene
         int minX =
             Math.Max(
                 4,
-                centerX - 100);
+                centerX - (int)(100f * TerrainScale));
 
         int maxX =
             Math.Min(
                 worldMap.MaxTileX - 4,
-                centerX + 100);
+                centerX + (int)(100f * TerrainScale));
 
         int minY =
             Math.Max(
                 4,
-                centerY - 45);
+                centerY - (int)(45f * TerrainScale));
 
         int maxY =
             Math.Min(
                 worldMap.MaxTileY - 4,
-                centerY + 45);
+                centerY + (int)(45f * TerrainScale));
 
         for (int y = minY;
              y <= maxY;
@@ -181,33 +216,35 @@ public sealed class LongRangeCombatTestScene
                 height +=
                     2.2f *
                     MathF.Sin(
-                        dx * 0.075f);
+                        dx * (0.075f / TerrainScale));
 
                 height +=
                     1.7f *
                     MathF.Cos(
-                        dy * 0.12f);
+                        dy * (0.12f / TerrainScale));
 
                 height +=
                     1.4f *
                     MathF.Sin(
-                        (dx + dy) * 0.055f);
+                        (dx + dy) * (0.055f / TerrainScale));
 
                 // Central high ridge with deliberate firing lanes.
-                if (MathF.Abs(dx) <= 4f)
+                if (MathF.Abs(dx) <= 4f * TerrainScale)
                 {
                     int lane =
                         (int)MathF.Floor(
-                            (dy + 45f) / 9f);
+                            (dy + 45f * TerrainScale) / (9f * TerrainScale));
 
+                    // Keep most cross-map sight lines open. Cover is arranged
+                    // in staggered pockets instead of a continuous firing wall.
                     bool ridgeSegment =
-                        lane % 3 != 1;
+                        lane % 4 == 0;
 
                     if (ridgeSegment)
                     {
                         float ridgeFactor =
                             1f -
-                            MathF.Abs(dx) / 4f;
+                            MathF.Abs(dx) / (4f * TerrainScale);
 
                         height +=
                             10f *
@@ -222,32 +259,32 @@ public sealed class LongRangeCombatTestScene
                     MathF.Abs(
                         dy -
                         0.24f * dx -
-                        15f);
+                        15f * TerrainScale);
 
-                if (ridgeA < 2.0f &&
+                if (ridgeA < 2.0f * TerrainScale &&
                     ((int)MathF.Floor(
-                        (dx + 100f) / 20f) % 2 == 0))
+                        (dx + 100f * TerrainScale) / (20f * TerrainScale)) % 2 == 0))
                 {
                     height +=
                         6f *
                         (1f -
-                         ridgeA / 2f);
+                         ridgeA / (2f * TerrainScale));
                 }
 
                 float ridgeB =
                     MathF.Abs(
                         dy +
                         0.19f * dx +
-                        17f);
+                        17f * TerrainScale);
 
-                if (ridgeB < 2.0f &&
+                if (ridgeB < 2.0f * TerrainScale &&
                     ((int)MathF.Floor(
-                        (dx + 100f) / 24f) % 2 != 0))
+                        (dx + 100f * TerrainScale) / (24f * TerrainScale)) % 2 != 0))
                 {
                     height +=
                         5f *
                         (1f -
-                         ridgeB / 2f);
+                         ridgeB / (2f * TerrainScale));
                 }
 
                 bool hardCover =
@@ -255,7 +292,8 @@ public sealed class LongRangeCombatTestScene
                         x,
                         y,
                         centerX,
-                        centerY);
+                        centerY,
+                        TerrainScale);
 
                 if (hardCover)
                     height += 5f;
@@ -293,32 +331,31 @@ public sealed class LongRangeCombatTestScene
         int x,
         int y,
         int centerX,
-        int centerY)
+        int centerY,
+        float scale)
     {
         int dx = x - centerX;
         int dy = y - centerY;
 
         if (Math.Abs(
-                dx + 34) <= 2 &&
+                dx + (int)(34f * scale)) <= 2f * scale &&
             Math.Abs(
-                dy) <= 12)
+                dy) <= 12f * scale)
         {
             return true;
         }
 
         if (Math.Abs(
-                dx - 38) <= 2 &&
+                dx - (int)(38f * scale)) <= 2f * scale &&
             Math.Abs(
-                dy + 8) <= 13)
+                dy + (int)(8f * scale)) <= 13f * scale)
         {
             return true;
         }
 
-        return
-            Math.Abs(dx) <= 2 &&
-            Math.Abs(dy) <= 42 &&
-            ((int)MathF.Floor(
-                (dy + 42f) / 8f) % 3 == 0);
+        // Do not place repeated hard-cover blocks across the central firing lanes.
+        // The two offset lines above remain flank cover; the center stays traversable.
+        return false;
     }
 
     private static void ClearWater(
@@ -328,26 +365,8 @@ public sealed class LongRangeCombatTestScene
         int minY,
         int maxY)
     {
-        for (int y = minY;
-             y <= maxY;
-             y++)
-        {
-            for (int x = minX;
-                 x <= maxX;
-                 x++)
-            {
-                for (int z = 0;
-                     z < worldMap.Water.Levels;
-                     z++)
-                {
-                    worldMap.Water.SetAmount(
-                        x,
-                        y,
-                        z,
-                        0);
-                }
-            }
-        }
+        // Clearing the water layer once avoids millions of per-cell API calls.
+        worldMap.Water.Clear();
     }
 
     private void SpawnUnits(
@@ -394,14 +413,15 @@ public sealed class LongRangeCombatTestScene
 
                     float x =
                         baseX +
-                        (column -
-                         (Columns - 1) * 0.5f) *
+                        (row -
+                         (Rows - 1) * 0.5f) *
                         1.5f;
 
                     float y =
                         centerY -
-                        (Rows - 1) * 0.75f +
-                        row * 1.5f;
+                        (Columns - 1) * 0.75f +
+                        column * 1.5f +
+                        (row % 2) * 0.75f;
 
                     SpawnUnit(
                         simulation,
@@ -470,9 +490,9 @@ public sealed class LongRangeCombatTestScene
         int unitIndex =
             id.Index;
 
-        // The range test intentionally freezes the battle line.
-        simulation.Units.MoveSpeed[unitIndex] = 0f;
-        simulation.Units.ViewRange[unitIndex] = 220f;
+        // Give each unit a real movement order so the test exercises route planning.
+        SetMarchTarget(simulation, id, worldMap, side, tileX, tileY);
+        simulation.Units.ViewRange[unitIndex] = VisionStressRange;
         simulation.Units.FieldOfView[unitIndex] = 180f;
 
         simulation.SetPosture(
@@ -497,6 +517,7 @@ public sealed class LongRangeCombatTestScene
                 unitIndex,
                 UnitWeaponSlot.Primary,
                 1_000);
+            ConfigureCombatModes(simulation, unitIndex, index);
         }
 
         simulation.AI.Store.InitializeUnit(
@@ -515,11 +536,9 @@ public sealed class LongRangeCombatTestScene
 
         _elapsed = 0f;
         _fireTimer = 0f;
-                _hitsAtReset =
+        _hitsAtReset =
             simulation.Projectiles.TotalHits;
 
-        simulation.AI.Enabled = false;
-        simulation.VisionEnabled = false;
         simulation.Projectiles.Clear();
 
         for (int i = 0;
@@ -554,14 +573,15 @@ public sealed class LongRangeCombatTestScene
 
             float x =
                 baseX +
-                (column -
-                 (Columns - 1) * 0.5f) *
+                (row -
+                 (Rows - 1) * 0.5f) *
                 1.5f;
 
             float y =
                 centerY -
-                (Rows - 1) * 0.75f +
-                row * 1.5f;
+                (Columns - 1) * 0.75f +
+                column * 1.5f +
+                (row % 2) * 0.75f;
 
             int tileX =
                 Math.Clamp(
@@ -586,11 +606,13 @@ public sealed class LongRangeCombatTestScene
             simulation.Units.Velocity[unit] =
                 Vector3.Zero;
 
+            SetMarchTarget(simulation, _units[i], worldMap, side, tileX, tileY);
+
             simulation.Units.MoveSpeed[unit] =
-                0f;
+                UnitCatalog.Get(UnitType.Colonist).MoveSpeed;
 
             simulation.Units.ViewRange[unit] =
-                220f;
+                VisionStressRange;
 
             simulation.Units.FieldOfView[unit] =
                 180f;
@@ -623,6 +645,33 @@ public sealed class LongRangeCombatTestScene
         }
     }
 
+    private static void SetMarchTarget(
+        UnitSimulation simulation,
+        UnitId unit,
+        WorldMap worldMap,
+        int side,
+        int tileX,
+        int tileY)
+    {
+        int direction = side == 0 ? 1 : -1;
+        int targetX = Math.Clamp(
+            tileX + direction * (int)AdvanceDistance,
+            1,
+            worldMap.MaxTileX - 1);
+
+        int targetY = Math.Clamp(
+            tileY,
+            1,
+            worldMap.MaxTileY - 1);
+
+        simulation.SetTarget(
+            unit,
+            new Vector3(
+                targetX + 0.5f,
+                targetY + 0.5f,
+                worldMap.GetSurfaceHeight(targetX, targetY)));
+    }
+
     private void FireVolley(
         UnitSimulation simulation)
     {
@@ -633,8 +682,13 @@ public sealed class LongRangeCombatTestScene
             UnitId shooter =
                 _units[i];
 
-            if (!simulation.Units.IsAlive(shooter))
+            if (!simulation.Units.TryGetIndex(
+                    shooter,
+                    out int shooterIndex) ||
+                simulation.Health.OverallHitPoints[shooterIndex] <= 0f)
+            {
                 continue;
+            }
 
             int targetSlot =
                 i < UnitsPerFaction
@@ -644,8 +698,13 @@ public sealed class LongRangeCombatTestScene
             UnitId target =
                 _units[targetSlot];
 
-            if (!simulation.Units.IsAlive(target))
+            if (!simulation.Units.TryGetIndex(
+                    target,
+                    out int targetIndex) ||
+                simulation.Health.OverallHitPoints[targetIndex] <= 0f)
+            {
                 continue;
+            }
 
             simulation.FireWeaponAt(
                 shooter,
@@ -711,6 +770,37 @@ public sealed class LongRangeCombatTestScene
             unit,
             UnitWeaponSlot.Primary,
             1_000);
+        ConfigureCombatModes(simulation, unit, unit);
+    }
+
+    private static void ConfigureCombatModes(
+        UnitSimulation simulation,
+        int unitIndex,
+        int rosterIndex)
+    {
+        int stateIndex = UnitWeaponStore.GetIndex(
+            unitIndex,
+            UnitWeaponSlot.Primary);
+
+        // Keep the mass-battle test representative: every third rifle uses
+        // one of CE's three aim styles and a corresponding fire mode.
+        switch (rosterIndex % 3)
+        {
+            case 0:
+                simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.SuppressFire;
+                simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Auto;
+                break;
+
+            case 1:
+                simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.Snapshot;
+                simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Burst;
+                break;
+
+            default:
+                simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.AimedShot;
+                simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Single;
+                break;
+        }
     }
 
     private void UpdateStats(

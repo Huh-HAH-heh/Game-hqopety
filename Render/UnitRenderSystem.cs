@@ -1,3 +1,5 @@
+using Core.Combat;
+using Core.Items;
 using Core.Map;
 using Core.Unit;
 using SFML.Graphics;
@@ -25,6 +27,12 @@ public sealed class UnitRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _aiming =
+        new VertexArray(
+            PrimitiveType.Lines);
+
+    private bool[] _aimTargetDrawn = Array.Empty<bool>();
+
     private readonly VertexArray _visionDebug =
         new VertexArray(
             PrimitiveType.Lines);
@@ -50,6 +58,7 @@ public sealed class UnitRenderSystem
         _vertices.Clear();
         _visionArea.Clear();
         _selection.Clear();
+        _aiming.Clear();
         _visionDebug.Clear();
         _aiDebug.Clear();
 
@@ -85,6 +94,11 @@ public sealed class UnitRenderSystem
 
         UnitStore units =
             simulation.Units;
+
+        if (_aimTargetDrawn.Length < units.Capacity)
+            Array.Resize(ref _aimTargetDrawn, units.Capacity);
+
+        Array.Clear(_aimTargetDrawn);
 
         UnitBodyStore bodies =
             simulation.Bodies;
@@ -146,6 +160,18 @@ public sealed class UnitRenderSystem
             Vector3 unitPosition =
                 positions[unitIndex];
 
+            // A shooter can be outside the camera while its target is visible.
+            // Aim state is simulation data, so collect it before view culling.
+            if (simulation.Health.OverallHitPoints[unitIndex] > 0f)
+            {
+                AppendAimProgress(
+                    _aiming,
+                    simulation,
+                    unitIndex,
+                    tilePixelSize,
+                    _aimTargetDrawn);
+            }
+
             if (hideUnseenTargets &&
                 hasSelection &&
                 unitIndex != selectedIndex)
@@ -166,6 +192,19 @@ public sealed class UnitRenderSystem
                 unitPosition.Y < minWorldY ||
                 unitPosition.Y > maxWorldY)
             {
+                continue;
+            }
+
+            float screenX = unitPosition.X * tilePixelSize;
+            float screenY = unitPosition.Y * tilePixelSize;
+
+            if (simulation.Health.OverallHitPoints[unitIndex] <= 0f)
+            {
+                AppendDeathMarker(
+                    _selection,
+                    screenX,
+                    screenY,
+                    MathF.Max(3f, tilePixelSize * 0.62f));
                 continue;
             }
 
@@ -192,20 +231,31 @@ public sealed class UnitRenderSystem
             if (showAiDebug &&
                 simulation.AI.Enabled)
             {
-                color =
-                    GetAiColor(aiState);
+                color = GetAiColor(aiState);
 
-                AppendAiDebug(
-                    _aiDebug,
-                    simulation,
-                    unitIndex,
-                    tilePixelSize);
+                AppendAiStateMarker(
+                    _selection,
+                    screenX,
+                    screenY,
+                    tilePixelSize,
+                    color);
 
-                AppendSuppressionDebug(
-                    _aiDebug,
-                    simulation,
-                    unitIndex,
-                    tilePixelSize);
+                // Full target/goal vectors are useful for the selected unit,
+                // but drawing 800 vectors at once hides the battlefield.
+                if (hasSelection && selectedIndex == unitIndex)
+                {
+                    AppendAiDebug(
+                        _aiDebug,
+                        simulation,
+                        unitIndex,
+                        tilePixelSize);
+
+                    AppendSuppressionDebug(
+                        _aiDebug,
+                        simulation,
+                        unitIndex,
+                        tilePixelSize);
+                }
             }
 
             if (types[unitIndex] ==
@@ -336,6 +386,12 @@ public sealed class UnitRenderSystem
                 _selection);
         }
 
+        if (_aiming.VertexCount > 0)
+        {
+            window.Draw(
+                _aiming);
+        }
+
         if (_visionDebug.VertexCount > 0)
         {
             window.Draw(
@@ -347,6 +403,134 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _aiDebug);
         }
+    }
+
+    private static void AppendDeathMarker(
+        VertexArray vertices,
+        float x,
+        float y,
+        float radius)
+    {
+        AppendCircleOutline(
+            vertices,
+            x,
+            y,
+            radius,
+            new Color(90, 90, 90, 245),
+            10);
+
+        Color cross = new Color(255, 62, 62, 255);
+        AppendDebugLine(vertices, x - radius * 0.58f, y - radius * 0.58f,
+            x + radius * 0.58f, y + radius * 0.58f, cross);
+        AppendDebugLine(vertices, x - radius * 0.58f, y + radius * 0.58f,
+            x + radius * 0.58f, y - radius * 0.58f, cross);
+    }
+
+    private static void AppendAimProgress(
+        VertexArray aiming,
+        UnitSimulation simulation,
+        int shooterIndex,
+        float tilePixelSize,
+        bool[] targetDrawn)
+    {
+        UnitStore units = simulation.Units;
+        UnitInventoryStore inventory = simulation.Inventory;
+        UnitWeaponStore weapons = simulation.Weapons;
+
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            int stateIndex = UnitWeaponStore.GetIndex(shooterIndex, weaponSlot);
+
+            if (!weapons.AimIndicatorActive[stateIndex] ||
+                weapons.AimTimer[stateIndex] <= 0f)
+            {
+                continue;
+            }
+
+            UnitId combatTarget = weapons.AimTarget[stateIndex];
+
+            if (!units.TryGetIndex(combatTarget, out int targetIndex) ||
+                targetDrawn[targetIndex] ||
+                simulation.Health.OverallHitPoints[targetIndex] <= 0f)
+            {
+                continue;
+            }
+
+            short inventorySlot = inventory.GetWeaponEquipment(
+                shooterIndex,
+                weaponSlot);
+
+            if (inventorySlot < 0 ||
+                inventory.GetItem(shooterIndex, inventorySlot) is not RangedWeaponConfig weapon)
+            {
+                continue;
+            }
+
+            Vector3 aimPoint = weapons.AimPoint[stateIndex];
+            if (aimPoint == Vector3.Zero)
+                continue;
+
+            Vector3 shooterPosition = units.Position[shooterIndex];
+            float dx = aimPoint.X - shooterPosition.X;
+            float dy = aimPoint.Y - shooterPosition.Y;
+            float distance = MathF.Sqrt(dx * dx + dy * dy);
+
+            float duration = UnitWeaponSystem.GetAimDuration(
+                weapon,
+                weapons.CurrentAimMode[stateIndex],
+                distance);
+
+            if (duration <= 0f)
+                continue;
+
+            float progress = Math.Clamp(
+                weapons.AimTimer[stateIndex] / duration,
+                0f,
+                1f);
+
+            // One muted ring per target. It shrinks as the active weapon warms
+            // up, then fades almost to nothing until the shot clears the state.
+            // A restrained RimWorld/CE-style aim bubble: it contracts around
+            // the target while the weapon warms up, then disappears on firing.
+            float radius = tilePixelSize * (0.72f - 0.60f * progress);
+            byte alpha = (byte)Math.Clamp(
+                (int)(78f * (1f - progress) + 12f),
+                0,
+                90);
+
+            AppendCircleOutline(
+                aiming,
+                aimPoint.X * tilePixelSize,
+                aimPoint.Y * tilePixelSize,
+                MathF.Max(0.10f * tilePixelSize, radius),
+                new Color(205, 218, 232, alpha),
+                24);
+
+            // Several shooters aiming at the same pawn should not stack opacity.
+            targetDrawn[targetIndex] = true;
+            return;
+        }
+    }
+
+    private static void AppendAiStateMarker(
+        VertexArray vertices,
+        float x,
+        float y,
+        float tilePixelSize,
+        Color color)
+    {
+        float radius = MathF.Max(1.7f, tilePixelSize * 0.28f);
+        AppendCircleOutline(vertices, x, y, radius, color, 8);
+        AppendDebugLine(
+            vertices,
+            x - radius * 0.55f,
+            y,
+            x + radius * 0.55f,
+            y,
+            color);
     }
 
     private static void AppendSuppressionDebug(

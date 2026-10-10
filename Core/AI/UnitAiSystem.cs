@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Combat;
 using Core.Items;
 using Core.Map;
 
@@ -22,14 +23,15 @@ public sealed class UnitAiSystem
     public UnitAiStore Store { get; }
 
     public UnitAiSystem(
-        int initialUnitCapacity = 1024)
+        int initialUnitCapacity = 1024,
+        UnitWeaponSystem? weaponSystem = null)
     {
         Store =
             new UnitAiStore(
                 initialUnitCapacity);
 
         _weaponSystem =
-            new UnitWeaponSystem();
+            weaponSystem ?? new UnitWeaponSystem();
     }
 
     public void Update(
@@ -80,6 +82,7 @@ public sealed class UnitAiSystem
             if (health.OverallMaxHitPoints[unit] <= 0f ||
                 health.OverallHitPoints[unit] <= 0f)
             {
+                ClearAiming(weapons, unit);
                 units.HasTarget[unit] = false;
                 Store.ClearGoal(unit);
                 Store.State[unit] = UnitAiState.Dead;
@@ -89,7 +92,8 @@ public sealed class UnitAiSystem
             UnitSuppressionState suppressionState =
                 suppression.GetState(unit);
 
-            if (suppressionState == UnitSuppressionState.Panicked)
+            if (suppressionState == UnitSuppressionState.Panicked ||
+                suppressionState == UnitSuppressionState.Suppressed)
             {
                 if (!Store.HasGoal[unit] &&
                     TryFindSuppressionCover(
@@ -107,6 +111,7 @@ public sealed class UnitAiSystem
 
                 if (Store.HasGoal[unit])
                 {
+                    ClearAiming(weapons, unit);
                     units.Target[unit] =
                         Store.Goal[unit];
 
@@ -126,12 +131,32 @@ public sealed class UnitAiSystem
                     vision,
                     unit);
 
-            if (visibleEnemy >= 0)
-            {
-                UnitId targetId =
-                    units.GetId(
-                        visibleEnemy);
+            bool keepCurrentVisibleTarget = false;
 
+            if (Store.HasTarget[unit])
+            {
+                UnitId currentTarget = Store.Target[unit];
+
+                if (units.IsAlive(currentTarget) &&
+                    health.OverallHitPoints[currentTarget.Index] > 0f &&
+                    IsHostile(units, unit, currentTarget.Index) &&
+                    vision.IsRecentlyVisible(unit, currentTarget.Index, units))
+                {
+                    // Keep the current target while it remains in recent LOS memory.
+                    // The rotating vision sample must not make every soldier switch
+                    // targets just because a different enemy was checked this tick.
+                    Store.RememberTarget(
+                        unit,
+                        currentTarget,
+                        units.Position[currentTarget.Index],
+                        TargetMemorySeconds);
+                    keepCurrentVisibleTarget = true;
+                }
+            }
+
+            if (!keepCurrentVisibleTarget && visibleEnemy >= 0)
+            {
+                UnitId targetId = units.GetId(visibleEnemy);
                 Store.RememberTarget(
                     unit,
                     targetId,
@@ -141,9 +166,44 @@ public sealed class UnitAiSystem
 
             if (!Store.HasTarget[unit])
             {
-                units.HasTarget[unit] = false;
-                Store.ClearGoal(unit);
-                Store.State[unit] = UnitAiState.Idle;
+                ClearAiming(weapons, unit);
+
+                // Keep the scenario's existing march order until it is reached.
+                // Afterward patrol forward and laterally instead of standing idle
+                // forever waiting for an enemy to enter the current line of sight.
+                if (!units.HasTarget[unit])
+                {
+                    if (!Store.HasGoal[unit] ||
+                        ReachedGoal(units.Position[unit], Store.Goal[unit]))
+                    {
+                        Store.ClearGoal(unit);
+
+                        if (TryFindSearchWaypoint(
+                                units,
+                                worldMap,
+                                unit,
+                                out Vector3 searchWaypoint))
+                        {
+                            Store.SetGoal(unit, searchWaypoint);
+                        }
+                    }
+
+                    if (Store.HasGoal[unit])
+                    {
+                        units.Target[unit] = Store.Goal[unit];
+                        units.HasTarget[unit] = true;
+                        Store.State[unit] = UnitAiState.Search;
+                    }
+                    else
+                    {
+                        Store.State[unit] = UnitAiState.Idle;
+                    }
+                }
+                else
+                {
+                    Store.State[unit] = UnitAiState.Search;
+                }
+
                 continue;
             }
 
@@ -153,6 +213,7 @@ public sealed class UnitAiSystem
             if (!units.IsAlive(target) ||
                 health.OverallHitPoints[target.Index] <= 0f)
             {
+                ClearAiming(weapons, unit);
                 Store.ClearTarget(unit);
                 units.HasTarget[unit] = false;
                 Store.State[unit] = UnitAiState.Idle;
@@ -164,6 +225,7 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index))
             {
+                ClearAiming(weapons, unit);
                 Store.ClearTarget(unit);
                 units.HasTarget[unit] = false;
                 Store.State[unit] = UnitAiState.Idle;
@@ -171,9 +233,25 @@ public sealed class UnitAiSystem
             }
 
             bool targetVisible =
-                IsTargetVisible(
-                    vision.GetVisibleTargets(unit),
-                    target.Index);
+                vision.IsRecentlyVisible(
+                    unit,
+                    target.Index,
+                    units);
+
+            if (!targetVisible)
+            {
+                // Vision uses a rotating, bounded candidate sample. A target can
+                // temporarily leave that sample while remaining physically visible.
+                // Do not restart aim on that bookkeeping gap; only cancel when an
+                // exact terrain LOS check confirms the shot is actually blocked.
+                ClearAimingIfOccluded(
+                    units,
+                    weapons,
+                    vision,
+                    worldMap,
+                    unit,
+                    target);
+            }
 
             bool moving =
                 units.Velocity[unit].LengthSquared() >
@@ -203,6 +281,7 @@ public sealed class UnitAiSystem
                         units.Position[unit],
                         Store.Goal[unit]))
                 {
+                    ClearAiming(weapons, unit);
                     units.HasTarget[unit] = false;
                     Store.State[unit] =
                         UnitAiState.SeekCover;
@@ -231,6 +310,7 @@ public sealed class UnitAiSystem
 
                 if (Store.HasGoal[unit])
                 {
+                    ClearAiming(weapons, unit);
                     units.Target[unit] =
                         Store.Goal[unit];
 
@@ -257,6 +337,59 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index);
 
+                // Hold position while firing/aiming; do not continue walking
+                // toward the previous patrol waypoint through the firing lane.
+                units.Target[unit] = units.Position[unit];
+                units.HasTarget[unit] = false;
+
+                VisionCheck shotCheck = vision.Evaluate(
+                    units,
+                    worldMap,
+                    unit,
+                    target.Index);
+
+                // Visibility lists are refreshed less often than movement. Recheck
+                // before pulling the trigger so a stale target cannot cause wall fire.
+                if (!shotCheck.IsVisible)
+                {
+                    // Forget stale LOS immediately. Suppressive weapons may
+                    // keep firing at the last known point; the others must stop.
+                    vision.ForgetVisibleTarget(unit, target.Index);
+
+                    if (Store.TargetMemory[unit] > 0f &&
+                        HasSuppressFireWeapon(inventory, weapons, unit))
+                    {
+                        ClearNonSuppressiveAiming(weapons, inventory, unit);
+                        units.Target[unit] = units.Position[unit];
+                        units.HasTarget[unit] = false;
+                        Store.State[unit] = UnitAiState.Attack;
+                        continue;
+                    }
+
+                    ClearAiming(weapons, unit);
+                    Store.ClearTarget(unit);
+                    units.HasTarget[unit] = false;
+                    Store.State[unit] = UnitAiState.Search;
+                    continue;
+                }
+
+                if (!TryChooseVisibleAimPoint(
+                        units,
+                        worldMap,
+                        vision,
+                        unit,
+                        target.Index,
+                        out Vector3 aimPoint))
+                {
+                    // A broad silhouette point can be visible while not belonging
+                    // to the actual body collider. Do not shoot at that arbitrary point.
+                    ClearNonSuppressiveAiming(weapons, inventory, unit);
+                    units.Target[unit] = Store.LastSeenPosition[unit];
+                    units.HasTarget[unit] = true;
+                    Store.State[unit] = UnitAiState.Search;
+                    continue;
+                }
+
                 bool fired =
                     TryFireAnyRangedWeapon(
                         units,
@@ -265,6 +398,7 @@ public sealed class UnitAiSystem
                         projectiles,
                         unit,
                         target,
+                        aimPoint,
                         suppression.GetAccuracyMultiplier(unit));
 
                 if (fired)
@@ -272,6 +406,7 @@ public sealed class UnitAiSystem
                     units.HasTarget[unit] =
                         HasSustainedFireWeapon(
                             inventory,
+                            weapons,
                             unit);
                 }
                 else if (!HasRangedWeapon(
@@ -286,6 +421,7 @@ public sealed class UnitAiSystem
                 }
                 else if (HasSustainedFireWeapon(
                              inventory,
+                             weapons,
                              unit) ||
                          HasPendingAim(
                              units,
@@ -309,18 +445,147 @@ public sealed class UnitAiSystem
 
             if (Store.TargetMemory[unit] > 0f)
             {
-                units.Target[unit] =
-                    Store.LastSeenPosition[unit];
+                if (HasSuppressFireWeapon(inventory, weapons, unit))
+                {
+                    Vector3 lastSeenAimPoint =
+                        Store.LastSeenPosition[unit] +
+                        new Vector3(
+                            0f,
+                            0f,
+                            MathF.Max(
+                                0.05f,
+                                units.Height[target.Index] * 0.55f));
 
-                units.HasTarget[unit] = true;
-                Store.State[unit] =
-                    UnitAiState.Search;
+                    TryFireSuppressiveWeapons(
+                        units,
+                        inventory,
+                        weapons,
+                        projectiles,
+                        unit,
+                        target,
+                        lastSeenAimPoint,
+                        suppression.GetAccuracyMultiplier(unit));
+
+                    units.Target[unit] = units.Position[unit];
+                    units.HasTarget[unit] = false;
+                    Store.State[unit] = UnitAiState.Attack;
+                }
+                else
+                {
+                    units.Target[unit] = Store.LastSeenPosition[unit];
+                    units.HasTarget[unit] = true;
+                    Store.State[unit] = UnitAiState.Search;
+                }
+
                 continue;
             }
 
+            // Target memory expired: stop suppressing stale coordinates and resume scouting.
+            ClearAiming(weapons, unit);
+            Store.ClearTarget(unit);
+            Store.ClearGoal(unit);
             units.HasTarget[unit] = false;
-            Store.State[unit] = UnitAiState.Idle;
+            Store.State[unit] = UnitAiState.Search;
         }
+    }
+
+    private static bool TryFindSearchWaypoint(
+        UnitStore units,
+        WorldMap worldMap,
+        int unit,
+        out Vector3 waypoint)
+    {
+        waypoint = Vector3.Zero;
+
+        Vector3 position = units.Position[unit];
+        float centerX = worldMap.TileWidth * 0.5f;
+        float centerY = worldMap.TileHeight * 0.5f;
+
+        float direction = units.FactionTag[unit] switch
+        {
+            1 => 1f,
+            2 => -1f,
+            _ => position.X < centerX ? 1f : -1f
+        };
+
+        float distanceToCenter = (centerX - position.X) * direction;
+        float targetX;
+
+        if (distanceToCenter > 8f)
+        {
+            targetX = position.X + direction * MathF.Min(10f, distanceToCenter);
+        }
+        else
+        {
+            // Sweep across the center line while scanning a distinct lateral lane.
+            float forwardPoint = centerX + direction * 5f;
+            float reversePoint = centerX - direction * 5f;
+            targetX = MathF.Abs(position.X - forwardPoint) <= 2f
+                ? reversePoint
+                : forwardPoint;
+        }
+
+        float laneY = centerY + ((unit % 13) - 6) * 4f;
+        float targetY = position.Y + Math.Clamp(laneY - position.Y, -5f, 5f);
+
+        targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
+        targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+
+        int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
+
+        waypoint = new Vector3(
+            tileX + 0.5f,
+            tileY + 0.5f,
+            worldMap.GetSurfaceHeight(tileX, tileY));
+
+        Vector2 delta = new Vector2(
+            waypoint.X - position.X,
+            waypoint.Y - position.Y);
+
+        return delta.LengthSquared() > 1f;
+    }
+
+    private static bool TryChooseVisibleAimPoint(
+        UnitStore units,
+        WorldMap worldMap,
+        VisionSystem vision,
+        int shooter,
+        int target,
+        out Vector3 aimPoint)
+    {
+        Vector3 eye = vision.GetEyePosition(units, shooter);
+        Span<Vector3> candidates =
+            stackalloc Vector3[UnitHitSystem.MaxAimPointCount];
+
+        int count = UnitHitSystem.GetAimPoints(
+            units,
+            target,
+            eye,
+            candidates);
+
+        // These candidates come from the same ellipsoids used for projectile
+        // collision. If the torso is hidden, test its exposed edge and then
+        // real head/limb volumes rather than aiming at target-center coordinates.
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 candidate = candidates[i];
+
+            if (!vision.HasLineOfSight(
+                    worldMap,
+                    eye,
+                    candidate,
+                    out _))
+            {
+                continue;
+            }
+
+            aimPoint = candidate;
+            return true;
+        }
+
+        aimPoint = Vector3.Zero;
+        return false;
     }
 
     private static int FindNearestVisibleEnemy(
@@ -347,10 +612,10 @@ public sealed class UnitAiSystem
              i < visible.Length;
              i++)
         {
-            int target =
-                visible[i];
+            int target = visible[i];
 
-            if (health.OverallHitPoints[target] <= 0f ||
+            if ((uint)target >= (uint)units.Capacity ||
+                health.OverallHitPoints[target] <= 0f ||
                 !FactionRules.ShouldAttack(
                     observerFaction,
                     units.FactionTag[target]))
@@ -458,6 +723,7 @@ public sealed class UnitAiSystem
         ProjectileStore projectiles,
         int unit,
         UnitId target,
+        Vector3 aimPoint,
         float accuracyMultiplier)
     {
         for (int slot = 0;
@@ -504,6 +770,7 @@ public sealed class UnitAiSystem
                     unit,
                     weaponSlot,
                     target,
+                    aimPoint,
                     accuracyMultiplier))
             {
                 return true;
@@ -521,6 +788,7 @@ public sealed class UnitAiSystem
         int unit,
         UnitWeaponSlot slot,
         UnitId target,
+        Vector3 aimPoint,
         float accuracyMultiplier)
     {
         short inventorySlot =
@@ -546,7 +814,145 @@ public sealed class UnitAiSystem
             units.GetId(unit),
             slot,
             target,
-            accuracyMultiplier);
+            accuracyMultiplier,
+            aimPoint);
+    }
+
+    private bool TryFireSuppressiveWeapons(
+        UnitStore units,
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        ProjectileStore projectiles,
+        int unit,
+        UnitId target,
+        Vector3 aimPoint,
+        float accuracyMultiplier)
+    {
+        bool attempted = false;
+
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            short inventorySlot = inventory.GetWeaponEquipment(unit, weaponSlot);
+
+            if (inventorySlot < 0 ||
+                inventory.GetItem(unit, inventorySlot) is not RangedWeaponConfig)
+            {
+                continue;
+            }
+
+            int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
+            if (weapons.CurrentAimMode[stateIndex] != AimMode.SuppressFire)
+                continue;
+
+            attempted = true;
+
+            // This deliberately updates the stored aim point even while the
+            // weapon is on cooldown. Auto fire can then keep suppressing that
+            // last-known position without requiring a fresh visible target.
+            _weaponSystem.TryFireAt(
+                units,
+                inventory,
+                weapons,
+                projectiles,
+                units.GetId(unit),
+                weaponSlot,
+                target,
+                accuracyMultiplier,
+                aimPoint);
+        }
+
+        return attempted;
+    }
+
+    private static bool HasSuppressFireWeapon(
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        int unit)
+    {
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            short inventorySlot = inventory.GetWeaponEquipment(unit, weaponSlot);
+
+            if (inventorySlot < 0 ||
+                inventory.GetItem(unit, inventorySlot) is not RangedWeaponConfig)
+            {
+                continue;
+            }
+
+            if (weapons.CurrentAimMode[
+                    UnitWeaponStore.GetIndex(unit, weaponSlot)] == AimMode.SuppressFire)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static void ClearAimingIfOccluded(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        VisionSystem vision,
+        WorldMap worldMap,
+        int unit,
+        UnitId target)
+    {
+        Vector3 shooterPosition = units.Position[unit];
+        Vector3 eye = shooterPosition + new Vector3(
+            0f,
+            0f,
+            MathF.Max(0.1f, units.Height[unit] * 0.75f));
+
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
+
+            if (weapons.AimTarget[stateIndex] != target ||
+                weapons.CurrentAimMode[stateIndex] == AimMode.SuppressFire)
+            {
+                continue;
+            }
+
+            Vector3 aimPoint = weapons.AimPoint[stateIndex];
+            if (aimPoint == Vector3.Zero ||
+                !vision.HasLineOfSight(worldMap, eye, aimPoint, out _))
+            {
+                weapons.ClearAim(unit, weaponSlot);
+            }
+        }
+    }
+
+    private static void ClearNonSuppressiveAiming(
+        UnitWeaponStore weapons,
+        UnitInventoryStore inventory,
+        int unit)
+    {
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            short inventorySlot = inventory.GetWeaponEquipment(unit, weaponSlot);
+
+            if (inventorySlot >= 0 &&
+                inventory.GetItem(unit, inventorySlot) is RangedWeaponConfig &&
+                weapons.CurrentAimMode[
+                    UnitWeaponStore.GetIndex(unit, weaponSlot)] == AimMode.SuppressFire)
+            {
+                continue;
+            }
+
+            weapons.ClearAim(unit, weaponSlot);
+        }
     }
 
     private static bool HasPendingAim(
@@ -600,32 +1006,41 @@ public sealed class UnitAiSystem
         return false;
     }
 
-    private static bool HasSustainedFireWeapon(
-        UnitInventoryStore inventory,
+    private static void ClearAiming(
+        UnitWeaponStore weapons,
         int unit)
     {
         for (int slot = 0;
              slot < UnitInventoryStore.WeaponSlotCount;
              slot++)
         {
+            weapons.ClearAim(unit, (UnitWeaponSlot)slot);
+        }
+    }
+
+    private static bool HasSustainedFireWeapon(
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        int unit)
+    {
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
             short inventorySlot =
-                inventory.GetWeaponEquipment(
-                    unit,
-                    (UnitWeaponSlot)slot);
+                inventory.GetWeaponEquipment(unit, weaponSlot);
 
-            if (inventorySlot < 0)
+            if (inventorySlot < 0 ||
+                inventory.GetItem(unit, inventorySlot) is not RangedWeaponConfig)
+            {
                 continue;
+            }
 
-            RangedWeaponConfig? weapon =
-                inventory.GetItem(
-                    unit,
-                    inventorySlot) as RangedWeaponConfig;
+            int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
 
-            if (weapon == null)
-                continue;
-
-            if (weapon.DefaultFireMode !=
-                Core.Combat.FireMode.Single)
+            if (weapons.CurrentFireMode[stateIndex] != FireMode.Single ||
+                weapons.BurstRemaining[stateIndex] > 0)
             {
                 return true;
             }

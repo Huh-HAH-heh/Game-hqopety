@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
 
@@ -48,8 +49,42 @@ public sealed class VisionSystem
 
     private const float UpdateInterval = 0.10f;
     private const float Epsilon = 0.02f;
+    private const float LayerEpsilon = Epsilon * WorldMap.HeightUnitsPerMeter;
+    private const int VisibilityMemoryUpdates = 60;
+    private const int VisibilitySectorCount = 8;
+    private const int CandidatesPerSector = 2;
+    private const int MaxTargetCandidatesPerObserver = 64;
+    private const int TargetScanStride = 97;
+    private const int TargetObserverOffset = 37;
+    private const int MaxNearbyUnitsPerCell = 4;
+    private const int NearbyCellRadius = 1;
 
     private float _updateTimer;
+    private int _candidatePairCount;
+    private int _lineOfSightChecks;
+    private int _targetEvaluationCount;
+    private int[] _lastVisibleUpdate = Array.Empty<int>();
+    private int[] _sectorTargetCursors = Array.Empty<int>();
+    private int _visibilityCapacity;
+    private int _visionUpdateSequence;
+    private long _visibilityTerrainVersion = long.MinValue;
+
+    private int _spatialWidth;
+    private int _spatialHeight;
+    private int[] _spatialCellCounts = Array.Empty<int>();
+    private int[] _spatialCellStarts = Array.Empty<int>();
+    private int[] _spatialCellWriteCursors = Array.Empty<int>();
+    private int[] _spatialUnits = Array.Empty<int>();
+
+    public double LastUpdateMilliseconds { get; private set; }
+    public int LastCandidatePairs { get; private set; }
+    public int LastActiveCandidatesScanned { get; private set; }
+    public int LastTargetEvaluations { get; private set; }
+    public int LastLineOfSightChecks { get; private set; }
+    public int LastVisibleTargetCount { get; private set; }
+    public int LastVisibilityMemoryEntriesScanned { get; private set; }
+    public long UpdateCount { get; private set; }
+    private int[] _aliveUnits;
     private int[] _visibleStarts;
     private int[] _visibleCounts;
     private int[] _visibleTargets;
@@ -61,6 +96,9 @@ public sealed class VisionSystem
         if (initialUnitCapacity <= 0)
             throw new ArgumentOutOfRangeException(
                 nameof(initialUnitCapacity));
+
+        _aliveUnits =
+            new int[initialUnitCapacity];
 
         _visibleStarts =
             new int[initialUnitCapacity];
@@ -95,11 +133,19 @@ public sealed class VisionSystem
     public void Update(
         UnitStore units,
         WorldMap worldMap,
-        float deltaTime)
+        float deltaTime,
+        UnitHealthStore? health = null)
     {
-        if (deltaTime < 0f ||
-            units.ActiveCount == 0)
+        if (deltaTime < 0f)
+            return;
+
+        if (units.ActiveCount == 0)
         {
+            Array.Clear(_visibleCounts);
+            _visibleTargetCount = 0;
+            LastActiveCandidatesScanned = 0;
+            LastVisibilityMemoryEntriesScanned = 0;
+            _updateTimer = 0f;
             return;
         }
 
@@ -108,60 +154,383 @@ public sealed class VisionSystem
         if (_updateTimer < UpdateInterval)
             return;
 
-        _updateTimer = 0f;
+        _updateTimer %= UpdateInterval;
 
-        EnsureUnitCapacity(
-            units.Capacity);
+        long started = Stopwatch.GetTimestamp();
+        EnsureUnitCapacity(units.Capacity);
 
-        Array.Clear(
-            _visibleCounts);
-
-        _visibleTargetCount = 0;
-
-        ReadOnlySpan<int> active =
-            units.ActiveIndices;
-
-        for (int i = 0;
-             i < active.Length;
-             i++)
+        if (_visionUpdateSequence >= int.MaxValue - VisibilityMemoryUpdates)
         {
-            int observer =
-                active[i];
+            Array.Clear(_lastVisibleUpdate);
+            _visionUpdateSequence = 0;
+        }
 
-            int start =
-                _visibleTargetCount;
+        _visionUpdateSequence++;
 
-            for (int j = 0;
-                 j < active.Length;
-                 j++)
+        if (_visibilityTerrainVersion != worldMap.TerrainVersion)
+        {
+            Array.Clear(_lastVisibleUpdate);
+            _visibilityTerrainVersion = worldMap.TerrainVersion;
+        }
+
+        Array.Clear(_visibleCounts);
+        _visibleTargetCount = 0;
+        _candidatePairCount = 0;
+        _lineOfSightChecks = 0;
+        _targetEvaluationCount = 0;
+        LastActiveCandidatesScanned = 0;
+        LastVisibilityMemoryEntriesScanned = 0;
+
+        ReadOnlySpan<int> allActive = units.ActiveIndices;
+        int aliveCount = 0;
+
+        for (int i = 0; i < allActive.Length; i++)
+        {
+            int unit = allActive[i];
+
+            if (health != null && health.OverallHitPoints[unit] <= 0f)
+                continue;
+
+            _aliveUnits[aliveCount++] = unit;
+        }
+
+        ReadOnlySpan<int> active = _aliveUnits.AsSpan(0, aliveCount);
+        Vector3[] positions = units.Position;
+        float[] ranges = units.ViewRange;
+
+        EnsureSpatialGrid(worldMap, units.Capacity);
+        BuildSpatialGrid(units, active);
+
+        // Sample nearby cells first so close hostiles are never skipped solely
+        // because of their active-list index. A bounded rolling window fills the
+        // remaining slots to preserve gradual discovery at longer ranges.
+        const int SectorCount = VisibilitySectorCount;
+        const int SlotCount = CandidatesPerSector;
+        const int CandidateSlots = SectorCount * SlotCount;
+
+        Span<int> candidateTargets = stackalloc int[CandidateSlots];
+        Span<float> candidateDistances = stackalloc float[CandidateSlots];
+        Span<int> rotationDistances = stackalloc int[SectorCount];
+        Span<int> sampledTargets = stackalloc int[MaxTargetCandidatesPerObserver];
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int observer = active[i];
+
+            if (health != null && health.OverallHitPoints[observer] <= 0f)
+                continue;
+
+            int start = _visibleTargetCount;
+            _visibleStarts[observer] = start;
+
+            Vector3 position = positions[observer];
+            float range = MathF.Max(0f, ranges[observer]);
+            float rangeSquared = range * range;
+            Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
+            float halfFovRadians = units.FieldOfView[observer] * MathF.PI / 360f;
+            float minFacingDot = MathF.Cos(halfFovRadians);
+
+            for (int sector = 0; sector < SectorCount; sector++)
             {
-                int target =
-                    active[j];
-
-                if (observer == target)
-                    continue;
-
-                VisionCheck check =
-                    Evaluate(
-                        units,
-                        worldMap,
-                        observer,
-                        target);
-
-                if (!check.IsVisible)
-                    continue;
-
-                AppendVisibleTarget(
-                    target);
+                int slot = sector * CandidatesPerSector;
+                candidateTargets[slot] = -1;
+                candidateTargets[slot + 1] = -1;
+                candidateDistances[slot] = float.PositiveInfinity;
+                candidateDistances[slot + 1] = 0f;
+                rotationDistances[sector] = int.MaxValue;
             }
 
-            _visibleStarts[observer] =
-                start;
+            int sampledCount = CollectNearbyTargets(
+                observer,
+                position,
+                sampledTargets);
 
-            _visibleCounts[observer] =
-                _visibleTargetCount -
-                start;
+            // Nearby spatial targets have priority. Fill the remaining slots
+            // from a rolling global window so distant enemies are still found
+            // without restoring the all-pairs scan.
+            int scanCount = Math.Min(
+                active.Length,
+                MaxTargetCandidatesPerObserver + sampledCount);
+            int scanStart = (int)(
+                ((long)observer * TargetObserverOffset +
+                 (long)_visionUpdateSequence * TargetScanStride) %
+                active.Length);
+
+            for (int sample = 0;
+                 sample < scanCount &&
+                 sampledCount < MaxTargetCandidatesPerObserver;
+                 sample++)
+            {
+                LastActiveCandidatesScanned++;
+                int activeSlot = scanStart + sample;
+                if (activeSlot >= active.Length)
+                    activeSlot -= active.Length;
+
+                int target = active[activeSlot];
+                if (target == observer ||
+                    ContainsTarget(sampledTargets[..sampledCount], target))
+                {
+                    continue;
+                }
+
+                sampledTargets[sampledCount++] = target;
+            }
+
+            for (int sample = 0; sample < sampledCount; sample++)
+            {
+                int target = sampledTargets[sample];
+
+                if (target == observer ||
+                    (health != null && health.OverallHitPoints[target] <= 0f))
+                {
+                    continue;
+                }
+
+                if (!FactionRules.ShouldAttack(
+                        units.FactionTag[observer],
+                        units.FactionTag[target]))
+                {
+                    continue;
+                }
+
+                _candidatePairCount++;
+
+                Vector3 targetPosition = positions[target];
+                float dx = targetPosition.X - position.X;
+                float dy = targetPosition.Y - position.Y;
+                float distanceSquared = dx * dx + dy * dy;
+
+                if (distanceSquared > rangeSquared)
+                    continue;
+
+                int sector;
+                if (dx >= 0f)
+                {
+                    if (dy >= 0f)
+                        sector = dx >= dy ? 0 : 1;
+                    else
+                        sector = dx >= -dy ? 7 : 6;
+                }
+                else
+                {
+                    if (dy >= 0f)
+                        sector = dy >= -dx ? 2 : 3;
+                    else
+                        sector = -dx >= -dy ? 4 : 5;
+                }
+
+                if (distanceSquared > 0.0001f)
+                {
+                    float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
+                    float facingDot =
+                        (forward.X * dx + forward.Y * dy) * inverseDistance;
+
+                    if (facingDot < minFacingDot)
+                        continue;
+                }
+
+                int slot = sector * CandidatesPerSector;
+
+                // Keep the nearest sampled target and one rotating candidate
+                // in each sector, with close targets sampled first.
+                if (distanceSquared < candidateDistances[slot])
+                {
+                    candidateTargets[slot] = target;
+                    candidateDistances[slot] = distanceSquared;
+                }
+
+                int cursor = _sectorTargetCursors[
+                    observer * SectorCount + sector];
+                int rotationDistance = target >= cursor
+                    ? target - cursor
+                    : _visibilityCapacity - cursor + target;
+
+                if (rotationDistance < rotationDistances[sector])
+                {
+                    rotationDistances[sector] = rotationDistance;
+                    candidateTargets[slot + 1] = target;
+                }
+            }
+
+            for (int candidate = 0; candidate < CandidateSlots; candidate++)
+            {
+                int target = candidateTargets[candidate];
+                if (target < 0)
+                    continue;
+
+                bool duplicate = false;
+                for (int previous = 0; previous < candidate; previous++)
+                {
+                    if (candidateTargets[previous] == target)
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (duplicate)
+                    continue;
+
+                _targetEvaluationCount++;
+                VisionCheck check = Evaluate(
+                    units,
+                    worldMap,
+                    observer,
+                    target);
+
+                int pairIndex = observer * _visibilityCapacity + target;
+                _lastVisibleUpdate[pairIndex] = check.IsVisible
+                    ? _visionUpdateSequence
+                    : 0;
+            }
+
+            // Advance sector cursors independently from nearest candidates so
+            // the rotating slot eventually tests every hostile in a crowded sector.
+            for (int sector = 0; sector < SectorCount; sector++)
+            {
+                int sampledTarget =
+                    candidateTargets[sector * SlotCount + 1];
+
+                if (sampledTarget >= 0)
+                {
+                    _sectorTargetCursors[observer * SectorCount + sector] =
+                        (sampledTarget + 1) % _visibilityCapacity;
+                }
+            }
+
+            BuildVisibleTargetList(
+                observer,
+                candidateTargets);
+
+            _visibleCounts[observer] = _visibleTargetCount - start;
         }
+
+        LastUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        LastCandidatePairs = _candidatePairCount;
+        LastTargetEvaluations = _targetEvaluationCount;
+        LastLineOfSightChecks = _lineOfSightChecks;
+        LastVisibleTargetCount = _visibleTargetCount;
+        UpdateCount++;
+    }
+
+    public bool IsRecentlyVisible(
+        int observerIndex,
+        int targetIndex,
+        UnitStore units)
+    {
+        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
+            (uint)targetIndex >= (uint)_visibilityCapacity ||
+            observerIndex == targetIndex)
+        {
+            return false;
+        }
+
+        int pairIndex = observerIndex * _visibilityCapacity + targetIndex;
+        int lastVisible = _lastVisibleUpdate[pairIndex];
+
+        if (lastVisible == 0 ||
+            _visionUpdateSequence - lastVisible > VisibilityMemoryUpdates)
+        {
+            _lastVisibleUpdate[pairIndex] = 0;
+            return false;
+        }
+
+        if (!FactionRules.ShouldAttack(
+                units.FactionTag[observerIndex],
+                units.FactionTag[targetIndex]) ||
+            !IsWithinRangeAndFov(
+                units,
+                observerIndex,
+                targetIndex,
+                out _))
+        {
+            _lastVisibleUpdate[pairIndex] = 0;
+            return false;
+        }
+
+        return true;
+    }
+
+    public void ForgetVisibleTarget(int observerIndex, int targetIndex)
+    {
+        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
+            (uint)targetIndex >= (uint)_visibilityCapacity)
+        {
+            return;
+        }
+
+        _lastVisibleUpdate[
+            observerIndex * _visibilityCapacity + targetIndex] = 0;
+
+        int start = _visibleStarts[observerIndex];
+        int end = start + _visibleCounts[observerIndex];
+
+        for (int i = start; i < end; i++)
+        {
+            if (_visibleTargets[i] == targetIndex)
+                _visibleTargets[i] = -1;
+        }
+    }
+
+    public void ClearUnit(int unitIndex)
+    {
+        if ((uint)unitIndex >= (uint)_visibleCounts.Length)
+            return;
+
+        _visibleStarts[unitIndex] = 0;
+        _visibleCounts[unitIndex] = 0;
+
+        // Remove this unit from every already-built observer list as well as
+        // from the pair cache, because unit indices can be recycled after death.
+        for (int observer = 0; observer < _visibleCounts.Length; observer++)
+        {
+            int start = _visibleStarts[observer];
+            int end = start + _visibleCounts[observer];
+
+            for (int i = start; i < end; i++)
+            {
+                if (_visibleTargets[i] == unitIndex)
+                    _visibleTargets[i] = -1;
+            }
+        }
+
+        if ((uint)unitIndex < (uint)_visibilityCapacity)
+        {
+            Array.Clear(
+                _lastVisibleUpdate,
+                unitIndex * _visibilityCapacity,
+                _visibilityCapacity);
+
+            for (int observer = 0; observer < _visibilityCapacity; observer++)
+                _lastVisibleUpdate[observer * _visibilityCapacity + unitIndex] = 0;
+
+            Array.Clear(
+                _sectorTargetCursors,
+                unitIndex * VisibilitySectorCount,
+                VisibilitySectorCount);
+        }
+
+        _updateTimer = UpdateInterval;
+    }
+
+    public void ClearAll()
+    {
+        Array.Clear(_visibleStarts);
+        Array.Clear(_visibleCounts);
+        Array.Clear(_lastVisibleUpdate);
+        Array.Clear(_sectorTargetCursors);
+        _visibleTargetCount = 0;
+        _visionUpdateSequence = 0;
+        _visibilityTerrainVersion = long.MinValue;
+        LastCandidatePairs = 0;
+        LastActiveCandidatesScanned = 0;
+        LastTargetEvaluations = 0;
+        LastLineOfSightChecks = 0;
+        LastVisibleTargetCount = 0;
+        LastVisibilityMemoryEntriesScanned = 0;
+        LastUpdateMilliseconds = 0d;
+        _updateTimer = 0f;
     }
 
     public VisionCheck Evaluate(
@@ -286,6 +655,8 @@ public sealed class VisionSystem
         {
             Vector3 point =
                 points[i];
+
+            _lineOfSightChecks++;
 
             if (HasLineOfSight(
                     worldMap,
@@ -521,6 +892,8 @@ public sealed class VisionSystem
         float dx = end.X - start.X;
         float dy = end.Y - start.Y;
         float dz = end.Z - start.Z;
+        float startLayerZ = start.Z * WorldMap.HeightUnitsPerMeter;
+        float dzLayers = dz * WorldMap.HeightUnitsPerMeter;
 
         float horizontalLengthSquared =
             dx * dx + dy * dy;
@@ -530,8 +903,9 @@ public sealed class VisionSystem
             int verticalCellX = (int)MathF.Floor(end.X);
             int verticalCellY = (int)MathF.Floor(end.Y);
 
-            float lowZ = MathF.Min(start.Z, end.Z);
-            float highZ = MathF.Max(start.Z, end.Z);
+            float endLayerZ = startLayerZ + dzLayers;
+            float lowZ = MathF.Min(startLayerZ, endLayerZ);
+            float highZ = MathF.Max(startLayerZ, endLayerZ);
 
             int firstZ = Math.Max(0, (int)MathF.Floor(lowZ));
             int lastZ = Math.Min(
@@ -544,23 +918,23 @@ public sealed class VisionSystem
                     continue;
 
                 bool intersects =
-                    MathF.Abs(dz) < 0.000001f
-                        ? start.Z >= z - Epsilon &&
-                          start.Z < z + 1f - Epsilon
-                        : highZ > z + Epsilon &&
-                          lowZ < z + 1f - Epsilon;
+                    MathF.Abs(dzLayers) < 0.000001f
+                        ? startLayerZ >= z - LayerEpsilon &&
+                          startLayerZ < z + 1f - LayerEpsilon
+                        : highZ > z + LayerEpsilon &&
+                          lowZ < z + 1f - LayerEpsilon;
 
                 if (!intersects)
                     continue;
 
                 float boundaryZ =
-                    dz < 0f ? z + 1f : z;
+                    dzLayers < 0f ? z + 1f : z;
 
                 float hitT =
-                    MathF.Abs(dz) < 0.000001f
+                    MathF.Abs(dzLayers) < 0.000001f
                         ? 0f
                         : Math.Clamp(
-                            (boundaryZ - start.Z) / dz,
+                            (boundaryZ - startLayerZ) / dzLayers,
                             0f,
                             1f);
 
@@ -645,8 +1019,8 @@ public sealed class VisionSystem
 
             if (checkEnd > segmentStart)
             {
-                float z0 = start.Z + dz * segmentStart;
-                float z1 = start.Z + dz * checkEnd;
+                float z0 = startLayerZ + dzLayers * segmentStart;
+                float z1 = startLayerZ + dzLayers * checkEnd;
                 float lowZ = MathF.Min(z0, z1);
                 float highZ = MathF.Max(z0, z1);
 
@@ -661,26 +1035,26 @@ public sealed class VisionSystem
                         continue;
 
                     bool intersects =
-                        MathF.Abs(dz) < 0.000001f
-                            ? z0 >= z - Epsilon &&
-                              z0 < z + 1f - Epsilon
-                            : highZ > z + Epsilon &&
-                              lowZ < z + 1f - Epsilon;
+                        MathF.Abs(dzLayers) < 0.000001f
+                            ? z0 >= z - LayerEpsilon &&
+                              z0 < z + 1f - LayerEpsilon
+                            : highZ > z + LayerEpsilon &&
+                              lowZ < z + 1f - LayerEpsilon;
 
                     if (!intersects)
                         continue;
 
                     float hitT;
 
-                    if (MathF.Abs(dz) < 0.000001f)
+                    if (MathF.Abs(dzLayers) < 0.000001f)
                     {
                         hitT = segmentStart;
                     }
                     else
                     {
-                        float entryZ = dz > 0f ? z : z + 1f;
+                        float entryZ = dzLayers > 0f ? z : z + 1f;
                         hitT = Math.Clamp(
-                            (entryZ - start.Z) / dz,
+                            (entryZ - startLayerZ) / dzLayers,
                             segmentStart,
                             checkEnd);
                     }
@@ -734,6 +1108,221 @@ public sealed class VisionSystem
         return true;
     }
 
+    private void EnsureSpatialGrid(
+        WorldMap worldMap,
+        int unitCapacity)
+    {
+        int width = worldMap.TileWidth;
+        int height = worldMap.TileHeight;
+
+        if (_spatialWidth != width || _spatialHeight != height)
+        {
+            int cellCount = checked(width * height);
+            _spatialCellCounts = new int[cellCount];
+            _spatialCellStarts = new int[cellCount];
+            _spatialCellWriteCursors = new int[cellCount];
+            _spatialWidth = width;
+            _spatialHeight = height;
+        }
+        else
+        {
+            Array.Clear(_spatialCellCounts);
+        }
+
+        if (_spatialUnits.Length < unitCapacity)
+            Array.Resize(ref _spatialUnits, unitCapacity);
+    }
+
+    private void BuildSpatialGrid(
+        UnitStore units,
+        ReadOnlySpan<int> active)
+    {
+        Vector3[] positions = units.Position;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            Vector3 position = positions[active[i]];
+            int x = (int)MathF.Floor(position.X);
+            int y = (int)MathF.Floor(position.Y);
+
+            if (x < 0 || y < 0 || x >= _spatialWidth || y >= _spatialHeight)
+                continue;
+
+            _spatialCellCounts[x + y * _spatialWidth]++;
+        }
+
+        int offset = 0;
+        for (int cell = 0; cell < _spatialCellCounts.Length; cell++)
+        {
+            _spatialCellStarts[cell] = offset;
+            _spatialCellWriteCursors[cell] = offset;
+            offset += _spatialCellCounts[cell];
+        }
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            Vector3 position = positions[unit];
+            int x = (int)MathF.Floor(position.X);
+            int y = (int)MathF.Floor(position.Y);
+
+            if (x < 0 || y < 0 || x >= _spatialWidth || y >= _spatialHeight)
+                continue;
+
+            int cell = x + y * _spatialWidth;
+            _spatialUnits[_spatialCellWriteCursors[cell]++] = unit;
+        }
+    }
+
+    private int CollectNearbyTargets(
+        int observer,
+        Vector3 position,
+        Span<int> targets)
+    {
+        int centerX = (int)MathF.Floor(position.X);
+        int centerY = (int)MathF.Floor(position.Y);
+
+        if (centerX < 0 || centerY < 0 ||
+            centerX >= _spatialWidth || centerY >= _spatialHeight)
+        {
+            return 0;
+        }
+
+        int count = 0;
+
+        for (int radius = 0; radius <= NearbyCellRadius; radius++)
+        {
+            for (int dy = -radius; dy <= radius; dy++)
+            {
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != radius)
+                        continue;
+
+                    int x = centerX + dx;
+                    int y = centerY + dy;
+
+                    if (x < 0 || y < 0 ||
+                        x >= _spatialWidth || y >= _spatialHeight)
+                    {
+                        continue;
+                    }
+
+                    int cell = x + y * _spatialWidth;
+                    int cellCount = _spatialCellCounts[cell];
+
+                    if (cellCount == 0 || count >= targets.Length)
+                        continue;
+
+                    int take = Math.Min(
+                        Math.Min(cellCount, MaxNearbyUnitsPerCell),
+                        targets.Length - count);
+
+                    int offset = (int)(
+                        ((long)observer * TargetObserverOffset +
+                         (long)_visionUpdateSequence * TargetScanStride +
+                         cell) % cellCount);
+
+                    int cellStart = _spatialCellStarts[cell];
+
+                    for (int i = 0; i < take; i++)
+                    {
+                        int slot = offset + i;
+                        if (slot >= cellCount)
+                            slot -= cellCount;
+
+                        int target = _spatialUnits[cellStart + slot];
+                        if (target == observer)
+                            continue;
+
+                        targets[count++] = target;
+                    }
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static bool ContainsTarget(
+        ReadOnlySpan<int> targets,
+        int target)
+    {
+        for (int i = 0; i < targets.Length; i++)
+        {
+            if (targets[i] == target)
+                return true;
+        }
+
+        return false;
+    }
+
+    private void BuildVisibleTargetList(
+        int observer,
+        ReadOnlySpan<int> candidates)
+    {
+        int visibleStart = _visibleTargetCount;
+
+        // Every candidate in this span was selected by the spatial index for
+        // this observer. Only publish targets whose LOS was verified this tick.
+        // Do not scan every active unit here: doing that for each observer made
+        // target-list rebuilding O(units^2) every 100 ms.
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            int target = candidates[i];
+            if (target < 0)
+                continue;
+
+            LastVisibilityMemoryEntriesScanned++;
+
+            int pairIndex = observer * _visibilityCapacity + target;
+            if (_lastVisibleUpdate[pairIndex] != _visionUpdateSequence)
+                continue;
+
+            bool duplicate = false;
+            for (int previous = visibleStart; previous < _visibleTargetCount; previous++)
+            {
+                if (_visibleTargets[previous] == target)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (!duplicate)
+                AppendVisibleTarget(target);
+        }
+    }
+
+    private static bool IsWithinRangeAndFov(
+        UnitStore units,
+        int observer,
+        int target,
+        out float distanceSquared)
+    {
+        Vector3 observerPosition = units.Position[observer];
+        Vector3 targetPosition = units.Position[target];
+
+        float dx = targetPosition.X - observerPosition.X;
+        float dy = targetPosition.Y - observerPosition.Y;
+        distanceSquared = dx * dx + dy * dy;
+
+        float range = MathF.Max(0f, units.ViewRange[observer]);
+        if (distanceSquared > range * range)
+            return false;
+
+        if (distanceSquared < 0.0001f)
+            return true;
+
+        float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
+        Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
+        float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
+        float minFacingDot = MathF.Cos(
+            units.FieldOfView[observer] * MathF.PI / 360f);
+
+        return facingDot >= minFacingDot;
+    }
+
     private void AppendVisibleTarget(
         int targetIndex)
     {
@@ -745,19 +1334,50 @@ public sealed class VisionSystem
             targetIndex;
     }
 
-    private void EnsureUnitCapacity(
-        int capacity)
+    private void EnsureUnitCapacity(int capacity)
     {
-        if (_visibleStarts.Length >= capacity)
+        if (_visibleStarts.Length < capacity)
+        {
+            Array.Resize(ref _aliveUnits, capacity);
+            Array.Resize(ref _visibleStarts, capacity);
+            Array.Resize(ref _visibleCounts, capacity);
+        }
+
+        EnsureVisibilityCacheCapacity(capacity);
+    }
+
+    private void EnsureVisibilityCacheCapacity(int capacity)
+    {
+        if (_visibilityCapacity >= capacity)
             return;
 
-        Array.Resize(
-            ref _visibleStarts,
-            capacity);
+        int newCapacity = Math.Max(
+            capacity,
+            _visibilityCapacity == 0 ? 32 : _visibilityCapacity * 2);
 
-        Array.Resize(
-            ref _visibleCounts,
-            capacity);
+        int[] nextVisibleUpdates = new int[checked(newCapacity * newCapacity)];
+        int[] nextSectorCursors = new int[checked(newCapacity * VisibilitySectorCount)];
+
+        for (int row = 0; row < _visibilityCapacity; row++)
+        {
+            Array.Copy(
+                _lastVisibleUpdate,
+                row * _visibilityCapacity,
+                nextVisibleUpdates,
+                row * newCapacity,
+                _visibilityCapacity);
+
+            Array.Copy(
+                _sectorTargetCursors,
+                row * VisibilitySectorCount,
+                nextSectorCursors,
+                row * VisibilitySectorCount,
+                VisibilitySectorCount);
+        }
+
+        _lastVisibleUpdate = nextVisibleUpdates;
+        _sectorTargetCursors = nextSectorCursors;
+        _visibilityCapacity = newCapacity;
     }
 
     private void EnsureVisibleTargetCapacity(

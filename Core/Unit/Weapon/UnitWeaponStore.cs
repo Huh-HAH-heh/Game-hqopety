@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using Core.Items;
 using Core.Combat;
 
@@ -24,6 +25,8 @@ public sealed class UnitWeaponStore
     private TargetMode[] _targetMode;
     private float[] _aimTimer;
     private UnitId[] _aimTarget;
+    private Vector3[] _aimPoint;
+    private bool[] _aimIndicatorActive;
     private UnitId[] _burstTarget;
     private uint[] _randomState;
 
@@ -45,6 +48,8 @@ public sealed class UnitWeaponStore
     public TargetMode[] CurrentTargetMode => _targetMode;
     public float[] AimTimer => _aimTimer;
     public UnitId[] AimTarget => _aimTarget;
+    public Vector3[] AimPoint => _aimPoint;
+    public bool[] AimIndicatorActive => _aimIndicatorActive;
 
     public UnitWeaponStore(
         int initialUnitCapacity = DefaultUnitCapacity)
@@ -72,6 +77,8 @@ public sealed class UnitWeaponStore
         _targetMode = new TargetMode[capacity];
         _aimTimer = new float[capacity];
         _aimTarget = new UnitId[capacity];
+        _aimPoint = new Vector3[capacity];
+        _aimIndicatorActive = new bool[capacity];
         _randomState = new uint[capacity];
 
         for (int i = 0; i < capacity; i++)
@@ -107,6 +114,8 @@ public sealed class UnitWeaponStore
             _targetMode[index] = TargetMode.Automatic;
             _aimTimer[index] = 0f;
             _aimTarget[index] = default;
+            _aimPoint[index] = Vector3.Zero;
+            _aimIndicatorActive[index] = false;
             _randomState[index] = Seed(index);
         }
     }
@@ -118,6 +127,53 @@ public sealed class UnitWeaponStore
             return;
 
         InitializeUnit(unitIndex);
+    }
+
+    public void CancelActions(int unitIndex)
+    {
+        if (unitIndex < 0 || unitIndex >= Capacity)
+            return;
+
+        int start = unitIndex * UnitInventoryStore.WeaponSlotCount;
+
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            int index = start + slot;
+            _burstRemaining[index] = 0;
+            _burstTimer[index] = 0f;
+            _burstTarget[index] = default;
+            _aimTimer[index] = 0f;
+            _aimTarget[index] = default;
+            _aimPoint[index] = Vector3.Zero;
+            _aimIndicatorActive[index] = false;
+        }
+    }
+
+    public void ClearReferencesToTarget(int unitIndex, UnitId target)
+    {
+        if (unitIndex < 0 || unitIndex >= Capacity || target.Generation == 0)
+            return;
+
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            int index = GetIndex(unitIndex, weaponSlot);
+
+            if (_burstTarget[index] == target)
+            {
+                _burstTarget[index] = default;
+                _burstRemaining[index] = 0;
+                _burstTimer[index] = 0f;
+            }
+
+            if (_aimTarget[index] == target)
+            {
+                _aimTarget[index] = default;
+                _aimTimer[index] = 0f;
+                _aimPoint[index] = Vector3.Zero;
+                _aimIndicatorActive[index] = false;
+            }
+        }
     }
 
     public void ConfigureSlot(
@@ -179,6 +235,8 @@ public sealed class UnitWeaponStore
         _burstTarget[index] = default;
         _aimTimer[index] = 0f;
         _aimTarget[index] = default;
+        _aimPoint[index] = Vector3.Zero;
+        _aimIndicatorActive[index] = false;
 
         if (weapon is RangedWeaponConfig ranged)
         {
@@ -218,6 +276,8 @@ public sealed class UnitWeaponStore
         _burstTarget[index] = default;
         _aimTimer[index] = 0f;
         _aimTarget[index] = default;
+        _aimPoint[index] = Vector3.Zero;
+        _aimIndicatorActive[index] = false;
         _fireMode[index] = FireMode.Single;
         _aimMode[index] = AimMode.AimedShot;
         _targetMode[index] = TargetMode.Automatic;
@@ -294,7 +354,12 @@ public sealed class UnitWeaponStore
         }
     }
 
-    public void SetAimTarget(int unitIndex, UnitWeaponSlot slot, UnitId target, bool reset)
+    public void SetAimTarget(
+        int unitIndex,
+        UnitWeaponSlot slot,
+        UnitId target,
+        bool reset,
+        Vector3 aimPoint)
     {
         int index = GetIndex(unitIndex, slot);
 
@@ -302,7 +367,15 @@ public sealed class UnitWeaponStore
         {
             _aimTarget[index] = target;
             _aimTimer[index] = 0f;
+            _aimIndicatorActive[index] = true;
         }
+
+        _aimPoint[index] = aimPoint;
+    }
+
+    public void MarkAimComplete(int unitIndex, UnitWeaponSlot slot)
+    {
+        _aimIndicatorActive[GetIndex(unitIndex, slot)] = false;
     }
 
     public void ClearAim(int unitIndex, UnitWeaponSlot slot)
@@ -310,6 +383,8 @@ public sealed class UnitWeaponStore
         int index = GetIndex(unitIndex, slot);
         _aimTarget[index] = default;
         _aimTimer[index] = 0f;
+        _aimPoint[index] = Vector3.Zero;
+        _aimIndicatorActive[index] = false;
     }
 
     public bool SelectAmmunition(
@@ -340,6 +415,8 @@ public sealed class UnitWeaponStore
 
         _aimTimer[index] = 0f;
         _aimTarget[index] = default;
+        _aimPoint[index] = Vector3.Zero;
+        _aimIndicatorActive[index] = false;
 
         return true;
     }
@@ -362,10 +439,12 @@ public sealed class UnitWeaponStore
         int index = GetIndex(unitIndex, slot);
         _aimTimer[index] = 0f;
         _aimTarget[index] = default;
+        _aimPoint[index] = Vector3.Zero;
+        _aimIndicatorActive[index] = false;
         _aimMode[index] = _aimMode[index] switch
         {
-            AimMode.AimedShot => AimMode.Snapshot,
-            AimMode.Snapshot => AimMode.SuppressFire,
+            AimMode.AimedShot => AimMode.SuppressFire,
+            AimMode.SuppressFire => AimMode.Snapshot,
             _ => AimMode.AimedShot
         };
     }
@@ -489,6 +568,8 @@ public sealed class UnitWeaponStore
         Array.Resize(ref _targetMode, newLength);
         Array.Resize(ref _aimTimer, newLength);
         Array.Resize(ref _aimTarget, newLength);
+        Array.Resize(ref _aimPoint, newLength);
+        Array.Resize(ref _aimIndicatorActive, newLength);
         Array.Resize(ref _randomState, newLength);
 
         for (int i = oldLength; i < newLength; i++)

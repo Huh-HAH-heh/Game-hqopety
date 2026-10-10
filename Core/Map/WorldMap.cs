@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 
 namespace Core.Map;
 
@@ -33,6 +32,9 @@ public sealed class WorldMap
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly TerrainLayer[] _layers;
     private readonly ushort[] _surfaceHeights;
+    private readonly bool[] _navigationBlocked;
+    private readonly bool[] _simpleFillColumns;
+    private readonly ushort[] _columnMaterialIds;
     private readonly TileRange[]?[] _rangeCache;
 
     public WorldMap(
@@ -77,6 +79,10 @@ public sealed class WorldMap
         }
 
         _surfaceHeights = new ushort[columnCount];
+        _navigationBlocked = new bool[columnCount];
+        _simpleFillColumns = new bool[columnCount];
+        Array.Fill(_simpleFillColumns, true);
+        _columnMaterialIds = new ushort[columnCount];
         _rangeCache = new TileRange[]?[columnCount];
 
         Water =
@@ -142,7 +148,31 @@ public sealed class WorldMap
             materialId);
 
         _rangeCache[columnIndex] = null;
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
         RecalculateSurfaceHeight(columnIndex);
+        TerrainVersion++;
+    }
+
+    public bool IsNavigationBlocked(int x, int y)
+    {
+        if (!IsInside(x, y))
+            return true;
+
+        return _navigationBlocked[GetColumnIndex(x, y)];
+    }
+
+    public void SetNavigationBlocked(int x, int y, bool blocked)
+    {
+        if (!IsInside(x, y))
+            throw new IndexOutOfRangeException();
+
+        int index = GetColumnIndex(x, y);
+
+        if (_navigationBlocked[index] == blocked)
+            return;
+
+        _navigationBlocked[index] = blocked;
         TerrainVersion++;
     }
 
@@ -303,9 +333,75 @@ public sealed class WorldMap
         if (cached != null)
             return cached;
 
-        List<TileRange> ranges =
-            new List<TileRange>(LayerCount);
+        int totalHeightUnits = LayerCount * LayerHeightUnits;
 
+        // The generated terrain is a continuous, single-material column.
+        // Keep that common case O(1): don't scan all 500 Z levels on every
+        // first query for a tile reached by vision or a projectile.
+        if (_simpleFillColumns[columnIndex])
+        {
+            int filledLayers = Math.Clamp(
+                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
+                LayerHeightUnits,
+                0,
+                LayerCount);
+            ushort materialId = _columnMaterialIds[columnIndex];
+
+            if (filledLayers == 0 || materialId == 0)
+            {
+                cached = new[]
+                {
+                    new TileRange
+                    {
+                        StartZ = 0,
+                        EndZ = (ushort)totalHeightUnits,
+                        MaterialId = 0,
+                        State = StateEmpty
+                    }
+                };
+            }
+            else if (filledLayers >= LayerCount)
+            {
+                cached = new[]
+                {
+                    new TileRange
+                    {
+                        StartZ = 0,
+                        EndZ = (ushort)totalHeightUnits,
+                        MaterialId = materialId,
+                        State = StateSolid
+                    }
+                };
+            }
+            else
+            {
+                cached = new TileRange[2];
+                cached[0] = new TileRange
+                {
+                    StartZ = 0,
+                    EndZ = (ushort)(filledLayers * LayerHeightUnits),
+                    MaterialId = materialId,
+                    State = StateSolid
+                };
+                cached[1] = new TileRange
+                {
+                    StartZ = (ushort)(filledLayers * LayerHeightUnits),
+                    EndZ = (ushort)totalHeightUnits,
+                    MaterialId = 0,
+                    State = StateEmpty
+                };
+            }
+
+            _rangeCache[columnIndex] = cached;
+            return cached;
+        }
+
+        // Complex editable columns may contain several materials and air gaps.
+        // Use stack memory for the scan, then retain only the exact number of
+        // ranges. The former List<TileRange>(LayerCount) allocated ~4 KB of
+        // garbage for every previously unseen tile, even for just two ranges.
+        Span<TileRange> ranges = stackalloc TileRange[LayerCount];
+        int rangeCount = 0;
         int runStart = 0;
         ushort runMaterial =
             _layers[0].GetMaterialIdAtIndex(columnIndex);
@@ -318,16 +414,15 @@ public sealed class WorldMap
                 continue;
             }
 
-            ranges.Add(
-                new TileRange
-                {
-                    StartZ = (ushort)(runStart * LayerHeightUnits),
-                    EndZ = (ushort)(z * LayerHeightUnits),
-                    MaterialId = runMaterial,
-                    State = runMaterial == 0
-                        ? StateEmpty
-                        : StateSolid
-                });
+            ranges[rangeCount++] = new TileRange
+            {
+                StartZ = (ushort)(runStart * LayerHeightUnits),
+                EndZ = (ushort)(z * LayerHeightUnits),
+                MaterialId = runMaterial,
+                State = runMaterial == 0
+                    ? StateEmpty
+                    : StateSolid
+            };
 
             if (z < LayerCount)
             {
@@ -337,7 +432,8 @@ public sealed class WorldMap
             }
         }
 
-        cached = ranges.ToArray();
+        cached = new TileRange[rangeCount];
+        ranges[..rangeCount].CopyTo(cached);
         _rangeCache[columnIndex] = cached;
         return cached;
     }
@@ -414,6 +510,8 @@ public sealed class WorldMap
 
         _surfaceHeights[columnIndex] = (ushort)surfaceHeight;
         _rangeCache[columnIndex] = null;
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
         TerrainVersion++;
     }
 
@@ -501,6 +599,8 @@ public sealed class WorldMap
         }
 
         _rangeCache[columnIndex] = null;
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
         TerrainVersion++;
         return true;
     }
@@ -564,6 +664,8 @@ public sealed class WorldMap
 
         _surfaceHeights[columnIndex] =
             (ushort)(filledLayers > 0 ? clampedHeight : 0);
+        _simpleFillColumns[columnIndex] = true;
+        _columnMaterialIds[columnIndex] = filledLayers > 0 ? materialId : (ushort)0;
 
         TerrainVersion++;
     }
@@ -620,6 +722,8 @@ public sealed class WorldMap
 
         _surfaceHeights[columnIndex] = 0;
         _rangeCache[columnIndex] = null;
+        _simpleFillColumns[columnIndex] = true;
+        _columnMaterialIds[columnIndex] = 0;
     }
 
     private void RecalculateSurfaceHeight(

@@ -11,6 +11,13 @@ public sealed class MapRenderSystem : IDisposable
 {
     private readonly record struct TerrainChunkKey(int RegionIndex);
 
+    private readonly record struct PendingTerrainChunk(
+        int RegionX,
+        int RegionY,
+        int RegionIndex);
+
+    private const int MaxTerrainChunksBuiltPerFrame = 4;
+
     private sealed class TerrainChunkMesh : IDisposable
     {
         public VertexBuffer? Buffer;
@@ -42,6 +49,9 @@ public sealed class MapRenderSystem : IDisposable
     // Camera movement rebuilds only chunks entering the view.
     private readonly Dictionary<TerrainChunkKey, TerrainChunkMesh> _terrainChunks = new();
     private readonly List<TerrainChunkMesh> _visibleTerrainChunks = new();
+    private readonly List<PendingTerrainChunk> _pendingTerrainChunks = new();
+    private int _pendingCenterRegionX;
+    private int _pendingCenterRegionY;
 
     private Vertex[] _terrainVertices = Array.Empty<Vertex>();
     private int _terrainVertexCount;
@@ -159,6 +169,30 @@ void main()
     public void ResetVisualSettings()
     {
         SetVisualSettings(48f, 14f);
+    }
+
+    public void InvalidateGraphicsResources()
+    {
+        // The OS/GPU may invalidate window-owned OpenGL resources while the
+        // window is minimized or the graphics context is reactivated. Never
+        // keep stale VBO/shader handles after focus has returned.
+        ClearTerrainChunkCache();
+
+        _terrainLayerShader?.Dispose();
+        _terrainLayerShader = null;
+        _terrainShaderChecked = false;
+        _terrainBufferSupportChecked = false;
+        _useTerrainBuffer = false;
+
+        _chunkCacheTerrainVersion = long.MinValue;
+        _chunkCacheVisibleMaxLayer = -1;
+        _chunkCacheTilePixelSize = -1f;
+
+        _mapCacheValid = false;
+        _gridCacheValid = false;
+        _waterCacheValid = false;
+
+        LastTerrainBuildMilliseconds = 0d;
     }
 
     public bool UsesTerrainVertexBuffer =>
@@ -410,6 +444,11 @@ void main()
         long rebuildsBefore = TerrainMeshRebuildCount;
         long started = Stopwatch.GetTimestamp();
 
+        _pendingTerrainChunks.Clear();
+
+        // Draw all cached chunks immediately, but never build the entire missing
+        // viewport in one frame. Camera jumps can otherwise synchronously build
+        // dozens or hundreds of meshes and cause visible frame-time spikes.
         for (int regionY = minRegionY;
              regionY <= maxRegionY;
              regionY++)
@@ -423,22 +462,52 @@ void main()
 
                 if (!_terrainChunks.TryGetValue(key, out TerrainChunkMesh? mesh))
                 {
-                    mesh = BuildTerrainChunk(
-                        worldMap,
-                        regionX,
-                        regionY,
-                        lodStep,
-                        tilePixelSize,
-                        geometryMaxLayer);
-
-                    _terrainChunks.Add(key, mesh);
-                    _cachedTerrainVertexCount += mesh.VertexCount;
+                    _pendingTerrainChunks.Add(
+                        new PendingTerrainChunk(
+                            regionX,
+                            regionY,
+                            regionIndex));
+                    continue;
                 }
 
                 mesh.LastUsedFrame = _frameNumber;
                 _visibleTerrainChunks.Add(mesh);
                 _terrainVertexCount += mesh.VertexCount;
             }
+        }
+
+        // When the view is zoomed out, build around its center first so the
+        // important area appears immediately while the remaining cache warms.
+        _pendingCenterRegionX =
+            ((minTileX + maxTileX) / 2) / TerrainRegion.TilesPerSide;
+        _pendingCenterRegionY =
+            ((minTileY + maxTileY) / 2) / TerrainRegion.TilesPerSide;
+        _pendingTerrainChunks.Sort(ComparePendingTerrainChunks);
+
+        int buildCount = Math.Min(
+            MaxTerrainChunksBuiltPerFrame,
+            _pendingTerrainChunks.Count);
+
+        for (int i = 0; i < buildCount; i++)
+        {
+            PendingTerrainChunk pending = _pendingTerrainChunks[i];
+
+            TerrainChunkMesh mesh = BuildTerrainChunk(
+                worldMap,
+                pending.RegionX,
+                pending.RegionY,
+                lodStep,
+                tilePixelSize,
+                geometryMaxLayer);
+
+            _terrainChunks.Add(
+                new TerrainChunkKey(pending.RegionIndex),
+                mesh);
+            _cachedTerrainVertexCount += mesh.VertexCount;
+
+            mesh.LastUsedFrame = _frameNumber;
+            _visibleTerrainChunks.Add(mesh);
+            _terrainVertexCount += mesh.VertexCount;
         }
 
         RenderStates terrainStates = RenderStates.Default;
@@ -462,6 +531,24 @@ void main()
 
         // Keep generated chunk meshes for the lifetime of this terrain version.
         // Zooming away and back therefore reuses existing GPU buffers.
+    }
+
+    private int ComparePendingTerrainChunks(
+        PendingTerrainChunk left,
+        PendingTerrainChunk right)
+    {
+        int leftX = left.RegionX - _pendingCenterRegionX;
+        int leftY = left.RegionY - _pendingCenterRegionY;
+        int rightX = right.RegionX - _pendingCenterRegionX;
+        int rightY = right.RegionY - _pendingCenterRegionY;
+
+        int leftDistance = leftX * leftX + leftY * leftY;
+        int rightDistance = rightX * rightX + rightY * rightY;
+
+        int distanceOrder = leftDistance.CompareTo(rightDistance);
+        return distanceOrder != 0
+            ? distanceOrder
+            : left.RegionIndex.CompareTo(right.RegionIndex);
     }
 
     private TerrainChunkMesh BuildTerrainChunk(
@@ -706,6 +793,7 @@ void main()
 
         _terrainChunks.Clear();
         _visibleTerrainChunks.Clear();
+        _pendingTerrainChunks.Clear();
         _cachedTerrainVertexCount = 0;
         _terrainVertexCount = 0;
         _buildingTerrainVertexCount = 0;
