@@ -52,7 +52,7 @@ public sealed class ProjectileSystem
         _unitGrid.Ensure(worldMap, units.Capacity);
 
         long gridStarted = Stopwatch.GetTimestamp();
-        _unitGrid.Build(units);
+        _unitGrid.Build(units, health);
         LastGridBuildMilliseconds =
             Stopwatch.GetElapsedTime(gridStarted).TotalMilliseconds;
 
