@@ -23,7 +23,23 @@ public enum BodyPrimitive : byte
 public enum BodyPartMotion : byte
 {
     StaticRelative = 0,
-    FollowParent = 1
+    FollowParent = 1,
+    WalkCycle = 2,
+    WalkCycleOpposite = 3
+}
+
+public enum BodyPartRole : byte
+{
+    Generic = 0,
+    Torso = 1,
+    Head = 2,
+    UpperArm = 3,
+    Forearm = 4,
+    Hand = 5,
+    Thigh = 6,
+    Shin = 7,
+    Foot = 8,
+    Segment = 9
 }
 
 public enum UnitPosture : byte
