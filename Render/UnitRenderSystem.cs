@@ -109,12 +109,6 @@ public sealed class UnitRenderSystem
         Vector3[] positions =
             units.Position;
 
-        Vector3[] bodyNormals =
-            units.BodyNormal;
-
-        Vector3[] headNormals =
-            units.HeadNormal;
-
         float[] widths =
             units.Width;
 
@@ -135,12 +129,6 @@ public sealed class UnitRenderSystem
 
         float[] partRotations =
             bodies.WorldRotation;
-
-        UnitType[] types =
-            units.Type;
-
-        UnitPosture[] postures =
-            units.Posture;
 
         BodyPrimitive[] primitives =
             bodies.Primitive;
@@ -196,7 +184,7 @@ public sealed class UnitRenderSystem
                 unitPosition.Y <= maxWorldY;
 
             if (!rootVisible &&
-                (!bodies.IsCustomBody(bodyStart) ||
+                (!bodies.UsesBodyDefinition(bodyStart) ||
                  !IsBodyVisible(
                      bodyStart,
                      bodyCount,
@@ -273,88 +261,52 @@ public sealed class UnitRenderSystem
                 }
             }
 
-            if (types[unitIndex] ==
-                    UnitType.Colonist &&
-                !bodies.IsCustomBody(bodyStarts[unitIndex]))
+            int start = bodyStarts[unitIndex];
+            int count = bodyCounts[unitIndex];
+            int end = start + count;
+
+            for (int part = start; part < end; part++)
             {
-                AppendHuman(
-                    _vertices,
-                    unitPosition,
-                    widths[unitIndex],
-                    lengths[unitIndex],
-                    units.Height[unitIndex],
-                    bodyNormals[unitIndex],
-                    headNormals[unitIndex],
-                    postures[unitIndex],
-                    tilePixelSize,
-                    color);
-            }
-            else
-            {
-                int start =
-                    bodyStarts[unitIndex];
+                Vector3 position = partPositions[part];
+                Vector3 scale = partScales[part];
+                float radiusX = MathF.Max(0.06f, scale.X);
+                float radiusY = MathF.Max(0.06f, scale.Y);
+                float extent = MathF.Sqrt(
+                    radiusX * radiusX +
+                    radiusY * radiusY);
 
-                int count =
-                    bodyCounts[unitIndex];
-
-                int end =
-                    start + count;
-
-                for (int part = start;
-                     part < end;
-                     part++)
+                if (position.X + extent < minWorldX ||
+                    position.X - extent > maxWorldX ||
+                    position.Y + extent < minWorldY ||
+                    position.Y - extent > maxWorldY)
                 {
-                    Vector3 position =
-                        partPositions[part];
+                    continue;
+                }
 
-                    Vector3 scale =
-                        partScales[part];
+                float pixelX = position.X * tilePixelSize;
+                float pixelY = position.Y * tilePixelSize;
 
-                    float radiusX = MathF.Max(0.06f, scale.X);
-                    float radiusY = MathF.Max(0.06f, scale.Y);
-                    float extent = MathF.Sqrt(
-                        radiusX * radiusX +
-                        radiusY * radiusY);
-
-                    if (position.X + extent < minWorldX ||
-                        position.X - extent > maxWorldX ||
-                        position.Y + extent < minWorldY ||
-                        position.Y - extent > maxWorldY)
-                    {
-                        continue;
-                    }
-
-                    float pixelX = position.X * tilePixelSize;
-                    float pixelY = position.Y * tilePixelSize;
-
-                    if (primitives[part] == BodyPrimitive.Circle)
-                    {
-                        AppendEllipse(
-                            _vertices,
-                            pixelX,
-                            pixelY,
-                            radiusX * tilePixelSize,
-                            radiusY * tilePixelSize,
-                            partRotations[part],
-                            color);
-                    }
-                    else
-                    {
-                        AppendBox(
-                            _vertices,
-                            pixelX,
-                            pixelY,
-                            MathF.Max(
-                                0.03f,
-                                scale.X) *
-                            tilePixelSize,
-                            MathF.Max(
-                                0.03f,
-                                scale.Y) *
-                            tilePixelSize,
-                            partRotations[part],
-                            color);
-                    }
+                if (primitives[part] == BodyPrimitive.Circle)
+                {
+                    AppendEllipse(
+                        _vertices,
+                        pixelX,
+                        pixelY,
+                        radiusX * tilePixelSize,
+                        radiusY * tilePixelSize,
+                        partRotations[part],
+                        color);
+                }
+                else
+                {
+                    AppendBox(
+                        _vertices,
+                        pixelX,
+                        pixelY,
+                        MathF.Max(0.03f, scale.X) * tilePixelSize,
+                        MathF.Max(0.03f, scale.Y) * tilePixelSize,
+                        partRotations[part],
+                        color);
                 }
             }
 
@@ -1007,40 +959,6 @@ public sealed class UnitRenderSystem
                     220,
                     180)
         };
-    }
-
-    private static void AppendHuman(
-        VertexArray vertices,
-        Vector3 position,
-        float width,
-        float length,
-        float height,
-        Vector3 bodyNormal,
-        Vector3 headNormal,
-        UnitPosture posture,
-        float tilePixelSize,
-        Color color)
-    {
-        float x =
-            position.X *
-            tilePixelSize;
-
-        float y =
-            position.Y *
-            tilePixelSize;
-
-        float radius =
-            MathF.Max(
-                0.12f,
-                width * 0.50f) *
-            tilePixelSize;
-
-        AppendCircle(
-            vertices,
-            x,
-            y,
-            radius,
-            color);
     }
 
     private static void AppendVisionCone(
