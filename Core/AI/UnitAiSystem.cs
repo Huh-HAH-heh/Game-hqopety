@@ -884,7 +884,7 @@ public sealed class UnitAiSystem
         return false;
     }
 
-    private static void ClearAimingIfOccluded(
+    internal static void ClearAimingIfOccluded(
         UnitStore units,
         UnitWeaponStore weapons,
         VisionSystem vision,
