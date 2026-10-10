@@ -36,6 +36,8 @@ public sealed class ProjectileStore
     private float[] _bleedChance;
     private float[] _lifetime;
     private uint[] _generation;
+    private bool[] _showTracer;
+    private uint _projectileSpawnSequence;
 
     private readonly Vector3[] _impactPositions = new Vector3[ImpactCapacity];
     private readonly float[] _impactLifetimes = new float[ImpactCapacity];
@@ -93,6 +95,7 @@ public sealed class ProjectileStore
     public DamageType[] DamageType => _damageType;
     public float[] BleedChance => _bleedChance;
     public float[] Lifetime => _lifetime;
+    public bool[] ShowTracer => _showTracer;
 
     public ReadOnlySpan<int> ActiveIndices =>
         _activeIndices.AsSpan(
@@ -124,6 +127,7 @@ public sealed class ProjectileStore
         _bleedChance = new float[initialCapacity];
         _lifetime = new float[initialCapacity];
         _generation = new uint[initialCapacity];
+        _showTracer = new bool[initialCapacity];
 
         _activeIndices = new int[initialCapacity];
         _activeSlots = new int[initialCapacity];
@@ -229,6 +233,7 @@ public sealed class ProjectileStore
             MathF.Max(
                 0f,
                 lifetime);
+        _showTracer[index] = (_projectileSpawnSequence++ % 5u) == 0;
 
         _activeSlots[index] =
             _activeCount;
@@ -453,6 +458,9 @@ public sealed class ProjectileStore
             newCapacity);
         Array.Resize(
             ref _generation,
+            newCapacity);
+        Array.Resize(
+            ref _showTracer,
             newCapacity);
         Array.Resize(
             ref _activeIndices,
