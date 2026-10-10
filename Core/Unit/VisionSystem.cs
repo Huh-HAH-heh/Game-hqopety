@@ -251,6 +251,18 @@ public sealed class VisionSystem
         _updateTimer = UpdateInterval;
     }
 
+    public void ClearAll()
+    {
+        Array.Clear(_visibleStarts);
+        Array.Clear(_visibleCounts);
+        _visibleTargetCount = 0;
+        LastCandidatePairs = 0;
+        LastLineOfSightChecks = 0;
+        LastVisibleTargetCount = 0;
+        LastUpdateMilliseconds = 0d;
+        _updateTimer = 0f;
+    }
+
     private void EnsureSpatialCapacity(WorldMap worldMap)
     {
         int cellsX = Math.Max(
