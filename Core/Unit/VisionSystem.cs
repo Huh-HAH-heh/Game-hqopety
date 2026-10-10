@@ -201,10 +201,9 @@ public sealed class VisionSystem
         EnsureSpatialGrid(worldMap, units.Capacity);
         BuildSpatialGrid(units, active);
 
-        // Scan a bounded rolling window instead of enumerating every hostile
-        // in every observer's radius. The spatial-cell walk still degenerated
-        // into O(units^2) in dense firefights. Every window moves through the
-        // active list so enemies outside the current sample are eventually seen.
+        // Sample nearby cells first so close hostiles are never skipped solely
+        // because of their active-list index. A bounded rolling window fills the
+        // remaining slots to preserve gradual discovery at longer ranges.
         const int SectorCount = VisibilitySectorCount;
         const int SlotCount = CandidatesPerSector;
         const int CandidateSlots = SectorCount * SlotCount;
@@ -262,6 +261,7 @@ public sealed class VisionSystem
                  sampledCount < MaxTargetCandidatesPerObserver;
                  sample++)
             {
+                LastActiveCandidatesScanned++;
                 int activeSlot = scanStart + sample;
                 if (activeSlot >= active.Length)
                     activeSlot -= active.Length;
@@ -275,8 +275,6 @@ public sealed class VisionSystem
 
                 sampledTargets[sampledCount++] = target;
             }
-
-            LastActiveCandidatesScanned += sampledCount;
 
             for (int sample = 0; sample < sampledCount; sample++)
             {
