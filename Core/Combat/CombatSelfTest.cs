@@ -37,6 +37,7 @@ public static class CombatSelfTest
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
+        RunTest("Projectile: dead units are excluded from collision grid", TestDeadUnitsExcludedFromProjectileGrid, ref passed, ref failed);
         RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
         RunTest("Combat log: hit and blocked events survive shot spam", TestCombatLogPriorities, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
@@ -927,6 +928,35 @@ public static class CombatSelfTest
                simulation.Projectiles.ActiveCount > 0 &&
                simulation.TotalProjectilesSpawned == simulation.Projectiles.ActiveCount &&
                simulation.ShotsFiredThisFrame == 1;
+    }
+
+    private static bool TestDeadUnitsExcludedFromProjectileGrid()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 50);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+
+        UnitId dead = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10.5f, 10.5f, 1f),
+            factionTag: 1);
+        UnitId living = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(20.5f, 20.5f, 1f),
+            factionTag: 2);
+
+        simulation.Health.OverallHitPoints[dead.Index] = 0f;
+
+        UnitSpatialGrid grid = new UnitSpatialGrid();
+        grid.Ensure(worldMap, simulation.Units.Capacity);
+        grid.Build(simulation.Units, simulation.Health);
+
+        return grid.GetCellHead(10, 10) < 0 &&
+               grid.GetCellHead(20, 20) >= 0 &&
+               simulation.Units.IsAlive(dead) &&
+               simulation.Units.IsAlive(living);
     }
 
     private static bool TestProjectileHitsUnit()
