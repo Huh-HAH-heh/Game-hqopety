@@ -46,6 +46,7 @@ public sealed class GameRenderer
     private int _visibleMaxLayer;
     private bool _showVisionDebug;
     private bool _massCombatMode;
+    private bool _simulationPaused;
     private bool _terrainStressMode;
     private int _visionTestIndex;
 
@@ -252,6 +253,7 @@ public sealed class GameRenderer
                 $"TotalAlloc={_allocatedBytes / 1024d / 1024d:0.0}MB " +
                 $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
                 $"Units={_unitSimulation.Units.ActiveCount} " +
+                $"SimPaused={_simulationPaused} " +
                 $"Sim={_unitSimulation.LastSimulationUpdateMilliseconds:0.0}ms " +
                 $"Vision={visionMetrics} " +
                 $"AI={_unitSimulation.LastAIUpdateMilliseconds:0.0}ms " +
@@ -288,27 +290,30 @@ public sealed class GameRenderer
                 _input.MoveDirection,
                 deltaTime);
 
-            if (!_terrainStressMode && !_massCombatMode)
+            if (!_simulationPaused)
             {
-                _visionTestScene.UpdateAiDemo(
-                    _unitSimulation,
-                    _worldMap,
-                    deltaTime);
-            }
+                if (!_terrainStressMode && !_massCombatMode)
+                {
+                    _visionTestScene.UpdateAiDemo(
+                        _unitSimulation,
+                        _worldMap,
+                        deltaTime);
+                }
 
-            if (_massCombatMode)
-            {
-                _massCombatTestScene.Update(
-                    _unitSimulation,
-                    _worldMap,
-                    deltaTime);
-            }
+                if (_massCombatMode)
+                {
+                    _massCombatTestScene.Update(
+                        _unitSimulation,
+                        _worldMap,
+                        deltaTime);
+                }
 
-            if (!_terrainStressMode)
-            {
-                _unitSimulation.Update(
-                    _worldMap,
-                    deltaTime);
+                if (!_terrainStressMode)
+                {
+                    _unitSimulation.Update(
+                        _worldMap,
+                        deltaTime);
+                }
             }
         }
     }
@@ -560,7 +565,7 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
-            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F8=scale";
+            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale";
     }
 
     private void InitializeWindow()
@@ -761,6 +766,14 @@ public sealed class GameRenderer
 
             Console.WriteLine(
                 $"[TEST] Vision simulation={_unitSimulation.VisionEnabled}");
+            return;
+        }
+
+        if (key == Keyboard.Key.F7)
+        {
+            _simulationPaused = !_simulationPaused;
+            Console.WriteLine(
+                $"[TEST] Simulation paused={_simulationPaused}; rendering remains active");
             return;
         }
 
