@@ -59,9 +59,12 @@ public sealed class VisionSystem
     private int _spatialCellCount;
     private int _candidatePairCount;
     private int _lineOfSightChecks;
+    private int _targetEvaluationCount;
+    private long _visionUpdateSequence;
 
     public double LastUpdateMilliseconds { get; private set; }
     public int LastCandidatePairs { get; private set; }
+    public int LastTargetEvaluations { get; private set; }
     public int LastLineOfSightChecks { get; private set; }
     public int LastVisibleTargetCount { get; private set; }
     public long UpdateCount { get; private set; }
@@ -143,6 +146,8 @@ public sealed class VisionSystem
         _visibleTargetCount = 0;
         _candidatePairCount = 0;
         _lineOfSightChecks = 0;
+        _targetEvaluationCount = 0;
+        _visionUpdateSequence++;
 
         ReadOnlySpan<int> active = units.ActiveIndices;
         Vector3[] positions = units.Position;
@@ -172,6 +177,17 @@ public sealed class VisionSystem
             _spatialCellHeads[cell] = unit;
         }
 
+        // Only evaluate a bounded, directionally diverse set of hostile targets
+        // per observer. Every sector contributes its two nearest candidates and
+        // one farthest candidate so cover does not hide every target behind the
+        // same nearest pair. All other pairs receive only cheap range/FOV tests.
+        const int SectorCount = 8;
+        const int CandidatesPerSector = 3;
+        const int CandidateSlots = SectorCount * CandidatesPerSector;
+
+        Span<int> candidateTargets = stackalloc int[CandidateSlots];
+        Span<float> candidateDistances = stackalloc float[CandidateSlots];
+
         for (int i = 0; i < active.Length; i++)
         {
             int observer = active[i];
@@ -184,6 +200,21 @@ public sealed class VisionSystem
 
             Vector3 position = positions[observer];
             float range = MathF.Max(0f, ranges[observer]);
+            float rangeSquared = range * range;
+            Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
+            float halfFovRadians = units.FieldOfView[observer] * MathF.PI / 360f;
+            float minFacingDot = MathF.Cos(halfFovRadians);
+
+            for (int sector = 0; sector < SectorCount; sector++)
+            {
+                int slot = sector * CandidatesPerSector;
+                candidateTargets[slot] = -1;
+                candidateTargets[slot + 1] = -1;
+                candidateTargets[slot + 2] = -1;
+                candidateDistances[slot] = float.PositiveInfinity;
+                candidateDistances[slot + 1] = float.PositiveInfinity;
+                candidateDistances[slot + 2] = float.NegativeInfinity;
+            }
 
             int minCellX = Math.Clamp(
                 (int)MathF.Floor((position.X - range) / SpatialCellSize),
@@ -202,6 +233,8 @@ public sealed class VisionSystem
                 0,
                 _spatialCellsY - 1);
 
+            // Candidate collection never traces terrain. It only computes cheap
+            // horizontal distance, facing, and angular sector.
             for (int cellY = minCellY; cellY <= maxCellY; cellY++)
             {
                 for (int cellX = minCellX; cellX <= maxCellX; cellX++)
@@ -215,9 +248,6 @@ public sealed class VisionSystem
                         if (observer == target)
                             continue;
 
-                        // Vision.GetVisibleTargets is the combat target list.
-                        // Allies cannot be selected for attack, so testing every
-                        // friendly pair wasted most of the frame on dense formations.
                         if (!FactionRules.ShouldAttack(
                                 units.FactionTag[observer],
                                 units.FactionTag[target]))
@@ -227,25 +257,105 @@ public sealed class VisionSystem
 
                         _candidatePairCount++;
 
-                        VisionCheck check = Evaluate(
-                            units,
-                            worldMap,
-                            observer,
-                            target);
+                        Vector3 targetPosition = positions[target];
+                        float dx = targetPosition.X - position.X;
+                        float dy = targetPosition.Y - position.Y;
+                        float distanceSquared = dx * dx + dy * dy;
 
-                        if (check.IsVisible)
-                            AppendVisibleTarget(target);
+                        if (distanceSquared > rangeSquared)
+                            continue;
+
+                        int sector;
+                        if (dx >= 0f)
+                        {
+                            if (dy >= 0f)
+                                sector = dx >= dy ? 0 : 1;
+                            else
+                                sector = dx >= -dy ? 7 : 6;
+                        }
+                        else
+                        {
+                            if (dy >= 0f)
+                                sector = dy >= -dx ? 2 : 3;
+                            else
+                                sector = -dx >= -dy ? 4 : 5;
+                        }
+
+                        if (distanceSquared > 0.0001f)
+                        {
+                            float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
+                            float facingDot =
+                                (forward.X * dx + forward.Y * dy) * inverseDistance;
+
+                            if (facingDot < minFacingDot)
+                                continue;
+                        }
+
+                        int slot = sector * CandidatesPerSector;
+
+                        // Keep two nearest hostile candidates in this sector.
+                        if (distanceSquared < candidateDistances[slot])
+                        {
+                            candidateTargets[slot + 1] = candidateTargets[slot];
+                            candidateDistances[slot + 1] = candidateDistances[slot];
+                            candidateTargets[slot] = target;
+                            candidateDistances[slot] = distanceSquared;
+                        }
+                        else if (distanceSquared < candidateDistances[slot + 1])
+                        {
+                            candidateTargets[slot + 1] = target;
+                            candidateDistances[slot + 1] = distanceSquared;
+                        }
+
+                        // Also keep the farthest candidate in the sector so an
+                        // enemy around a flank can still be tested despite nearer
+                        // targets being hidden by the ridge.
+                        if (distanceSquared > candidateDistances[slot + 2])
+                        {
+                            candidateTargets[slot + 2] = target;
+                            candidateDistances[slot + 2] = distanceSquared;
+                        }
                     }
                 }
             }
 
-            _visibleCounts[observer] =
-                _visibleTargetCount - start;
+            for (int candidate = 0; candidate < CandidateSlots; candidate++)
+            {
+                int target = candidateTargets[candidate];
+                if (target < 0)
+                    continue;
+
+                bool duplicate = false;
+                for (int previous = 0; previous < candidate; previous++)
+                {
+                    if (candidateTargets[previous] == target)
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (duplicate)
+                    continue;
+
+                _targetEvaluationCount++;
+                VisionCheck check = Evaluate(
+                    units,
+                    worldMap,
+                    observer,
+                    target);
+
+                if (check.IsVisible)
+                    AppendVisibleTarget(target);
+            }
+
+            _visibleCounts[observer] = _visibleTargetCount - start;
         }
 
         LastUpdateMilliseconds =
             Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         LastCandidatePairs = _candidatePairCount;
+        LastTargetEvaluations = _targetEvaluationCount;
         LastLineOfSightChecks = _lineOfSightChecks;
         LastVisibleTargetCount = _visibleTargetCount;
         UpdateCount++;
@@ -267,6 +377,7 @@ public sealed class VisionSystem
         Array.Clear(_visibleCounts);
         _visibleTargetCount = 0;
         LastCandidatePairs = 0;
+        LastTargetEvaluations = 0;
         LastLineOfSightChecks = 0;
         LastVisibleTargetCount = 0;
         LastUpdateMilliseconds = 0d;
