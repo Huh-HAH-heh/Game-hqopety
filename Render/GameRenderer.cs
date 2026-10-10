@@ -100,9 +100,8 @@ public sealed class GameRenderer
         _massCombatTestScene =
             new LongRangeCombatTestScene();
 
-        // Start in a terrain-only stress test. The 160-unit combat test
-        // is still available via C, but must not contaminate idle render
-        // profiling with periodic volleys and projectile simulation.
+        // The long-range scene is now the default: 800 units move by A* routes
+        // while scheduled volleys stress the real projectile pipeline.
         _unitSimulation.AI.Enabled = false;
         _unitSimulation.VisionEnabled = false;
         _showVisionDebug = false;
@@ -110,6 +109,8 @@ public sealed class GameRenderer
         // Launch directly into the 800-unit navigation/combat test.
         _terrainStressMode = false;
         EnterMassCombatMode();
+        for (int i = 0; i < 7; i++)
+            _camera.HandleZoom(-1f);
 
         _lastAllocatedBytesSample =
             GC.GetTotalAllocatedBytes(false);
