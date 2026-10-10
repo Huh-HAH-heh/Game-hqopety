@@ -455,7 +455,8 @@ public sealed class UnitSimulation
         _movementSystem.Update(
             Units,
             worldMap,
-            deltaTime);
+            deltaTime,
+            Health);
 
         _weaponSystem.Update(
             Units,
