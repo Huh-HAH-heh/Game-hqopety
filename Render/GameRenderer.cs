@@ -46,7 +46,7 @@ public sealed class GameRenderer
     private int _visibleMaxLayer;
     private bool _showVisionDebug;
     private bool _massCombatMode;
-    private bool _terrainStressMode = true;
+    private bool _terrainStressMode;
     private int _visionTestIndex;
 
     private float _perfTimer;
@@ -106,6 +106,11 @@ public sealed class GameRenderer
         _unitSimulation.AI.Enabled = false;
         _unitSimulation.VisionEnabled = false;
         _showVisionDebug = false;
+
+        // Launch directly into the 800-unit navigation/combat test.
+        _terrainStressMode = false;
+        EnterMassCombatMode();
+
         _lastAllocatedBytesSample =
             GC.GetTotalAllocatedBytes(false);
     }
