@@ -14,7 +14,7 @@ public sealed class CombatStatusOverlay : IDisposable
     private readonly Text? _red;
     private readonly Text? _details;
     private readonly RectangleShape _panel =
-        new RectangleShape(new Vector2f(430f, 126f))
+        new RectangleShape(new Vector2f(520f, 158f))
         {
             FillColor = new Color(5, 8, 13, 220),
             OutlineColor = new Color(72, 88, 105, 210),
@@ -82,29 +82,73 @@ public sealed class CombatStatusOverlay : IDisposable
             return;
         }
 
-        int blueAlive = CountAlive(simulation, 1);
-        int redAlive = CountAlive(simulation, 2);
-        int totalAlive = blueAlive + redAlive;
+        int blueAlive = 0;
+        int blueDead = 0;
+        int redAlive = 0;
+        int redDead = 0;
+        int attack = 0;
+        int search = 0;
+        int cover = 0;
+        int idle = 0;
+        int suppressed = 0;
+        int panicked = 0;
 
-        _blue.DisplayedString = $"BLUE  {blueAlive}";
-        _red.DisplayedString = $"RED  {redAlive}";
+        ReadOnlySpan<int> active = simulation.Units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            bool alive = simulation.Health.OverallHitPoints[unit] > 0f;
+
+            if (simulation.Units.FactionTag[unit] == 1)
+            {
+                if (alive) blueAlive++;
+                else blueDead++;
+            }
+            else if (simulation.Units.FactionTag[unit] == 2)
+            {
+                if (alive) redAlive++;
+                else redDead++;
+            }
+
+            if (!alive)
+                continue;
+
+            switch (simulation.AI.Store.State[unit])
+            {
+                case UnitAiState.Attack: attack++; break;
+                case UnitAiState.Search: search++; break;
+                case UnitAiState.SeekCover: cover++; break;
+                default: idle++; break;
+            }
+
+            switch (simulation.Suppression.GetState(unit))
+            {
+                case UnitSuppressionState.Suppressed: suppressed++; break;
+                case UnitSuppressionState.Panicked: panicked++; break;
+            }
+        }
+
+        int totalAlive = blueAlive + redAlive;
+        _blue.DisplayedString = $"BLUE  {blueAlive} UP / {blueDead} KIA";
+        _red.DisplayedString = $"RED  {redAlive} UP / {redDead} KIA";
 
         string mode = simulation.AI.Enabled
-            ? "MODE: AI ACTIVE"
-            : "MODE: SCRIPTED VOLLEYS  |  [A] ENABLE AI";
+            ? "AI ACTIVE"
+            : "SCRIPTED VOLLEYS  |  press A to enable AI";
 
         _details.DisplayedString =
             $"ALIVE {totalAlive}  |  FIRE {shotsPerSecond:0} rounds/s  |  HIT EVENTS {hitEventsPerSecond:0}/s\n" +
             $"EVENTS/ROUND {hitEventsPerRound:0.00}  |  TOTAL HIT EVENTS {simulation.Projectiles.TotalHits:N0}\n" +
-            $"{mode}\n" +
-            $"[T] TRACERS {(showTracers ? "ON" : "OFF")}  |  [F9] HIDE PANEL";
+            $"AI: ATTACK {attack}  SEARCH {search}  COVER {cover}  IDLE {idle}\n" +
+            $"SUPPRESSED {suppressed}  PANICKED {panicked}  |  {mode}\n" +
+            $"[I] AI STATES {(true ? "ON" : "OFF")}  [T] TRACERS {(showTracers ? "ON" : "OFF")}  [F9] HIDE";
 
         _panel.Position = new Vector2f(12f, 12f);
         _blueAccent.Position = new Vector2f(12f, 40f);
-        _redAccent.Position = new Vector2f(206f, 40f);
+        _redAccent.Position = new Vector2f(268f, 40f);
         _title.Position = new Vector2f(24f, 20f);
         _blue.Position = new Vector2f(26f, 42f);
-        _red.Position = new Vector2f(220f, 42f);
+        _red.Position = new Vector2f(282f, 42f);
         _details.Position = new Vector2f(24f, 64f);
 
         window.Draw(_panel);
