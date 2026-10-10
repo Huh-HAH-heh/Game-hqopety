@@ -18,6 +18,7 @@ public sealed class UnitBodyStore
     private int[] _parent;
     private BodyPrimitive[] _primitive;
     private BodyPartMotion[] _motion;
+    private bool[] _customBodyRoots;
 
     private int _count;
 
@@ -55,6 +56,10 @@ public sealed class UnitBodyStore
     public BodyPartMotion[] Motion =>
         _motion;
 
+    public bool IsCustomBody(int start) =>
+        (uint)start < (uint)_customBodyRoots.Length &&
+        _customBodyRoots[start];
+
     public UnitBodyStore(
         int initialCapacity = DefaultCapacity)
     {
@@ -75,6 +80,7 @@ public sealed class UnitBodyStore
         _parent = new int[initialCapacity];
         _primitive = new BodyPrimitive[initialCapacity];
         _motion = new BodyPartMotion[initialCapacity];
+        _customBodyRoots = new bool[initialCapacity];
     }
 
     public BodyHandle CreateBody(
@@ -107,6 +113,51 @@ public sealed class UnitBodyStore
             _count);
     }
 
+    public BodyHandle CreateBody(
+        ReadOnlySpan<BodyPartDefinition> parts)
+    {
+        if (parts.Length == 0 || parts.Length > short.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(parts),
+                "Тело должно содержать от 1 до 32767 частей.");
+        }
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            int parent = parts[i].ParentIndex;
+            if (parent < -1 || parent >= i)
+            {
+                throw new ArgumentException(
+                    "Родитель должен быть -1 или предшествовать дочерней части.",
+                    nameof(parts));
+            }
+        }
+
+        int start = TakeFreeRange(parts.Length);
+        if (start < 0)
+            start = _count;
+
+        EnsureCapacityAt(start, parts.Length);
+        SetWriteIndex(start);
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            BodyPartDefinition part = parts[i];
+            AddPart(
+                part.LocalPosition,
+                part.Scale,
+                part.LocalRotation,
+                part.FollowDistance,
+                part.ParentIndex < 0 ? -1 : start + part.ParentIndex,
+                part.Primitive,
+                part.Motion);
+        }
+
+        _customBodyRoots[start] = true;
+        return new BodyHandle(start, parts.Length);
+    }
+
     public void FreeBody(
         BodyHandle handle)
     {
@@ -129,7 +180,7 @@ public sealed class UnitBodyStore
         UnitBodyType bodyType,
         int start)
     {
-        return bodyType switch
+        BodyHandle handle = bodyType switch
         {
             UnitBodyType.Colonist =>
                 CreateColonistAt(start),
@@ -146,6 +197,9 @@ public sealed class UnitBodyStore
                     bodyType,
                     "Неизвестный тип тела.")
         };
+
+        _customBodyRoots[handle.Start] = false;
+        return handle;
     }
 
     public void SetInitialWorldPosition(
@@ -156,6 +210,28 @@ public sealed class UnitBodyStore
         int end =
             handle.Start +
             handle.Count;
+
+        if (IsCustomBody(handle.Start))
+        {
+            for (int i = handle.Start; i < end; i++)
+            {
+                int parent = _parent[i];
+                Vector3 origin = unitPosition;
+                float rotation = unitRotation;
+
+                if (parent >= handle.Start)
+                {
+                    origin = _worldPosition[parent];
+                    rotation = _worldRotation[parent];
+                }
+
+                _worldPosition[i] =
+                    origin + Rotate2D(_localPosition[i], rotation);
+                _worldRotation[i] = rotation + _localRotation[i];
+            }
+
+            return;
+        }
 
         for (int i = handle.Start;
              i < end;
@@ -369,6 +445,10 @@ public sealed class UnitBodyStore
 
         Array.Resize(
             ref _motion,
+            newCapacity);
+
+        Array.Resize(
+            ref _customBodyRoots,
             newCapacity);
     }
 
