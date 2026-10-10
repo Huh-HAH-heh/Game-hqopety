@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Combat;
 using Core.Items;
 using Core.Map;
 
@@ -238,7 +239,7 @@ public sealed class UnitAiSystem
                     units);
 
             if (!targetVisible)
-                ClearAiming(weapons, unit);
+                ClearNonSuppressiveAiming(weapons, inventory, unit);
 
             bool moving =
                 units.Velocity[unit].LengthSquared() >
@@ -339,10 +340,21 @@ public sealed class UnitAiSystem
                 // before pulling the trigger so a stale target cannot cause wall fire.
                 if (!shotCheck.IsVisible)
                 {
-                    // The cache is a detection memory, not permission to shoot
-                    // through a newly discovered obstruction.
-                    ClearAiming(weapons, unit);
+                    // Forget stale LOS immediately. Suppressive weapons may
+                    // keep firing at the last known point; the others must stop.
                     vision.ForgetVisibleTarget(unit, target.Index);
+
+                    if (Store.TargetMemory[unit] > 0f &&
+                        HasSuppressFireWeapon(inventory, weapons, unit))
+                    {
+                        ClearNonSuppressiveAiming(weapons, inventory, unit);
+                        units.Target[unit] = units.Position[unit];
+                        units.HasTarget[unit] = false;
+                        Store.State[unit] = UnitAiState.Attack;
+                        continue;
+                    }
+
+                    ClearAiming(weapons, unit);
                     Store.ClearTarget(unit);
                     units.HasTarget[unit] = false;
                     Store.State[unit] = UnitAiState.Search;
@@ -410,16 +422,43 @@ public sealed class UnitAiSystem
 
             if (Store.TargetMemory[unit] > 0f)
             {
-                units.Target[unit] =
-                    Store.LastSeenPosition[unit];
+                if (HasSuppressFireWeapon(inventory, weapons, unit))
+                {
+                    Vector3 lastSeenAimPoint =
+                        Store.LastSeenPosition[unit] +
+                        new Vector3(
+                            0f,
+                            0f,
+                            MathF.Max(
+                                0.05f,
+                                units.Height[target.Index] * 0.55f));
 
-                units.HasTarget[unit] = true;
-                Store.State[unit] =
-                    UnitAiState.Search;
+                    TryFireSuppressiveWeapons(
+                        units,
+                        inventory,
+                        weapons,
+                        projectiles,
+                        unit,
+                        target,
+                        lastSeenAimPoint,
+                        suppression.GetAccuracyMultiplier(unit));
+
+                    units.Target[unit] = units.Position[unit];
+                    units.HasTarget[unit] = false;
+                    Store.State[unit] = UnitAiState.Attack;
+                }
+                else
+                {
+                    units.Target[unit] = Store.LastSeenPosition[unit];
+                    units.HasTarget[unit] = true;
+                    Store.State[unit] = UnitAiState.Search;
+                }
+
                 continue;
             }
 
-            // Target memory expired: discard the stale target and resume scouting.
+            // Target memory expired: stop suppressing stale coordinates and resume scouting.
+            ClearAiming(weapons, unit);
             Store.ClearTarget(unit);
             Store.ClearGoal(unit);
             units.HasTarget[unit] = false;
@@ -752,6 +791,107 @@ public sealed class UnitAiSystem
             target,
             accuracyMultiplier,
             aimPoint);
+    }
+
+    private bool TryFireSuppressiveWeapons(
+        UnitStore units,
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        ProjectileStore projectiles,
+        int unit,
+        UnitId target,
+        Vector3 aimPoint,
+        float accuracyMultiplier)
+    {
+        bool attempted = false;
+
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            short inventorySlot = inventory.GetWeaponEquipment(unit, weaponSlot);
+
+            if (inventorySlot < 0 ||
+                inventory.GetItem(unit, inventorySlot) is not RangedWeaponConfig)
+            {
+                continue;
+            }
+
+            int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
+            if (weapons.CurrentAimMode[stateIndex] != AimMode.SuppressFire)
+                continue;
+
+            attempted = true;
+
+            // This deliberately updates the stored aim point even while the
+            // weapon is on cooldown. Auto fire can then keep suppressing that
+            // last-known position without requiring a fresh visible target.
+            _weaponSystem.TryFireAt(
+                units,
+                inventory,
+                weapons,
+                projectiles,
+                units.GetId(unit),
+                weaponSlot,
+                target,
+                accuracyMultiplier,
+                aimPoint);
+        }
+
+        return attempted;
+    }
+
+    private static bool HasSuppressFireWeapon(
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        int unit)
+    {
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            short inventorySlot = inventory.GetWeaponEquipment(unit, weaponSlot);
+
+            if (inventorySlot < 0 ||
+                inventory.GetItem(unit, inventorySlot) is not RangedWeaponConfig)
+            {
+                continue;
+            }
+
+            if (weapons.CurrentAimMode[
+                    UnitWeaponStore.GetIndex(unit, weaponSlot)] == AimMode.SuppressFire)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void ClearNonSuppressiveAiming(
+        UnitWeaponStore weapons,
+        UnitInventoryStore inventory,
+        int unit)
+    {
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            short inventorySlot = inventory.GetWeaponEquipment(unit, weaponSlot);
+
+            if (inventorySlot >= 0 &&
+                inventory.GetItem(unit, inventorySlot) is RangedWeaponConfig &&
+                weapons.CurrentAimMode[
+                    UnitWeaponStore.GetIndex(unit, weaponSlot)] == AimMode.SuppressFire)
+            {
+                continue;
+            }
+
+            weapons.ClearAim(unit, weaponSlot);
+        }
     }
 
     private static bool HasPendingAim(
