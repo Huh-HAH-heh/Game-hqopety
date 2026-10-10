@@ -267,7 +267,8 @@ public sealed class GameRenderer
                 ? $"{_unitSimulation.Vision.LastUpdateMilliseconds:0.0}ms " +
                   $"{_unitSimulation.Vision.LastCandidatePairs:N0} pairs " +
                   $"{_unitSimulation.Vision.LastTargetEvaluations:N0} targets " +
-                  $"{_unitSimulation.Vision.LastLineOfSightChecks:N0} LOS"
+                  $"{_unitSimulation.Vision.LastLineOfSightChecks:N0} LOS " +
+                  $"cache={_unitSimulation.Vision.LastVisibilityMemoryEntriesScanned:N0}"
                 : "OFF";
 
             Console.WriteLine(
