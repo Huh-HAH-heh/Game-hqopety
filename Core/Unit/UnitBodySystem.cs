@@ -132,18 +132,23 @@ public sealed class UnitBodySystem
                 rotation = worldRotations[parent];
             }
 
-            if (motions[part] == BodyPartMotion.WalkCycle)
+            float gaitRotation = motions[part] switch
             {
-                rotation += MathF.Sin(gaitPhase) * 0.32f * gait;
-            }
-            else if (motions[part] == BodyPartMotion.WalkCycleOpposite)
-            {
-                rotation -= MathF.Sin(gaitPhase) * 0.32f * gait;
-            }
+                BodyPartMotion.WalkCycle =>
+                    MathF.Sin(gaitPhase) * 0.32f * gait,
 
+                BodyPartMotion.WalkCycleOpposite =>
+                    -MathF.Sin(gaitPhase) * 0.32f * gait,
+
+                _ => 0f
+            };
+
+            // The hip/shoulder anchor stays attached to its parent.
+            // Gait rotates the limb itself; child segments inherit that pose.
             worldPositions[part] =
                 origin + Rotate2D(localPositions[part], rotation);
-            worldRotations[part] = rotation + localRotations[part];
+            worldRotations[part] =
+                rotation + localRotations[part] + gaitRotation;
         }
     }
 
