@@ -8,21 +8,24 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    private const int UnitsPerFaction = 400;
-    private const int TotalUnits = UnitsPerFaction * 2;
+    private const int InitialUnitsPerFaction = 400;
     private const int Columns = 20;
-    private const int Rows = UnitsPerFaction / Columns;
+
+    private int _unitsPerFaction = InitialUnitsPerFaction;
+    private int UnitsPerFaction => _unitsPerFaction;
+    private int TotalUnits => _unitsPerFaction * 2;
+    private int Rows => _unitsPerFaction / Columns;
     private const float CombatDistance = 400f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
     private const float AdvanceDistance = 160f;
     private const float VisionStressRange = 55f;
 
-    private readonly UnitId[] _units =
-        new UnitId[TotalUnits];
+    private UnitId[] _units =
+        new UnitId[InitialUnitsPerFaction * 2];
 
-    private readonly byte[] _side =
-        new byte[TotalUnits];
+    private byte[] _side =
+        new byte[InitialUnitsPerFaction * 2];
 
     private bool _initialized;
     private float _elapsed;
@@ -61,6 +64,26 @@ public sealed class LongRangeCombatTestScene
         }
 
         UpdateStats(simulation);
+    }
+
+    public void CycleScale(
+        UnitSimulation simulation,
+        WorldMap worldMap)
+    {
+        int nextUnitsPerFaction = _unitsPerFaction switch
+        {
+            80 => 400,
+            400 => 800,
+            _ => 80
+        };
+
+        Stop(simulation);
+
+        _unitsPerFaction = nextUnitsPerFaction;
+        _units = new UnitId[TotalUnits];
+        _side = new byte[TotalUnits];
+
+        Start(simulation, worldMap);
     }
 
     public void Stop(
