@@ -606,7 +606,22 @@ public static class CombatSelfTest
         for (int i = 0; i < 4; i++)
             simulation.Update(worldMap, 0.10f);
 
-        return simulation.TotalShotsFired == 3;
+        if (simulation.TotalShotsFired != 3 ||
+            simulation.Weapons.AimTarget[stateIndex].Generation != 0)
+        {
+            return false;
+        }
+
+        // A new burst cannot reuse the previous burst's completed warmup.
+        bool startedNewAim = !simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target);
+
+        return startedNewAim &&
+               simulation.TotalShotsFired == 3 &&
+               simulation.Weapons.AimTarget[stateIndex] == target &&
+               simulation.Weapons.AimTimer[stateIndex] == 0f;
     }
 
     private static bool TestSuppressiveFireThroughOcclusion()
