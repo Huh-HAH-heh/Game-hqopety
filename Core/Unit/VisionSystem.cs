@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
 
@@ -48,8 +49,22 @@ public sealed class VisionSystem
 
     private const float UpdateInterval = 0.10f;
     private const float Epsilon = 0.02f;
+    private const int SpatialCellSize = 16;
 
     private float _updateTimer;
+    private int[] _spatialCellHeads = Array.Empty<int>();
+    private int[] _nextInCell = Array.Empty<int>();
+    private int _spatialCellsX;
+    private int _spatialCellsY;
+    private int _spatialCellCount;
+    private int _candidatePairCount;
+    private int _lineOfSightChecks;
+
+    public double LastUpdateMilliseconds { get; private set; }
+    public int LastCandidatePairs { get; private set; }
+    public int LastLineOfSightChecks { get; private set; }
+    public int LastVisibleTargetCount { get; private set; }
+    public long UpdateCount { get; private set; }
     private int[] _visibleStarts;
     private int[] _visibleCounts;
     private int[] _visibleTargets;
@@ -66,6 +81,9 @@ public sealed class VisionSystem
             new int[initialUnitCapacity];
 
         _visibleCounts =
+            new int[initialUnitCapacity];
+
+        _nextInCell =
             new int[initialUnitCapacity];
 
         _visibleTargets =
@@ -95,11 +113,17 @@ public sealed class VisionSystem
     public void Update(
         UnitStore units,
         WorldMap worldMap,
-        float deltaTime)
+        float deltaTime,
+        UnitHealthStore? health = null)
     {
-        if (deltaTime < 0f ||
-            units.ActiveCount == 0)
+        if (deltaTime < 0f)
+            return;
+
+        if (units.ActiveCount == 0)
         {
+            Array.Clear(_visibleCounts);
+            _visibleTargetCount = 0;
+            _updateTimer = 0f;
             return;
         }
 
@@ -108,60 +132,148 @@ public sealed class VisionSystem
         if (_updateTimer < UpdateInterval)
             return;
 
-        _updateTimer = 0f;
+        _updateTimer %= UpdateInterval;
 
-        EnsureUnitCapacity(
-            units.Capacity);
+        long started = Stopwatch.GetTimestamp();
+        EnsureUnitCapacity(units.Capacity);
+        EnsureSpatialCapacity(worldMap);
 
-        Array.Clear(
-            _visibleCounts);
-
+        Array.Clear(_visibleCounts);
+        Array.Fill(_spatialCellHeads, -1, 0, _spatialCellCount);
         _visibleTargetCount = 0;
+        _candidatePairCount = 0;
+        _lineOfSightChecks = 0;
 
-        ReadOnlySpan<int> active =
-            units.ActiveIndices;
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        Vector3[] positions = units.Position;
+        float[] ranges = units.ViewRange;
+        int lastAliveCount = 0;
 
-        for (int i = 0;
-             i < active.Length;
-             i++)
+        // Build an allocation-free spatial hash once per vision tick.
+        for (int i = 0; i < active.Length; i++)
         {
-            int observer =
-                active[i];
+            int unit = active[i];
+            _nextInCell[unit] = -1;
 
-            int start =
-                _visibleTargetCount;
+            if (health != null && health.OverallHitPoints[unit] <= 0f)
+                continue;
 
-            for (int j = 0;
-                 j < active.Length;
-                 j++)
+            Vector3 position = positions[unit];
+            int cellX = Math.Clamp(
+                (int)MathF.Floor(position.X / SpatialCellSize),
+                0,
+                _spatialCellsX - 1);
+            int cellY = Math.Clamp(
+                (int)MathF.Floor(position.Y / SpatialCellSize),
+                0,
+                _spatialCellsY - 1);
+            int cell = cellX + cellY * _spatialCellsX;
+
+            _nextInCell[unit] = _spatialCellHeads[cell];
+            _spatialCellHeads[cell] = unit;
+            lastAliveCount++;
+        }
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int observer = active[i];
+
+            if (health != null && health.OverallHitPoints[observer] <= 0f)
+                continue;
+
+            int start = _visibleTargetCount;
+            _visibleStarts[observer] = start;
+
+            Vector3 position = positions[observer];
+            float range = MathF.Max(0f, ranges[observer]);
+
+            int minCellX = Math.Clamp(
+                (int)MathF.Floor((position.X - range) / SpatialCellSize),
+                0,
+                _spatialCellsX - 1);
+            int maxCellX = Math.Clamp(
+                (int)MathF.Floor((position.X + range) / SpatialCellSize),
+                0,
+                _spatialCellsX - 1);
+            int minCellY = Math.Clamp(
+                (int)MathF.Floor((position.Y - range) / SpatialCellSize),
+                0,
+                _spatialCellsY - 1);
+            int maxCellY = Math.Clamp(
+                (int)MathF.Floor((position.Y + range) / SpatialCellSize),
+                0,
+                _spatialCellsY - 1);
+
+            for (int cellY = minCellY; cellY <= maxCellY; cellY++)
             {
-                int target =
-                    active[j];
+                for (int cellX = minCellX; cellX <= maxCellX; cellX++)
+                {
+                    int cell = cellX + cellY * _spatialCellsX;
 
-                if (observer == target)
-                    continue;
+                    for (int target = _spatialCellHeads[cell];
+                         target >= 0;
+                         target = _nextInCell[target])
+                    {
+                        if (observer == target)
+                            continue;
 
-                VisionCheck check =
-                    Evaluate(
-                        units,
-                        worldMap,
-                        observer,
-                        target);
+                        _candidatePairCount++;
 
-                if (!check.IsVisible)
-                    continue;
+                        VisionCheck check = Evaluate(
+                            units,
+                            worldMap,
+                            observer,
+                            target);
 
-                AppendVisibleTarget(
-                    target);
+                        if (check.IsVisible)
+                            AppendVisibleTarget(target);
+                    }
+                }
             }
 
-            _visibleStarts[observer] =
-                start;
-
             _visibleCounts[observer] =
-                _visibleTargetCount -
-                start;
+                _visibleTargetCount - start;
         }
+
+        LastUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        LastCandidatePairs = _candidatePairCount;
+        LastLineOfSightChecks = _lineOfSightChecks;
+        LastVisibleTargetCount = _visibleTargetCount;
+        UpdateCount++;
+    }
+
+    public void ClearUnit(int unitIndex)
+    {
+        if ((uint)unitIndex >= (uint)_visibleCounts.Length)
+            return;
+
+        _visibleStarts[unitIndex] = 0;
+        _visibleCounts[unitIndex] = 0;
+        _updateTimer = UpdateInterval;
+    }
+
+    private void EnsureSpatialCapacity(WorldMap worldMap)
+    {
+        int cellsX = Math.Max(
+            1,
+            (worldMap.TileWidth + SpatialCellSize - 1) / SpatialCellSize);
+        int cellsY = Math.Max(
+            1,
+            (worldMap.TileHeight + SpatialCellSize - 1) / SpatialCellSize);
+        int cells = checked(cellsX * cellsY);
+
+        if (_spatialCellsX == cellsX &&
+            _spatialCellsY == cellsY &&
+            _spatialCellHeads.Length >= cells)
+        {
+            return;
+        }
+
+        _spatialCellsX = cellsX;
+        _spatialCellsY = cellsY;
+        _spatialCellCount = cells;
+        _spatialCellHeads = new int[cells];
     }
 
     public VisionCheck Evaluate(
@@ -286,6 +398,8 @@ public sealed class VisionSystem
         {
             Vector3 point =
                 points[i];
+
+            _lineOfSightChecks++;
 
             if (HasLineOfSight(
                     worldMap,
