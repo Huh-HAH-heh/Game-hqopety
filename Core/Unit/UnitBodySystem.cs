@@ -18,6 +18,7 @@ public sealed class UnitBodySystem
 
         Vector3[] unitPositions = units.Position;
         Vector3[] bodyNormals = units.BodyNormal;
+        Vector3[] headNormals = units.HeadNormal;
         int[] bodyStarts = units.BodyStart;
         short[] bodyCounts = units.BodyCount;
 
@@ -28,6 +29,7 @@ public sealed class UnitBodySystem
         float[] followDistances = bodies.FollowDistance;
         int[] parents = bodies.Parent;
         BodyPartMotion[] motions = bodies.Motion;
+        BodyPartAnchor[] anchors = bodies.Anchor;
 
         for (int i = 0; i < active.Length; i++)
         {
@@ -44,12 +46,14 @@ public sealed class UnitBodySystem
                 count,
                 unitPositions,
                 bodyNormals,
+                headNormals,
                 worldPositions,
                 worldRotations,
                 localPositions,
                 localRotations,
                 parents,
                 motions,
+                anchors,
                 followDistances,
                 followAlpha);
         }
@@ -61,17 +65,21 @@ public sealed class UnitBodySystem
         int count,
         Vector3[] unitPositions,
         Vector3[] bodyNormals,
+        Vector3[] headNormals,
         Vector3[] worldPositions,
         float[] worldRotations,
         Vector3[] localPositions,
         float[] localRotations,
         int[] parents,
         BodyPartMotion[] motions,
+        BodyPartAnchor[] anchors,
         float[] followDistances,
         float followAlpha)
     {
         Vector3 bodyNormal = NormalizeHorizontal(bodyNormals[unit]);
+        Vector3 headNormal = NormalizeHorizontal(headNormals[unit]);
         float bodyRotation = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
+        float headRotation = MathF.Atan2(headNormal.Y, headNormal.X);
         int end = start + count;
 
         // Definitions are parent-first, so every parent's transform has
@@ -79,9 +87,16 @@ public sealed class UnitBodySystem
         for (int part = start; part < end; part++)
         {
             int parent = parents[part];
+            Vector3 origin = unitPositions[unit];
+            float rotation = bodyRotation;
 
-            if (motions[part] == BodyPartMotion.FollowParent &&
-                parent >= start)
+            if (anchors[part] == BodyPartAnchor.UnitHead)
+            {
+                rotation = headRotation;
+            }
+            else if (anchors[part] == BodyPartAnchor.Parent &&
+                     motions[part] == BodyPartMotion.FollowParent &&
+                     parent >= start)
             {
                 UpdateFollower(
                     part,
@@ -92,11 +107,8 @@ public sealed class UnitBodySystem
                     followAlpha);
                 continue;
             }
-
-            Vector3 origin = unitPositions[unit];
-            float rotation = bodyRotation;
-
-            if (parent >= start)
+            else if (anchors[part] == BodyPartAnchor.Parent &&
+                     parent >= start)
             {
                 origin = worldPositions[parent];
                 rotation = worldRotations[parent];
