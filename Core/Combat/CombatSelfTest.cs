@@ -30,7 +30,7 @@ public static class CombatSelfTest
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
-        RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
+        RunTest("Vision: candidate sampling bounds pair work", TestVisionBoundedCandidateSampling, ref passed, ref failed);
         RunTest("Vision: candidate work scales with living units", TestVisionWorkScalesWithLivingUnits, ref passed, ref failed);
         RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
@@ -694,7 +694,7 @@ public static class CombatSelfTest
         return GC.GetAllocatedBytesForCurrentThread() == before;
     }
 
-    private static bool TestVisionSpatialIndex()
+    private static bool TestVisionBoundedCandidateSampling()
     {
         WorldMap worldMap = new WorldMap(
             regionsX: 10,
@@ -719,7 +719,8 @@ public static class CombatSelfTest
                     UnitType.Colonist,
                     position,
                     Vector3.UnitX,
-                    Vector3.UnitX);
+                    Vector3.UnitX,
+                    factionTag: (ushort)((row * columns + column) % 2 + 1));
 
                 simulation.Units.ViewRange[unit.Index] = 10f;
                 simulation.Units.FieldOfView[unit.Index] = 360f;
@@ -734,7 +735,8 @@ public static class CombatSelfTest
 
         int bruteForcePairs = unitCount * (unitCount - 1);
 
-        return simulation.Vision.LastCandidatePairs < bruteForcePairs / 4 &&
+        return simulation.Vision.LastActiveCandidatesScanned == unitCount * 64 &&
+               simulation.Vision.LastCandidatePairs < bruteForcePairs / 4 &&
                simulation.Vision.LastVisibleTargetCount == 0 &&
                simulation.Vision.UpdateCount == 1;
     }
