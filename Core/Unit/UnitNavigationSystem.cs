@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
 
@@ -29,6 +30,10 @@ public sealed class UnitNavigationSystem
     private int[] _pathCursor = Array.Empty<int>();
     private int[] _routeGoalX = Array.Empty<int>();
     private int[] _routeGoalY = Array.Empty<int>();
+    private int[] _routeFootprintX = Array.Empty<int>();
+    private int[] _routeFootprintY = Array.Empty<int>();
+    private int[] _failedFootprintX = Array.Empty<int>();
+    private int[] _failedFootprintY = Array.Empty<int>();
     private UnitId[] _routeOwner = Array.Empty<UnitId>();
     private int[] _failedGoalX = Array.Empty<int>();
     private int[] _failedGoalY = Array.Empty<int>();
@@ -38,6 +43,13 @@ public sealed class UnitNavigationSystem
 
     public int RoutesBuilt { get; private set; }
     public int RoutesFailed { get; private set; }
+    public int RoutesBuiltThisUpdate { get; private set; }
+    public int RoutesFailedThisUpdate { get; private set; }
+    public int SearchesThisUpdate { get; private set; }
+    public long CellsExpandedThisUpdate { get; private set; }
+    public double SearchMillisecondsThisUpdate { get; private set; }
+
+    private int _lastSearchCellsExpanded;
 
     private int _width;
     private int _height;
@@ -60,6 +72,11 @@ public sealed class UnitNavigationSystem
         EnsureUnitCapacity(units.Capacity);
         EnsureWorkspace(worldMap);
         _routeBuildsRemaining = MaxRouteBuildsPerUpdate;
+        RoutesBuiltThisUpdate = 0;
+        RoutesFailedThisUpdate = 0;
+        SearchesThisUpdate = 0;
+        CellsExpandedThisUpdate = 0;
+        SearchMillisecondsThisUpdate = 0d;
     }
 
     public bool TryGetWaypoint(
@@ -78,9 +95,14 @@ public sealed class UnitNavigationSystem
         int targetX = ClampCell((int)MathF.Floor(target.X), _width);
         int targetY = ClampCell((int)MathF.Floor(target.Y), _height);
         int startCell = startX + startY * _width;
+        int footprintX = GetFootprintRadius(units.Width[unitIndex]);
+        int footprintY = GetFootprintRadius(units.Length[unitIndex]);
         UnitId owner = units.GetId(unitIndex);
 
         bool sameOwner = _routeOwner[unitIndex] == owner;
+        bool footprintChanged = sameOwner &&
+            (_routeFootprintX[unitIndex] != footprintX ||
+             _routeFootprintY[unitIndex] != footprintY);
         int length = sameOwner ? _paths[unitIndex]?.Length ?? 0 : 0;
         int cursor = sameOwner ? _pathCursor[unitIndex] : 0;
         bool targetFarMoved =
@@ -115,6 +137,7 @@ public sealed class UnitNavigationSystem
             deviatedFromRoute ||
             (routeFinished && goalChanged) ||
             repositionedAwayFromFinishedRoute ||
+            footprintChanged ||
             (sameOwner && _routeTerrainVersion[unitIndex] != worldMap.TerrainVersion);
 
         if (needsRoute)
@@ -124,27 +147,42 @@ public sealed class UnitNavigationSystem
                 _failedGoalX[unitIndex] == targetX &&
                 _failedGoalY[unitIndex] == targetY &&
                 _failedStartCell[unitIndex] == startCell &&
+                _failedFootprintX[unitIndex] == footprintX &&
+                _failedFootprintY[unitIndex] == footprintY &&
                 _failedTerrainVersion[unitIndex] == worldMap.TerrainVersion;
 
             if (!failedAlready && _routeBuildsRemaining > 0)
             {
                 _routeBuildsRemaining--;
 
-                if (TryBuildPath(
-                        worldMap,
-                        startX,
-                        startY,
-                        targetX,
-                        targetY,
-                        out int[] path))
+                long searchStarted = Stopwatch.GetTimestamp();
+                bool pathFound = TryBuildPath(
+                    worldMap,
+                    startX,
+                    startY,
+                    targetX,
+                    targetY,
+                    footprintX,
+                    footprintY,
+                    out int[] path);
+
+                SearchesThisUpdate++;
+                SearchMillisecondsThisUpdate +=
+                    Stopwatch.GetElapsedTime(searchStarted).TotalMilliseconds;
+                CellsExpandedThisUpdate += _lastSearchCellsExpanded;
+
+                if (pathFound)
                 {
                     _paths[unitIndex] = path;
                     _pathCursor[unitIndex] = 0;
                     _routeGoalX[unitIndex] = targetX;
                     _routeGoalY[unitIndex] = targetY;
+                    _routeFootprintX[unitIndex] = footprintX;
+                    _routeFootprintY[unitIndex] = footprintY;
                     _routeOwner[unitIndex] = owner;
                     _routeTerrainVersion[unitIndex] = worldMap.TerrainVersion;
                     RoutesBuilt++;
+                    RoutesBuiltThisUpdate++;
                     _failedGoalX[unitIndex] = int.MinValue;
                     _failedGoalY[unitIndex] = int.MinValue;
                     length = path.Length;
@@ -157,12 +195,17 @@ public sealed class UnitNavigationSystem
                     _pathCursor[unitIndex] = 0;
                     _routeGoalX[unitIndex] = targetX;
                     _routeGoalY[unitIndex] = targetY;
+                    _routeFootprintX[unitIndex] = footprintX;
+                    _routeFootprintY[unitIndex] = footprintY;
                     _routeOwner[unitIndex] = owner;
                     _failedGoalX[unitIndex] = targetX;
                     _failedGoalY[unitIndex] = targetY;
                     _failedStartCell[unitIndex] = startCell;
+                    _failedFootprintX[unitIndex] = footprintX;
+                    _failedFootprintY[unitIndex] = footprintY;
                     _failedTerrainVersion[unitIndex] = worldMap.TerrainVersion;
                     RoutesFailed++;
+                    RoutesFailedThisUpdate++;
                     waypoint = default;
                     return false;
                 }
@@ -245,14 +288,17 @@ public sealed class UnitNavigationSystem
         int startY,
         int targetX,
         int targetY,
+        int footprintRadiusX,
+        int footprintRadiusY,
         out int[] path)
     {
         path = Array.Empty<int>();
+        _lastSearchCellsExpanded = 0;
 
         if (!IsInside(startX, startY) ||
             !IsInside(targetX, targetY) ||
-            !IsSurface(worldMap, startX, startY) ||
-            !IsSurface(worldMap, targetX, targetY))
+            !IsFootprintPassable(worldMap, startX, startY, footprintRadiusX, footprintRadiusY) ||
+            !IsFootprintPassable(worldMap, targetX, targetY, footprintRadiusX, footprintRadiusY))
         {
             return false;
         }
@@ -277,6 +323,7 @@ public sealed class UnitNavigationSystem
         while (_heapCount > 0)
         {
             int current = HeapPop();
+            _lastSearchCellsExpanded++;
 
             if (current == goal)
             {
@@ -297,7 +344,7 @@ public sealed class UnitNavigationSystem
                 int ny = y + dy;
 
                 if (!IsInside(nx, ny) ||
-                    !CanStep(worldMap, x, y, nx, ny, dx, dy))
+                    !CanStep(worldMap, x, y, nx, ny, dx, dy, footprintRadiusX, footprintRadiusY))
                 {
                     continue;
                 }
@@ -348,10 +395,50 @@ public sealed class UnitNavigationSystem
         int nx,
         int ny,
         int dx,
+        int dy,
+        int footprintRadiusX,
+        int footprintRadiusY)
+    {
+        if (footprintRadiusX == 0 && footprintRadiusY == 0)
+            return CanStepCell(worldMap, x, y, nx, ny, dx, dy);
+
+        // Check the full rectangular footprint, not just the unit's center.
+        // Every footprint cell must have a surface and be traversable.
+        for (int offsetY = -footprintRadiusY; offsetY <= footprintRadiusY; offsetY++)
+        {
+            for (int offsetX = -footprintRadiusX; offsetX <= footprintRadiusX; offsetX++)
+            {
+                if (!CanStepCell(
+                        worldMap,
+                        x + offsetX,
+                        y + offsetY,
+                        nx + offsetX,
+                        ny + offsetY,
+                        dx,
+                        dy))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool CanStepCell(
+        WorldMap worldMap,
+        int x,
+        int y,
+        int nx,
+        int ny,
+        int dx,
         int dy)
     {
-        if (!IsSurface(worldMap, nx, ny))
+        if (worldMap.GetSurfaceLayer(x, y) < 0 ||
+            worldMap.GetSurfaceLayer(nx, ny) < 0)
+        {
             return false;
+        }
 
         float currentHeight = worldMap.GetSurfaceHeight(x, y);
         float nextHeight = worldMap.GetSurfaceHeight(nx, ny);
@@ -359,19 +446,54 @@ public sealed class UnitNavigationSystem
         if (MathF.Abs(nextHeight - currentHeight) > MaxStepHeight)
             return false;
 
-        // Do not cut diagonally through a blocked or too-steep corner.
-        if (dx != 0 && dy != 0)
+        if (dx != 0 && dy != 0 &&
+            (!CanCardinalStep(worldMap, x, y, x + dx, y) ||
+             !CanCardinalStep(worldMap, x, y, x, y + dy) ||
+             !CanCardinalStep(worldMap, x + dx, y, nx, ny) ||
+             !CanCardinalStep(worldMap, x, y + dy, nx, ny)))
         {
-            if (!CanCardinalStep(worldMap, x, y, x + dx, y) ||
-                !CanCardinalStep(worldMap, x, y, x, y + dy) ||
-                !CanCardinalStep(worldMap, x + dx, y, nx, ny) ||
-                !CanCardinalStep(worldMap, x, y + dy, nx, ny))
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsFootprintPassable(
+        WorldMap worldMap,
+        int x,
+        int y,
+        int radiusX,
+        int radiusY)
+    {
+        float centerHeight = worldMap.GetSurfaceHeight(x, y);
+
+        for (int offsetY = -radiusY; offsetY <= radiusY; offsetY++)
+        {
+            for (int offsetX = -radiusX; offsetX <= radiusX; offsetX++)
             {
-                return false;
+                int cellX = x + offsetX;
+                int cellY = y + offsetY;
+
+                if (worldMap.GetSurfaceLayer(cellX, cellY) < 0)
+                    return false;
+
+                if (MathF.Abs(
+                        worldMap.GetSurfaceHeight(cellX, cellY) - centerHeight) >
+                    MaxStepHeight)
+                {
+                    return false;
+                }
             }
         }
 
         return true;
+    }
+
+    private static int GetFootprintRadius(float size)
+    {
+        return Math.Max(
+            0,
+            (int)MathF.Ceiling((MathF.Max(0.1f, size) - 1f) * 0.5f));
     }
 
     private static bool CanCardinalStep(
@@ -560,6 +682,10 @@ public sealed class UnitNavigationSystem
         Array.Resize(ref _pathCursor, newCapacity);
         Array.Resize(ref _routeGoalX, newCapacity);
         Array.Resize(ref _routeGoalY, newCapacity);
+        Array.Resize(ref _routeFootprintX, newCapacity);
+        Array.Resize(ref _routeFootprintY, newCapacity);
+        Array.Resize(ref _failedFootprintX, newCapacity);
+        Array.Resize(ref _failedFootprintY, newCapacity);
         Array.Resize(ref _routeOwner, newCapacity);
         Array.Resize(ref _failedGoalX, newCapacity);
         Array.Resize(ref _failedGoalY, newCapacity);
@@ -576,6 +702,8 @@ public sealed class UnitNavigationSystem
             _failedGoalX[i] = int.MinValue;
             _failedGoalY[i] = int.MinValue;
             _failedStartCell[i] = -1;
+            _failedFootprintX[i] = int.MinValue;
+            _failedFootprintY[i] = int.MinValue;
         }
     }
 
