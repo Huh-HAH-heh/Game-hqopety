@@ -487,10 +487,10 @@ public static class CombatSelfTest
             worldMap.SetNavigationBlocked(wallX, y, true);
         }
 
-        UnitNavigationSystem blockedNavigation = new UnitNavigationSystem();
-        blockedNavigation.BeginUpdate(simulation.Units, worldMap);
+        // Reuse the planner to verify terrain-version changes invalidate its cached grid.
+        navigation.BeginUpdate(simulation.Units, worldMap);
 
-        bool foundBlockedRoute = blockedNavigation.TryGetWaypoint(
+        bool foundBlockedRoute = navigation.TryGetWaypoint(
             simulation.Units,
             unit.Index,
             worldMap,
@@ -498,7 +498,9 @@ public static class CombatSelfTest
             target,
             out _);
 
-        return !foundBlockedRoute && blockedNavigation.RoutesFailed == 1;
+        return !foundBlockedRoute &&
+               navigation.RoutesFailedThisUpdate == 1 &&
+               navigation.NavigationGridBuildMilliseconds >= 0d;
     }
 
     private static bool TestVisionSpatialIndex()
