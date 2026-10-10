@@ -577,8 +577,9 @@ public static class CombatSelfTest
                simulation.Projectiles.ActiveCount == 1 &&
                simulation.TotalShotsFired == 1 &&
                simulation.TotalRoundsConsumed == 1 &&
-               simulation.TotalProjectilesSpawned == 1 &&
-               simulation.Weapons.ShotsFiredThisFrame == 1;
+               simulation.Projectiles.ActiveCount > 0 &&
+               simulation.TotalProjectilesSpawned == simulation.Projectiles.ActiveCount &&
+               simulation.ShotsFiredThisFrame == 1;
     }
 
     private static bool TestDeadUnitCleanup()
