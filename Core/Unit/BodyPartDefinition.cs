@@ -10,9 +10,8 @@ public enum BodyPartAnchor : byte
 }
 
 /// <summary>
-/// Data-only description of one body part. Scale stores half-extents
-/// for boxes and radii for circles. Parents must appear earlier in the
-/// definition. Anchors make body/head orientation choices explicit.
+/// Geometry and attachment data for one renderable anatomical part.
+/// Parents must precede their children in a definition.
 /// </summary>
 public readonly struct BodyPartDefinition
 {
@@ -24,6 +23,7 @@ public readonly struct BodyPartDefinition
     public BodyPrimitive Primitive { get; }
     public BodyPartMotion Motion { get; }
     public BodyPartAnchor Anchor { get; }
+    public BodyPartRole Role { get; }
 
     public BodyPartDefinition(
         Vector3 localPosition,
@@ -33,7 +33,8 @@ public readonly struct BodyPartDefinition
         float localRotation = 0f,
         BodyPartMotion motion = BodyPartMotion.StaticRelative,
         float followDistance = 0f,
-        BodyPartAnchor anchor = BodyPartAnchor.Parent)
+        BodyPartAnchor anchor = BodyPartAnchor.Parent,
+        BodyPartRole role = BodyPartRole.Generic)
     {
         LocalPosition = localPosition;
         Scale = scale;
@@ -43,5 +44,6 @@ public readonly struct BodyPartDefinition
         Motion = motion;
         FollowDistance = followDistance;
         Anchor = anchor;
+        Role = role;
     }
 }
