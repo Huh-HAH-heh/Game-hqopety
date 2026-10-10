@@ -385,6 +385,7 @@ public sealed class UnitAiSystem
                     units.HasTarget[unit] =
                         HasSustainedFireWeapon(
                             inventory,
+                            weapons,
                             unit);
                 }
                 else if (!HasRangedWeapon(
@@ -399,6 +400,7 @@ public sealed class UnitAiSystem
                 }
                 else if (HasSustainedFireWeapon(
                              inventory,
+                             weapons,
                              unit) ||
                          HasPendingAim(
                              units,
@@ -959,30 +961,27 @@ public sealed class UnitAiSystem
 
     private static bool HasSustainedFireWeapon(
         UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
         int unit)
     {
         for (int slot = 0;
              slot < UnitInventoryStore.WeaponSlotCount;
              slot++)
         {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
             short inventorySlot =
-                inventory.GetWeaponEquipment(
-                    unit,
-                    (UnitWeaponSlot)slot);
+                inventory.GetWeaponEquipment(unit, weaponSlot);
 
-            if (inventorySlot < 0)
+            if (inventorySlot < 0 ||
+                inventory.GetItem(unit, inventorySlot) is not RangedWeaponConfig)
+            {
                 continue;
+            }
 
-            RangedWeaponConfig? weapon =
-                inventory.GetItem(
-                    unit,
-                    inventorySlot) as RangedWeaponConfig;
+            int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
 
-            if (weapon == null)
-                continue;
-
-            if (weapon.DefaultFireMode !=
-                Core.Combat.FireMode.Single)
+            if (weapons.CurrentFireMode[stateIndex] != FireMode.Single ||
+                weapons.BurstRemaining[stateIndex] > 0)
             {
                 return true;
             }
