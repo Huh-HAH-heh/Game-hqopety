@@ -1,5 +1,6 @@
 using Core.Items;
 using Core.Map;
+using System;
 using System.Diagnostics;
 using System.Numerics;
 
@@ -182,32 +183,67 @@ public sealed class UnitSimulation
                 locationId,
                 factionTag);
 
+        return FinishSpawn(
+            id,
+            type,
+            position,
+            bodyNormal,
+            body);
+    }
+
+    public UnitId SpawnCustom(
+        UnitType type,
+        Vector3 position,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        float bodyAngle = 0f,
+        int locationId = 0,
+        ushort factionTag = 0)
+    {
+        UnitDefinition definition = UnitCatalog.Get(type);
+        BodyHandle body = Bodies.CreateBody(bodyParts);
+
+        Vector3 bodyNormal = new Vector3(
+            MathF.Cos(bodyAngle),
+            MathF.Sin(bodyAngle),
+            0f);
+
+        UnitId id = Units.Create(
+            definition,
+            position,
+            bodyNormal,
+            bodyNormal,
+            body,
+            locationId,
+            factionTag);
+
+        return FinishSpawn(
+            id,
+            type,
+            position,
+            bodyNormal,
+            body);
+    }
+
+    private UnitId FinishSpawn(
+        UnitId id,
+        UnitType type,
+        Vector3 position,
+        Vector3 bodyNormal,
+        BodyHandle body)
+    {
         Bodies.SetInitialWorldPosition(
             body,
             position,
-            MathF.Atan2(
-                bodyNormal.Y,
-                bodyNormal.X));
+            MathF.Atan2(bodyNormal.Y, bodyNormal.X));
 
         EnsureDeathCapacity();
         _deathHandled[id.Index] = false;
 
-        Health.InitializeUnit(
-            id.Index,
-            type);
-
-        Inventory.InitializeUnit(
-            id.Index);
-
-        Weapons.InitializeUnit(
-            id.Index);
-
-        Suppression.InitializeUnit(
-            id.Index);
-
-        _aiSystem.Store.InitializeUnit(
-            id.Index);
-
+        Health.InitializeUnit(id.Index, type);
+        Inventory.InitializeUnit(id.Index);
+        Weapons.InitializeUnit(id.Index);
+        Suppression.InitializeUnit(id.Index);
+        _aiSystem.Store.InitializeUnit(id.Index);
         return id;
     }
 
