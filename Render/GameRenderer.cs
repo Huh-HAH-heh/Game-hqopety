@@ -632,7 +632,24 @@ public sealed class GameRenderer
 
         _window.Resized +=
             (_, e) =>
+            {
+                if (e.Size.X == 0 || e.Size.Y == 0)
+                    return;
+
                 UpdateWindowViews(e.Size);
+            };
+
+        _window.GainedFocus +=
+            (_, _) =>
+            {
+                Vector2u size = _window.Size;
+                if (size.X > 0 && size.Y > 0)
+                    UpdateWindowViews(size);
+
+                _mapRenderer.InvalidateGraphicsResources();
+                Console.WriteLine(
+                    "[Render] Window focus restored; terrain GPU cache will rebuild.");
+            };
 
         _window.MouseWheelScrolled +=
             (_, e) =>
