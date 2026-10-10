@@ -721,7 +721,7 @@ public static class CombatSelfTest
         // Aim at an exposed upper-body point, as selected by terrain-aware vision,
         // then fire a real ballistic projectile through the simulation pipeline.
         Vector3 visibleAimPoint = simulation.Units.Position[target.Index] +
-            new Vector3(0f, 0f, simulation.Units.Height[target.Index] * 0.88f);
+            new Vector3(0f, 0f, simulation.Units.Height[target.Index] * 0.55f);
         simulation.FireWeaponAt(
             shooter,
             UnitWeaponSlot.Primary,
