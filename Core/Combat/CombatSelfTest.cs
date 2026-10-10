@@ -31,6 +31,7 @@ public static class CombatSelfTest
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
+        RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
         RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
         RunTest("Combat log: hit and blocked events survive shot spam", TestCombatLogPriorities, ref passed, ref failed);
@@ -642,6 +643,56 @@ public static class CombatSelfTest
         return simulation.Vision.LastCandidatePairs < bruteForcePairs / 4 &&
                simulation.Vision.LastVisibleTargetCount == 0 &&
                simulation.Vision.UpdateCount == 1;
+    }
+
+    private static bool TestVisionHostilePairsOnly()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 48);
+        UnitSimulation simulation = new UnitSimulation(128, 512);
+
+        for (int i = 0; i < 80; i++)
+        {
+            UnitId ally = simulation.Spawn(
+                UnitType.Colonist,
+                new Vector3(
+                    10.2f + (i % 10) * 0.35f,
+                    10.2f + (i / 10) * 0.35f,
+                    0.1f),
+                factionTag: 1);
+
+            simulation.Units.ViewRange[ally.Index] = 30f;
+            simulation.Units.FieldOfView[ally.Index] = 360f;
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            UnitId enemy = simulation.Spawn(
+                UnitType.Colonist,
+                new Vector3(
+                    12.0f + i * 0.25f,
+                    13.7f,
+                    0.1f),
+                factionTag: 2);
+
+            simulation.Units.ViewRange[enemy.Index] = 30f;
+            simulation.Units.FieldOfView[enemy.Index] = 360f;
+        }
+
+        simulation.Vision.Update(
+            simulation.Units,
+            worldMap,
+            0.11f,
+            simulation.Health);
+
+        // Only the 80x4 hostile pairs in both directions need terrain LOS.
+        // 84 units produce 6,972 possible directed non-self pairs without filtering.
+        return simulation.Vision.LastCandidatePairs <= 80 * 4 * 2 &&
+               simulation.Vision.LastCandidatePairs > 0 &&
+               simulation.Vision.LastLineOfSightChecks > 0 &&
+               simulation.Vision.LastVisibleTargetCount > 0;
     }
 
     private static bool TestWeaponAmmoConsumption()
