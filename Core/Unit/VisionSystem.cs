@@ -53,7 +53,7 @@ public sealed class VisionSystem
     private const int SpatialCellSize = 16;
     private const int VisibilityMemoryUpdates = 60;
     private const int VisibilitySectorCount = 8;
-    private const int CandidatesPerSector = 4;
+    private const int CandidatesPerSector = 2;
 
     private float _updateTimer;
     private int[] _spatialCellHeads = Array.Empty<int>();
@@ -234,12 +234,8 @@ public sealed class VisionSystem
                 int slot = sector * CandidatesPerSector;
                 candidateTargets[slot] = -1;
                 candidateTargets[slot + 1] = -1;
-                candidateTargets[slot + 2] = -1;
-                candidateTargets[slot + 3] = -1;
                 candidateDistances[slot] = float.PositiveInfinity;
-                candidateDistances[slot + 1] = float.PositiveInfinity;
-                candidateDistances[slot + 2] = float.NegativeInfinity;
-                candidateDistances[slot + 3] = 0f;
+                candidateDistances[slot + 1] = 0f;
                 rotationDistances[sector] = int.MaxValue;
             }
 
@@ -320,27 +316,13 @@ public sealed class VisionSystem
 
                         int slot = sector * CandidatesPerSector;
 
-                        // Keep two nearest hostile candidates in this sector.
+                        // Keep the nearest target and one rotating target per
+                        // sector. Halving expensive terrain LOS samples keeps a
+                        // large firefight bounded without starving flank searches.
                         if (distanceSquared < candidateDistances[slot])
                         {
-                            candidateTargets[slot + 1] = candidateTargets[slot];
-                            candidateDistances[slot + 1] = candidateDistances[slot];
                             candidateTargets[slot] = target;
                             candidateDistances[slot] = distanceSquared;
-                        }
-                        else if (distanceSquared < candidateDistances[slot + 1])
-                        {
-                            candidateTargets[slot + 1] = target;
-                            candidateDistances[slot + 1] = distanceSquared;
-                        }
-
-                        // Also keep the farthest candidate in the sector so an
-                        // enemy around a flank can still be tested despite nearer
-                        // targets being hidden by the ridge.
-                        if (distanceSquared > candidateDistances[slot + 2])
-                        {
-                            candidateTargets[slot + 2] = target;
-                            candidateDistances[slot + 2] = distanceSquared;
                         }
 
                         int cursor = _sectorTargetCursors[
@@ -352,7 +334,7 @@ public sealed class VisionSystem
                         if (rotationDistance < rotationDistances[sector])
                         {
                             rotationDistances[sector] = rotationDistance;
-                            candidateTargets[slot + 3] = target;
+                            candidateTargets[slot + 1] = target;
                         }
                     }
                 }
@@ -390,12 +372,12 @@ public sealed class VisionSystem
                     : 0;
             }
 
-            // Advance the sector cursors independently from the stable nearest/farthest
-            // candidates, so every hostile in a crowded sector gets LOS-tested over time.
+            // Advance sector cursors independently from nearest candidates so
+            // the rotating slot eventually tests every hostile in a crowded sector.
             for (int sector = 0; sector < SectorCount; sector++)
             {
                 int sampledTarget =
-                    candidateTargets[sector * SlotCount + 3];
+                    candidateTargets[sector * SlotCount + 1];
 
                 if (sampledTarget >= 0)
                 {
