@@ -292,6 +292,11 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index);
 
+                // Hold position while firing/aiming; do not continue walking
+                // toward the previous patrol waypoint through the firing lane.
+                units.Target[unit] = units.Position[unit];
+                units.HasTarget[unit] = false;
+
                 VisionCheck shotCheck = vision.Evaluate(
                     units,
                     worldMap,
