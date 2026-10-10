@@ -20,6 +20,7 @@ public sealed class UnitBodyStore
     private BodyPartMotion[] _motion;
     private BodyPartAnchor[] _anchor;
     private BodyPartRole[] _role;
+    private BodyPartPivot[] _pivot;
 
     private int _count;
 
@@ -63,6 +64,9 @@ public sealed class UnitBodyStore
     public BodyPartRole[] Role =>
         _role;
 
+    public BodyPartPivot[] Pivot =>
+        _pivot;
+
     public UnitBodyStore(
         int initialCapacity = DefaultCapacity)
     {
@@ -85,6 +89,7 @@ public sealed class UnitBodyStore
         _motion = new BodyPartMotion[initialCapacity];
         _anchor = new BodyPartAnchor[initialCapacity];
         _role = new BodyPartRole[initialCapacity];
+        _pivot = new BodyPartPivot[initialCapacity];
     }
 
     public BodyHandle CreateBody(
@@ -131,7 +136,8 @@ public sealed class UnitBodyStore
                 part.Primitive,
                 part.Motion,
                 part.Anchor,
-                part.Role);
+                part.Role,
+                part.Pivot);
         }
 
         return new BodyHandle(start, parts.Length);
@@ -179,22 +185,37 @@ public sealed class UnitBodyStore
         {
             int parent = _parent[i];
             Vector3 origin = unitPosition;
-            float rotation = unitRotation;
+            float positionRotation = unitRotation;
+            float partRotation = unitRotation;
 
             if (_anchor[i] == BodyPartAnchor.UnitHead)
             {
-                rotation = headRotation;
+                // The head may look independently, but its center stays at
+                // the front of the torso instead of orbiting around the unit.
+                partRotation = headRotation;
             }
             else if (_anchor[i] == BodyPartAnchor.Parent &&
                      parent >= handle.Start)
             {
                 origin = _worldPosition[parent];
-                rotation = _worldRotation[parent];
+                positionRotation = _worldRotation[parent];
+                partRotation = _worldRotation[parent];
             }
 
-            _worldPosition[i] =
-                origin + Rotate2D(_localPosition[i], rotation);
-            _worldRotation[i] = rotation + _localRotation[i];
+            Vector3 pivot =
+                origin + Rotate2D(_localPosition[i], positionRotation);
+
+            partRotation += _localRotation[i];
+
+            if (_pivot[i] == BodyPartPivot.Start)
+            {
+                pivot += Rotate2D(
+                    new Vector3(MathF.Abs(_scale[i].X), 0f, 0f),
+                    partRotation);
+            }
+
+            _worldPosition[i] = pivot;
+            _worldRotation[i] = partRotation;
         }
     }
 
@@ -215,7 +236,8 @@ public sealed class UnitBodyStore
         BodyPrimitive primitive,
         BodyPartMotion motion,
         BodyPartAnchor anchor,
-        BodyPartRole role)
+        BodyPartRole role,
+        BodyPartPivot pivot)
     {
         int index = _writeIndex++;
 
@@ -237,6 +259,7 @@ public sealed class UnitBodyStore
         _motion[index] = motion;
         _anchor[index] = anchor;
         _role[index] = role;
+        _pivot[index] = pivot;
     }
 
     private void EnsureCapacityAt(
@@ -300,6 +323,10 @@ public sealed class UnitBodyStore
 
         Array.Resize(
             ref _role,
+            newCapacity);
+
+        Array.Resize(
+            ref _pivot,
             newCapacity);
     }
 
