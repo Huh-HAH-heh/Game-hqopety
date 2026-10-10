@@ -5,7 +5,8 @@ namespace Core.Unit;
 
 /// <summary>
 /// Data-only anatomy profiles. Body local +X is forward; +Y/-Y are
-/// the two sides. Colonists use a compact overhead pose: arms fan sideways,\n/// legs trail behind the torso, and the head stays ahead of the chest.
+/// the two sides. Colonists use a compact overhead pose: arms fan sideways,
+/// legs trail behind the torso, and the head stays ahead of the chest.
 /// </summary>
 internal static class UnitBodyCatalog
 {
