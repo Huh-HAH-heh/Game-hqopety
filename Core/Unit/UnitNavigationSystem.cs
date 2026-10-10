@@ -96,6 +96,7 @@ public sealed class UnitNavigationSystem
     {
         EnsureUnitCapacity(units.Capacity);
         EnsureWorkspace(worldMap);
+        EnsureNavigationGrid(worldMap);
 
         int startX = ClampCell((int)MathF.Floor(position.X), _width);
         int startY = ClampCell((int)MathF.Floor(position.Y), _height);
