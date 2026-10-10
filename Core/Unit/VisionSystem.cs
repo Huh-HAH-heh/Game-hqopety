@@ -1123,6 +1123,172 @@ public sealed class VisionSystem
         return true;
     }
 
+    private void BuildVisibleTargetList(
+        UnitStore units,
+        UnitHealthStore? health,
+        ReadOnlySpan<int> active,
+        int observer,
+        Span<int> selectedTargets,
+        Span<float> selectedDistances,
+        Span<int> selectedRecency)
+    {
+        const int slotsPerSector = CandidatesPerSector;
+        const int selectedSlotCount = VisibilitySectorCount * slotsPerSector;
+
+        for (int sector = 0; sector < VisibilitySectorCount; sector++)
+        {
+            int slot = sector * slotsPerSector;
+            selectedTargets[slot] = -1;
+            selectedTargets[slot + 1] = -1;
+            selectedTargets[slot + 2] = -1;
+            selectedTargets[slot + 3] = -1;
+            selectedDistances[slot] = float.PositiveInfinity;
+            selectedDistances[slot + 1] = float.PositiveInfinity;
+            selectedDistances[slot + 2] = float.NegativeInfinity;
+            selectedDistances[slot + 3] = 0f;
+            selectedRecency[sector] = 0;
+        }
+
+        Vector3 observerPosition = units.Position[observer];
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int target = active[i];
+            if (target == observer)
+                continue;
+
+            if (health != null && health.OverallHitPoints[target] <= 0f)
+                continue;
+
+            if (!FactionRules.ShouldAttack(
+                    units.FactionTag[observer],
+                    units.FactionTag[target]))
+            {
+                continue;
+            }
+
+            int pairIndex = observer * _visibilityCapacity + target;
+            int lastVisible = _lastVisibleUpdate[pairIndex];
+            if (lastVisible == 0)
+                continue;
+
+            if (_visionUpdateSequence - lastVisible > VisibilityMemoryUpdates)
+            {
+                _lastVisibleUpdate[pairIndex] = 0;
+                continue;
+            }
+
+            if (!IsWithinRangeAndFov(
+                    units,
+                    observer,
+                    target,
+                    out float distanceSquared))
+            {
+                _lastVisibleUpdate[pairIndex] = 0;
+                continue;
+            }
+
+            Vector3 targetPosition = units.Position[target];
+            float dx = targetPosition.X - observerPosition.X;
+            float dy = targetPosition.Y - observerPosition.Y;
+            int sector = GetAngularSector(dx, dy);
+            int slot = sector * slotsPerSector;
+
+            if (distanceSquared < selectedDistances[slot])
+            {
+                selectedTargets[slot + 1] = selectedTargets[slot];
+                selectedDistances[slot + 1] = selectedDistances[slot];
+                selectedTargets[slot] = target;
+                selectedDistances[slot] = distanceSquared;
+            }
+            else if (distanceSquared < selectedDistances[slot + 1])
+            {
+                selectedTargets[slot + 1] = target;
+                selectedDistances[slot + 1] = distanceSquared;
+            }
+
+            if (distanceSquared > selectedDistances[slot + 2])
+            {
+                selectedTargets[slot + 2] = target;
+                selectedDistances[slot + 2] = distanceSquared;
+            }
+
+            // The fourth slot preserves the most recently verified target in
+            // each sector, so a sampled target does not disappear next vision tick.
+            if (lastVisible > selectedRecency[sector])
+            {
+                selectedRecency[sector] = lastVisible;
+                selectedTargets[slot + 3] = target;
+            }
+        }
+
+        int visibleStart = _visibleTargetCount;
+        for (int i = 0; i < selectedSlotCount; i++)
+        {
+            int target = selectedTargets[i];
+            if (target < 0)
+                continue;
+
+            bool duplicate = false;
+            for (int previous = visibleStart; previous < _visibleTargetCount; previous++)
+            {
+                if (_visibleTargets[previous] == target)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (!duplicate)
+                AppendVisibleTarget(target);
+        }
+    }
+
+    private static bool IsWithinRangeAndFov(
+        UnitStore units,
+        int observer,
+        int target,
+        out float distanceSquared)
+    {
+        Vector3 observerPosition = units.Position[observer];
+        Vector3 targetPosition = units.Position[target];
+
+        float dx = targetPosition.X - observerPosition.X;
+        float dy = targetPosition.Y - observerPosition.Y;
+        distanceSquared = dx * dx + dy * dy;
+
+        float range = MathF.Max(0f, units.ViewRange[observer]);
+        if (distanceSquared > range * range)
+            return false;
+
+        if (distanceSquared < 0.0001f)
+            return true;
+
+        float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
+        Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
+        float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
+        float minFacingDot = MathF.Cos(
+            units.FieldOfView[observer] * MathF.PI / 360f);
+
+        return facingDot >= minFacingDot;
+    }
+
+    private static int GetAngularSector(float dx, float dy)
+    {
+        if (dx >= 0f)
+        {
+            if (dy >= 0f)
+                return dx >= dy ? 0 : 1;
+
+            return dx >= -dy ? 7 : 6;
+        }
+
+        if (dy >= 0f)
+            return dy >= -dx ? 2 : 3;
+
+        return -dx >= -dy ? 4 : 5;
+    }
+
     private void AppendVisibleTarget(
         int targetIndex)
     {
