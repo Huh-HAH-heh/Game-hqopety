@@ -216,7 +216,7 @@ public sealed class TerrainRegion
 
         ushort[] values = _materialIds!;
 
-        if (previous == 0 && materialId != 0)
+        if (previousDense == 0 && materialId != 0)
         {
             if (_nonZeroCount == 0)
             {
@@ -230,7 +230,7 @@ public sealed class TerrainRegion
 
             _nonZeroCount++;
         }
-        else if (previous != 0 && materialId == 0)
+        else if (previousDense != 0 && materialId == 0)
         {
             _nonZeroCount--;
 
@@ -240,8 +240,8 @@ public sealed class TerrainRegion
                 _allNonZeroSame = true;
             }
         }
-        else if (previous != 0 && materialId != 0 &&
-                 previous != materialId && _allNonZeroSame)
+        else if (previousDense != 0 && materialId != 0 &&
+                 previousDense != materialId && _allNonZeroSame)
         {
             if (_nonZeroCount == 1)
             {
