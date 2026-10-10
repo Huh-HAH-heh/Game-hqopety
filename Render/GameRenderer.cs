@@ -243,7 +243,9 @@ public sealed class GameRenderer
             long shotsDelta = Math.Max(0L, totalShots - _lastShotsSample);
             long roundsDelta = Math.Max(0L, totalRounds - _lastRoundsSample);
             long projectilesDelta = Math.Max(0L, totalProjectilesSpawned - _lastProjectilesSpawnedSample);
-            long hitsDelta = Math.Max(0L, totalHits - _lastHitsSample);
+            long hitsDelta = totalHits >= _lastHitsSample
+                ? totalHits - _lastHitsSample
+                : totalHits;
 
             double shotsPerSecond = shotsDelta / sampleSeconds;
             double roundsPerSecond = roundsDelta / sampleSeconds;
