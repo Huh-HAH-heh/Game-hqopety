@@ -188,6 +188,7 @@ public sealed class UnitSimulation
             type,
             position,
             bodyNormal,
+            headNormal,
             body);
     }
 
@@ -221,6 +222,7 @@ public sealed class UnitSimulation
             type,
             position,
             bodyNormal,
+            bodyNormal,
             body);
     }
 
@@ -229,12 +231,14 @@ public sealed class UnitSimulation
         UnitType type,
         Vector3 position,
         Vector3 bodyNormal,
+        Vector3 headNormal,
         BodyHandle body)
     {
         Bodies.SetInitialWorldPosition(
             body,
             position,
-            MathF.Atan2(bodyNormal.Y, bodyNormal.X));
+            MathF.Atan2(bodyNormal.Y, bodyNormal.X),
+            MathF.Atan2(headNormal.Y, headNormal.X));
 
         EnsureDeathCapacity();
         _deathHandled[id.Index] = false;
