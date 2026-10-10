@@ -1804,8 +1804,8 @@ public static class CombatSelfTest
             BodyPartRole.Head);
 
         Vector3 headPosition = definitions.WorldPosition[definitionHead];
-        if (MathF.Abs(headPosition.X) > 0.001f ||
-            MathF.Abs(headPosition.Y - 0.195f) > 0.001f)
+        if (MathF.Abs(headPosition.X - 0.195f) > 0.001f ||
+            MathF.Abs(headPosition.Y) > 0.001f)
         {
             return false;
         }
@@ -1879,6 +1879,28 @@ public static class CombatSelfTest
         if (!gaitCorrect)
             return false;
 
+        if (!BodyLinksConnected(
+                simulation.Bodies,
+                new BodyHandle(start, count)))
+        {
+            return false;
+        }
+
+        // Independent head aim must rotate the head, not move it around the pawn.
+        simulation.SetHeadNormal(colonist, Vector3.UnitY);
+        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        int head = FindBodyRole(
+            simulation.Bodies,
+            new BodyHandle(start, count),
+            BodyPartRole.Head);
+        Vector3 aimedHeadPosition = simulation.Bodies.WorldPosition[head];
+        if (MathF.Abs(aimedHeadPosition.X - 10.195f) > 0.002f ||
+            MathF.Abs(aimedHeadPosition.Y - 10f) > 0.002f ||
+            MathF.Abs(simulation.Bodies.WorldRotation[head] - MathF.PI * 0.5f) > 0.002f)
+        {
+            return false;
+        }
+
         int walkingArm = FindBodyRole(
             simulation.Bodies,
             new BodyHandle(start, count),
@@ -1896,7 +1918,7 @@ public static class CombatSelfTest
         float crouchingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
-        if (MathF.Abs(crouchingArmRotation) >= MathF.Abs(standingArmRotation) - 0.20f)
+        if (MathF.Abs(crouchingArmRotation) >= MathF.Abs(standingArmRotation) - 0.12f)
             return false;
 
         simulation.SetPosture(colonist, UnitPosture.Lying);
@@ -1907,16 +1929,92 @@ public static class CombatSelfTest
         if (MathF.Abs(lyingArmRotation) <= MathF.Abs(standingArmRotation) + 0.10f)
             return false;
 
-        // A moving body faces its travel vector, while head aim remains independent.
+        // A moving body follows its travel vector while head facing remains independent.
+        simulation.SetHeadNormal(colonist, Vector3.UnitX);
         simulation.Units.Velocity[colonist.Index] =
             new Vector3(0f, 1f, 0f);
         simulation.SetPosture(colonist, UnitPosture.Standing);
         bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
 
         Vector3 bodyNormal = simulation.Units.BodyNormal[colonist.Index];
+        Vector3 movedHead = simulation.Bodies.WorldPosition[head];
         return MathF.Abs(bodyNormal.X) < 0.001f &&
-               MathF.Abs(bodyNormal.Y - 1f) < 0.001f;
+               MathF.Abs(bodyNormal.Y - 1f) < 0.001f &&
+               MathF.Abs(movedHead.X - 10f) < 0.002f &&
+               MathF.Abs(movedHead.Y - 10.195f) < 0.002f &&
+               MathF.Abs(simulation.Bodies.WorldRotation[head]) < 0.002f;
     }
+
+    private static bool BodyLinksConnected(
+        UnitBodyStore bodies,
+        BodyHandle body)
+    {
+        int end = body.Start + body.Count;
+
+        for (int part = body.Start; part < end; part++)
+        {
+            int parent = bodies.Parent[part];
+            if (parent < body.Start)
+                continue;
+
+            BodyPartRole role = bodies.Role[part];
+            BodyPartRole parentRole = bodies.Role[parent];
+            Vector3 position = bodies.WorldPosition[part];
+            Vector3 parentPosition = bodies.WorldPosition[parent];
+            float rotation = bodies.WorldRotation[parent];
+
+            if (role is BodyPartRole.Elbow or BodyPartRole.Knee &&
+                (parentRole is BodyPartRole.UpperArm or BodyPartRole.Thigh))
+            {
+                Vector3 endpoint = parentPosition + Axis(
+                    rotation,
+                    MathF.Abs(bodies.Scale[parent].X));
+
+                if (Vector3.Distance(position, endpoint) > 0.002f)
+                    return false;
+            }
+            else if (role is BodyPartRole.Forearm or BodyPartRole.Shin)
+            {
+                Vector3 proximal = position - Axis(
+                    bodies.WorldRotation[part],
+                    MathF.Abs(bodies.Scale[part].X));
+
+                if (Vector3.Distance(proximal, parentPosition) > 0.002f)
+                    return false;
+            }
+            else if (role == BodyPartRole.Hand &&
+                     parentRole == BodyPartRole.Forearm)
+            {
+                Vector3 endpoint = parentPosition + Axis(
+                    rotation,
+                    MathF.Abs(bodies.Scale[parent].X));
+
+                if (Vector3.Distance(position, endpoint) > 0.002f)
+                    return false;
+            }
+            else if (role == BodyPartRole.Foot &&
+                     parentRole == BodyPartRole.Shin)
+            {
+                Vector3 ankle = parentPosition + Axis(
+                    rotation,
+                    MathF.Abs(bodies.Scale[parent].X));
+                Vector3 footStart = position - Axis(
+                    bodies.WorldRotation[part],
+                    MathF.Abs(bodies.Scale[part].X));
+
+                if (Vector3.Distance(footStart, ankle) > 0.002f)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static Vector3 Axis(float angle, float distance) =>
+        new Vector3(
+            MathF.Cos(angle) * distance,
+            MathF.Sin(angle) * distance,
+            0f);
 
     private static int CountBodyRole(
         UnitBodyStore bodies,
