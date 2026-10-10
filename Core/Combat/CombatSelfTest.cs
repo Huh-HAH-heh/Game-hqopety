@@ -31,6 +31,7 @@ public static class CombatSelfTest
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: candidate sampling bounds pair work", TestVisionBoundedCandidateSampling, ref passed, ref failed);
+        RunTest("Vision: close elevated hostiles are spatially sampled", TestVisionCloseHostilesSpatiallySampled, ref passed, ref failed);
         RunTest("Vision: candidate work scales with living units", TestVisionWorkScalesWithLivingUnits, ref passed, ref failed);
         RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
@@ -739,6 +740,68 @@ public static class CombatSelfTest
                simulation.Vision.LastCandidatePairs < bruteForcePairs / 4 &&
                simulation.Vision.LastVisibleTargetCount == 0 &&
                simulation.Vision.UpdateCount == 1;
+    }
+
+    private static bool TestVisionCloseHostilesSpatiallySampled()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 5,
+            regionsY: 5,
+            layerCount: 64);
+        worldMap.SetSolidHeight(20, 20, 10, 1);
+        worldMap.SetSolidHeight(21, 20, 20, 1);
+        UnitSimulation simulation = new UnitSimulation(256, 512);
+
+        UnitId observer = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(20.5f, 20.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        simulation.Units.ViewRange[observer.Index] = 10f;
+        simulation.Units.FieldOfView[observer.Index] = 360f;
+
+        // The target stands on a 2 m surface next to the observer's 1 m surface.
+        // Keep many distant units between them in active-list order: index-only
+        // rolling samples miss this visible close target.
+        for (int i = 0; i < 198; i++)
+        {
+            UnitId distant = simulation.Spawn(
+                UnitType.Colonist,
+                new Vector3(100f + i * 0.5f, 100.5f, 1f),
+                factionTag: (ushort)(i % 2 + 1));
+
+            simulation.Units.ViewRange[distant.Index] = 5f;
+            simulation.Units.FieldOfView[distant.Index] = 360f;
+        }
+
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(21.5f, 20.5f, 2f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        simulation.Units.ViewRange[target.Index] = 10f;
+        simulation.Units.FieldOfView[target.Index] = 360f;
+
+        simulation.Vision.Update(
+            simulation.Units,
+            worldMap,
+            0.11f,
+            simulation.Health);
+
+        ReadOnlySpan<int> visibleTargets =
+            simulation.Vision.GetVisibleTargets(observer.Index);
+
+        for (int i = 0; i < visibleTargets.Length; i++)
+        {
+            if (visibleTargets[i] == target.Index)
+                return true;
+        }
+
+        return false;
     }
 
     private static bool TestVisionWorkScalesWithLivingUnits()
