@@ -75,6 +75,7 @@ public sealed class VisionSystem
     public int LastTargetEvaluations { get; private set; }
     public int LastLineOfSightChecks { get; private set; }
     public int LastVisibleTargetCount { get; private set; }
+    public int LastVisibilityMemoryEntriesScanned { get; private set; }
     public long UpdateCount { get; private set; }
     private int[] _visibleStarts;
     private int[] _visibleCounts;
@@ -169,6 +170,7 @@ public sealed class VisionSystem
         _candidatePairCount = 0;
         _lineOfSightChecks = 0;
         _targetEvaluationCount = 0;
+        LastVisibilityMemoryEntriesScanned = 0;
 
         ReadOnlySpan<int> active = units.ActiveIndices;
         Vector3[] positions = units.Position;
@@ -402,13 +404,8 @@ public sealed class VisionSystem
             }
 
             BuildVisibleTargetList(
-                units,
-                health,
-                active,
                 observer,
-                candidateTargets,
-                candidateDistances,
-                rotationDistances);
+                candidateTargets);
 
             _visibleCounts[observer] = _visibleTargetCount - start;
         }
@@ -1138,109 +1135,25 @@ public sealed class VisionSystem
     }
 
     private void BuildVisibleTargetList(
-        UnitStore units,
-        UnitHealthStore? health,
-        ReadOnlySpan<int> active,
         int observer,
-        Span<int> selectedTargets,
-        Span<float> selectedDistances,
-        Span<int> selectedRecency)
+        ReadOnlySpan<int> candidates)
     {
-        const int slotsPerSector = CandidatesPerSector;
-        const int selectedSlotCount = VisibilitySectorCount * slotsPerSector;
+        int visibleStart = _visibleTargetCount;
 
-        for (int sector = 0; sector < VisibilitySectorCount; sector++)
+        // Every candidate in this span was selected by the spatial index for
+        // this observer. Only publish targets whose LOS was verified this tick.
+        // Do not scan every active unit here: doing that for each observer made
+        // target-list rebuilding O(units^2) every 100 ms.
+        for (int i = 0; i < candidates.Length; i++)
         {
-            int slot = sector * slotsPerSector;
-            selectedTargets[slot] = -1;
-            selectedTargets[slot + 1] = -1;
-            selectedTargets[slot + 2] = -1;
-            selectedTargets[slot + 3] = -1;
-            selectedDistances[slot] = float.PositiveInfinity;
-            selectedDistances[slot + 1] = float.PositiveInfinity;
-            selectedDistances[slot + 2] = float.NegativeInfinity;
-            selectedDistances[slot + 3] = 0f;
-            selectedRecency[sector] = 0;
-        }
-
-        Vector3 observerPosition = units.Position[observer];
-
-        for (int i = 0; i < active.Length; i++)
-        {
-            int target = active[i];
-            if (target == observer)
+            int target = candidates[i];
+            if (target < 0)
                 continue;
 
-            if (health != null && health.OverallHitPoints[target] <= 0f)
-                continue;
-
-            if (!FactionRules.ShouldAttack(
-                    units.FactionTag[observer],
-                    units.FactionTag[target]))
-            {
-                continue;
-            }
+            LastVisibilityMemoryEntriesScanned++;
 
             int pairIndex = observer * _visibilityCapacity + target;
-            int lastVisible = _lastVisibleUpdate[pairIndex];
-            if (lastVisible == 0)
-                continue;
-
-            if (_visionUpdateSequence - lastVisible > VisibilityMemoryUpdates)
-            {
-                _lastVisibleUpdate[pairIndex] = 0;
-                continue;
-            }
-
-            if (!IsWithinRangeAndFov(
-                    units,
-                    observer,
-                    target,
-                    out float distanceSquared))
-            {
-                _lastVisibleUpdate[pairIndex] = 0;
-                continue;
-            }
-
-            Vector3 targetPosition = units.Position[target];
-            float dx = targetPosition.X - observerPosition.X;
-            float dy = targetPosition.Y - observerPosition.Y;
-            int sector = GetAngularSector(dx, dy);
-            int slot = sector * slotsPerSector;
-
-            if (distanceSquared < selectedDistances[slot])
-            {
-                selectedTargets[slot + 1] = selectedTargets[slot];
-                selectedDistances[slot + 1] = selectedDistances[slot];
-                selectedTargets[slot] = target;
-                selectedDistances[slot] = distanceSquared;
-            }
-            else if (distanceSquared < selectedDistances[slot + 1])
-            {
-                selectedTargets[slot + 1] = target;
-                selectedDistances[slot + 1] = distanceSquared;
-            }
-
-            if (distanceSquared > selectedDistances[slot + 2])
-            {
-                selectedTargets[slot + 2] = target;
-                selectedDistances[slot + 2] = distanceSquared;
-            }
-
-            // The fourth slot preserves the most recently verified target in
-            // each sector, so a sampled target does not disappear next vision tick.
-            if (lastVisible > selectedRecency[sector])
-            {
-                selectedRecency[sector] = lastVisible;
-                selectedTargets[slot + 3] = target;
-            }
-        }
-
-        int visibleStart = _visibleTargetCount;
-        for (int i = 0; i < selectedSlotCount; i++)
-        {
-            int target = selectedTargets[i];
-            if (target < 0)
+            if (_lastVisibleUpdate[pairIndex] != _visionUpdateSequence)
                 continue;
 
             bool duplicate = false;
@@ -1285,22 +1198,6 @@ public sealed class VisionSystem
             units.FieldOfView[observer] * MathF.PI / 360f);
 
         return facingDot >= minFacingDot;
-    }
-
-    private static int GetAngularSector(float dx, float dy)
-    {
-        if (dx >= 0f)
-        {
-            if (dy >= 0f)
-                return dx >= dy ? 0 : 1;
-
-            return dx >= -dy ? 7 : 6;
-        }
-
-        if (dy >= 0f)
-            return dy >= -dx ? 2 : 3;
-
-        return -dx >= -dy ? 4 : 5;
     }
 
     private void AppendVisibleTarget(
