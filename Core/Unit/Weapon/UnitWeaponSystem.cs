@@ -666,9 +666,13 @@ public sealed class UnitWeaponSystem
             default;
 
         bool solved = false;
+        bool suppressing =
+            weapons.CurrentAimMode[stateIndex] == AimMode.SuppressFire;
 
+        // Suppressive fire targets the last known point, not the target's
+        // current movement vector. Aimed shots and snapshots still lead targets.
         for (int iteration = 0;
-             iteration < 3;
+             !suppressing && iteration < 3;
              iteration++)
         {
             solved =
