@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Numerics;
 using Core.Combat;
 using Core.Items;
@@ -31,6 +32,7 @@ public static class CombatSelfTest
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
         RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
+        RunTest("Combat log: hit and blocked events survive shot spam", TestCombatLogPriorities, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
 
         Console.WriteLine("---------------------------------------");
@@ -694,6 +696,44 @@ public static class CombatSelfTest
 
         simulation.Update(worldMap, 0.05f);
         return simulation.Projectiles.TotalHits > 0;
+    }
+
+    private static bool TestCombatLogPriorities()
+    {
+        bool wasEnabled = CombatDiagnostics.Enabled;
+        TextWriter originalOut = Console.Out;
+        using StringWriter output = new StringWriter();
+
+        try
+        {
+            Console.SetOut(output);
+            CombatDiagnostics.Enabled = true;
+
+            for (int i = 0; i < 12; i++)
+                CombatDiagnostics.WriteLine($"[SHOT] test={i}");
+
+            CombatDiagnostics.WriteLine("[HIT] target=Unit[2:1]");
+            CombatDiagnostics.WriteLine("[BLOCKED] material=1");
+
+            string log = output.ToString();
+            int shotLines = 0;
+            int offset = 0;
+
+            while ((offset = log.IndexOf("[SHOT]", offset, StringComparison.Ordinal)) >= 0)
+            {
+                shotLines++;
+                offset += 6;
+            }
+
+            return shotLines == 5 &&
+                   log.Contains("[HIT]", StringComparison.Ordinal) &&
+                   log.Contains("[BLOCKED]", StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            CombatDiagnostics.Enabled = wasEnabled;
+        }
     }
 
     private static bool TestDeadUnitCleanup()
