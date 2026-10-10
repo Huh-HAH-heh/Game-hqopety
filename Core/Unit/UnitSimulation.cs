@@ -16,6 +16,7 @@ public sealed class UnitSimulation
     private readonly UnitAiSystem _aiSystem;
 
     public UnitStore Units { get; }
+    public UnitNavigationSystem Navigation => _movementSystem.Navigation;
     public UnitBodyStore Bodies { get; }
     public UnitHealthStore Health { get; }
     public UnitInventoryStore Inventory { get; }
