@@ -303,6 +303,15 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index);
 
+                // Visibility lists are refreshed less often than movement. Recheck
+                // before pulling the trigger so a stale target cannot cause wall fire.
+                if (!shotCheck.IsVisible)
+                {
+                    units.HasTarget[unit] = false;
+                    Store.State[unit] = UnitAiState.Search;
+                    continue;
+                }
+
                 Vector3 aimPoint = ChooseVisibleAimPoint(
                     units,
                     worldMap,
