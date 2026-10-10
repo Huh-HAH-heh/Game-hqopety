@@ -17,15 +17,18 @@ public sealed class ProjectileRenderSystem : IDisposable
     public void Draw(
         RenderWindow window,
         ProjectileStore projectiles,
-        float tilePixelSize)
+        float tilePixelSize,
+        bool showTracers = true)
     {
         _tracers.Clear();
         _impacts.Clear();
 
-        Vector3[] starts = projectiles.TraceStarts;
-        Vector3[] ends = projectiles.TraceEnds;
-        ushort[] factions = projectiles.TraceFactions;
-        float[] traceLifetimes = projectiles.TraceLifetimes;
+        if (showTracers)
+        {
+            Vector3[] starts = projectiles.TraceStarts;
+            Vector3[] ends = projectiles.TraceEnds;
+            ushort[] factions = projectiles.TraceFactions;
+            float[] traceLifetimes = projectiles.TraceLifetimes;
 
         for (int i = 0; i < projectiles.TraceCapacityCount; i++)
         {
@@ -42,7 +45,7 @@ public sealed class ProjectileRenderSystem : IDisposable
 
             // Fade old segments instead of losing a fast bullet the same frame it hits.
             byte fade = (byte)(255f * Math.Clamp(
-                traceLifetimes[i] / 0.14f, 0f, 1f));
+                traceLifetimes[i] / ProjectileStore.TraceLifetimeSeconds, 0f, 1f));
             trail = new Color(trail.R, trail.G, trail.B,
                 (byte)(trail.A * fade / 255));
             head = new Color(head.R, head.G, head.B,
@@ -69,6 +72,7 @@ public sealed class ProjectileRenderSystem : IDisposable
             _tracers.Append(new Vertex(
                 new Vector2f(screenEnd.X, screenEnd.Y),
                 new Color(255, 255, 245, fade)));
+            }
         }
 
         if (_tracers.VertexCount > 0)
@@ -154,9 +158,9 @@ public sealed class ProjectileRenderSystem : IDisposable
         float age,
         Color color)
     {
-        const int segments = 10;
-        float radius = tilePixelSize * (0.22f + age * 0.72f);
-        float innerRadius = radius * 0.45f;
+        const int segments = 8;
+        float radius = tilePixelSize * (0.13f + age * 0.31f);
+        float innerRadius = radius * 0.55f;
 
         for (int segment = 0; segment < segments; segment++)
         {
