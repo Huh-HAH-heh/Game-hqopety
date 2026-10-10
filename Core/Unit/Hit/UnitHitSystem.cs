@@ -45,6 +45,101 @@ public readonly struct UnitHitResult
 
 public sealed class UnitHitSystem
 {
+    public const int AimPointsPerVolume = 4;
+    public const int MaxAimPointCount = 40;
+
+    public static int GetAimPoints(
+        UnitStore units,
+        int unitIndex,
+        Vector3 source,
+        Span<Vector3> points)
+    {
+        Span<HitVolume> volumes = stackalloc HitVolume[10];
+        int volumeCount = BuildVolumes(units, unitIndex, volumes);
+        int required = volumeCount * AimPointsPerVolume;
+
+        if (points.Length < required)
+            throw new ArgumentException("Insufficient aim point buffer.", nameof(points));
+
+        int count = 0;
+
+        for (int i = 0; i < volumeCount; i++)
+        {
+            ref readonly HitVolume volume = ref volumes[i];
+
+            float rx = MathF.Max(0.001f, volume.Radii.X);
+            float ry = MathF.Max(0.001f, volume.Radii.Y);
+            float rz = MathF.Max(0.001f, volume.Radii.Z);
+            Vector3 toSource = source - volume.Center;
+
+            // Center first, then points on the source-facing side of the same
+            // collision volume and an upper-biased point for ridge exposure.
+            points[count++] = volume.Center;
+
+            float sx = Vector3.Dot(toSource, volume.Right) / rx;
+            float sy = Vector3.Dot(toSource, volume.Forward) / ry;
+            float sz = toSource.Z / rz;
+            float length = MathF.Sqrt(sx * sx + sy * sy + sz * sz);
+
+            if (length < 0.000001f)
+            {
+                sx = 0f;
+                sy = 1f;
+                sz = 0f;
+            }
+            else
+            {
+                sx /= length;
+                sy /= length;
+                sz /= length;
+            }
+
+            points[count++] = GetAimPointInsideVolume(
+                volume, rx, ry, rz, sx, sy, sz, 0.88f);
+
+            points[count++] = GetAimPointInsideVolume(
+                volume, rx, ry, rz, sx, sy, sz, 0.62f);
+
+            float upperZ = sz + 0.65f;
+            float upperLength = MathF.Sqrt(sx * sx + sy * sy + upperZ * upperZ);
+
+            if (upperLength > 0.000001f)
+            {
+                points[count++] = GetAimPointInsideVolume(
+                    volume,
+                    rx,
+                    ry,
+                    rz,
+                    sx / upperLength,
+                    sy / upperLength,
+                    upperZ / upperLength,
+                    0.82f);
+            }
+            else
+            {
+                points[count++] = volume.Center;
+            }
+        }
+
+        return count;
+    }
+
+    private static Vector3 GetAimPointInsideVolume(
+        in HitVolume volume,
+        float rx,
+        float ry,
+        float rz,
+        float x,
+        float y,
+        float z,
+        float scale)
+    {
+        return volume.Center +
+            volume.Right * (rx * x * scale) +
+            volume.Forward * (ry * y * scale) +
+            new Vector3(0f, 0f, rz * z * scale);
+    }
+
     public bool TryHitUnit(
         UnitStore units,
         int unitIndex,
