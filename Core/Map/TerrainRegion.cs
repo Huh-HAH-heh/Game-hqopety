@@ -35,6 +35,9 @@ public sealed class TerrainRegion
     internal bool HasDenseMaterialBuffer =>
         _materialIds != null;
 
+    internal bool HasSparseMaterialBuffer =>
+        _overrideBits != null;
+
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly int _regionIndex;
 
@@ -211,7 +214,7 @@ public sealed class TerrainRegion
         if (previousDense == materialId)
             return;
 
-        ushort[] values = _materialIds;
+        ushort[] values = _materialIds!;
 
         if (previous == 0 && materialId != 0)
         {
