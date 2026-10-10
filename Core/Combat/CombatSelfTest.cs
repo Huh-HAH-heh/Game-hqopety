@@ -870,11 +870,15 @@ public static class CombatSelfTest
 
         // Only the 80x4 hostile pairs in both directions need terrain LOS.
         // 84 units produce 6,972 possible directed non-self pairs without filtering.
+        int activeCount = simulation.Units.ActiveCount;
+        int bruteForcePairs = activeCount * (activeCount - 1);
+
         return simulation.Vision.LastCandidatePairs <= 80 * 4 * 2 &&
                simulation.Vision.LastCandidatePairs > 0 &&
                simulation.Vision.LastTargetEvaluations > 0 &&
-               simulation.Vision.LastTargetEvaluations <=
-                   simulation.Units.ActiveCount * 32 &&
+               simulation.Vision.LastTargetEvaluations <= activeCount * 32 &&
+               simulation.Vision.LastVisibilityMemoryEntriesScanned <= activeCount * 32 &&
+               simulation.Vision.LastVisibilityMemoryEntriesScanned < bruteForcePairs &&
                simulation.Vision.LastLineOfSightChecks > 0 &&
                simulation.Vision.LastVisibleTargetCount > 0;
     }
