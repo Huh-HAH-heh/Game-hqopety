@@ -1417,15 +1417,18 @@ public sealed class UnitRenderSystem
         role switch
         {
             BodyPartRole.Thigh or
+            BodyPartRole.Knee or
             BodyPartRole.Shin or
             BodyPartRole.Foot => 0,
 
             BodyPartRole.Torso or
+            BodyPartRole.Neck or
             BodyPartRole.Segment or
             BodyPartRole.Generic => 1,
 
             BodyPartRole.UpperArm or
             BodyPartRole.Forearm or
+            BodyPartRole.Elbow or
             BodyPartRole.Hand => 2,
 
             BodyPartRole.Head => 3,
@@ -1439,11 +1442,14 @@ public sealed class UnitRenderSystem
         return role switch
         {
             BodyPartRole.Torso => Shade(baseColor, 0.83f),
+            BodyPartRole.Neck => Shade(baseColor, 0.90f),
             BodyPartRole.Head => Blend(baseColor, new Color(220, 205, 185), 0.48f),
             BodyPartRole.UpperArm => Shade(baseColor, 0.74f),
             BodyPartRole.Forearm => Shade(baseColor, 0.80f),
+            BodyPartRole.Elbow => Shade(baseColor, 0.76f),
             BodyPartRole.Hand => Blend(baseColor, new Color(207, 179, 151), 0.42f),
             BodyPartRole.Thigh => Shade(baseColor, 0.65f),
+            BodyPartRole.Knee => Shade(baseColor, 0.60f),
             BodyPartRole.Shin => Shade(baseColor, 0.58f),
             BodyPartRole.Foot => Shade(baseColor, 0.48f),
             BodyPartRole.Segment => Shade(baseColor, 0.88f),
@@ -1482,6 +1488,7 @@ public sealed class UnitRenderSystem
 
         bool capsule =
             role == BodyPartRole.Torso ||
+            role == BodyPartRole.Neck ||
             role == BodyPartRole.UpperArm ||
             role == BodyPartRole.Forearm ||
             role == BodyPartRole.Thigh ||
