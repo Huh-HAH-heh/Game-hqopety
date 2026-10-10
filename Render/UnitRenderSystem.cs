@@ -493,19 +493,21 @@ public sealed class UnitRenderSystem
 
             // One muted ring per target. It shrinks as the active weapon warms
             // up, then fades almost to nothing until the shot clears the state.
-            float radius = tilePixelSize * (0.82f - 0.66f * progress);
+            // A restrained RimWorld/CE-style aim bubble: it contracts around
+            // the target while the weapon warms up, then disappears on firing.
+            float radius = tilePixelSize * (0.72f - 0.60f * progress);
             byte alpha = (byte)Math.Clamp(
-                (int)(62f * (1f - progress) + 4f),
+                (int)(78f * (1f - progress) + 12f),
                 0,
-                66);
+                90);
 
             AppendCircleOutline(
                 aiming,
                 aimPoint.X * tilePixelSize,
                 aimPoint.Y * tilePixelSize,
-                MathF.Max(0.08f * tilePixelSize, radius),
+                MathF.Max(0.10f * tilePixelSize, radius),
                 new Color(205, 218, 232, alpha),
-                20);
+                24);
 
             // Several shooters aiming at the same pawn should not stack opacity.
             targetDrawn[targetIndex] = true;
