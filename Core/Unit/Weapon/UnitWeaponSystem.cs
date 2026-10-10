@@ -91,7 +91,9 @@ public sealed class UnitWeaponSystem
                 UnitId target =
                     weapons.BurstTarget[stateIndex];
 
-                if (!units.IsAlive(target))
+                if (!units.IsAlive(target) ||
+                    (health != null &&
+                     health.OverallHitPoints[target.Index] <= 0f))
                 {
                     weapons.StartBurst(
                         unit,
@@ -99,6 +101,7 @@ public sealed class UnitWeaponSystem
                         default,
                         0,
                         0f);
+                    weapons.ClearAim(unit, weaponSlot);
                     continue;
                 }
 
