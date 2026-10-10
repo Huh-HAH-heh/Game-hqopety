@@ -192,11 +192,30 @@ public sealed class GameRenderer
             _lastAllocatedBytesSample =
                 _allocatedBytes;
 
+            string visionMetrics = _unitSimulation.VisionEnabled
+                ? $"{_unitSimulation.Vision.LastUpdateMilliseconds:0.0}ms " +
+                  $"{_unitSimulation.Vision.LastCandidatePairs:N0} pairs " +
+                  $"{_unitSimulation.Vision.LastLineOfSightChecks:N0} LOS"
+                : "OFF";
+
             Console.WriteLine(
                 $"[PERF] FPS={_fps:0.0} " +
                 $"RAM={_workingSetBytes / 1024d / 1024d:0.0}MB " +
                 $"Heap={_managedHeapBytes / 1024d / 1024d:0.0}MB " +
                 $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.00}MB/s " +
+                $"Units={_unitSimulation.Units.ActiveCount} " +
+                $"Sim={_unitSimulation.LastSimulationUpdateMilliseconds:0.0}ms " +
+                $"Vision={visionMetrics} " +
+                $"AI={_unitSimulation.LastAIUpdateMilliseconds:0.0}ms " +
+                $"Move={_unitSimulation.LastMovementUpdateMilliseconds:0.0}ms " +
+                $"Weapons={_unitSimulation.LastWeaponUpdateMilliseconds:0.0}ms " +
+                $"Ballistics={_unitSimulation.LastProjectileUpdateMilliseconds:0.0}ms " +
+                $"Health={_unitSimulation.LastHealthUpdateMilliseconds:0.0}ms " +
+                $"Nav={_unitSimulation.Navigation.RoutesBuiltThisUpdate} built/" +
+                    $"{_unitSimulation.Navigation.RoutesFailedThisUpdate} failed/" +
+                    $"{_unitSimulation.Navigation.SearchesThisUpdate} A*/" +
+                    $"{_unitSimulation.Navigation.CellsExpandedThisUpdate:N0} nodes/" +
+                    $"{_unitSimulation.Navigation.SearchMillisecondsThisUpdate:0.0}ms " +
                 $"TerrainQ={_mapRenderer.TerrainQuadCount:N0} " +
                 $"Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"LayerShader={_mapRenderer.UsesTerrainLayerShader} " +
@@ -487,7 +506,7 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
-            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision";
+            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision";
     }
 
     private void InitializeWindow()
@@ -671,6 +690,23 @@ public sealed class GameRenderer
         {
             _unitSimulation.AI.Enabled =
                 !_unitSimulation.AI.Enabled;
+
+            if (_unitSimulation.AI.Enabled)
+                _unitSimulation.VisionEnabled = true;
+
+            Console.WriteLine(
+                $"[TEST] AI={_unitSimulation.AI.Enabled}; scripted volleys are " +
+                (_unitSimulation.AI.Enabled ? "disabled" : "enabled"));
+            return;
+        }
+
+        if (key == Keyboard.Key.F6)
+        {
+            _unitSimulation.VisionEnabled =
+                !_unitSimulation.VisionEnabled;
+
+            Console.WriteLine(
+                $"[TEST] Vision simulation={_unitSimulation.VisionEnabled}");
             return;
         }
 
