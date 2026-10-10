@@ -105,6 +105,13 @@ public sealed class ProjectileSystem
                     projectileIndex] *
                 deltaTime;
 
+            // Preserve the whole segment before collision destroys a projectile.
+            // Otherwise a fast round can cross a target between rendered frames.
+            projectiles.RegisterTrace(
+                start,
+                end,
+                projectiles.FactionTag[projectileIndex]);
+
             bool alive =
                 Trace(
                     units,
