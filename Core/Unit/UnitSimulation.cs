@@ -37,6 +37,14 @@ public sealed class UnitSimulation
     public double LastBodyUpdateMilliseconds { get; private set; }
     public double LastProjectileUpdateMilliseconds { get; private set; }
     public double LastHealthUpdateMilliseconds { get; private set; }
+    public double LastProjectileGridBuildMilliseconds =>
+        _projectileSystem.LastGridBuildMilliseconds;
+    public int LastProjectilesVisited =>
+        _projectileSystem.LastProjectilesVisited;
+    public int LastProjectileTerrainCellsTraced =>
+        _projectileSystem.LastTerrainCellsTraced;
+    public int LastProjectileUnitCandidates =>
+        _projectileSystem.LastUnitCandidates;
 
     public UnitAiSystem AI =>
         _aiSystem;
@@ -517,7 +525,7 @@ public sealed class UnitSimulation
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();
-        _weaponSystem.Update(Units, Inventory, Weapons, Projectiles, deltaTime);
+        _weaponSystem.Update(Units, Inventory, Weapons, Projectiles, deltaTime, Health);
         LastWeaponUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
