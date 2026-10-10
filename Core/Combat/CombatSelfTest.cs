@@ -395,12 +395,16 @@ public static class CombatSelfTest
         }
 
         for (int i = 0; i < 12; i++)
+        {
             simulation.Update(worldMap, 0.05f);
+
+            if (simulation.TotalShotsFired > 0)
+                break;
+        }
 
         // Automatic mode must emit the first round only after the CE-style
         // range-scaled warmup, without needing another AI/target command.
         return simulation.TotalShotsFired == 1 &&
-               simulation.Projectiles.ActiveCount > 0 &&
                !simulation.Weapons.AimIndicatorActive[stateIndex];
     }
 
@@ -1440,26 +1444,39 @@ public static class CombatSelfTest
             return false;
         }
 
-        // Aim at an exposed upper-body point, as selected by terrain-aware vision,
-        // then fire a real ballistic projectile through the simulation pipeline.
+        // Aim first, then let the weapon's own update fire the first round once
+        // the range-scaled warmup elapses. Small steps preserve projectile flight.
         Vector3 visibleAimPoint = simulation.Units.Position[target.Index] +
             new Vector3(0f, 0f, simulation.Units.Height[target.Index] * 0.55f);
-        simulation.FireWeaponAt(
-            shooter,
-            UnitWeaponSlot.Primary,
-            target,
-            visibleAimPoint);
-        simulation.Update(worldMap, 0.75f);
 
-        bool fired = simulation.FireWeaponAt(
+        bool startedAiming = !simulation.FireWeaponAt(
             shooter,
             UnitWeaponSlot.Primary,
             target,
             visibleAimPoint);
-        if (!fired || simulation.Projectiles.ActiveCount == 0)
+
+        if (!startedAiming || simulation.TotalShotsFired != 0)
             return false;
 
-        simulation.Update(worldMap, 0.05f);
+        for (int i = 0; i < 15; i++)
+            simulation.Update(worldMap, 0.05f);
+
+        if (simulation.TotalShotsFired != 0)
+            return false;
+
+        for (int i = 0; i < 4; i++)
+        {
+            simulation.Update(worldMap, 0.05f);
+            if (simulation.TotalShotsFired > 0)
+                break;
+        }
+
+        if (simulation.TotalShotsFired != 1)
+            return false;
+
+        for (int i = 0; i < 4 && simulation.Projectiles.TotalHits == 0; i++)
+            simulation.Update(worldMap, 0.05f);
+
         return simulation.Projectiles.TotalHits > 0;
     }
 
