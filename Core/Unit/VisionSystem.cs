@@ -75,6 +75,7 @@ public sealed class VisionSystem
     public int LastVisibleTargetCount { get; private set; }
     public int LastVisibilityMemoryEntriesScanned { get; private set; }
     public long UpdateCount { get; private set; }
+    private int[] _aliveUnits;
     private int[] _visibleStarts;
     private int[] _visibleCounts;
     private int[] _visibleTargets;
@@ -86,6 +87,9 @@ public sealed class VisionSystem
         if (initialUnitCapacity <= 0)
             throw new ArgumentOutOfRangeException(
                 nameof(initialUnitCapacity));
+
+        _aliveUnits =
+            new int[initialUnitCapacity];
 
         _visibleStarts =
             new int[initialUnitCapacity];
@@ -168,7 +172,20 @@ public sealed class VisionSystem
         LastActiveCandidatesScanned = 0;
         LastVisibilityMemoryEntriesScanned = 0;
 
-        ReadOnlySpan<int> active = units.ActiveIndices;
+        ReadOnlySpan<int> allActive = units.ActiveIndices;
+        int aliveCount = 0;
+
+        for (int i = 0; i < allActive.Length; i++)
+        {
+            int unit = allActive[i];
+
+            if (health != null && health.OverallHitPoints[unit] <= 0f)
+                continue;
+
+            _aliveUnits[aliveCount++] = unit;
+        }
+
+        ReadOnlySpan<int> active = _aliveUnits.AsSpan(0, aliveCount);
         Vector3[] positions = units.Position;
         float[] ranges = units.ViewRange;
 
@@ -1136,6 +1153,7 @@ public sealed class VisionSystem
     {
         if (_visibleStarts.Length < capacity)
         {
+            Array.Resize(ref _aliveUnits, capacity);
             Array.Resize(ref _visibleStarts, capacity);
             Array.Resize(ref _visibleCounts, capacity);
         }
