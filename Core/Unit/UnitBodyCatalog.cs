@@ -23,7 +23,7 @@ internal static class UnitBodyCatalog
             new Vector3(0.22f, 0f, 0f),
             new Vector3(0.085f, 0.085f, 0.085f),
             BodyPrimitive.Circle,
-            parentIndex: 0),
+            anchor: BodyPartAnchor.UnitHead),
 
         // 2-4: left upper arm, forearm, hand.
         new BodyPartDefinition(
