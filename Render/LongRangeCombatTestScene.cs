@@ -234,8 +234,10 @@ public sealed class LongRangeCombatTestScene
                         (int)MathF.Floor(
                             (dy + 45f * TerrainScale) / (9f * TerrainScale));
 
+                    // Keep most cross-map sight lines open. Cover is arranged
+                    // in staggered pockets instead of a continuous firing wall.
                     bool ridgeSegment =
-                        lane % 3 != 1;
+                        lane % 4 == 0;
 
                     if (ridgeSegment)
                     {
@@ -350,11 +352,9 @@ public sealed class LongRangeCombatTestScene
             return true;
         }
 
-        return
-            Math.Abs(dx) <= 2 * scale &&
-            Math.Abs(dy) <= 42 * scale &&
-            ((int)MathF.Floor(
-                (dy + 42f * scale) / (8f * scale)) % 3 == 0);
+        // Do not place repeated hard-cover blocks across the central firing lanes.
+        // The two offset lines above remain flank cover; the center stays traversable.
+        return false;
     }
 
     private static void ClearWater(
