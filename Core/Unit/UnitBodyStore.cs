@@ -19,7 +19,6 @@ public sealed class UnitBodyStore
     private BodyPrimitive[] _primitive;
     private BodyPartMotion[] _motion;
     private BodyPartAnchor[] _anchor;
-    private bool[] _definitionBodyRoots;
 
     private int _count;
 
@@ -60,10 +59,6 @@ public sealed class UnitBodyStore
     public BodyPartAnchor[] Anchor =>
         _anchor;
 
-    public bool UsesBodyDefinition(int start) =>
-        (uint)start < (uint)_definitionBodyRoots.Length &&
-        _definitionBodyRoots[start];
-
     public UnitBodyStore(
         int initialCapacity = DefaultCapacity)
     {
@@ -85,7 +80,6 @@ public sealed class UnitBodyStore
         _primitive = new BodyPrimitive[initialCapacity];
         _motion = new BodyPartMotion[initialCapacity];
         _anchor = new BodyPartAnchor[initialCapacity];
-        _definitionBodyRoots = new bool[initialCapacity];
     }
 
     public BodyHandle CreateBody(
@@ -134,7 +128,6 @@ public sealed class UnitBodyStore
                 part.Anchor);
         }
 
-        _definitionBodyRoots[start] = true;
         return new BodyHandle(start, parts.Length);
     }
 
@@ -285,10 +278,6 @@ public sealed class UnitBodyStore
 
         Array.Resize(
             ref _anchor,
-            newCapacity);
-
-        Array.Resize(
-            ref _definitionBodyRoots,
             newCapacity);
     }
 
