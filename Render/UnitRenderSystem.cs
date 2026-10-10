@@ -1,3 +1,5 @@
+using Core.Combat;
+using Core.Items;
 using Core.Map;
 using Core.Unit;
 using SFML.Graphics;
@@ -25,6 +27,12 @@ public sealed class UnitRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _aiming =
+        new VertexArray(
+            PrimitiveType.Lines);
+
+    private bool[] _aimTargetDrawn = Array.Empty<bool>();
+
     private readonly VertexArray _visionDebug =
         new VertexArray(
             PrimitiveType.Lines);
@@ -50,6 +58,7 @@ public sealed class UnitRenderSystem
         _vertices.Clear();
         _visionArea.Clear();
         _selection.Clear();
+        _aiming.Clear();
         _visionDebug.Clear();
         _aiDebug.Clear();
 
@@ -85,6 +94,11 @@ public sealed class UnitRenderSystem
 
         UnitStore units =
             simulation.Units;
+
+        if (_aimTargetDrawn.Length < units.Capacity)
+            Array.Resize(ref _aimTargetDrawn, units.Capacity);
+
+        Array.Clear(_aimTargetDrawn);
 
         UnitBodyStore bodies =
             simulation.Bodies;
@@ -201,6 +215,13 @@ public sealed class UnitRenderSystem
 
             UnitAiState aiState =
                 simulation.AI.Store.State[unitIndex];
+
+            AppendAimProgress(
+                _aiming,
+                simulation,
+                unitIndex,
+                tilePixelSize,
+                _aimTargetDrawn);
 
             if (showAiDebug &&
                 simulation.AI.Enabled)
@@ -360,6 +381,12 @@ public sealed class UnitRenderSystem
                 _selection);
         }
 
+        if (_aiming.VertexCount > 0)
+        {
+            window.Draw(
+                _aiming);
+        }
+
         if (_visionDebug.VertexCount > 0)
         {
             window.Draw(
@@ -392,6 +419,101 @@ public sealed class UnitRenderSystem
             x + radius * 0.58f, y + radius * 0.58f, cross);
         AppendDebugLine(vertices, x - radius * 0.58f, y + radius * 0.58f,
             x + radius * 0.58f, y - radius * 0.58f, cross);
+    }
+
+    private static void AppendAimProgress(
+        VertexArray aiming,
+        UnitSimulation simulation,
+        int shooterIndex,
+        float tilePixelSize,
+        bool[] targetDrawn)
+    {
+        if (!simulation.AI.Enabled)
+            return;
+
+        UnitAiStore ai = simulation.AI.Store;
+        if (ai.State[shooterIndex] != UnitAiState.Attack ||
+            !ai.HasTarget[shooterIndex])
+        {
+            return;
+        }
+
+        UnitId combatTarget = ai.Target[shooterIndex];
+
+        if (!simulation.Units.TryGetIndex(
+                combatTarget,
+                out int targetIndex) ||
+            targetDrawn[targetIndex] ||
+            simulation.Health.OverallHitPoints[targetIndex] <= 0f ||
+            !simulation.Vision.IsRecentlyVisible(
+                shooterIndex,
+                targetIndex,
+                simulation.Units))
+        {
+            return;
+        }
+
+        UnitWeaponStore weapons = simulation.Weapons;
+
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            int stateIndex = UnitWeaponStore.GetIndex(shooterIndex, weaponSlot);
+
+            if (weapons.CurrentAimMode[stateIndex] != AimMode.AimedShot ||
+                weapons.AimTarget[stateIndex] != combatTarget)
+            {
+                continue;
+            }
+
+            short inventorySlot = simulation.Inventory.GetWeaponEquipment(
+                shooterIndex,
+                weaponSlot);
+
+            if (inventorySlot < 0 ||
+                simulation.Inventory.GetItem(
+                    shooterIndex,
+                    inventorySlot) is not RangedWeaponConfig weapon ||
+                weapon.AimTime <= 0f)
+            {
+                continue;
+            }
+
+            float aimTimer = weapons.AimTimer[stateIndex];
+            if (aimTimer <= 0f || aimTimer >= weapon.AimTime)
+                continue;
+
+            float progress = Math.Clamp(
+                aimTimer / weapon.AimTime,
+                0f,
+                1f);
+
+            // A quiet, rim-like targeting ring collapses as the pawn finishes
+            // aiming, then fades completely before the shot is emitted.
+            float radius = tilePixelSize * (0.82f - 0.66f * progress);
+            byte alpha = (byte)Math.Clamp(
+                (int)(68f * (1f - progress)),
+                0,
+                68);
+
+            if (alpha < 5)
+                continue;
+
+            Vector3 targetPosition = simulation.Units.Position[targetIndex];
+
+            AppendCircleOutline(
+                aiming,
+                targetPosition.X * tilePixelSize,
+                targetPosition.Y * tilePixelSize,
+                radius,
+                new Color(215, 225, 232, alpha),
+                20);
+
+            // A target selected by several pawns only needs one indicator;
+            // this prevents their semi-transparent rings from becoming opaque.
+            targetDrawn[targetIndex] = true;
+            return;
+        }
     }
 
     private static void AppendAiStateMarker(
