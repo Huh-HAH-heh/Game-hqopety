@@ -8,12 +8,14 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    private const int UnitsPerFaction = 80;
+    private const int UnitsPerFaction = 400;
     private const int TotalUnits = UnitsPerFaction * 2;
-    private const int Columns = 4;
+    private const int Columns = 20;
     private const int Rows = UnitsPerFaction / Columns;
-    private const float CombatDistance = 176f;
+    private const float CombatDistance = 400f;
     private const float BaseHeight = 6f;
+    private const float TerrainScale = 2.25f;
+    private const float AdvanceDistance = 100f;
 
     private readonly UnitId[] _units =
         new UnitId[TotalUnits];
@@ -125,7 +127,7 @@ public sealed class LongRangeCombatTestScene
             $"LONG-RANGE {TotalUnits} | " +
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
-            $"Range {CombatDistance:0}m/180m | " +
+            $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | "
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
@@ -143,22 +145,22 @@ public sealed class LongRangeCombatTestScene
         int minX =
             Math.Max(
                 4,
-                centerX - 100);
+                centerX - (int)(100f * TerrainScale));
 
         int maxX =
             Math.Min(
                 worldMap.MaxTileX - 4,
-                centerX + 100);
+                centerX + (int)(100f * TerrainScale));
 
         int minY =
             Math.Max(
                 4,
-                centerY - 45);
+                centerY - (int)(45f * TerrainScale));
 
         int maxY =
             Math.Min(
                 worldMap.MaxTileY - 4,
-                centerY + 45);
+                centerY + (int)(45f * TerrainScale));
 
         for (int y = minY;
              y <= maxY;
@@ -181,24 +183,24 @@ public sealed class LongRangeCombatTestScene
                 height +=
                     2.2f *
                     MathF.Sin(
-                        dx * 0.075f);
+                        dx * (0.075f / TerrainScale));
 
                 height +=
                     1.7f *
                     MathF.Cos(
-                        dy * 0.12f);
+                        dy * (0.12f / TerrainScale));
 
                 height +=
                     1.4f *
                     MathF.Sin(
-                        (dx + dy) * 0.055f);
+                        (dx + dy) * (0.055f / TerrainScale));
 
                 // Central high ridge with deliberate firing lanes.
-                if (MathF.Abs(dx) <= 4f)
+                if (MathF.Abs(dx) <= 4f * TerrainScale)
                 {
                     int lane =
                         (int)MathF.Floor(
-                            (dy + 45f) / 9f);
+                            (dy + 45f * TerrainScale) / (9f * TerrainScale));
 
                     bool ridgeSegment =
                         lane % 3 != 1;
@@ -207,7 +209,7 @@ public sealed class LongRangeCombatTestScene
                     {
                         float ridgeFactor =
                             1f -
-                            MathF.Abs(dx) / 4f;
+                            MathF.Abs(dx) / (4f * TerrainScale);
 
                         height +=
                             10f *
@@ -222,32 +224,32 @@ public sealed class LongRangeCombatTestScene
                     MathF.Abs(
                         dy -
                         0.24f * dx -
-                        15f);
+                        15f * TerrainScale);
 
-                if (ridgeA < 2.0f &&
+                if (ridgeA < 2.0f * TerrainScale &&
                     ((int)MathF.Floor(
-                        (dx + 100f) / 20f) % 2 == 0))
+                        (dx + 100f * TerrainScale) / (20f * TerrainScale)) % 2 == 0))
                 {
                     height +=
                         6f *
                         (1f -
-                         ridgeA / 2f);
+                         ridgeA / (2f * TerrainScale));
                 }
 
                 float ridgeB =
                     MathF.Abs(
                         dy +
                         0.19f * dx +
-                        17f);
+                        17f * TerrainScale);
 
-                if (ridgeB < 2.0f &&
+                if (ridgeB < 2.0f * TerrainScale &&
                     ((int)MathF.Floor(
-                        (dx + 100f) / 24f) % 2 != 0))
+                        (dx + 100f * TerrainScale) / (24f * TerrainScale)) % 2 != 0))
                 {
                     height +=
                         5f *
                         (1f -
-                         ridgeB / 2f);
+                         ridgeB / (2f * TerrainScale));
                 }
 
                 bool hardCover =
@@ -255,7 +257,8 @@ public sealed class LongRangeCombatTestScene
                         x,
                         y,
                         centerX,
-                        centerY);
+                        centerY,
+                        TerrainScale);
 
                 if (hardCover)
                     height += 5f;
@@ -293,7 +296,8 @@ public sealed class LongRangeCombatTestScene
         int x,
         int y,
         int centerX,
-        int centerY)
+        int centerY,
+        float scale)
     {
         int dx = x - centerX;
         int dy = y - centerY;
@@ -315,10 +319,10 @@ public sealed class LongRangeCombatTestScene
         }
 
         return
-            Math.Abs(dx) <= 2 &&
-            Math.Abs(dy) <= 42 &&
+            Math.Abs(dx) <= 2 * scale &&
+            Math.Abs(dy) <= 42 * scale &&
             ((int)MathF.Floor(
-                (dy + 42f) / 8f) % 3 == 0);
+                (dy + 42f * scale) / (8f * scale)) % 3 == 0);
     }
 
     private static void ClearWater(
@@ -328,26 +332,8 @@ public sealed class LongRangeCombatTestScene
         int minY,
         int maxY)
     {
-        for (int y = minY;
-             y <= maxY;
-             y++)
-        {
-            for (int x = minX;
-                 x <= maxX;
-                 x++)
-            {
-                for (int z = 0;
-                     z < worldMap.Water.Levels;
-                     z++)
-                {
-                    worldMap.Water.SetAmount(
-                        x,
-                        y,
-                        z,
-                        0);
-                }
-            }
-        }
+        // Clearing the water layer once avoids millions of per-cell API calls.
+        worldMap.Water.Clear();
     }
 
     private void SpawnUnits(
@@ -471,8 +457,8 @@ public sealed class LongRangeCombatTestScene
             id.Index;
 
         // The range test intentionally freezes the battle line.
-        simulation.Units.MoveSpeed[unitIndex] = 0f;
-        simulation.Units.ViewRange[unitIndex] = 220f;
+        SetMarchTarget(simulation, id, worldMap, side, tileX, tileY);
+        simulation.Units.ViewRange[unitIndex] = 500f;
         simulation.Units.FieldOfView[unitIndex] = 180f;
 
         simulation.SetPosture(
@@ -586,11 +572,13 @@ public sealed class LongRangeCombatTestScene
             simulation.Units.Velocity[unit] =
                 Vector3.Zero;
 
+            SetMarchTarget(simulation, _units[i], worldMap, side, tileX, tileY);
+
             simulation.Units.MoveSpeed[unit] =
-                0f;
+                UnitCatalog.Get(UnitType.Colonist).MoveSpeed;
 
             simulation.Units.ViewRange[unit] =
-                220f;
+                500f;
 
             simulation.Units.FieldOfView[unit] =
                 180f;
@@ -621,6 +609,33 @@ public sealed class LongRangeCombatTestScene
                 simulation,
                 unit);
         }
+    }
+
+    private static void SetMarchTarget(
+        UnitSimulation simulation,
+        UnitId unit,
+        WorldMap worldMap,
+        int side,
+        int tileX,
+        int tileY)
+    {
+        int direction = side == 0 ? 1 : -1;
+        int targetX = Math.Clamp(
+            tileX + direction * (int)AdvanceDistance,
+            1,
+            worldMap.MaxTileX - 1);
+
+        int targetY = Math.Clamp(
+            tileY,
+            1,
+            worldMap.MaxTileY - 1);
+
+        simulation.SetTarget(
+            unit,
+            new Vector3(
+                targetX + 0.5f,
+                targetY + 0.5f,
+                worldMap.GetSurfaceHeight(targetX, targetY)));
     }
 
     private void FireVolley(
