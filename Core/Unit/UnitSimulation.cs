@@ -616,6 +616,31 @@ public sealed class UnitSimulation
         }
 
         _deathHandled[unitIndex] = true;
+        UnitId deadId = Units.GetId(unitIndex);
+
+        // Do not leave live units' AI or weapon state pointing at the corpse.
+        ReadOnlySpan<int> active = Units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int other = active[i];
+            if (other == unitIndex)
+                continue;
+
+            if (_aiSystem.Store.HasTarget[other] &&
+                _aiSystem.Store.Target[other] == deadId)
+            {
+                _aiSystem.Store.ClearTarget(other);
+                _aiSystem.Store.ClearGoal(other);
+                _aiSystem.Store.State[other] = UnitAiState.Idle;
+                Units.HasTarget[other] = false;
+                Units.Target[other] = Units.Position[other];
+                Units.Velocity[other] = Vector3.Zero;
+                _movementSystem.Navigation.ClearRoute(other);
+            }
+
+            Weapons.ClearReferencesToTarget(other, deadId);
+        }
+
         Units.HasTarget[unitIndex] = false;
         Units.Velocity[unitIndex] = Vector3.Zero;
         _movementSystem.Navigation.ClearRoute(unitIndex);
