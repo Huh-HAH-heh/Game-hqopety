@@ -401,7 +401,7 @@ public sealed class UnitRenderSystem
         float tilePixelSize,
         Color color)
     {
-        float radius = MathF.Max(1.2f, tilePixelSize * 0.17f);
+        float radius = MathF.Max(1.7f, tilePixelSize * 0.28f);
         AppendCircleOutline(vertices, x, y, radius, color, 8);
         AppendDebugLine(
             vertices,
