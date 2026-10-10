@@ -28,6 +28,7 @@ public sealed class GameRenderer
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
     private readonly VisionTestScene _visionTestScene;
+    private CombatStatusOverlay? _combatStatusOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
@@ -49,6 +50,8 @@ public sealed class GameRenderer
     private bool _massCombatMode;
     private bool _simulationPaused;
     private bool _terrainStressMode;
+    private bool _showCombatTracers = true;
+    private bool _showCombatHud = true;
     private int _visionTestIndex;
 
     private float _perfTimer;
@@ -62,6 +65,9 @@ public sealed class GameRenderer
     private long _lastRoundsSample;
     private long _lastProjectilesSpawnedSample;
     private long _lastHitsSample;
+    private double _combatShotsPerSecond;
+    private double _combatHitEventsPerSecond;
+    private double _combatHitEventsPerRound;
     private float _fps;
     private long _workingSetBytes;
     private long _managedHeapBytes;
@@ -162,6 +168,7 @@ public sealed class GameRenderer
         _mapRenderer.Dispose();
         _projectileRenderer.Dispose();
         _gameMenuOverlay?.Dispose();
+        _combatStatusOverlay?.Dispose();
         _uiView?.Dispose();
         _window.Close();
     }
@@ -241,9 +248,10 @@ public sealed class GameRenderer
             double shotsPerSecond = shotsDelta / sampleSeconds;
             double roundsPerSecond = roundsDelta / sampleSeconds;
             double projectilesPerSecond = projectilesDelta / sampleSeconds;
-            double hitsPerSecond = hitsDelta / sampleSeconds;
-            double hitPerRoundPercent = roundsDelta > 0
-                ? hitsDelta * 100d / roundsDelta
+            _combatShotsPerSecond = shotsDelta / sampleSeconds;
+            _combatHitEventsPerSecond = hitsDelta / sampleSeconds;
+            _combatHitEventsPerRound = roundsDelta > 0
+                ? hitsDelta / (double)roundsDelta
                 : 0d;
 
             _lastShotsSample = totalShots;
@@ -279,7 +287,8 @@ public sealed class GameRenderer
                 $"UnitCandidates={_unitSimulation.LastProjectileUnitCandidates} " +
                 $"Shots/s={shotsPerSecond:0} Rounds/s={roundsPerSecond:0} " +
                 $"ProjectileSpawn/s={projectilesPerSecond:0} " +
-                $"Hits/s={hitsPerSecond:0} Hit/Rd={hitPerRoundPercent:0}% HitsTotal={totalHits} " +
+                $"HitEvents/s={_combatHitEventsPerSecond:0} " +
+                $"Events/Round={_combatHitEventsPerRound:0.00} TotalHitEvents={totalHits} " +
                 $"Health={_unitSimulation.LastHealthUpdateMilliseconds:0.0}ms " +
                 $"Nav={_unitSimulation.Navigation.RoutesBuiltThisUpdate} built/" +
                     $"{_unitSimulation.Navigation.RoutesFailedThisUpdate} failed/" +
@@ -377,7 +386,8 @@ public sealed class GameRenderer
         _projectileRenderer.Draw(
             _window,
             _unitSimulation.Projectiles,
-            TerrainTilePixelSize);
+            TerrainTilePixelSize,
+            _showCombatTracers);
 
         _gameMenuOverlay?.DrawWorldMarkers(
             _window,
@@ -393,6 +403,14 @@ public sealed class GameRenderer
         if (_uiView != null)
         {
             _window.SetView(_uiView);
+
+            _combatStatusOverlay?.Draw(
+                _window,
+                _unitSimulation,
+                _combatShotsPerSecond,
+                _combatHitEventsPerSecond,
+                _combatHitEventsPerRound,
+                _showCombatTracers);
 
             Vector2i mousePixels = Mouse.GetPosition(_window);
             Vector2f uiMouseCoordinates =
@@ -599,6 +617,7 @@ public sealed class GameRenderer
                 _window.Size.Y));
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
+        _combatStatusOverlay = new CombatStatusOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
         _window.Closed +=
@@ -773,6 +792,21 @@ public sealed class GameRenderer
                 wasEnabled
                     ? "[TEST] AI is already enabled; A never disables it."
                     : "[TEST] AI enabled; vision and combat diagnostics enabled. A will not turn AI off.");
+            return;
+        }
+
+        if (key == Keyboard.Key.T)
+        {
+            _showCombatTracers = !_showCombatTracers;
+            Console.WriteLine($"[TEST] Tracers={_showCombatTracers}");
+            return;
+        }
+
+        if (key == Keyboard.Key.F9)
+        {
+            _showCombatHud = !_showCombatHud;
+            if (_combatStatusOverlay != null)
+                _combatStatusOverlay.Visible = _showCombatHud;
             return;
         }
 
