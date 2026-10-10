@@ -607,6 +607,17 @@ public static class CombatSelfTest
             survivor,
             3,
             0.1f);
+        simulation.AI.Store.RememberTarget(
+            survivor.Index,
+            dead,
+            simulation.Units.Position[dead.Index],
+            3f);
+        simulation.Weapons.StartBurst(
+            survivor.Index,
+            UnitWeaponSlot.Primary,
+            dead,
+            2,
+            0.1f);
         simulation.Health.OverallHitPoints[dead.Index] = 0f;
 
         simulation.Update(worldMap, 1f / 60f);
@@ -615,7 +626,12 @@ public static class CombatSelfTest
             simulation.Units.Velocity[dead.Index] != Vector3.Zero ||
             simulation.AI.Store.State[dead.Index] != UnitAiState.Dead ||
             simulation.Weapons.BurstRemaining[
-                UnitWeaponStore.GetIndex(dead.Index, UnitWeaponSlot.Primary)] != 0)
+                UnitWeaponStore.GetIndex(dead.Index, UnitWeaponSlot.Primary)] != 0 ||
+            simulation.AI.Store.HasTarget[survivor.Index] ||
+            simulation.Weapons.BurstRemaining[
+                UnitWeaponStore.GetIndex(survivor.Index, UnitWeaponSlot.Primary)] != 0 ||
+            simulation.Weapons.BurstTarget[
+                UnitWeaponStore.GetIndex(survivor.Index, UnitWeaponSlot.Primary)] == dead)
         {
             return false;
         }
