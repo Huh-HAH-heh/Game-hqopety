@@ -5,6 +5,8 @@ namespace Core.Unit;
 
 public sealed class UnitBodySystem
 {
+    private float _animationTime;
+
     public void Update(
         UnitStore units,
         UnitBodyStore bodies,
@@ -13,10 +15,13 @@ public sealed class UnitBodySystem
         if (units.ActiveCount == 0)
             return;
 
+        _animationTime += Math.Clamp(deltaTime, 0f, 0.1f);
         float followAlpha = Math.Clamp(deltaTime * 14f, 0f, 1f);
         ReadOnlySpan<int> active = units.ActiveIndices;
 
         Vector3[] unitPositions = units.Position;
+        Vector3[] velocities = units.Velocity;
+        float[] moveSpeeds = units.MoveSpeed;
         Vector3[] bodyNormals = units.BodyNormal;
         Vector3[] headNormals = units.HeadNormal;
         int[] bodyStarts = units.BodyStart;
@@ -47,6 +52,9 @@ public sealed class UnitBodySystem
                 unitPositions,
                 bodyNormals,
                 headNormals,
+                velocities,
+                moveSpeeds,
+                _animationTime,
                 worldPositions,
                 worldRotations,
                 localPositions,
@@ -66,6 +74,9 @@ public sealed class UnitBodySystem
         Vector3[] unitPositions,
         Vector3[] bodyNormals,
         Vector3[] headNormals,
+        Vector3[] velocities,
+        float[] moveSpeeds,
+        float animationTime,
         Vector3[] worldPositions,
         float[] worldRotations,
         Vector3[] localPositions,
@@ -80,6 +91,13 @@ public sealed class UnitBodySystem
         Vector3 headNormal = NormalizeHorizontal(headNormals[unit]);
         float bodyRotation = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
         float headRotation = MathF.Atan2(headNormal.Y, headNormal.X);
+        Vector3 velocity = velocities[unit];
+        float speed = MathF.Sqrt(velocity.X * velocity.X + velocity.Y * velocity.Y);
+        float gait = Math.Clamp(
+            speed / MathF.Max(0.5f, moveSpeeds[unit] * 0.20f),
+            0f,
+            1f);
+        float gaitPhase = animationTime * 11f + unit * 1.317f;
         int end = start + count;
 
         // Definitions are parent-first, so every parent's transform has
@@ -112,6 +130,15 @@ public sealed class UnitBodySystem
             {
                 origin = worldPositions[parent];
                 rotation = worldRotations[parent];
+            }
+
+            if (motions[part] == BodyPartMotion.WalkCycle)
+            {
+                rotation += MathF.Sin(gaitPhase) * 0.32f * gait;
+            }
+            else if (motions[part] == BodyPartMotion.WalkCycleOpposite)
+            {
+                rotation -= MathF.Sin(gaitPhase) * 0.32f * gait;
             }
 
             worldPositions[part] =
