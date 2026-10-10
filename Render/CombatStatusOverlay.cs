@@ -73,7 +73,8 @@ public sealed class CombatStatusOverlay : IDisposable
         double shotsPerSecond,
         double hitEventsPerSecond,
         double hitEventsPerRound,
-        bool showTracers)
+        bool showTracers,
+        bool showAiStates)
     {
         if (!Visible || _font == null ||
             _title == null || _blue == null ||
@@ -141,7 +142,7 @@ public sealed class CombatStatusOverlay : IDisposable
             $"EVENTS/ROUND {hitEventsPerRound:0.00}  |  TOTAL HIT EVENTS {simulation.Projectiles.TotalHits:N0}\n" +
             $"AI: ATTACK {attack}  SEARCH {search}  COVER {cover}  IDLE {idle}\n" +
             $"SUPPRESSED {suppressed}  PANICKED {panicked}  |  {mode}\n" +
-            $"[I] AI STATES {(true ? "ON" : "OFF")}  [T] TRACERS {(showTracers ? "ON" : "OFF")}  [F9] HIDE";
+            $"[I] AI STATES {(showAiStates ? "ON" : "OFF")}  [T] TRACERS {(showTracers ? "ON" : "OFF")}  [F9] HIDE";
 
         _panel.Position = new Vector2f(12f, 12f);
         _blueAccent.Position = new Vector2f(12f, 40f);
