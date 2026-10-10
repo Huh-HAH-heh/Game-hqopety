@@ -266,6 +266,7 @@ public sealed class GameRenderer
             string visionMetrics = _unitSimulation.VisionEnabled
                 ? $"{_unitSimulation.Vision.LastUpdateMilliseconds:0.0}ms " +
                   $"{_unitSimulation.Vision.LastCandidatePairs:N0} pairs " +
+                  $"{_unitSimulation.Vision.LastTargetEvaluations:N0} targets " +
                   $"{_unitSimulation.Vision.LastLineOfSightChecks:N0} LOS"
                 : "OFF";
 
