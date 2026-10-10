@@ -25,6 +25,7 @@ public static class CombatSelfTest
         RunTest("Weapon: aim mode cycle", TestAimModes, ref passed, ref failed);
         RunTest("Weapon: target mode cycle", TestTargetModes, ref passed, ref failed);
         RunTest("Weapon: ammunition selection", TestAmmunitionSelection, ref passed, ref failed);
+        RunTest("Weapon: aim warmup delays first shot", TestWeaponAimWarmup, ref passed, ref failed);
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
@@ -309,6 +310,77 @@ public static class CombatSelfTest
 
         return weapons.CurrentTargetMode[index] ==
                TargetMode.Automatic;
+    }
+
+    private static bool TestWeaponAimWarmup()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 64);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter,
+            WeaponCatalog.AssaultRifle);
+
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(
+                shooter,
+                inventorySlot,
+                UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        int stateIndex = UnitWeaponStore.GetIndex(
+            shooter.Index,
+            UnitWeaponSlot.Primary);
+
+        bool firstAttemptFired = simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target);
+
+        if (firstAttemptFired ||
+            simulation.Projectiles.ActiveCount != 0 ||
+            simulation.Weapons.AimTarget[stateIndex] != target)
+        {
+            return false;
+        }
+
+        simulation.Update(worldMap, 0.30f);
+
+        bool firedTooEarly = simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target);
+
+        if (firedTooEarly || simulation.Projectiles.ActiveCount != 0)
+            return false;
+
+        simulation.Update(worldMap, 0.40f);
+
+        bool firedAfterWarmup = simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target);
+
+        return firedAfterWarmup &&
+               simulation.Projectiles.ActiveCount > 0;
     }
 
     private static bool TestAmmunitionSelection()
@@ -1104,7 +1176,7 @@ public static class CombatSelfTest
             UnitWeaponSlot.Primary,
             target,
             visibleAimPoint);
-        simulation.Update(worldMap, 0.25f);
+        simulation.Update(worldMap, 0.75f);
 
         bool fired = simulation.FireWeaponAt(
             shooter,
