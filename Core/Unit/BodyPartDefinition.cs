@@ -2,11 +2,17 @@ using System.Numerics;
 
 namespace Core.Unit;
 
+public enum BodyPartAnchor : byte
+{
+    Parent,
+    UnitBody,
+    UnitHead
+}
+
 /// <summary>
-/// Data-only description of one body part.
-/// Scale stores half-extents for boxes and radii for circles.
-/// ParentIndex is -1 for attachment to the unit root, otherwise it
-/// identifies an earlier part in the same definition.
+/// Data-only description of one body part. Scale stores half-extents
+/// for boxes and radii for circles. Parents must appear earlier in the
+/// definition. Anchors make body/head orientation choices explicit.
 /// </summary>
 public readonly struct BodyPartDefinition
 {
@@ -17,6 +23,7 @@ public readonly struct BodyPartDefinition
     public int ParentIndex { get; }
     public BodyPrimitive Primitive { get; }
     public BodyPartMotion Motion { get; }
+    public BodyPartAnchor Anchor { get; }
 
     public BodyPartDefinition(
         Vector3 localPosition,
@@ -25,7 +32,8 @@ public readonly struct BodyPartDefinition
         int parentIndex = -1,
         float localRotation = 0f,
         BodyPartMotion motion = BodyPartMotion.StaticRelative,
-        float followDistance = 0f)
+        float followDistance = 0f,
+        BodyPartAnchor anchor = BodyPartAnchor.Parent)
     {
         LocalPosition = localPosition;
         Scale = scale;
@@ -34,5 +42,6 @@ public readonly struct BodyPartDefinition
         LocalRotation = localRotation;
         Motion = motion;
         FollowDistance = followDistance;
+        Anchor = anchor;
     }
 }
