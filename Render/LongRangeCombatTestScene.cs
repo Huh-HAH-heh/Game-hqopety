@@ -9,7 +9,7 @@ namespace RimClone.Render;
 public sealed class LongRangeCombatTestScene
 {
     private const int InitialUnitsPerFaction = 400;
-    private const int Columns = 20;
+    private const int Columns = 40;
 
     private int _unitsPerFaction = InitialUnitsPerFaction;
     private int UnitsPerFaction => _unitsPerFaction;
@@ -413,14 +413,15 @@ public sealed class LongRangeCombatTestScene
 
                     float x =
                         baseX +
-                        (column -
-                         (Columns - 1) * 0.5f) *
+                        (row -
+                         (Rows - 1) * 0.5f) *
                         1.5f;
 
                     float y =
                         centerY -
-                        (Rows - 1) * 0.75f +
-                        row * 1.5f;
+                        (Columns - 1) * 0.75f +
+                        column * 1.5f +
+                        (row % 2) * 0.75f;
 
                     SpawnUnit(
                         simulation,
@@ -573,14 +574,15 @@ public sealed class LongRangeCombatTestScene
 
             float x =
                 baseX +
-                (column -
-                 (Columns - 1) * 0.5f) *
+                (row -
+                 (Rows - 1) * 0.5f) *
                 1.5f;
 
             float y =
                 centerY -
-                (Rows - 1) * 0.75f +
-                row * 1.5f;
+                (Columns - 1) * 0.75f +
+                column * 1.5f +
+                (row % 2) * 0.75f;
 
             int tileX =
                 Math.Clamp(
