@@ -171,6 +171,30 @@ void main()
         SetVisualSettings(48f, 14f);
     }
 
+    public void InvalidateGraphicsResources()
+    {
+        // The OS/GPU may invalidate window-owned OpenGL resources while the
+        // window is minimized or the graphics context is reactivated. Never
+        // keep stale VBO/shader handles after focus has returned.
+        ClearTerrainChunkCache();
+
+        _terrainLayerShader?.Dispose();
+        _terrainLayerShader = null;
+        _terrainShaderChecked = false;
+        _terrainBufferSupportChecked = false;
+        _useTerrainBuffer = false;
+
+        _chunkCacheTerrainVersion = long.MinValue;
+        _chunkCacheVisibleMaxLayer = -1;
+        _chunkCacheTilePixelSize = -1f;
+
+        _mapCacheValid = false;
+        _gridCacheValid = false;
+        _waterCacheValid = false;
+
+        LastTerrainBuildMilliseconds = 0d;
+    }
+
     public bool UsesTerrainVertexBuffer =>
         _useTerrainBuffer;
 
