@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Combat;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
@@ -516,6 +517,7 @@ public sealed class LongRangeCombatTestScene
                 unitIndex,
                 UnitWeaponSlot.Primary,
                 1_000);
+            ConfigureCombatModes(simulation, unitIndex, index);
         }
 
         simulation.AI.Store.InitializeUnit(
@@ -768,6 +770,37 @@ public sealed class LongRangeCombatTestScene
             unit,
             UnitWeaponSlot.Primary,
             1_000);
+        ConfigureCombatModes(simulation, unit, unit);
+    }
+
+    private static void ConfigureCombatModes(
+        UnitSimulation simulation,
+        int unitIndex,
+        int rosterIndex)
+    {
+        int stateIndex = UnitWeaponStore.GetIndex(
+            unitIndex,
+            UnitWeaponSlot.Primary);
+
+        // Keep the mass-battle test representative: every third rifle uses
+        // one of CE's three aim styles and a corresponding fire mode.
+        switch (rosterIndex % 3)
+        {
+            case 0:
+                simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.SuppressFire;
+                simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Auto;
+                break;
+
+            case 1:
+                simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.Snapshot;
+                simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Burst;
+                break;
+
+            default:
+                simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.AimedShot;
+                simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Single;
+                break;
+        }
     }
 
     private void UpdateStats(
