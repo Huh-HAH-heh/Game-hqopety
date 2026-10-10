@@ -51,6 +51,7 @@ public static class CombatSelfTest
         RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
         RunTest("Combat log: hit and blocked events survive shot spam", TestCombatLogPriorities, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
+        RunTest("Anatomy: all built-in and custom body definitions transform correctly", TestAnatomyProfiles, ref passed, ref failed);
 
         Console.WriteLine("---------------------------------------");
         Console.WriteLine($"RESULT: PASS={passed} FAIL={failed}");
@@ -1760,6 +1761,156 @@ public static class CombatSelfTest
         return replacement.Index == dead.Index &&
                replacement.Generation != dead.Generation &&
                !simulation.Units.IsAlive(dead);
+    }
+
+
+    private static bool TestAnatomyProfiles()
+    {
+        UnitBodyStore definitions = new UnitBodyStore(4);
+        BodyHandle colonistBody = definitions.CreateBody(UnitBodyType.Colonist);
+
+        if (colonistBody.Count != 19 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Head) != 1 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Torso) != 1 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.UpperArm) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Elbow) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Hand) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Thigh) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Knee) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Shin) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Foot) != 2)
+        {
+            return false;
+        }
+
+        for (int part = colonistBody.Start;
+             part < colonistBody.Start + colonistBody.Count;
+             part++)
+        {
+            int parent = definitions.Parent[part];
+            if (parent < -1 || parent >= part)
+                return false;
+        }
+
+        definitions.SetInitialWorldPosition(
+            colonistBody,
+            Vector3.Zero,
+            0f,
+            MathF.PI * 0.5f);
+
+        int definitionHead = FindBodyRole(
+            definitions,
+            colonistBody,
+            BodyPartRole.Head);
+
+        Vector3 headPosition = definitions.WorldPosition[definitionHead];
+        if (MathF.Abs(headPosition.X) > 0.001f ||
+            MathF.Abs(headPosition.Y - 0.235f) > 0.001f)
+        {
+            return false;
+        }
+
+        UnitSimulation simulation = new UnitSimulation(8, 128);
+        UnitId colonist = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10f, 10f, 0f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        UnitId greenbob = simulation.Spawn(
+            UnitType.Greenbob,
+            new Vector3(12f, 10f, 0f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        UnitId segmented = simulation.Spawn(
+            UnitType.SegmentedMonster,
+            new Vector3(14f, 10f, 0f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        BodyPartDefinition[] customParts =
+            BodyDefinitionExamples.CreateMultiLimbCreature();
+
+        UnitId custom = simulation.SpawnCustom(
+            UnitType.Colonist,
+            new Vector3(16f, 10f, 0f),
+            customParts);
+
+        if (simulation.Units.BodyCount[colonist.Index] != 19 ||
+            simulation.Units.BodyCount[greenbob.Index] != 10 ||
+            simulation.Units.BodyCount[segmented.Index] != 10 ||
+            simulation.Units.BodyCount[custom.Index] != customParts.Length)
+        {
+            return false;
+        }
+
+        simulation.Units.Velocity[colonist.Index] =
+            new Vector3(1f, 0f, 0f);
+
+        UnitBodySystem bodySystem = new UnitBodySystem();
+        bodySystem.Update(
+            simulation.Units,
+            simulation.Bodies,
+            0.1f);
+
+        int start = simulation.Units.BodyStart[colonist.Index];
+        short count = simulation.Units.BodyCount[colonist.Index];
+        int leftThigh = FindBodyRole(
+            simulation.Bodies,
+            new BodyHandle(start, count),
+            BodyPartRole.Thigh,
+            BodyPartMotion.WalkCycle);
+        int rightThigh = FindBodyRole(
+            simulation.Bodies,
+            new BodyHandle(start, count),
+            BodyPartRole.Thigh,
+            BodyPartMotion.WalkCycleOpposite);
+
+        float swing = MathF.Sin(1.1f) * 0.32f;
+        return leftThigh >= 0 &&
+               rightThigh >= 0 &&
+               MathF.Abs(
+                   simulation.Bodies.WorldRotation[leftThigh] -
+                   (MathF.PI - 0.18f + swing)) < 0.001f &&
+               MathF.Abs(
+                   simulation.Bodies.WorldRotation[rightThigh] -
+                   (-MathF.PI + 0.18f - swing)) < 0.001f;
+    }
+
+    private static int CountBodyRole(
+        UnitBodyStore bodies,
+        BodyHandle body,
+        BodyPartRole role)
+    {
+        int result = 0;
+        int end = body.Start + body.Count;
+
+        for (int part = body.Start; part < end; part++)
+        {
+            if (bodies.Role[part] == role)
+                result++;
+        }
+
+        return result;
+    }
+
+    private static int FindBodyRole(
+        UnitBodyStore bodies,
+        BodyHandle body,
+        BodyPartRole role,
+        BodyPartMotion motion = BodyPartMotion.StaticRelative)
+    {
+        int end = body.Start + body.Count;
+
+        for (int part = body.Start; part < end; part++)
+        {
+            if (bodies.Role[part] == role &&
+                bodies.Motion[part] == motion)
+            {
+                return part;
+            }
+        }
+
+        return -1;
     }
 
 }
