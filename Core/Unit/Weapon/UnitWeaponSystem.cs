@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using Core.Combat;
 using Core.Items;
+using Core.Map;
 
 namespace Core.Unit;
 
