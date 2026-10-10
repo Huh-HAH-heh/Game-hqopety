@@ -184,16 +184,15 @@ public sealed class UnitRenderSystem
                 unitPosition.Y <= maxWorldY;
 
             if (!rootVisible &&
-                (!bodies.UsesBodyDefinition(bodyStart) ||
-                 !IsBodyVisible(
-                     bodyStart,
-                     bodyCount,
-                     partPositions,
-                     partScales,
-                     minWorldX,
-                     maxWorldX,
-                     minWorldY,
-                     maxWorldY)))
+                !IsBodyVisible(
+                    bodyStart,
+                    bodyCount,
+                    partPositions,
+                    partScales,
+                    minWorldX,
+                    maxWorldX,
+                    minWorldY,
+                    maxWorldY))
             {
                 continue;
             }
