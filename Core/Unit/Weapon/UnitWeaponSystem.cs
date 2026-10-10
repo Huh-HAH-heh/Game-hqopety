@@ -12,7 +12,8 @@ public sealed class UnitWeaponSystem
         UnitInventoryStore inventory,
         UnitWeaponStore weapons,
         ProjectileStore projectiles,
-        float deltaTime)
+        float deltaTime,
+        UnitHealthStore? health = null)
     {
         weapons.UpdateTimers(deltaTime);
         weapons.AdvanceBurstTimer(deltaTime);
@@ -23,6 +24,9 @@ public sealed class UnitWeaponSystem
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
+
+            if (health != null && health.OverallHitPoints[unit] <= 0f)
+                continue;
 
             for (int slot = 0;
                  slot < UnitInventoryStore.WeaponSlotCount;
