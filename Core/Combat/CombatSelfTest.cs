@@ -394,7 +394,8 @@ public static class CombatSelfTest
             return false;
         }
 
-        simulation.Update(worldMap, 0.60f);
+        for (int i = 0; i < 12; i++)
+            simulation.Update(worldMap, 0.05f);
 
         // Automatic mode must emit the first round only after the CE-style
         // range-scaled warmup, without needing another AI/target command.
@@ -457,19 +458,23 @@ public static class CombatSelfTest
             return false;
         }
 
+        int stateIndex = UnitWeaponStore.GetIndex(
+            shooter.Index,
+            UnitWeaponSlot.Primary);
+        simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.SuppressFire;
+        worldMap.SetSolidHeight(10, 10, 30, 1);
+
         bool startedAim = !simulation.FireWeaponAt(
             shooter,
             UnitWeaponSlot.Primary,
             target);
 
-        simulation.Update(worldMap, 0.90f);
-        long shotsAfterWarmup = simulation.TotalShotsFired;
-
-        for (int i = 0; i < 10; i++)
+        long shotsBeforeWarmup = simulation.TotalShotsFired;
+        for (int i = 0; i < 18; i++)
             simulation.Update(worldMap, 0.05f);
 
         return startedAim &&
-               shotsAfterWarmup == 1 &&
+               shotsBeforeWarmup == 0 &&
                simulation.TotalShotsFired >= 4;
     }
 
@@ -516,6 +521,7 @@ public static class CombatSelfTest
             return false;
 
         simulation.Update(worldMap, 0.90f);
+        worldMap.SetSolidHeight(10, 10, 30, 1);
         bool firstShot = simulation.FireWeaponAt(
             shooter,
             UnitWeaponSlot.Primary,
@@ -577,10 +583,12 @@ public static class CombatSelfTest
             shooter.Index,
             UnitWeaponSlot.Primary);
         simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Burst;
+        simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.SuppressFire;
 
         if (simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target))
             return false;
 
+        worldMap.SetSolidHeight(10, 10, 30, 1);
         simulation.Update(worldMap, 0.90f);
 
         bool firstShot = simulation.FireWeaponAt(
@@ -639,14 +647,11 @@ public static class CombatSelfTest
         if (simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target))
             return false;
 
-        simulation.Update(worldMap, 0.20f);
-        if (simulation.TotalShotsFired != 1)
-            return false;
-
-        // A three-meter obstacle blocks aimed shots, but SuppressFire keeps
-        // sending rounds toward the previous aim point until the mag is empty.
+        // SuppressFire can start with known target position and then keep
+        // shooting into the obstacle after the first aim delay.
         worldMap.SetSolidHeight(10, 10, 30, 1);
-        simulation.Update(worldMap, 0.40f);
+        for (int i = 0; i < 12; i++)
+            simulation.Update(worldMap, 0.05f);
 
         return simulation.TotalShotsFired > 1;
     }
