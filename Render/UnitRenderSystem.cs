@@ -274,7 +274,10 @@ public sealed class UnitRenderSystem
             int end = start + count;
             float screenScale = window.Size.X / MathF.Max(1f, cameraView.Size.X);
             float outline = 0.42f / MathF.Max(1f, tilePixelSize * screenScale);
+            Color outlineColor = new Color(20, 22, 26, 238);
 
+            // Outline every part first. Fill batches are layered afterwards,
+            // so legs disappear under the torso instead of covering it.
             for (int part = start; part < end; part++)
             {
                 Vector3 position = partPositions[part];
@@ -285,43 +288,70 @@ public sealed class UnitRenderSystem
                     radiusX * radiusX +
                     radiusY * radiusY) + outline;
 
-                if (position.X + extent < minWorldX ||
-                    position.X - extent > maxWorldX ||
-                    position.Y + extent < minWorldY ||
-                    position.Y - extent > maxWorldY)
+                if (!IsPartInView(
+                    position,
+                    extent,
+                    minWorldX,
+                    maxWorldX,
+                    minWorldY,
+                    maxWorldY))
                 {
                     continue;
                 }
 
-                float pixelX = position.X * tilePixelSize;
-                float pixelY = position.Y * tilePixelSize;
-                BodyPartRole role = bodyRoles[part];
-                Color partColor = GetBodyPartColor(role, color);
-                Color outlineColor = new Color(20, 22, 26, 238);
-
                 AppendBodyPart(
                     _bodyOutlines,
                     primitives[part],
-                    role,
-                    pixelX,
-                    pixelY,
+                    bodyRoles[part],
+                    position.X * tilePixelSize,
+                    position.Y * tilePixelSize,
                     radiusX * tilePixelSize,
                     radiusY * tilePixelSize,
                     partRotations[part],
                     outline * tilePixelSize,
                     outlineColor);
+            }
 
-                AppendBodyPart(
-                    _vertices,
-                    primitives[part],
-                    role,
-                    pixelX,
-                    pixelY,
-                    radiusX * tilePixelSize,
-                    radiusY * tilePixelSize,
-                    partRotations[part],
-                    0f,
-                    partColor);
+            // Back-to-front fill order: legs, torso/body, arms/hands, head.
+            for (int layer = 0; layer < 4; layer++)
+            {
+                for (int part = start; part < end; part++)
+                {
+                    BodyPartRole role = bodyRoles[part];
+                    if (GetBodyLayer(role) != layer)
+                        continue;
+
+                    Vector3 position = partPositions[part];
+                    Vector3 scale = partScales[part];
+                    float radiusX = MathF.Max(0.015f, MathF.Abs(scale.X));
+                    float radiusY = MathF.Max(0.015f, MathF.Abs(scale.Y));
+                    float extent = MathF.Sqrt(
+                        radiusX * radiusX +
+                        radiusY * radiusY);
+
+                    if (!IsPartInView(
+                        position,
+                        extent,
+                        minWorldX,
+                        maxWorldX,
+                        minWorldY,
+                        maxWorldY))
+                    {
+                        continue;
+                    }
+
+                    AppendBodyPart(
+                        _vertices,
+                        primitives[part],
+                        role,
+                        position.X * tilePixelSize,
+                        position.Y * tilePixelSize,
+                        radiusX * tilePixelSize,
+                        radiusY * tilePixelSize,
+                        partRotations[part],
+                        0f,
+                        GetBodyPartColor(role, color));
+                }
             }
 
             if (hasSelection &&
@@ -1350,6 +1380,37 @@ public sealed class UnitRenderSystem
                 color));
         }
     }
+
+    private static bool IsPartInView(
+        Vector3 position,
+        float extent,
+        float minX,
+        float maxX,
+        float minY,
+        float maxY) =>
+        position.X + extent >= minX &&
+        position.X - extent <= maxX &&
+        position.Y + extent >= minY &&
+        position.Y - extent <= maxY;
+
+    private static int GetBodyLayer(BodyPartRole role) =>
+        role switch
+        {
+            BodyPartRole.Thigh or
+            BodyPartRole.Shin or
+            BodyPartRole.Foot => 0,
+
+            BodyPartRole.Torso or
+            BodyPartRole.Segment or
+            BodyPartRole.Generic => 1,
+
+            BodyPartRole.UpperArm or
+            BodyPartRole.Forearm or
+            BodyPartRole.Hand => 2,
+
+            BodyPartRole.Head => 3,
+            _ => 1
+        };
 
     private static Color GetBodyPartColor(
         BodyPartRole role,
