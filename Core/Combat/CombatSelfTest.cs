@@ -29,6 +29,7 @@ public static class CombatSelfTest
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
+        RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
         RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
@@ -563,6 +564,41 @@ public static class CombatSelfTest
                navigation.RouteTrafficCellsConsideredThisUpdate == 0;
     }
 
+    private static bool TestAiSearchAdvance()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 12);
+
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < worldMap.TileWidth; x++)
+                worldMap.SetSolidHeight(x, y, 10, 1);
+        }
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId scout = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(4.5f, 24.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        int index = scout.Index;
+        simulation.Units.ViewRange[index] = 2f;
+        simulation.Units.FieldOfView[index] = 180f;
+        simulation.AI.Enabled = true;
+        simulation.VisionEnabled = true;
+
+        float startX = simulation.Units.Position[index].X;
+        for (int tick = 0; tick < 20; tick++)
+            simulation.Update(worldMap, 0.1f);
+
+        return simulation.Units.Position[index].X > startX + 3f &&
+               simulation.AI.Store.State[index] == UnitAiState.Search;
+    }
+
     private static bool TestVisionSpatialIndex()
     {
         WorldMap worldMap = new WorldMap(
@@ -682,15 +718,22 @@ public static class CombatSelfTest
             return false;
         }
 
-        // Start aiming at the persistent target, allow aim time to accumulate,
+        // Aim at an exposed upper-body point, as selected by terrain-aware vision,
         // then fire a real ballistic projectile through the simulation pipeline.
-        simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target);
+        Vector3 visibleAimPoint = simulation.Units.Position[target.Index] +
+            new Vector3(0f, 0f, simulation.Units.Height[target.Index] * 0.88f);
+        simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target,
+            visibleAimPoint);
         simulation.Update(worldMap, 0.25f);
 
         bool fired = simulation.FireWeaponAt(
             shooter,
             UnitWeaponSlot.Primary,
-            target);
+            target,
+            visibleAimPoint);
         if (!fired || simulation.Projectiles.ActiveCount == 0)
             return false;
 
