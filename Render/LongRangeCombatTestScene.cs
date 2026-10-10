@@ -127,7 +127,7 @@ public sealed class LongRangeCombatTestScene
             $"LONG-RANGE {TotalUnits} | " +
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
-            $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | "
+            $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
@@ -303,17 +303,17 @@ public sealed class LongRangeCombatTestScene
         int dy = y - centerY;
 
         if (Math.Abs(
-                dx + 34) <= 2 &&
+                dx + (int)(34f * scale)) <= 2f * scale &&
             Math.Abs(
-                dy) <= 12)
+                dy) <= 12f * scale)
         {
             return true;
         }
 
         if (Math.Abs(
-                dx - 38) <= 2 &&
+                dx - (int)(38f * scale)) <= 2f * scale &&
             Math.Abs(
-                dy + 8) <= 13)
+                dy + (int)(8f * scale)) <= 13f * scale)
         {
             return true;
         }
@@ -456,7 +456,7 @@ public sealed class LongRangeCombatTestScene
         int unitIndex =
             id.Index;
 
-        // The range test intentionally freezes the battle line.
+        // Give each unit a real movement order so the test exercises route planning.
         SetMarchTarget(simulation, id, worldMap, side, tileX, tileY);
         simulation.Units.ViewRange[unitIndex] = 500f;
         simulation.Units.FieldOfView[unitIndex] = 180f;
@@ -501,7 +501,7 @@ public sealed class LongRangeCombatTestScene
 
         _elapsed = 0f;
         _fireTimer = 0f;
-                _hitsAtReset =
+        _hitsAtReset =
             simulation.Projectiles.TotalHits;
 
         simulation.AI.Enabled = false;
