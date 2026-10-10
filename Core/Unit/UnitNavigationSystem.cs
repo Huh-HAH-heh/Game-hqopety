@@ -34,6 +34,10 @@ public sealed class UnitNavigationSystem
     private int[] _failedGoalY = Array.Empty<int>();
     private int[] _failedStartCell = Array.Empty<int>();
     private long[] _failedTerrainVersion = Array.Empty<long>();
+    private long[] _routeTerrainVersion = Array.Empty<long>();
+
+    public int RoutesBuilt { get; private set; }
+    public int RoutesFailed { get; private set; }
 
     private int _width;
     private int _height;
@@ -110,7 +114,8 @@ public sealed class UnitNavigationSystem
             targetFarMoved ||
             deviatedFromRoute ||
             (routeFinished && goalChanged) ||
-            repositionedAwayFromFinishedRoute;
+            repositionedAwayFromFinishedRoute ||
+            (sameOwner && _routeTerrainVersion[unitIndex] != worldMap.TerrainVersion);
 
         if (needsRoute)
         {
@@ -138,6 +143,8 @@ public sealed class UnitNavigationSystem
                     _routeGoalX[unitIndex] = targetX;
                     _routeGoalY[unitIndex] = targetY;
                     _routeOwner[unitIndex] = owner;
+                    _routeTerrainVersion[unitIndex] = worldMap.TerrainVersion;
+                    RoutesBuilt++;
                     _failedGoalX[unitIndex] = int.MinValue;
                     _failedGoalY[unitIndex] = int.MinValue;
                     length = path.Length;
@@ -155,6 +162,7 @@ public sealed class UnitNavigationSystem
                     _failedGoalY[unitIndex] = targetY;
                     _failedStartCell[unitIndex] = startCell;
                     _failedTerrainVersion[unitIndex] = worldMap.TerrainVersion;
+                    RoutesFailed++;
                     waypoint = default;
                     return false;
                 }
@@ -557,6 +565,7 @@ public sealed class UnitNavigationSystem
         Array.Resize(ref _failedGoalY, newCapacity);
         Array.Resize(ref _failedStartCell, newCapacity);
         Array.Resize(ref _failedTerrainVersion, newCapacity);
+        Array.Resize(ref _routeTerrainVersion, newCapacity);
 
         for (int i = 0; i < newCapacity; i++)
         {
