@@ -152,6 +152,16 @@ public sealed class UnitBodyStore
     public void SetInitialWorldPosition(
         BodyHandle handle,
         Vector3 unitPosition,
+        float unitRotation) =>
+        SetInitialWorldPosition(
+            handle,
+            unitPosition,
+            unitRotation,
+            unitRotation);
+
+    public void SetInitialWorldPosition(
+        BodyHandle handle,
+        Vector3 unitPosition,
         float unitRotation,
         float headRotation)
     {
