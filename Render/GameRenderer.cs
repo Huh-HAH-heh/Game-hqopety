@@ -990,6 +990,15 @@ public sealed class GameRenderer
                 _unitSimulation.Weapons.CycleFireMode(
                     unitIndex,
                     UnitWeaponSlot.Primary);
+
+                int stateIndex = UnitWeaponStore.GetIndex(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+
+                Console.WriteLine(
+                    $"[FIRE CONTROL] Unit[{unitIndex}] " +
+                    $"Fire={_unitSimulation.Weapons.CurrentFireMode[stateIndex]} " +
+                    $"Aim={_unitSimulation.Weapons.CurrentAimMode[stateIndex]}");
             }
 
             return;
@@ -1004,6 +1013,15 @@ public sealed class GameRenderer
                 _unitSimulation.Weapons.CycleAimMode(
                     unitIndex,
                     UnitWeaponSlot.Primary);
+
+                int stateIndex = UnitWeaponStore.GetIndex(
+                    unitIndex,
+                    UnitWeaponSlot.Primary);
+
+                Console.WriteLine(
+                    $"[FIRE CONTROL] Unit[{unitIndex}] " +
+                    $"Fire={_unitSimulation.Weapons.CurrentFireMode[stateIndex]} " +
+                    $"Aim={_unitSimulation.Weapons.CurrentAimMode[stateIndex]}");
             }
 
             return;
