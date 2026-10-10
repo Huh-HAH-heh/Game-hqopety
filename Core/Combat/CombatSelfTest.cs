@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using Core.Combat;
 using Core.Items;
+using Core.Map;
 
 namespace Core.Unit;
 
@@ -25,6 +26,10 @@ public static class CombatSelfTest
         RunTest("Weapon: ammunition selection", TestAmmunitionSelection, ref passed, ref failed);
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
+        RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
+        RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
+        RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
+        RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
 
         Console.WriteLine("---------------------------------------");
         Console.WriteLine($"RESULT: PASS={passed} FAIL={failed}");
@@ -396,4 +401,249 @@ public static class CombatSelfTest
         return stressed > calm &&
                calm > 0f;
     }
+    private static bool TestNavigationRoutesAroundWall()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 50);
+
+        int width = worldMap.TileWidth;
+        int height = worldMap.TileHeight;
+        int wallX = width / 2;
+        int centerY = height / 2;
+        const ushort floorHeight = 10;
+        const ushort wallHeight = 40;
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+                worldMap.SetSolidHeight(x, y, floorHeight, 1);
+        }
+
+        for (int y = 3; y < height - 3; y++)
+            worldMap.SetSolidHeight(wallX, y, wallHeight, 2);
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        Vector3 start = new Vector3(5.5f, centerY + 0.5f, 1f);
+        Vector3 target = new Vector3(width - 5.5f, centerY + 0.5f, 1f);
+        UnitId unit = simulation.Spawn(
+            UnitType.Colonist,
+            start,
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        UnitNavigationSystem navigation = simulation.Navigation;
+        Vector3 position = start;
+        float startY = start.Y;
+        bool detoured = false;
+
+        navigation.BeginUpdate(simulation.Units, worldMap);
+
+        for (int step = 0; step < width * height; step++)
+        {
+            if (!navigation.TryGetWaypoint(
+                    simulation.Units,
+                    unit.Index,
+                    worldMap,
+                    position,
+                    target,
+                    out Vector2 waypoint))
+            {
+                return false;
+            }
+
+            if (MathF.Abs(waypoint.Y - startY) > 0.01f)
+                detoured = true;
+
+            if (waypoint == new Vector2(target.X, target.Y))
+            {
+                if (!detoured || navigation.RoutesBuilt != 1)
+                    return false;
+
+                break;
+            }
+
+            int cellX = Math.Clamp((int)MathF.Floor(waypoint.X), 0, width - 1);
+            int cellY = Math.Clamp((int)MathF.Floor(waypoint.Y), 0, height - 1);
+
+            if (cellX == wallX && cellY >= 3 && cellY < height - 3)
+                return false;
+
+            position = new Vector3(
+                waypoint.X,
+                waypoint.Y,
+                worldMap.GetSurfaceHeight(cellX, cellY));
+        }
+
+        // Seal the previously open gaps; A* must report that the goal is unreachable.
+        for (int y = 0; y < height; y++)
+            worldMap.SetSolidHeight(wallX, y, wallHeight, 2);
+
+        UnitNavigationSystem blockedNavigation = new UnitNavigationSystem();
+        blockedNavigation.BeginUpdate(simulation.Units, worldMap);
+
+        bool foundBlockedRoute = blockedNavigation.TryGetWaypoint(
+            simulation.Units,
+            unit.Index,
+            worldMap,
+            start,
+            target,
+            out _);
+
+        return !foundBlockedRoute && blockedNavigation.RoutesFailed == 1;
+    }
+
+    private static bool TestVisionSpatialIndex()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 10,
+            regionsY: 10,
+            layerCount: 10);
+        UnitSimulation simulation = new UnitSimulation(256, 2048);
+
+        const int columns = 16;
+        const int rows = 10;
+        const int unitCount = columns * rows;
+
+        for (int row = 0; row < rows; row++)
+        {
+            for (int column = 0; column < columns; column++)
+            {
+                Vector3 position = new Vector3(
+                    20f + column * 25f,
+                    20f + row * 25f,
+                    0f);
+
+                UnitId unit = simulation.Spawn(
+                    UnitType.Colonist,
+                    position,
+                    Vector3.UnitX,
+                    Vector3.UnitX);
+
+                simulation.Units.ViewRange[unit.Index] = 10f;
+                simulation.Units.FieldOfView[unit.Index] = 360f;
+            }
+        }
+
+        simulation.Vision.Update(
+            simulation.Units,
+            worldMap,
+            0.1f,
+            simulation.Health);
+
+        int bruteForcePairs = unitCount * (unitCount - 1);
+
+        return simulation.Vision.LastCandidatePairs < bruteForcePairs / 4 &&
+               simulation.Vision.LastVisibleTargetCount == 0 &&
+               simulation.Vision.UpdateCount == 1;
+    }
+
+    private static bool TestWeaponAmmoConsumption()
+    {
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 5.5f, 0f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter,
+            WeaponCatalog.AssaultRifle);
+
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(
+                shooter,
+                inventorySlot,
+                UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        int weaponIndex = UnitWeaponStore.GetIndex(
+            shooter.Index,
+            UnitWeaponSlot.Primary);
+        simulation.Weapons.Ammo[weaponIndex] = 1;
+        simulation.BeginMetricsFrame();
+
+        bool fired = simulation.FireWeapon(
+            shooter,
+            UnitWeaponSlot.Primary,
+            Vector3.UnitX);
+
+        return fired &&
+               simulation.Weapons.Ammo[weaponIndex] == 0 &&
+               simulation.Projectiles.ActiveCount == 1 &&
+               simulation.TotalShotsFired == 1 &&
+               simulation.TotalRoundsConsumed == 1 &&
+               simulation.TotalProjectilesSpawned == 1 &&
+               simulation.Weapons.ShotsFiredThisFrame == 1;
+    }
+
+    private static bool TestDeadUnitCleanup()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 20);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+
+        UnitId dead = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 5.5f, 0f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        UnitId survivor = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(8.5f, 5.5f, 0f),
+            -Vector3.UnitX,
+            -Vector3.UnitX);
+
+        simulation.SetTarget(dead, new Vector3(20.5f, 5.5f, 0f));
+        simulation.Weapons.StartBurst(
+            dead.Index,
+            UnitWeaponSlot.Primary,
+            survivor,
+            3,
+            0.1f);
+        simulation.Health.OverallHitPoints[dead.Index] = 0f;
+
+        simulation.Update(worldMap, 1f / 60f);
+
+        if (simulation.Units.HasTarget[dead.Index] ||
+            simulation.Units.Velocity[dead.Index] != Vector3.Zero ||
+            simulation.AI.Store.State[dead.Index] != UnitAiState.Dead ||
+            simulation.Weapons.BurstRemaining[
+                UnitWeaponStore.GetIndex(dead.Index, UnitWeaponSlot.Primary)] != 0)
+        {
+            return false;
+        }
+
+        if (simulation.FireWeapon(
+                dead,
+                UnitWeaponSlot.Primary,
+                Vector3.UnitX) ||
+            simulation.FireWeaponAt(
+                survivor,
+                UnitWeaponSlot.Primary,
+                dead))
+        {
+            return false;
+        }
+
+        if (!simulation.Destroy(dead))
+            return false;
+
+        UnitId replacement = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10.5f, 5.5f, 0f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        return replacement.Index == dead.Index &&
+               replacement.Generation != dead.Generation &&
+               !simulation.Units.IsAlive(dead);
+    }
+
 }
