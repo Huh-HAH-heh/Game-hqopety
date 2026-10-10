@@ -215,6 +215,16 @@ public sealed class VisionSystem
                         if (observer == target)
                             continue;
 
+                        // Vision.GetVisibleTargets is the combat target list.
+                        // Allies cannot be selected for attack, so testing every
+                        // friendly pair wasted most of the frame on dense formations.
+                        if (!FactionRules.ShouldAttack(
+                                units.FactionTag[observer],
+                                units.FactionTag[target]))
+                        {
+                            continue;
+                        }
+
                         _candidatePairCount++;
 
                         VisionCheck check = Evaluate(
