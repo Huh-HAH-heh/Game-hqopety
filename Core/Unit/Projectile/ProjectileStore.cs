@@ -15,7 +15,8 @@ public sealed class ProjectileStore
 {
     private const int DefaultCapacity = 8192;
     private const int ImpactCapacity = 256;
-    private const int TraceCapacity = 1024;
+    private const int TraceCapacity = 512;
+    public const float TraceLifetimeSeconds = 0.035f;
 
     private Vector3[] _position;
     private Vector3[] _previousPosition;
@@ -250,9 +251,9 @@ public sealed class ProjectileStore
         _impactKinds[index] = kind;
         _impactLifetimes[index] = kind switch
         {
-            ProjectileImpactKind.MuzzleFlash => 0.10f,
-            ProjectileImpactKind.UnitHit => 0.30f,
-            _ => 0.24f
+            ProjectileImpactKind.MuzzleFlash => 0.055f,
+            ProjectileImpactKind.UnitHit => 0.16f,
+            _ => 0.12f
         };
 
         _nextImpact = (index + 1) % ImpactCapacity;
@@ -267,7 +268,7 @@ public sealed class ProjectileStore
         _traceStarts[index] = start;
         _traceEnds[index] = end;
         _traceFactions[index] = faction;
-        _traceLifetimes[index] = 0.14f;
+        _traceLifetimes[index] = TraceLifetimeSeconds;
         _nextTrace = (index + 1) % TraceCapacity;
     }
 
