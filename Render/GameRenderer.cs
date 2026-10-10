@@ -272,6 +272,7 @@ public sealed class GameRenderer
                     $"{_unitSimulation.Navigation.SearchesThisUpdate} A*/" +
                     $"{_unitSimulation.Navigation.CellsExpandedThisUpdate:N0} nodes/" +
                     $"{_unitSimulation.Navigation.SearchMillisecondsThisUpdate:0.0}ms " +
+                $"NavGrid={_unitSimulation.Navigation.NavigationGridBuildMilliseconds:0.0}ms " +
                 $"TerrainQ={_mapRenderer.TerrainQuadCount:N0} " +
                 $"Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"LayerShader={_mapRenderer.UsesTerrainLayerShader} " +
