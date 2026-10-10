@@ -35,7 +35,7 @@ internal static class UnitBodyCatalog
             new Vector3(0.075f, 0.024f, 0.05f),
             BodyPrimitive.Box,
             parentIndex: 0,
-            localRotation: -0.70f,
+            localRotation: -0.35f,
             role: BodyPartRole.UpperArm),
 
         new BodyPartDefinition(
@@ -43,7 +43,7 @@ internal static class UnitBodyCatalog
             new Vector3(0.064f, 0.021f, 0.045f),
             BodyPrimitive.Box,
             parentIndex: 2,
-            localRotation: 0.80f,
+            localRotation: 0.70f,
             role: BodyPartRole.Forearm),
 
         new BodyPartDefinition(
@@ -60,7 +60,7 @@ internal static class UnitBodyCatalog
             new Vector3(0.075f, 0.024f, 0.05f),
             BodyPrimitive.Box,
             parentIndex: 0,
-            localRotation: 0.70f,
+            localRotation: 0.35f,
             role: BodyPartRole.UpperArm),
 
         new BodyPartDefinition(
@@ -68,7 +68,7 @@ internal static class UnitBodyCatalog
             new Vector3(0.064f, 0.021f, 0.045f),
             BodyPrimitive.Box,
             parentIndex: 5,
-            localRotation: -0.80f,
+            localRotation: -0.70f,
             role: BodyPartRole.Forearm),
 
         new BodyPartDefinition(
