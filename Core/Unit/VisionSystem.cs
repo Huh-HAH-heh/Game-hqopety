@@ -49,6 +49,7 @@ public sealed class VisionSystem
 
     private const float UpdateInterval = 0.10f;
     private const float Epsilon = 0.02f;
+    private const float LayerEpsilon = Epsilon * WorldMap.HeightUnitsPerMeter;
     private const int SpatialCellSize = 16;
 
     private float _updateTimer;
@@ -764,6 +765,8 @@ public sealed class VisionSystem
         float dx = end.X - start.X;
         float dy = end.Y - start.Y;
         float dz = end.Z - start.Z;
+        float startLayerZ = start.Z * WorldMap.HeightUnitsPerMeter;
+        float dzLayers = dz * WorldMap.HeightUnitsPerMeter;
 
         float horizontalLengthSquared =
             dx * dx + dy * dy;
@@ -773,8 +776,9 @@ public sealed class VisionSystem
             int verticalCellX = (int)MathF.Floor(end.X);
             int verticalCellY = (int)MathF.Floor(end.Y);
 
-            float lowZ = MathF.Min(start.Z, end.Z);
-            float highZ = MathF.Max(start.Z, end.Z);
+            float endLayerZ = startLayerZ + dzLayers;
+            float lowZ = MathF.Min(startLayerZ, endLayerZ);
+            float highZ = MathF.Max(startLayerZ, endLayerZ);
 
             int firstZ = Math.Max(0, (int)MathF.Floor(lowZ));
             int lastZ = Math.Min(
@@ -787,23 +791,23 @@ public sealed class VisionSystem
                     continue;
 
                 bool intersects =
-                    MathF.Abs(dz) < 0.000001f
-                        ? start.Z >= z - Epsilon &&
-                          start.Z < z + 1f - Epsilon
-                        : highZ > z + Epsilon &&
-                          lowZ < z + 1f - Epsilon;
+                    MathF.Abs(dzLayers) < 0.000001f
+                        ? startLayerZ >= z - LayerEpsilon &&
+                          startLayerZ < z + 1f - LayerEpsilon
+                        : highZ > z + LayerEpsilon &&
+                          lowZ < z + 1f - LayerEpsilon;
 
                 if (!intersects)
                     continue;
 
                 float boundaryZ =
-                    dz < 0f ? z + 1f : z;
+                    dzLayers < 0f ? z + 1f : z;
 
                 float hitT =
-                    MathF.Abs(dz) < 0.000001f
+                    MathF.Abs(dzLayers) < 0.000001f
                         ? 0f
                         : Math.Clamp(
-                            (boundaryZ - start.Z) / dz,
+                            (boundaryZ - startLayerZ) / dzLayers,
                             0f,
                             1f);
 
@@ -888,8 +892,8 @@ public sealed class VisionSystem
 
             if (checkEnd > segmentStart)
             {
-                float z0 = start.Z + dz * segmentStart;
-                float z1 = start.Z + dz * checkEnd;
+                float z0 = startLayerZ + dzLayers * segmentStart;
+                float z1 = startLayerZ + dzLayers * checkEnd;
                 float lowZ = MathF.Min(z0, z1);
                 float highZ = MathF.Max(z0, z1);
 
@@ -904,26 +908,26 @@ public sealed class VisionSystem
                         continue;
 
                     bool intersects =
-                        MathF.Abs(dz) < 0.000001f
-                            ? z0 >= z - Epsilon &&
-                              z0 < z + 1f - Epsilon
-                            : highZ > z + Epsilon &&
-                              lowZ < z + 1f - Epsilon;
+                        MathF.Abs(dzLayers) < 0.000001f
+                            ? z0 >= z - LayerEpsilon &&
+                              z0 < z + 1f - LayerEpsilon
+                            : highZ > z + LayerEpsilon &&
+                              lowZ < z + 1f - LayerEpsilon;
 
                     if (!intersects)
                         continue;
 
                     float hitT;
 
-                    if (MathF.Abs(dz) < 0.000001f)
+                    if (MathF.Abs(dzLayers) < 0.000001f)
                     {
                         hitT = segmentStart;
                     }
                     else
                     {
-                        float entryZ = dz > 0f ? z : z + 1f;
+                        float entryZ = dzLayers > 0f ? z : z + 1f;
                         hitT = Math.Clamp(
-                            (entryZ - start.Z) / dz,
+                            (entryZ - startLayerZ) / dzLayers,
                             segmentStart,
                             checkEnd);
                     }
