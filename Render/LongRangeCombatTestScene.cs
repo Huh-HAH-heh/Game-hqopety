@@ -649,8 +649,13 @@ public sealed class LongRangeCombatTestScene
             UnitId shooter =
                 _units[i];
 
-            if (!simulation.Units.IsAlive(shooter))
+            if (!simulation.Units.TryGetIndex(
+                    shooter,
+                    out int shooterIndex) ||
+                simulation.Health.OverallHitPoints[shooterIndex] <= 0f)
+            {
                 continue;
+            }
 
             int targetSlot =
                 i < UnitsPerFaction
@@ -660,8 +665,13 @@ public sealed class LongRangeCombatTestScene
             UnitId target =
                 _units[targetSlot];
 
-            if (!simulation.Units.IsAlive(target))
+            if (!simulation.Units.TryGetIndex(
+                    target,
+                    out int targetIndex) ||
+                simulation.Health.OverallHitPoints[targetIndex] <= 0f)
+            {
                 continue;
+            }
 
             simulation.FireWeaponAt(
                 shooter,
