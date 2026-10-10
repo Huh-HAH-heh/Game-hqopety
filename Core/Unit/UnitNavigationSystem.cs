@@ -10,7 +10,7 @@ namespace Core.Unit;
 /// </summary>
 public sealed class UnitNavigationSystem
 {
-    private const float MaxStepHeight = 1.25f;
+    private const float MaxStepHeight = 1.5f;
     private const float HeightCost = 0.15f;
     private const int MaxRouteBuildsPerUpdate = 16;
     private const int MovingGoalTolerance = 4;
