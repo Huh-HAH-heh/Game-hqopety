@@ -4,11 +4,20 @@ using Core.Combat;
 
 namespace Core.Unit;
 
+public enum ProjectileImpactKind : byte
+{
+    MuzzleFlash,
+    UnitHit,
+    TerrainHit
+}
+
 public sealed class ProjectileStore
 {
     private const int DefaultCapacity = 8192;
+    private const int ImpactCapacity = 256;
 
     private Vector3[] _position;
+    private Vector3[] _previousPosition;
     private Vector3[] _velocity;
     private UnitId[] _owner;
     private ushort[] _factionTag;
@@ -25,6 +34,12 @@ public sealed class ProjectileStore
     private float[] _bleedChance;
     private float[] _lifetime;
     private uint[] _generation;
+
+    private readonly Vector3[] _impactPositions = new Vector3[ImpactCapacity];
+    private readonly float[] _impactLifetimes = new float[ImpactCapacity];
+    private readonly ProjectileImpactKind[] _impactKinds =
+        new ProjectileImpactKind[ImpactCapacity];
+    private int _nextImpact;
 
     private int[] _activeIndices;
     private int[] _activeSlots;
@@ -46,7 +61,12 @@ public sealed class ProjectileStore
         _position.Length;
 
     public Vector3[] Position => _position;
+    public Vector3[] PreviousPosition => _previousPosition;
     public Vector3[] Velocity => _velocity;
+    public Vector3[] ImpactPositions => _impactPositions;
+    public float[] ImpactLifetimes => _impactLifetimes;
+    public ProjectileImpactKind[] ImpactKinds => _impactKinds;
+    public int ImpactCapacityCount => ImpactCapacity;
     public UnitId[] Owner => _owner;
     public ushort[] FactionTag => _factionTag;
     public float[] Energy => _energy;
@@ -75,6 +95,7 @@ public sealed class ProjectileStore
                 nameof(initialCapacity));
 
         _position = new Vector3[initialCapacity];
+        _previousPosition = new Vector3[initialCapacity];
         _velocity = new Vector3[initialCapacity];
         _owner = new UnitId[initialCapacity];
         _factionTag = new ushort[initialCapacity];
@@ -157,6 +178,7 @@ public sealed class ProjectileStore
             velocityValue;
 
         _position[index] = position;
+        _previousPosition[index] = position;
         _velocity[index] =
             direction *
             velocityValue;
@@ -208,6 +230,32 @@ public sealed class ProjectileStore
             _generation[index]);
     }
 
+    public void RegisterImpact(
+        Vector3 position,
+        ProjectileImpactKind kind)
+    {
+        int index = _nextImpact;
+        _impactPositions[index] = position;
+        _impactKinds[index] = kind;
+        _impactLifetimes[index] = kind switch
+        {
+            ProjectileImpactKind.MuzzleFlash => 0.10f,
+            ProjectileImpactKind.UnitHit => 0.30f,
+            _ => 0.24f
+        };
+
+        _nextImpact = (index + 1) % ImpactCapacity;
+    }
+
+    public void UpdateImpactEffects(float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        for (int i = 0; i < ImpactCapacity; i++)
+            _impactLifetimes[i] = MathF.Max(0f, _impactLifetimes[i] - deltaTime);
+    }
+
     public void RegisterHit(
         UnitId target,
         UnitHealthPartId part,
@@ -217,6 +265,7 @@ public sealed class ProjectileStore
         LastHitTarget = target;
         LastHitPart = part;
         LastHitPosition = position;
+        RegisterImpact(position, ProjectileImpactKind.UnitHit);
     }
 
     public void Clear()
@@ -233,6 +282,10 @@ public sealed class ProjectileStore
         LastHitPosition = Vector3.Zero;
         LastHitTarget = default;
         LastHitPart = UnitHealthPartId.None;
+        Array.Clear(_impactLifetimes);
+        Array.Clear(_impactPositions);
+        Array.Clear(_impactKinds);
+        _nextImpact = 0;
     }
 
     public bool Destroy(
@@ -316,6 +369,9 @@ public sealed class ProjectileStore
 
         Array.Resize(
             ref _position,
+            newCapacity);
+        Array.Resize(
+            ref _previousPosition,
             newCapacity);
         Array.Resize(
             ref _velocity,
