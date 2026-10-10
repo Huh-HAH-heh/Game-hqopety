@@ -43,6 +43,7 @@ public static class CombatSelfTest
         RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
+        RunTest("Combat: aim point uses an exposed hit volume", TestAimPointUsesExposedHitVolume, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
@@ -1306,6 +1307,86 @@ public static class CombatSelfTest
             out _);
 
         return aboveWallVisible && !throughWallVisible;
+    }
+
+    private static bool TestAimPointUsesExposedHitVolume()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 64);
+
+        // The ridge blocks a torso-level ray but leaves the upper head volume exposed.
+        worldMap.SetSolidHeight(10, 10, 17, 1);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 0.1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        simulation.Units.ViewRange[shooter.Index] = 30f;
+        simulation.Units.FieldOfView[shooter.Index] = 360f;
+        simulation.Units.ViewRange[target.Index] = 30f;
+        simulation.Units.FieldOfView[target.Index] = 360f;
+
+        VisionSystem vision = simulation.Vision;
+        Vector3 eye = vision.GetEyePosition(
+            simulation.Units,
+            shooter.Index);
+
+        Vector3 torsoCenter =
+            simulation.Units.Position[target.Index] +
+            new Vector3(
+                0f,
+                0f,
+                simulation.Units.Height[target.Index] * 0.55f);
+
+        if (vision.HasLineOfSight(worldMap, eye, torsoCenter, out _))
+            return false;
+
+        Span<Vector3> candidates =
+            stackalloc Vector3[UnitHitSystem.MaxAimPointCount];
+
+        int count = UnitHitSystem.GetAimPoints(
+            simulation.Units,
+            target.Index,
+            eye,
+            candidates);
+
+        UnitHitSystem hitSystem = new UnitHitSystem();
+
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 candidate = candidates[i];
+
+            if (!vision.HasLineOfSight(worldMap, eye, candidate, out _))
+                continue;
+
+            if (hitSystem.TryHitUnit(
+                    simulation.Units,
+                    target.Index,
+                    eye,
+                    candidate,
+                    0f,
+                    UnitHealthPartId.None,
+                    out UnitHitResult hit) &&
+                hit.Part == UnitHealthPartId.Head)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TestVisionSampleMemory()
