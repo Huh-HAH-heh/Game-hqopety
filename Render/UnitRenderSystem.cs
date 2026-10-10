@@ -340,17 +340,37 @@ public sealed class UnitRenderSystem
                         continue;
                     }
 
+                    float pixelX = position.X * tilePixelSize;
+                    float pixelY = position.Y * tilePixelSize;
+                    float rotation = partRotations[part];
+
                     AppendBodyPart(
                         _vertices,
                         primitives[part],
                         role,
-                        position.X * tilePixelSize,
-                        position.Y * tilePixelSize,
+                        pixelX,
+                        pixelY,
                         radiusX * tilePixelSize,
                         radiusY * tilePixelSize,
-                        partRotations[part],
+                        rotation,
                         0f,
                         GetBodyPartColor(role, color));
+
+                    if (role == BodyPartRole.Head)
+                    {
+                        float faceRadius = MathF.Max(
+                            0.30f,
+                            MathF.Min(radiusX, radiusY) * tilePixelSize * 0.18f);
+
+                        AppendEllipse(
+                            _vertices,
+                            pixelX + MathF.Cos(rotation) * radiusX * tilePixelSize * 0.48f,
+                            pixelY + MathF.Sin(rotation) * radiusX * tilePixelSize * 0.48f,
+                            faceRadius,
+                            faceRadius,
+                            rotation,
+                            new Color(28, 30, 34, 255));
+                    }
                 }
             }
 
