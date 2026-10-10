@@ -15,6 +15,7 @@ public sealed class ProjectileStore
 {
     private const int DefaultCapacity = 8192;
     private const int ImpactCapacity = 256;
+    private const int TraceCapacity = 1024;
 
     private Vector3[] _position;
     private Vector3[] _previousPosition;
@@ -39,7 +40,12 @@ public sealed class ProjectileStore
     private readonly float[] _impactLifetimes = new float[ImpactCapacity];
     private readonly ProjectileImpactKind[] _impactKinds =
         new ProjectileImpactKind[ImpactCapacity];
+    private readonly Vector3[] _traceStarts = new Vector3[TraceCapacity];
+    private readonly Vector3[] _traceEnds = new Vector3[TraceCapacity];
+    private readonly ushort[] _traceFactions = new ushort[TraceCapacity];
+    private readonly float[] _traceLifetimes = new float[TraceCapacity];
     private int _nextImpact;
+    private int _nextTrace;
 
     private int[] _activeIndices;
     private int[] _activeSlots;
@@ -67,6 +73,11 @@ public sealed class ProjectileStore
     public float[] ImpactLifetimes => _impactLifetimes;
     public ProjectileImpactKind[] ImpactKinds => _impactKinds;
     public int ImpactCapacityCount => ImpactCapacity;
+    public Vector3[] TraceStarts => _traceStarts;
+    public Vector3[] TraceEnds => _traceEnds;
+    public ushort[] TraceFactions => _traceFactions;
+    public float[] TraceLifetimes => _traceLifetimes;
+    public int TraceCapacityCount => TraceCapacity;
     public UnitId[] Owner => _owner;
     public ushort[] FactionTag => _factionTag;
     public float[] Energy => _energy;
@@ -247,6 +258,19 @@ public sealed class ProjectileStore
         _nextImpact = (index + 1) % ImpactCapacity;
     }
 
+    public void RegisterTrace(
+        Vector3 start,
+        Vector3 end,
+        ushort faction)
+    {
+        int index = _nextTrace;
+        _traceStarts[index] = start;
+        _traceEnds[index] = end;
+        _traceFactions[index] = faction;
+        _traceLifetimes[index] = 0.14f;
+        _nextTrace = (index + 1) % TraceCapacity;
+    }
+
     public void UpdateImpactEffects(float deltaTime)
     {
         if (deltaTime <= 0f)
@@ -254,6 +278,9 @@ public sealed class ProjectileStore
 
         for (int i = 0; i < ImpactCapacity; i++)
             _impactLifetimes[i] = MathF.Max(0f, _impactLifetimes[i] - deltaTime);
+
+        for (int i = 0; i < TraceCapacity; i++)
+            _traceLifetimes[i] = MathF.Max(0f, _traceLifetimes[i] - deltaTime);
     }
 
     public void RegisterHit(
@@ -285,7 +312,12 @@ public sealed class ProjectileStore
         Array.Clear(_impactLifetimes);
         Array.Clear(_impactPositions);
         Array.Clear(_impactKinds);
+        Array.Clear(_traceStarts);
+        Array.Clear(_traceEnds);
+        Array.Clear(_traceLifetimes);
+        Array.Clear(_traceFactions);
         _nextImpact = 0;
+        _nextTrace = 0;
     }
 
     public bool Destroy(
