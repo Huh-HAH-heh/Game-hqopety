@@ -373,13 +373,22 @@ public sealed class UnitAiSystem
                     continue;
                 }
 
-                Vector3 aimPoint = ChooseVisibleAimPoint(
-                    units,
-                    worldMap,
-                    vision,
-                    unit,
-                    target.Index,
-                    shotCheck.VisibleTargetPoint);
+                if (!TryChooseVisibleAimPoint(
+                        units,
+                        worldMap,
+                        vision,
+                        unit,
+                        target.Index,
+                        out Vector3 aimPoint))
+                {
+                    // A broad silhouette point can be visible while not belonging
+                    // to the actual body collider. Do not shoot at that arbitrary point.
+                    ClearNonSuppressiveAiming(weapons, inventory, unit);
+                    units.Target[unit] = Store.LastSeenPosition[unit];
+                    units.HasTarget[unit] = true;
+                    Store.State[unit] = UnitAiState.Search;
+                    continue;
+                }
 
                 bool fired =
                     TryFireAnyRangedWeapon(
@@ -537,44 +546,46 @@ public sealed class UnitAiSystem
         return delta.LengthSquared() > 1f;
     }
 
-    private static Vector3 ChooseVisibleAimPoint(
+    private static bool TryChooseVisibleAimPoint(
         UnitStore units,
         WorldMap worldMap,
         VisionSystem vision,
         int shooter,
         int target,
-        Vector3 visiblePoint)
+        out Vector3 aimPoint)
     {
         Vector3 eye = vision.GetEyePosition(units, shooter);
-        Vector3 targetPosition = units.Position[target];
-        float targetHeight = MathF.Max(0.1f, units.Height[target]);
+        Span<Vector3> candidates =
+            stackalloc Vector3[UnitHitSystem.MaxAimPointCount];
 
-        // Prefer an interior torso/upper-body point. The outermost vision point
-        // sits on the top silhouette and may be outside the ballistic hit volume.
-        Span<float> heightFractions = stackalloc float[5]
+        int count = UnitHitSystem.GetAimPoints(
+            units,
+            target,
+            eye,
+            candidates);
+
+        // These candidates come from the same ellipsoids used for projectile
+        // collision. If the torso is hidden, test its exposed edge and then
+        // real head/limb volumes rather than aiming at target-center coordinates.
+        for (int i = 0; i < count; i++)
         {
-            0.55f, 0.66f, 0.45f, 0.72f, 0.22f
-        };
+            Vector3 candidate = candidates[i];
 
-        for (int i = 0; i < heightFractions.Length; i++)
-        {
-            Vector3 candidate = targetPosition +
-                new Vector3(0f, 0f, targetHeight * heightFractions[i]);
+            if (!vision.HasLineOfSight(
+                    worldMap,
+                    eye,
+                    candidate,
+                    out _))
+            {
+                continue;
+            }
 
-            if (vision.HasLineOfSight(worldMap, eye, candidate, out _))
-                return candidate;
+            aimPoint = candidate;
+            return true;
         }
 
-        // If only the top silhouette is visible, lower the aim a little while
-        // retaining a proven terrain-visible point.
-        Vector3 fallback = visiblePoint;
-        fallback.Z = MathF.Max(
-            targetPosition.Z + targetHeight * 0.66f,
-            visiblePoint.Z - targetHeight * 0.08f);
-
-        return vision.HasLineOfSight(worldMap, eye, fallback, out _)
-            ? fallback
-            : visiblePoint;
+        aimPoint = Vector3.Zero;
+        return false;
     }
 
     private static int FindNearestVisibleEnemy(
