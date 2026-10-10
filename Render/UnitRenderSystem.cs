@@ -273,7 +273,9 @@ public sealed class UnitRenderSystem
             int count = bodyCounts[unitIndex];
             int end = start + count;
             float screenScale = window.Size.X / MathF.Max(1f, cameraView.Size.X);
-            float outline = 0.42f / MathF.Max(1f, tilePixelSize * screenScale);
+            float pixelScale = MathF.Max(1f, tilePixelSize * screenScale);
+            float outline = 0.42f / pixelScale;
+            float minLimbRadius = 0.50f / pixelScale;
             Color outlineColor = new Color(20, 22, 26, 238);
 
             // Outline every part first. Fill batches are layered afterwards,
@@ -282,8 +284,11 @@ public sealed class UnitRenderSystem
             {
                 Vector3 position = partPositions[part];
                 Vector3 scale = partScales[part];
+                BodyPartRole role = bodyRoles[part];
                 float radiusX = MathF.Max(0.015f, MathF.Abs(scale.X));
                 float radiusY = MathF.Max(0.015f, MathF.Abs(scale.Y));
+                if (IsAnatomicalLimb(role))
+                    radiusY = MathF.Max(radiusY, minLimbRadius);
                 float extent = MathF.Sqrt(
                     radiusX * radiusX +
                     radiusY * radiusY) + outline;
@@ -302,7 +307,7 @@ public sealed class UnitRenderSystem
                 AppendBodyPart(
                     _bodyOutlines,
                     primitives[part],
-                    bodyRoles[part],
+                    role,
                     position.X * tilePixelSize,
                     position.Y * tilePixelSize,
                     radiusX * tilePixelSize,
@@ -325,6 +330,8 @@ public sealed class UnitRenderSystem
                     Vector3 scale = partScales[part];
                     float radiusX = MathF.Max(0.015f, MathF.Abs(scale.X));
                     float radiusY = MathF.Max(0.015f, MathF.Abs(scale.Y));
+                    if (IsAnatomicalLimb(role))
+                        radiusY = MathF.Max(radiusY, minLimbRadius);
                     float extent = MathF.Sqrt(
                         radiusX * radiusX +
                         radiusY * radiusY);
@@ -1400,6 +1407,14 @@ public sealed class UnitRenderSystem
                 color));
         }
     }
+
+    private static bool IsAnatomicalLimb(BodyPartRole role) =>
+        role is BodyPartRole.Neck or
+            BodyPartRole.UpperArm or
+            BodyPartRole.Forearm or
+            BodyPartRole.Thigh or
+            BodyPartRole.Shin or
+            BodyPartRole.Foot;
 
     private static bool IsPartInView(
         Vector3 position,
