@@ -21,7 +21,10 @@ public sealed class TerrainRegion
     // Store those chunks as one material ID and allocate the 48x48 buffer
     // only for layers that actually contain mixed materials.
     private ushort[]? _materialIds;
+    private ulong[]? _overrideBits;
     private ushort _uniformMaterialId;
+    private ushort _overrideMaterialId;
+    private int _overrideCount;
     private ushort _nonZeroMaterialId;
     private int _nonZeroCount;
     private bool _allNonZeroSame = true;
@@ -68,9 +71,14 @@ public sealed class TerrainRegion
         if (!IsInside(localX, localY))
             return 0;
 
-        return _materialIds == null
-            ? _uniformMaterialId
-            : _materialIds[localX + localY * TilesPerSide];
+        int index = localX + localY * TilesPerSide;
+
+        if (_materialIds != null)
+            return _materialIds[index];
+
+        return IsOverrideSet(index)
+            ? _overrideMaterialId
+            : _uniformMaterialId;
     }
 
     // Compatibility overload for callers that still pass Z explicitly.
@@ -90,9 +98,12 @@ public sealed class TerrainRegion
         if (localIndex < 0 || localIndex >= TotalTiles)
             throw new IndexOutOfRangeException();
 
-        return _materialIds == null
-            ? _uniformMaterialId
-            : _materialIds[localIndex];
+        if (_materialIds != null)
+            return _materialIds[localIndex];
+
+        return IsOverrideSet(localIndex)
+            ? _overrideMaterialId
+            : _uniformMaterialId;
     }
 
     internal void SetMaterialId(
@@ -137,7 +148,10 @@ public sealed class TerrainRegion
     internal void Clear()
     {
         _materialIds = null;
+        _overrideBits = null;
         _uniformMaterialId = 0;
+        _overrideMaterialId = 0;
+        _overrideCount = 0;
         _nonZeroMaterialId = 0;
         _nonZeroCount = 0;
         _allNonZeroSame = true;
@@ -147,14 +161,57 @@ public sealed class TerrainRegion
         int index,
         ushort materialId)
     {
-        ushort previous = _materialIds == null
-            ? _uniformMaterialId
-            : _materialIds[index];
+        if (_materialIds == null)
+        {
+            bool overridden = IsOverrideSet(index);
+            ushort previous = overridden
+                ? _overrideMaterialId
+                : _uniformMaterialId;
 
-        if (previous == materialId)
+            if (previous == materialId)
+                return;
+
+            if (materialId == _uniformMaterialId)
+            {
+                ClearOverrideBit(index);
+                if (_overrideCount == 0)
+                {
+                    _overrideBits = null;
+                    _overrideMaterialId = 0;
+                }
+
+                return;
+            }
+
+            if (_overrideBits == null)
+            {
+                _overrideBits = new ulong[(TotalTiles + 63) / 64];
+                _overrideMaterialId = materialId;
+                SetOverrideBit(index);
+                _overrideCount = 1;
+                return;
+            }
+
+            if (materialId == _overrideMaterialId)
+            {
+                SetOverrideBit(index);
+                _overrideCount++;
+
+                if (_overrideCount == TotalTiles)
+                    CollapseUniform(_overrideMaterialId);
+
+                return;
+            }
+
+            // A third distinct value requires general dense storage.
+            GetOrCreateMaterialBuffer();
+        }
+
+        ushort previousDense = _materialIds![index];
+        if (previousDense == materialId)
             return;
 
-        ushort[] values = GetOrCreateMaterialBuffer();
+        ushort[] values = _materialIds;
 
         if (previous == 0 && materialId != 0)
         {
@@ -205,33 +262,75 @@ public sealed class TerrainRegion
         }
     }
 
+    private bool IsOverrideSet(int index)
+    {
+        return _overrideBits != null &&
+               (_overrideBits[index >> 6] & (1UL << (index & 63))) != 0;
+    }
+
+    private void SetOverrideBit(int index)
+    {
+        _overrideBits![index >> 6] |= 1UL << (index & 63);
+    }
+
+    private void ClearOverrideBit(int index)
+    {
+        if (!IsOverrideSet(index))
+            return;
+
+        _overrideBits![index >> 6] &= ~(1UL << (index & 63));
+        _overrideCount--;
+    }
+
     private ushort[] GetOrCreateMaterialBuffer()
     {
         if (_materialIds != null)
             return _materialIds;
 
         _materialIds = new ushort[TotalTiles];
+        Array.Fill(_materialIds, _uniformMaterialId);
 
-        if (_uniformMaterialId != 0)
+        if (_overrideBits != null)
         {
-            Array.Fill(_materialIds, _uniformMaterialId);
-            _nonZeroMaterialId = _uniformMaterialId;
-            _nonZeroCount = TotalTiles;
-        }
-        else
-        {
-            _nonZeroMaterialId = 0;
-            _nonZeroCount = 0;
+            for (int i = 0; i < TotalTiles; i++)
+            {
+                if (IsOverrideSet(i))
+                    _materialIds[i] = _overrideMaterialId;
+            }
         }
 
+        _overrideBits = null;
+        _overrideMaterialId = 0;
+        _overrideCount = 0;
+
+        _nonZeroMaterialId = 0;
+        _nonZeroCount = 0;
         _allNonZeroSame = true;
+
+        for (int i = 0; i < TotalTiles; i++)
+        {
+            ushort value = _materialIds[i];
+            if (value == 0)
+                continue;
+
+            if (_nonZeroCount == 0)
+                _nonZeroMaterialId = value;
+            else if (_nonZeroMaterialId != value)
+                _allNonZeroSame = false;
+
+            _nonZeroCount++;
+        }
+
         return _materialIds;
     }
 
     private void CollapseUniform(ushort materialId)
     {
         _materialIds = null;
+        _overrideBits = null;
         _uniformMaterialId = materialId;
+        _overrideMaterialId = 0;
+        _overrideCount = 0;
         _nonZeroMaterialId = materialId;
         _nonZeroCount = materialId == 0 ? 0 : TotalTiles;
         _allNonZeroSame = true;
