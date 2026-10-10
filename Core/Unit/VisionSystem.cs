@@ -51,6 +51,9 @@ public sealed class VisionSystem
     private const float Epsilon = 0.02f;
     private const float LayerEpsilon = Epsilon * WorldMap.HeightUnitsPerMeter;
     private const int SpatialCellSize = 16;
+    private const int VisibilityMemoryUpdates = 60;
+    private const int VisibilitySectorCount = 8;
+    private const int CandidatesPerSector = 4;
 
     private float _updateTimer;
     private int[] _spatialCellHeads = Array.Empty<int>();
@@ -61,6 +64,11 @@ public sealed class VisionSystem
     private int _candidatePairCount;
     private int _lineOfSightChecks;
     private int _targetEvaluationCount;
+    private int[] _lastVisibleUpdate = Array.Empty<int>();
+    private int[] _sectorTargetCursors = Array.Empty<int>();
+    private int _visibilityCapacity;
+    private int _visionUpdateSequence;
+    private long _visibilityTerrainVersion = long.MinValue;
 
     public double LastUpdateMilliseconds { get; private set; }
     public int LastCandidatePairs { get; private set; }
@@ -141,6 +149,20 @@ public sealed class VisionSystem
         EnsureUnitCapacity(units.Capacity);
         EnsureSpatialCapacity(worldMap);
 
+        if (_visionUpdateSequence >= int.MaxValue - VisibilityMemoryUpdates)
+        {
+            Array.Clear(_lastVisibleUpdate);
+            _visionUpdateSequence = 0;
+        }
+
+        _visionUpdateSequence++;
+
+        if (_visibilityTerrainVersion != worldMap.TerrainVersion)
+        {
+            Array.Clear(_lastVisibleUpdate);
+            _visibilityTerrainVersion = worldMap.TerrainVersion;
+        }
+
         Array.Clear(_visibleCounts);
         Array.Fill(_spatialCellHeads, -1, 0, _spatialCellCount);
         _visibleTargetCount = 0;
@@ -176,16 +198,16 @@ public sealed class VisionSystem
             _spatialCellHeads[cell] = unit;
         }
 
-        // Only evaluate a bounded, directionally diverse set of hostile targets
-        // per observer. Every sector contributes its two nearest candidates and
-        // one farthest candidate so cover does not hide every target behind the
-        // same nearest pair. All other pairs receive only cheap range/FOV tests.
-        const int SectorCount = 8;
-        const int CandidatesPerSector = 3;
-        const int CandidateSlots = SectorCount * CandidatesPerSector;
+        // Keep a small stable target cache but rotate one candidate per sector.
+        // Two nearest and one farthest targets preserve tactical relevance;
+        // the rotating fourth slot prevents middle targets from being ignored.
+        const int SectorCount = VisibilitySectorCount;
+        const int SlotCount = CandidatesPerSector;
+        const int CandidateSlots = SectorCount * SlotCount;
 
         Span<int> candidateTargets = stackalloc int[CandidateSlots];
         Span<float> candidateDistances = stackalloc float[CandidateSlots];
+        Span<int> rotationDistances = stackalloc int[SectorCount];
 
         for (int i = 0; i < active.Length; i++)
         {
@@ -210,9 +232,12 @@ public sealed class VisionSystem
                 candidateTargets[slot] = -1;
                 candidateTargets[slot + 1] = -1;
                 candidateTargets[slot + 2] = -1;
+                candidateTargets[slot + 3] = -1;
                 candidateDistances[slot] = float.PositiveInfinity;
                 candidateDistances[slot + 1] = float.PositiveInfinity;
                 candidateDistances[slot + 2] = float.NegativeInfinity;
+                candidateDistances[slot + 3] = 0f;
+                rotationDistances[sector] = int.MaxValue;
             }
 
             int minCellX = Math.Clamp(
@@ -314,6 +339,18 @@ public sealed class VisionSystem
                             candidateTargets[slot + 2] = target;
                             candidateDistances[slot + 2] = distanceSquared;
                         }
+
+                        int cursor = _sectorTargetCursors[
+                            observer * SectorCount + sector];
+                        int rotationDistance = target >= cursor
+                            ? target - cursor
+                            : _visibilityCapacity - cursor + target;
+
+                        if (rotationDistance < rotationDistances[sector])
+                        {
+                            rotationDistances[sector] = rotationDistance;
+                            candidateTargets[slot + 3] = target;
+                        }
                     }
                 }
             }
@@ -344,9 +381,35 @@ public sealed class VisionSystem
                     observer,
                     target);
 
-                if (check.IsVisible)
-                    AppendVisibleTarget(target);
+                int pairIndex = observer * _visibilityCapacity + target;
+                _lastVisibleUpdate[pairIndex] = check.IsVisible
+                    ? _visionUpdateSequence
+                    : 0;
             }
+
+            // Advance the sector cursors independently from the stable nearest/farthest
+            // candidates, so every hostile in a crowded sector gets LOS-tested over time.
+            for (int sector = 0; sector < SectorCount; sector++)
+            {
+                int sampledTarget =
+                    candidateTargets[sector * SlotCount + 3];
+
+                if (sampledTarget >= 0)
+                {
+                    _sectorTargetCursors[observer * SectorCount + sector] =
+                        (sampledTarget + 1) % _visibilityCapacity;
+                }
+            }
+
+            BuildVisibleTargetList(
+                units,
+                worldMap,
+                health,
+                active,
+                observer,
+                candidateTargets,
+                candidateDistances,
+                rotationDistances);
 
             _visibleCounts[observer] = _visibleTargetCount - start;
         }
