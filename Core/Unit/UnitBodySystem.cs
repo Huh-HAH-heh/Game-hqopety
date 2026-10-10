@@ -24,6 +24,7 @@ public sealed class UnitBodySystem
         float[] moveSpeeds = units.MoveSpeed;
         Vector3[] bodyNormals = units.BodyNormal;
         Vector3[] headNormals = units.HeadNormal;
+        UnitPosture[] postures = units.Posture;
         int[] bodyStarts = units.BodyStart;
         short[] bodyCounts = units.BodyCount;
 
@@ -35,6 +36,7 @@ public sealed class UnitBodySystem
         int[] parents = bodies.Parent;
         BodyPartMotion[] motions = bodies.Motion;
         BodyPartAnchor[] anchors = bodies.Anchor;
+        BodyPartRole[] roles = bodies.Role;
 
         for (int i = 0; i < active.Length; i++)
         {
@@ -54,6 +56,7 @@ public sealed class UnitBodySystem
                 headNormals,
                 velocities,
                 moveSpeeds,
+                postures[unit],
                 _animationTime,
                 worldPositions,
                 worldRotations,
@@ -62,6 +65,7 @@ public sealed class UnitBodySystem
                 parents,
                 motions,
                 anchors,
+                roles,
                 followDistances,
                 followAlpha);
         }
@@ -76,6 +80,7 @@ public sealed class UnitBodySystem
         Vector3[] headNormals,
         Vector3[] velocities,
         float[] moveSpeeds,
+        UnitPosture posture,
         float animationTime,
         Vector3[] worldPositions,
         float[] worldRotations,
@@ -84,15 +89,25 @@ public sealed class UnitBodySystem
         int[] parents,
         BodyPartMotion[] motions,
         BodyPartAnchor[] anchors,
+        BodyPartRole[] roles,
         float[] followDistances,
         float followAlpha)
     {
         Vector3 bodyNormal = NormalizeHorizontal(bodyNormals[unit]);
         Vector3 headNormal = NormalizeHorizontal(headNormals[unit]);
-        float bodyRotation = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
-        float headRotation = MathF.Atan2(headNormal.Y, headNormal.X);
         Vector3 velocity = velocities[unit];
         float speed = MathF.Sqrt(velocity.X * velocity.X + velocity.Y * velocity.Y);
+
+        // During movement the torso faces its travel direction. The head keeps
+        // its independent aim direction, so a pawn can move and look elsewhere.
+        if (speed > 0.05f)
+        {
+            bodyNormal = NormalizeHorizontal(velocity);
+            bodyNormals[unit] = bodyNormal;
+        }
+
+        float bodyRotation = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
+        float headRotation = MathF.Atan2(headNormal.Y, headNormal.X);
         float gait = Math.Clamp(
             speed / MathF.Max(0.5f, moveSpeeds[unit] * 0.20f),
             0f,
@@ -105,6 +120,10 @@ public sealed class UnitBodySystem
         for (int part = start; part < end; part++)
         {
             int parent = parents[part];
+            Vector3 localPosition = localPositions[part];
+            float localRotation = localRotations[part];
+            ApplyPosture(posture, roles[part], ref localPosition, ref localRotation);
+
             Vector3 origin = unitPositions[unit];
             float rotation = bodyRotation;
 
@@ -146,9 +165,88 @@ public sealed class UnitBodySystem
             // The hip/shoulder anchor stays attached to its parent.
             // Gait rotates the limb itself; child segments inherit that pose.
             worldPositions[part] =
-                origin + Rotate2D(localPositions[part], rotation);
+                origin + Rotate2D(localPosition, rotation);
             worldRotations[part] =
-                rotation + localRotations[part] + gaitRotation;
+                rotation + localRotation + gaitRotation;
+        }
+    }
+
+    private static void ApplyPosture(
+        UnitPosture posture,
+        BodyPartRole role,
+        ref Vector3 localPosition,
+        ref float localRotation)
+    {
+        if (posture == UnitPosture.Standing)
+            return;
+
+        if (posture == UnitPosture.Crouching)
+        {
+            switch (role)
+            {
+                case BodyPartRole.UpperArm:
+                    localPosition.Y *= 0.78f;
+                    localRotation *= 0.76f;
+                    break;
+
+                case BodyPartRole.Forearm:
+                    localRotation *= 1.15f;
+                    break;
+
+                case BodyPartRole.Elbow:
+                case BodyPartRole.Hand:
+                    localPosition.X *= 0.88f;
+                    break;
+
+                case BodyPartRole.Thigh:
+                    localPosition.X *= 0.92f;
+                    localPosition.Y *= 0.78f;
+                    if (MathF.Abs(localRotation) > 2.5f)
+                        localRotation -= MathF.Sign(localRotation) * 0.30f;
+                    break;
+
+                case BodyPartRole.Knee:
+                case BodyPartRole.Shin:
+                case BodyPartRole.Foot:
+                    localPosition.X *= 0.85f;
+                    break;
+            }
+
+            return;
+        }
+
+        // Prone pawns have a wider, flatter limb silhouette. Their head and
+        // torso still face the same world direction; this is not a 90-degree
+        // side-view rotation.
+        switch (role)
+        {
+            case BodyPartRole.UpperArm:
+                localPosition.Y *= 1.18f;
+                localRotation = MathF.CopySign(
+                    MathF.Max(MathF.Abs(localRotation), 1.34f),
+                    localRotation);
+                break;
+
+            case BodyPartRole.Forearm:
+                localRotation *= 0.45f;
+                break;
+
+            case BodyPartRole.Elbow:
+            case BodyPartRole.Hand:
+                localPosition.X *= 1.05f;
+                break;
+
+            case BodyPartRole.Thigh:
+                localPosition.Y *= 1.18f;
+                if (MathF.Abs(localRotation) > 2.5f)
+                    localRotation = MathF.CopySign(MathF.PI, localRotation);
+                break;
+
+            case BodyPartRole.Knee:
+            case BodyPartRole.Shin:
+            case BodyPartRole.Foot:
+                localPosition.X *= 1.05f;
+                break;
         }
     }
 
