@@ -26,6 +26,11 @@ public static class CombatSelfTest
         RunTest("Weapon: target mode cycle", TestTargetModes, ref passed, ref failed);
         RunTest("Weapon: ammunition selection", TestAmmunitionSelection, ref passed, ref failed);
         RunTest("Weapon: aim warmup delays first shot", TestWeaponAimWarmup, ref passed, ref failed);
+        RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
+        RunTest("Weapon: automatic fire follows weapon cadence", TestAutomaticFireCadence, ref passed, ref failed);
+        RunTest("Weapon: single fire requires a new aim", TestSingleFireReAims, ref passed, ref failed);
+        RunTest("Weapon: burst mode completes the configured burst", TestBurstFireCadence, ref passed, ref failed);
+        RunTest("Weapon: suppressive auto fire continues without LOS", TestSuppressiveFireThroughOcclusion, ref passed, ref failed);
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
@@ -253,6 +258,16 @@ public static class CombatSelfTest
             UnitWeaponSlot.Primary);
 
         if (weapons.CurrentAimMode[index] !=
+            AimMode.SuppressFire)
+        {
+            return false;
+        }
+
+        weapons.CycleAimMode(
+            0,
+            UnitWeaponSlot.Primary);
+
+        if (weapons.CurrentAimMode[index] !=
             AimMode.Snapshot)
         {
             return false;
@@ -263,7 +278,7 @@ public static class CombatSelfTest
             UnitWeaponSlot.Primary);
 
         return weapons.CurrentAimMode[index] ==
-               AimMode.SuppressFire;
+               AimMode.AimedShot;
     }
 
     private static bool TestTargetModes()
@@ -362,6 +377,9 @@ public static class CombatSelfTest
             return false;
         }
 
+        if (!simulation.Weapons.AimIndicatorActive[stateIndex])
+            return false;
+
         simulation.Update(worldMap, 0.30f);
 
         bool firedTooEarly = simulation.FireWeaponAt(
@@ -369,18 +387,268 @@ public static class CombatSelfTest
             UnitWeaponSlot.Primary,
             target);
 
-        if (firedTooEarly || simulation.Projectiles.ActiveCount != 0)
+        if (firedTooEarly ||
+            simulation.TotalShotsFired != 0 ||
+            simulation.Projectiles.ActiveCount != 0)
+        {
             return false;
+        }
 
-        simulation.Update(worldMap, 0.40f);
+        simulation.Update(worldMap, 0.60f);
 
-        bool firedAfterWarmup = simulation.FireWeaponAt(
+        // Automatic mode must emit the first round only after the CE-style
+        // range-scaled warmup, without needing another AI/target command.
+        return simulation.TotalShotsFired == 1 &&
+               simulation.Projectiles.ActiveCount > 0 &&
+               !simulation.Weapons.AimIndicatorActive[stateIndex];
+    }
+
+    private static bool TestAimModeDurations()
+    {
+        RangedWeaponConfig weapon = WeaponCatalog.AssaultRifle;
+
+        float suppress = UnitWeaponSystem.GetAimDuration(
+            weapon, AimMode.SuppressFire, 20f);
+        float snapshot = UnitWeaponSystem.GetAimDuration(
+            weapon, AimMode.Snapshot, 20f);
+        float aimedNear = UnitWeaponSystem.GetAimDuration(
+            weapon, AimMode.AimedShot, 20f);
+        float aimedFar = UnitWeaponSystem.GetAimDuration(
+            weapon, AimMode.AimedShot, 150f);
+
+        return suppress > 0f &&
+               suppress < snapshot &&
+               snapshot < aimedNear &&
+               aimedNear < aimedFar &&
+               aimedFar >= 3.99f;
+    }
+
+    private static bool TestAutomaticFireCadence()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 64);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        simulation.VisionEnabled = false;
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter,
+            WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(
+                shooter,
+                inventorySlot,
+                UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        bool startedAim = !simulation.FireWeaponAt(
             shooter,
             UnitWeaponSlot.Primary,
             target);
 
-        return firedAfterWarmup &&
-               simulation.Projectiles.ActiveCount > 0;
+        simulation.Update(worldMap, 0.90f);
+        long shotsAfterWarmup = simulation.TotalShotsFired;
+
+        for (int i = 0; i < 10; i++)
+            simulation.Update(worldMap, 0.05f);
+
+        return startedAim &&
+               shotsAfterWarmup == 1 &&
+               simulation.TotalShotsFired >= 4;
+    }
+
+    private static bool TestSingleFireReAims()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 64);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        simulation.VisionEnabled = false;
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter,
+            WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(
+                shooter,
+                inventorySlot,
+                UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        int stateIndex = UnitWeaponStore.GetIndex(
+            shooter.Index,
+            UnitWeaponSlot.Primary);
+        simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Single;
+
+        if (simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target))
+            return false;
+
+        simulation.Update(worldMap, 0.90f);
+        bool firstShot = simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target);
+
+        if (!firstShot ||
+            simulation.TotalShotsFired != 1 ||
+            simulation.Weapons.AimTarget[stateIndex].Generation != 0)
+        {
+            return false;
+        }
+
+        bool repeatedWithoutAim = simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target);
+
+        return !repeatedWithoutAim &&
+               simulation.TotalShotsFired == 1 &&
+               simulation.Weapons.AimTarget[stateIndex] == target &&
+               simulation.Weapons.AimTimer[stateIndex] == 0f;
+    }
+
+    private static bool TestBurstFireCadence()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 64);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        simulation.VisionEnabled = false;
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter,
+            WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(
+                shooter,
+                inventorySlot,
+                UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        int stateIndex = UnitWeaponStore.GetIndex(
+            shooter.Index,
+            UnitWeaponSlot.Primary);
+        simulation.Weapons.CurrentFireMode[stateIndex] = FireMode.Burst;
+
+        if (simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target))
+            return false;
+
+        simulation.Update(worldMap, 0.90f);
+
+        bool firstShot = simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target);
+
+        if (!firstShot || simulation.TotalShotsFired != 1)
+            return false;
+
+        for (int i = 0; i < 4; i++)
+            simulation.Update(worldMap, 0.10f);
+
+        return simulation.TotalShotsFired == 3;
+    }
+
+    private static bool TestSuppressiveFireThroughOcclusion()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 64);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        simulation.VisionEnabled = false;
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter,
+            WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(
+                shooter,
+                inventorySlot,
+                UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        int stateIndex = UnitWeaponStore.GetIndex(
+            shooter.Index,
+            UnitWeaponSlot.Primary);
+        simulation.Weapons.CurrentAimMode[stateIndex] = AimMode.SuppressFire;
+
+        if (simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target))
+            return false;
+
+        simulation.Update(worldMap, 0.20f);
+        if (simulation.TotalShotsFired != 1)
+            return false;
+
+        // A three-meter obstacle blocks aimed shots, but SuppressFire keeps
+        // sending rounds toward the previous aim point until the mag is empty.
+        worldMap.SetSolidHeight(10, 10, 30, 1);
+        simulation.Update(worldMap, 0.40f);
+
+        return simulation.TotalShotsFired > 1;
     }
 
     private static bool TestAmmunitionSelection()
