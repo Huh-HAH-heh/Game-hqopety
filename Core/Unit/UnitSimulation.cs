@@ -37,6 +37,14 @@ public sealed class UnitSimulation
     public double LastBodyUpdateMilliseconds { get; private set; }
     public double LastProjectileUpdateMilliseconds { get; private set; }
     public double LastHealthUpdateMilliseconds { get; private set; }
+    public long TotalShotsFired => _weaponSystem.TotalShotsFired;
+    public long TotalRoundsConsumed => _weaponSystem.TotalRoundsConsumed;
+    public long TotalProjectilesSpawned => _weaponSystem.TotalProjectilesSpawned;
+
+    public void BeginMetricsFrame()
+    {
+        _weaponSystem.BeginMetricsFrame();
+    }
     public double LastProjectileGridBuildMilliseconds =>
         _projectileSystem.LastGridBuildMilliseconds;
     public int LastProjectilesVisited =>
