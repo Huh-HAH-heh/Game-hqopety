@@ -14,7 +14,7 @@ public sealed class UnitNavigationSystem
     private const float HeightCost = 0.15f;
     private const int MaxRouteBuildsPerUpdate = 16;
     private const int MovingGoalTolerance = 4;
-    private const float WaypointRadius = 0.32f;
+    private const float WaypointRadius = 0.12f;
 
     private static readonly int[] DirectionX =
         { 1, -1, 0, 0, 1, 1, -1, -1 };
