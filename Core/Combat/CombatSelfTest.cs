@@ -1896,7 +1896,7 @@ public static class CombatSelfTest
         float crouchingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
-        if (crouchingArmRotation >= standingArmRotation - 0.20f)
+        if (MathF.Abs(crouchingArmRotation) >= MathF.Abs(standingArmRotation) - 0.20f)
             return false;
 
         simulation.SetPosture(colonist, UnitPosture.Lying);
@@ -1904,7 +1904,7 @@ public static class CombatSelfTest
         float lyingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
-        if (lyingArmRotation <= standingArmRotation + 0.10f)
+        if (MathF.Abs(lyingArmRotation) <= MathF.Abs(standingArmRotation) + 0.10f)
             return false;
 
         // A moving body faces its travel vector, while head aim remains independent.
