@@ -87,11 +87,17 @@ public sealed class UnitNavigationSystem
             (targetX != _routeGoalX[unitIndex] ||
              targetY != _routeGoalY[unitIndex]);
         bool routeFinished = length > 0 && cursor >= length;
+        float distanceToGoalX = position.X - target.X;
+        float distanceToGoalY = position.Y - target.Y;
+        bool repositionedAwayFromFinishedRoute =
+            routeFinished &&
+            distanceToGoalX * distanceToGoalX + distanceToGoalY * distanceToGoalY > 2.25f;
         bool needsRoute =
             !sameOwner ||
             length == 0 ||
             targetFarMoved ||
-            (routeFinished && goalChanged);
+            (routeFinished && goalChanged) ||
+            repositionedAwayFromFinishedRoute;
 
         if (needsRoute)
         {
