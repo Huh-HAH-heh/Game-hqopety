@@ -30,6 +30,7 @@ public static class CombatSelfTest
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
+        RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
 
         Console.WriteLine("---------------------------------------");
@@ -646,6 +647,53 @@ public static class CombatSelfTest
                simulation.Projectiles.ActiveCount > 0 &&
                simulation.TotalProjectilesSpawned == simulation.Projectiles.ActiveCount &&
                simulation.ShotsFiredThisFrame == 1;
+    }
+
+    private static bool TestProjectileHitsUnit()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 50);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 1f),
+            Vector3.UnitY,
+            Vector3.UnitY);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter,
+            WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(
+                shooter,
+                inventorySlot,
+                UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        // Start aiming at the persistent target, allow aim time to accumulate,
+        // then fire a real ballistic projectile through the simulation pipeline.
+        simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target);
+        simulation.Update(worldMap, 0.25f);
+
+        bool fired = simulation.FireWeaponAt(
+            shooter,
+            UnitWeaponSlot.Primary,
+            target);
+        if (!fired || simulation.Projectiles.ActiveCount == 0)
+            return false;
+
+        simulation.Update(worldMap, 0.05f);
+        return simulation.Projectiles.TotalHits > 0;
     }
 
     private static bool TestDeadUnitCleanup()
