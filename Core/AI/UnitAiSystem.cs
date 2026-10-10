@@ -128,12 +128,32 @@ public sealed class UnitAiSystem
                     vision,
                     unit);
 
-            if (visibleEnemy >= 0)
-            {
-                UnitId targetId =
-                    units.GetId(
-                        visibleEnemy);
+            bool keepCurrentVisibleTarget = false;
 
+            if (Store.HasTarget[unit])
+            {
+                UnitId currentTarget = Store.Target[unit];
+
+                if (units.IsAlive(currentTarget) &&
+                    health.OverallHitPoints[currentTarget.Index] > 0f &&
+                    IsHostile(units, unit, currentTarget.Index) &&
+                    vision.IsRecentlyVisible(unit, currentTarget.Index, units))
+                {
+                    // Keep the current target while it remains in recent LOS memory.
+                    // The rotating vision sample must not make every soldier switch
+                    // targets just because a different enemy was checked this tick.
+                    Store.RememberTarget(
+                        unit,
+                        currentTarget,
+                        units.Position[currentTarget.Index],
+                        TargetMemorySeconds);
+                    keepCurrentVisibleTarget = true;
+                }
+            }
+
+            if (!keepCurrentVisibleTarget && visibleEnemy >= 0)
+            {
+                UnitId targetId = units.GetId(visibleEnemy);
                 Store.RememberTarget(
                     unit,
                     targetId,
@@ -206,9 +226,10 @@ public sealed class UnitAiSystem
             }
 
             bool targetVisible =
-                IsTargetVisible(
-                    vision.GetVisibleTargets(unit),
-                    target.Index);
+                vision.IsRecentlyVisible(
+                    unit,
+                    target.Index,
+                    units);
 
             bool moving =
                 units.Velocity[unit].LengthSquared() >
@@ -307,6 +328,10 @@ public sealed class UnitAiSystem
                 // before pulling the trigger so a stale target cannot cause wall fire.
                 if (!shotCheck.IsVisible)
                 {
+                    // The cache is a detection memory, not permission to shoot
+                    // through a newly discovered obstruction.
+                    vision.ForgetVisibleTarget(unit, target.Index);
+                    Store.ClearTarget(unit);
                     units.HasTarget[unit] = false;
                     Store.State[unit] = UnitAiState.Search;
                     continue;
@@ -511,10 +536,10 @@ public sealed class UnitAiSystem
              i < visible.Length;
              i++)
         {
-            int target =
-                visible[i];
+            int target = visible[i];
 
-            if (health.OverallHitPoints[target] <= 0f ||
+            if ((uint)target >= (uint)units.Capacity ||
+                health.OverallHitPoints[target] <= 0f ||
                 !FactionRules.ShouldAttack(
                     observerFaction,
                     units.FactionTag[target]))
