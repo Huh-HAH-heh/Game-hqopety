@@ -268,6 +268,7 @@ public sealed class GameRenderer
                   $"{_unitSimulation.Vision.LastCandidatePairs:N0} pairs " +
                   $"{_unitSimulation.Vision.LastTargetEvaluations:N0} targets " +
                   $"{_unitSimulation.Vision.LastLineOfSightChecks:N0} LOS " +
+                  $"sampled={_unitSimulation.Vision.LastActiveCandidatesScanned:N0} " +
                   $"cache={_unitSimulation.Vision.LastVisibilityMemoryEntriesScanned:N0}"
                 : "OFF";
 
