@@ -462,7 +462,8 @@ public sealed class UnitWeaponSystem
         {
             CombatDiagnostics.WriteLine(
                 $"[SHOT] {shooter} faction={units.FactionTag[shooterIndex]} " +
-                $"target={target} mode={weapons.CurrentFireMode[stateIndex]} " +
+                $"target={target} targetFaction={units.FactionTag[targetIndex]} " +
+                $"mode={weapons.CurrentFireMode[stateIndex]} " +
                 $"aim={weapons.CurrentAimMode[stateIndex]} " +
                 $"targetMode={weapons.CurrentTargetMode[stateIndex]} " +
                 $"targetPos={units.Position[targetIndex]} " +
