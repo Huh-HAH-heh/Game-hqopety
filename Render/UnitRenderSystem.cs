@@ -169,6 +169,19 @@ public sealed class UnitRenderSystem
                 continue;
             }
 
+            float screenX = unitPosition.X * tilePixelSize;
+            float screenY = unitPosition.Y * tilePixelSize;
+
+            if (simulation.Health.OverallHitPoints[unitIndex] <= 0f)
+            {
+                AppendDeathMarker(
+                    _selection,
+                    screenX,
+                    screenY,
+                    MathF.Max(3f, tilePixelSize * 0.62f));
+                continue;
+            }
+
             Color color =
                 new Color(
                     238,
@@ -192,20 +205,31 @@ public sealed class UnitRenderSystem
             if (showAiDebug &&
                 simulation.AI.Enabled)
             {
-                color =
-                    GetAiColor(aiState);
+                color = GetAiColor(aiState);
 
-                AppendAiDebug(
-                    _aiDebug,
-                    simulation,
-                    unitIndex,
-                    tilePixelSize);
+                AppendAiStateMarker(
+                    _selection,
+                    screenX,
+                    screenY,
+                    tilePixelSize,
+                    color);
 
-                AppendSuppressionDebug(
-                    _aiDebug,
-                    simulation,
-                    unitIndex,
-                    tilePixelSize);
+                // Full target/goal vectors are useful for the selected unit,
+                // but drawing 800 vectors at once hides the battlefield.
+                if (hasSelection && selectedIndex == unitIndex)
+                {
+                    AppendAiDebug(
+                        _aiDebug,
+                        simulation,
+                        unitIndex,
+                        tilePixelSize);
+
+                    AppendSuppressionDebug(
+                        _aiDebug,
+                        simulation,
+                        unitIndex,
+                        tilePixelSize);
+                }
             }
 
             if (types[unitIndex] ==
@@ -347,6 +371,45 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _aiDebug);
         }
+    }
+
+    private static void AppendDeathMarker(
+        VertexArray vertices,
+        float x,
+        float y,
+        float radius)
+    {
+        AppendCircleOutline(
+            vertices,
+            x,
+            y,
+            radius,
+            new Color(90, 90, 90, 245),
+            10);
+
+        Color cross = new Color(255, 62, 62, 255);
+        AppendDebugLine(vertices, x - radius * 0.58f, y - radius * 0.58f,
+            x + radius * 0.58f, y + radius * 0.58f, cross);
+        AppendDebugLine(vertices, x - radius * 0.58f, y + radius * 0.58f,
+            x + radius * 0.58f, y - radius * 0.58f, cross);
+    }
+
+    private static void AppendAiStateMarker(
+        VertexArray vertices,
+        float x,
+        float y,
+        float tilePixelSize,
+        Color color)
+    {
+        float radius = MathF.Max(1.2f, tilePixelSize * 0.17f);
+        AppendCircleOutline(vertices, x, y, radius, color, 8);
+        AppendDebugLine(
+            vertices,
+            x - radius * 0.55f,
+            y,
+            x + radius * 0.55f,
+            y,
+            color);
     }
 
     private static void AppendSuppressionDebug(
