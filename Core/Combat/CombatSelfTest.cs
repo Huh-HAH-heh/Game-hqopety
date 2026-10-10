@@ -31,6 +31,7 @@ public static class CombatSelfTest
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
+        RunTest("Vision: candidate work scales with living units", TestVisionWorkScalesWithLivingUnits, ref passed, ref failed);
         RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
@@ -736,6 +737,45 @@ public static class CombatSelfTest
         return simulation.Vision.LastCandidatePairs < bruteForcePairs / 4 &&
                simulation.Vision.LastVisibleTargetCount == 0 &&
                simulation.Vision.UpdateCount == 1;
+    }
+
+    private static bool TestVisionWorkScalesWithLivingUnits()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 16);
+        UnitSimulation simulation = new UnitSimulation(128, 512);
+
+        for (int i = 0; i < 100; i++)
+        {
+            UnitId unit = simulation.Spawn(
+                UnitType.Colonist,
+                new Vector3(
+                    10.5f + (i % 10) * 2f,
+                    10.5f + (i / 10) * 2f,
+                    0.1f),
+                factionTag: (ushort)(i % 2 + 1));
+
+            simulation.Units.ViewRange[unit.Index] = 40f;
+            simulation.Units.FieldOfView[unit.Index] = 360f;
+
+            if (i < 75)
+                simulation.Health.OverallHitPoints[unit.Index] = 0f;
+        }
+
+        simulation.Vision.Update(
+            simulation.Units,
+            worldMap,
+            0.11f,
+            simulation.Health);
+
+        // Corpses stay in UnitStore for display, but vision work should only
+        // consider the 25 living units: 25 observers x 25 sampled entries.
+        return simulation.Units.ActiveCount == 100 &&
+               simulation.Vision.LastActiveCandidatesScanned == 25 * 25 &&
+               simulation.Vision.LastTargetEvaluations <= 25 * 16 &&
+               simulation.Vision.LastVisibleTargetCount > 0;
     }
 
     private static bool TestVisionHeightUnits()
