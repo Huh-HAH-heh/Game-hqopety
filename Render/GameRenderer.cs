@@ -273,6 +273,8 @@ public sealed class GameRenderer
                     $"{_unitSimulation.Navigation.CellsExpandedThisUpdate:N0} nodes/" +
                     $"{_unitSimulation.Navigation.SearchMillisecondsThisUpdate:0.0}ms " +
                 $"NavGrid={_unitSimulation.Navigation.NavigationGridBuildMilliseconds:0.0}ms " +
+                $"RouteReuse={_unitSimulation.Navigation.RoutesBuiltUsingPriorRoutesThisUpdate}/" +
+                    $"{_unitSimulation.Navigation.RouteTrafficCellsConsideredThisUpdate:N0} " +
                 $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} " +
                 $"Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"LayerShader={_mapRenderer.UsesTerrainLayerShader} " +
