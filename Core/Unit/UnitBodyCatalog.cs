@@ -161,11 +161,84 @@ internal static class UnitBodyCatalog
 
     private static readonly BodyPartDefinition[] SmallCreature =
     {
+        // Body and forward head.
         new BodyPartDefinition(
             Vector3.Zero,
-            new Vector3(0.24f, 0.24f, 0.24f),
+            new Vector3(0.18f, 0.105f, 0.15f),
             BodyPrimitive.Circle,
-            role: BodyPartRole.Generic)
+            role: BodyPartRole.Generic),
+
+        new BodyPartDefinition(
+            new Vector3(0.18f, 0f, 0f),
+            new Vector3(0.058f, 0.055f, 0.055f),
+            BodyPrimitive.Circle,
+            anchor: BodyPartAnchor.UnitHead,
+            role: BodyPartRole.Head),
+
+        // Four short legs with alternating phases; paws are separate parts.
+        new BodyPartDefinition(
+            new Vector3(0.065f, 0.075f, 0f),
+            new Vector3(0.052f, 0.019f, 0.035f),
+            BodyPrimitive.Box,
+            parentIndex: 0,
+            localRotation: 0.80f,
+            motion: BodyPartMotion.WalkCycle,
+            role: BodyPartRole.Thigh),
+
+        new BodyPartDefinition(
+            new Vector3(0.047f, 0f, 0f),
+            new Vector3(0.026f, 0.020f, 0.025f),
+            BodyPrimitive.Circle,
+            parentIndex: 2,
+            role: BodyPartRole.Foot),
+
+        new BodyPartDefinition(
+            new Vector3(0.065f, -0.075f, 0f),
+            new Vector3(0.052f, 0.019f, 0.035f),
+            BodyPrimitive.Box,
+            parentIndex: 0,
+            localRotation: -0.80f,
+            motion: BodyPartMotion.WalkCycleOpposite,
+            role: BodyPartRole.Thigh),
+
+        new BodyPartDefinition(
+            new Vector3(0.047f, 0f, 0f),
+            new Vector3(0.026f, 0.020f, 0.025f),
+            BodyPrimitive.Circle,
+            parentIndex: 4,
+            role: BodyPartRole.Foot),
+
+        new BodyPartDefinition(
+            new Vector3(-0.075f, 0.075f, 0f),
+            new Vector3(0.052f, 0.019f, 0.035f),
+            BodyPrimitive.Box,
+            parentIndex: 0,
+            localRotation: MathF.PI - 0.80f,
+            motion: BodyPartMotion.WalkCycleOpposite,
+            role: BodyPartRole.Thigh),
+
+        new BodyPartDefinition(
+            new Vector3(0.047f, 0f, 0f),
+            new Vector3(0.026f, 0.020f, 0.025f),
+            BodyPrimitive.Circle,
+            parentIndex: 6,
+            role: BodyPartRole.Foot),
+
+        new BodyPartDefinition(
+            new Vector3(-0.075f, -0.075f, 0f),
+            new Vector3(0.052f, 0.019f, 0.035f),
+            BodyPrimitive.Box,
+            parentIndex: 0,
+            localRotation: -MathF.PI + 0.80f,
+            motion: BodyPartMotion.WalkCycle,
+            role: BodyPartRole.Thigh),
+
+        new BodyPartDefinition(
+            new Vector3(0.047f, 0f, 0f),
+            new Vector3(0.026f, 0.020f, 0.025f),
+            BodyPrimitive.Circle,
+            parentIndex: 8,
+            role: BodyPartRole.Foot)
     };
 
     private static readonly BodyPartDefinition[] SegmentedCreature = CreateSegmented();
