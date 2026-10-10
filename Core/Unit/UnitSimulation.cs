@@ -596,7 +596,7 @@ public sealed class UnitSimulation
         Units.Velocity[unitIndex] = Vector3.Zero;
         _movementSystem.Navigation.ClearRoute(unitIndex);
         _visionSystem.ClearUnit(unitIndex);
-        Weapons.ClearUnit(unitIndex);
+        Weapons.CancelActions(unitIndex);
         _aiSystem.Store.ClearUnit(unitIndex);
         _aiSystem.Store.State[unitIndex] = UnitAiState.Dead;
     }
