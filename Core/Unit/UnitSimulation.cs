@@ -26,7 +26,22 @@ public sealed class UnitSimulation
     public ProjectileStore Projectiles { get; }
     public UnitSuppressionStore Suppression { get; }
 
-    public bool VisionEnabled { get; set; } = true;
+    private bool _visionEnabled = true;
+
+    public bool VisionEnabled
+    {
+        get => _visionEnabled;
+        set
+        {
+            if (_visionEnabled == value)
+                return;
+
+            _visionEnabled = value;
+
+            if (!value)
+                _visionSystem.ClearAll();
+        }
+    }
 
     public double LastSimulationUpdateMilliseconds { get; private set; }
     public double LastSuppressionUpdateMilliseconds { get; private set; }
