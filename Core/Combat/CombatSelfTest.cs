@@ -876,6 +876,9 @@ public static class CombatSelfTest
         return simulation.Vision.LastCandidatePairs <= 80 * 4 * 2 &&
                simulation.Vision.LastCandidatePairs > 0 &&
                simulation.Vision.LastTargetEvaluations > 0 &&
+               simulation.Vision.LastActiveCandidatesScanned > 0 &&
+               simulation.Vision.LastActiveCandidatesScanned <= activeCount * 64 &&
+               simulation.Vision.LastActiveCandidatesScanned < bruteForcePairs &&
                simulation.Vision.LastTargetEvaluations <= activeCount * 16 &&
                simulation.Vision.LastVisibilityMemoryEntriesScanned <= activeCount * 16 &&
                simulation.Vision.LastVisibilityMemoryEntriesScanned < bruteForcePairs &&
