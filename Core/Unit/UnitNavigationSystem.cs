@@ -92,10 +92,23 @@ public sealed class UnitNavigationSystem
         bool repositionedAwayFromFinishedRoute =
             routeFinished &&
             distanceToGoalX * distanceToGoalX + distanceToGoalY * distanceToGoalY > 2.25f;
+        bool deviatedFromRoute = false;
+        if (sameOwner && length > 0 && cursor < length)
+        {
+            int[] cachedPath = _paths[unitIndex] ?? Array.Empty<int>();
+            if (cursor < cachedPath.Length)
+            {
+                int nextCell = cachedPath[cursor];
+                float routeDx = position.X - (nextCell % _width + 0.5f);
+                float routeDy = position.Y - (nextCell / _width + 0.5f);
+                deviatedFromRoute = routeDx * routeDx + routeDy * routeDy > 9f;
+            }
+        }
         bool needsRoute =
             !sameOwner ||
             length == 0 ||
             targetFarMoved ||
+            deviatedFromRoute ||
             (routeFinished && goalChanged) ||
             repositionedAwayFromFinishedRoute;
 
@@ -146,13 +159,9 @@ public sealed class UnitNavigationSystem
                     return false;
                 }
             }
-            else if (failedAlready)
+            else
             {
-                waypoint = default;
-                return false;
-            }
-            else if (!sameOwner || length == 0 || routeFinished)
-            {
+                // Do not follow a stale route while waiting for the pathfinding budget.
                 waypoint = default;
                 return false;
             }
