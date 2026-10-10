@@ -39,7 +39,10 @@ public enum BodyPartRole : byte
     Thigh = 6,
     Shin = 7,
     Foot = 8,
-    Segment = 9
+    Segment = 9,
+    Neck = 10,
+    Elbow = 11,
+    Knee = 12
 }
 
 public enum UnitPosture : byte
