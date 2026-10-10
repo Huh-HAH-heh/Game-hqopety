@@ -22,40 +22,31 @@ public sealed class ProjectileRenderSystem : IDisposable
         _tracers.Clear();
         _impacts.Clear();
 
-        ReadOnlySpan<int> active = projectiles.ActiveIndices;
-        Vector3[] positions = projectiles.Position;
-        Vector3[] previousPositions = projectiles.PreviousPosition;
-        Vector3[] velocities = projectiles.Velocity;
-        ushort[] factions = projectiles.FactionTag;
+        Vector3[] starts = projectiles.TraceStarts;
+        Vector3[] ends = projectiles.TraceEnds;
+        ushort[] factions = projectiles.TraceFactions;
+        float[] traceLifetimes = projectiles.TraceLifetimes;
 
-        for (int i = 0; i < active.Length; i++)
+        for (int i = 0; i < projectiles.TraceCapacityCount; i++)
         {
-            int projectile = active[i];
-            Vector3 end = positions[projectile];
-            Vector3 start = previousPositions[projectile];
+            if (traceLifetimes[i] <= 0f)
+                continue;
+
+            Vector3 start = starts[i];
+            Vector3 end = ends[i];
             Vector2 delta = new Vector2(end.X - start.X, end.Y - start.Y);
-
             if (delta.LengthSquared() < 0.025f)
-            {
-                Vector3 velocity = velocities[projectile];
-                float horizontalSpeed = MathF.Sqrt(
-                    velocity.X * velocity.X + velocity.Y * velocity.Y);
+                continue;
 
-                if (horizontalSpeed < 0.001f)
-                    continue;
+            GetTeamColors(factions[i], out Color trail, out Color head);
 
-                Vector2 direction = new Vector2(
-                    velocity.X / horizontalSpeed,
-                    velocity.Y / horizontalSpeed);
-
-                delta = direction * MathF.Min(2.5f, horizontalSpeed * 0.02f);
-                start = new Vector3(
-                    end.X - delta.X,
-                    end.Y - delta.Y,
-                    end.Z);
-            }
-
-            GetTeamColors(factions[projectile], out Color trail, out Color head);
+            // Fade old segments instead of losing a fast bullet the same frame it hits.
+            byte fade = (byte)(255f * Math.Clamp(
+                traceLifetimes[i] / 0.14f, 0f, 1f));
+            trail = new Color(trail.R, trail.G, trail.B,
+                (byte)(trail.A * fade / 255));
+            head = new Color(head.R, head.G, head.B,
+                (byte)(head.A * fade / 255));
 
             Vector2 screenStart = new Vector2(
                 start.X * tilePixelSize,
@@ -64,8 +55,6 @@ public sealed class ProjectileRenderSystem : IDisposable
                 end.X * tilePixelSize,
                 end.Y * tilePixelSize);
 
-            // The outer streak uses the actual distance travelled this frame.
-            // That keeps a 900 m/s projectile visible even at low frame rates.
             _tracers.Append(new Vertex(
                 new Vector2f(screenStart.X, screenStart.Y),
                 trail));
@@ -73,14 +62,13 @@ public sealed class ProjectileRenderSystem : IDisposable
                 new Vector2f(screenEnd.X, screenEnd.Y),
                 head));
 
-            // Bright short core makes the projectile read as a tracer, not a thin line.
             Vector2 coreStart = screenEnd - delta * tilePixelSize * 0.22f;
             _tracers.Append(new Vertex(
                 new Vector2f(coreStart.X, coreStart.Y),
-                new Color(255, 246, 210, 170)));
+                new Color(255, 246, 210, fade)));
             _tracers.Append(new Vertex(
                 new Vector2f(screenEnd.X, screenEnd.Y),
-                new Color(255, 255, 245, 255)));
+                new Color(255, 255, 245, fade)));
         }
 
         if (_tracers.VertexCount > 0)
