@@ -15,11 +15,11 @@ public sealed class LongRangeCombatTestScene
     private int UnitsPerFaction => _unitsPerFaction;
     private int TotalUnits => _unitsPerFaction * 2;
     private int Rows => _unitsPerFaction / Columns;
-    private const float CombatDistance = 400f;
+    private const float CombatDistance = 90f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
-    private const float AdvanceDistance = 160f;
-    private const float VisionStressRange = 55f;
+    private const float AdvanceDistance = 25f;
+    private const float VisionStressRange = 75f;
 
     private UnitId[] _units =
         new UnitId[InitialUnitsPerFaction * 2];
@@ -128,8 +128,8 @@ public sealed class LongRangeCombatTestScene
                 0f,
                 deltaTime);
 
-        // Scripted volley is the ballistic stress driver. When AI is enabled,
-        // it owns target selection and firing; the two drivers never fire at once.
+        // Scripted volleys keep the opening fight active until AI is enabled.
+        // The two fire drivers never fire at once.
         if (simulation.AI.Enabled)
         {
             _fireTimer = 0f;
@@ -138,9 +138,9 @@ public sealed class LongRangeCombatTestScene
         {
             _fireTimer += MathF.Max(0f, deltaTime);
 
-            if (_fireTimer >= 1.0f)
+            if (_fireTimer >= 0.24f)
             {
-                _fireTimer -= 1.0f;
+                _fireTimer -= 0.24f;
                 FireVolley(simulation);
             }
         }
@@ -154,7 +154,7 @@ public sealed class LongRangeCombatTestScene
         UpdateStats(simulation);
 
         return
-            $"LONG-RANGE {TotalUnits} | " +
+            $"FIREFIGHT {TotalUnits} | " +
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
             $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
