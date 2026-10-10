@@ -62,7 +62,8 @@ public sealed class UnitSpatialGrid
     }
 
     public void Build(
-        UnitStore units)
+        UnitStore units,
+        UnitHealthStore? health = null)
     {
         for (int i = 0;
              i < _touchedCount;
@@ -84,6 +85,11 @@ public sealed class UnitSpatialGrid
         {
             int unit =
                 active[i];
+
+            // Dead units remain in UnitStore for corpse rendering but must
+            // no longer consume collision-grid nodes for every live bullet.
+            if (health != null && health.OverallHitPoints[unit] <= 0f)
+                continue;
 
             float radius =
                 MathF.Max(
