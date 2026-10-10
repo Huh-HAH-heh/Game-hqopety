@@ -337,7 +337,8 @@ public sealed class UnitWeaponSystem
         UnitId shooter,
         UnitWeaponSlot slot,
         UnitId target,
-        float accuracyMultiplier = 1f)
+        float accuracyMultiplier = 1f,
+        Vector3? aimPoint = null)
     {
         if (!units.TryGetIndex(
                 shooter,
@@ -417,7 +418,8 @@ public sealed class UnitWeaponSystem
                 shooter,
                 slot,
                 target,
-                accuracyMultiplier);
+                accuracyMultiplier,
+                aimPoint);
 
         if (!fired)
         {
@@ -471,6 +473,7 @@ public sealed class UnitWeaponSystem
                 $"aim={weapons.CurrentAimMode[stateIndex]} " +
                 $"targetMode={weapons.CurrentTargetMode[stateIndex]} " +
                 $"targetPos={units.Position[targetIndex]} " +
+                $"aimPoint={aimPoint ?? units.Position[targetIndex]} " +
                 $"ammo={currentAmmo?.Name ?? "none"}");
         }
 
@@ -485,7 +488,8 @@ public sealed class UnitWeaponSystem
         UnitId shooter,
         UnitWeaponSlot slot,
         UnitId target,
-        float accuracyMultiplier)
+        float accuracyMultiplier,
+        Vector3? aimPoint = null)
     {
         if (!units.TryGetIndex(
                 shooter,
@@ -537,13 +541,14 @@ public sealed class UnitWeaponSystem
             };
 
         Vector3 targetPoint =
-            units.Position[targetIndex] +
-            new Vector3(
-                0f,
-                0f,
-                MathF.Max(
-                    0.05f,
-                    targetZ));
+            aimPoint ??
+            (units.Position[targetIndex] +
+             new Vector3(
+                 0f,
+                 0f,
+                 MathF.Max(
+                     0.05f,
+                     targetZ)));
 
         Vector3 predictedTarget =
             targetPoint;
