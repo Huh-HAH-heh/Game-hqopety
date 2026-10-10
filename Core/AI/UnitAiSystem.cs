@@ -239,7 +239,19 @@ public sealed class UnitAiSystem
                     units);
 
             if (!targetVisible)
-                ClearNonSuppressiveAiming(weapons, inventory, unit);
+            {
+                // Vision uses a rotating, bounded candidate sample. A target can
+                // temporarily leave that sample while remaining physically visible.
+                // Do not restart aim on that bookkeeping gap; only cancel when an
+                // exact terrain LOS check confirms the shot is actually blocked.
+                ClearAimingIfOccluded(
+                    units,
+                    weapons,
+                    vision,
+                    worldMap,
+                    unit,
+                    target);
+            }
 
             bool moving =
                 units.Velocity[unit].LengthSquared() >
@@ -870,6 +882,42 @@ public sealed class UnitAiSystem
         }
 
         return false;
+    }
+
+    private static void ClearAimingIfOccluded(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        VisionSystem vision,
+        WorldMap worldMap,
+        int unit,
+        UnitId target)
+    {
+        Vector3 shooterPosition = units.Position[unit];
+        Vector3 eye = shooterPosition + new Vector3(
+            0f,
+            0f,
+            MathF.Max(0.1f, units.Height[unit] * 0.75f));
+
+        for (int slot = 0;
+             slot < UnitInventoryStore.WeaponSlotCount;
+             slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
+
+            if (weapons.AimTarget[stateIndex] != target ||
+                weapons.CurrentAimMode[stateIndex] == AimMode.SuppressFire)
+            {
+                continue;
+            }
+
+            Vector3 aimPoint = weapons.AimPoint[stateIndex];
+            if (aimPoint == Vector3.Zero ||
+                !vision.HasLineOfSight(worldMap, eye, aimPoint, out _))
+            {
+                weapons.ClearAim(unit, weaponSlot);
+            }
+        }
     }
 
     private static void ClearNonSuppressiveAiming(
