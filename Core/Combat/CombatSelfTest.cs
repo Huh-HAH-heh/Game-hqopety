@@ -32,6 +32,7 @@ public static class CombatSelfTest
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
+        RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
         RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
@@ -678,6 +679,61 @@ public static class CombatSelfTest
             out _);
 
         return aboveWallVisible && !throughWallVisible;
+    }
+
+    private static bool TestVisionSampleMemory()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 64);
+        UnitSimulation simulation = new UnitSimulation(16, 64);
+
+        UnitId observer = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(2.5f, 20.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        simulation.Units.ViewRange[observer.Index] = 30f;
+        simulation.Units.FieldOfView[observer.Index] = 360f;
+
+        UnitId thirdTarget = default;
+        for (int i = 0; i < 12; i++)
+        {
+            UnitId target = simulation.Spawn(
+                UnitType.Colonist,
+                new Vector3(10.5f + i, 20.5f, 0.1f),
+                -Vector3.UnitX,
+                -Vector3.UnitX,
+                factionTag: 2);
+
+            simulation.Units.ViewRange[target.Index] = 30f;
+            simulation.Units.FieldOfView[target.Index] = 360f;
+
+            if (i == 2)
+                thirdTarget = target;
+        }
+
+        // Three scans advance the rotating slot past targets 1 and 2 to target 3.
+        for (int tick = 0; tick < 4; tick++)
+        {
+            simulation.Vision.Update(
+                simulation.Units,
+                worldMap,
+                0.11f,
+                simulation.Health);
+        }
+
+        // The target is not one of the two nearest or the farthest candidates,
+        // and may not appear in this tick's compact list. Its verified sighting
+        // must nevertheless remain available to the current AI target memory.
+        return thirdTarget.Index >= 0 &&
+               simulation.Vision.IsRecentlyVisible(
+                   observer.Index,
+                   thirdTarget.Index,
+                   simulation.Units);
     }
 
     private static bool TestVisionHostilePairsOnly()
