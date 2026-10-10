@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using Core.Items;
+using Core.Combat;
 using Core.Map;
 using Core.Unit;
 using RimClone.Render;
@@ -60,6 +61,7 @@ public sealed class GameRenderer
     private long _lastShotsSample;
     private long _lastRoundsSample;
     private long _lastProjectilesSpawnedSample;
+    private long _lastHitsSample;
     private float _fps;
     private long _workingSetBytes;
     private long _managedHeapBytes;
@@ -109,8 +111,10 @@ public sealed class GameRenderer
         _massCombatTestScene =
             new LongRangeCombatTestScene();
 
-        // The long-range scene is now the default: 800 units move by A* routes
-        // while scheduled volleys stress the real projectile pipeline.
+        // Always produce a rate-limited [SHOT]/[HIT]/[BLOCKED] combat trace.
+        CombatDiagnostics.Enabled = true;
+
+        // The combat scene starts with scripted firing, then A can enable AI.
         _unitSimulation.AI.Enabled = false;
         _unitSimulation.VisionEnabled = false;
         _showVisionDebug = false;
@@ -118,7 +122,7 @@ public sealed class GameRenderer
         // Launch directly into the 800-unit navigation/combat test.
         _terrainStressMode = false;
         EnterMassCombatMode();
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 3; i++)
             _camera.HandleZoom(-1f);
 
         _lastAllocatedBytesSample =
@@ -156,6 +160,7 @@ public sealed class GameRenderer
 
         // Release GPU resources while the graphics context still exists.
         _mapRenderer.Dispose();
+        _projectileRenderer.Dispose();
         _gameMenuOverlay?.Dispose();
         _uiView?.Dispose();
         _window.Close();
@@ -226,17 +231,25 @@ public sealed class GameRenderer
             long totalShots = _unitSimulation.TotalShotsFired;
             long totalRounds = _unitSimulation.TotalRoundsConsumed;
             long totalProjectilesSpawned = _unitSimulation.TotalProjectilesSpawned;
+            long totalHits = _unitSimulation.Projectiles.TotalHits;
 
-            double shotsPerSecond =
-                (totalShots - _lastShotsSample) / sampleSeconds;
-            double roundsPerSecond =
-                (totalRounds - _lastRoundsSample) / sampleSeconds;
-            double projectilesPerSecond =
-                (totalProjectilesSpawned - _lastProjectilesSpawnedSample) / sampleSeconds;
+            long shotsDelta = Math.Max(0L, totalShots - _lastShotsSample);
+            long roundsDelta = Math.Max(0L, totalRounds - _lastRoundsSample);
+            long projectilesDelta = Math.Max(0L, totalProjectilesSpawned - _lastProjectilesSpawnedSample);
+            long hitsDelta = Math.Max(0L, totalHits - _lastHitsSample);
+
+            double shotsPerSecond = shotsDelta / sampleSeconds;
+            double roundsPerSecond = roundsDelta / sampleSeconds;
+            double projectilesPerSecond = projectilesDelta / sampleSeconds;
+            double hitsPerSecond = hitsDelta / sampleSeconds;
+            double hitPerRoundPercent = roundsDelta > 0
+                ? hitsDelta * 100d / roundsDelta
+                : 0d;
 
             _lastShotsSample = totalShots;
             _lastRoundsSample = totalRounds;
             _lastProjectilesSpawnedSample = totalProjectilesSpawned;
+            _lastHitsSample = totalHits;
 
             string visionMetrics = _unitSimulation.VisionEnabled
                 ? $"{_unitSimulation.Vision.LastUpdateMilliseconds:0.0}ms " +
@@ -266,6 +279,7 @@ public sealed class GameRenderer
                 $"UnitCandidates={_unitSimulation.LastProjectileUnitCandidates} " +
                 $"Shots/s={shotsPerSecond:0} Rounds/s={roundsPerSecond:0} " +
                 $"ProjectileSpawn/s={projectilesPerSecond:0} " +
+                $"Hits/s={hitsPerSecond:0} Hit/Rd={hitPerRoundPercent:0}% HitsTotal={totalHits} " +
                 $"Health={_unitSimulation.LastHealthUpdateMilliseconds:0.0}ms " +
                 $"Nav={_unitSimulation.Navigation.RoutesBuiltThisUpdate} built/" +
                     $"{_unitSimulation.Navigation.RoutesFailedThisUpdate} failed/" +
@@ -750,15 +764,15 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.A)
         {
-            _unitSimulation.AI.Enabled =
-                !_unitSimulation.AI.Enabled;
-
-            if (_unitSimulation.AI.Enabled)
-                _unitSimulation.VisionEnabled = true;
+            bool wasEnabled = _unitSimulation.AI.Enabled;
+            _unitSimulation.AI.Enabled = true;
+            _unitSimulation.VisionEnabled = true;
+            CombatDiagnostics.Enabled = true;
 
             Console.WriteLine(
-                $"[TEST] AI={_unitSimulation.AI.Enabled}; scripted volleys are " +
-                (_unitSimulation.AI.Enabled ? "disabled" : "enabled"));
+                wasEnabled
+                    ? "[TEST] AI is already enabled; A never disables it."
+                    : "[TEST] AI enabled; vision and combat diagnostics enabled. A will not turn AI off.");
             return;
         }
 
