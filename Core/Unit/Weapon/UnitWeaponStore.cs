@@ -415,6 +415,8 @@ public sealed class UnitWeaponStore
 
         _aimTimer[index] = 0f;
         _aimTarget[index] = default;
+        _aimPoint[index] = Vector3.Zero;
+        _aimIndicatorActive[index] = false;
 
         return true;
     }
@@ -437,6 +439,8 @@ public sealed class UnitWeaponStore
         int index = GetIndex(unitIndex, slot);
         _aimTimer[index] = 0f;
         _aimTarget[index] = default;
+        _aimPoint[index] = Vector3.Zero;
+        _aimIndicatorActive[index] = false;
         _aimMode[index] = _aimMode[index] switch
         {
             AimMode.AimedShot => AimMode.SuppressFire,
