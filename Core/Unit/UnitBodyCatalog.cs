@@ -4,23 +4,29 @@ using System.Numerics;
 namespace Core.Unit;
 
 /// <summary>
-/// Data-only anatomy profiles for built-in species. The renderer and
-/// transform system never branch on a species name.
-/// Body local +X is the forward direction; +Y/-Y are the two sides.
+/// Data-only anatomy profiles. Body local +X is forward; +Y/-Y are
+/// the two sides. Every species uses the same transform and render path.
 /// </summary>
 internal static class UnitBodyCatalog
 {
     private static readonly BodyPartDefinition[] Colonist =
     {
-        // Torso: compact capsule, not a broad rectangular "T-pose" hub.
+        // 0: torso.
         new BodyPartDefinition(
             Vector3.Zero,
             new Vector3(0.12f, 0.064f, 0.15f),
             BodyPrimitive.Box,
             role: BodyPartRole.Torso),
 
-        // Head is controlled by the aim/head direction, independently
-        // of the body, and sits in front of the torso.
+        // 1: short neck connects the chest to the independently aimed head.
+        new BodyPartDefinition(
+            new Vector3(0.135f, 0f, 0f),
+            new Vector3(0.040f, 0.026f, 0.04f),
+            BodyPrimitive.Box,
+            parentIndex: 0,
+            role: BodyPartRole.Neck),
+
+        // 2: head. Its offset follows the head direction, not body heading.
         new BodyPartDefinition(
             new Vector3(0.235f, 0f, 0f),
             new Vector3(0.068f, 0.064f, 0.064f),
@@ -28,8 +34,7 @@ internal static class UnitBodyCatalog
             anchor: BodyPartAnchor.UnitHead,
             role: BodyPartRole.Head),
 
-        // Left/top arm: upper arm angles forward and inward; the forearm
-        // bends back toward the center, so the pawn does not form a star.
+        // 3-6: left/top arm with a visible elbow bend and separate hand.
         new BodyPartDefinition(
             new Vector3(0f, 0.064f, 0f),
             new Vector3(0.075f, 0.024f, 0.05f),
@@ -40,9 +45,16 @@ internal static class UnitBodyCatalog
 
         new BodyPartDefinition(
             new Vector3(0.065f, 0f, 0f),
+            new Vector3(0.024f, 0.024f, 0.024f),
+            BodyPrimitive.Circle,
+            parentIndex: 3,
+            role: BodyPartRole.Elbow),
+
+        new BodyPartDefinition(
+            Vector3.Zero,
             new Vector3(0.064f, 0.021f, 0.045f),
             BodyPrimitive.Box,
-            parentIndex: 2,
+            parentIndex: 4,
             localRotation: 0.70f,
             role: BodyPartRole.Forearm),
 
@@ -50,11 +62,10 @@ internal static class UnitBodyCatalog
             new Vector3(0.058f, 0f, 0f),
             new Vector3(0.026f, 0.026f, 0.026f),
             BodyPrimitive.Circle,
-            parentIndex: 3,
+            parentIndex: 5,
             role: BodyPartRole.Hand),
 
-        // Right/bottom arm mirrors the left, maintaining a bent, compact
-        // ready pose instead of extending both arms perpendicular to body.
+        // 7-10: right/bottom arm mirrors the left.
         new BodyPartDefinition(
             new Vector3(0f, -0.064f, 0f),
             new Vector3(0.075f, 0.024f, 0.05f),
@@ -65,9 +76,16 @@ internal static class UnitBodyCatalog
 
         new BodyPartDefinition(
             new Vector3(0.065f, 0f, 0f),
+            new Vector3(0.024f, 0.024f, 0.024f),
+            BodyPrimitive.Circle,
+            parentIndex: 7,
+            role: BodyPartRole.Elbow),
+
+        new BodyPartDefinition(
+            Vector3.Zero,
             new Vector3(0.064f, 0.021f, 0.045f),
             BodyPrimitive.Box,
-            parentIndex: 5,
+            parentIndex: 8,
             localRotation: -0.70f,
             role: BodyPartRole.Forearm),
 
@@ -75,11 +93,10 @@ internal static class UnitBodyCatalog
             new Vector3(0.058f, 0f, 0f),
             new Vector3(0.026f, 0.026f, 0.026f),
             BodyPrimitive.Circle,
-            parentIndex: 6,
+            parentIndex: 9,
             role: BodyPartRole.Hand),
 
-        // Left/top leg: two segments and a small foot. The natural pose
-        // keeps the legs behind the torso with a little outward angle.
+        // 11-14: left/top leg: thigh, knee, shin and trailing foot.
         new BodyPartDefinition(
             new Vector3(-0.095f, 0.035f, 0f),
             new Vector3(0.070f, 0.027f, 0.05f),
@@ -91,19 +108,26 @@ internal static class UnitBodyCatalog
 
         new BodyPartDefinition(
             new Vector3(0.065f, 0f, 0f),
+            new Vector3(0.025f, 0.025f, 0.025f),
+            BodyPrimitive.Circle,
+            parentIndex: 11,
+            role: BodyPartRole.Knee),
+
+        new BodyPartDefinition(
+            Vector3.Zero,
             new Vector3(0.064f, 0.023f, 0.045f),
             BodyPrimitive.Box,
-            parentIndex: 8,
+            parentIndex: 12,
             role: BodyPartRole.Shin),
 
         new BodyPartDefinition(
             new Vector3(0.054f, 0f, 0f),
             new Vector3(0.040f, 0.023f, 0.035f),
             BodyPrimitive.Box,
-            parentIndex: 9,
+            parentIndex: 13,
             role: BodyPartRole.Foot),
 
-        // Right/bottom leg; phase is opposite to make movement readable.
+        // 15-18: right/bottom leg, driven with the opposite gait phase.
         new BodyPartDefinition(
             new Vector3(-0.095f, -0.035f, 0f),
             new Vector3(0.070f, 0.027f, 0.05f),
@@ -115,16 +139,23 @@ internal static class UnitBodyCatalog
 
         new BodyPartDefinition(
             new Vector3(0.065f, 0f, 0f),
+            new Vector3(0.025f, 0.025f, 0.025f),
+            BodyPrimitive.Circle,
+            parentIndex: 15,
+            role: BodyPartRole.Knee),
+
+        new BodyPartDefinition(
+            Vector3.Zero,
             new Vector3(0.064f, 0.023f, 0.045f),
             BodyPrimitive.Box,
-            parentIndex: 11,
+            parentIndex: 16,
             role: BodyPartRole.Shin),
 
         new BodyPartDefinition(
             new Vector3(0.054f, 0f, 0f),
             new Vector3(0.040f, 0.023f, 0.035f),
             BodyPrimitive.Box,
-            parentIndex: 12,
+            parentIndex: 17,
             role: BodyPartRole.Foot)
     };
 
