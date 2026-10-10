@@ -532,8 +532,14 @@ public sealed class UnitWeaponSystem
 
         weapons.MarkAimComplete(shooterIndex, slot);
 
-        if (weapons.CurrentFireMode[stateIndex] == FireMode.Single)
+        // A burst is one firing action. The next burst must start a new
+        // range-dependent warmup instead of inheriting the previous timer.
+        if (weapons.CurrentFireMode[stateIndex] == FireMode.Single ||
+            (weapons.CurrentFireMode[stateIndex] == FireMode.Burst &&
+             weapons.BurstRemaining[stateIndex] == 0))
+        {
             weapons.ClearAim(shooterIndex, slot);
+        }
 
         AmmunitionConfig? currentAmmo = GetCurrentAmmunition(
             weapon,
