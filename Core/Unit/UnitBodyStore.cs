@@ -18,7 +18,7 @@ public sealed class UnitBodyStore
     private int[] _parent;
     private BodyPrimitive[] _primitive;
     private BodyPartMotion[] _motion;
-    private bool[] _customBodyRoots;
+    private bool[] _definitionBodyRoots;
 
     private int _count;
 
@@ -56,9 +56,9 @@ public sealed class UnitBodyStore
     public BodyPartMotion[] Motion =>
         _motion;
 
-    public bool IsCustomBody(int start) =>
-        (uint)start < (uint)_customBodyRoots.Length &&
-        _customBodyRoots[start];
+    public bool UsesBodyDefinition(int start) =>
+        (uint)start < (uint)_definitionBodyRoots.Length &&
+        _definitionBodyRoots[start];
 
     public UnitBodyStore(
         int initialCapacity = DefaultCapacity)
@@ -80,38 +80,12 @@ public sealed class UnitBodyStore
         _parent = new int[initialCapacity];
         _primitive = new BodyPrimitive[initialCapacity];
         _motion = new BodyPartMotion[initialCapacity];
-        _customBodyRoots = new bool[initialCapacity];
+        _definitionBodyRoots = new bool[initialCapacity];
     }
 
     public BodyHandle CreateBody(
-        UnitBodyType bodyType)
-    {
-        int count =
-            bodyType switch
-            {
-                UnitBodyType.Colonist => 2,
-                UnitBodyType.SmallCreature => 1,
-                UnitBodyType.SegmentedCreature => 10,
-                _ => throw new ArgumentOutOfRangeException(
-                    nameof(bodyType),
-                    bodyType,
-                    "Неизвестный тип тела.")
-            };
-
-        int reusedStart =
-            TakeFreeRange(count);
-
-        if (reusedStart >= 0)
-        {
-            return CreateBodyAt(
-                bodyType,
-                reusedStart);
-        }
-
-        return CreateBodyAt(
-            bodyType,
-            _count);
-    }
+        UnitBodyType bodyType) =>
+        CreateBody(UnitBodyCatalog.Get(bodyType));
 
     public BodyHandle CreateBody(
         ReadOnlySpan<BodyPartDefinition> parts)
@@ -154,7 +128,7 @@ public sealed class UnitBodyStore
                 part.Motion);
         }
 
-        _customBodyRoots[start] = true;
+        _definitionBodyRoots[start] = true;
         return new BodyHandle(start, parts.Length);
     }
 
@@ -176,32 +150,6 @@ public sealed class UnitBodyStore
         _freeRangeCount++;
     }
 
-    private BodyHandle CreateBodyAt(
-        UnitBodyType bodyType,
-        int start)
-    {
-        BodyHandle handle = bodyType switch
-        {
-            UnitBodyType.Colonist =>
-                CreateColonistAt(start),
-
-            UnitBodyType.SmallCreature =>
-                CreateSmallCreatureAt(start),
-
-            UnitBodyType.SegmentedCreature =>
-                CreateSegmentedCreatureAt(start),
-
-            _ =>
-                throw new ArgumentOutOfRangeException(
-                    nameof(bodyType),
-                    bodyType,
-                    "Неизвестный тип тела.")
-        };
-
-        _customBodyRoots[handle.Start] = false;
-        return handle;
-    }
-
     public void SetInitialWorldPosition(
         BodyHandle handle,
         Vector3 unitPosition,
@@ -211,7 +159,7 @@ public sealed class UnitBodyStore
             handle.Start +
             handle.Count;
 
-        if (IsCustomBody(handle.Start))
+        if (UsesBodyDefinition(handle.Start))
         {
             for (int i = handle.Start; i < end; i++)
             {
@@ -253,106 +201,6 @@ public sealed class UnitBodyStore
                 unitRotation +
                 _localRotation[i];
         }
-    }
-
-    private BodyHandle CreateColonistAt(
-        int start)
-    {
-        EnsureCapacityAt(start, 2);
-        if (start == _count)
-            _count = start;
-
-        SetWriteIndex(start);
-
-        AddPart(
-            localPosition: Vector3.Zero,
-            scale: new Vector3(0.28f, 0.42f, 0.3f),
-            localRotation: 0f,
-            followDistance: 0f,
-            parent: -1,
-            primitive: BodyPrimitive.Box,
-            motion: BodyPartMotion.StaticRelative);
-
-        AddPart(
-            localPosition: new Vector3(0f, 0.42f, 0f),
-            scale: new Vector3(0.17f, 0.17f, 0.17f),
-            localRotation: 0f,
-            followDistance: 0f,
-            parent: start,
-            primitive: BodyPrimitive.Circle,
-            motion: BodyPartMotion.StaticRelative);
-
-        return new BodyHandle(
-            start,
-            2);
-    }
-
-    private BodyHandle CreateSmallCreatureAt(
-        int start)
-    {
-        EnsureCapacityAt(start, 1);
-        SetWriteIndex(start);
-
-        AddPart(
-            localPosition: Vector3.Zero,
-            scale: new Vector3(0.24f, 0.24f, 0.24f),
-            localRotation: 0f,
-            followDistance: 0f,
-            parent: -1,
-            primitive: BodyPrimitive.Circle,
-            motion: BodyPartMotion.StaticRelative);
-
-        return new BodyHandle(
-            start,
-            1);
-    }
-
-    private BodyHandle CreateSegmentedCreatureAt(
-        int start)
-    {
-        const int segmentCount = 10;
-
-        EnsureCapacityAt(
-            start,
-            segmentCount);
-        SetWriteIndex(start);
-
-        AddPart(
-            localPosition: Vector3.Zero,
-            scale: new Vector3(0.52f, 0.52f, 0.45f),
-            localRotation: 0f,
-            followDistance: 0f,
-            parent: -1,
-            primitive: BodyPrimitive.Circle,
-            motion: BodyPartMotion.StaticRelative);
-
-        for (int i = 1;
-             i < segmentCount;
-             i++)
-        {
-            float radius =
-                0.46f -
-                (i - 1) * 0.025f;
-
-            AddPart(
-                localPosition: new Vector3(
-                    -(i * 0.62f),
-                    0f,
-                    0f),
-                scale: new Vector3(
-                    radius,
-                    radius,
-                    radius),
-                localRotation: 0f,
-                followDistance: 0.62f,
-                parent: start + i - 1,
-                primitive: BodyPrimitive.Circle,
-                motion: BodyPartMotion.FollowParent);
-        }
-
-        return new BodyHandle(
-            start,
-            segmentCount);
     }
 
     private int _writeIndex;
@@ -448,7 +296,7 @@ public sealed class UnitBodyStore
             newCapacity);
 
         Array.Resize(
-            ref _customBodyRoots,
+            ref _definitionBodyRoots,
             newCapacity);
     }
 
