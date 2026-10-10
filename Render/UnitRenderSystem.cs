@@ -161,10 +161,25 @@ public sealed class UnitRenderSystem
                     continue;
             }
 
-            if (unitPosition.X < minWorldX ||
-                unitPosition.X > maxWorldX ||
-                unitPosition.Y < minWorldY ||
-                unitPosition.Y > maxWorldY)
+            int bodyStart = bodyStarts[unitIndex];
+            int bodyCount = bodyCounts[unitIndex];
+            bool rootVisible =
+                unitPosition.X >= minWorldX &&
+                unitPosition.X <= maxWorldX &&
+                unitPosition.Y >= minWorldY &&
+                unitPosition.Y <= maxWorldY;
+
+            if (!rootVisible &&
+                (!bodies.IsCustomBody(bodyStart) ||
+                 !IsBodyVisible(
+                     bodyStart,
+                     bodyCount,
+                     partPositions,
+                     partScales,
+                     minWorldX,
+                     maxWorldX,
+                     minWorldY,
+                     maxWorldY)))
             {
                 continue;
             }
@@ -209,7 +224,8 @@ public sealed class UnitRenderSystem
             }
 
             if (types[unitIndex] ==
-                UnitType.Colonist)
+                    UnitType.Colonist &&
+                !bodies.IsCustomBody(bodyStarts[unitIndex]))
             {
                 AppendHuman(
                     _vertices,
@@ -244,25 +260,30 @@ public sealed class UnitRenderSystem
                     Vector3 scale =
                         partScales[part];
 
-                    float pixelX =
-                        position.X *
-                        tilePixelSize;
+                    float radiusX = MathF.Max(0.06f, scale.X);
+                    float radiusY = MathF.Max(0.06f, scale.Y);
+                    float extent = MathF.Max(radiusX, radiusY);
 
-                    float pixelY =
-                        position.Y *
-                        tilePixelSize;
-
-                    if (primitives[part] ==
-                        BodyPrimitive.Circle)
+                    if (position.X + extent < minWorldX ||
+                        position.X - extent > maxWorldX ||
+                        position.Y + extent < minWorldY ||
+                        position.Y - extent > maxWorldY)
                     {
-                        AppendCircle(
+                        continue;
+                    }
+
+                    float pixelX = position.X * tilePixelSize;
+                    float pixelY = position.Y * tilePixelSize;
+
+                    if (primitives[part] == BodyPrimitive.Circle)
+                    {
+                        AppendEllipse(
                             _vertices,
                             pixelX,
                             pixelY,
-                            MathF.Max(
-                                0.06f,
-                                scale.X) *
-                            tilePixelSize,
+                            radiusX * tilePixelSize,
+                            radiusY * tilePixelSize,
+                            partRotations[part],
                             color);
                     }
                     else
@@ -347,6 +368,37 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _aiDebug);
         }
+    }
+
+    private static bool IsBodyVisible(
+        int start,
+        int count,
+        Vector3[] positions,
+        Vector3[] scales,
+        float minX,
+        float maxX,
+        float minY,
+        float maxY)
+    {
+        int end = start + count;
+        for (int part = start; part < end; part++)
+        {
+            Vector3 position = positions[part];
+            Vector3 scale = scales[part];
+            float extent = MathF.Max(
+                MathF.Max(0.06f, MathF.Abs(scale.X)),
+                MathF.Max(0.06f, MathF.Abs(scale.Y)));
+
+            if (position.X + extent >= minX &&
+                position.X - extent <= maxX &&
+                position.Y + extent >= minY &&
+                position.Y - extent <= maxY)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void AppendSuppressionDebug(
@@ -1190,6 +1242,37 @@ public sealed class UnitRenderSystem
                         MathF.Sin(a1) *
                         radius),
                     color));
+        }
+    }
+
+    private static void AppendEllipse(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float rotation,
+        Color color)
+    {
+        float cos = MathF.Cos(rotation);
+        float sin = MathF.Sin(rotation);
+
+        for (int i = 0; i < CircleSegments; i++)
+        {
+            float a0 = i * MathF.Tau / CircleSegments;
+            float a1 = (i + 1) * MathF.Tau / CircleSegments;
+            float x0 = radiusX * MathF.Cos(a0);
+            float y0 = radiusY * MathF.Sin(a0);
+            float x1 = radiusX * MathF.Cos(a1);
+            float y1 = radiusY * MathF.Sin(a1);
+
+            vertices.Append(new Vertex(new Vector2f(centerX, centerY), color));
+            vertices.Append(new Vertex(
+                new Vector2f(centerX + x0 * cos - y0 * sin, centerY + x0 * sin + y0 * cos),
+                color));
+            vertices.Append(new Vertex(
+                new Vector2f(centerX + x1 * cos - y1 * sin, centerY + x1 * sin + y1 * cos),
+                color));
         }
     }
 
