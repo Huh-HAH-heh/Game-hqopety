@@ -15,7 +15,7 @@ internal static class UnitBodyCatalog
         // Torso: compact capsule, not a broad rectangular "T-pose" hub.
         new BodyPartDefinition(
             Vector3.Zero,
-            new Vector3(0.15f, 0.078f, 0.15f),
+            new Vector3(0.12f, 0.064f, 0.15f),
             BodyPrimitive.Box,
             role: BodyPartRole.Torso),
 
