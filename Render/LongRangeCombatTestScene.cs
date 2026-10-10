@@ -15,7 +15,8 @@ public sealed class LongRangeCombatTestScene
     private const float CombatDistance = 400f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
-    private const float AdvanceDistance = 100f;
+    private const float AdvanceDistance = 160f;
+    private const float VisionStressRange = 55f;
 
     private readonly UnitId[] _units =
         new UnitId[TotalUnits];
@@ -104,15 +105,21 @@ public sealed class LongRangeCombatTestScene
                 0f,
                 deltaTime);
 
-        _fireTimer +=
-            MathF.Max(
-                0f,
-                deltaTime);
-
-        if (_fireTimer >= 1.0f)
+        // Scripted volley is the ballistic stress driver. When AI is enabled,
+        // it owns target selection and firing; the two drivers never fire at once.
+        if (simulation.AI.Enabled)
         {
             _fireTimer = 0f;
-            FireVolley(simulation);
+        }
+        else
+        {
+            _fireTimer += MathF.Max(0f, deltaTime);
+
+            if (_fireTimer >= 1.0f)
+            {
+                _fireTimer -= 1.0f;
+                FireVolley(simulation);
+            }
         }
 
         UpdateStats(simulation);
@@ -128,6 +135,8 @@ public sealed class LongRangeCombatTestScene
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
             $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
+            $"Fire mode {(simulation.AI.Enabled ? "AI" : "scripted volley")} | " +
+            $"Vision {(simulation.VisionEnabled ? "ON" : "OFF")} | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Routes {simulation.Navigation.RoutesBuilt} built/{simulation.Navigation.RoutesFailed} failed | " +
             $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
@@ -459,7 +468,7 @@ public sealed class LongRangeCombatTestScene
 
         // Give each unit a real movement order so the test exercises route planning.
         SetMarchTarget(simulation, id, worldMap, side, tileX, tileY);
-        simulation.Units.ViewRange[unitIndex] = 500f;
+        simulation.Units.ViewRange[unitIndex] = VisionStressRange;
         simulation.Units.FieldOfView[unitIndex] = 180f;
 
         simulation.SetPosture(
@@ -579,7 +588,7 @@ public sealed class LongRangeCombatTestScene
                 UnitCatalog.Get(UnitType.Colonist).MoveSpeed;
 
             simulation.Units.ViewRange[unit] =
-                500f;
+                VisionStressRange;
 
             simulation.Units.FieldOfView[unit] =
                 180f;
