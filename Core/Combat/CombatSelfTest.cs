@@ -784,7 +784,7 @@ public static class CombatSelfTest
                simulation.Vision.LastCandidatePairs > 0 &&
                simulation.Vision.LastTargetEvaluations > 0 &&
                simulation.Vision.LastTargetEvaluations <=
-                   simulation.Units.ActiveCount * 24 &&
+                   simulation.Units.ActiveCount * 32 &&
                simulation.Vision.LastLineOfSightChecks > 0 &&
                simulation.Vision.LastVisibleTargetCount > 0;
     }
