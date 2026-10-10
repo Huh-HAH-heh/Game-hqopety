@@ -138,6 +138,31 @@ public sealed class UnitWeaponStore
         }
     }
 
+    public void ClearReferencesToTarget(int unitIndex, UnitId target)
+    {
+        if (unitIndex < 0 || unitIndex >= Capacity || target.Generation == 0)
+            return;
+
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+            int index = GetIndex(unitIndex, weaponSlot);
+
+            if (_burstTarget[index] == target)
+            {
+                _burstTarget[index] = default;
+                _burstRemaining[index] = 0;
+                _burstTimer[index] = 0f;
+            }
+
+            if (_aimTarget[index] == target)
+            {
+                _aimTarget[index] = default;
+                _aimTimer[index] = 0f;
+            }
+        }
+    }
+
     public void ConfigureSlot(
         int unitIndex,
         UnitWeaponSlot slot,
