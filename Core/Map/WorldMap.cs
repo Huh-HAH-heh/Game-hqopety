@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 
 namespace Core.Map;
 
@@ -82,6 +81,7 @@ public sealed class WorldMap
         _surfaceHeights = new ushort[columnCount];
         _navigationBlocked = new bool[columnCount];
         _simpleFillColumns = new bool[columnCount];
+        Array.Fill(_simpleFillColumns, true);
         _columnMaterialIds = new ushort[columnCount];
         _rangeCache = new TileRange[]?[columnCount];
 
