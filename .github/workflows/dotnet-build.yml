@@ -1,0 +1,30 @@
+name: .NET build
+
+on:
+  push:
+    branches:
+      - main
+      - experimental/unit-development-terrain-data-refactor
+      - feature/unit-navigation-800-battle
+  pull_request:
+    branches:
+      - main
+      - experimental/unit-development-terrain-data-refactor
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore RimClone.slnx
+
+      - name: Build
+        run: dotnet build RimClone.slnx --configuration Release --no-restore
