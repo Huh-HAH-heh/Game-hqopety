@@ -32,6 +32,8 @@ public sealed class ProjectileSystem
         WorldMap worldMap,
         float deltaTime)
     {
+        projectiles.UpdateImpactEffects(deltaTime);
+
         if (deltaTime <= 0f || projectiles.ActiveCount == 0)
         {
             LastUpdateMilliseconds = 0d;
@@ -94,6 +96,8 @@ public sealed class ProjectileSystem
             Vector3 start =
                 projectiles.Position[
                     projectileIndex];
+
+            projectiles.PreviousPosition[projectileIndex] = start;
 
             Vector3 end =
                 start +
@@ -446,6 +450,10 @@ public sealed class ProjectileSystem
 
             if (terrainT <= unitT)
             {
+                projectiles.RegisterImpact(
+                    start + (end - start) * terrainT,
+                    ProjectileImpactKind.TerrainHit);
+
                 if (!ApplyTerrainImpact(
                         projectiles,
                         projectileIndex,
@@ -460,7 +468,7 @@ public sealed class ProjectileSystem
                 {
                     if (CombatDiagnostics.Enabled)
                     {
-                        Console.WriteLine(
+                        CombatDiagnostics.WriteLine(
                             $"[BLOCKED] projectile owner={projectiles.Owner[projectileIndex]} " +
                             $"faction={projectiles.FactionTag[projectileIndex]} " +
                             $"terrainMaterial={terrainMaterial} " +
@@ -572,7 +580,7 @@ public sealed class ProjectileSystem
 
             if (CombatDiagnostics.Enabled)
             {
-                Console.WriteLine(
+                CombatDiagnostics.WriteLine(
                     $"[HIT] projectile owner={projectiles.Owner[projectileIndex]} " +
                     $"faction={projectiles.FactionTag[projectileIndex]} " +
                     $"target={target} " +
