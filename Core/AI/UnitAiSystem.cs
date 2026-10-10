@@ -22,14 +22,15 @@ public sealed class UnitAiSystem
     public UnitAiStore Store { get; }
 
     public UnitAiSystem(
-        int initialUnitCapacity = 1024)
+        int initialUnitCapacity = 1024,
+        UnitWeaponSystem? weaponSystem = null)
     {
         Store =
             new UnitAiStore(
                 initialUnitCapacity);
 
         _weaponSystem =
-            new UnitWeaponSystem();
+            weaponSystem ?? new UnitWeaponSystem();
     }
 
     public void Update(
