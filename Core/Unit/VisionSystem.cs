@@ -69,6 +69,7 @@ public sealed class VisionSystem
 
     public double LastUpdateMilliseconds { get; private set; }
     public int LastCandidatePairs { get; private set; }
+    public int LastActiveCandidatesScanned { get; private set; }
     public int LastTargetEvaluations { get; private set; }
     public int LastLineOfSightChecks { get; private set; }
     public int LastVisibleTargetCount { get; private set; }
@@ -129,6 +130,7 @@ public sealed class VisionSystem
         {
             Array.Clear(_visibleCounts);
             _visibleTargetCount = 0;
+            LastActiveCandidatesScanned = 0;
             LastVisibilityMemoryEntriesScanned = 0;
             _updateTimer = 0f;
             return;
@@ -163,6 +165,7 @@ public sealed class VisionSystem
         _candidatePairCount = 0;
         _lineOfSightChecks = 0;
         _targetEvaluationCount = 0;
+        LastActiveCandidatesScanned = 0;
         LastVisibilityMemoryEntriesScanned = 0;
 
         ReadOnlySpan<int> active = units.ActiveIndices;
@@ -218,6 +221,7 @@ public sealed class VisionSystem
 
             for (int sample = 0; sample < scanCount; sample++)
             {
+                LastActiveCandidatesScanned++;
                 int activeSlot = scanStart + sample;
                 if (activeSlot >= active.Length)
                     activeSlot -= active.Length;
@@ -467,6 +471,7 @@ public sealed class VisionSystem
         _visionUpdateSequence = 0;
         _visibilityTerrainVersion = long.MinValue;
         LastCandidatePairs = 0;
+        LastActiveCandidatesScanned = 0;
         LastTargetEvaluations = 0;
         LastLineOfSightChecks = 0;
         LastVisibleTargetCount = 0;
