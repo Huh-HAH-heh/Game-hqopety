@@ -27,6 +27,7 @@ public static class CombatSelfTest
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
+        RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
@@ -501,6 +502,62 @@ public static class CombatSelfTest
         return !foundBlockedRoute &&
                navigation.RoutesFailedThisUpdate == 1 &&
                navigation.NavigationGridBuildMilliseconds >= 0d;
+    }
+
+    private static bool TestNavigationRouteReuse()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 50);
+
+        const ushort floorHeight = 10;
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < worldMap.TileWidth; x++)
+                worldMap.SetSolidHeight(x, y, floorHeight, 1);
+        }
+
+        UnitSimulation simulation = new UnitSimulation(32, 64);
+        Vector3 start = new Vector3(5.5f, 24.5f, 1f);
+        Vector3 target = new Vector3(42.5f, 24.5f, 1f);
+
+        UnitId first = simulation.Spawn(
+            UnitType.Colonist, start, Vector3.UnitX, Vector3.UnitX);
+        UnitId second = simulation.Spawn(
+            UnitType.Colonist, start, Vector3.UnitX, Vector3.UnitX);
+
+        UnitNavigationSystem navigation = simulation.Navigation;
+        navigation.BeginUpdate(simulation.Units, worldMap);
+
+        bool firstFound = navigation.TryGetWaypoint(
+            simulation.Units, first.Index, worldMap, start, target,
+            out Vector2 firstWaypoint);
+        bool secondFound = navigation.TryGetWaypoint(
+            simulation.Units, second.Index, worldMap, start, target,
+            out Vector2 secondWaypoint);
+
+        bool independentPaths =
+            firstFound &&
+            secondFound &&
+            firstWaypoint != secondWaypoint &&
+            navigation.RoutesBuiltThisUpdate == 2 &&
+            navigation.RoutesBuiltUsingPriorRoutesThisUpdate == 1 &&
+            navigation.RouteTrafficCellsConsideredThisUpdate > 0;
+
+        if (!independentPaths)
+            return false;
+
+        // A second tick with unchanged terrain/orders should reuse each unit's
+        // stored path without starting more A* searches.
+        navigation.BeginUpdate(simulation.Units, worldMap);
+        navigation.TryGetWaypoint(
+            simulation.Units, first.Index, worldMap, start, target, out _);
+        navigation.TryGetWaypoint(
+            simulation.Units, second.Index, worldMap, start, target, out _);
+
+        return navigation.RoutesBuiltThisUpdate == 0 &&
+               navigation.RouteTrafficCellsConsideredThisUpdate == 0;
     }
 
     private static bool TestVisionSpatialIndex()
