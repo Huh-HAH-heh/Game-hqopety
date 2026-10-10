@@ -135,6 +135,7 @@ public sealed class VisionSystem
         {
             Array.Clear(_visibleCounts);
             _visibleTargetCount = 0;
+            LastVisibilityMemoryEntriesScanned = 0;
             _updateTimer = 0f;
             return;
         }
@@ -532,6 +533,7 @@ public sealed class VisionSystem
         LastTargetEvaluations = 0;
         LastLineOfSightChecks = 0;
         LastVisibleTargetCount = 0;
+        LastVisibilityMemoryEntriesScanned = 0;
         LastUpdateMilliseconds = 0d;
         _updateTimer = 0f;
     }
