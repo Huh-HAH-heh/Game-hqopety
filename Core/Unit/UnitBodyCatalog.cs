@@ -5,7 +5,7 @@ namespace Core.Unit;
 
 /// <summary>
 /// Data-only anatomy profiles. Body local +X is forward; +Y/-Y are
-/// the two sides. Every species uses the same transform and render path.
+/// the two sides. Colonists use a compact overhead pose: arms fan sideways,\n/// legs trail behind the torso, and the head stays ahead of the chest.
 /// </summary>
 internal static class UnitBodyCatalog
 {
@@ -14,65 +14,65 @@ internal static class UnitBodyCatalog
         // 0: torso.
         new BodyPartDefinition(
             Vector3.Zero,
-            new Vector3(0.12f, 0.064f, 0.15f),
+            new Vector3(0.105f, 0.052f, 0.12f),
             BodyPrimitive.Box,
             role: BodyPartRole.Torso),
 
         // 1: short neck connects the chest to the independently aimed head.
         new BodyPartDefinition(
-            new Vector3(0.135f, 0f, 0f),
-            new Vector3(0.040f, 0.026f, 0.04f),
+            new Vector3(0.105f, 0f, 0f),
+            new Vector3(0.030f, 0.020f, 0.04f),
             BodyPrimitive.Box,
             parentIndex: 0,
             role: BodyPartRole.Neck),
 
         // 2: head. Its offset follows the head direction, not body heading.
         new BodyPartDefinition(
-            new Vector3(0.235f, 0f, 0f),
-            new Vector3(0.068f, 0.064f, 0.064f),
+            new Vector3(0.195f, 0f, 0f),
+            new Vector3(0.055f, 0.052f, 0.052f),
             BodyPrimitive.Circle,
             anchor: BodyPartAnchor.UnitHead,
             role: BodyPartRole.Head),
 
         // 3-6: left/top arm with a visible elbow bend and separate hand.
         new BodyPartDefinition(
-            new Vector3(0f, 0.064f, 0f),
-            new Vector3(0.075f, 0.024f, 0.05f),
+            new Vector3(0.005f, 0.046f, 0f),
+            new Vector3(0.045f, 0.018f, 0.04f),
             BodyPrimitive.Box,
             parentIndex: 0,
-            localRotation: 0.85f,
+            localRotation: 1.20f,
             motion: BodyPartMotion.WalkCycleOpposite,
             role: BodyPartRole.UpperArm),
 
         new BodyPartDefinition(
-            new Vector3(0.065f, 0f, 0f),
-            new Vector3(0.024f, 0.024f, 0.024f),
+            new Vector3(0.042f, 0f, 0f),
+            new Vector3(0.019f, 0.019f, 0.019f),
             BodyPrimitive.Circle,
             parentIndex: 3,
             role: BodyPartRole.Elbow),
 
         new BodyPartDefinition(
             Vector3.Zero,
-            new Vector3(0.064f, 0.021f, 0.045f),
+            new Vector3(0.044f, 0.017f, 0.038f),
             BodyPrimitive.Box,
             parentIndex: 4,
-            localRotation: -0.75f,
+            localRotation: -0.58f,
             role: BodyPartRole.Forearm),
 
         new BodyPartDefinition(
-            new Vector3(0.058f, 0f, 0f),
-            new Vector3(0.026f, 0.026f, 0.026f),
+            new Vector3(0.040f, 0f, 0f),
+            new Vector3(0.019f, 0.019f, 0.019f),
             BodyPrimitive.Circle,
             parentIndex: 5,
             role: BodyPartRole.Hand),
 
         // 7-10: right/bottom arm mirrors the left.
         new BodyPartDefinition(
-            new Vector3(0f, -0.064f, 0f),
+            new Vector3(0.005f, -0.046f, 0f),
             new Vector3(0.075f, 0.024f, 0.05f),
             BodyPrimitive.Box,
             parentIndex: 0,
-            localRotation: -0.85f,
+            localRotation: -1.20f,
             motion: BodyPartMotion.WalkCycle,
             role: BodyPartRole.UpperArm),
 
@@ -88,7 +88,7 @@ internal static class UnitBodyCatalog
             new Vector3(0.064f, 0.021f, 0.045f),
             BodyPrimitive.Box,
             parentIndex: 8,
-            localRotation: 0.75f,
+            localRotation: 0.58f,
             role: BodyPartRole.Forearm),
 
         new BodyPartDefinition(
@@ -100,42 +100,42 @@ internal static class UnitBodyCatalog
 
         // 11-14: left/top leg: thigh, knee, shin and trailing foot.
         new BodyPartDefinition(
-            new Vector3(-0.095f, 0.035f, 0f),
-            new Vector3(0.070f, 0.027f, 0.05f),
+            new Vector3(-0.062f, 0.030f, 0f),
+            new Vector3(0.052f, 0.021f, 0.04f),
             BodyPrimitive.Box,
             parentIndex: 0,
-            localRotation: MathF.PI - 0.18f,
+            localRotation: MathF.PI - 0.12f,
             motion: BodyPartMotion.WalkCycle,
             role: BodyPartRole.Thigh),
 
         new BodyPartDefinition(
             new Vector3(0.065f, 0f, 0f),
-            new Vector3(0.025f, 0.025f, 0.025f),
+            new Vector3(0.020f, 0.020f, 0.020f),
             BodyPrimitive.Circle,
             parentIndex: 11,
             role: BodyPartRole.Knee),
 
         new BodyPartDefinition(
             Vector3.Zero,
-            new Vector3(0.064f, 0.023f, 0.045f),
+            new Vector3(0.048f, 0.018f, 0.038f),
             BodyPrimitive.Box,
             parentIndex: 12,
             role: BodyPartRole.Shin),
 
         new BodyPartDefinition(
-            new Vector3(0.054f, 0f, 0f),
-            new Vector3(0.040f, 0.023f, 0.035f),
+            new Vector3(0.043f, 0f, 0f),
+            new Vector3(0.030f, 0.020f, 0.030f),
             BodyPrimitive.Box,
             parentIndex: 13,
             role: BodyPartRole.Foot),
 
         // 15-18: right/bottom leg, driven with the opposite gait phase.
         new BodyPartDefinition(
-            new Vector3(-0.095f, -0.035f, 0f),
+            new Vector3(-0.062f, -0.030f, 0f),
             new Vector3(0.070f, 0.027f, 0.05f),
             BodyPrimitive.Box,
             parentIndex: 0,
-            localRotation: -MathF.PI + 0.18f,
+            localRotation: -MathF.PI + 0.12f,
             motion: BodyPartMotion.WalkCycleOpposite,
             role: BodyPartRole.Thigh),
 
