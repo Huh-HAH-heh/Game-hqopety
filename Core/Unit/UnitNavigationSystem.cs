@@ -14,6 +14,8 @@ public sealed class UnitNavigationSystem
     private const float MaxStepHeight = 1.5f;
     private const float HeightCost = 0.15f;
     private const int MaxRouteBuildsPerUpdate = 16;
+    private const int RouteCohortSize = 16;
+    private const float RouteReuseCostPerUnit = 0.35f;
     private const int MovingGoalTolerance = 4;
     private const float WaypointRadius = 0.12f;
 
@@ -40,6 +42,10 @@ public sealed class UnitNavigationSystem
     private int[] _failedStartCell = Array.Empty<int>();
     private long[] _failedTerrainVersion = Array.Empty<long>();
     private long[] _routeTerrainVersion = Array.Empty<long>();
+    private bool[] _routeTrafficRegistered = Array.Empty<bool>();
+
+    private int[] _routeTraffic = Array.Empty<int>();
+    private long _routeTrafficTerrainVersion = long.MinValue;
 
     public int RoutesBuilt { get; private set; }
     public int RoutesFailed { get; private set; }
@@ -49,8 +55,11 @@ public sealed class UnitNavigationSystem
     public long CellsExpandedThisUpdate { get; private set; }
     public double SearchMillisecondsThisUpdate { get; private set; }
     public double NavigationGridBuildMilliseconds { get; private set; }
+    public long RouteTrafficCellsConsideredThisUpdate { get; private set; }
+    public int RoutesBuiltUsingPriorRoutesThisUpdate { get; private set; }
 
     private int _lastSearchCellsExpanded;
+    private long _lastSearchTrafficCellsConsidered;
 
     private int _width;
     private int _height;
@@ -76,6 +85,7 @@ public sealed class UnitNavigationSystem
     {
         EnsureUnitCapacity(units.Capacity);
         EnsureWorkspace(worldMap);
+        EnsureRouteTrafficVersion(worldMap);
         NavigationGridBuildMilliseconds = 0d;
         EnsureNavigationGrid(worldMap);
         _routeBuildsRemaining = MaxRouteBuildsPerUpdate;
@@ -84,6 +94,8 @@ public sealed class UnitNavigationSystem
         SearchesThisUpdate = 0;
         CellsExpandedThisUpdate = 0;
         SearchMillisecondsThisUpdate = 0d;
+        RouteTrafficCellsConsideredThisUpdate = 0;
+        RoutesBuiltUsingPriorRoutesThisUpdate = 0;
     }
 
     public bool TryGetWaypoint(
@@ -96,6 +108,7 @@ public sealed class UnitNavigationSystem
     {
         EnsureUnitCapacity(units.Capacity);
         EnsureWorkspace(worldMap);
+        EnsureRouteTrafficVersion(worldMap);
         EnsureNavigationGrid(worldMap);
 
         int startX = ClampCell((int)MathF.Floor(position.X), _width);
@@ -106,6 +119,9 @@ public sealed class UnitNavigationSystem
         int footprintX = GetFootprintRadius(units.Width[unitIndex]);
         int footprintY = GetFootprintRadius(units.Length[unitIndex]);
         UnitId owner = units.GetId(unitIndex);
+
+        if (_routeOwner[unitIndex] != owner)
+            RemoveRouteTraffic(unitIndex);
 
         bool sameOwner = _routeOwner[unitIndex] == owner;
         bool footprintChanged = sameOwner &&
@@ -150,6 +166,9 @@ public sealed class UnitNavigationSystem
 
         if (needsRoute)
         {
+            // A stale path must not continue reserving cells while its replacement waits.
+            RemoveRouteTraffic(unitIndex);
+
             bool failedAlready =
                 sameOwner &&
                 _failedGoalX[unitIndex] == targetX &&
@@ -196,6 +215,10 @@ public sealed class UnitNavigationSystem
                     length = path.Length;
                     cursor = 0;
                     sameOwner = true;
+                    RegisterRouteTraffic(unitIndex);
+
+                    if (_lastSearchTrafficCellsConsidered > 0)
+                        RoutesBuiltUsingPriorRoutesThisUpdate++;
                 }
                 else
                 {
@@ -248,10 +271,16 @@ public sealed class UnitNavigationSystem
             if (dx * dx + dy * dy > WaypointRadius * WaypointRadius)
                 break;
 
+            if (_routeTrafficRegistered[unitIndex])
+                DecrementRouteTraffic(cell);
+
             cursor++;
         }
 
         _pathCursor[unitIndex] = cursor;
+
+        if (cursor >= route.Length)
+            _routeTrafficRegistered[unitIndex] = false;
 
         if (cursor < route.Length)
         {
@@ -283,6 +312,7 @@ public sealed class UnitNavigationSystem
             return;
         }
 
+        RemoveRouteTraffic(unitIndex);
         _paths[unitIndex] = Array.Empty<int>();
         _pathCursor[unitIndex] = 0;
         _routeOwner[unitIndex] = default;
@@ -302,6 +332,7 @@ public sealed class UnitNavigationSystem
     {
         path = Array.Empty<int>();
         _lastSearchCellsExpanded = 0;
+        _lastSearchTrafficCellsConsidered = 0;
 
         if (!IsInside(startX, startY) ||
             !IsInside(targetX, targetY) ||
@@ -373,10 +404,22 @@ public sealed class UnitNavigationSystem
                         ? DiagonalCost
                         : 1f;
 
+                int priorRouteCount = _routeTraffic[neighbor];
+                float routeReuseCost = Math.Min(
+                    priorRouteCount,
+                    RouteCohortSize - 1) * RouteReuseCostPerUnit;
+
+                if (priorRouteCount > 0)
+                {
+                    _lastSearchTrafficCellsConsidered++;
+                    RouteTrafficCellsConsideredThisUpdate++;
+                }
+
                 float tentativeG =
                     _gScore[current] +
                     stepCost +
-                    heightDifference * HeightCost;
+                    heightDifference * HeightCost +
+                    routeReuseCost;
 
                 if (tentativeG >= _gScore[neighbor])
                     continue;
@@ -715,6 +758,7 @@ public sealed class UnitNavigationSystem
         Array.Resize(ref _failedStartCell, newCapacity);
         Array.Resize(ref _failedTerrainVersion, newCapacity);
         Array.Resize(ref _routeTerrainVersion, newCapacity);
+        Array.Resize(ref _routeTrafficRegistered, newCapacity);
 
         for (int i = 0; i < newCapacity; i++)
         {
@@ -744,6 +788,9 @@ public sealed class UnitNavigationSystem
 
         _gScore = new float[_cellCount];
         _fScore = new float[_cellCount];
+        _routeTraffic = new int[_cellCount];
+        _routeTrafficTerrainVersion = long.MinValue;
+        Array.Clear(_routeTrafficRegistered);
         _navigationHeights = new float[_cellCount];
         _navigationPassable = new bool[_cellCount];
         _navigationNeighbors = new byte[_cellCount];
@@ -759,6 +806,64 @@ public sealed class UnitNavigationSystem
         Array.Clear(_pathCursor);
         Array.Clear(_routeOwner);
         _searchStamp = 0;
+    }
+
+    private void EnsureRouteTrafficVersion(WorldMap worldMap)
+    {
+        if (_routeTrafficTerrainVersion == worldMap.TerrainVersion)
+            return;
+
+        Array.Clear(_routeTraffic);
+        Array.Clear(_routeTrafficRegistered);
+        _routeTrafficTerrainVersion = worldMap.TerrainVersion;
+    }
+
+    private void RegisterRouteTraffic(int unitIndex)
+    {
+        if (_routeTrafficRegistered[unitIndex])
+            return;
+
+        int[]? path = _paths[unitIndex];
+        if (path == null || path.Length == 0)
+            return;
+
+        int start = Math.Clamp(_pathCursor[unitIndex], 0, path.Length);
+        for (int i = start; i < path.Length; i++)
+        {
+            int cell = path[i];
+            if ((uint)cell < (uint)_routeTraffic.Length)
+                _routeTraffic[cell]++;
+        }
+
+        _routeTrafficRegistered[unitIndex] = true;
+    }
+
+    private void RemoveRouteTraffic(int unitIndex)
+    {
+        if ((uint)unitIndex >= (uint)_routeTrafficRegistered.Length ||
+            !_routeTrafficRegistered[unitIndex])
+        {
+            return;
+        }
+
+        int[]? path = _paths[unitIndex];
+        if (path != null)
+        {
+            int start = Math.Clamp(_pathCursor[unitIndex], 0, path.Length);
+            for (int i = start; i < path.Length; i++)
+                DecrementRouteTraffic(path[i]);
+        }
+
+        _routeTrafficRegistered[unitIndex] = false;
+    }
+
+    private void DecrementRouteTraffic(int cell)
+    {
+        if ((uint)cell < (uint)_routeTraffic.Length &&
+            _routeTraffic[cell] > 0)
+        {
+            _routeTraffic[cell]--;
+        }
     }
 
     // Cache surface heights and legal 8-way steps once per terrain version.
