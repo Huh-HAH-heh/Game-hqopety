@@ -403,7 +403,6 @@ public sealed class VisionSystem
 
             BuildVisibleTargetList(
                 units,
-                worldMap,
                 health,
                 active,
                 observer,
@@ -423,6 +422,65 @@ public sealed class VisionSystem
         UpdateCount++;
     }
 
+    public bool IsRecentlyVisible(
+        int observerIndex,
+        int targetIndex,
+        UnitStore units)
+    {
+        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
+            (uint)targetIndex >= (uint)_visibilityCapacity ||
+            observerIndex == targetIndex)
+        {
+            return false;
+        }
+
+        int pairIndex = observerIndex * _visibilityCapacity + targetIndex;
+        int lastVisible = _lastVisibleUpdate[pairIndex];
+
+        if (lastVisible == 0 ||
+            _visionUpdateSequence - lastVisible > VisibilityMemoryUpdates)
+        {
+            _lastVisibleUpdate[pairIndex] = 0;
+            return false;
+        }
+
+        if (!FactionRules.ShouldAttack(
+                units.FactionTag[observerIndex],
+                units.FactionTag[targetIndex]) ||
+            !IsWithinRangeAndFov(
+                units,
+                observerIndex,
+                targetIndex,
+                out _))
+        {
+            _lastVisibleUpdate[pairIndex] = 0;
+            return false;
+        }
+
+        return true;
+    }
+
+    public void ForgetVisibleTarget(int observerIndex, int targetIndex)
+    {
+        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
+            (uint)targetIndex >= (uint)_visibilityCapacity)
+        {
+            return;
+        }
+
+        _lastVisibleUpdate[
+            observerIndex * _visibilityCapacity + targetIndex] = 0;
+
+        int start = _visibleStarts[observerIndex];
+        int end = start + _visibleCounts[observerIndex];
+
+        for (int i = start; i < end; i++)
+        {
+            if (_visibleTargets[i] == targetIndex)
+                _visibleTargets[i] = -1;
+        }
+    }
+
     public void ClearUnit(int unitIndex)
     {
         if ((uint)unitIndex >= (uint)_visibleCounts.Length)
@@ -430,6 +488,23 @@ public sealed class VisionSystem
 
         _visibleStarts[unitIndex] = 0;
         _visibleCounts[unitIndex] = 0;
+
+        if ((uint)unitIndex < (uint)_visibilityCapacity)
+        {
+            Array.Clear(
+                _lastVisibleUpdate,
+                unitIndex * _visibilityCapacity,
+                _visibilityCapacity);
+
+            for (int observer = 0; observer < _visibilityCapacity; observer++)
+                _lastVisibleUpdate[observer * _visibilityCapacity + unitIndex] = 0;
+
+            Array.Clear(
+                _sectorTargetCursors,
+                unitIndex * VisibilitySectorCount,
+                VisibilitySectorCount);
+        }
+
         _updateTimer = UpdateInterval;
     }
 
@@ -437,7 +512,11 @@ public sealed class VisionSystem
     {
         Array.Clear(_visibleStarts);
         Array.Clear(_visibleCounts);
+        Array.Clear(_lastVisibleUpdate);
+        Array.Clear(_sectorTargetCursors);
         _visibleTargetCount = 0;
+        _visionUpdateSequence = 0;
+        _visibilityTerrainVersion = long.MinValue;
         LastCandidatePairs = 0;
         LastTargetEvaluations = 0;
         LastLineOfSightChecks = 0;
@@ -1055,23 +1134,50 @@ public sealed class VisionSystem
             targetIndex;
     }
 
-    private void EnsureUnitCapacity(
-        int capacity)
+    private void EnsureUnitCapacity(int capacity)
     {
-        if (_visibleStarts.Length >= capacity)
+        if (_visibleStarts.Length < capacity)
+        {
+            Array.Resize(ref _visibleStarts, capacity);
+            Array.Resize(ref _visibleCounts, capacity);
+            Array.Resize(ref _nextInCell, capacity);
+        }
+
+        EnsureVisibilityCacheCapacity(capacity);
+    }
+
+    private void EnsureVisibilityCacheCapacity(int capacity)
+    {
+        if (_visibilityCapacity >= capacity)
             return;
 
-        Array.Resize(
-            ref _visibleStarts,
-            capacity);
+        int newCapacity = Math.Max(
+            capacity,
+            _visibilityCapacity == 0 ? 32 : _visibilityCapacity * 2);
 
-        Array.Resize(
-            ref _visibleCounts,
-            capacity);
+        int[] nextVisibleUpdates = new int[checked(newCapacity * newCapacity)];
+        int[] nextSectorCursors = new int[checked(newCapacity * VisibilitySectorCount)];
 
-        Array.Resize(
-            ref _nextInCell,
-            capacity);
+        for (int row = 0; row < _visibilityCapacity; row++)
+        {
+            Array.Copy(
+                _lastVisibleUpdate,
+                row * _visibilityCapacity,
+                nextVisibleUpdates,
+                row * newCapacity,
+                _visibilityCapacity);
+
+            Array.Copy(
+                _sectorTargetCursors,
+                row * VisibilitySectorCount,
+                nextSectorCursors,
+                row * VisibilitySectorCount,
+                VisibilitySectorCount);
+        }
+
+        _lastVisibleUpdate = nextVisibleUpdates;
+        _sectorTargetCursors = nextSectorCursors;
+        _visibilityCapacity = newCapacity;
     }
 
     private void EnsureVisibleTargetCapacity(
