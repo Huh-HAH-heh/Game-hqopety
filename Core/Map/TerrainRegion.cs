@@ -17,11 +17,20 @@ public sealed class TerrainRegion
     public int RegionY { get; }
     public int ZLevel { get; }
 
-    private readonly ushort[] _materialIds =
-        new ushort[TotalTiles];
+    // Most voxel chunks are entirely empty or entirely solid at a given Z.
+    // Store those chunks as one material ID and allocate the 48x48 buffer
+    // only for layers that actually contain mixed materials.
+    private ushort[]? _materialIds;
+    private ushort _uniformMaterialId;
+    private ushort _nonZeroMaterialId;
+    private int _nonZeroCount;
+    private bool _allNonZeroSame = true;
 
     public ReadOnlySpan<ushort> MaterialIds =>
-        _materialIds;
+        GetOrCreateMaterialBuffer();
+
+    internal bool HasDenseMaterialBuffer =>
+        _materialIds != null;
 
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly int _regionIndex;
@@ -59,8 +68,9 @@ public sealed class TerrainRegion
         if (!IsInside(localX, localY))
             return 0;
 
-        return _materialIds[
-            localX + localY * TilesPerSide];
+        return _materialIds == null
+            ? _uniformMaterialId
+            : _materialIds[localX + localY * TilesPerSide];
     }
 
     // Compatibility overload for callers that still pass Z explicitly.
@@ -80,7 +90,9 @@ public sealed class TerrainRegion
         if (localIndex < 0 || localIndex >= TotalTiles)
             throw new IndexOutOfRangeException();
 
-        return _materialIds[localIndex];
+        return _materialIds == null
+            ? _uniformMaterialId
+            : _materialIds[localIndex];
     }
 
     internal void SetMaterialId(
@@ -91,9 +103,9 @@ public sealed class TerrainRegion
         if (!IsInside(localX, localY))
             throw new IndexOutOfRangeException();
 
-        _materialIds[
-            localX + localY * TilesPerSide] =
-            materialId;
+        SetCellMaterial(
+            localX + localY * TilesPerSide,
+            materialId);
     }
 
     // Compatibility overload for callers that still pass Z explicitly.
@@ -119,12 +131,110 @@ public sealed class TerrainRegion
         if (localIndex < 0 || localIndex >= TotalTiles)
             throw new IndexOutOfRangeException();
 
-        _materialIds[localIndex] = materialId;
+        SetCellMaterial(localIndex, materialId);
     }
 
     internal void Clear()
     {
-        Array.Clear(_materialIds);
+        _materialIds = null;
+        _uniformMaterialId = 0;
+        _nonZeroMaterialId = 0;
+        _nonZeroCount = 0;
+        _allNonZeroSame = true;
+    }
+
+    private void SetCellMaterial(
+        int index,
+        ushort materialId)
+    {
+        ushort previous = _materialIds == null
+            ? _uniformMaterialId
+            : _materialIds[index];
+
+        if (previous == materialId)
+            return;
+
+        ushort[] values = GetOrCreateMaterialBuffer();
+
+        if (previous == 0 && materialId != 0)
+        {
+            if (_nonZeroCount == 0)
+            {
+                _nonZeroMaterialId = materialId;
+                _allNonZeroSame = true;
+            }
+            else if (_allNonZeroSame && materialId != _nonZeroMaterialId)
+            {
+                _allNonZeroSame = false;
+            }
+
+            _nonZeroCount++;
+        }
+        else if (previous != 0 && materialId == 0)
+        {
+            _nonZeroCount--;
+
+            if (_nonZeroCount == 0)
+            {
+                _nonZeroMaterialId = 0;
+                _allNonZeroSame = true;
+            }
+        }
+        else if (previous != 0 && materialId != 0 &&
+                 previous != materialId && _allNonZeroSame)
+        {
+            if (_nonZeroCount == 1)
+            {
+                _nonZeroMaterialId = materialId;
+            }
+            else
+            {
+                _allNonZeroSame = false;
+            }
+        }
+
+        values[index] = materialId;
+
+        if (_nonZeroCount == 0)
+        {
+            CollapseUniform(0);
+        }
+        else if (_nonZeroCount == TotalTiles && _allNonZeroSame)
+        {
+            CollapseUniform(_nonZeroMaterialId);
+        }
+    }
+
+    private ushort[] GetOrCreateMaterialBuffer()
+    {
+        if (_materialIds != null)
+            return _materialIds;
+
+        _materialIds = new ushort[TotalTiles];
+
+        if (_uniformMaterialId != 0)
+        {
+            Array.Fill(_materialIds, _uniformMaterialId);
+            _nonZeroMaterialId = _uniformMaterialId;
+            _nonZeroCount = TotalTiles;
+        }
+        else
+        {
+            _nonZeroMaterialId = 0;
+            _nonZeroCount = 0;
+        }
+
+        _allNonZeroSame = true;
+        return _materialIds;
+    }
+
+    private void CollapseUniform(ushort materialId)
+    {
+        _materialIds = null;
+        _uniformMaterialId = materialId;
+        _nonZeroMaterialId = materialId;
+        _nonZeroCount = materialId == 0 ? 0 : TotalTiles;
+        _allNonZeroSame = true;
     }
 
     public ref Tile GetLocalTile(
