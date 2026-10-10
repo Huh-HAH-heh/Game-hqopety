@@ -26,7 +26,7 @@ public sealed class LongRangeCombatTestScene
     private bool _initialized;
     private float _elapsed;
     private float _fireTimer;
-        private long _hitsAtReset;
+    private long _hitsAtReset;
 
     public bool Initialized =>
         _initialized;
@@ -129,6 +129,7 @@ public sealed class LongRangeCombatTestScene
             $"Red {AliveRed} | " +
             $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
+            $"Routes {simulation.Navigation.RoutesBuilt} built/{simulation.Navigation.RoutesFailed} failed | " +
             $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
     }
