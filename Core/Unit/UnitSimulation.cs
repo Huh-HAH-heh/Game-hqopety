@@ -171,6 +171,8 @@ public sealed class UnitSimulation
             return false;
         }
 
+        _movementSystem.Navigation.ClearRoute(index);
+
         BodyHandle body =
             new BodyHandle(
                 Units.BodyStart[index],
