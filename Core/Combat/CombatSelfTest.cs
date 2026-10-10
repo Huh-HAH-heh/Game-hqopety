@@ -613,18 +613,27 @@ public static class CombatSelfTest
             new TerrainTileRegion?[1],
             0);
 
-        if (region.HasDenseMaterialBuffer)
+        if (region.HasDenseMaterialBuffer ||
+            region.HasSparseMaterialBuffer)
+        {
             return false;
+        }
 
         region.SetMaterialIdAtIndex(0, 1);
 
-        if (!region.HasDenseMaterialBuffer)
+        if (region.HasDenseMaterialBuffer ||
+            !region.HasSparseMaterialBuffer ||
+            region.GetMaterialIdAtIndex(0) != 1 ||
+            region.GetMaterialIdAtIndex(1) != 0)
+        {
             return false;
+        }
 
         for (int i = 1; i < TerrainRegion.TotalTiles; i++)
             region.SetMaterialIdAtIndex(i, 1);
 
         if (region.HasDenseMaterialBuffer ||
+            region.HasSparseMaterialBuffer ||
             region.GetMaterialIdAtIndex(0) != 1 ||
             region.GetMaterialIdAtIndex(TerrainRegion.TotalTiles - 1) != 1)
         {
@@ -633,9 +642,22 @@ public static class CombatSelfTest
 
         region.SetMaterialIdAtIndex(0, 0);
 
+        if (region.HasDenseMaterialBuffer ||
+            !region.HasSparseMaterialBuffer ||
+            region.GetMaterialIdAtIndex(0) != 0 ||
+            region.GetMaterialIdAtIndex(1) != 1)
+        {
+            return false;
+        }
+
+        // A third material expands the compact base+override representation
+        // into dense storage without changing existing cell values.
+        region.SetMaterialIdAtIndex(1, 2);
+
         return region.HasDenseMaterialBuffer &&
                region.GetMaterialIdAtIndex(0) == 0 &&
-               region.GetMaterialIdAtIndex(1) == 1;
+               region.GetMaterialIdAtIndex(1) == 2 &&
+               region.GetMaterialIdAtIndex(2) == 1;
     }
 
     private static bool TestTerrainRangeCacheAllocations()
