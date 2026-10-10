@@ -107,7 +107,7 @@ public sealed class ProjectileSystem
 
             // Only a sample of bullets is rendered as tracers. Every bullet
             // still follows the full ballistic/collision simulation.
-            if (projectileIndex % 5 == 0)
+            if (projectiles.ShowTracer[projectileIndex])
             {
                 projectiles.RegisterTrace(
                     start,
