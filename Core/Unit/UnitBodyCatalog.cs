@@ -41,6 +41,7 @@ internal static class UnitBodyCatalog
             BodyPrimitive.Box,
             parentIndex: 0,
             localRotation: -0.35f,
+            motion: BodyPartMotion.WalkCycleOpposite,
             role: BodyPartRole.UpperArm),
 
         new BodyPartDefinition(
@@ -72,6 +73,7 @@ internal static class UnitBodyCatalog
             BodyPrimitive.Box,
             parentIndex: 0,
             localRotation: 0.35f,
+            motion: BodyPartMotion.WalkCycle,
             role: BodyPartRole.UpperArm),
 
         new BodyPartDefinition(
