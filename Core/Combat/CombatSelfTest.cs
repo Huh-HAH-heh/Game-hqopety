@@ -691,6 +691,9 @@ public static class CombatSelfTest
         // 84 units produce 6,972 possible directed non-self pairs without filtering.
         return simulation.Vision.LastCandidatePairs <= 80 * 4 * 2 &&
                simulation.Vision.LastCandidatePairs > 0 &&
+               simulation.Vision.LastTargetEvaluations > 0 &&
+               simulation.Vision.LastTargetEvaluations <=
+                   simulation.Units.ActiveCount * 24 &&
                simulation.Vision.LastLineOfSightChecks > 0 &&
                simulation.Vision.LastVisibleTargetCount > 0;
     }
