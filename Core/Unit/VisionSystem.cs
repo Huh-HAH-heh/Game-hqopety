@@ -489,6 +489,20 @@ public sealed class VisionSystem
         _visibleStarts[unitIndex] = 0;
         _visibleCounts[unitIndex] = 0;
 
+        // Remove this unit from every already-built observer list as well as
+        // from the pair cache, because unit indices can be recycled after death.
+        for (int observer = 0; observer < _visibleCounts.Length; observer++)
+        {
+            int start = _visibleStarts[observer];
+            int end = start + _visibleCounts[observer];
+
+            for (int i = start; i < end; i++)
+            {
+                if (_visibleTargets[i] == unitIndex)
+                    _visibleTargets[i] = -1;
+            }
+        }
+
         if ((uint)unitIndex < (uint)_visibilityCapacity)
         {
             Array.Clear(
