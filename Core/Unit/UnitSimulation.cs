@@ -115,7 +115,8 @@ public sealed class UnitSimulation
 
         _aiSystem =
             new UnitAiSystem(
-                unitCapacity);
+                unitCapacity,
+                _weaponSystem);
     }
 
     public UnitId Spawn(
