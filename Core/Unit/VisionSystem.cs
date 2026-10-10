@@ -147,7 +147,6 @@ public sealed class VisionSystem
         ReadOnlySpan<int> active = units.ActiveIndices;
         Vector3[] positions = units.Position;
         float[] ranges = units.ViewRange;
-        int lastAliveCount = 0;
 
         // Build an allocation-free spatial hash once per vision tick.
         for (int i = 0; i < active.Length; i++)
@@ -171,7 +170,6 @@ public sealed class VisionSystem
 
             _nextInCell[unit] = _spatialCellHeads[cell];
             _spatialCellHeads[cell] = unit;
-            lastAliveCount++;
         }
 
         for (int i = 0; i < active.Length; i++)
@@ -871,6 +869,10 @@ public sealed class VisionSystem
 
         Array.Resize(
             ref _visibleCounts,
+            capacity);
+
+        Array.Resize(
+            ref _nextInCell,
             capacity);
     }
 
