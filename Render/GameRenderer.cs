@@ -560,7 +560,7 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
-            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision";
+            $"A=AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F8=scale";
     }
 
     private void InitializeWindow()
@@ -761,6 +761,23 @@ public sealed class GameRenderer
 
             Console.WriteLine(
                 $"[TEST] Vision simulation={_unitSimulation.VisionEnabled}");
+            return;
+        }
+
+        if (key == Keyboard.Key.F8)
+        {
+            if (!_massCombatMode)
+                return;
+
+            _massCombatTestScene.CycleScale(
+                _unitSimulation,
+                _worldMap);
+
+            _selectedUnit = _massCombatTestScene.FirstUnit;
+            _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
+
+            Console.WriteLine(
+                $"[TEST] {_massCombatTestScene.GetStatus(_unitSimulation)}");
             return;
         }
 
