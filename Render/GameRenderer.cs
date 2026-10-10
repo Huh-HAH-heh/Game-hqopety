@@ -52,6 +52,7 @@ public sealed class GameRenderer
     private bool _terrainStressMode;
     private bool _showCombatTracers = true;
     private bool _showCombatHud = true;
+    private bool _showAiStateDebug = true;
     private int _visionTestIndex;
 
     private float _perfTimer;
@@ -383,7 +384,7 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _selectedUnit,
             _showVisionDebug && !_massCombatMode,
-            !_massCombatMode,
+            _showAiStateDebug && _unitSimulation.AI.Enabled,
             false);
 
         _projectileRenderer.Draw(
@@ -413,7 +414,8 @@ public sealed class GameRenderer
                 _combatShotsPerSecond,
                 _combatHitEventsPerSecond,
                 _combatHitEventsPerRound,
-                _showCombatTracers);
+                _showCombatTracers,
+                _showAiStateDebug);
 
             Vector2i mousePixels = Mouse.GetPosition(_window);
             Vector2f uiMouseCoordinates =
@@ -603,7 +605,7 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
-            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale T=tracers F9=HUD";
+            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
     }
 
     private void InitializeWindow()
@@ -810,6 +812,13 @@ public sealed class GameRenderer
             _showCombatHud = !_showCombatHud;
             if (_combatStatusOverlay != null)
                 _combatStatusOverlay.Visible = _showCombatHud;
+            return;
+        }
+
+        if (key == Keyboard.Key.I)
+        {
+            _showAiStateDebug = !_showAiStateDebug;
+            Console.WriteLine($"[TEST] AI state markers={_showAiStateDebug}");
             return;
         }
 
