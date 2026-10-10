@@ -370,7 +370,8 @@ public sealed class UnitSimulation
     public bool FireWeaponAt(
         UnitId id,
         UnitWeaponSlot slot,
-        UnitId target)
+        UnitId target,
+        Vector3? aimPoint = null)
     {
         if (!Units.TryGetIndex(id, out int shooterIndex) ||
             Health.OverallHitPoints[shooterIndex] <= 0f ||
@@ -387,7 +388,9 @@ public sealed class UnitSimulation
             Projectiles,
             id,
             slot,
-            target);
+            target,
+            1f,
+            aimPoint);
     }
 
     public UnitDamageResult ApplyDamage(
