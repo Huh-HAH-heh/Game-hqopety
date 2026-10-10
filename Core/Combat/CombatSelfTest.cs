@@ -26,6 +26,7 @@ public static class CombatSelfTest
         RunTest("Weapon: target mode cycle", TestTargetModes, ref passed, ref failed);
         RunTest("Weapon: ammunition selection", TestAmmunitionSelection, ref passed, ref failed);
         RunTest("Weapon: aim warmup delays first shot", TestWeaponAimWarmup, ref passed, ref failed);
+        RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
         RunTest("Weapon: automatic fire follows weapon cadence", TestAutomaticFireCadence, ref passed, ref failed);
         RunTest("Weapon: single fire requires a new aim", TestSingleFireReAims, ref passed, ref failed);
@@ -405,6 +406,72 @@ public static class CombatSelfTest
         // Automatic mode must emit the first round only after the CE-style
         // range-scaled warmup, without needing another AI/target command.
         return simulation.TotalShotsFired == 1 &&
+               !simulation.Weapons.AimIndicatorActive[stateIndex];
+    }
+
+    private static bool TestAimSurvivesVisionSampleGaps()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 64);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        int stateIndex = UnitWeaponStore.GetIndex(
+            shooter.Index,
+            UnitWeaponSlot.Primary);
+        Vector3 aimPoint = new Vector3(15.5f, 10.5f, 1.5f);
+
+        simulation.Weapons.SetAimTarget(
+            shooter.Index,
+            UnitWeaponSlot.Primary,
+            target,
+            reset: true,
+            aimPoint);
+        simulation.Weapons.UpdateTimers(0.65f);
+
+        UnitAiSystem.ClearAimingIfOccluded(
+            simulation.Units,
+            simulation.Weapons,
+            simulation.Vision,
+            worldMap,
+            shooter.Index,
+            target);
+
+        if (simulation.Weapons.AimTarget[stateIndex] != target ||
+            simulation.Weapons.AimTimer[stateIndex] < 0.65f ||
+            !simulation.Weapons.AimIndicatorActive[stateIndex])
+        {
+            return false;
+        }
+
+        // A real obstruction must cancel the stored aim, even if the vision
+        // candidate rotation was the original reason the target went stale.
+        worldMap.SetSolidHeight(10, 10, 30, 1);
+
+        UnitAiSystem.ClearAimingIfOccluded(
+            simulation.Units,
+            simulation.Weapons,
+            simulation.Vision,
+            worldMap,
+            shooter.Index,
+            target);
+
+        return simulation.Weapons.AimTarget[stateIndex] != target &&
+               simulation.Weapons.AimTimer[stateIndex] == 0f &&
                !simulation.Weapons.AimIndicatorActive[stateIndex];
     }
 
