@@ -90,7 +90,8 @@ public sealed class UnitAiSystem
             UnitSuppressionState suppressionState =
                 suppression.GetState(unit);
 
-            if (suppressionState == UnitSuppressionState.Panicked)
+            if (suppressionState == UnitSuppressionState.Panicked ||
+                suppressionState == UnitSuppressionState.Suppressed)
             {
                 if (!Store.HasGoal[unit] &&
                     TryFindSuppressionCover(
@@ -142,9 +143,42 @@ public sealed class UnitAiSystem
 
             if (!Store.HasTarget[unit])
             {
-                units.HasTarget[unit] = false;
-                Store.ClearGoal(unit);
-                Store.State[unit] = UnitAiState.Idle;
+                // Keep the scenario's existing march order until it is reached.
+                // Afterward patrol forward and laterally instead of standing idle
+                // forever waiting for an enemy to enter the current line of sight.
+                if (!units.HasTarget[unit])
+                {
+                    if (!Store.HasGoal[unit] ||
+                        ReachedGoal(units.Position[unit], Store.Goal[unit]))
+                    {
+                        Store.ClearGoal(unit);
+
+                        if (TryFindSearchWaypoint(
+                                units,
+                                worldMap,
+                                unit,
+                                out Vector3 searchWaypoint))
+                        {
+                            Store.SetGoal(unit, searchWaypoint);
+                        }
+                    }
+
+                    if (Store.HasGoal[unit])
+                    {
+                        units.Target[unit] = Store.Goal[unit];
+                        units.HasTarget[unit] = true;
+                        Store.State[unit] = UnitAiState.Search;
+                    }
+                    else
+                    {
+                        Store.State[unit] = UnitAiState.Idle;
+                    }
+                }
+                else
+                {
+                    Store.State[unit] = UnitAiState.Search;
+                }
+
                 continue;
             }
 
@@ -258,6 +292,16 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index);
 
+                VisionCheck shotCheck = vision.Evaluate(
+                    units,
+                    worldMap,
+                    unit,
+                    target.Index);
+
+                Vector3 aimPoint = shotCheck.IsVisible
+                    ? shotCheck.VisibleTargetPoint
+                    : units.Position[target.Index];
+
                 bool fired =
                     TryFireAnyRangedWeapon(
                         units,
@@ -266,6 +310,7 @@ public sealed class UnitAiSystem
                         projectiles,
                         unit,
                         target,
+                        aimPoint,
                         suppression.GetAccuracyMultiplier(unit));
 
                 if (fired)
@@ -319,9 +364,69 @@ public sealed class UnitAiSystem
                 continue;
             }
 
+            // Target memory expired: discard the stale target and resume scouting.
+            Store.ClearTarget(unit);
+            Store.ClearGoal(unit);
             units.HasTarget[unit] = false;
-            Store.State[unit] = UnitAiState.Idle;
+            Store.State[unit] = UnitAiState.Search;
         }
+    }
+
+    private static bool TryFindSearchWaypoint(
+        UnitStore units,
+        WorldMap worldMap,
+        int unit,
+        out Vector3 waypoint)
+    {
+        waypoint = Vector3.Zero;
+
+        Vector3 position = units.Position[unit];
+        float centerX = worldMap.TileWidth * 0.5f;
+        float centerY = worldMap.TileHeight * 0.5f;
+
+        float direction = units.FactionTag[unit] switch
+        {
+            1 => 1f,
+            2 => -1f,
+            _ => position.X < centerX ? 1f : -1f
+        };
+
+        float distanceToCenter = (centerX - position.X) * direction;
+        float targetX;
+
+        if (distanceToCenter > 8f)
+        {
+            targetX = position.X + direction * MathF.Min(10f, distanceToCenter);
+        }
+        else
+        {
+            // Sweep across the center line while scanning a distinct lateral lane.
+            float forwardPoint = centerX + direction * 5f;
+            float reversePoint = centerX - direction * 5f;
+            targetX = MathF.Abs(position.X - forwardPoint) <= 2f
+                ? reversePoint
+                : forwardPoint;
+        }
+
+        float laneY = centerY + ((unit % 13) - 6) * 4f;
+        float targetY = position.Y + Math.Clamp(laneY - position.Y, -5f, 5f);
+
+        targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
+        targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+
+        int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
+
+        waypoint = new Vector3(
+            tileX + 0.5f,
+            tileY + 0.5f,
+            worldMap.GetSurfaceHeight(tileX, tileY));
+
+        Vector2 delta = new Vector2(
+            waypoint.X - position.X,
+            waypoint.Y - position.Y);
+
+        return delta.LengthSquared() > 1f;
     }
 
     private static int FindNearestVisibleEnemy(
@@ -459,6 +564,7 @@ public sealed class UnitAiSystem
         ProjectileStore projectiles,
         int unit,
         UnitId target,
+        Vector3 aimPoint,
         float accuracyMultiplier)
     {
         for (int slot = 0;
@@ -505,6 +611,7 @@ public sealed class UnitAiSystem
                     unit,
                     weaponSlot,
                     target,
+                    aimPoint,
                     accuracyMultiplier))
             {
                 return true;
@@ -522,6 +629,7 @@ public sealed class UnitAiSystem
         int unit,
         UnitWeaponSlot slot,
         UnitId target,
+        Vector3 aimPoint,
         float accuracyMultiplier)
     {
         short inventorySlot =
@@ -547,7 +655,8 @@ public sealed class UnitAiSystem
             units.GetId(unit),
             slot,
             target,
-            accuracyMultiplier);
+            accuracyMultiplier,
+            aimPoint);
     }
 
     private static bool HasPendingAim(
