@@ -1,5 +1,6 @@
 using Core.Items;
 using Core.Map;
+using System;
 using System.Numerics;
 
 namespace Core.Unit;
@@ -124,39 +125,73 @@ public sealed class UnitSimulation
             Bodies.CreateBody(
                 definition.BodyType);
 
-        UnitId id =
-            Units.Create(
-                definition,
-                position,
-                bodyNormal,
-                headNormal,
-                body,
-                locationId,
-                factionTag);
+        return SpawnWithBody(
+            type,
+            definition,
+            position,
+            bodyNormal,
+            headNormal,
+            body,
+            locationId,
+            factionTag);
+    }
+
+    public UnitId SpawnCustom(
+        UnitType type,
+        Vector3 position,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        float bodyAngle = 0f,
+        int locationId = 0,
+        ushort factionTag = 0)
+    {
+        UnitDefinition definition = UnitCatalog.Get(type);
+        BodyHandle body = Bodies.CreateBody(bodyParts);
+
+        Vector3 bodyNormal = new Vector3(
+            MathF.Cos(bodyAngle),
+            MathF.Sin(bodyAngle),
+            0f);
+
+        return SpawnWithBody(
+            type,
+            definition,
+            position,
+            bodyNormal,
+            bodyNormal,
+            body,
+            locationId,
+            factionTag);
+    }
+
+    private UnitId SpawnWithBody(
+        UnitType type,
+        UnitDefinition definition,
+        Vector3 position,
+        Vector3 bodyNormal,
+        Vector3 headNormal,
+        BodyHandle body,
+        int locationId,
+        ushort factionTag)
+    {
+        UnitId id = Units.Create(
+            definition,
+            position,
+            bodyNormal,
+            headNormal,
+            body,
+            locationId,
+            factionTag);
 
         Bodies.SetInitialWorldPosition(
             body,
             position,
-            MathF.Atan2(
-                bodyNormal.Y,
-                bodyNormal.X));
+            MathF.Atan2(bodyNormal.Y, bodyNormal.X));
 
-        Health.InitializeUnit(
-            id.Index,
-            type);
-
-        Inventory.InitializeUnit(
-            id.Index);
-
-        Weapons.InitializeUnit(
-            id.Index);
-
-        Suppression.InitializeUnit(
-            id.Index);
-
-        _aiSystem.Store.InitializeUnit(
-            id.Index);
-
+        Health.InitializeUnit(id.Index, type);
+        Inventory.InitializeUnit(id.Index);
+        Weapons.InitializeUnit(id.Index);
+        Suppression.InitializeUnit(id.Index);
+        _aiSystem.Store.InitializeUnit(id.Index);
         return id;
     }
 
