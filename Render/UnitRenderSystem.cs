@@ -11,11 +11,16 @@ namespace RimClone.Render;
 
 public sealed class UnitRenderSystem
 {
-    private const int CircleSegments = 8;
+    private const int CircleSegments = 10;
+    private const int CapsuleHalfSegments = 4;
     private const int VisionConeSegments = 20;
     private const int VisionRingSegments = 48;
 
     private readonly VertexArray _vertices =
+        new VertexArray(
+            PrimitiveType.Triangles);
+
+    private readonly VertexArray _bodyOutlines =
         new VertexArray(
             PrimitiveType.Triangles);
 
@@ -56,6 +61,7 @@ public sealed class UnitRenderSystem
             return;
 
         _vertices.Clear();
+        _bodyOutlines.Clear();
         _visionArea.Clear();
         _selection.Clear();
         _aiming.Clear();
@@ -132,6 +138,9 @@ public sealed class UnitRenderSystem
 
         BodyPrimitive[] primitives =
             bodies.Primitive;
+
+        BodyPartRole[] bodyRoles =
+            bodies.Role;
 
         bool hasSelection =
             units.TryGetIndex(
@@ -263,16 +272,18 @@ public sealed class UnitRenderSystem
             int start = bodyStarts[unitIndex];
             int count = bodyCounts[unitIndex];
             int end = start + count;
+            float screenScale = window.Size.X / MathF.Max(1f, cameraView.Size.X);
+            float outline = 0.42f / MathF.Max(1f, tilePixelSize * screenScale);
 
             for (int part = start; part < end; part++)
             {
                 Vector3 position = partPositions[part];
                 Vector3 scale = partScales[part];
-                float radiusX = MathF.Max(0.06f, scale.X);
-                float radiusY = MathF.Max(0.06f, scale.Y);
+                float radiusX = MathF.Max(0.015f, MathF.Abs(scale.X));
+                float radiusY = MathF.Max(0.015f, MathF.Abs(scale.Y));
                 float extent = MathF.Sqrt(
                     radiusX * radiusX +
-                    radiusY * radiusY);
+                    radiusY * radiusY) + outline;
 
                 if (position.X + extent < minWorldX ||
                     position.X - extent > maxWorldX ||
@@ -284,29 +295,33 @@ public sealed class UnitRenderSystem
 
                 float pixelX = position.X * tilePixelSize;
                 float pixelY = position.Y * tilePixelSize;
+                BodyPartRole role = bodyRoles[part];
+                Color partColor = GetBodyPartColor(role, color);
+                Color outlineColor = new Color(20, 22, 26, 238);
 
-                if (primitives[part] == BodyPrimitive.Circle)
-                {
-                    AppendEllipse(
-                        _vertices,
-                        pixelX,
-                        pixelY,
-                        radiusX * tilePixelSize,
-                        radiusY * tilePixelSize,
-                        partRotations[part],
-                        color);
-                }
-                else
-                {
-                    AppendBox(
-                        _vertices,
-                        pixelX,
-                        pixelY,
-                        MathF.Max(0.03f, scale.X) * tilePixelSize,
-                        MathF.Max(0.03f, scale.Y) * tilePixelSize,
-                        partRotations[part],
-                        color);
-                }
+                AppendBodyPart(
+                    _bodyOutlines,
+                    primitives[part],
+                    role,
+                    pixelX,
+                    pixelY,
+                    radiusX * tilePixelSize,
+                    radiusY * tilePixelSize,
+                    partRotations[part],
+                    outline * tilePixelSize,
+                    outlineColor);
+
+                AppendBodyPart(
+                    _vertices,
+                    primitives[part],
+                    role,
+                    pixelX,
+                    pixelY,
+                    radiusX * tilePixelSize,
+                    radiusY * tilePixelSize,
+                    partRotations[part],
+                    0f,
+                    partColor);
             }
 
             if (hasSelection &&
@@ -346,6 +361,12 @@ public sealed class UnitRenderSystem
         {
             window.Draw(
                 _visionArea);
+        }
+
+        if (_bodyOutlines.VertexCount > 0)
+        {
+            window.Draw(
+                _bodyOutlines);
         }
 
         if (_vertices.VertexCount > 0)
@@ -1327,6 +1348,149 @@ public sealed class UnitRenderSystem
                     centerX + x1 * cos - y1 * sin,
                     centerY + x1 * sin + y1 * cos),
                 color));
+        }
+    }
+
+    private static Color GetBodyPartColor(
+        BodyPartRole role,
+        Color baseColor)
+    {
+        return role switch
+        {
+            BodyPartRole.Torso => Shade(baseColor, 0.83f),
+            BodyPartRole.Head => Blend(baseColor, new Color(220, 205, 185), 0.48f),
+            BodyPartRole.UpperArm => Shade(baseColor, 0.74f),
+            BodyPartRole.Forearm => Shade(baseColor, 0.80f),
+            BodyPartRole.Hand => Blend(baseColor, new Color(207, 179, 151), 0.42f),
+            BodyPartRole.Thigh => Shade(baseColor, 0.65f),
+            BodyPartRole.Shin => Shade(baseColor, 0.58f),
+            BodyPartRole.Foot => Shade(baseColor, 0.48f),
+            BodyPartRole.Segment => Shade(baseColor, 0.88f),
+            _ => baseColor
+        };
+    }
+
+    private static Color Shade(Color color, float amount) =>
+        new Color(
+            (byte)Math.Clamp((int)(color.R * amount), 0, 255),
+            (byte)Math.Clamp((int)(color.G * amount), 0, 255),
+            (byte)Math.Clamp((int)(color.B * amount), 0, 255),
+            color.A);
+
+    private static Color Blend(Color source, Color tint, float amount) =>
+        new Color(
+            (byte)Math.Clamp((int)(source.R + (tint.R - source.R) * amount), 0, 255),
+            (byte)Math.Clamp((int)(source.G + (tint.G - source.G) * amount), 0, 255),
+            (byte)Math.Clamp((int)(source.B + (tint.B - source.B) * amount), 0, 255),
+            source.A);
+
+    private static void AppendBodyPart(
+        VertexArray vertices,
+        BodyPrimitive primitive,
+        BodyPartRole role,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float rotation,
+        float expansion,
+        Color color)
+    {
+        radiusX = MathF.Max(0.01f, radiusX + expansion);
+        radiusY = MathF.Max(0.01f, radiusY + expansion);
+
+        bool capsule =
+            role == BodyPartRole.Torso ||
+            role == BodyPartRole.UpperArm ||
+            role == BodyPartRole.Forearm ||
+            role == BodyPartRole.Thigh ||
+            role == BodyPartRole.Shin ||
+            role == BodyPartRole.Foot ||
+            role == BodyPartRole.Segment;
+
+        if (capsule)
+        {
+            AppendCapsule(
+                vertices,
+                centerX,
+                centerY,
+                radiusX,
+                radiusY,
+                rotation,
+                color);
+        }
+        else if (primitive == BodyPrimitive.Circle ||
+                 role == BodyPartRole.Head ||
+                 role == BodyPartRole.Hand)
+        {
+            AppendEllipse(
+                vertices,
+                centerX,
+                centerY,
+                radiusX,
+                radiusY,
+                rotation,
+                color);
+        }
+        else
+        {
+            AppendBox(
+                vertices,
+                centerX,
+                centerY,
+                radiusX,
+                radiusY,
+                rotation,
+                color);
+        }
+    }
+
+    private static void AppendCapsule(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float halfLength,
+        float halfWidth,
+        float rotation,
+        Color color)
+    {
+        float radius = MathF.Min(halfLength, halfWidth);
+        float straightHalfLength = MathF.Max(0f, MathF.Max(halfLength, halfWidth) - radius);
+        float cos = MathF.Cos(rotation);
+        float sin = MathF.Sin(rotation);
+        float endX = cos * straightHalfLength;
+        float endY = sin * straightHalfLength;
+        Span<Vector2f> points = stackalloc Vector2f[CapsuleHalfSegments * 2 + 2];
+        int pointCount = 0;
+
+        for (int i = 0; i <= CapsuleHalfSegments; i++)
+        {
+            float angle = rotation - MathF.PI * 0.5f +
+                MathF.PI * i / CapsuleHalfSegments;
+
+            points[pointCount++] = new Vector2f(
+                centerX + endX + MathF.Cos(angle) * radius,
+                centerY + endY + MathF.Sin(angle) * radius);
+        }
+
+        for (int i = 0; i <= CapsuleHalfSegments; i++)
+        {
+            float angle = rotation + MathF.PI * 0.5f +
+                MathF.PI * i / CapsuleHalfSegments;
+
+            points[pointCount++] = new Vector2f(
+                centerX - endX + MathF.Cos(angle) * radius,
+                centerY - endY + MathF.Sin(angle) * radius);
+        }
+
+        Vector2f center = new Vector2f(centerX, centerY);
+
+        for (int i = 0; i < pointCount; i++)
+        {
+            int next = (i + 1) % pointCount;
+            vertices.Append(new Vertex(center, color));
+            vertices.Append(new Vertex(points[i], color));
+            vertices.Append(new Vertex(points[next], color));
         }
     }
 
