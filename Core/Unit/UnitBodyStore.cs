@@ -19,6 +19,7 @@ public sealed class UnitBodyStore
     private BodyPrimitive[] _primitive;
     private BodyPartMotion[] _motion;
     private BodyPartAnchor[] _anchor;
+    private BodyPartRole[] _role;
 
     private int _count;
 
@@ -59,6 +60,9 @@ public sealed class UnitBodyStore
     public BodyPartAnchor[] Anchor =>
         _anchor;
 
+    public BodyPartRole[] Role =>
+        _role;
+
     public UnitBodyStore(
         int initialCapacity = DefaultCapacity)
     {
@@ -80,6 +84,7 @@ public sealed class UnitBodyStore
         _primitive = new BodyPrimitive[initialCapacity];
         _motion = new BodyPartMotion[initialCapacity];
         _anchor = new BodyPartAnchor[initialCapacity];
+        _role = new BodyPartRole[initialCapacity];
     }
 
     public BodyHandle CreateBody(
@@ -125,7 +130,8 @@ public sealed class UnitBodyStore
                 part.ParentIndex < 0 ? -1 : start + part.ParentIndex,
                 part.Primitive,
                 part.Motion,
-                part.Anchor);
+                part.Anchor,
+                part.Role);
         }
 
         return new BodyHandle(start, parts.Length);
@@ -208,7 +214,8 @@ public sealed class UnitBodyStore
         int parent,
         BodyPrimitive primitive,
         BodyPartMotion motion,
-        BodyPartAnchor anchor)
+        BodyPartAnchor anchor,
+        BodyPartRole role)
     {
         int index = _writeIndex++;
 
@@ -229,6 +236,7 @@ public sealed class UnitBodyStore
         _primitive[index] = primitive;
         _motion[index] = motion;
         _anchor[index] = anchor;
+        _role[index] = role;
     }
 
     private void EnsureCapacityAt(
@@ -288,6 +296,10 @@ public sealed class UnitBodyStore
 
         Array.Resize(
             ref _anchor,
+            newCapacity);
+
+        Array.Resize(
+            ref _role,
             newCapacity);
     }
 
