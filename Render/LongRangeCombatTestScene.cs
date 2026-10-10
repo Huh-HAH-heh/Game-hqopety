@@ -19,7 +19,7 @@ public sealed class LongRangeCombatTestScene
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
     private const float AdvanceDistance = 25f;
-    private const float VisionStressRange = 75f;
+    private const float VisionStressRange = 85f;
 
     private UnitId[] _units =
         new UnitId[InitialUnitsPerFaction * 2];
