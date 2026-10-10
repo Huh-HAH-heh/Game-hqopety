@@ -1879,9 +1879,13 @@ public static class CombatSelfTest
         if (!gaitCorrect)
             return false;
 
-        if (!BodyLinksConnected(
-                simulation.Bodies,
-                new BodyHandle(start, count)))
+        BodyHandle colonistHandle = new BodyHandle(start, count);
+        BodyHandle greenbobHandle = new BodyHandle(
+            simulation.Units.BodyStart[greenbob.Index],
+            simulation.Units.BodyCount[greenbob.Index]);
+
+        if (!BodyLinksConnected(simulation.Bodies, colonistHandle) ||
+            !BodyLinksConnected(simulation.Bodies, greenbobHandle))
         {
             return false;
         }
@@ -1918,16 +1922,22 @@ public static class CombatSelfTest
         float crouchingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
-        if (MathF.Abs(crouchingArmRotation) >= MathF.Abs(standingArmRotation) - 0.12f)
+        if (MathF.Abs(crouchingArmRotation) >= MathF.Abs(standingArmRotation) - 0.12f ||
+            !BodyLinksConnected(simulation.Bodies, colonistHandle))
+        {
             return false;
+        }
 
         simulation.SetPosture(colonist, UnitPosture.Lying);
         bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
         float lyingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
-        if (MathF.Abs(lyingArmRotation) <= MathF.Abs(standingArmRotation) + 0.10f)
+        if (MathF.Abs(lyingArmRotation) <= MathF.Abs(standingArmRotation) + 0.10f ||
+            !BodyLinksConnected(simulation.Bodies, colonistHandle))
+        {
             return false;
+        }
 
         // A moving body follows its travel vector while head facing remains independent.
         simulation.SetHeadNormal(colonist, Vector3.UnitX);
@@ -1984,6 +1994,16 @@ public static class CombatSelfTest
             }
             else if (role == BodyPartRole.Hand &&
                      parentRole == BodyPartRole.Forearm)
+            {
+                Vector3 endpoint = parentPosition + Axis(
+                    rotation,
+                    MathF.Abs(bodies.Scale[parent].X));
+
+                if (Vector3.Distance(position, endpoint) > 0.002f)
+                    return false;
+            }
+            else if (role == BodyPartRole.Foot &&
+                     parentRole == BodyPartRole.Thigh)
             {
                 Vector3 endpoint = parentPosition + Axis(
                     rotation,
