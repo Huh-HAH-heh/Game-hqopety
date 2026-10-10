@@ -120,9 +120,10 @@ public sealed class GameRenderer
         // Always produce a rate-limited [SHOT]/[HIT]/[BLOCKED] combat trace.
         CombatDiagnostics.Enabled = true;
 
-        // The combat scene starts with scripted firing, then A can enable AI.
-        _unitSimulation.AI.Enabled = false;
-        _unitSimulation.VisionEnabled = false;
+        // The battlefield is a live micro-AI demonstration by default.
+        // A is idempotent: it only enables AI and cannot switch it off.
+        _unitSimulation.AI.Enabled = true;
+        _unitSimulation.VisionEnabled = true;
         _showVisionDebug = false;
 
         // Launch directly into the 800-unit navigation/combat test.
