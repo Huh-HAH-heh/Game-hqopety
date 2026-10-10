@@ -323,10 +323,13 @@ public sealed class UnitRenderSystem
                 for (int part = start; part < end; part++)
                 {
                     BodyPartRole role = bodyRoles[part];
-                    if (GetBodyLayer(role) != layer)
+                    Vector3 position = partPositions[part];
+
+                    // In a top-down view, the far-side limbs are painted
+                    // under the body and near-side limbs over it.
+                    if (GetBodyLayer(role, position.Y, unitPosition.Y) != layer)
                         continue;
 
-                    Vector3 position = partPositions[part];
                     Vector3 scale = partScales[part];
                     float radiusX = MathF.Max(0.015f, MathF.Abs(scale.X));
                     float radiusY = MathF.Max(0.015f, MathF.Abs(scale.Y));
@@ -1428,27 +1431,37 @@ public sealed class UnitRenderSystem
         position.Y + extent >= minY &&
         position.Y - extent <= maxY;
 
-    private static int GetBodyLayer(BodyPartRole role) =>
-        role switch
-        {
-            BodyPartRole.Thigh or
-            BodyPartRole.Knee or
-            BodyPartRole.Shin or
-            BodyPartRole.Foot => 0,
+    private static int GetBodyLayer(
+        BodyPartRole role,
+        float partY,
+        float bodyY)
+    {
+        if (role == BodyPartRole.Head)
+            return 3;
 
-            BodyPartRole.Torso or
+        if (role is BodyPartRole.Torso or
             BodyPartRole.Neck or
             BodyPartRole.Segment or
-            BodyPartRole.Generic => 1,
+            BodyPartRole.Generic)
+        {
+            return 1;
+        }
 
+        bool limb = role is
             BodyPartRole.UpperArm or
             BodyPartRole.Forearm or
             BodyPartRole.Elbow or
-            BodyPartRole.Hand => 2,
+            BodyPartRole.Hand or
+            BodyPartRole.Thigh or
+            BodyPartRole.Knee or
+            BodyPartRole.Shin or
+            BodyPartRole.Foot;
 
-            BodyPartRole.Head => 3,
-            _ => 1
-        };
+        if (!limb)
+            return 1;
+
+        return partY < bodyY ? 0 : 2;
+    }
 
     private static Color GetBodyPartColor(
         BodyPartRole role,
