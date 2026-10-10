@@ -28,3 +28,6 @@ jobs:
 
       - name: Build
         run: dotnet build RimClone.slnx --configuration Release --no-restore
+
+      - name: Run simulation self-tests
+        run: dotnet run --project App/App.csproj --configuration Release --no-build -- --self-test
