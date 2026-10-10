@@ -31,6 +31,7 @@ public static class CombatSelfTest
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: spatial index prunes distant unit pairs", TestVisionSpatialIndex, ref passed, ref failed);
+        RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
         RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
@@ -643,6 +644,40 @@ public static class CombatSelfTest
         return simulation.Vision.LastCandidatePairs < bruteForcePairs / 4 &&
                simulation.Vision.LastVisibleTargetCount == 0 &&
                simulation.Vision.UpdateCount == 1;
+    }
+
+    private static bool TestVisionHeightUnits()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 100);
+
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < worldMap.TileWidth; x++)
+                worldMap.SetSolidHeight(x, y, 10, 1);
+        }
+
+        // A 6 m obstacle occupies layers 0..59 (each layer is 0.1 m).
+        // A ray at 7 m must pass over it; a ray at 2 m must be blocked.
+        worldMap.SetSolidHeight(12, 10, 60, 2);
+
+        VisionSystem vision = new VisionSystem();
+
+        bool aboveWallVisible = vision.HasLineOfSight(
+            worldMap,
+            new Vector3(5.5f, 10.5f, 7f),
+            new Vector3(20.5f, 10.5f, 7f),
+            out _);
+
+        bool throughWallVisible = vision.HasLineOfSight(
+            worldMap,
+            new Vector3(5.5f, 10.5f, 2f),
+            new Vector3(20.5f, 10.5f, 2f),
+            out _);
+
+        return aboveWallVisible && !throughWallVisible;
     }
 
     private static bool TestVisionHostilePairsOnly()
