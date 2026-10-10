@@ -54,8 +54,7 @@ public sealed class LongRangeCombatTestScene
             BuildTerrain(worldMap);
             SpawnUnits(simulation, worldMap);
             _initialized = true;
-            simulation.AI.Enabled = false;
-            simulation.VisionEnabled = false;
+            // AI/vision are controlled by the user, not reset by scene setup.
             _hitsAtReset = simulation.Projectiles.TotalHits;
         }
         else
@@ -538,8 +537,6 @@ public sealed class LongRangeCombatTestScene
         _hitsAtReset =
             simulation.Projectiles.TotalHits;
 
-        simulation.AI.Enabled = false;
-        simulation.VisionEnabled = false;
         simulation.Projectiles.Clear();
 
         for (int i = 0;
