@@ -40,8 +40,12 @@ public sealed class UnitHealthSystem
             int unit =
                 active[i];
 
-            if (unit >= capacity)
+            if (unit >= capacity ||
+                overall[unit] <= 0f ||
+                overallMax[unit] <= 0f)
+            {
                 continue;
+            }
 
             overall[unit] =
                 Math.Clamp(
@@ -120,6 +124,7 @@ public sealed class UnitHealthSystem
     {
         if (amountPerSecond <= 0f ||
             !units.TryGetIndex(unitId, out int unitIndex) ||
+            health.OverallHitPoints[unitIndex] <= 0f ||
             !health.TryFindPart(unitIndex, partId, out int partIndex))
             return;
 
@@ -139,7 +144,8 @@ public sealed class UnitHealthSystem
         if (amount <= 0f ||
             !units.TryGetIndex(
                 unitId,
-                out int unitIndex))
+                out int unitIndex) ||
+            health.OverallHitPoints[unitIndex] <= 0f)
         {
             return false;
         }
