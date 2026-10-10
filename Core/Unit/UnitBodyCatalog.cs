@@ -43,7 +43,7 @@ internal static class UnitBodyCatalog
             new Vector3(0.064f, 0.021f, 0.045f),
             BodyPrimitive.Box,
             parentIndex: 2,
-            localRotation: 0.40f,
+            localRotation: 0.80f,
             role: BodyPartRole.Forearm),
 
         new BodyPartDefinition(
@@ -68,7 +68,7 @@ internal static class UnitBodyCatalog
             new Vector3(0.064f, 0.021f, 0.045f),
             BodyPrimitive.Box,
             parentIndex: 5,
-            localRotation: -0.40f,
+            localRotation: -0.80f,
             role: BodyPartRole.Forearm),
 
         new BodyPartDefinition(
