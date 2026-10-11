@@ -265,60 +265,45 @@ public sealed class UnitRenderSystem
 
             int start = bodyStarts[unitIndex];
             int count = bodyCounts[unitIndex];
-            int end = start + count;
             float screenScale = window.Size.X / MathF.Max(1f, cameraView.Size.X);
             float pixelScale = MathF.Max(1f, tilePixelSize * screenScale);
+            float radius = MathF.Max(0.24f, widths[unitIndex] * 0.55f);
+            float pixelX = unitPosition.X * tilePixelSize;
+            float pixelY = unitPosition.Y * tilePixelSize;
             Color outlineColor = new Color(20, 22, 26, 238);
-            float bodyRotation = MathF.Atan2(bodyNormals[unitIndex].Y, bodyNormals[unitIndex].X);
 
-            // Only active anatomy renderer: every part is one circle at its simulated world coordinate.
-            for (int part = start; part < end; part++)
-            {
-                Vector3 position = partPositions[part];
-                Vector3 scale = partScales[part];
-                BodyPartRole role = bodyRoles[part];
-                float radius = GetBodyDotRadius(role, scale, pixelScale);
+            // Restored simple body model: the whole unit is one circle at its root position.
+            AppendCircleOutline(
+                _bodyOutlines,
+                pixelX,
+                pixelY,
+                radius * tilePixelSize + 0.30f / pixelScale,
+                outlineColor,
+                CircleSegments);
 
-                if (!IsPartInView(position, radius + 0.12f,
-                    minWorldX, maxWorldX, minWorldY, maxWorldY))
-                {
-                    continue;
-                }
+            AppendCircle(
+                _vertices,
+                pixelX,
+                pixelY,
+                radius * tilePixelSize,
+                color);
 
-                float pixelX = position.X * tilePixelSize;
-                float pixelY = position.Y * tilePixelSize;
-
-                AppendCircleOutline(_bodyOutlines, pixelX, pixelY,
-                    radius * tilePixelSize + 0.30f, outlineColor, CircleSegments);
-                AppendCircle(_vertices, pixelX, pixelY,
-                    radius * tilePixelSize, GetBodyPartColor(role, color));
-
-                int zone = GetArmorZoneIndex(
-                    role,
-                    LocalSide(position, unitPosition, bodyRotation));
-
-                if (zone < 0)
-                    continue;
-
-                for (int layer = 0; layer < UnitInventoryStore.ArmorLayerCount; layer++)
-                {
-                    short itemSlot = inventory.GetBodyEquipment(unitIndex, zone, (ArmorLayer)layer);
-                    if (itemSlot < 0 ||
-                        inventory.GetItem(unitIndex, itemSlot) is not ArmorConfig apparel)
-                    {
-                        continue;
-                    }
-
-                    float padding = MathF.Max(0.045f, apparel.WorldRenderPadding) + layer * 0.035f;
-                    AppendCircleOutline(_equipment, pixelX, pixelY,
-                        (radius + padding) * tilePixelSize, GetItemColor(apparel), CircleSegments);
-                }
-            }
+            AppendEquippedApparel(
+                _equipment,
+                inventory,
+                unitIndex,
+                unitPosition,
+                radius,
+                tilePixelSize);
 
             AppendEquippedWeapons(
-                _weaponVisuals, inventory, simulation.Weapons, unitIndex,
-                unitPosition, headNormals[unitIndex], partPositions, bodyRoles,
-                start, count, tilePixelSize);
+                _weaponVisuals,
+                inventory,
+                simulation.Weapons,
+                unitIndex,
+                unitPosition,
+                headNormals[unitIndex],
+                tilePixelSize);
 
             if (hasSelection &&
                 selectedIndex == unitIndex)
@@ -402,111 +387,73 @@ public sealed class UnitRenderSystem
         }
     }
 
-    private static float GetBodyDotRadius(BodyPartRole role, Vector3 scale, float pixelScale)
-    {
-        float configured = MathF.Min(MathF.Abs(scale.X), MathF.Abs(scale.Y));
-        float minPixels = role switch
-        {
-            BodyPartRole.Torso => 1.7f,
-            BodyPartRole.Head => 1.5f,
-            BodyPartRole.Generic or BodyPartRole.Segment => 1.5f,
-            BodyPartRole.UpperArm or BodyPartRole.Forearm or BodyPartRole.Thigh or BodyPartRole.Shin => 0.72f,
-            BodyPartRole.Neck or BodyPartRole.Elbow or BodyPartRole.Knee => 0.52f,
-            BodyPartRole.Hand or BodyPartRole.Foot => 0.68f,
-            _ => 0.65f
-        };
-        return MathF.Max(configured, minPixels / pixelScale);
-    }
-
-    private static float LocalSide(Vector3 part, Vector3 unit, float bodyRotation) =>
-        -(part.X - unit.X) * MathF.Sin(bodyRotation) +
-        (part.Y - unit.Y) * MathF.Cos(bodyRotation);
-
-    private static int GetArmorZoneIndex(BodyPartRole role, float side)
-    {
-        bool left = side >= 0f;
-        return role switch
-        {
-            BodyPartRole.Head => 0,
-            BodyPartRole.Torso or BodyPartRole.Neck => 1,
-            BodyPartRole.UpperArm or BodyPartRole.Elbow or BodyPartRole.Forearm => left ? 2 : 3,
-            BodyPartRole.Hand => left ? 4 : 5,
-            BodyPartRole.Thigh or BodyPartRole.Knee or BodyPartRole.Shin => left ? 6 : 7,
-            BodyPartRole.Foot => left ? 8 : 9,
-            _ => -1
-        };
-    }
-
-    private static Color GetItemColor(ItemConfig item) =>
+private static Color GetItemColor(ItemConfig item) =>
         new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
 
     private static void AppendEquippedWeapons(
-        VertexArray vertices, UnitInventoryStore inventory, UnitWeaponStore weapons,
-        int unitIndex, Vector3 unitPosition, Vector3 headNormal,
-        Vector3[] partPositions, BodyPartRole[] roles,
-        int bodyStart, int bodyCount, float tilePixelSize)
+        VertexArray vertices,
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        int unitIndex,
+        Vector3 unitPosition,
+        Vector3 facing,
+        float tilePixelSize)
     {
-        float handX = 0f, handY = 0f;
-        int handCount = 0;
-        for (int part = bodyStart; part < bodyStart + bodyCount; part++)
+        float dx = facing.X;
+        float dy = facing.Y;
+        float facingLength = MathF.Sqrt(dx * dx + dy * dy);
+        if (facingLength < 0.001f)
         {
-            if (roles[part] != BodyPartRole.Hand) continue;
-            handX += partPositions[part].X;
-            handY += partPositions[part].Y;
-            handCount++;
-        }
-
-        float directionX = headNormal.X, directionY = headNormal.Y;
-        float directionLength = MathF.Sqrt(directionX * directionX + directionY * directionY);
-        if (directionLength < 0.001f)
-        {
-            directionX = 1f;
-            directionY = 0f;
+            dx = 1f;
+            dy = 0f;
         }
         else
         {
-            directionX /= directionLength;
-            directionY /= directionLength;
-        }
-
-        if (handCount > 0)
-        {
-            handX /= handCount;
-            handY /= handCount;
-        }
-        else
-        {
-            handX = unitPosition.X + directionX * 0.30f;
-            handY = unitPosition.Y + directionY * 0.30f;
+            dx /= facingLength;
+            dy /= facingLength;
         }
 
         for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
         {
             short itemSlot = inventory.GetWeaponEquipment(unitIndex, (UnitWeaponSlot)slot);
-            if (itemSlot < 0 || inventory.GetItem(unitIndex, itemSlot) is not WeaponConfig weapon)
+            if (itemSlot < 0 ||
+                inventory.GetItem(unitIndex, itemSlot) is not WeaponConfig weapon)
                 continue;
 
-            float dx = directionX, dy = directionY;
+            float weaponX = dx;
+            float weaponY = dy;
             int stateIndex = UnitWeaponStore.GetIndex(unitIndex, (UnitWeaponSlot)slot);
             Vector3 aimPoint = weapons.AimPoint[stateIndex];
+
             if (weapons.AimIndicatorActive[stateIndex] && aimPoint != Vector3.Zero)
             {
-                dx = aimPoint.X - unitPosition.X;
-                dy = aimPoint.Y - unitPosition.Y;
-                float len = MathF.Sqrt(dx * dx + dy * dy);
-                if (len > 0.001f) { dx /= len; dy /= len; }
+                weaponX = aimPoint.X - unitPosition.X;
+                weaponY = aimPoint.Y - unitPosition.Y;
+                float aimLength = MathF.Sqrt(weaponX * weaponX + weaponY * weaponY);
+                if (aimLength > 0.001f)
+                {
+                    weaponX /= aimLength;
+                    weaponY /= aimLength;
+                }
+                else
+                {
+                    weaponX = dx;
+                    weaponY = dy;
+                }
             }
 
-            float offset = slot == (int)UnitWeaponSlot.Secondary ? 0.09f : 0f;
-            float cx = handX - directionY * offset + directionX * 0.08f;
-            float cy = handY + directionX * offset + directionY * 0.08f;
+            float sideOffset = slot == (int)UnitWeaponSlot.Secondary ? 0.10f : 0f;
+            float centerDistance = weapon.WorldRenderLength * 0.43f;
+            float centerX = unitPosition.X + weaponX * centerDistance - weaponY * sideOffset;
+            float centerY = unitPosition.Y + weaponY * centerDistance + weaponX * sideOffset;
+
             AppendOrientedRect(
                 vertices,
-                cx * tilePixelSize,
-                cy * tilePixelSize,
+                centerX * tilePixelSize,
+                centerY * tilePixelSize,
                 MathF.Max(0.025f, weapon.WorldRenderWidth * 0.5f) * tilePixelSize,
                 MathF.Max(0.12f, weapon.WorldRenderLength * 0.5f) * tilePixelSize,
-                MathF.Atan2(dy, dx),
+                MathF.Atan2(weaponY, weaponX),
                 GetItemColor(weapon));
         }
     }
@@ -1407,25 +1354,7 @@ private static void AppendSelection(
         position.Y + extent >= minY &&
         position.Y - extent <= maxY;
 
-    private static Color GetBodyPartColor(
-        BodyPartRole role,
-        Color baseColor) =>
-        role switch
-        {
-            BodyPartRole.Torso => Shade(baseColor, 0.83f),
-            BodyPartRole.Neck => Shade(baseColor, 0.90f),
-            BodyPartRole.Head => Blend(baseColor, new Color(220, 205, 185), 0.48f),
-            BodyPartRole.UpperArm => Shade(baseColor, 0.74f),
-            BodyPartRole.Forearm => Shade(baseColor, 0.80f),
-            BodyPartRole.Elbow => Shade(baseColor, 0.76f),
-            BodyPartRole.Hand => Blend(baseColor, new Color(207, 179, 151), 0.42f),
-            BodyPartRole.Thigh => Shade(baseColor, 0.65f),
-            BodyPartRole.Knee => Shade(baseColor, 0.60f),
-            BodyPartRole.Shin => Shade(baseColor, 0.58f),
-            BodyPartRole.Foot => Shade(baseColor, 0.48f),
-            BodyPartRole.Segment => Shade(baseColor, 0.88f),
-            _ => baseColor
-        };
+;
 
 private static Color Shade(Color color, float amount) =>
         new Color(
