@@ -20,6 +20,12 @@ public readonly record struct RenderUnitState(
     float HitPoints,
     ushort FactionTag,
     UnitAiState AiState,
+    bool HasTarget,
+    Vector3 TargetPosition,
+    bool HasGoal,
+    Vector3 Goal,
+    float Suppression,
+    UnitSuppressionState SuppressionState,
     bool HasApparel,
     bool HasPoweredArmor,
     RenderWeaponVisual PrimaryWeapon,
@@ -140,8 +146,10 @@ public sealed class SimulationFrameSnapshot
         float[] widths = units.Width;
         float[] lengths = units.Length;
         Vector3[] headNormals = units.HeadNormal;
-        UnitAiState[] aiStates = simulation.AI.Store.State;
+        UnitAiStore aiStore = simulation.AI.Store;
+        UnitAiState[] aiStates = aiStore.State;
         UnitInventoryStore inventoryStore = simulation.Inventory;
+        UnitSuppressionStore suppressionStore = simulation.Suppression;
         UnitWeaponStore weaponStore = simulation.Weapons;
 
         for (int i = 0; i < active.Length; i++)
@@ -178,6 +186,20 @@ public sealed class SimulationFrameSnapshot
             RenderWeaponVisual secondaryWeapon = CaptureWeaponVisual(
                 inventoryStore, weaponStore, index, UnitWeaponSlot.Secondary);
 
+            bool hasTarget = false;
+            Vector3 targetPosition = Vector3.Zero;
+            if (aiStore.HasTarget[index] &&
+                units.TryGetIndex(aiStore.Target[index], out int targetIndex))
+            {
+                hasTarget = true;
+                targetPosition = positions[targetIndex];
+            }
+
+            bool hasGoal = aiStore.HasGoal[index];
+            Vector3 goal = aiStore.Goal[index];
+            float suppression = suppressionStore.Value[index];
+            UnitSuppressionState suppressionState = suppressionStore.GetState(index);
+
             unitStates[i] = new RenderUnitState(
                 index,
                 positions[index],
@@ -187,6 +209,12 @@ public sealed class SimulationFrameSnapshot
                 hp,
                 faction,
                 aiState,
+                hasTarget,
+                targetPosition,
+                hasGoal,
+                goal,
+                suppression,
+                suppressionState,
                 hasApparel,
                 hasPoweredArmor,
                 primaryWeapon,
