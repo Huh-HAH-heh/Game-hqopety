@@ -39,6 +39,7 @@ public readonly record struct RenderBodyPart(
     BodyPrimitive Primitive,
     BodyPartRole Role,
     ushort FactionTag,
+    UnitAiState AiState,
     bool IsAlive);
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
@@ -238,6 +239,7 @@ public sealed class SimulationFrameSnapshot
                     bodyPrimitives[bodyPart],
                     bodyRoles[bodyPart],
                     faction,
+                    aiState,
                     hp > 0f);
             }
 
