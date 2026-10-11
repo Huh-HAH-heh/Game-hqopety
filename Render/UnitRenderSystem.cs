@@ -23,7 +23,7 @@ public sealed class UnitRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
-    private readonly VertexArray _equipment =
+    private readonly VertexArray _statusIcons =
         new VertexArray(
             PrimitiveType.Lines);
 
@@ -82,7 +82,7 @@ public sealed class UnitRenderSystem
 
         _vertices.Clear();
         _bodyOutlines.Clear();
-        _equipment.Clear();
+        _statusIcons.Clear();
         _weaponVisuals.Clear();
         _visionArea.Clear();
         _selection.Clear();
@@ -122,21 +122,6 @@ public sealed class UnitRenderSystem
 
         UnitStore units =
             simulation.Units;
-
-        UnitBodyStore bodyStore = simulation.Bodies;
-        Vector3[] bodyPositions = bodyStore.WorldPosition;
-        Vector3[] bodyScales = bodyStore.Scale;
-        float[] bodyRotations = bodyStore.WorldRotation;
-        BodyPrimitive[] bodyPrimitives = bodyStore.Primitive;
-        BodyPartRole[] bodyRoles = bodyStore.Role;
-        int[] bodyStarts = units.BodyStart;
-        short[] bodyCounts = units.BodyCount;
-
-        UnitInventoryStore inventory =
-            simulation.Inventory;
-
-        Vector3[] bodyNormals =
-            units.BodyNormal;
 
         Vector3[] headNormals =
             units.HeadNormal;
@@ -217,44 +202,35 @@ public sealed class UnitRenderSystem
 
             float screenX = unitPosition.X * tilePixelSize;
             float screenY = unitPosition.Y * tilePixelSize;
-            bool isAlive = simulation.Health.OverallHitPoints[unitIndex] > 0f;
-            UnitAiState aiState = simulation.AI.Store.State[unitIndex];
+            float hitPoints = simulation.Health.OverallHitPoints[unitIndex];
+            float maxHitPoints = simulation.Health.OverallMaxHitPoints[unitIndex];
+            bool isAlive = hitPoints > 0f;
+            float healthRatio = maxHitPoints > 0f ? hitPoints / maxHitPoints : 0f;
+            float suppression = simulation.Suppression.Value[unitIndex];
+            UnitSuppressionState suppressionState = simulation.Suppression.GetState(unitIndex);
+            float markerRadius = GetMarkerRadius(
+                widths[unitIndex],
+                lengths[unitIndex],
+                tilePixelSize,
+                screenScale);
 
-            int bodyStart = bodyStarts[unitIndex];
-            int bodyEnd = bodyStart + Math.Max(0, (int)bodyCounts[unitIndex]);
-            for (int bodyPart = bodyStart;
-                 bodyPart < bodyEnd && bodyPart < bodyStore.Count;
-                 bodyPart++)
-            {
-                AppendLogicalBodyPart(
-                    _vertices,
-                    _bodyOutlines,
-                    bodyPositions[bodyPart],
-                    bodyScales[bodyPart],
-                    bodyRotations[bodyPart],
-                    bodyPrimitives[bodyPart],
-                    bodyRoles[bodyPart],
-                    units.FactionTag[unitIndex],
-                    aiState,
-                    isAlive,
-                    showAiDebug && simulation.AI.Enabled,
-                    tilePixelSize,
-                    screenScale,
-                    minWorldX,
-                    maxWorldX,
-                    minWorldY,
-                    maxWorldY);
-            }
+            AppendUnitMarker(
+                _vertices,
+                _bodyOutlines,
+                _statusIcons,
+                screenX,
+                screenY,
+                markerRadius,
+                headNormals[unitIndex],
+                units.FactionTag[unitIndex],
+                isAlive,
+                healthRatio,
+                suppression,
+                suppressionState,
+                screenScale);
 
             if (!isAlive)
-            {
-                AppendDeathMarker(
-                    _selection,
-                    screenX,
-                    screenY,
-                    MathF.Max(1.2f / screenScale, tilePixelSize * 0.16f));
                 continue;
-            }
 
             if (showAiDebug &&
                 simulation.AI.Enabled &&
@@ -267,36 +243,6 @@ public sealed class UnitRenderSystem
                     unitIndex,
                     tilePixelSize);
 
-                AppendSuppressionDebug(
-                    _aiDebug,
-                    simulation,
-                    unitIndex,
-                    tilePixelSize);
-            }
-
-            float radius =
-                MathF.Max(
-                    0.24f,
-                    widths[unitIndex] * 0.55f);
-
-            if (showUnitDetails)
-            {
-                AppendEquippedApparel(
-                    _equipment,
-                    inventory,
-                    unitIndex,
-                    unitPosition,
-                    radius,
-                    tilePixelSize);
-
-                AppendEquippedWeapons(
-                    _weaponVisuals,
-                    inventory,
-                    simulation.Weapons,
-                    unitIndex,
-                    unitPosition,
-                    headNormals[unitIndex],
-                    tilePixelSize);
             }
 
             if (hasSelection &&
@@ -344,8 +290,8 @@ public sealed class UnitRenderSystem
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
 
-        if (_equipment.VertexCount > 0)
-            window.Draw(_equipment);
+        if (_statusIcons.VertexCount > 0)
+            window.Draw(_statusIcons);
 
         if (_weaponVisuals.VertexCount > 0)
             window.Draw(_weaponVisuals);
@@ -403,36 +349,12 @@ public void DrawSnapshot(
         _vertices.Clear();
         _bodyOutlines.Clear();
         _selection.Clear();
-        _equipment.Clear();
+        _statusIcons.Clear();
         _weaponVisuals.Clear();
         _aiming.Clear();
         _visionArea.Clear();
         _visionDebug.Clear();
         _aiDebug.Clear();
-
-        RenderBodyPart[] bodyParts = snapshot.BodyParts;
-        for (int i = 0; i < bodyParts.Length; i++)
-        {
-            RenderBodyPart part = bodyParts[i];
-            AppendLogicalBodyPart(
-                _vertices,
-                _bodyOutlines,
-                part.Position,
-                part.Scale,
-                part.Rotation,
-                part.Primitive,
-                part.Role,
-                part.FactionTag,
-                part.AiState,
-                part.IsAlive,
-                showAiDebug,
-                tilePixelSize,
-                screenScale,
-                minX,
-                maxX,
-                minY,
-                maxY);
-        }
 
         RenderUnitState[] units = snapshot.Units;
         for (int i = 0; i < units.Length; i++)
@@ -481,23 +403,6 @@ public void DrawSnapshot(
                         new Color(debugColor.R, debugColor.G, debugColor.B, 110));
                 }
 
-                if (unit.Suppression > 0.01f)
-                {
-                    Color suppressionColor = unit.SuppressionState switch
-                    {
-                        UnitSuppressionState.Panicked => new Color(255, 70, 70, 220),
-                        UnitSuppressionState.Suppressed => new Color(255, 200, 70, 190),
-                        _ => new Color(190, 190, 190, 130)
-                    };
-                    float suppressionRadius = (0.45f + MathF.Min(1f, unit.Suppression * 0.15f)) * tilePixelSize;
-                    AppendCircleOutline(
-                        _aiDebug,
-                        x,
-                        y,
-                        suppressionRadius,
-                        suppressionColor,
-                        14);
-                }
             }
 
             if (position.X < minX || position.X > maxX ||
@@ -506,49 +411,30 @@ public void DrawSnapshot(
                 continue;
             }
 
-            if (unit.HitPoints <= 0f)
-            {
-                AppendDeathMarker(
-                    _selection,
-                    x,
-                    y,
-                    MathF.Max(1.2f / screenScale, tilePixelSize * 0.16f));
+            bool isAlive = unit.HitPoints > 0f;
+            float markerRadius = GetMarkerRadius(
+                unit.Width,
+                unit.Length,
+                tilePixelSize,
+                screenScale);
+
+            AppendUnitMarker(
+                _vertices,
+                _bodyOutlines,
+                _statusIcons,
+                x,
+                y,
+                markerRadius,
+                unit.HeadNormal,
+                unit.FactionTag,
+                isAlive,
+                unit.HealthRatio,
+                unit.Suppression,
+                unit.SuppressionState,
+                screenScale);
+
+            if (!isAlive)
                 continue;
-            }
-
-            float radius = MathF.Max(0.24f, unit.Width * 0.55f);
-
-            if (showUnitDetails)
-            {
-                if (unit.HasApparel)
-                {
-                    Color apparelAccent = unit.HasPoweredArmor
-                        ? new Color(105, 185, 202, 190)
-                        : new Color(161, 171, 181, 150);
-                    AppendCircleOutline(
-                        _equipment,
-                        x,
-                        y,
-                        (radius + 0.10f) * tilePixelSize,
-                        apparelAccent,
-                        CircleSegments);
-                }
-
-                AppendSnapshotWeapon(
-                    _weaponVisuals,
-                    unit.PrimaryWeapon,
-                    position,
-                    unit.HeadNormal,
-                    tilePixelSize,
-                    false);
-                AppendSnapshotWeapon(
-                    _weaponVisuals,
-                    unit.SecondaryWeapon,
-                    position,
-                    unit.HeadNormal,
-                    tilePixelSize,
-                    true);
-            }
 
             if (unit.Index == selectedUnitIndex)
             {
@@ -587,8 +473,8 @@ public void DrawSnapshot(
             window.Draw(_vertices);
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
-        if (_equipment.VertexCount > 0)
-            window.Draw(_equipment);
+        if (_statusIcons.VertexCount > 0)
+            window.Draw(_statusIcons);
         if (_weaponVisuals.VertexCount > 0)
             window.Draw(_weaponVisuals);
         if (_selection.VertexCount > 0)
@@ -917,9 +803,9 @@ public void DrawSnapshot(
     private static Color GetFactionAccent(ushort factionTag) =>
         factionTag switch
         {
-            1 => new Color(91, 157, 225),
-            2 => new Color(217, 125, 97),
-            _ => new Color(151, 163, 174)
+            1 => new Color(80, 170, 255),
+            2 => new Color(245, 96, 82),
+            _ => new Color(158, 172, 190)
         };
 
     private static void AppendEquippedApparel(
@@ -1055,6 +941,171 @@ public void DrawSnapshot(
         vertices.Append(new Vertex(p0, color));
         vertices.Append(new Vertex(p2, color));
         vertices.Append(new Vertex(p3, color));
+    }
+
+    private static float GetMarkerRadius(
+        float width,
+        float length,
+        float tilePixelSize,
+        float screenScale)
+    {
+        float footprint = MathF.Max(width, length);
+        return MathF.Max(
+            3.2f / MathF.Max(0.001f, screenScale),
+            MathF.Max(0.24f, footprint * 0.30f) * tilePixelSize);
+    }
+
+    private static void AppendUnitMarker(
+        VertexArray fills,
+        VertexArray outlines,
+        VertexArray statusIcons,
+        float x,
+        float y,
+        float radius,
+        Vector3 facing,
+        ushort factionTag,
+        bool isAlive,
+        float healthRatio,
+        float suppression,
+        UnitSuppressionState suppressionState,
+        float screenScale)
+    {
+        float pixel = 1f / MathF.Max(0.001f, screenScale);
+        int segments = radius * screenScale < 5f ? 10 : 16;
+
+        Color accent = isAlive
+            ? GetFactionAccent(factionTag)
+            : new Color(112, 119, 127, 245);
+        Color core = isAlive
+            ? new Color(
+                (byte)(accent.R * 0.22f),
+                (byte)(accent.G * 0.22f),
+                (byte)(accent.B * 0.22f),
+                255)
+            : new Color(57, 62, 69, 245);
+
+        // One clean disk with a narrow faction-colored rim.
+        AppendEllipse(
+            fills, x, y, radius + pixel * 1.25f, radius + pixel * 1.25f,
+            0f, new Color(7, 11, 17, 245), segments);
+        AppendEllipse(
+            fills, x, y, radius, radius, 0f, accent, segments);
+        AppendEllipse(
+            fills, x, y, radius * 0.70f, radius * 0.70f,
+            0f, core, segments);
+        AppendEllipseOutline(
+            outlines, x, y, radius + pixel * 0.15f, radius + pixel * 0.15f,
+            0f,
+            new Color(225, 237, 248, isAlive ? (byte)190 : (byte)90),
+            segments);
+
+        if (!isAlive)
+        {
+            // Dead units keep the same silhouette, but all marks are grey.
+            Color deadMark = new Color(166, 171, 177, 225);
+            AppendDebugLine(
+                statusIcons,
+                x - radius * 0.28f, y - radius * 0.28f,
+                x + radius * 0.28f, y + radius * 0.28f,
+                deadMark);
+            AppendDebugLine(
+                statusIcons,
+                x - radius * 0.28f, y + radius * 0.28f,
+                x + radius * 0.28f, y - radius * 0.28f,
+                deadMark);
+            return;
+        }
+
+        // A small nose shows the unit's actual facing without drawing a body.
+        float dx = facing.X;
+        float dy = facing.Y;
+        float length = MathF.Sqrt(dx * dx + dy * dy);
+        if (length > 0.001f)
+        {
+            dx /= length;
+            dy /= length;
+        }
+        else
+        {
+            dx = 1f;
+            dy = 0f;
+        }
+
+        float px = -dy;
+        float py = dx;
+        float tipDistance = radius * 0.86f;
+        float baseDistance = radius * 0.22f;
+        float halfWidth = MathF.Max(pixel * 0.75f, radius * 0.20f);
+        AppendTriangle(
+            fills,
+            x + dx * tipDistance,
+            y + dy * tipDistance,
+            x + dx * baseDistance + px * halfWidth,
+            y + dy * baseDistance + py * halfWidth,
+            x + dx * baseDistance - px * halfWidth,
+            y + dy * baseDistance - py * halfWidth,
+            new Color(241, 247, 253, 245));
+
+        // Suppression/panic badge: a tiny warning mark, not another large ring.
+        if (suppression > 0.01f &&
+            (suppressionState == UnitSuppressionState.Suppressed ||
+             suppressionState == UnitSuppressionState.Panicked))
+        {
+            Color warning = suppressionState == UnitSuppressionState.Panicked
+                ? new Color(255, 78, 76, 255)
+                : new Color(255, 190, 73, 255);
+            float badgeRadius = MathF.Max(pixel * 1.7f, radius * 0.24f);
+            float badgeX = x + radius * 0.72f;
+            float badgeY = y - radius * 0.72f;
+
+            AppendEllipse(
+                fills, badgeX, badgeY, badgeRadius, badgeRadius,
+                0f, warning, 8);
+            AppendDebugLine(
+                statusIcons,
+                badgeX, badgeY - badgeRadius * 0.42f,
+                badgeX, badgeY + badgeRadius * 0.10f,
+                new Color(31, 26, 21, 245));
+            AppendDebugLine(
+                statusIcons,
+                badgeX - badgeRadius * 0.08f, badgeY + badgeRadius * 0.46f,
+                badgeX + badgeRadius * 0.08f, badgeY + badgeRadius * 0.46f,
+                new Color(31, 26, 21, 245));
+        }
+
+        // A compact red cross appears only when the unit is badly injured.
+        if (healthRatio < 0.72f)
+        {
+            float markArm = MathF.Max(pixel * 0.55f, radius * 0.13f);
+            float markX = x + radius * 0.72f;
+            float markY = y + radius * 0.70f;
+            Color injury = new Color(255, 94, 87, 245);
+            AppendDebugLine(
+                statusIcons,
+                markX - markArm, markY,
+                markX + markArm, markY,
+                injury);
+            AppendDebugLine(
+                statusIcons,
+                markX, markY - markArm,
+                markX, markY + markArm,
+                injury);
+        }
+    }
+
+    private static void AppendTriangle(
+        VertexArray vertices,
+        float x0,
+        float y0,
+        float x1,
+        float y1,
+        float x2,
+        float y2,
+        Color color)
+    {
+        vertices.Append(new Vertex(new Vector2f(x0, y0), color));
+        vertices.Append(new Vertex(new Vector2f(x1, y1), color));
+        vertices.Append(new Vertex(new Vector2f(x2, y2), color));
     }
 
     private static void AppendDeathMarker(
