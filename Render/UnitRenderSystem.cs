@@ -600,6 +600,265 @@ public void DrawSnapshot(
             window.Draw(_aiDebug);
     }
 
+    private static void AppendLogicalBodyPart(
+        VertexArray fills,
+        VertexArray outlines,
+        Vector3 position,
+        Vector3 scale,
+        float rotation,
+        BodyPrimitive primitive,
+        BodyPartRole role,
+        ushort factionTag,
+        UnitAiState aiState,
+        bool isAlive,
+        bool showAiDebug,
+        float tilePixelSize,
+        float screenScale,
+        float minWorldX,
+        float maxWorldX,
+        float minWorldY,
+        float maxWorldY)
+    {
+        // A small world-space cull margin keeps off-screen limbs from being
+        // emitted while allowing parts to remain visible when the torso is near an edge.
+        if (position.X < minWorldX - 1f || position.X > maxWorldX + 1f ||
+            position.Y < minWorldY - 1f || position.Y > maxWorldY + 1f)
+        {
+            return;
+        }
+
+        float centerX = position.X * tilePixelSize;
+        float centerY = position.Y * tilePixelSize;
+
+        // This is a render-only readability boost. The simulation transforms
+        // and hit logic remain unchanged; tiny joints are kept visible at battle zoom.
+        const float BodyVisualScale = 1.55f;
+        const float MinimumHalfExtentPixels = 0.70f;
+        float halfX = MathF.Max(
+            MathF.Abs(scale.X) * BodyVisualScale * tilePixelSize,
+            MinimumHalfExtentPixels / screenScale);
+        float halfY = MathF.Max(
+            MathF.Abs(scale.Y) * BodyVisualScale * tilePixelSize,
+            MinimumHalfExtentPixels / screenScale);
+        float outlinePad = 0.45f / screenScale;
+        float pixelsPerWorldUnit = tilePixelSize * screenScale;
+        int segments = pixelsPerWorldUnit >= 8f
+            ? 16
+            : pixelsPerWorldUnit >= 3f
+                ? 8
+                : 4;
+
+        Color fill = GetLogicalBodyPartColor(
+            role,
+            factionTag,
+            aiState,
+            isAlive,
+            showAiDebug);
+
+        Color outline = new Color(13, 16, 20, 235);
+
+        if (primitive == BodyPrimitive.Box)
+        {
+            AppendOrientedRect(
+                fills,
+                centerX,
+                centerY,
+                halfY,
+                halfX,
+                rotation,
+                fill);
+
+            AppendOrientedRectOutline(
+                outlines,
+                centerX,
+                centerY,
+                halfY + outlinePad,
+                halfX + outlinePad,
+                rotation,
+                outline);
+        }
+        else
+        {
+            AppendEllipse(
+                fills,
+                centerX,
+                centerY,
+                halfX,
+                halfY,
+                rotation,
+                fill,
+                segments);
+
+            AppendEllipseOutline(
+                outlines,
+                centerX,
+                centerY,
+                halfX + outlinePad,
+                halfY + outlinePad,
+                rotation,
+                outline,
+                segments);
+        }
+    }
+
+    private static Color GetLogicalBodyPartColor(
+        BodyPartRole role,
+        ushort factionTag,
+        UnitAiState aiState,
+        bool isAlive,
+        bool showAiDebug)
+    {
+        if (!isAlive)
+            return new Color(72, 77, 84, 240);
+
+        if (showAiDebug)
+        {
+            Color aiColor = GetAiColor(aiState);
+            return new Color(
+                (byte)(aiColor.R * 0.82f + 35f),
+                (byte)(aiColor.G * 0.82f + 35f),
+                (byte)(aiColor.B * 0.82f + 35f),
+                255);
+        }
+
+        return role switch
+        {
+            BodyPartRole.Torso => factionTag switch
+            {
+                1 => new Color(173, 205, 232),
+                2 => new Color(233, 190, 174),
+                _ => new Color(217, 223, 230)
+            },
+            BodyPartRole.Head => factionTag switch
+            {
+                1 => new Color(218, 231, 243),
+                2 => new Color(240, 219, 209),
+                _ => new Color(229, 233, 238)
+            },
+            BodyPartRole.Segment => factionTag switch
+            {
+                1 => new Color(177, 207, 231),
+                2 => new Color(231, 190, 174),
+                _ => new Color(211, 219, 226)
+            },
+            BodyPartRole.Neck or
+            BodyPartRole.Elbow or
+            BodyPartRole.Knee => new Color(176, 190, 202),
+            BodyPartRole.Hand or
+            BodyPartRole.Foot => new Color(165, 181, 194),
+            BodyPartRole.UpperArm or
+            BodyPartRole.Forearm or
+            BodyPartRole.Thigh or
+            BodyPartRole.Shin => new Color(194, 205, 215),
+            _ => new Color(210, 218, 226)
+        };
+    }
+
+    private static void AppendEllipse(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float rotation,
+        Color color,
+        int segments)
+    {
+        Vector2f center = new(centerX, centerY);
+        float cos = MathF.Cos(rotation);
+        float sin = MathF.Sin(rotation);
+
+        for (int i = 0; i < segments; i++)
+        {
+            float a0 = i * MathF.Tau / segments;
+            float a1 = (i + 1) * MathF.Tau / segments;
+
+            Vector2f p0 = RotateEllipsePoint(
+                centerX, centerY, radiusX, radiusY, cos, sin, a0);
+            Vector2f p1 = RotateEllipsePoint(
+                centerX, centerY, radiusX, radiusY, cos, sin, a1);
+
+            vertices.Append(new Vertex(center, color));
+            vertices.Append(new Vertex(p0, color));
+            vertices.Append(new Vertex(p1, color));
+        }
+    }
+
+    private static void AppendEllipseOutline(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float rotation,
+        Color color,
+        int segments)
+    {
+        float cos = MathF.Cos(rotation);
+        float sin = MathF.Sin(rotation);
+
+        for (int i = 0; i < segments; i++)
+        {
+            float a0 = i * MathF.Tau / segments;
+            float a1 = (i + 1) * MathF.Tau / segments;
+            Vector2f p0 = RotateEllipsePoint(
+                centerX, centerY, radiusX, radiusY, cos, sin, a0);
+            Vector2f p1 = RotateEllipsePoint(
+                centerX, centerY, radiusX, radiusY, cos, sin, a1);
+
+            AppendDebugLine(
+                vertices,
+                p0.X, p0.Y,
+                p1.X, p1.Y,
+                color);
+        }
+    }
+
+    private static Vector2f RotateEllipsePoint(
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float cos,
+        float sin,
+        float angle)
+    {
+        float localX = MathF.Cos(angle) * radiusX;
+        float localY = MathF.Sin(angle) * radiusY;
+        return new Vector2f(
+            centerX + localX * cos - localY * sin,
+            centerY + localX * sin + localY * cos);
+    }
+
+    private static void AppendOrientedRectOutline(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float halfWidth,
+        float halfLength,
+        float rotation,
+        Color color)
+    {
+        float dx = MathF.Cos(rotation);
+        float dy = MathF.Sin(rotation);
+        float px = -dy;
+        float py = dx;
+
+        float x0 = centerX - dx * halfLength - px * halfWidth;
+        float y0 = centerY - dy * halfLength - py * halfWidth;
+        float x1 = centerX + dx * halfLength - px * halfWidth;
+        float y1 = centerY + dy * halfLength - py * halfWidth;
+        float x2 = centerX + dx * halfLength + px * halfWidth;
+        float y2 = centerY + dy * halfLength + py * halfWidth;
+        float x3 = centerX - dx * halfLength + px * halfWidth;
+        float y3 = centerY - dy * halfLength + py * halfWidth;
+
+        AppendDebugLine(vertices, x0, y0, x1, y1, color);
+        AppendDebugLine(vertices, x1, y1, x2, y2, color);
+        AppendDebugLine(vertices, x2, y2, x3, y3, color);
+        AppendDebugLine(vertices, x3, y3, x0, y0, color);
+    }
+
     private static void AppendSnapshotWeapon(
         VertexArray vertices,
         RenderWeaponVisual visual,
