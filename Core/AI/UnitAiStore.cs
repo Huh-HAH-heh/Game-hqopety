@@ -21,6 +21,8 @@ public sealed class UnitAiStore
     private float[] _targetMemory;
     private bool[] _hasGoal;
     private Vector3[] _goal;
+    private float[] _suppressionCoverRetry;
+    private Vector3[] _suppressionRetrySource;
 
     public int Capacity =>
         _state.Length;
@@ -46,6 +48,12 @@ public sealed class UnitAiStore
     public Vector3[] Goal =>
         _goal;
 
+    public float[] SuppressionCoverRetry =>
+        _suppressionCoverRetry;
+
+    public Vector3[] SuppressionRetrySource =>
+        _suppressionRetrySource;
+
     public UnitAiStore(
         int initialUnitCapacity = 1024)
     {
@@ -62,6 +70,8 @@ public sealed class UnitAiStore
         _targetMemory = new float[initialUnitCapacity];
         _hasGoal = new bool[initialUnitCapacity];
         _goal = new Vector3[initialUnitCapacity];
+        _suppressionCoverRetry = new float[initialUnitCapacity];
+        _suppressionRetrySource = new Vector3[initialUnitCapacity];
     }
 
     public void InitializeUnit(
@@ -76,6 +86,8 @@ public sealed class UnitAiStore
         _targetMemory[unitIndex] = 0f;
         _hasGoal[unitIndex] = false;
         _goal[unitIndex] = Vector3.Zero;
+        _suppressionCoverRetry[unitIndex] = 0f;
+        _suppressionRetrySource[unitIndex] = Vector3.Zero;
     }
 
     public void ClearUnit(
@@ -94,6 +106,8 @@ public sealed class UnitAiStore
         _targetMemory[unitIndex] = 0f;
         _hasGoal[unitIndex] = false;
         _goal[unitIndex] = Vector3.Zero;
+        _suppressionCoverRetry[unitIndex] = 0f;
+        _suppressionRetrySource[unitIndex] = Vector3.Zero;
     }
 
     public void RememberTarget(
@@ -183,6 +197,14 @@ public sealed class UnitAiStore
 
         Array.Resize(
             ref _goal,
+            newCapacity);
+
+        Array.Resize(
+            ref _suppressionCoverRetry,
+            newCapacity);
+
+        Array.Resize(
+            ref _suppressionRetrySource,
             newCapacity);
     }
 }
