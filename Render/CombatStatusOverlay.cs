@@ -14,7 +14,7 @@ public sealed class CombatStatusOverlay : IDisposable
     private readonly Text? _red;
     private readonly Text? _details;
     private readonly RectangleShape _panel =
-        new RectangleShape(new Vector2f(520f, 158f))
+        new RectangleShape(new Vector2f(520f, 198f))
         {
             FillColor = new Color(5, 8, 13, 220),
             OutlineColor = new Color(72, 88, 105, 210),
@@ -142,7 +142,9 @@ public sealed class CombatStatusOverlay : IDisposable
             $"EVENTS/ROUND {hitEventsPerRound:0.00}  |  TOTAL HIT EVENTS {simulation.Projectiles.TotalHits:N0}\n" +
             $"AI: ATTACK {attack}  SEARCH {search}  COVER {cover}  IDLE {idle}\n" +
             $"SUPPRESSED {suppressed}  PANICKED {panicked}  |  {mode}\n" +
-            $"[I] AI STATES {(showAiStates ? "ON" : "OFF")}  [T] TRACERS {(showTracers ? "ON" : "OFF")}  [F9] HIDE";
+            $"[I] AI STATES {(showAiStates ? "ON" : "OFF")}  [T] TRACERS {(showTracers ? "ON" : "OFF")}  [F9] HIDE\n" +
+            "HITBOX KEY: HEAD amber | TORSO blue | ARMS orange/red\n" +
+            "HANDS gold/pink | LEGS green/teal | FEET violet/magenta";
 
         _panel.Position = new Vector2f(12f, 12f);
         _blueAccent.Position = new Vector2f(12f, 40f);
@@ -190,7 +192,9 @@ public sealed class CombatStatusOverlay : IDisposable
             $"EVENTS/ROUND {hitEventsPerRound:0.00}  |  TOTAL HIT EVENTS {snapshot.TotalHits:N0}\n" +
             $"AI: ATTACK {snapshot.AttackCount}  SEARCH {snapshot.SearchCount}  COVER {snapshot.CoverCount}  IDLE {snapshot.IdleCount}\n" +
             $"SUPPRESSED {snapshot.SuppressedCount}  PANICKED {snapshot.PanickedCount}  |  {mode}\n" +
-            $"[I] AI STATES {(showAiStates ? "ON" : "OFF")}  [T] TRACERS {(showTracers ? "ON" : "OFF")}  [F9] HIDE";
+            $"[I] AI STATES {(showAiStates ? "ON" : "OFF")}  [T] TRACERS {(showTracers ? "ON" : "OFF")}  [F9] HIDE\n" +
+            "HITBOX KEY: HEAD amber | TORSO blue | ARMS orange/red\n" +
+            "HANDS gold/pink | LEGS green/teal | FEET violet/magenta";
 
         _panel.Position = new Vector2f(12f, 12f);
         _blueAccent.Position = new Vector2f(12f, 40f);
