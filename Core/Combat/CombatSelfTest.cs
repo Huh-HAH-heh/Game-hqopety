@@ -1806,7 +1806,7 @@ public static class CombatSelfTest
                 34f,
                 initialEnergy,
                 initialEnergy,
-                90f,
+                110f,
                 70f,
                 DamageType.Ballistic,
                 0f);
