@@ -645,7 +645,7 @@ public void DrawSnapshot(
         int segments = pixelsPerWorldUnit >= 8f
             ? 16
             : pixelsPerWorldUnit >= 3f
-                ? 8
+                ? 6
                 : 4;
 
         Color fill = GetLogicalBodyPartColor(
