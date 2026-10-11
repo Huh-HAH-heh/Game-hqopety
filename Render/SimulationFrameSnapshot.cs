@@ -31,6 +31,16 @@ public readonly record struct RenderUnitState(
     RenderWeaponVisual PrimaryWeapon,
     RenderWeaponVisual SecondaryWeapon);
 
+public readonly record struct RenderBodyPart(
+    int UnitIndex,
+    Vector3 Position,
+    Vector3 Scale,
+    float Rotation,
+    BodyPrimitive Primitive,
+    BodyPartRole Role,
+    ushort FactionTag,
+    bool IsAlive);
+
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
 public readonly record struct RenderProjectileTrace(
@@ -52,6 +62,7 @@ public readonly record struct RenderProjectileImpact(
 public sealed class SimulationFrameSnapshot
 {
     public RenderUnitState[] Units { get; init; } = Array.Empty<RenderUnitState>();
+    public RenderBodyPart[] BodyParts { get; init; } = Array.Empty<RenderBodyPart>();
     public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
     public RenderAimRing[] AimRings { get; init; } = Array.Empty<RenderAimRing>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
@@ -143,6 +154,19 @@ public sealed class SimulationFrameSnapshot
         float[] hitPoints = simulation.Health.OverallHitPoints;
         ushort[] factions = units.FactionTag;
         Vector3[] positions = units.Position;
+        int[] bodyStarts = units.BodyStart;
+        short[] bodyCounts = units.BodyCount;
+        UnitBodyStore bodyStore = simulation.Bodies;
+        Vector3[] bodyPositions = bodyStore.WorldPosition;
+        Vector3[] bodyScales = bodyStore.Scale;
+        float[] bodyRotations = bodyStore.WorldRotation;
+        BodyPrimitive[] bodyPrimitives = bodyStore.Primitive;
+        BodyPartRole[] bodyRoles = bodyStore.Role;
+        int totalBodyParts = 0;
+        for (int i = 0; i < active.Length; i++)
+            totalBodyParts += Math.Max(0, bodyCounts[active[i]]);
+        RenderBodyPart[] bodyParts = new RenderBodyPart[totalBodyParts];
+        int bodyPartWrite = 0;
         float[] widths = units.Width;
         float[] lengths = units.Length;
         Vector3[] headNormals = units.HeadNormal;
@@ -199,6 +223,23 @@ public sealed class SimulationFrameSnapshot
             Vector3 goal = aiStore.Goal[index];
             float suppression = suppressionStore.Value[index];
             UnitSuppressionState suppressionState = suppressionStore.GetState(index);
+
+            int bodyStart = bodyStarts[index];
+            int bodyEnd = bodyStart + Math.Max(0, bodyCounts[index]);
+            for (int bodyPart = bodyStart;
+                 bodyPart < bodyEnd && bodyPart < bodyStore.Count;
+                 bodyPart++)
+            {
+                bodyParts[bodyPartWrite++] = new RenderBodyPart(
+                    index,
+                    bodyPositions[bodyPart],
+                    bodyScales[bodyPart],
+                    bodyRotations[bodyPart],
+                    bodyPrimitives[bodyPart],
+                    bodyRoles[bodyPart],
+                    faction,
+                    hp > 0f);
+            }
 
             unitStates[i] = new RenderUnitState(
                 index,
@@ -369,6 +410,7 @@ public sealed class SimulationFrameSnapshot
         return new SimulationFrameSnapshot
         {
             Units = unitStates,
+            BodyParts = bodyPartWrite == bodyParts.Length ? bodyParts : bodyParts[..bodyPartWrite],
             Traces = traces,
             AimRings = aimRings.ToArray(),
             Impacts = impacts,
