@@ -686,6 +686,24 @@ public sealed class UnitHitSystem
                 out float radiusZ);
 
             Vector3 position = positions[partIndex];
+            Vector3 inspectionCenter = bodies.InspectionPosition[partIndex];
+            float inspectionRotation = bodies.InspectionRotation[partIndex];
+
+            // Non-human creatures keep their actual top-down silhouette in the
+            // inspector. Colonists use the separate upright, parent-linked pose.
+            if (type != UnitType.Colonist)
+            {
+                Vector3 relative = position - rootPosition;
+                inspectionCenter = new Vector3(
+                    Vector3.Dot(relative, bodyRight),
+                    -Vector3.Dot(relative, bodyForward),
+                    0f);
+
+                inspectionRotation = MathF.Atan2(
+                    -Vector3.Dot(right, bodyForward),
+                    Vector3.Dot(right, bodyRight));
+            }
+
             volumes[offset] = new HitVolume(
                 partId,
                 new Vector3(position.X, position.Y, centerZ),
@@ -695,8 +713,8 @@ public sealed class UnitHitSystem
                     MathF.Max(0.012f, MathF.Abs(scale.Y)),
                     MathF.Max(0.012f, MathF.Abs(scale.X)),
                     MathF.Max(0.025f, radiusZ)),
-                bodies.InspectionPosition[partIndex],
-                bodies.InspectionRotation[partIndex]);
+                inspectionCenter,
+                inspectionRotation);
         }
 
         return count;
