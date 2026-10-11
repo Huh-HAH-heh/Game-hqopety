@@ -343,6 +343,7 @@ public sealed class UnitHitSystem
         float width = MathF.Max(0.05f, units.Width[unitIndex]);
         float length = MathF.Max(0.05f, units.Length[unitIndex]);
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
+        float unscaledHeight = height;
         float headRadius = MathF.Min(width, length) * 0.32f;
         UnitPosture posture = units.Posture[unitIndex];
 
@@ -474,7 +475,7 @@ public sealed class UnitHitSystem
                 position,
                 forward,
                 length,
-                height,
+                unscaledHeight,
                 posture),
             headForward,
             headRight,
