@@ -27,7 +27,7 @@ public sealed class UnitRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
-    private readonly VertexArray _bodyPartFills =
+    private readonly VertexArray _hitVolumeFills =
         new VertexArray(
             PrimitiveType.Triangles);
 
@@ -82,7 +82,7 @@ public sealed class UnitRenderSystem
         _vertices.Clear();
         _bodyOutlines.Clear();
         _statusIcons.Clear();
-        _bodyPartFills.Clear();
+        _hitVolumeFills.Clear();
         _visionArea.Clear();
         _selection.Clear();
         _aiming.Clear();
@@ -123,14 +123,8 @@ public sealed class UnitRenderSystem
             simulation.Units;
 
         Vector3[] headNormals = units.HeadNormal;
-        UnitBodyStore bodyStore = simulation.Bodies;
-        Vector3[] bodyPositions = bodyStore.WorldPosition;
-        Vector3[] bodyScales = bodyStore.Scale;
-        float[] bodyRotations = bodyStore.WorldRotation;
-        BodyPrimitive[] bodyPrimitives = bodyStore.Primitive;
-        BodyPartRole[] bodyRoles = bodyStore.Role;
-        int[] bodyStarts = units.BodyStart;
-        short[] bodyCounts = units.BodyCount;
+        Span<HitVolume> hitVolumeBuffer =
+            stackalloc HitVolume[UnitHitSystem.MaxHitVolumeCount];
 
         if (showUnitDetails)
         {
@@ -220,35 +214,22 @@ public sealed class UnitRenderSystem
                 tilePixelSize,
                 screenScale);
 
-            int bodyStart = bodyStarts[unitIndex];
-            bool inspectBodyParts =
-                hasSelection &&
-                selectedIndex == unitIndex &&
-                bodyStart >= 0 &&
-                bodyStart < bodyStore.Count &&
-                bodyCounts[unitIndex] > 0;
+            bool inspectHitVolumes =
+                hasSelection && selectedIndex == unitIndex;
 
-            if (inspectBodyParts)
+            if (inspectHitVolumes)
             {
-                int bodyEnd = Math.Min(
-                    bodyStart + Math.Max(0, (int)bodyCounts[unitIndex]),
-                    bodyStore.Count);
-                UnitAiState bodyAiState = simulation.AI.Store.State[unitIndex];
+                int volumeCount = UnitHitSystem.GetHitVolumes(
+                    units,
+                    unitIndex,
+                    hitVolumeBuffer);
 
-                for (int bodyPart = bodyStart; bodyPart < bodyEnd; bodyPart++)
+                for (int volumeIndex = 0; volumeIndex < volumeCount; volumeIndex++)
                 {
-                    AppendLogicalBodyPart(
-                        _bodyPartFills,
+                    AppendHitVolume(
+                        _hitVolumeFills,
                         _bodyOutlines,
-                        bodyPositions[bodyPart],
-                        bodyScales[bodyPart],
-                        bodyRotations[bodyPart],
-                        bodyPrimitives[bodyPart],
-                        bodyRoles[bodyPart],
-                        units.FactionTag[unitIndex],
-                        bodyAiState,
-                        isAlive,
-                        false,
+                        hitVolumeBuffer[volumeIndex],
                         tilePixelSize,
                         screenScale,
                         minWorldX,
@@ -333,8 +314,8 @@ public sealed class UnitRenderSystem
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
 
-        if (_bodyPartFills.VertexCount > 0)
-            window.Draw(_bodyPartFills);
+        if (_hitVolumeFills.VertexCount > 0)
+            window.Draw(_hitVolumeFills);
 
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
@@ -396,7 +377,7 @@ public void DrawSnapshot(
         _bodyOutlines.Clear();
         _selection.Clear();
         _statusIcons.Clear();
-        _bodyPartFills.Clear();
+        _hitVolumeFills.Clear();
         _aiming.Clear();
         _visionArea.Clear();
         _visionDebug.Clear();
@@ -464,29 +445,26 @@ public void DrawSnapshot(
                 tilePixelSize,
                 screenScale);
 
-            RenderBodyPart[] selectedBodyParts = snapshot.BodyParts;
-            bool inspectBodyParts =
+            RenderHitVolume[] selectedHitVolumes = snapshot.HitVolumes;
+            bool inspectHitVolumes =
                 unit.Index == selectedUnitIndex &&
-                snapshot.BodyPartUnitIndex == selectedUnitIndex &&
-                selectedBodyParts.Length > 0;
+                snapshot.HitVolumeUnitIndex == selectedUnitIndex &&
+                selectedHitVolumes.Length > 0;
 
-            if (inspectBodyParts)
+            if (inspectHitVolumes)
             {
-                for (int bodyPartIndex = 0; bodyPartIndex < selectedBodyParts.Length; bodyPartIndex++)
+                for (int volumeIndex = 0; volumeIndex < selectedHitVolumes.Length; volumeIndex++)
                 {
-                    RenderBodyPart part = selectedBodyParts[bodyPartIndex];
-                    AppendLogicalBodyPart(
-                        _bodyPartFills,
+                    RenderHitVolume volume = selectedHitVolumes[volumeIndex];
+                    AppendHitVolume(
+                        _hitVolumeFills,
                         _bodyOutlines,
-                        part.Position,
-                        part.Scale,
-                        part.Rotation,
-                        part.Primitive,
-                        part.Role,
-                        part.FactionTag,
-                        part.AiState,
-                        part.IsAlive,
-                        false,
+                        new HitVolume(
+                            volume.Part,
+                            volume.Center,
+                            volume.Forward,
+                            volume.Right,
+                            volume.Radii),
                         tilePixelSize,
                         screenScale,
                         minX,
@@ -551,8 +529,8 @@ public void DrawSnapshot(
 
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
-        if (_bodyPartFills.VertexCount > 0)
-            window.Draw(_bodyPartFills);
+        if (_hitVolumeFills.VertexCount > 0)
+            window.Draw(_hitVolumeFills);
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
         if (_statusIcons.VertexCount > 0)
@@ -563,6 +541,90 @@ public void DrawSnapshot(
             window.Draw(_aiming);
         if (_aiDebug.VertexCount > 0)
             window.Draw(_aiDebug);
+    }
+
+    private static void AppendHitVolume(
+        VertexArray fills,
+        VertexArray outlines,
+        in HitVolume volume,
+        float tilePixelSize,
+        float screenScale,
+        float minWorldX,
+        float maxWorldX,
+        float minWorldY,
+        float maxWorldY)
+    {
+        float worldRadius = MathF.Max(volume.Radii.X, volume.Radii.Y);
+        if (volume.Center.X + worldRadius < minWorldX ||
+            volume.Center.X - worldRadius > maxWorldX ||
+            volume.Center.Y + worldRadius < minWorldY ||
+            volume.Center.Y - worldRadius > maxWorldY)
+        {
+            return;
+        }
+
+        float centerX = volume.Center.X * tilePixelSize;
+        float centerY = volume.Center.Y * tilePixelSize;
+        float radiusX = MathF.Max(
+            0.015f * tilePixelSize,
+            volume.Radii.Y * tilePixelSize);
+        float radiusY = MathF.Max(
+            0.015f * tilePixelSize,
+            volume.Radii.X * tilePixelSize);
+        float rotation = MathF.Atan2(
+            volume.Forward.Y,
+            volume.Forward.X);
+        float outlinePad = 0.9f / MathF.Max(0.001f, screenScale);
+        int segments = tilePixelSize * screenScale >= 8f ? 24 : 12;
+
+        GetHitVolumeColors(
+            volume.Part,
+            out Color fill,
+            out Color outline);
+
+        AppendEllipse(
+            fills,
+            centerX,
+            centerY,
+            radiusX,
+            radiusY,
+            rotation,
+            fill,
+            segments);
+
+        AppendEllipseOutline(
+            outlines,
+            centerX,
+            centerY,
+            radiusX + outlinePad,
+            radiusY + outlinePad,
+            rotation,
+            outline,
+            segments);
+    }
+
+    private static void GetHitVolumeColors(
+        UnitHealthPartId part,
+        out Color fill,
+        out Color outline)
+    {
+        Color solid = part switch
+        {
+            UnitHealthPartId.Head => new Color(255, 204, 74),
+            UnitHealthPartId.Torso => new Color(72, 166, 255),
+            UnitHealthPartId.LeftArm => new Color(255, 139, 61),
+            UnitHealthPartId.RightArm => new Color(255, 91, 112),
+            UnitHealthPartId.LeftHand => new Color(255, 211, 117),
+            UnitHealthPartId.RightHand => new Color(255, 157, 184),
+            UnitHealthPartId.LeftLeg => new Color(86, 220, 156),
+            UnitHealthPartId.RightLeg => new Color(50, 190, 191),
+            UnitHealthPartId.LeftFoot => new Color(169, 139, 255),
+            UnitHealthPartId.RightFoot => new Color(204, 122, 240),
+            _ => new Color(210, 220, 232)
+        };
+
+        fill = new Color(solid.R, solid.G, solid.B, 76);
+        outline = new Color(solid.R, solid.G, solid.B, 245);
     }
 
     private static void AppendLogicalBodyPart(
