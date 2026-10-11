@@ -1000,8 +1000,8 @@ public void DrawSnapshot(
     {
         float footprint = MathF.Max(width, length);
         return MathF.Max(
-            5.4f / MathF.Max(0.001f, screenScale),
-            MathF.Max(0.30f, footprint * 0.34f) * tilePixelSize);
+            3.0f / MathF.Max(0.001f, screenScale),
+            MathF.Max(0.20f, footprint * 0.23f) * tilePixelSize);
     }
 
     private static void AppendUnitMarker(
@@ -1033,7 +1033,7 @@ public void DrawSnapshot(
         // A compact white disk with a dark keyline. Faction is deliberately
         // separated from the disc so the unit silhouette stays neutral.
         AppendFactionHalo(
-            outlines, x, y, radius + pixel * 3.4f,
+            outlines, x, y, radius + pixel * 2.4f,
             factionTag, isAlive, segments);
 
         AppendEllipse(
@@ -1044,14 +1044,6 @@ public void DrawSnapshot(
             fills, x, y, radius, radius,
             0f, body, segments);
 
-        // A restrained upper-left glint makes the disk feel finished without
-        // turning the marker into a textured model.
-        AppendArc(
-            outlines, x, y, radius - pixel * 0.35f,
-            MathF.PI * 1.10f, MathF.PI * 0.62f,
-            new Color(255, 255, 255, isAlive ? (byte)165 : (byte)55),
-            segments);
-
         if (!isAlive)
         {
             Color deadMark = new Color(177, 182, 188, 225);
@@ -1061,47 +1053,9 @@ public void DrawSnapshot(
             return;
         }
 
-        // Tiny faction-coloured heading arrow floats outside the circle.
-        // The barrel can aim independently while this keeps movement/facing legible.
-        float dx = facing.X;
-        float dy = facing.Y;
-        float facingLength = MathF.Sqrt(dx * dx + dy * dy);
-        if (facingLength > 0.001f)
-        {
-            dx /= facingLength;
-            dy /= facingLength;
-        }
-        else
-        {
-            dx = 1f;
-            dy = 0f;
-        }
-
-        float px = -dy;
-        float py = dx;
-        float pointerTip = radius + pixel * 5.0f;
-        float pointerBase = radius + pixel * 1.7f;
-        float pointerWidth = MathF.Max(pixel * 1.0f, radius * 0.16f);
-        Color pointerColor = factionTag switch
-        {
-            1 => new Color(84, 190, 255, 230),
-            2 => new Color(255, 105, 95, 230),
-            _ => new Color(189, 199, 209, 210)
-        };
-
-        AppendTriangle(
-            fills,
-            x + dx * pointerTip,
-            y + dy * pointerTip,
-            x + dx * pointerBase + px * pointerWidth,
-            y + dy * pointerBase + py * pointerWidth,
-            x + dx * pointerBase - px * pointerWidth,
-            y + dy * pointerBase - py * pointerWidth,
-            pointerColor);
-
         // Health only becomes visible when it matters; it sits between the body
         // and faction ring instead of changing the whole unit's colour.
-        if (healthRatio < 0.96f)
+        if (healthRatio < 0.70f)
         {
             Color healthColor = healthRatio > 0.65f
                 ? new Color(90, 203, 148, 225)
@@ -1112,7 +1066,7 @@ public void DrawSnapshot(
             AppendArc(
                 outlines,
                 x, y,
-                radius + pixel * 1.6f,
+                radius + pixel * 1.25f,
                 -MathF.PI * 0.5f,
                 MathF.Tau * healthRatio,
                 healthColor,
@@ -1178,9 +1132,9 @@ public void DrawSnapshot(
             ? new Color(137, 143, 150, 100)
             : factionTag switch
             {
-                1 => new Color(63, 174, 249, 180),
-                2 => new Color(246, 84, 78, 180),
-                _ => new Color(160, 173, 187, 125)
+                1 => new Color(75, 170, 229, 128),
+                2 => new Color(218, 106, 101, 128),
+                _ => new Color(160, 173, 187, 92)
             };
 
         int segments = quality < 14 ? 12 : 24;
@@ -1258,46 +1212,43 @@ public void DrawSnapshot(
             dy *= inverseLength;
         }
 
+        float px = -dy;
+        float py = dx;
         float pixel = 1f / MathF.Max(0.001f, screenScale);
-        float angle = MathF.Atan2(dy, dx);
-        float halfLength = MathF.Max(pixel * 2.8f, radius * 0.52f);
-        float halfWidth = MathF.Max(pixel * 0.52f, radius * 0.075f);
-        float centerDistance = radius * 0.91f;
-        float centerX = x + dx * centerDistance;
-        float centerY = y + dy * centerDistance;
 
-        // Outer silhouette, steel top rail and a small crosswise muzzle.
-        AppendOrientedRect(
-            vertices, centerX, centerY,
-            halfWidth, halfLength, angle,
-            new Color(27, 34, 42, 255));
+        // Offset along the perpendicular so the triangular weapon sits at the
+        // circle's shoulder rather than dead-centre, while its tip tracks aim.
+        float side = radius * 0.43f;
+        float baseForward = radius * 0.12f;
+        float tipForward = radius + pixel * 2.6f;
+        float halfWidth = MathF.Max(pixel * 0.70f, radius * 0.22f);
 
-        AppendOrientedRect(
-            vertices, centerX, centerY,
-            MathF.Max(pixel * 0.26f, radius * 0.033f),
-            halfLength * 0.80f,
-            angle,
-            new Color(145, 157, 169, 245));
+        float bx = x + dx * baseForward + px * side;
+        float by = y + dy * baseForward + py * side;
+        float tx = x + dx * tipForward + px * side;
+        float ty = y + dy * tipForward + py * side;
 
-        float sightDistance = centerDistance - halfLength * 0.18f;
-        AppendOrientedRect(
+        // Dark outer silhouette keeps the weapon readable on white and on terrain.
+        AppendTriangle(
             vertices,
-            x + dx * sightDistance,
-            y + dy * sightDistance,
-            MathF.Max(pixel * 0.38f, radius * 0.075f),
-            MathF.Max(pixel * 0.36f, radius * 0.075f),
-            angle + MathF.PI * 0.5f,
-            new Color(27, 34, 42, 255));
+            tx, ty,
+            bx + px * halfWidth, by + py * halfWidth,
+            bx - px * halfWidth, by - py * halfWidth,
+            new Color(22, 29, 37, 250));
 
-        float muzzleDistance = centerDistance + halfLength * 0.90f;
-        AppendOrientedRect(
+        // One smaller steel triangle provides a restrained highlight, not a second gun shape.
+        float insetBase = baseForward + (tipForward - baseForward) * 0.34f;
+        float insetTip = tipForward - pixel * 0.55f;
+        float insetWidth = halfWidth * 0.28f;
+        AppendTriangle(
             vertices,
-            x + dx * muzzleDistance,
-            y + dy * muzzleDistance,
-            MathF.Max(pixel * 0.75f, radius * 0.12f),
-            MathF.Max(pixel * 0.30f, radius * 0.05f),
-            angle + MathF.PI * 0.5f,
-            new Color(231, 237, 242, 255));
+            x + dx * insetTip + px * side,
+            y + dy * insetTip + py * side,
+            x + dx * insetBase + px * (side + insetWidth),
+            y + dy * insetBase + py * (side + insetWidth),
+            x + dx * insetBase + px * (side - insetWidth),
+            y + dy * insetBase + py * (side - insetWidth),
+            new Color(180, 192, 202, 245));
     }
 
     private static void AppendTriangle(
