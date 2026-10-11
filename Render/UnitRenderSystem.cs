@@ -398,7 +398,10 @@ public sealed class UnitRenderSystem
         }
     }
 
-private static Color GetFactionAccent(ushort factionTag) =>
+private static Color GetItemColor(ItemConfig item) =>
+        new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
+
+    private static Color GetFactionAccent(ushort factionTag) =>
         factionTag switch
         {
             1 => new Color(91, 157, 225),
