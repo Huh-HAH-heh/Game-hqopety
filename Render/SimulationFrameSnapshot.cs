@@ -77,11 +77,11 @@ public sealed class SimulationFrameSnapshot
     public int RoutesBuilt { get; init; }
     public int RoutesFailed { get; init; }
     public int NavigationSearches { get; init; }
-    public int NavigationCellsExpanded { get; init; }
+    public long NavigationCellsExpanded { get; init; }
     public double NavigationSearchMs { get; init; }
     public double NavigationGridMs { get; init; }
     public int RoutesReused { get; init; }
-    public int RouteTrafficCells { get; init; }
+    public long RouteTrafficCells { get; init; }
 
     public static SimulationFrameSnapshot Capture(UnitSimulation simulation)
     {
