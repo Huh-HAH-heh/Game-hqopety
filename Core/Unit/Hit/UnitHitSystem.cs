@@ -173,7 +173,7 @@ public sealed class UnitHitSystem
 
             // Pick an observer-facing point biased slightly upward, but keep
             // it strictly inside the same ellipsoid that receives projectile hits.
-            float upperZ = sz + 0.65f;
+            float upperZ = sz + 1.0f;
             float length = MathF.Sqrt(
                 sx * sx +
                 sy * sy +
@@ -254,7 +254,7 @@ public sealed class UnitHitSystem
             points[count++] = GetAimPointInsideVolume(
                 volume, rx, ry, rz, sx, sy, sz, 0.62f);
 
-            float upperZ = sz + 0.65f;
+            float upperZ = sz + 1.0f;
             float upperLength = MathF.Sqrt(sx * sx + sy * sy + upperZ * upperZ);
 
             if (upperLength > 0.000001f)
@@ -662,11 +662,16 @@ public sealed class UnitHitSystem
             Vector3 right = new(-forward.Y, forward.X, 0f);
             Vector3 scale = scales[partIndex];
 
+            float headRadius = MathF.Min(
+                MathF.Max(0.05f, units.Width[unitIndex]),
+                MathF.Max(0.05f, units.Length[unitIndex])) * 0.32f;
+
             GetVerticalHitShape(
                 type,
                 posture,
                 rootPosition.Z,
                 height,
+                headRadius,
                 role,
                 scale,
                 out float centerZ,
@@ -767,6 +772,7 @@ public sealed class UnitHitSystem
         UnitPosture posture,
         float rootZ,
         float unitHeight,
+        float hitHeadRadius,
         BodyPartRole role,
         Vector3 scale,
         out float centerZ,
@@ -791,7 +797,7 @@ public sealed class UnitHitSystem
         {
             case BodyPartRole.Head:
                 centerZ = rootZ + GetHeadHeight(unitHeight, posture);
-                radiusZ = MathF.Max(0.025f, MathF.Abs(scale.Z) * 1.1f);
+                radiusZ = MathF.Max(0.025f, hitHeadRadius * 1.1f);
                 return;
 
             case BodyPartRole.Torso:
