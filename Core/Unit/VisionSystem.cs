@@ -75,6 +75,10 @@ public sealed class VisionSystem
     private int[] _spatialCellStarts = Array.Empty<int>();
     private int[] _spatialCellWriteCursors = Array.Empty<int>();
     private int[] _spatialUnits = Array.Empty<int>();
+    private int[] _occupiedSpatialCells = Array.Empty<int>();
+    private int _occupiedSpatialCellCount;
+    private int[] _candidateTargetMarks = Array.Empty<int>();
+    private int _candidateTargetMarkSequence;
 
     public double LastUpdateMilliseconds { get; private set; }
     public int LastCandidatePairs { get; private set; }
@@ -240,10 +244,13 @@ public sealed class VisionSystem
                 rotationDistances[sector] = int.MaxValue;
             }
 
+            int sampleMark = NextCandidateMark();
+
             int sampledCount = CollectNearbyTargets(
                 observer,
                 position,
-                sampledTargets);
+                sampledTargets,
+                sampleMark);
 
             // Nearby spatial targets have priority. Fill the remaining slots
             // from a rolling global window so distant enemies are still found
@@ -268,11 +275,12 @@ public sealed class VisionSystem
 
                 int target = active[activeSlot];
                 if (target == observer ||
-                    ContainsTarget(sampledTargets[..sampledCount], target))
+                    _candidateTargetMarks[target] == sampleMark)
                 {
                     continue;
                 }
 
+                _candidateTargetMarks[target] = sampleMark;
                 sampledTargets[sampledCount++] = target;
             }
 
@@ -964,8 +972,11 @@ public sealed class VisionSystem
     {
         int width = worldMap.TileWidth;
         int height = worldMap.TileHeight;
+        bool dimensionsChanged =
+            _spatialWidth != width ||
+            _spatialHeight != height;
 
-        if (_spatialWidth != width || _spatialHeight != height)
+        if (dimensionsChanged)
         {
             int cellCount = checked(width * height);
             _spatialCellCounts = new int[cellCount];
@@ -973,14 +984,26 @@ public sealed class VisionSystem
             _spatialCellWriteCursors = new int[cellCount];
             _spatialWidth = width;
             _spatialHeight = height;
+            _occupiedSpatialCellCount = 0;
         }
         else
         {
-            Array.Clear(_spatialCellCounts);
+            // Only occupied cells need reset; clearing the entire map-sized
+            // array every 100 ms cost more than maintaining the 800-unit grid.
+            for (int i = 0; i < _occupiedSpatialCellCount; i++)
+                _spatialCellCounts[_occupiedSpatialCells[i]] = 0;
+
+            _occupiedSpatialCellCount = 0;
         }
 
         if (_spatialUnits.Length < unitCapacity)
             Array.Resize(ref _spatialUnits, unitCapacity);
+
+        if (_occupiedSpatialCells.Length < unitCapacity)
+            Array.Resize(ref _occupiedSpatialCells, unitCapacity);
+
+        if (_candidateTargetMarks.Length < unitCapacity)
+            Array.Resize(ref _candidateTargetMarks, unitCapacity);
     }
 
     private void BuildSpatialGrid(
@@ -995,15 +1018,25 @@ public sealed class VisionSystem
             int x = (int)MathF.Floor(position.X);
             int y = (int)MathF.Floor(position.Y);
 
-            if (x < 0 || y < 0 || x >= _spatialWidth || y >= _spatialHeight)
+            if (x < 0 || y < 0 ||
+                x >= _spatialWidth || y >= _spatialHeight)
+            {
                 continue;
+            }
 
-            _spatialCellCounts[x + y * _spatialWidth]++;
+            int cell = x + y * _spatialWidth;
+            if (_spatialCellCounts[cell] == 0)
+                _occupiedSpatialCells[_occupiedSpatialCellCount++] = cell;
+
+            _spatialCellCounts[cell]++;
         }
 
+        // Only cells that contain units participate in the prefix sum. The
+        // grid's lookup remains O(1), but build cost now scales with unit count.
         int offset = 0;
-        for (int cell = 0; cell < _spatialCellCounts.Length; cell++)
+        for (int i = 0; i < _occupiedSpatialCellCount; i++)
         {
+            int cell = _occupiedSpatialCells[i];
             _spatialCellStarts[cell] = offset;
             _spatialCellWriteCursors[cell] = offset;
             offset += _spatialCellCounts[cell];
@@ -1016,18 +1049,33 @@ public sealed class VisionSystem
             int x = (int)MathF.Floor(position.X);
             int y = (int)MathF.Floor(position.Y);
 
-            if (x < 0 || y < 0 || x >= _spatialWidth || y >= _spatialHeight)
+            if (x < 0 || y < 0 ||
+                x >= _spatialWidth || y >= _spatialHeight)
+            {
                 continue;
+            }
 
             int cell = x + y * _spatialWidth;
             _spatialUnits[_spatialCellWriteCursors[cell]++] = unit;
         }
     }
 
+    private int NextCandidateMark()
+    {
+        if (_candidateTargetMarkSequence == int.MaxValue)
+        {
+            Array.Clear(_candidateTargetMarks);
+            _candidateTargetMarkSequence = 0;
+        }
+
+        return ++_candidateTargetMarkSequence;
+    }
+
     private int CollectNearbyTargets(
         int observer,
         Vector3 position,
-        Span<int> targets)
+        Span<int> targets,
+        int sampleMark)
     {
         int centerX = (int)MathF.Floor(position.X);
         int centerY = (int)MathF.Floor(position.Y);
@@ -1082,9 +1130,13 @@ public sealed class VisionSystem
                             slot -= cellCount;
 
                         int target = _spatialUnits[cellStart + slot];
-                        if (target == observer)
+                        if (target == observer ||
+                            _candidateTargetMarks[target] == sampleMark)
+                        {
                             continue;
+                        }
 
+                        _candidateTargetMarks[target] = sampleMark;
                         targets[count++] = target;
                     }
                 }
@@ -1092,19 +1144,6 @@ public sealed class VisionSystem
         }
 
         return count;
-    }
-
-    private static bool ContainsTarget(
-        ReadOnlySpan<int> targets,
-        int target)
-    {
-        for (int i = 0; i < targets.Length; i++)
-        {
-            if (targets[i] == target)
-                return true;
-        }
-
-        return false;
     }
 
     private void BuildVisibleTargetList(
