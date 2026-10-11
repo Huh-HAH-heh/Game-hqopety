@@ -1518,7 +1518,7 @@ public static class CombatSelfTest
 
                     // Head is anchored forward on the body; its independent
                     // facing vector may turn without moving its hitbox sideways.
-                    if (Vector3.Dot(headOffset, units.BodyNormal[unit.Index]) < 0.20f ||
+                    if (Vector3.Dot(headOffset, units.BodyNormal[unit.Index]) < 0.10f ||
                         MathF.Abs(Vector3.Dot(headOffset, units.HeadNormal[unit.Index])) > 0.01f)
                         return false;
                 }
