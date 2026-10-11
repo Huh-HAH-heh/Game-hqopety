@@ -27,7 +27,7 @@ public sealed class UnitRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
-    private readonly VertexArray _weaponVisuals =
+    private readonly VertexArray _bodyPartFills =
         new VertexArray(
             PrimitiveType.Triangles);
 
@@ -82,7 +82,7 @@ public sealed class UnitRenderSystem
         _vertices.Clear();
         _bodyOutlines.Clear();
         _statusIcons.Clear();
-        _weaponVisuals.Clear();
+        _bodyPartFills.Clear();
         _visionArea.Clear();
         _selection.Clear();
         _aiming.Clear();
@@ -123,6 +123,15 @@ public sealed class UnitRenderSystem
             simulation.Units;
 
         Vector3[] headNormals = units.HeadNormal;
+        UnitBodyStore bodyStore = simulation.Bodies;
+        Vector3[] bodyPositions = bodyStore.WorldPosition;
+        Vector3[] bodyScales = bodyStore.Scale;
+        float[] bodyRotations = bodyStore.WorldRotation;
+        BodyPrimitive[] bodyPrimitives = bodyStore.Primitive;
+        BodyPartRole[] bodyRoles = bodyStore.Role;
+        int[] bodyStarts = units.BodyStart;
+        short[] bodyCounts = units.BodyCount;
+
         if (showUnitDetails)
         {
             if (_aimTargetDrawn.Length < units.Capacity)
@@ -211,20 +220,60 @@ public sealed class UnitRenderSystem
                 tilePixelSize,
                 screenScale);
 
-            AppendUnitMarker(
-                _vertices,
-                _bodyOutlines,
-                _statusIcons,
-                screenX,
-                screenY,
-                markerRadius,
-                headNormals[unitIndex],
-                units.FactionTag[unitIndex],
-                isAlive,
-                healthRatio,
-                suppression,
-                suppressionState,
-                screenScale);
+            int bodyStart = bodyStarts[unitIndex];
+            bool inspectBodyParts =
+                hasSelection &&
+                selectedIndex == unitIndex &&
+                bodyStart >= 0 &&
+                bodyStart < bodyStore.Count &&
+                bodyCounts[unitIndex] > 0;
+
+            if (inspectBodyParts)
+            {
+                int bodyEnd = Math.Min(
+                    bodyStart + Math.Max(0, (int)bodyCounts[unitIndex]),
+                    bodyStore.Count);
+                UnitAiState bodyAiState = simulation.AI.Store.State[unitIndex];
+
+                for (int bodyPart = bodyStart; bodyPart < bodyEnd; bodyPart++)
+                {
+                    AppendLogicalBodyPart(
+                        _bodyPartFills,
+                        _bodyOutlines,
+                        bodyPositions[bodyPart],
+                        bodyScales[bodyPart],
+                        bodyRotations[bodyPart],
+                        bodyPrimitives[bodyPart],
+                        bodyRoles[bodyPart],
+                        units.FactionTag[unitIndex],
+                        bodyAiState,
+                        isAlive,
+                        false,
+                        tilePixelSize,
+                        screenScale,
+                        minWorldX,
+                        maxWorldX,
+                        minWorldY,
+                        maxWorldY);
+                }
+            }
+            else
+            {
+                AppendUnitMarker(
+                    _vertices,
+                    _bodyOutlines,
+                    _statusIcons,
+                    screenX,
+                    screenY,
+                    markerRadius,
+                    headNormals[unitIndex],
+                    units.FactionTag[unitIndex],
+                    isAlive,
+                    healthRatio,
+                    suppression,
+                    suppressionState,
+                    screenScale);
+            }
 
             if (!isAlive)
                 continue;
@@ -284,14 +333,14 @@ public sealed class UnitRenderSystem
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
 
+        if (_bodyPartFills.VertexCount > 0)
+            window.Draw(_bodyPartFills);
+
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
 
         if (_statusIcons.VertexCount > 0)
             window.Draw(_statusIcons);
-
-        if (_weaponVisuals.VertexCount > 0)
-            window.Draw(_weaponVisuals);
 
         if (_selection.VertexCount > 0)
         {
@@ -347,7 +396,7 @@ public void DrawSnapshot(
         _bodyOutlines.Clear();
         _selection.Clear();
         _statusIcons.Clear();
-        _weaponVisuals.Clear();
+        _bodyPartFills.Clear();
         _aiming.Clear();
         _visionArea.Clear();
         _visionDebug.Clear();
@@ -415,20 +464,54 @@ public void DrawSnapshot(
                 tilePixelSize,
                 screenScale);
 
-            AppendUnitMarker(
-                _vertices,
-                _bodyOutlines,
-                _statusIcons,
-                x,
-                y,
-                markerRadius,
-                unit.HeadNormal,
-                unit.FactionTag,
-                isAlive,
-                unit.HealthRatio,
-                unit.Suppression,
-                unit.SuppressionState,
-                screenScale);
+            RenderBodyPart[] selectedBodyParts = snapshot.BodyParts;
+            bool inspectBodyParts =
+                unit.Index == selectedUnitIndex &&
+                snapshot.BodyPartUnitIndex == selectedUnitIndex &&
+                selectedBodyParts.Length > 0;
+
+            if (inspectBodyParts)
+            {
+                for (int bodyPartIndex = 0; bodyPartIndex < selectedBodyParts.Length; bodyPartIndex++)
+                {
+                    RenderBodyPart part = selectedBodyParts[bodyPartIndex];
+                    AppendLogicalBodyPart(
+                        _bodyPartFills,
+                        _bodyOutlines,
+                        part.Position,
+                        part.Scale,
+                        part.Rotation,
+                        part.Primitive,
+                        part.Role,
+                        part.FactionTag,
+                        part.AiState,
+                        part.IsAlive,
+                        false,
+                        tilePixelSize,
+                        screenScale,
+                        minX,
+                        maxX,
+                        minY,
+                        maxY);
+                }
+            }
+            else
+            {
+                AppendUnitMarker(
+                    _vertices,
+                    _bodyOutlines,
+                    _statusIcons,
+                    x,
+                    y,
+                    markerRadius,
+                    unit.HeadNormal,
+                    unit.FactionTag,
+                    isAlive,
+                    unit.HealthRatio,
+                    unit.Suppression,
+                    unit.SuppressionState,
+                    screenScale);
+            }
 
             if (!isAlive)
                 continue;
@@ -468,12 +551,12 @@ public void DrawSnapshot(
 
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
+        if (_bodyPartFills.VertexCount > 0)
+            window.Draw(_bodyPartFills);
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
         if (_statusIcons.VertexCount > 0)
             window.Draw(_statusIcons);
-        if (_weaponVisuals.VertexCount > 0)
-            window.Draw(_weaponVisuals);
         if (_selection.VertexCount > 0)
             window.Draw(_selection);
         if (_aiming.VertexCount > 0)
@@ -514,8 +597,8 @@ public void DrawSnapshot(
 
         // This is a render-only readability boost. The simulation transforms
         // and hit logic remain unchanged; tiny joints are kept visible at battle zoom.
-        const float BodyVisualScale = 1.55f;
-        const float MinimumHalfExtentPixels = 0.70f;
+        const float BodyVisualScale = 1.0f;
+        const float MinimumHalfExtentPixels = 0.65f;
         float halfX = MathF.Max(
             MathF.Abs(scale.X) * BodyVisualScale * tilePixelSize,
             MinimumHalfExtentPixels / screenScale);
