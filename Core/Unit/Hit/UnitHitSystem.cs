@@ -11,18 +11,26 @@ public readonly struct HitVolume
     public Vector3 Right { get; }
     public Vector3 Radii { get; }
 
+    // Canonical upright inspection pose. Collision tests never read these fields.
+    public Vector3 InspectionCenter { get; }
+    public float InspectionRotation { get; }
+
     public HitVolume(
         UnitHealthPartId part,
         Vector3 center,
         Vector3 forward,
         Vector3 right,
-        Vector3 radii)
+        Vector3 radii,
+        Vector3 inspectionCenter = default,
+        float inspectionRotation = 0f)
     {
         Part = part;
         Center = center;
         Forward = forward;
         Right = right;
         Radii = radii;
+        InspectionCenter = inspectionCenter;
+        InspectionRotation = inspectionRotation;
     }
 }
 
@@ -686,7 +694,9 @@ public sealed class UnitHitSystem
                 new Vector3(
                     MathF.Max(0.012f, MathF.Abs(scale.Y)),
                     MathF.Max(0.012f, MathF.Abs(scale.X)),
-                    MathF.Max(0.025f, radiusZ)));
+                    MathF.Max(0.025f, radiusZ)),
+                bodies.InspectionPosition[partIndex],
+                bodies.InspectionRotation[partIndex]);
         }
 
         return count;

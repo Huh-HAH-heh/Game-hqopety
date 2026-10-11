@@ -53,7 +53,9 @@ public readonly record struct RenderHitVolume(
     Vector3 Center,
     Vector3 Forward,
     Vector3 Right,
-    Vector3 Radii);
+    Vector3 Radii,
+    Vector3 InspectionCenter,
+    float InspectionRotation);
 
 /// <summary>
 /// Immutable data published by the simulation thread and consumed by the renderer.
@@ -300,7 +302,9 @@ public sealed class SimulationFrameSnapshot
                             volume.Center,
                             volume.Forward,
                             volume.Right,
-                            volume.Radii);
+                            volume.Radii,
+                            volume.InspectionCenter,
+                            volume.InspectionRotation);
                     }
 
                     capturedHitVolumeUnitIndex = unitIndex;

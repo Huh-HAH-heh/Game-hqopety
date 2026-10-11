@@ -26,6 +26,8 @@ public enum BodyPartPivot : byte
 public readonly struct BodyPartDefinition
 {
     public Vector3 LocalPosition { get; }
+    public Vector3 InspectionLocalPosition { get; }
+    public float InspectionLocalRotation { get; }
     public Vector3 Scale { get; }
     public float LocalRotation { get; }
     public float FollowDistance { get; }
@@ -46,9 +48,13 @@ public readonly struct BodyPartDefinition
         float followDistance = 0f,
         BodyPartAnchor anchor = BodyPartAnchor.Parent,
         BodyPartRole role = BodyPartRole.Generic,
-        BodyPartPivot pivot = BodyPartPivot.Center)
+        BodyPartPivot pivot = BodyPartPivot.Center,
+        Vector3 inspectionLocalPosition = default,
+        float inspectionLocalRotation = 0f)
     {
         LocalPosition = localPosition;
+        InspectionLocalPosition = inspectionLocalPosition;
+        InspectionLocalRotation = inspectionLocalRotation;
         Scale = scale;
         Primitive = primitive;
         ParentIndex = parentIndex;

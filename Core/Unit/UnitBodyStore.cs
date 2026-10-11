@@ -9,6 +9,8 @@ public sealed class UnitBodyStore
 
     private Vector3[] _localPosition;
     private Vector3[] _worldPosition;
+    private Vector3[] _inspectionPosition;
+    private float[] _inspectionRotation;
     private Vector3[] _scale;
 
     private float[] _localRotation;
@@ -36,6 +38,12 @@ public sealed class UnitBodyStore
 
     public Vector3[] WorldPosition =>
         _worldPosition;
+
+    public Vector3[] InspectionPosition =>
+        _inspectionPosition;
+
+    public float[] InspectionRotation =>
+        _inspectionRotation;
 
     public Vector3[] Scale =>
         _scale;
@@ -78,6 +86,8 @@ public sealed class UnitBodyStore
 
         _localPosition = new Vector3[initialCapacity];
         _worldPosition = new Vector3[initialCapacity];
+        _inspectionPosition = new Vector3[initialCapacity];
+        _inspectionRotation = new float[initialCapacity];
         _scale = new Vector3[initialCapacity];
 
         _localRotation = new float[initialCapacity];
@@ -137,7 +147,9 @@ public sealed class UnitBodyStore
                 part.Motion,
                 part.Anchor,
                 part.Role,
-                part.Pivot);
+                part.Pivot,
+                part.InspectionLocalPosition,
+                part.InspectionLocalRotation);
         }
 
         return new BodyHandle(start, parts.Length);
@@ -237,7 +249,9 @@ public sealed class UnitBodyStore
         BodyPartMotion motion,
         BodyPartAnchor anchor,
         BodyPartRole role,
-        BodyPartPivot pivot)
+        BodyPartPivot pivot,
+        Vector3 inspectionLocalPosition,
+        float inspectionLocalRotation)
     {
         int index = _writeIndex++;
 
@@ -249,6 +263,17 @@ public sealed class UnitBodyStore
         _localPosition[index] = localPosition;
         _worldPosition[index] = Vector3.Zero;
         _scale[index] = scale;
+
+        Vector3 inspectionOrigin = parent >= 0
+            ? _inspectionPosition[parent]
+            : Vector3.Zero;
+        float inspectionParentRotation = parent >= 0
+            ? _inspectionRotation[parent]
+            : 0f;
+        _inspectionPosition[index] = inspectionOrigin +
+            Rotate2D(inspectionLocalPosition, inspectionParentRotation);
+        _inspectionRotation[index] =
+            inspectionParentRotation + inspectionLocalRotation;
 
         _localRotation[index] = localRotation;
         _worldRotation[index] = 0f;
@@ -287,6 +312,14 @@ public sealed class UnitBodyStore
 
         Array.Resize(
             ref _worldPosition,
+            newCapacity);
+
+        Array.Resize(
+            ref _inspectionPosition,
+            newCapacity);
+
+        Array.Resize(
+            ref _inspectionRotation,
             newCapacity);
 
         Array.Resize(

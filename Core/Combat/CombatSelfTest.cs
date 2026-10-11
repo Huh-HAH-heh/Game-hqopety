@@ -45,6 +45,7 @@ public static class CombatSelfTest
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Combat: aim point uses an exposed hit volume", TestAimPointUsesExposedHitVolume, ref passed, ref failed);
         RunTest("Anatomy: vision and hit volumes match every human posture", TestPostureCollisionVisionGeometry, ref passed, ref failed);
+        RunTest("Render: diagnostic hitboxes use an upright parent-linked anatomy", TestUprightInspectionPose, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
@@ -2108,6 +2109,61 @@ public static class CombatSelfTest
                simulation.Inventory.Durability[itemStart + trousers] > 0f &&
                simulation.Inventory.Durability[itemStart + vest] > 0f &&
                simulation.Inventory.Durability[itemStart + helmet] > 0f;
+    }
+
+    private static bool TestUprightInspectionPose()
+    {
+        UnitSimulation simulation = new UnitSimulation(8, 128);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10f, 10f, 0f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        Span<HitVolume> volumes =
+            stackalloc HitVolume[UnitHitSystem.MaxHitVolumeCount];
+
+        int count = UnitHitSystem.GetHitVolumes(
+            simulation.Units,
+            id.Index,
+            volumes,
+            simulation.Bodies);
+
+        if (count != 19)
+            return false;
+
+        // Diagram-space links must be parent-relative: head above neck,
+        // neck above torso, arms on the sides and feet at the bottom.
+        Vector3 torso = volumes[0].InspectionCenter;
+        Vector3 neck = volumes[1].InspectionCenter;
+        Vector3 head = volumes[2].InspectionCenter;
+        Vector3 rightArm = volumes[3].InspectionCenter;
+        Vector3 rightHand = volumes[6].InspectionCenter;
+        Vector3 leftArm = volumes[7].InspectionCenter;
+        Vector3 leftHand = volumes[10].InspectionCenter;
+        Vector3 rightThigh = volumes[11].InspectionCenter;
+        Vector3 rightFoot = volumes[14].InspectionCenter;
+        Vector3 leftThigh = volumes[15].InspectionCenter;
+        Vector3 leftFoot = volumes[18].InspectionCenter;
+
+        if (!(head.Y < neck.Y &&
+              neck.Y < torso.Y &&
+              rightArm.X > 0f &&
+              leftArm.X < 0f &&
+              rightHand.Y > rightArm.Y &&
+              leftHand.Y > leftArm.Y &&
+              rightThigh.Y > torso.Y &&
+              leftThigh.Y > torso.Y &&
+              rightFoot.Y > rightThigh.Y &&
+              leftFoot.Y > leftThigh.Y))
+        {
+            return false;
+        }
+
+        int bodyStart = simulation.Units.BodyStart[id.Index];
+        return simulation.Bodies.Parent[bodyStart + 2] == bodyStart + 1 &&
+               MathF.Abs(volumes[2].InspectionCenter.X) < 0.001f &&
+               MathF.Abs(volumes[0].InspectionCenter.X) < 0.001f;
     }
 
     private static bool TestAnatomyProfiles()

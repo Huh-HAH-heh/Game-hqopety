@@ -233,7 +233,6 @@ public sealed class UnitRenderSystem
                 float inspectionScale = GetInspectionScale(
                     hitVolumeBuffer,
                     volumeCount,
-                    unitPosition,
                     tilePixelSize,
                     inspectionRadius,
                     screenScale);
@@ -259,8 +258,6 @@ public sealed class UnitRenderSystem
                         _hitVolumeFills,
                         _bodyOutlines,
                         hitVolumeBuffer[volumeIndex],
-                        unitPosition,
-                        units.BodyNormal[unitIndex],
                         screenX,
                         screenY,
                         tilePixelSize,
@@ -272,7 +269,6 @@ public sealed class UnitRenderSystem
                     _bodyOutlines,
                     hitVolumeBuffer,
                     volumeCount,
-                    unitPosition,
                     units.BodyNormal[unitIndex],
                     screenX,
                     screenY,
@@ -509,7 +505,9 @@ public void DrawSnapshot(
                         source.Center,
                         source.Forward,
                         source.Right,
-                        source.Radii);
+                        source.Radii,
+                        source.InspectionCenter,
+                        source.InspectionRotation);
                 }
 
                 float inspectionRadius = MathF.Max(
@@ -519,7 +517,6 @@ public void DrawSnapshot(
                 float inspectionScale = GetInspectionScale(
                     snapshotHitVolumeBuffer,
                     volumeCount,
-                    position,
                     tilePixelSize,
                     inspectionRadius,
                     screenScale);
@@ -545,8 +542,6 @@ public void DrawSnapshot(
                         _hitVolumeFills,
                         _bodyOutlines,
                         snapshotHitVolumeBuffer[volumeIndex],
-                        position,
-                        unit.BodyNormal,
                         x,
                         y,
                         tilePixelSize,
@@ -558,7 +553,6 @@ public void DrawSnapshot(
                     _bodyOutlines,
                     snapshotHitVolumeBuffer,
                     volumeCount,
-                    position,
                     unit.BodyNormal,
                     x,
                     y,
@@ -640,7 +634,6 @@ public void DrawSnapshot(
     private static float GetInspectionScale(
         ReadOnlySpan<HitVolume> volumes,
         int volumeCount,
-        Vector3 unitPosition,
         float tilePixelSize,
         float inspectionRadius,
         float screenScale)
@@ -650,8 +643,8 @@ public void DrawSnapshot(
         for (int i = 0; i < volumeCount; i++)
         {
             ref readonly HitVolume volume = ref volumes[i];
-            float dx = volume.Center.X - unitPosition.X;
-            float dy = volume.Center.Y - unitPosition.Y;
+            float dx = volume.InspectionCenter.X;
+            float dy = volume.InspectionCenter.Y;
             float distance = MathF.Sqrt(dx * dx + dy * dy);
             float radius = MathF.Max(
                 MathF.Abs(volume.Radii.X),
@@ -681,8 +674,6 @@ public void DrawSnapshot(
         VertexArray fills,
         VertexArray outlines,
         in HitVolume volume,
-        Vector3 unitPosition,
-        Vector3 bodyNormal,
         float unitX,
         float unitY,
         float tilePixelSize,
@@ -692,20 +683,14 @@ public void DrawSnapshot(
         // Magnify the actual collision volume relative to the unit root.
         // Unlike the previous hand-authored layout, this preserves the rig's
         // actual attachment points and the independent head/body normals.
-        Vector3 bodyForward = NormalizeHorizontal(bodyNormal);
-        Vector3 bodyRight = new(-bodyForward.Y, bodyForward.X, 0f);
-        Vector3 relativeCenter = volume.Center - unitPosition;
-
-        // The simulation rig is top-down: body-forward is the character's
-        // head-to-feet axis in world space. Rotate the inspection projection
-        // into an upright diagram so forward is screen-up and lateral is X.
-        float localX = Vector3.Dot(relativeCenter, bodyRight);
-        float localY = -Vector3.Dot(relativeCenter, bodyForward);
+        // These coordinates belong to the inspection rig in UnitBodyCatalog.
+        // They are separate from world-space collision centers and form a
+        // parent-linked upright pose (head above torso, feet below).
         float centerX = unitX +
-            localX * tilePixelSize * inspectionScale;
+            volume.InspectionCenter.X * tilePixelSize * inspectionScale;
 
         float centerY = unitY +
-            localY * tilePixelSize * inspectionScale;
+            volume.InspectionCenter.Y * tilePixelSize * inspectionScale;
 
         float minimumRadius = 0.35f / MathF.Max(0.001f, screenScale);
         float radiusX = MathF.Max(
@@ -720,11 +705,8 @@ public void DrawSnapshot(
             tilePixelSize *
             inspectionScale);
 
-        // Radii.X lies along Right; Radii.Y lies along Forward.
-        Vector3 volumeRight = NormalizeHorizontal(volume.Right);
-        float volumeLocalX = Vector3.Dot(volumeRight, bodyRight);
-        float volumeLocalY = -Vector3.Dot(volumeRight, bodyForward);
-        float rotation = MathF.Atan2(volumeLocalY, volumeLocalX);
+        // Presentation orientation comes from the parent-linked inspection pose.
+        float rotation = volume.InspectionRotation;
 
         float outlinePad = 0.5f / MathF.Max(0.001f, screenScale);
         int segments = MathF.Max(radiusX, radiusY) *
@@ -760,7 +742,6 @@ public void DrawSnapshot(
         VertexArray outlines,
         ReadOnlySpan<HitVolume> volumes,
         int volumeCount,
-        Vector3 unitPosition,
         Vector3 bodyNormal,
         float unitX,
         float unitY,
@@ -797,11 +778,10 @@ public void DrawSnapshot(
         if (torsoIndex >= 0)
         {
             ref readonly HitVolume torso = ref volumes[torsoIndex];
-            Vector3 torsoDelta = torso.Center - unitPosition;
             AppendInspectionNormal(
                 outlines,
-                unitX + Vector3.Dot(torsoDelta, bodyRight) * tilePixelSize * inspectionScale,
-                unitY - Vector3.Dot(torsoDelta, bodyForward) * tilePixelSize * inspectionScale,
+                unitX + torso.InspectionCenter.X * tilePixelSize * inspectionScale,
+                unitY + torso.InspectionCenter.Y * tilePixelSize * inspectionScale,
                 ProjectNormalToBodyDiagram(torso.Forward, bodyForward, bodyRight),
                 MathF.Min(
                     inspectionRadius * 0.23f,
@@ -816,11 +796,10 @@ public void DrawSnapshot(
         if (headIndex >= 0)
         {
             ref readonly HitVolume head = ref volumes[headIndex];
-            Vector3 headDelta = head.Center - unitPosition;
             AppendInspectionNormal(
                 outlines,
-                unitX + Vector3.Dot(headDelta, bodyRight) * tilePixelSize * inspectionScale,
-                unitY - Vector3.Dot(headDelta, bodyForward) * tilePixelSize * inspectionScale,
+                unitX + head.InspectionCenter.X * tilePixelSize * inspectionScale,
+                unitY + head.InspectionCenter.Y * tilePixelSize * inspectionScale,
                 ProjectNormalToBodyDiagram(head.Forward, bodyForward, bodyRight),
                 MathF.Min(
                     inspectionRadius * 0.18f,
