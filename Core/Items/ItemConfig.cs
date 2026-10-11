@@ -51,6 +51,9 @@ public enum UnitWeaponSlot : byte
     {
         public string Name;
         public float Weight; // Масса предмета (пойдет в DynamicMass)
+        public byte WorldColorR = 155;
+        public byte WorldColorG = 160;
+        public byte WorldColorB = 165;
     }
 
     public sealed class ArmorConfig : ItemConfig
@@ -83,12 +86,15 @@ public enum UnitWeaponSlot : byte
         public ArmorCoverage Coverage;
 
         public ArmorLayer Layer;
+        public float WorldRenderPadding = 0.075f;
     }
 
     public enum WeaponType { Melee, Ranged }
 
     public abstract class WeaponConfig : ItemConfig
     {
+        public float WorldRenderLength = 0.55f;
+        public float WorldRenderWidth = 0.065f;
         public WeaponType Type;
 
         // Ranged + Melee supports hybrid weapons.

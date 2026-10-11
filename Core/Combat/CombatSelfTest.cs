@@ -52,6 +52,7 @@ public static class CombatSelfTest
         RunTest("Combat log: hit and blocked events survive shot spam", TestCombatLogPriorities, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
         RunTest("Anatomy: all built-in and custom body definitions transform correctly", TestAnatomyProfiles, ref passed, ref failed);
+        RunTest("Equipment: clothing coverage and visual metadata", TestEquipmentVisualMetadata, ref passed, ref failed);
 
         Console.WriteLine("---------------------------------------");
         Console.WriteLine($"RESULT: PASS={passed} FAIL={failed}");
@@ -1764,6 +1765,28 @@ public static class CombatSelfTest
     }
 
 
+    private static bool TestEquipmentVisualMetadata()
+    {
+        if (WeaponCatalog.AssaultRifle.WorldRenderLength <= WeaponCatalog.Pistol.WorldRenderLength ||
+            ApparelCatalog.WorkShirt.WorldRenderPadding <= 0f ||
+            ApparelCatalog.WorkTrousers.WorldRenderPadding <= 0f)
+            return false;
+
+        UnitSimulation simulation = new UnitSimulation(2, 32);
+        UnitId unit = simulation.Spawn(UnitType.Colonist, Vector3.Zero, Vector3.UnitX, Vector3.UnitX);
+        int shirt = simulation.AddInventoryItem(unit, ApparelCatalog.WorkShirt);
+        int trousers = simulation.AddInventoryItem(unit, ApparelCatalog.WorkTrousers);
+        if (shirt < 0 || trousers < 0 ||
+            !simulation.EquipArmor(unit, shirt) ||
+            !simulation.EquipArmor(unit, trousers))
+            return false;
+
+        return simulation.Inventory.GetBodyEquipment(unit.Index, 1, ArmorLayer.Clothing) == shirt &&
+               simulation.Inventory.GetBodyEquipment(unit.Index, 2, ArmorLayer.Clothing) == shirt &&
+               simulation.Inventory.GetBodyEquipment(unit.Index, 6, ArmorLayer.Clothing) == trousers &&
+               simulation.Inventory.GetBodyEquipment(unit.Index, 8, ArmorLayer.Clothing) == trousers;
+    }
+
     private static bool TestAnatomyProfiles()
     {
         UnitBodyStore definitions = new UnitBodyStore(4);
@@ -1804,7 +1827,7 @@ public static class CombatSelfTest
             BodyPartRole.Head);
 
         Vector3 headPosition = definitions.WorldPosition[definitionHead];
-        if (MathF.Abs(headPosition.X - 0.155f) > 0.001f ||
+        if (MathF.Abs(headPosition.X - 0.32f) > 0.001f ||
             MathF.Abs(headPosition.Y) > 0.001f)
         {
             return false;
@@ -1871,10 +1894,10 @@ public static class CombatSelfTest
             rightThigh >= 0 &&
             MathF.Abs(
                 simulation.Bodies.WorldRotation[leftThigh] -
-                (MathF.PI - 0.12f + swing)) < 0.001f &&
+                (MathF.PI - 0.58f + swing)) < 0.001f &&
             MathF.Abs(
                 simulation.Bodies.WorldRotation[rightThigh] -
-                (-MathF.PI + 0.12f - swing)) < 0.001f;
+                (-MathF.PI + 0.58f - swing)) < 0.001f;
 
         if (!gaitCorrect)
             return false;
@@ -1898,7 +1921,7 @@ public static class CombatSelfTest
             new BodyHandle(start, count),
             BodyPartRole.Head);
         Vector3 aimedHeadPosition = simulation.Bodies.WorldPosition[head];
-        if (MathF.Abs(aimedHeadPosition.X - 10.155f) > 0.002f ||
+        if (MathF.Abs(aimedHeadPosition.X - 10.32f) > 0.002f ||
             MathF.Abs(aimedHeadPosition.Y - 10f) > 0.002f ||
             MathF.Abs(simulation.Bodies.WorldRotation[head] - MathF.PI * 0.5f) > 0.002f)
         {
@@ -1951,7 +1974,7 @@ public static class CombatSelfTest
         return MathF.Abs(bodyNormal.X) < 0.001f &&
                MathF.Abs(bodyNormal.Y - 1f) < 0.001f &&
                MathF.Abs(movedHead.X - 10f) < 0.002f &&
-               MathF.Abs(movedHead.Y - 10.155f) < 0.002f &&
+               MathF.Abs(movedHead.Y - 10.32f) < 0.002f &&
                MathF.Abs(simulation.Bodies.WorldRotation[head]) < 0.002f;
     }
 

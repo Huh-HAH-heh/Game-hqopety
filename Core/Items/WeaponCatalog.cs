@@ -139,6 +139,11 @@ public static class WeaponCatalog
         {
             Name = "Assault Rifle",
             Weight = 4.1f,
+            WorldRenderLength = 0.82f,
+            WorldRenderWidth = 0.085f,
+            WorldColorR = 63,
+            WorldColorG = 68,
+            WorldColorB = 62,
             BaseDamage = 34,
             BleedChance = 0.55f,
             FireRate = 0.095f,
@@ -165,6 +170,11 @@ public static class WeaponCatalog
         {
             Name = "Pistol",
             Weight = 0.9f,
+            WorldRenderLength = 0.36f,
+            WorldRenderWidth = 0.075f,
+            WorldColorR = 72,
+            WorldColorG = 76,
+            WorldColorB = 82,
             BaseDamage = 22,
             BleedChance = 0.35f,
             FireRate = 0.18f,

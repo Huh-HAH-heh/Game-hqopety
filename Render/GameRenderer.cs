@@ -1362,6 +1362,8 @@ public sealed class GameRenderer
                 continue;
             }
 
+            EquipWorkClothes(units[i]);
+
             int inventorySlot =
                 _unitSimulation.AddInventoryItem(
                     units[i],
@@ -1376,4 +1378,12 @@ public sealed class GameRenderer
             }
         }
     }
+    private void EquipWorkClothes(UnitId unit)
+    {
+        int shirt = _unitSimulation.AddInventoryItem(unit, ApparelCatalog.WorkShirt);
+        if (shirt >= 0) _unitSimulation.EquipArmor(unit, shirt);
+        int trousers = _unitSimulation.AddInventoryItem(unit, ApparelCatalog.WorkTrousers);
+        if (trousers >= 0) _unitSimulation.EquipArmor(unit, trousers);
+    }
+
 }

@@ -12,7 +12,6 @@ namespace RimClone.Render;
 public sealed class UnitRenderSystem
 {
     private const int CircleSegments = 10;
-    private const int CapsuleHalfSegments = 4;
     private const int VisionConeSegments = 20;
     private const int VisionRingSegments = 48;
 
@@ -21,6 +20,14 @@ public sealed class UnitRenderSystem
             PrimitiveType.Triangles);
 
     private readonly VertexArray _bodyOutlines =
+        new VertexArray(
+            PrimitiveType.Lines);
+
+    private readonly VertexArray _equipment =
+        new VertexArray(
+            PrimitiveType.Lines);
+
+    private readonly VertexArray _weaponVisuals =
         new VertexArray(
             PrimitiveType.Triangles);
 
@@ -62,6 +69,8 @@ public sealed class UnitRenderSystem
 
         _vertices.Clear();
         _bodyOutlines.Clear();
+        _equipment.Clear();
+        _weaponVisuals.Clear();
         _visionArea.Clear();
         _selection.Clear();
         _aiming.Clear();
@@ -100,6 +109,15 @@ public sealed class UnitRenderSystem
 
         UnitStore units =
             simulation.Units;
+
+        UnitInventoryStore inventory =
+            simulation.Inventory;
+
+        Vector3[] bodyNormals =
+            units.BodyNormal;
+
+        Vector3[] headNormals =
+            units.HeadNormal;
 
         if (_aimTargetDrawn.Length < units.Capacity)
             Array.Resize(ref _aimTargetDrawn, units.Capacity);
@@ -219,17 +237,6 @@ public sealed class UnitRenderSystem
                     238,
                     238);
 
-            AppendFactionMarker(
-                _selection,
-                units.FactionTag[unitIndex],
-                unitPosition.X * tilePixelSize,
-                unitPosition.Y * tilePixelSize,
-                MathF.Max(
-                    MathF.Max(
-                        widths[unitIndex],
-                        lengths[unitIndex]) * 0.72f,
-                    0.55f) * tilePixelSize);
-
             UnitAiState aiState =
                 simulation.AI.Store.State[unitIndex];
 
@@ -237,13 +244,6 @@ public sealed class UnitRenderSystem
                 simulation.AI.Enabled)
             {
                 color = GetAiColor(aiState);
-
-                AppendAiStateMarker(
-                    _selection,
-                    screenX,
-                    screenY,
-                    tilePixelSize,
-                    color);
 
                 // Full target/goal vectors are useful for the selected unit,
                 // but drawing 800 vectors at once hides the battlefield.
@@ -268,32 +268,19 @@ public sealed class UnitRenderSystem
             int end = start + count;
             float screenScale = window.Size.X / MathF.Max(1f, cameraView.Size.X);
             float pixelScale = MathF.Max(1f, tilePixelSize * screenScale);
-            float minRadius = 1.4f / pixelScale;
-            float outline = 0.45f / pixelScale;
             Color outlineColor = new Color(20, 22, 26, 238);
+            float bodyRotation = MathF.Atan2(bodyNormals[unitIndex].Y, bodyNormals[unitIndex].X);
 
-            // Simple body debug rendering: one circle per body part at its
-            // calculated world coordinate. No capsules, boxes, or layering.
+            // Only active anatomy renderer: every part is one circle at its simulated world coordinate.
             for (int part = start; part < end; part++)
             {
                 Vector3 position = partPositions[part];
                 Vector3 scale = partScales[part];
                 BodyPartRole role = bodyRoles[part];
+                float radius = GetBodyDotRadius(role, scale, pixelScale);
 
-                // Segment length must not stretch a point into an arm/leg.
-                // Use the narrower dimension for a round marker.
-                float radius = MathF.Max(
-                    minRadius,
-                    MathF.Min(MathF.Abs(scale.X), MathF.Abs(scale.Y)));
-                float extent = radius + outline;
-
-                if (!IsPartInView(
-                    position,
-                    extent,
-                    minWorldX,
-                    maxWorldX,
-                    minWorldY,
-                    maxWorldY))
+                if (!IsPartInView(position, radius + 0.12f,
+                    minWorldX, maxWorldX, minWorldY, maxWorldY))
                 {
                     continue;
                 }
@@ -301,21 +288,37 @@ public sealed class UnitRenderSystem
                 float pixelX = position.X * tilePixelSize;
                 float pixelY = position.Y * tilePixelSize;
 
-                AppendCircleOutline(
-                    _bodyOutlines,
-                    pixelX,
-                    pixelY,
-                    (radius + outline) * tilePixelSize,
-                    outlineColor,
-                    CircleSegments);
+                AppendCircleOutline(_bodyOutlines, pixelX, pixelY,
+                    radius * tilePixelSize + 0.30f, outlineColor, CircleSegments);
+                AppendCircle(_vertices, pixelX, pixelY,
+                    radius * tilePixelSize, GetBodyPartColor(role, color));
 
-                AppendCircle(
-                    _vertices,
-                    pixelX,
-                    pixelY,
-                    radius * tilePixelSize,
-                    GetBodyPartColor(role, color));
+                int zone = GetArmorZoneIndex(
+                    role,
+                    LocalSide(position, unitPosition, bodyRotation));
+
+                if (zone < 0)
+                    continue;
+
+                for (int layer = 0; layer < UnitInventoryStore.ArmorLayerCount; layer++)
+                {
+                    short itemSlot = inventory.GetBodyEquipment(unitIndex, zone, (ArmorLayer)layer);
+                    if (itemSlot < 0 ||
+                        inventory.GetItem(unitIndex, itemSlot) is not ArmorConfig apparel)
+                    {
+                        continue;
+                    }
+
+                    float padding = MathF.Max(0.045f, apparel.WorldRenderPadding) + layer * 0.035f;
+                    AppendCircleOutline(_equipment, pixelX, pixelY,
+                        (radius + padding) * tilePixelSize, GetItemColor(apparel), CircleSegments);
+                }
             }
+
+            AppendEquippedWeapons(
+                _weaponVisuals, inventory, simulation.Weapons, unitIndex,
+                unitPosition, headNormals[unitIndex], partPositions, bodyRoles,
+                start, count, tilePixelSize);
 
             if (hasSelection &&
                 selectedIndex == unitIndex)
@@ -368,6 +371,12 @@ public sealed class UnitRenderSystem
                 _vertices);
         }
 
+        if (_equipment.VertexCount > 0)
+            window.Draw(_equipment);
+
+        if (_weaponVisuals.VertexCount > 0)
+            window.Draw(_weaponVisuals);
+
         if (_selection.VertexCount > 0)
         {
             window.Draw(
@@ -391,6 +400,133 @@ public sealed class UnitRenderSystem
             window.Draw(
                 _aiDebug);
         }
+    }
+
+    private static float GetBodyDotRadius(BodyPartRole role, Vector3 scale, float pixelScale)
+    {
+        float configured = MathF.Min(MathF.Abs(scale.X), MathF.Abs(scale.Y));
+        float minPixels = role switch
+        {
+            BodyPartRole.Torso => 1.7f,
+            BodyPartRole.Head => 1.5f,
+            BodyPartRole.Generic or BodyPartRole.Segment => 1.5f,
+            BodyPartRole.UpperArm or BodyPartRole.Forearm or BodyPartRole.Thigh or BodyPartRole.Shin => 0.72f,
+            BodyPartRole.Neck or BodyPartRole.Elbow or BodyPartRole.Knee => 0.52f,
+            BodyPartRole.Hand or BodyPartRole.Foot => 0.68f,
+            _ => 0.65f
+        };
+        return MathF.Max(configured, minPixels / pixelScale);
+    }
+
+    private static float LocalSide(Vector3 part, Vector3 unit, float bodyRotation) =>
+        -(part.X - unit.X) * MathF.Sin(bodyRotation) +
+        (part.Y - unit.Y) * MathF.Cos(bodyRotation);
+
+    private static int GetArmorZoneIndex(BodyPartRole role, float side)
+    {
+        bool left = side >= 0f;
+        return role switch
+        {
+            BodyPartRole.Head => 0,
+            BodyPartRole.Torso or BodyPartRole.Neck => 1,
+            BodyPartRole.UpperArm or BodyPartRole.Elbow or BodyPartRole.Forearm => left ? 2 : 3,
+            BodyPartRole.Hand => left ? 4 : 5,
+            BodyPartRole.Thigh or BodyPartRole.Knee or BodyPartRole.Shin => left ? 6 : 7,
+            BodyPartRole.Foot => left ? 8 : 9,
+            _ => -1
+        };
+    }
+
+    private static Color GetItemColor(ItemConfig item) =>
+        new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
+
+    private static void AppendEquippedWeapons(
+        VertexArray vertices, UnitInventoryStore inventory, UnitWeaponStore weapons,
+        int unitIndex, Vector3 unitPosition, Vector3 headNormal,
+        Vector3[] partPositions, BodyPartRole[] roles,
+        int bodyStart, int bodyCount, float tilePixelSize)
+    {
+        float handX = 0f, handY = 0f;
+        int handCount = 0;
+        for (int part = bodyStart; part < bodyStart + bodyCount; part++)
+        {
+            if (roles[part] != BodyPartRole.Hand) continue;
+            handX += partPositions[part].X;
+            handY += partPositions[part].Y;
+            handCount++;
+        }
+
+        float directionX = headNormal.X, directionY = headNormal.Y;
+        float directionLength = MathF.Sqrt(directionX * directionX + directionY * directionY);
+        if (directionLength < 0.001f)
+        {
+            directionX = 1f;
+            directionY = 0f;
+        }
+        else
+        {
+            directionX /= directionLength;
+            directionY /= directionLength;
+        }
+
+        if (handCount > 0)
+        {
+            handX /= handCount;
+            handY /= handCount;
+        }
+        else
+        {
+            handX = unitPosition.X + directionX * 0.30f;
+            handY = unitPosition.Y + directionY * 0.30f;
+        }
+
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            short itemSlot = inventory.GetWeaponEquipment(unitIndex, (UnitWeaponSlot)slot);
+            if (itemSlot < 0 || inventory.GetItem(unitIndex, itemSlot) is not WeaponConfig weapon)
+                continue;
+
+            float dx = directionX, dy = directionY;
+            int stateIndex = UnitWeaponStore.GetIndex(unitIndex, (UnitWeaponSlot)slot);
+            Vector3 aimPoint = weapons.AimPoint[stateIndex];
+            if (weapons.AimIndicatorActive[stateIndex] && aimPoint != Vector3.Zero)
+            {
+                dx = aimPoint.X - unitPosition.X;
+                dy = aimPoint.Y - unitPosition.Y;
+                float len = MathF.Sqrt(dx * dx + dy * dy);
+                if (len > 0.001f) { dx /= len; dy /= len; }
+            }
+
+            float offset = slot == (int)UnitWeaponSlot.Secondary ? 0.09f : 0f;
+            float cx = handX - directionY * offset + directionX * 0.08f;
+            float cy = handY + directionX * offset + directionY * 0.08f;
+            AppendOrientedRect(
+                vertices,
+                cx * tilePixelSize,
+                cy * tilePixelSize,
+                MathF.Max(0.025f, weapon.WorldRenderWidth * 0.5f) * tilePixelSize,
+                MathF.Max(0.12f, weapon.WorldRenderLength * 0.5f) * tilePixelSize,
+                MathF.Atan2(dy, dx),
+                GetItemColor(weapon));
+        }
+    }
+
+    private static void AppendOrientedRect(
+        VertexArray vertices, float centerX, float centerY,
+        float halfWidth, float halfLength, float rotation, Color color)
+    {
+        float dx = MathF.Cos(rotation), dy = MathF.Sin(rotation);
+        float px = -dy, py = dx;
+        Vector2f p0 = new(centerX - dx * halfLength - px * halfWidth, centerY - dy * halfLength - py * halfWidth);
+        Vector2f p1 = new(centerX + dx * halfLength - px * halfWidth, centerY + dy * halfLength - py * halfWidth);
+        Vector2f p2 = new(centerX + dx * halfLength + px * halfWidth, centerY + dy * halfLength + py * halfWidth);
+        Vector2f p3 = new(centerX - dx * halfLength + px * halfWidth, centerY - dy * halfLength + py * halfWidth);
+        vertices.Append(new Vertex(p0, color));
+        vertices.Append(new Vertex(p1, color));
+        vertices.Append(new Vertex(p2, color));
+        vertices.Append(new Vertex(p0, color));
+        vertices.Append(new Vertex(p2, color));
+        vertices.Append(new Vertex(p3, color));
     }
 
     private static void AppendDeathMarker(
@@ -503,25 +639,7 @@ public sealed class UnitRenderSystem
         }
     }
 
-    private static void AppendAiStateMarker(
-        VertexArray vertices,
-        float x,
-        float y,
-        float tilePixelSize,
-        Color color)
-    {
-        float radius = MathF.Max(1.7f, tilePixelSize * 0.28f);
-        AppendCircleOutline(vertices, x, y, radius, color, 8);
-        AppendDebugLine(
-            vertices,
-            x - radius * 0.55f,
-            y,
-            x + radius * 0.55f,
-            y,
-            color);
-    }
-
-    private static void AppendSuppressionDebug(
+private static void AppendSuppressionDebug(
         VertexArray debug,
         UnitSimulation simulation,
         int unitIndex,
@@ -1191,39 +1309,7 @@ public sealed class UnitRenderSystem
         }
     }
 
-    private static void AppendFactionMarker(
-        VertexArray vertices,
-        ushort factionTag,
-        float centerX,
-        float centerY,
-        float radius)
-    {
-        if (factionTag == 0)
-            return;
-
-        Color color =
-            factionTag == 1
-                ? new Color(
-                    90,
-                    170,
-                    255,
-                    220)
-                : new Color(
-                    255,
-                    130,
-                    90,
-                    220);
-
-        AppendCircleOutline(
-            vertices,
-            centerX,
-            centerY,
-            radius,
-            color,
-            10);
-    }
-
-    private static void AppendSelection(
+private static void AppendSelection(
         VertexArray vertices,
         float centerX,
         float centerY,
@@ -1309,102 +1395,7 @@ public sealed class UnitRenderSystem
         return false;
     }
 
-    private static void AppendEllipse(
-        VertexArray vertices,
-        float centerX,
-        float centerY,
-        float radiusX,
-        float radiusY,
-        float rotation,
-        Color color)
-    {
-        float cos = MathF.Cos(rotation);
-        float sin = MathF.Sin(rotation);
-
-        for (int i = 0; i < CircleSegments; i++)
-        {
-            float a0 = i * MathF.Tau / CircleSegments;
-            float a1 = (i + 1) * MathF.Tau / CircleSegments;
-            float x0 = radiusX * MathF.Cos(a0);
-            float y0 = radiusY * MathF.Sin(a0);
-            float x1 = radiusX * MathF.Cos(a1);
-            float y1 = radiusY * MathF.Sin(a1);
-
-            vertices.Append(new Vertex(new Vector2f(centerX, centerY), color));
-            vertices.Append(new Vertex(
-                new Vector2f(
-                    centerX + x0 * cos - y0 * sin,
-                    centerY + x0 * sin + y0 * cos),
-                color));
-            vertices.Append(new Vertex(
-                new Vector2f(
-                    centerX + x1 * cos - y1 * sin,
-                    centerY + x1 * sin + y1 * cos),
-                color));
-        }
-    }
-
-    private static bool IsAnatomicalLimb(BodyPartRole role) =>
-        role is BodyPartRole.Neck or
-            BodyPartRole.UpperArm or
-            BodyPartRole.Forearm or
-            BodyPartRole.Thigh or
-            BodyPartRole.Shin or
-            BodyPartRole.Foot;
-
-    private static bool IsPartInView(
-        Vector3 position,
-        float extent,
-        float minX,
-        float maxX,
-        float minY,
-        float maxY) =>
-        position.X + extent >= minX &&
-        position.X - extent <= maxX &&
-        position.Y + extent >= minY &&
-        position.Y - extent <= maxY;
-
-    private static int GetBodyLayer(BodyPartRole role)
-    {
-        // In a true overhead view, the trunk occludes proximal limb segments.
-        // Never choose layers by world Y: that paints a complete near-side pair
-        // over the torso and creates the outstretched "snow angel" silhouette.
-        if (role == BodyPartRole.Head)
-            return 2;
-
-        if (role is BodyPartRole.Torso or
-            BodyPartRole.Generic or
-            BodyPartRole.Segment)
-        {
-            return 1;
-        }
-
-        return 0;
-    }
-
-    private static Color GetBodyPartColor(
-        BodyPartRole role,
-        Color baseColor)
-    {
-        return role switch
-        {
-            BodyPartRole.Torso => Shade(baseColor, 0.83f),
-            BodyPartRole.Neck => Shade(baseColor, 0.90f),
-            BodyPartRole.Head => Blend(baseColor, new Color(220, 205, 185), 0.48f),
-            BodyPartRole.UpperArm => Shade(baseColor, 0.74f),
-            BodyPartRole.Forearm => Shade(baseColor, 0.80f),
-            BodyPartRole.Elbow => Shade(baseColor, 0.76f),
-            BodyPartRole.Hand => Blend(baseColor, new Color(207, 179, 151), 0.42f),
-            BodyPartRole.Thigh => Shade(baseColor, 0.65f),
-            BodyPartRole.Knee => Shade(baseColor, 0.60f),
-            BodyPartRole.Shin => Shade(baseColor, 0.58f),
-            BodyPartRole.Foot => Shade(baseColor, 0.48f),
-            BodyPartRole.Segment => Shade(baseColor, 0.88f),
-            _ => baseColor
-        };
-    }
-
-    private static Color Shade(Color color, float amount) =>
+private static Color Shade(Color color, float amount) =>
         new Color(
             (byte)Math.Clamp((int)(color.R * amount), 0, 255),
             (byte)Math.Clamp((int)(color.G * amount), 0, 255),
@@ -1418,118 +1409,7 @@ public sealed class UnitRenderSystem
             (byte)Math.Clamp((int)(source.B + (tint.B - source.B) * amount), 0, 255),
             source.A);
 
-    private static void AppendBodyPart(
-        VertexArray vertices,
-        BodyPrimitive primitive,
-        BodyPartRole role,
-        float centerX,
-        float centerY,
-        float radiusX,
-        float radiusY,
-        float rotation,
-        float expansion,
-        Color color)
-    {
-        radiusX = MathF.Max(0.01f, radiusX + expansion);
-        radiusY = MathF.Max(0.01f, radiusY + expansion);
-
-        bool capsule =
-            role == BodyPartRole.Torso ||
-            role == BodyPartRole.Neck ||
-            role == BodyPartRole.UpperArm ||
-            role == BodyPartRole.Forearm ||
-            role == BodyPartRole.Thigh ||
-            role == BodyPartRole.Shin ||
-            role == BodyPartRole.Foot ||
-            role == BodyPartRole.Segment;
-
-        if (capsule)
-        {
-            AppendCapsule(
-                vertices,
-                centerX,
-                centerY,
-                radiusX,
-                radiusY,
-                rotation,
-                color);
-        }
-        else if (primitive == BodyPrimitive.Circle ||
-                 role == BodyPartRole.Head ||
-                 role == BodyPartRole.Hand)
-        {
-            AppendEllipse(
-                vertices,
-                centerX,
-                centerY,
-                radiusX,
-                radiusY,
-                rotation,
-                color);
-        }
-        else
-        {
-            AppendBox(
-                vertices,
-                centerX,
-                centerY,
-                radiusX,
-                radiusY,
-                rotation,
-                color);
-        }
-    }
-
-    private static void AppendCapsule(
-        VertexArray vertices,
-        float centerX,
-        float centerY,
-        float halfLength,
-        float halfWidth,
-        float rotation,
-        Color color)
-    {
-        float radius = MathF.Min(halfLength, halfWidth);
-        float straightHalfLength = MathF.Max(0f, MathF.Max(halfLength, halfWidth) - radius);
-        float cos = MathF.Cos(rotation);
-        float sin = MathF.Sin(rotation);
-        float endX = cos * straightHalfLength;
-        float endY = sin * straightHalfLength;
-        Span<Vector2f> points = stackalloc Vector2f[CapsuleHalfSegments * 2 + 2];
-        int pointCount = 0;
-
-        for (int i = 0; i <= CapsuleHalfSegments; i++)
-        {
-            float angle = rotation - MathF.PI * 0.5f +
-                MathF.PI * i / CapsuleHalfSegments;
-
-            points[pointCount++] = new Vector2f(
-                centerX + endX + MathF.Cos(angle) * radius,
-                centerY + endY + MathF.Sin(angle) * radius);
-        }
-
-        for (int i = 0; i <= CapsuleHalfSegments; i++)
-        {
-            float angle = rotation + MathF.PI * 0.5f +
-                MathF.PI * i / CapsuleHalfSegments;
-
-            points[pointCount++] = new Vector2f(
-                centerX - endX + MathF.Cos(angle) * radius,
-                centerY - endY + MathF.Sin(angle) * radius);
-        }
-
-        Vector2f center = new Vector2f(centerX, centerY);
-
-        for (int i = 0; i < pointCount; i++)
-        {
-            int next = (i + 1) % pointCount;
-            vertices.Append(new Vertex(center, color));
-            vertices.Append(new Vertex(points[i], color));
-            vertices.Append(new Vertex(points[next], color));
-        }
-    }
-
-    private static void AppendCircle(
+private static void AppendCircle(
         VertexArray vertices,
         float centerX,
         float centerY,
@@ -1584,89 +1464,7 @@ public sealed class UnitRenderSystem
         }
     }
 
-    private static void AppendBox(
-        VertexArray vertices,
-        float centerX,
-        float centerY,
-        float halfWidth,
-        float halfLength,
-        float rotation,
-        Color color)
-    {
-        float cos =
-            MathF.Cos(rotation);
-
-        float sin =
-            MathF.Sin(rotation);
-
-        Vector2f p0 =
-            new Vector2f(
-                centerX -
-                halfWidth * cos +
-                halfLength * sin,
-                centerY -
-                halfWidth * sin -
-                halfLength * cos);
-
-        Vector2f p1 =
-            new Vector2f(
-                centerX +
-                halfWidth * cos +
-                halfLength * sin,
-                centerY +
-                halfWidth * sin -
-                halfLength * cos);
-
-        Vector2f p2 =
-            new Vector2f(
-                centerX +
-                halfWidth * cos -
-                halfLength * sin,
-                centerY +
-                halfWidth * sin +
-                halfLength * cos);
-
-        Vector2f p3 =
-            new Vector2f(
-                centerX -
-                halfWidth * cos -
-                halfLength * sin,
-                centerY -
-                halfWidth * sin +
-                halfLength * cos);
-
-        vertices.Append(
-            new Vertex(
-                p0,
-                color));
-
-        vertices.Append(
-            new Vertex(
-                p1,
-                color));
-
-        vertices.Append(
-            new Vertex(
-                p2,
-                color));
-
-        vertices.Append(
-            new Vertex(
-                p0,
-                color));
-
-        vertices.Append(
-            new Vertex(
-                p2,
-                color));
-
-        vertices.Append(
-            new Vertex(
-                p3,
-                color));
-    }
-
-    private static Vector3 NormalizeHorizontal(
+private static Vector3 NormalizeHorizontal(
         Vector3 value)
     {
         value.Z = 0f;

@@ -433,6 +433,8 @@ public sealed class MassCombatTestScene
         _units[testIndex] = id;
         _side[testIndex] = (byte)side;
 
+        EquipWorkClothes(simulation, id);
+
         ItemConfig weapon =
             (testIndex % 5 == 0)
                 ? WeaponCatalog.Pistol
@@ -470,7 +472,11 @@ public sealed class MassCombatTestScene
                     ArmorDamageCoefficient = 0.25f,
                     HardArmorDamageFactor = 0.5f,
                     Weight = 7f,
-                    Layer = ArmorLayer.Armor
+                    Layer = ArmorLayer.Armor,
+                    WorldColorR = 112,
+                    WorldColorG = 119,
+                    WorldColorB = 128,
+                    WorldRenderPadding = 0.12f
                 };
 
             int armorSlot =
@@ -731,4 +737,12 @@ public sealed class MassCombatTestScene
         if (_elapsed <= 0.001f)
             _hitsAtReset = simulation.Projectiles.TotalHits;
     }
+    private static void EquipWorkClothes(UnitSimulation simulation, UnitId unit)
+    {
+        int shirt = simulation.AddInventoryItem(unit, ApparelCatalog.WorkShirt);
+        if (shirt >= 0) simulation.EquipArmor(unit, shirt);
+        int trousers = simulation.AddInventoryItem(unit, ApparelCatalog.WorkTrousers);
+        if (trousers >= 0) simulation.EquipArmor(unit, trousers);
+    }
+
 }
