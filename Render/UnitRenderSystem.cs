@@ -438,15 +438,72 @@ public void DrawSnapshot(
         {
             RenderUnitState unit = units[i];
             Vector3 position = unit.Position;
+            float x = position.X * tilePixelSize;
+            float y = position.Y * tilePixelSize;
+
+            // Debug geometry is produced from the same immutable frame data
+            // as the unit markers; no live AI store reads happen on the render thread.
+            if (showAiDebug &&
+                unit.Index == selectedUnitIndex &&
+                unit.HitPoints > 0f)
+            {
+                Color debugColor = GetAiColor(unit.AiState);
+
+                if (unit.HasTarget)
+                {
+                    AppendDebugLine(
+                        _aiDebug,
+                        x,
+                        y,
+                        unit.TargetPosition.X * tilePixelSize,
+                        unit.TargetPosition.Y * tilePixelSize,
+                        new Color(debugColor.R, debugColor.G, debugColor.B, 140));
+                }
+
+                if (unit.HasGoal)
+                {
+                    float goalX = unit.Goal.X * tilePixelSize;
+                    float goalY = unit.Goal.Y * tilePixelSize;
+                    AppendCircleOutline(
+                        _aiDebug,
+                        goalX,
+                        goalY,
+                        0.42f * tilePixelSize,
+                        debugColor,
+                        12);
+                    AppendDebugLine(
+                        _aiDebug,
+                        x,
+                        y,
+                        goalX,
+                        goalY,
+                        new Color(debugColor.R, debugColor.G, debugColor.B, 110));
+                }
+
+                if (unit.Suppression > 0.01f)
+                {
+                    Color suppressionColor = unit.SuppressionState switch
+                    {
+                        UnitSuppressionState.Panicked => new Color(255, 70, 70, 220),
+                        UnitSuppressionState.Suppressed => new Color(255, 200, 70, 190),
+                        _ => new Color(190, 190, 190, 130)
+                    };
+                    float suppressionRadius = (0.45f + MathF.Min(1f, unit.Suppression * 0.15f)) * tilePixelSize;
+                    AppendCircleOutline(
+                        _aiDebug,
+                        x,
+                        y,
+                        suppressionRadius,
+                        suppressionColor,
+                        14);
+                }
+            }
 
             if (position.X < minX || position.X > maxX ||
                 position.Y < minY || position.Y > maxY)
             {
                 continue;
             }
-
-            float x = position.X * tilePixelSize;
-            float y = position.Y * tilePixelSize;
 
             if (unit.HitPoints <= 0f)
             {
@@ -561,6 +618,8 @@ public void DrawSnapshot(
             window.Draw(_selection);
         if (_aiming.VertexCount > 0)
             window.Draw(_aiming);
+        if (_aiDebug.VertexCount > 0)
+            window.Draw(_aiDebug);
     }
 
     private static void AppendSnapshotWeapon(
