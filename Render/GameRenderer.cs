@@ -52,7 +52,7 @@ public sealed class GameRenderer
     private bool _terrainStressMode;
     private bool _showCombatTracers = true;
     private bool _showCombatHud = true;
-    private bool _showAiStateDebug = true;
+    private bool _showAiStateDebug = false;
     private int _visionTestIndex;
 
     private float _perfTimer;
