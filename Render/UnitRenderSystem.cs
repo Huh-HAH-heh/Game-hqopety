@@ -232,38 +232,6 @@ public sealed class UnitRenderSystem
             if (!isAlive)
                 continue;
 
-            short primarySlot = inventory.GetWeaponEquipment(
-                unitIndex, UnitWeaponSlot.Primary);
-            short secondarySlot = inventory.GetWeaponEquipment(
-                unitIndex, UnitWeaponSlot.Secondary);
-            bool hasWeapon = primarySlot >= 0 || secondarySlot >= 0;
-            Vector3 weaponDirection = headNormals[unitIndex];
-
-            UnitWeaponSlot selectedWeaponSlot = primarySlot >= 0
-                ? UnitWeaponSlot.Primary
-                : UnitWeaponSlot.Secondary;
-            int weaponStateIndex = UnitWeaponStore.GetIndex(
-                unitIndex, selectedWeaponSlot);
-            Vector3 aimPoint = weaponStates.AimPoint[weaponStateIndex];
-
-            if (weaponStates.AimIndicatorActive[weaponStateIndex] &&
-                aimPoint != Vector3.Zero)
-            {
-                weaponDirection = aimPoint - unitPosition;
-            }
-
-            if (hasWeapon)
-            {
-                AppendWeaponGlyph(
-                    _weaponVisuals,
-                    screenX,
-                    screenY,
-                    markerRadius,
-                    weaponDirection,
-                    headNormals[unitIndex],
-                    screenScale);
-            }
-
             if (showAiDebug &&
                 simulation.AI.Enabled &&
                 hasSelection &&
@@ -467,25 +435,6 @@ public void DrawSnapshot(
 
             if (!isAlive)
                 continue;
-
-            RenderWeaponVisual weapon = unit.PrimaryWeapon.Config != null
-                ? unit.PrimaryWeapon
-                : unit.SecondaryWeapon;
-            if (weapon.Config != null)
-            {
-                Vector3 weaponDirection = unit.HeadNormal;
-                if (weapon.AimIndicatorActive && weapon.AimPoint != Vector3.Zero)
-                    weaponDirection = weapon.AimPoint - position;
-
-                AppendWeaponGlyph(
-                    _weaponVisuals,
-                    x,
-                    y,
-                    markerRadius,
-                    weaponDirection,
-                    unit.HeadNormal,
-                    screenScale);
-            }
 
             if (unit.Index == selectedUnitIndex)
             {
@@ -1021,98 +970,20 @@ public void DrawSnapshot(
         UnitSuppressionState suppressionState,
         float screenScale)
     {
+        // Baseline unit visualization: a plain white disk with a thin dark edge.
+        // All gameplay state is deliberately hidden from the marker for this pass.
         float pixel = 1f / MathF.Max(0.001f, screenScale);
-        int segments = radius * screenScale < 7f ? 12 : 20;
-        healthRatio = Math.Clamp(healthRatio, 0f, 1f);
-
-        Color body = isAlive
-            ? new Color(247, 249, 251, 255)
-            : new Color(91, 97, 105, 245);
-        Color bodyShadow = isAlive
-            ? new Color(19, 26, 34, 245)
-            : new Color(53, 58, 65, 235);
-
-        // A smaller neutral disk, with the faction mark kept above the silhouette.
-        AppendFactionHalo(
-            outlines, x, y, radius + pixel * 2.8f,
-            factionTag, isAlive, segments);
+        int segments = radius * screenScale < 7f ? 16 : 28;
 
         AppendEllipse(
             fills, x, y,
-            radius + pixel * 0.68f, radius + pixel * 0.68f,
-            0f, bodyShadow, segments);
+            radius + pixel * 0.72f, radius + pixel * 0.72f,
+            0f, new Color(16, 21, 27, 255), segments);
+
         AppendEllipse(
-            fills, x, y, radius, radius,
-            0f, body, segments);
-
-        if (!isAlive)
-        {
-            Color deadMark = new Color(177, 182, 188, 225);
-            float arm = radius * 0.34f;
-            AppendDebugLine(statusIcons, x - arm, y - arm, x + arm, y + arm, deadMark);
-            AppendDebugLine(statusIcons, x - arm, y + arm, x + arm, y - arm, deadMark);
-            return;
-        }
-
-        // Health only becomes visible when it matters; it sits between the body
-        // and faction ring instead of changing the whole unit's colour.
-        if (healthRatio < 0.70f)
-        {
-            Color healthColor = healthRatio > 0.65f
-                ? new Color(90, 203, 148, 225)
-                : healthRatio > 0.30f
-                    ? new Color(244, 177, 76, 240)
-                    : new Color(242, 83, 78, 245);
-
-            AppendArc(
-                outlines,
-                x, y,
-                radius + pixel * 1.25f,
-                -MathF.PI * 0.5f,
-                MathF.Tau * healthRatio,
-                healthColor,
-                Math.Max(3, (int)(segments * healthRatio)));
-        }
-
-        // Suppression gets one lower arc; it does not stack over the faction colour.
-        if (suppression > 0.01f &&
-            (suppressionState == UnitSuppressionState.Suppressed ||
-             suppressionState == UnitSuppressionState.Panicked))
-        {
-            Color pulse = suppressionState == UnitSuppressionState.Panicked
-                ? new Color(255, 70, 74, 235)
-                : new Color(174, 112, 255, 225);
-
-            AppendArc(
-                outlines, x, y, radius + pixel * 2.8f,
-                MathF.PI * 0.18f, MathF.PI * 0.64f,
-                pulse, Math.Max(5, segments / 2));
-        }
-
-        // A small amber plus is the wounded marker; critical wounds turn red.
-        if (healthRatio < 0.78f)
-        {
-            Color wound = healthRatio < 0.30f
-                ? new Color(235, 77, 73, 250)
-                : new Color(241, 170, 64, 245);
-            float badgeRadius = MathF.Max(pixel * 1.8f, radius * 0.27f);
-            float badgeX = x + radius * 0.82f;
-            float badgeY = y + radius * 0.62f;
-
-            AppendEllipse(
-                fills, badgeX, badgeY,
-                badgeRadius, badgeRadius,
-                0f, new Color(16, 22, 29, 240), 8);
-            AppendEllipse(
-                fills, badgeX, badgeY,
-                badgeRadius * 0.78f, badgeRadius * 0.78f,
-                0f, wound, 8);
-
-            float plus = badgeRadius * 0.42f;
-            Color plusColor = new Color(255, 250, 238, 245);
-            AppendDebugLine(statusIcons, badgeX - plus, badgeY, badgeX + plus, badgeY, plusColor);
-            AppendDebugLine(statusIcons, badgeX, badgeY - plus, badgeX, badgeY + plus, plusColor);
-        }
+            fills, x, y,
+            radius, radius,
+            0f, new Color(255, 255, 255, 255), segments);
     }
 
     private static void AppendFactionHalo(
