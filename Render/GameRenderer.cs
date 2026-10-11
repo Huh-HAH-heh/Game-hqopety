@@ -409,22 +409,45 @@ public sealed class GameRenderer
                 _window);
         }
 
-        _unitRenderer.Draw(
-            _window,
-            _unitSimulation,
-            _worldMap,
-            _camera.View,
-            TerrainTilePixelSize,
-            _selectedUnit,
-            _showVisionDebug && !_massCombatMode,
-            _showAiStateDebug && _unitSimulation.AI.Enabled,
-            false);
+        SimulationFrameSnapshot? renderSnapshot = _simulationThread != null
+            ? Volatile.Read(ref _latestSnapshot)
+            : null;
 
-        _projectileRenderer.Draw(
-            _window,
-            _unitSimulation.Projectiles,
-            TerrainTilePixelSize,
-            _showCombatTracers);
+        if (renderSnapshot != null)
+        {
+            _unitRenderer.DrawSnapshot(
+                _window,
+                renderSnapshot,
+                _camera.View,
+                TerrainTilePixelSize,
+                _selectedUnit.Index,
+                _showAiStateDebug && renderSnapshot.AiEnabled);
+
+            _projectileRenderer.DrawSnapshot(
+                _window,
+                renderSnapshot,
+                TerrainTilePixelSize,
+                _showCombatTracers);
+        }
+        else
+        {
+            _unitRenderer.Draw(
+                _window,
+                _unitSimulation,
+                _worldMap,
+                _camera.View,
+                TerrainTilePixelSize,
+                _selectedUnit,
+                _showVisionDebug && !_massCombatMode,
+                _showAiStateDebug && _unitSimulation.AI.Enabled,
+                false);
+
+            _projectileRenderer.Draw(
+                _window,
+                _unitSimulation.Projectiles,
+                TerrainTilePixelSize,
+                _showCombatTracers);
+        }
 
         _gameMenuOverlay?.DrawWorldMarkers(
             _window,
@@ -441,14 +464,28 @@ public sealed class GameRenderer
         {
             _window.SetView(_uiView);
 
-            _combatStatusOverlay?.Draw(
-                _window,
-                _unitSimulation,
-                _combatShotsPerSecond,
-                _combatHitEventsPerSecond,
-                _combatHitEventsPerRound,
-                _showCombatTracers,
-                _showAiStateDebug);
+            if (renderSnapshot != null)
+            {
+                _combatStatusOverlay?.DrawSnapshot(
+                    _window,
+                    renderSnapshot,
+                    _combatShotsPerSecond,
+                    _combatHitEventsPerSecond,
+                    _combatHitEventsPerRound,
+                    _showCombatTracers,
+                    _showAiStateDebug);
+            }
+            else
+            {
+                _combatStatusOverlay?.Draw(
+                    _window,
+                    _unitSimulation,
+                    _combatShotsPerSecond,
+                    _combatHitEventsPerSecond,
+                    _combatHitEventsPerRound,
+                    _showCombatTracers,
+                    _showAiStateDebug);
+            }
 
             Vector2i mousePixels = Mouse.GetPosition(_window);
             Vector2f uiMouseCoordinates =
@@ -475,8 +512,44 @@ public sealed class GameRenderer
         _window.Display();
     }
 
+    private string BuildSnapshotWindowTitle(SimulationFrameSnapshot snapshot)
+    {
+        string ai = snapshot.AiEnabled ? "ON" : "OFF";
+        string vision = snapshot.VisionEnabled ? "ON" : "OFF";
+        string selectedState = "None";
+
+        for (int i = 0; i < snapshot.Units.Length; i++)
+        {
+            if (snapshot.Units[i].Index != _selectedUnit.Index)
+                continue;
+
+            selectedState = snapshot.Units[i].AiState.ToString();
+            break;
+        }
+
+        return
+            $"RimClone | Units={snapshot.UnitCount} | " +
+            $"Projectiles={snapshot.ActiveProjectiles}/{snapshot.ProjectileCapacity} Hits={snapshot.TotalHits} | " +
+            $"Teams 1:{snapshot.BlueAlive} 2:{snapshot.RedAlive} | AI={ai}:{selectedState} | " +
+            $"States I={snapshot.IdleCount} A={snapshot.AttackCount} C={snapshot.CoverCount} " +
+            $"S={snapshot.SearchCount} D={snapshot.DeadCount} | " +
+            $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
+            $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
+            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
+            "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
+            "A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
+            $"Vision {vision}";
+    }
+
     private string BuildWindowTitle()
     {
+        SimulationFrameSnapshot? snapshot = _simulationThread != null
+            ? Volatile.Read(ref _latestSnapshot)
+            : null;
+
+        if (snapshot != null)
+            return BuildSnapshotWindowTitle(snapshot);
+
         int visible = 0;
         int blocked = 0;
         int outsideFov = 0;
