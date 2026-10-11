@@ -743,6 +743,32 @@ public sealed class GameRenderer
         _bodyPartDebugUnitIndex = unit.IsValid ? unit.Index : -1;
     }
 
+    private void CycleMassCombatSelection()
+    {
+        SimulationFrameSnapshot? snapshot = Volatile.Read(ref _latestSnapshot);
+        if (snapshot == null || snapshot.Units.Length == 0)
+            return;
+
+        RenderUnitState[] units = snapshot.Units;
+        int current = -1;
+        for (int i = 0; i < units.Length; i++)
+        {
+            if (units[i].Index == _selectedUnit.Index &&
+                units[i].Generation == _selectedUnit.Generation)
+            {
+                current = i;
+                break;
+            }
+        }
+
+        int next = current < 0 ? 0 : (current + 1) % units.Length;
+        RenderUnitState selected = units[next];
+        SetSelectedUnit(new UnitId(selected.Index, selected.Generation));
+        _camera.CenterOnPosition(new Vector2f(
+            selected.Position.X * TerrainTilePixelSize,
+            selected.Position.Y * TerrainTilePixelSize));
+    }
+
     private void StopSimulationThread()
     {
         Thread? thread = _simulationThread;
@@ -1141,8 +1167,7 @@ public sealed class GameRenderer
         {
             if (_massCombatMode)
             {
-                SetSelectedUnit(_massCombatTestScene.FirstUnit);
-
+                CycleMassCombatSelection();
                 return;
             }
 
