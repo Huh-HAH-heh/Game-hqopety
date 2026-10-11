@@ -75,9 +75,8 @@ public sealed class UnitRenderSystem
         float pixelsPerWorldUnit =
             tilePixelSize * screenScale;
 
-        // At battle zoom, render stable faction discs only. Gear rings, weapon
-        // silhouettes and aim bubbles appear after the unit is large enough to
-        // read them instead of flickering into sub-pixel coloured noise.
+        // Logical body parts are always rendered. Equipment and aim overlays
+        // use a zoom threshold to avoid noisy sub-pixel details at battle scale.
         bool showUnitDetails =
             pixelsPerWorldUnit >= 8f;
 
@@ -211,8 +210,8 @@ public sealed class UnitRenderSystem
                 unitPosition.Y >= minWorldY &&
                 unitPosition.Y <= maxWorldY;
 
-            // This renderer draws a single marker, not body-part geometry;
-            // cull by the marker's root instead of walking every limb.
+            // Body parts extend less than two world units from the root.
+            // This padded root cull rejects distant units before visiting their parts.
             if (!rootVisible)
                 continue;
 
