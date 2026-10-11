@@ -1436,8 +1436,40 @@ public static class CombatSelfTest
                 volumes,
                 simulation.Bodies);
 
-            if (volumeCount != UnitHitSystem.MaxHitVolumeCount)
+            if (volumeCount != UnitHitSystem.MaxHitVolumeCount ||
+                volumeCount != units.BodyCount[unit.Index])
+            {
                 return false;
+            }
+
+            // Every projectile hit volume must occupy the same world-space
+            // center, orientation and planar extents as its rendered body shape.
+            Vector3[] bodyPositions = simulation.Bodies.WorldPosition;
+            Vector3[] bodyScales = simulation.Bodies.Scale;
+            float[] bodyRotations = simulation.Bodies.WorldRotation;
+            int bodyStart = units.BodyStart[unit.Index];
+
+            for (int part = 0; part < volumeCount; part++)
+            {
+                int bodyIndex = bodyStart + part;
+                HitVolume volume = volumes[part];
+                Vector3 bodyPosition = bodyPositions[bodyIndex];
+                Vector3 bodyScale = bodyScales[bodyIndex];
+                float rotation = bodyRotations[bodyIndex];
+                Vector3 expectedForward = new Vector3(
+                    MathF.Cos(rotation),
+                    MathF.Sin(rotation),
+                    0f);
+
+                if (MathF.Abs(volume.Center.X - bodyPosition.X) > 0.0001f ||
+                    MathF.Abs(volume.Center.Y - bodyPosition.Y) > 0.0001f ||
+                    MathF.Abs(volume.Radii.X - MathF.Abs(bodyScale.Y)) > 0.0001f ||
+                    MathF.Abs(volume.Radii.Y - MathF.Abs(bodyScale.X)) > 0.0001f ||
+                    Vector3.Dot(volume.Forward, expectedForward) < 0.9999f)
+                {
+                    return false;
+                }
+            }
 
             Vector3 source =
                 units.Position[unit.Index] +
