@@ -165,7 +165,7 @@ public sealed class SimulationFrameSnapshot
         BodyPartRole[] bodyRoles = bodyStore.Role;
         int totalBodyParts = 0;
         for (int i = 0; i < active.Length; i++)
-            totalBodyParts += Math.Max(0, bodyCounts[active[i]]);
+            totalBodyParts += Math.Max(0, (int)bodyCounts[active[i]]);
         RenderBodyPart[] bodyParts = new RenderBodyPart[totalBodyParts];
         int bodyPartWrite = 0;
         float[] widths = units.Width;
@@ -226,7 +226,7 @@ public sealed class SimulationFrameSnapshot
             UnitSuppressionState suppressionState = suppressionStore.GetState(index);
 
             int bodyStart = bodyStarts[index];
-            int bodyEnd = bodyStart + Math.Max(0, bodyCounts[index]);
+            int bodyEnd = bodyStart + Math.Max(0, (int)bodyCounts[index]);
             for (int bodyPart = bodyStart;
                  bodyPart < bodyEnd && bodyPart < bodyStore.Count;
                  bodyPart++)
