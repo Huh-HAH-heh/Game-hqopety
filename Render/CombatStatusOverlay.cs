@@ -161,6 +161,54 @@ public sealed class CombatStatusOverlay : IDisposable
         window.Draw(_details);
     }
 
+    public void DrawSnapshot(
+        RenderWindow window,
+        SimulationFrameSnapshot snapshot,
+        double shotsPerSecond,
+        double hitEventsPerSecond,
+        double hitEventsPerRound,
+        bool showTracers,
+        bool showAiStates)
+    {
+        if (!Visible || _font == null ||
+            _title == null || _blue == null ||
+            _red == null || _details == null)
+        {
+            return;
+        }
+
+        int totalAlive = snapshot.BlueAlive + snapshot.RedAlive;
+        _blue.DisplayedString = $"BLUE  {snapshot.BlueAlive} UP / {snapshot.BlueDead} KIA";
+        _red.DisplayedString = $"RED  {snapshot.RedAlive} UP / {snapshot.RedDead} KIA";
+
+        string mode = snapshot.AiEnabled
+            ? "AI ACTIVE"
+            : "SCRIPTED VOLLEYS  |  press A to enable AI";
+
+        _details.DisplayedString =
+            $"ALIVE {totalAlive}  |  FIRE {shotsPerSecond:0} rounds/s  |  HIT EVENTS {hitEventsPerSecond:0}/s\n" +
+            $"EVENTS/ROUND {hitEventsPerRound:0.00}  |  TOTAL HIT EVENTS {snapshot.TotalHits:N0}\n" +
+            $"AI: ATTACK {snapshot.AttackCount}  SEARCH {snapshot.SearchCount}  COVER {snapshot.CoverCount}  IDLE {snapshot.IdleCount}\n" +
+            $"SUPPRESSED {snapshot.SuppressedCount}  PANICKED {snapshot.PanickedCount}  |  {mode}\n" +
+            $"[I] AI STATES {(showAiStates ? "ON" : "OFF")}  [T] TRACERS {(showTracers ? "ON" : "OFF")}  [F9] HIDE";
+
+        _panel.Position = new Vector2f(12f, 12f);
+        _blueAccent.Position = new Vector2f(12f, 40f);
+        _redAccent.Position = new Vector2f(268f, 40f);
+        _title.Position = new Vector2f(24f, 20f);
+        _blue.Position = new Vector2f(26f, 42f);
+        _red.Position = new Vector2f(282f, 42f);
+        _details.Position = new Vector2f(24f, 64f);
+
+        window.Draw(_panel);
+        window.Draw(_blueAccent);
+        window.Draw(_redAccent);
+        window.Draw(_title);
+        window.Draw(_blue);
+        window.Draw(_red);
+        window.Draw(_details);
+    }
+
     private static int CountAlive(
         UnitSimulation simulation,
         ushort faction)
