@@ -1061,6 +1061,44 @@ public void DrawSnapshot(
             return;
         }
 
+        // Tiny faction-coloured heading arrow floats outside the circle.
+        // The barrel can aim independently while this keeps movement/facing legible.
+        float dx = facing.X;
+        float dy = facing.Y;
+        float facingLength = MathF.Sqrt(dx * dx + dy * dy);
+        if (facingLength > 0.001f)
+        {
+            dx /= facingLength;
+            dy /= facingLength;
+        }
+        else
+        {
+            dx = 1f;
+            dy = 0f;
+        }
+
+        float px = -dy;
+        float py = dx;
+        float pointerTip = radius + pixel * 5.0f;
+        float pointerBase = radius + pixel * 1.7f;
+        float pointerWidth = MathF.Max(pixel * 1.0f, radius * 0.16f);
+        Color pointerColor = factionTag switch
+        {
+            1 => new Color(84, 190, 255, 230),
+            2 => new Color(255, 105, 95, 230),
+            _ => new Color(189, 199, 209, 210)
+        };
+
+        AppendTriangle(
+            fills,
+            x + dx * pointerTip,
+            y + dy * pointerTip,
+            x + dx * pointerBase + px * pointerWidth,
+            y + dy * pointerBase + py * pointerWidth,
+            x + dx * pointerBase - px * pointerWidth,
+            y + dy * pointerBase - py * pointerWidth,
+            pointerColor);
+
         // Health only becomes visible when it matters; it sits between the body
         // and faction ring instead of changing the whole unit's colour.
         if (healthRatio < 0.96f)
