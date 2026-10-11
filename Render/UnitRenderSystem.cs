@@ -1000,8 +1000,8 @@ public void DrawSnapshot(
     {
         float footprint = MathF.Max(width, length);
         return MathF.Max(
-            3.0f / MathF.Max(0.001f, screenScale),
-            MathF.Max(0.20f, footprint * 0.23f) * tilePixelSize);
+            2.6f / MathF.Max(0.001f, screenScale),
+            MathF.Max(0.16f, footprint * 0.165f) * tilePixelSize);
     }
 
     private static void AppendUnitMarker(
@@ -1030,15 +1030,14 @@ public void DrawSnapshot(
             ? new Color(19, 26, 34, 245)
             : new Color(53, 58, 65, 235);
 
-        // A compact white disk with a dark keyline. Faction is deliberately
-        // separated from the disc so the unit silhouette stays neutral.
+        // A smaller neutral disk, with the faction mark kept above the silhouette.
         AppendFactionHalo(
-            outlines, x, y, radius + pixel * 2.4f,
+            outlines, x, y, radius + pixel * 2.8f,
             factionTag, isAlive, segments);
 
         AppendEllipse(
             fills, x, y,
-            radius + pixel * 0.95f, radius + pixel * 0.95f,
+            radius + pixel * 0.68f, radius + pixel * 0.68f,
             0f, bodyShadow, segments);
         AppendEllipse(
             fills, x, y, radius, radius,
@@ -1073,24 +1072,19 @@ public void DrawSnapshot(
                 Math.Max(3, (int)(segments * healthRatio)));
         }
 
-        // The reference uses radio-like pulses for suppression rather than a
-        // badge cluttered onto the body. Panic shifts the same motif to red.
+        // Suppression gets one lower arc; it does not stack over the faction colour.
         if (suppression > 0.01f &&
             (suppressionState == UnitSuppressionState.Suppressed ||
              suppressionState == UnitSuppressionState.Panicked))
         {
             Color pulse = suppressionState == UnitSuppressionState.Panicked
-                ? new Color(244, 83, 87, 195)
-                : new Color(166, 109, 245, 180);
+                ? new Color(255, 70, 74, 235)
+                : new Color(174, 112, 255, 225);
 
             AppendArc(
-                outlines, x, y, radius + pixel * 6.2f,
-                MathF.PI * 1.18f, MathF.PI * 0.64f,
-                pulse, 7);
-            AppendArc(
-                outlines, x, y, radius + pixel * 9.5f,
-                MathF.PI * 1.25f, MathF.PI * 0.50f,
-                new Color(pulse.R, pulse.G, pulse.B, 120), 7);
+                outlines, x, y, radius + pixel * 2.8f,
+                MathF.PI * 0.18f, MathF.PI * 0.64f,
+                pulse, Math.Max(5, segments / 2));
         }
 
         // A small amber plus is the wounded marker; critical wounds turn red.
@@ -1129,33 +1123,26 @@ public void DrawSnapshot(
         int quality)
     {
         Color color = !isAlive
-            ? new Color(137, 143, 150, 100)
+            ? new Color(137, 143, 150, 165)
             : factionTag switch
             {
-                1 => new Color(75, 170, 229, 128),
-                2 => new Color(218, 106, 101, 128),
-                _ => new Color(160, 173, 187, 92)
+                1 => new Color(54, 157, 255, 245),
+                2 => new Color(255, 65, 70, 245),
+                _ => new Color(171, 183, 196, 190)
             };
 
-        int segments = quality < 14 ? 12 : 24;
-        float angleStep = MathF.Tau / segments;
-        for (int i = 0; i < segments; i++)
-        {
-            // Four small breaks keep the ring light and separate it from the disc.
-            int gapPeriod = segments / 4;
-            if (i % gapPeriod == gapPeriod - 1)
-                continue;
-
-            float a0 = angleStep * i;
-            float a1 = angleStep * (i + 1);
-            AppendDebugLine(
-                vertices,
-                x + MathF.Cos(a0) * radius,
-                y + MathF.Sin(a0) * radius,
-                x + MathF.Cos(a1) * radius,
-                y + MathF.Sin(a1) * radius,
-                color);
-        }
+        // One clean blue/red upper arc, instead of a dim full halo underneath
+        // multiple status rings. The saturated tint carries faction identity.
+        int segments = quality < 14 ? 10 : 18;
+        AppendArc(
+            vertices,
+            x,
+            y,
+            radius,
+            MathF.PI * 1.14f,
+            MathF.PI * 0.72f,
+            color,
+            segments);
     }
 
     private static void AppendArc(
@@ -1216,30 +1203,30 @@ public void DrawSnapshot(
         float py = dx;
         float pixel = 1f / MathF.Max(0.001f, screenScale);
 
-        // Offset along the perpendicular so the triangular weapon sits at the
-        // circle's shoulder rather than dead-centre, while its tip tracks aim.
-        float side = radius * 0.43f;
-        float baseForward = radius * 0.12f;
-        float tipForward = radius + pixel * 2.6f;
-        float halfWidth = MathF.Max(pixel * 0.70f, radius * 0.22f);
+        // The body remains the small anchor; the triangular weapon projects
+        // far beyond its edge so it reads as a weapon, not a dark bump on the disc.
+        float side = radius * 0.36f;
+        float baseForward = radius * 0.22f;
+        float tipForward = radius * 1.78f + pixel * 1.8f;
+        float halfWidth = MathF.Max(pixel * 1.05f, radius * 0.25f);
 
         float bx = x + dx * baseForward + px * side;
         float by = y + dy * baseForward + py * side;
         float tx = x + dx * tipForward + px * side;
         float ty = y + dy * tipForward + py * side;
 
-        // Dark outer silhouette keeps the weapon readable on white and on terrain.
+        // Dark keyline makes the complete triangular silhouette distinct at battle zoom.
         AppendTriangle(
             vertices,
             tx, ty,
             bx + px * halfWidth, by + py * halfWidth,
             bx - px * halfWidth, by - py * halfWidth,
-            new Color(22, 29, 37, 250));
+            new Color(20, 27, 35, 255));
 
-        // One smaller steel triangle provides a restrained highlight, not a second gun shape.
-        float insetBase = baseForward + (tipForward - baseForward) * 0.34f;
-        float insetTip = tipForward - pixel * 0.55f;
-        float insetWidth = halfWidth * 0.28f;
+        // A broad enough steel inset stays visible without looking rectangular.
+        float insetBase = baseForward + (tipForward - baseForward) * 0.43f;
+        float insetTip = tipForward - pixel * 1.0f;
+        float insetWidth = halfWidth * 0.36f;
         AppendTriangle(
             vertices,
             x + dx * insetTip + px * side,
@@ -1248,7 +1235,7 @@ public void DrawSnapshot(
             y + dy * insetBase + py * (side + insetWidth),
             x + dx * insetBase + px * (side - insetWidth),
             y + dy * insetBase + py * (side - insetWidth),
-            new Color(180, 192, 202, 245));
+            new Color(221, 231, 239, 250));
     }
 
     private static void AppendTriangle(
