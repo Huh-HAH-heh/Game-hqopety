@@ -123,8 +123,9 @@ public sealed class UnitRenderSystem
         UnitStore units =
             simulation.Units;
 
-        Vector3[] headNormals =
-            units.HeadNormal;
+        Vector3[] headNormals = units.HeadNormal;
+        UnitInventoryStore inventory = simulation.Inventory;
+        UnitWeaponStore weaponStates = simulation.Weapons;
 
         if (showUnitDetails)
         {
@@ -231,6 +232,37 @@ public sealed class UnitRenderSystem
 
             if (!isAlive)
                 continue;
+
+            short primarySlot = inventory.GetWeaponEquipment(
+                unitIndex, UnitWeaponSlot.Primary);
+            short secondarySlot = inventory.GetWeaponEquipment(
+                unitIndex, UnitWeaponSlot.Secondary);
+            bool hasWeapon = primarySlot >= 0 || secondarySlot >= 0;
+            Vector3 weaponDirection = headNormals[unitIndex];
+
+            UnitWeaponSlot selectedWeaponSlot = primarySlot >= 0
+                ? UnitWeaponSlot.Primary
+                : UnitWeaponSlot.Secondary;
+            int weaponStateIndex = UnitWeaponStore.GetIndex(
+                unitIndex, selectedWeaponSlot);
+            Vector3 aimPoint = weaponStates.AimPoint[weaponStateIndex];
+
+            if (weaponStates.AimIndicatorActive[weaponStateIndex] &&
+                aimPoint != Vector3.Zero)
+            {
+                weaponDirection = aimPoint - unitPosition;
+            }
+
+            if (hasWeapon)
+            {
+                AppendWeaponGlyph(
+                    _weaponVisuals,
+                    screenX,
+                    screenY,
+                    markerRadius,
+                    weaponDirection,
+                    screenScale);
+            }
 
             if (showAiDebug &&
                 simulation.AI.Enabled &&
@@ -435,6 +467,24 @@ public void DrawSnapshot(
 
             if (!isAlive)
                 continue;
+
+            RenderWeaponVisual weapon = unit.PrimaryWeapon.Config != null
+                ? unit.PrimaryWeapon
+                : unit.SecondaryWeapon;
+            if (weapon.Config != null)
+            {
+                Vector3 weaponDirection = unit.HeadNormal;
+                if (weapon.AimIndicatorActive && weapon.AimPoint != Vector3.Zero)
+                    weaponDirection = weapon.AimPoint - position;
+
+                AppendWeaponGlyph(
+                    _weaponVisuals,
+                    x,
+                    y,
+                    markerRadius,
+                    weaponDirection,
+                    screenScale);
+            }
 
             if (unit.Index == selectedUnitIndex)
             {
@@ -803,9 +853,9 @@ public void DrawSnapshot(
     private static Color GetFactionAccent(ushort factionTag) =>
         factionTag switch
         {
-            1 => new Color(80, 170, 255),
-            2 => new Color(245, 96, 82),
-            _ => new Color(158, 172, 190)
+            1 => new Color(107, 158, 198, 125),
+            2 => new Color(190, 116, 109, 125),
+            _ => new Color(153, 164, 176, 95)
         };
 
     private static void AppendEquippedApparel(
@@ -971,126 +1021,196 @@ public void DrawSnapshot(
         float screenScale)
     {
         float pixel = 1f / MathF.Max(0.001f, screenScale);
-        int segments = radius * screenScale < 5f ? 10 : 16;
+        int segments = radius * screenScale < 5f ? 12 : 20;
 
-        Color accent = isAlive
-            ? GetFactionAccent(factionTag)
-            : new Color(112, 119, 127, 245);
-        Color core = isAlive
-            ? new Color(
-                (byte)(accent.R * 0.22f),
-                (byte)(accent.G * 0.22f),
-                (byte)(accent.B * 0.22f),
-                255)
-            : new Color(57, 62, 69, 245);
+        // White pawn, regardless of faction. The faction identity lives on a
+        // separate broken ring with an actual gap around the white disc.
+        Color body = isAlive
+            ? new Color(242, 245, 247, 255)
+            : new Color(101, 107, 114, 235);
+        Color bodyOutline = isAlive
+            ? new Color(25, 31, 38, 240)
+            : new Color(71, 76, 83, 220);
 
-        // One clean disk with a narrow faction-colored rim.
+        AppendFactionHalo(
+            outlines,
+            x,
+            y,
+            radius + pixel * 3.0f,
+            factionTag,
+            isAlive,
+            segments);
+
         AppendEllipse(
-            fills, x, y, radius + pixel * 1.25f, radius + pixel * 1.25f,
-            0f, new Color(7, 11, 17, 245), segments);
-        AppendEllipse(
-            fills, x, y, radius, radius, 0f, accent, segments);
-        AppendEllipse(
-            fills, x, y, radius * 0.70f, radius * 0.70f,
-            0f, core, segments);
-        AppendEllipseOutline(
-            outlines, x, y, radius + pixel * 0.15f, radius + pixel * 0.15f,
+            fills,
+            x,
+            y,
+            radius + pixel * 0.75f,
+            radius + pixel * 0.75f,
             0f,
-            new Color(225, 237, 248, isAlive ? (byte)190 : (byte)90),
+            bodyOutline,
+            segments);
+        AppendEllipse(
+            fills,
+            x,
+            y,
+            radius,
+            radius,
+            0f,
+            body,
+            segments);
+        AppendEllipseOutline(
+            outlines,
+            x,
+            y,
+            radius,
+            radius,
+            0f,
+            new Color(255, 255, 255, isAlive ? (byte)165 : (byte)60),
             segments);
 
         if (!isAlive)
-        {
-            // Dead units keep the same silhouette, but all marks are grey.
-            Color deadMark = new Color(166, 171, 177, 225);
-            AppendDebugLine(
-                statusIcons,
-                x - radius * 0.28f, y - radius * 0.28f,
-                x + radius * 0.28f, y + radius * 0.28f,
-                deadMark);
-            AppendDebugLine(
-                statusIcons,
-                x - radius * 0.28f, y + radius * 0.28f,
-                x + radius * 0.28f, y - radius * 0.28f,
-                deadMark);
             return;
-        }
 
-        // A small nose shows the unit's actual facing without drawing a body.
-        float dx = facing.X;
-        float dy = facing.Y;
-        float length = MathF.Sqrt(dx * dx + dy * dy);
-        if (length > 0.001f)
-        {
-            dx /= length;
-            dy /= length;
-        }
-        else
-        {
-            dx = 1f;
-            dy = 0f;
-        }
-
-        float px = -dy;
-        float py = dx;
-        float tipDistance = radius * 0.86f;
-        float baseDistance = radius * 0.22f;
-        float halfWidth = MathF.Max(pixel * 0.75f, radius * 0.20f);
-        AppendTriangle(
-            fills,
-            x + dx * tipDistance,
-            y + dy * tipDistance,
-            x + dx * baseDistance + px * halfWidth,
-            y + dy * baseDistance + py * halfWidth,
-            x + dx * baseDistance - px * halfWidth,
-            y + dy * baseDistance - py * halfWidth,
-            new Color(241, 247, 253, 245));
-
-        // Suppression/panic badge: a tiny warning mark, not another large ring.
+        // Suppression is the only prominent state glyph; panic changes amber to red.
         if (suppression > 0.01f &&
             (suppressionState == UnitSuppressionState.Suppressed ||
              suppressionState == UnitSuppressionState.Panicked))
         {
             Color warning = suppressionState == UnitSuppressionState.Panicked
-                ? new Color(255, 78, 76, 255)
-                : new Color(255, 190, 73, 255);
-            float badgeRadius = MathF.Max(pixel * 1.7f, radius * 0.24f);
-            float badgeX = x + radius * 0.72f;
-            float badgeY = y - radius * 0.72f;
+                ? new Color(238, 83, 78, 235)
+                : new Color(219, 166, 74, 225);
+            float badgeRadius = MathF.Max(pixel * 1.1f, radius * 0.19f);
+            float badgeX = x + radius * 0.76f;
+            float badgeY = y - radius * 0.76f;
 
             AppendEllipse(
-                fills, badgeX, badgeY, badgeRadius, badgeRadius,
+                fills, badgeX, badgeY,
+                badgeRadius, badgeRadius,
                 0f, warning, 8);
             AppendDebugLine(
                 statusIcons,
-                badgeX, badgeY - badgeRadius * 0.42f,
-                badgeX, badgeY + badgeRadius * 0.10f,
-                new Color(31, 26, 21, 245));
+                badgeX, badgeY - badgeRadius * 0.35f,
+                badgeX, badgeY + badgeRadius * 0.08f,
+                new Color(35, 33, 30, 235));
             AppendDebugLine(
                 statusIcons,
-                badgeX - badgeRadius * 0.08f, badgeY + badgeRadius * 0.46f,
-                badgeX + badgeRadius * 0.08f, badgeY + badgeRadius * 0.46f,
-                new Color(31, 26, 21, 245));
+                badgeX - badgeRadius * 0.05f, badgeY + badgeRadius * 0.38f,
+                badgeX + badgeRadius * 0.05f, badgeY + badgeRadius * 0.38f,
+                new Color(35, 33, 30, 235));
         }
 
-        // A compact red cross appears only when the unit is badly injured.
-        if (healthRatio < 0.72f)
+        // Wound cross appears only when health is critically low.
+        if (healthRatio < 0.45f)
         {
-            float markArm = MathF.Max(pixel * 0.55f, radius * 0.13f);
-            float markX = x + radius * 0.72f;
-            float markY = y + radius * 0.70f;
-            Color injury = new Color(255, 94, 87, 245);
-            AppendDebugLine(
-                statusIcons,
-                markX - markArm, markY,
-                markX + markArm, markY,
-                injury);
-            AppendDebugLine(
-                statusIcons,
-                markX, markY - markArm,
-                markX, markY + markArm,
-                injury);
+            float arm = MathF.Max(pixel * 0.7f, radius * 0.13f);
+            float markX = x + radius * 0.74f;
+            float markY = y + radius * 0.73f;
+            Color injury = new Color(205, 76, 73, 225);
+            AppendDebugLine(statusIcons, markX - arm, markY, markX + arm, markY, injury);
+            AppendDebugLine(statusIcons, markX, markY - arm, markX, markY + arm, injury);
         }
+    }
+
+    private static void AppendFactionHalo(
+        VertexArray vertices,
+        float x,
+        float y,
+        float radius,
+        ushort factionTag,
+        bool isAlive,
+        int quality)
+    {
+        Color color = !isAlive
+            ? new Color(133, 139, 145, 85)
+            : factionTag switch
+            {
+                1 => new Color(107, 158, 198, 125),
+                2 => new Color(190, 116, 109, 125),
+                _ => new Color(153, 164, 176, 95)
+            };
+
+        int segments = quality < 14 ? 12 : 24;
+        float angleStep = MathF.Tau / segments;
+        for (int i = 0; i < segments; i++)
+        {
+            // Four small gaps make the faction colour readable without a loud ring.
+            if (i % 6 == 5)
+                continue;
+
+            float a0 = angleStep * i;
+            float a1 = angleStep * (i + 1);
+            AppendDebugLine(
+                vertices,
+                x + MathF.Cos(a0) * radius,
+                y + MathF.Sin(a0) * radius,
+                x + MathF.Cos(a1) * radius,
+                y + MathF.Sin(a1) * radius,
+                color);
+        }
+    }
+
+    private static void AppendWeaponGlyph(
+        VertexArray vertices,
+        float x,
+        float y,
+        float radius,
+        Vector3 direction,
+        float screenScale)
+    {
+        float dx = direction.X;
+        float dy = direction.Y;
+        float lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared < 0.0001f)
+        {
+            dx = 1f;
+            dy = 0f;
+        }
+        else
+        {
+            float inverseLength = 1f / MathF.Sqrt(lengthSquared);
+            dx *= inverseLength;
+            dy *= inverseLength;
+        }
+
+        float pixel = 1f / MathF.Max(0.001f, screenScale);
+        float angle = MathF.Atan2(dy, dx);
+        float halfLength = MathF.Max(pixel * 1.8f, radius * 0.38f);
+        float halfWidth = MathF.Max(pixel * 0.48f, radius * 0.075f);
+        float centerDistance = radius * 0.91f;
+        float centerX = x + dx * centerDistance;
+        float centerY = y + dy * centerDistance;
+
+        // Slim dark barrel crosses the edge of the white disk.
+        AppendOrientedRect(
+            vertices,
+            centerX,
+            centerY,
+            halfWidth,
+            halfLength,
+            angle,
+            new Color(32, 39, 47, 255));
+
+        // A thin steel line and a tiny muzzle cap give the weapon definition
+        // without drawing a full rifle silhouette at battle zoom.
+        AppendOrientedRect(
+            vertices,
+            centerX,
+            centerY,
+            MathF.Max(pixel * 0.22f, radius * 0.028f),
+            halfLength * 0.76f,
+            angle,
+            new Color(133, 145, 157, 245));
+
+        float muzzleDistance = centerDistance + halfLength * 0.88f;
+        AppendOrientedRect(
+            vertices,
+            x + dx * muzzleDistance,
+            y + dy * muzzleDistance,
+            MathF.Max(pixel * 0.60f, radius * 0.105f),
+            MathF.Max(pixel * 0.25f, radius * 0.045f),
+            angle + MathF.PI * 0.5f,
+            new Color(245, 247, 249, 255));
     }
 
     private static void AppendTriangle(
