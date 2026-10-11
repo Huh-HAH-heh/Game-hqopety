@@ -37,6 +37,12 @@ public sealed class GameCamera
             moveSpeed;
     }
 
+    public void CenterOnPosition(Vector2f position)
+    {
+        _targetPosition = position;
+        _view.Center = position;
+    }
+
     public void CenterOnWorld(
         float tilePixelSize,
         Core.Map.WorldMap worldMap)
