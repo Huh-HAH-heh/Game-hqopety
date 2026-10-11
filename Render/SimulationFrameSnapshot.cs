@@ -6,14 +6,24 @@ using Core.Unit;
 
 namespace RimClone.Render;
 
+public readonly record struct RenderWeaponVisual(
+    WeaponConfig? Config,
+    Vector3 AimPoint,
+    bool AimIndicatorActive);
+
 public readonly record struct RenderUnitState(
     int Index,
     Vector3 Position,
+    Vector3 HeadNormal,
     float Width,
     float Length,
     float HitPoints,
     ushort FactionTag,
-    UnitAiState AiState);
+    UnitAiState AiState,
+    bool HasApparel,
+    bool HasPoweredArmor,
+    RenderWeaponVisual PrimaryWeapon,
+    RenderWeaponVisual SecondaryWeapon);
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
@@ -88,6 +98,24 @@ public sealed class SimulationFrameSnapshot
     public int RoutesReused { get; init; }
     public long RouteTrafficCells { get; init; }
 
+    private static RenderWeaponVisual CaptureWeaponVisual(
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        int unitIndex,
+        UnitWeaponSlot slot)
+    {
+        short itemSlot = inventory.GetWeaponEquipment(unitIndex, slot);
+        WeaponConfig? config = itemSlot >= 0
+            ? inventory.GetItem(unitIndex, itemSlot) as WeaponConfig
+            : null;
+
+        int stateIndex = UnitWeaponStore.GetIndex(unitIndex, slot);
+        return new RenderWeaponVisual(
+            config,
+            weapons.AimPoint[stateIndex],
+            weapons.AimIndicatorActive[stateIndex]);
+    }
+
     public static SimulationFrameSnapshot Capture(UnitSimulation simulation)
     {
         UnitStore units = simulation.Units;
@@ -111,7 +139,10 @@ public sealed class SimulationFrameSnapshot
         Vector3[] positions = units.Position;
         float[] widths = units.Width;
         float[] lengths = units.Length;
+        Vector3[] headNormals = units.HeadNormal;
         UnitAiState[] aiStates = simulation.AI.Store.State;
+        UnitInventoryStore inventoryStore = simulation.Inventory;
+        UnitWeaponStore weaponStore = simulation.Weapons;
 
         for (int i = 0; i < active.Length; i++)
         {
@@ -120,14 +151,46 @@ public sealed class SimulationFrameSnapshot
             ushort faction = factions[index];
             UnitAiState aiState = aiStates[index];
 
+            bool hasApparel = false;
+            bool hasPoweredArmor = false;
+            for (int zone = 0; zone < UnitInventoryStore.BodyZoneCount; zone++)
+            {
+                for (int layer = 0; layer < UnitInventoryStore.ArmorLayerCount; layer++)
+                {
+                    short itemSlot = inventoryStore.GetBodyEquipment(
+                        index,
+                        zone,
+                        (ArmorLayer)layer);
+
+                    if (itemSlot < 0 ||
+                        inventoryStore.GetItem(index, itemSlot) is not ArmorConfig armor)
+                    {
+                        continue;
+                    }
+
+                    hasApparel = true;
+                    hasPoweredArmor |= armor.MovementSpeedMultiplier > 1f;
+                }
+            }
+
+            RenderWeaponVisual primaryWeapon = CaptureWeaponVisual(
+                inventoryStore, weaponStore, index, UnitWeaponSlot.Primary);
+            RenderWeaponVisual secondaryWeapon = CaptureWeaponVisual(
+                inventoryStore, weaponStore, index, UnitWeaponSlot.Secondary);
+
             unitStates[i] = new RenderUnitState(
                 index,
                 positions[index],
+                headNormals[index],
                 widths[index],
                 lengths[index],
                 hp,
                 faction,
-                aiState);
+                aiState,
+                hasApparel,
+                hasPoweredArmor,
+                primaryWeapon,
+                secondaryWeapon);
 
             bool alive = hp > 0f;
             if (faction == 1)
