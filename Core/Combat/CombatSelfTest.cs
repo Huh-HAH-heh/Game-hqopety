@@ -2230,8 +2230,31 @@ public static class CombatSelfTest
             BodyPartRole.Head);
 
         Vector3 headPosition = definitions.WorldPosition[definitionHead];
-        if (MathF.Abs(headPosition.X - 0.32f) > 0.001f ||
-            MathF.Abs(headPosition.Y) > 0.001f)
+        Vector3[] initialPositions = definitions.WorldPosition;
+        int bodyStartForPose = colonistBody.Start;
+        Vector3 torsoPosition = initialPositions[bodyStartForPose];
+        Vector3 rightArmPosition = initialPositions[bodyStartForPose + 2];
+        Vector3 rightHandPosition = initialPositions[bodyStartForPose + 3];
+        Vector3 leftArmPosition = initialPositions[bodyStartForPose + 4];
+        Vector3 leftHandPosition = initialPositions[bodyStartForPose + 5];
+        Vector3 rightLegPosition = initialPositions[bodyStartForPose + 6];
+        Vector3 rightFootPosition = initialPositions[bodyStartForPose + 7];
+        Vector3 leftLegPosition = initialPositions[bodyStartForPose + 8];
+        Vector3 leftFootPosition = initialPositions[bodyStartForPose + 9];
+
+        // Root torso is exactly at the unit-marker center; each limb pair mirrors over Y=0.
+        if (MathF.Abs(torsoPosition.X) > 0.001f ||
+            MathF.Abs(torsoPosition.Y) > 0.001f ||
+            MathF.Abs(headPosition.X - 0.155f) > 0.001f ||
+            MathF.Abs(headPosition.Y) > 0.001f ||
+            MathF.Abs(rightArmPosition.X - leftArmPosition.X) > 0.001f ||
+            MathF.Abs(rightArmPosition.Y + leftArmPosition.Y) > 0.001f ||
+            MathF.Abs(rightHandPosition.X - leftHandPosition.X) > 0.001f ||
+            MathF.Abs(rightHandPosition.Y + leftHandPosition.Y) > 0.001f ||
+            MathF.Abs(rightLegPosition.X - leftLegPosition.X) > 0.001f ||
+            MathF.Abs(rightLegPosition.Y + leftLegPosition.Y) > 0.001f ||
+            MathF.Abs(rightFootPosition.X - leftFootPosition.X) > 0.001f ||
+            MathF.Abs(rightFootPosition.Y + leftFootPosition.Y) > 0.001f)
         {
             return false;
         }
@@ -2297,10 +2320,10 @@ public static class CombatSelfTest
             rightThigh >= 0 &&
             MathF.Abs(
                 simulation.Bodies.WorldRotation[leftThigh] -
-                (MathF.PI - 0.20f + swing)) < 0.001f &&
+                (MathF.PI + swing)) < 0.001f &&
             MathF.Abs(
                 simulation.Bodies.WorldRotation[rightThigh] -
-                (-MathF.PI + 0.20f - swing)) < 0.001f;
+                (-MathF.PI - swing)) < 0.001f;
 
         if (!gaitCorrect)
             return false;
@@ -2324,7 +2347,7 @@ public static class CombatSelfTest
             new BodyHandle(start, count),
             BodyPartRole.Head);
         Vector3 aimedHeadPosition = simulation.Bodies.WorldPosition[head];
-        if (MathF.Abs(aimedHeadPosition.X - 10.32f) > 0.002f ||
+        if (MathF.Abs(aimedHeadPosition.X - 10.155f) > 0.002f ||
             MathF.Abs(aimedHeadPosition.Y - 10f) > 0.002f ||
             MathF.Abs(simulation.Bodies.WorldRotation[head] - MathF.PI * 0.5f) > 0.002f)
         {
@@ -2377,7 +2400,7 @@ public static class CombatSelfTest
         return MathF.Abs(bodyNormal.X) < 0.001f &&
                MathF.Abs(bodyNormal.Y - 1f) < 0.001f &&
                MathF.Abs(movedHead.X - 10f) < 0.002f &&
-               MathF.Abs(movedHead.Y - 10.32f) < 0.002f &&
+               MathF.Abs(movedHead.Y - 10.155f) < 0.002f &&
                MathF.Abs(simulation.Bodies.WorldRotation[head]) < 0.002f;
     }
 
