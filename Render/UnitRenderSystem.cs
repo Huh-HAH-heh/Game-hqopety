@@ -222,7 +222,7 @@ public sealed class UnitRenderSystem
             UnitAiState aiState = simulation.AI.Store.State[unitIndex];
 
             int bodyStart = bodyStarts[unitIndex];
-            int bodyEnd = bodyStart + Math.Max(0, bodyCounts[unitIndex]);
+            int bodyEnd = bodyStart + Math.Max(0, (int)bodyCounts[unitIndex]);
             for (int bodyPart = bodyStart;
                  bodyPart < bodyEnd && bodyPart < bodyStore.Count;
                  bodyPart++)
