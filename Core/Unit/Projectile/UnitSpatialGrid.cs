@@ -63,6 +63,12 @@ public sealed class UnitSpatialGrid
 
     public void Build(
         UnitStore units,
+        UnitHealthStore? health = null) =>
+        Build(units, null, health);
+
+    public void Build(
+        UnitStore units,
+        UnitBodyStore? bodies,
         UnitHealthStore? health = null)
     {
         for (int i = 0;
@@ -100,6 +106,27 @@ public sealed class UnitSpatialGrid
                             units.Width[unit],
                             units.Length[unit]) *
                         0.65f));
+
+            // Collision follows the articulated rig, whose limbs can extend
+            // beyond the pawn's movement footprint. Broad-phase bounds must
+            // cover those same shapes or a bullet may never test the target.
+            if (bodies != null)
+            {
+                int bodyStart = units.BodyStart[unit];
+                int bodyCount = Math.Max(0, (int)units.BodyCount[unit]);
+                int bodyEnd = Math.Min(bodyStart + bodyCount, bodies.Count);
+                Vector3[] bodyPositions = bodies.WorldPosition;
+                Vector3[] bodyScales = bodies.Scale;
+
+                for (int part = Math.Max(0, bodyStart); part < bodyEnd; part++)
+                {
+                    Vector3 offset = bodyPositions[part] - units.Position[unit];
+                    Vector3 scale = bodyScales[part];
+                    float reach = MathF.Sqrt(offset.X * offset.X + offset.Y * offset.Y) +
+                        MathF.Sqrt(scale.X * scale.X + scale.Y * scale.Y);
+                    radius = MathF.Max(radius, reach + 0.02f);
+                }
+            }
 
             int minX =
                 Math.Max(
