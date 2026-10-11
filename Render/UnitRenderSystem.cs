@@ -252,8 +252,6 @@ public sealed class UnitRenderSystem
                 }
             }
 
-            int start = bodyStarts[unitIndex];
-            int count = bodyCounts[unitIndex];
             float radius =
                 MathF.Max(
                     0.24f,
