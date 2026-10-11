@@ -46,6 +46,16 @@ public readonly record struct RenderProjectileImpact(
     float Lifetime,
     ProjectileImpactKind Kind);
 
+public readonly record struct RenderBodyPart(
+    Vector3 Position,
+    Vector3 Scale,
+    float Rotation,
+    BodyPrimitive Primitive,
+    BodyPartRole Role,
+    ushort FactionTag,
+    UnitAiState AiState,
+    bool IsAlive);
+
 /// <summary>
 /// Immutable data published by the simulation thread and consumed by the renderer.
 /// No mutable simulation-store arrays escape this object.
@@ -56,6 +66,8 @@ public sealed class SimulationFrameSnapshot
     public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
     public RenderAimRing[] AimRings { get; init; } = Array.Empty<RenderAimRing>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
+    public RenderBodyPart[] BodyParts { get; init; } = Array.Empty<RenderBodyPart>();
+    public int BodyPartUnitIndex { get; init; } = -1;
 
     public int UnitCount => Units.Length;
     public int ActiveProjectiles { get; init; }
@@ -123,7 +135,9 @@ public sealed class SimulationFrameSnapshot
             weapons.AimIndicatorActive[stateIndex]);
     }
 
-    public static SimulationFrameSnapshot Capture(UnitSimulation simulation)
+    public static SimulationFrameSnapshot Capture(
+        UnitSimulation simulation,
+        int bodyPartUnitIndex = -1)
     {
         UnitStore units = simulation.Units;
         ReadOnlySpan<int> active = units.ActiveIndices;
@@ -254,6 +268,56 @@ public sealed class SimulationFrameSnapshot
             }
         }
 
+        RenderBodyPart[] bodyParts = Array.Empty<RenderBodyPart>();
+        int capturedBodyPartUnitIndex = -1;
+
+        if (bodyPartUnitIndex >= 0)
+        {
+            for (int i = 0; i < active.Length; i++)
+            {
+                int unitIndex = active[i];
+                if (unitIndex != bodyPartUnitIndex)
+                    continue;
+
+                UnitBodyStore bodyStore = simulation.Bodies;
+                int bodyStart = units.BodyStart[unitIndex];
+                int bodyCount = Math.Max(0, (int)units.BodyCount[unitIndex]);
+
+                if (bodyStart >= 0 && bodyStart < bodyStore.Count)
+                {
+                    bodyCount = Math.Min(bodyCount, bodyStore.Count - bodyStart);
+                    if (bodyCount > 0)
+                    {
+                        bodyParts = new RenderBodyPart[bodyCount];
+                        Vector3[] bodyPositions = bodyStore.WorldPosition;
+                        Vector3[] bodyScales = bodyStore.Scale;
+                        float[] bodyRotations = bodyStore.WorldRotation;
+                        BodyPrimitive[] bodyPrimitives = bodyStore.Primitive;
+                        BodyPartRole[] bodyRoles = bodyStore.Role;
+                        bool isAlive = hitPoints[unitIndex] > 0f;
+
+                        for (int part = 0; part < bodyCount; part++)
+                        {
+                            int bodyIndex = bodyStart + part;
+                            bodyParts[part] = new RenderBodyPart(
+                                bodyPositions[bodyIndex],
+                                bodyScales[bodyIndex],
+                                bodyRotations[bodyIndex],
+                                bodyPrimitives[bodyIndex],
+                                bodyRoles[bodyIndex],
+                                factions[unitIndex],
+                                aiStates[unitIndex],
+                                isAlive);
+                        }
+
+                        capturedBodyPartUnitIndex = unitIndex;
+                    }
+                }
+
+                break;
+            }
+        }
+
         List<RenderAimRing> aimRings = new(Math.Min(active.Length, 128));
         bool[] targetDrawn = new bool[units.Capacity];
         UnitInventoryStore inventory = simulation.Inventory;
@@ -378,6 +442,8 @@ public sealed class SimulationFrameSnapshot
             Traces = traces,
             AimRings = aimRings.ToArray(),
             Impacts = impacts,
+            BodyParts = bodyParts,
+            BodyPartUnitIndex = capturedBodyPartUnitIndex,
             ActiveProjectiles = projectiles.ActiveCount,
             ProjectileCapacity = projectiles.Capacity,
             TotalShotsFired = simulation.TotalShotsFired,
