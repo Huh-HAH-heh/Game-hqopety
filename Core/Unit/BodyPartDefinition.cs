@@ -35,6 +35,7 @@ public readonly struct BodyPartDefinition
     public BodyPartAnchor Anchor { get; }
     public BodyPartRole Role { get; }
     public BodyPartPivot Pivot { get; }
+    public UnitHealthPartId DamagePart { get; }
 
     public BodyPartDefinition(
         Vector3 localPosition,
@@ -46,7 +47,8 @@ public readonly struct BodyPartDefinition
         float followDistance = 0f,
         BodyPartAnchor anchor = BodyPartAnchor.Parent,
         BodyPartRole role = BodyPartRole.Generic,
-        BodyPartPivot pivot = BodyPartPivot.Center)
+        BodyPartPivot pivot = BodyPartPivot.Center,
+        UnitHealthPartId damagePart = UnitHealthPartId.None)
     {
         LocalPosition = localPosition;
         Scale = scale;
@@ -58,5 +60,6 @@ public readonly struct BodyPartDefinition
         Anchor = anchor;
         Role = role;
         Pivot = pivot;
+        DamagePart = damagePart;
     }
 }

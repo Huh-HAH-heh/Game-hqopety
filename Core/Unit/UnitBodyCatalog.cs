@@ -12,32 +12,98 @@ internal static class UnitBodyCatalog
 {
     private static readonly BodyPartDefinition[] Colonist =
     {
-        // Body-local +X is forward. Parts remain connected and have distinct anatomical positions.
-        new BodyPartDefinition(Vector3.Zero, new Vector3(0.22f, 0.15f, 0.12f), BodyPrimitive.Circle, role: BodyPartRole.Torso),
-        new BodyPartDefinition(new Vector3(0.205f, 0f, 0f), new Vector3(0.045f, 0.045f, 0.045f), BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Neck),
-        new BodyPartDefinition(new Vector3(0.32f, 0f, 0f), new Vector3(0.09f, 0.09f, 0.09f), BodyPrimitive.Circle, parentIndex: 1, anchor: BodyPartAnchor.UnitHead, role: BodyPartRole.Head),
+        new BodyPartDefinition(
+            Vector3.Zero,
+            new Vector3(0.22f, 0.15f, 0.12f),
+            BodyPrimitive.Circle,
+            role: BodyPartRole.Torso,
+            damagePart: UnitHealthPartId.Torso),
 
-        // Shoulder -> upper arm -> elbow -> forearm -> hand.
-        new BodyPartDefinition(new Vector3(0.055f, 0.13f, 0f), new Vector3(0.11f, 0.045f, 0.05f), BodyPrimitive.Circle, parentIndex: 0, localRotation: 1.15f, motion: BodyPartMotion.WalkCycleOpposite, role: BodyPartRole.UpperArm, pivot: BodyPartPivot.Start),
-        new BodyPartDefinition(new Vector3(0.11f, 0f, 0f), new Vector3(0.035f, 0.035f, 0.035f), BodyPrimitive.Circle, parentIndex: 3, role: BodyPartRole.Elbow),
-        new BodyPartDefinition(Vector3.Zero, new Vector3(0.14f, 0.04f, 0.04f), BodyPrimitive.Circle, parentIndex: 4, localRotation: -2.23f, role: BodyPartRole.Forearm, pivot: BodyPartPivot.Start),
-        new BodyPartDefinition(new Vector3(0.14f, 0f, 0f), new Vector3(0.04f, 0.04f, 0.04f), BodyPrimitive.Circle, parentIndex: 5, role: BodyPartRole.Hand),
+        new BodyPartDefinition(
+            new Vector3(0.32f, 0f, 0f),
+            new Vector3(0.09f, 0.09f, 0.09f),
+            BodyPrimitive.Circle,
+            parentIndex: 0,
+            anchor: BodyPartAnchor.UnitHead,
+            role: BodyPartRole.Head,
+            damagePart: UnitHealthPartId.Head),
 
-        new BodyPartDefinition(new Vector3(0.055f, -0.13f, 0f), new Vector3(0.11f, 0.045f, 0.05f), BodyPrimitive.Circle, parentIndex: 0, localRotation: -1.15f, motion: BodyPartMotion.WalkCycle, role: BodyPartRole.UpperArm, pivot: BodyPartPivot.Start),
-        new BodyPartDefinition(new Vector3(0.11f, 0f, 0f), new Vector3(0.035f, 0.035f, 0.035f), BodyPrimitive.Circle, parentIndex: 7, role: BodyPartRole.Elbow),
-        new BodyPartDefinition(Vector3.Zero, new Vector3(0.14f, 0.04f, 0.04f), BodyPrimitive.Circle, parentIndex: 8, localRotation: 2.23f, role: BodyPartRole.Forearm, pivot: BodyPartPivot.Start),
-        new BodyPartDefinition(new Vector3(0.14f, 0f, 0f), new Vector3(0.04f, 0.04f, 0.04f), BodyPrimitive.Circle, parentIndex: 9, role: BodyPartRole.Hand),
+        // One volume per complete arm; the hand remains separately damageable.
+        new BodyPartDefinition(
+            new Vector3(0f, 0.15f, 0f),
+            new Vector3(0.14f, 0.045f, 0.05f),
+            BodyPrimitive.Circle,
+            parentIndex: 0,
+            localRotation: MathF.PI * 0.5f,
+            motion: BodyPartMotion.WalkCycleOpposite,
+            role: BodyPartRole.UpperArm,
+            pivot: BodyPartPivot.Start,
+            damagePart: UnitHealthPartId.RightArm),
 
-        // Hips -> thighs -> knees -> shins -> feet. Legs trail behind the torso.
-        new BodyPartDefinition(new Vector3(-0.12f, 0.065f, 0f), new Vector3(0.10f, 0.06f, 0.055f), BodyPrimitive.Circle, parentIndex: 0, localRotation: MathF.PI - 0.58f, motion: BodyPartMotion.WalkCycle, role: BodyPartRole.Thigh, pivot: BodyPartPivot.Start),
-        new BodyPartDefinition(new Vector3(0.10f, 0f, 0f), new Vector3(0.035f, 0.035f, 0.035f), BodyPrimitive.Circle, parentIndex: 11, role: BodyPartRole.Knee),
-        new BodyPartDefinition(Vector3.Zero, new Vector3(0.12f, 0.04f, 0.04f), BodyPrimitive.Circle, parentIndex: 12, localRotation: 0.63f, role: BodyPartRole.Shin, pivot: BodyPartPivot.Start),
-        new BodyPartDefinition(new Vector3(0.12f, 0f, 0f), new Vector3(0.06f, 0.04f, 0.04f), BodyPrimitive.Circle, parentIndex: 13, localRotation: 0.10f, role: BodyPartRole.Foot, pivot: BodyPartPivot.Start),
+        new BodyPartDefinition(
+            new Vector3(0.14f, 0f, 0f),
+            new Vector3(0.04f, 0.04f, 0.04f),
+            BodyPrimitive.Circle,
+            parentIndex: 2,
+            role: BodyPartRole.Hand,
+            damagePart: UnitHealthPartId.RightHand),
 
-        new BodyPartDefinition(new Vector3(-0.12f, -0.065f, 0f), new Vector3(0.10f, 0.06f, 0.055f), BodyPrimitive.Circle, parentIndex: 0, localRotation: -MathF.PI + 0.58f, motion: BodyPartMotion.WalkCycleOpposite, role: BodyPartRole.Thigh, pivot: BodyPartPivot.Start),
-        new BodyPartDefinition(new Vector3(0.10f, 0f, 0f), new Vector3(0.035f, 0.035f, 0.035f), BodyPrimitive.Circle, parentIndex: 15, role: BodyPartRole.Knee),
-        new BodyPartDefinition(Vector3.Zero, new Vector3(0.12f, 0.04f, 0.04f), BodyPrimitive.Circle, parentIndex: 16, localRotation: -0.63f, role: BodyPartRole.Shin, pivot: BodyPartPivot.Start),
-        new BodyPartDefinition(new Vector3(0.12f, 0f, 0f), new Vector3(0.06f, 0.04f, 0.04f), BodyPrimitive.Circle, parentIndex: 17, localRotation: -0.10f, role: BodyPartRole.Foot, pivot: BodyPartPivot.Start)
+        new BodyPartDefinition(
+            new Vector3(0f, -0.15f, 0f),
+            new Vector3(0.14f, 0.045f, 0.05f),
+            BodyPrimitive.Circle,
+            parentIndex: 0,
+            localRotation: -MathF.PI * 0.5f,
+            motion: BodyPartMotion.WalkCycle,
+            role: BodyPartRole.UpperArm,
+            pivot: BodyPartPivot.Start,
+            damagePart: UnitHealthPartId.LeftArm),
+
+        new BodyPartDefinition(
+            new Vector3(0.14f, 0f, 0f),
+            new Vector3(0.04f, 0.04f, 0.04f),
+            BodyPrimitive.Circle,
+            parentIndex: 4,
+            role: BodyPartRole.Hand,
+            damagePart: UnitHealthPartId.LeftHand),
+
+        new BodyPartDefinition(
+            new Vector3(-0.12f, 0.065f, 0f),
+            new Vector3(0.20f, 0.05f, 0.055f),
+            BodyPrimitive.Circle,
+            parentIndex: 0,
+            localRotation: MathF.PI - 0.20f,
+            motion: BodyPartMotion.WalkCycle,
+            role: BodyPartRole.Thigh,
+            pivot: BodyPartPivot.Start,
+            damagePart: UnitHealthPartId.RightLeg),
+
+        new BodyPartDefinition(
+            new Vector3(0.20f, 0f, 0f),
+            new Vector3(0.06f, 0.04f, 0.04f),
+            BodyPrimitive.Circle,
+            parentIndex: 6,
+            role: BodyPartRole.Foot,
+            damagePart: UnitHealthPartId.RightFoot),
+
+        new BodyPartDefinition(
+            new Vector3(-0.12f, -0.065f, 0f),
+            new Vector3(0.20f, 0.05f, 0.055f),
+            BodyPrimitive.Circle,
+            parentIndex: 0,
+            localRotation: -MathF.PI + 0.20f,
+            motion: BodyPartMotion.WalkCycleOpposite,
+            role: BodyPartRole.Thigh,
+            pivot: BodyPartPivot.Start,
+            damagePart: UnitHealthPartId.LeftLeg),
+
+        new BodyPartDefinition(
+            new Vector3(0.20f, 0f, 0f),
+            new Vector3(0.06f, 0.04f, 0.04f),
+            BodyPrimitive.Circle,
+            parentIndex: 8,
+            role: BodyPartRole.Foot,
+            damagePart: UnitHealthPartId.LeftFoot)
     };
 
     private static readonly BodyPartDefinition[] SmallCreature =
@@ -46,14 +112,16 @@ internal static class UnitBodyCatalog
             Vector3.Zero,
             new Vector3(0.18f, 0.105f, 0.15f),
             BodyPrimitive.Circle,
-            role: BodyPartRole.Generic),
+            role: BodyPartRole.Generic,
+            damagePart: UnitHealthPartId.WholeBody),
 
         new BodyPartDefinition(
             new Vector3(0.18f, 0f, 0f),
             new Vector3(0.052f, 0.050f, 0.052f),
             BodyPrimitive.Circle,
             anchor: BodyPartAnchor.UnitHead,
-            role: BodyPartRole.Head),
+            role: BodyPartRole.Head,
+            damagePart: UnitHealthPartId.WholeBody),
 
         // Legs are kept under the broad body; only small paws peek out from the silhouette.
         new BodyPartDefinition(
@@ -64,6 +132,7 @@ internal static class UnitBodyCatalog
             localRotation: 0.60f,
             motion: BodyPartMotion.WalkCycle,
             role: BodyPartRole.Thigh,
+            damagePart: UnitHealthPartId.WholeBody,
             pivot: BodyPartPivot.Start),
 
         new BodyPartDefinition(
@@ -71,7 +140,8 @@ internal static class UnitBodyCatalog
             new Vector3(0.014f, 0.014f, 0.014f),
             BodyPrimitive.Circle,
             parentIndex: 2,
-            role: BodyPartRole.Foot),
+            role: BodyPartRole.Foot,
+            damagePart: UnitHealthPartId.WholeBody),
 
         new BodyPartDefinition(
             new Vector3(0.11f, -0.055f, 0f),
@@ -81,6 +151,7 @@ internal static class UnitBodyCatalog
             localRotation: -0.60f,
             motion: BodyPartMotion.WalkCycleOpposite,
             role: BodyPartRole.Thigh,
+            damagePart: UnitHealthPartId.WholeBody,
             pivot: BodyPartPivot.Start),
 
         new BodyPartDefinition(
@@ -88,7 +159,8 @@ internal static class UnitBodyCatalog
             new Vector3(0.014f, 0.014f, 0.014f),
             BodyPrimitive.Circle,
             parentIndex: 4,
-            role: BodyPartRole.Foot),
+            role: BodyPartRole.Foot,
+            damagePart: UnitHealthPartId.WholeBody),
 
         new BodyPartDefinition(
             new Vector3(-0.14f, 0.055f, 0f),
@@ -98,6 +170,7 @@ internal static class UnitBodyCatalog
             localRotation: MathF.PI - 0.60f,
             motion: BodyPartMotion.WalkCycleOpposite,
             role: BodyPartRole.Thigh,
+            damagePart: UnitHealthPartId.WholeBody,
             pivot: BodyPartPivot.Start),
 
         new BodyPartDefinition(
@@ -105,7 +178,8 @@ internal static class UnitBodyCatalog
             new Vector3(0.014f, 0.014f, 0.014f),
             BodyPrimitive.Circle,
             parentIndex: 6,
-            role: BodyPartRole.Foot),
+            role: BodyPartRole.Foot,
+            damagePart: UnitHealthPartId.WholeBody),
 
         new BodyPartDefinition(
             new Vector3(-0.14f, -0.055f, 0f),
@@ -115,6 +189,7 @@ internal static class UnitBodyCatalog
             localRotation: -MathF.PI + 0.60f,
             motion: BodyPartMotion.WalkCycle,
             role: BodyPartRole.Thigh,
+            damagePart: UnitHealthPartId.WholeBody,
             pivot: BodyPartPivot.Start),
 
         new BodyPartDefinition(
@@ -122,7 +197,8 @@ internal static class UnitBodyCatalog
             new Vector3(0.014f, 0.014f, 0.014f),
             BodyPrimitive.Circle,
             parentIndex: 8,
-            role: BodyPartRole.Foot)
+            role: BodyPartRole.Foot,
+            damagePart: UnitHealthPartId.WholeBody)
     };
 
     private static readonly BodyPartDefinition[] SegmentedCreature = CreateSegmented();
@@ -147,7 +223,8 @@ internal static class UnitBodyCatalog
             Vector3.Zero,
             new Vector3(0.52f, 0.52f, 0.45f),
             BodyPrimitive.Circle,
-            role: BodyPartRole.Segment);
+            role: BodyPartRole.Segment,
+            damagePart: UnitHealthPartId.WholeBody);
 
         for (int i = 1; i < parts.Length; i++)
         {
@@ -160,7 +237,8 @@ internal static class UnitBodyCatalog
                 parentIndex: i - 1,
                 motion: BodyPartMotion.FollowParent,
                 followDistance: 0.62f,
-                role: BodyPartRole.Segment);
+                role: BodyPartRole.Segment,
+                damagePart: UnitHealthPartId.WholeBody);
         }
 
         return parts;

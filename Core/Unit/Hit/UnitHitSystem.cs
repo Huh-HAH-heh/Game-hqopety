@@ -45,9 +45,8 @@ public readonly struct UnitHitResult
 
 public sealed class UnitHitSystem
 {
-    // Colonists have 19 modeled shapes in UnitBodyCatalog. Every collision
-    // volume now follows one of those shapes instead of being placed separately.
-    public const int MaxHitVolumeCount = 19;
+    // Hit-volume count is bounded by explicitly damageable body zones.
+    public const int MaxHitVolumeCount = 10;
     public const int AimPointsPerVolume = 4;
     public const int MaxAimPointCount =
         MaxHitVolumeCount * AimPointsPerVolume;
@@ -620,18 +619,13 @@ public sealed class UnitHitSystem
         Span<HitVolume> volumes)
     {
         int start = units.BodyStart[unitIndex];
-        int count = Math.Max(0, (int)units.BodyCount[unitIndex]);
-        if (start < 0 || count == 0 || start >= bodies.Count)
+        int bodyCount = Math.Max(0, (int)units.BodyCount[unitIndex]);
+        if (start < 0 || bodyCount == 0 || start >= bodies.Count)
             return 0;
 
-        count = Math.Min(count, bodies.Count - start);
-        if (count > volumes.Length)
-            throw new InvalidOperationException(
-                $"Body has {count} shapes, but hit-volume capacity is {volumes.Length}.");
+        bodyCount = Math.Min(bodyCount, bodies.Count - start);
 
         Vector3 rootPosition = units.Position[unitIndex];
-        Vector3 bodyForward = NormalizeHorizontal(units.BodyNormal[unitIndex]);
-        Vector3 bodyRight = new(-bodyForward.Y, bodyForward.X, 0f);
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
         UnitPosture posture = units.Posture[unitIndex];
 
@@ -639,20 +633,26 @@ public sealed class UnitHitSystem
         Vector3[] scales = bodies.Scale;
         float[] rotations = bodies.WorldRotation;
         BodyPartRole[] roles = bodies.Role;
+        UnitHealthPartId[] damageParts = bodies.DamagePart;
         UnitType type = units.Type[unitIndex];
+        int volumeCount = 0;
 
-        for (int offset = 0; offset < count; offset++)
+        for (int offset = 0; offset < bodyCount; offset++)
         {
             int partIndex = start + offset;
-            BodyPartRole role = roles[partIndex];
-            UnitHealthPartId partId = GetHealthPartId(
-                units,
-                bodies,
-                unitIndex,
-                partIndex,
-                start,
-                bodyRight);
+            UnitHealthPartId partId = damageParts[partIndex];
 
+            // Unbound model pieces are not collision targets and cannot receive damage.
+            if (partId == UnitHealthPartId.None)
+                continue;
+
+            if (volumeCount >= volumes.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Body has more than {volumes.Length} explicitly damageable shapes.");
+            }
+
+            BodyPartRole role = roles[partIndex];
             float rotation = rotations[partIndex];
             Vector3 forward = new(
                 MathF.Cos(rotation),
@@ -677,7 +677,7 @@ public sealed class UnitHitSystem
                 out float radiusZ);
 
             Vector3 position = positions[partIndex];
-            volumes[offset] = new HitVolume(
+            volumes[volumeCount++] = new HitVolume(
                 partId,
                 new Vector3(position.X, position.Y, centerZ),
                 forward,
@@ -688,82 +688,7 @@ public sealed class UnitHitSystem
                     MathF.Max(0.025f, radiusZ)));
         }
 
-        return count;
-    }
-
-    private static UnitHealthPartId GetHealthPartId(
-        UnitStore units,
-        UnitBodyStore bodies,
-        int unitIndex,
-        int partIndex,
-        int bodyStart,
-        Vector3 bodyRight)
-    {
-        BodyPartRole[] roles = bodies.Role;
-        BodyPartRole role = roles[partIndex];
-
-        if (units.Type[unitIndex] != UnitType.Colonist)
-            return UnitHealthPartId.WholeBody;
-
-        return role switch
-        {
-            BodyPartRole.Head => UnitHealthPartId.Head,
-            BodyPartRole.Torso or BodyPartRole.Neck => UnitHealthPartId.Torso,
-            BodyPartRole.UpperArm or
-            BodyPartRole.Elbow or
-            BodyPartRole.Forearm =>
-                IsRightLimb(units, bodies, unitIndex, partIndex, bodyStart, bodyRight)
-                    ? UnitHealthPartId.RightArm
-                    : UnitHealthPartId.LeftArm,
-            BodyPartRole.Hand =>
-                IsRightLimb(units, bodies, unitIndex, partIndex, bodyStart, bodyRight)
-                    ? UnitHealthPartId.RightHand
-                    : UnitHealthPartId.LeftHand,
-            BodyPartRole.Thigh or
-            BodyPartRole.Knee or
-            BodyPartRole.Shin =>
-                IsRightLimb(units, bodies, unitIndex, partIndex, bodyStart, bodyRight)
-                    ? UnitHealthPartId.RightLeg
-                    : UnitHealthPartId.LeftLeg,
-            BodyPartRole.Foot =>
-                IsRightLimb(units, bodies, unitIndex, partIndex, bodyStart, bodyRight)
-                    ? UnitHealthPartId.RightFoot
-                    : UnitHealthPartId.LeftFoot,
-            _ => UnitHealthPartId.Torso
-        };
-    }
-
-    private static bool IsRightLimb(
-        UnitStore units,
-        UnitBodyStore bodies,
-        int unitIndex,
-        int partIndex,
-        int bodyStart,
-        Vector3 bodyRight)
-    {
-        int[] parents = bodies.Parent;
-        BodyPartRole[] roles = bodies.Role;
-        Vector3[] positions = bodies.WorldPosition;
-        int ancestor = partIndex;
-
-        while (ancestor >= bodyStart)
-        {
-            BodyPartRole role = roles[ancestor];
-            if (role == BodyPartRole.UpperArm ||
-                role == BodyPartRole.Thigh)
-            {
-                Vector3 offset = positions[ancestor] - units.Position[unitIndex];
-                float side = Vector3.Dot(offset, bodyRight);
-                if (MathF.Abs(side) > 0.0001f)
-                    return side > 0f;
-            }
-
-            ancestor = parents[ancestor];
-        }
-
-        Vector3 fallbackOffset =
-            positions[partIndex] - units.Position[unitIndex];
-        return Vector3.Dot(fallbackOffset, bodyRight) >= 0f;
+        return volumeCount;
     }
 
     private static void GetVerticalHitShape(

@@ -2130,8 +2130,25 @@ public static class CombatSelfTest
             simulation.Bodies);
 
         int bodyStart = simulation.Units.BodyStart[id.Index];
-        if (count != 19 || count != simulation.Units.BodyCount[id.Index])
+        UnitHealthPartId[] expectedParts =
+        {
+            UnitHealthPartId.Torso,
+            UnitHealthPartId.Head,
+            UnitHealthPartId.RightArm,
+            UnitHealthPartId.RightHand,
+            UnitHealthPartId.LeftArm,
+            UnitHealthPartId.LeftHand,
+            UnitHealthPartId.RightLeg,
+            UnitHealthPartId.RightFoot,
+            UnitHealthPartId.LeftLeg,
+            UnitHealthPartId.LeftFoot
+        };
+
+        if (count != expectedParts.Length ||
+            count != simulation.Units.BodyCount[id.Index])
+        {
             return false;
+        }
 
         Vector3[] positions = simulation.Bodies.WorldPosition;
         Vector3[] scales = simulation.Bodies.Scale;
@@ -2153,7 +2170,9 @@ public static class CombatSelfTest
                 expectedForward.X,
                 0f);
 
-            if (MathF.Abs(volume.Center.X - bodyPosition.X) > 0.0001f ||
+            if (volume.Part != expectedParts[i] ||
+                volume.Part != simulation.Bodies.DamagePart[bodyStart + i] ||
+                MathF.Abs(volume.Center.X - bodyPosition.X) > 0.0001f ||
                 MathF.Abs(volume.Center.Y - bodyPosition.Y) > 0.0001f ||
                 MathF.Abs(volume.Forward.X - expectedForward.X) > 0.0001f ||
                 MathF.Abs(volume.Forward.Y - expectedForward.Y) > 0.0001f ||
@@ -2174,16 +2193,18 @@ public static class CombatSelfTest
         UnitBodyStore definitions = new UnitBodyStore(4);
         BodyHandle colonistBody = definitions.CreateBody(UnitBodyType.Colonist);
 
-        if (colonistBody.Count != 19 ||
+        if (colonistBody.Count != 10 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Head) != 1 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Torso) != 1 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.UpperArm) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Elbow) != 2 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Hand) != 2 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Thigh) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Knee) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Shin) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Foot) != 2)
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Foot) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Neck) != 0 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Elbow) != 0 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Forearm) != 0 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Knee) != 0 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Shin) != 0)
         {
             return false;
         }
@@ -2240,7 +2261,7 @@ public static class CombatSelfTest
             new Vector3(16f, 10f, 0f),
             customParts);
 
-        if (simulation.Units.BodyCount[colonist.Index] != 19 ||
+        if (simulation.Units.BodyCount[colonist.Index] != 10 ||
             simulation.Units.BodyCount[greenbob.Index] != 10 ||
             simulation.Units.BodyCount[segmented.Index] != 10 ||
             simulation.Units.BodyCount[custom.Index] != customParts.Length)
@@ -2276,10 +2297,10 @@ public static class CombatSelfTest
             rightThigh >= 0 &&
             MathF.Abs(
                 simulation.Bodies.WorldRotation[leftThigh] -
-                (MathF.PI - 0.58f + swing)) < 0.001f &&
+                (MathF.PI - 0.20f + swing)) < 0.001f &&
             MathF.Abs(
                 simulation.Bodies.WorldRotation[rightThigh] -
-                (-MathF.PI + 0.58f - swing)) < 0.001f;
+                (-MathF.PI + 0.20f - swing)) < 0.001f;
 
         if (!gaitCorrect)
             return false;
@@ -2338,7 +2359,7 @@ public static class CombatSelfTest
         float lyingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
-        if (MathF.Abs(lyingArmRotation) <= MathF.Abs(standingArmRotation) + 0.10f ||
+        if (MathF.Abs(lyingArmRotation - standingArmRotation) > 0.03f ||
             !BodyLinksConnected(simulation.Bodies, colonistHandle))
         {
             return false;
@@ -2398,7 +2419,8 @@ public static class CombatSelfTest
                     return false;
             }
             else if (role == BodyPartRole.Hand &&
-                     parentRole == BodyPartRole.Forearm)
+                     (parentRole == BodyPartRole.Forearm ||
+                      parentRole == BodyPartRole.UpperArm))
             {
                 Vector3 endpoint = parentPosition + Axis(
                     rotation,
