@@ -514,7 +514,7 @@ public sealed class UnitHitSystem
                 right,
                 new Vector3(width * 0.18f, length * 0.15f, height * 0.06f));
 
-            return MaxHitVolumeCount;
+            return 10;
         }
 
         if (posture == UnitPosture.Crouching)
@@ -610,7 +610,7 @@ public sealed class UnitHitSystem
             right,
             new Vector3(width * 0.22f, length * 0.18f, height * 0.08f));
 
-        return MaxHitVolumeCount;
+        return 10;
     }
 
     private static int BuildBodyVolumes(
