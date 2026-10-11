@@ -226,24 +226,13 @@ public sealed class UnitRenderSystem
                     hitVolumeBuffer,
                     simulation.Bodies);
 
-                float inspectionRadius = MathF.Max(
-                    markerRadius,
-                    9f / MathF.Max(0.001f, screenScale));
-
-                float inspectionScale = GetInspectionScale(
-                    hitVolumeBuffer,
-                    volumeCount,
-                    tilePixelSize,
-                    inspectionRadius,
-                    screenScale);
-
                 AppendUnitMarker(
                     _vertices,
                     _bodyOutlines,
                     _statusIcons,
                     screenX,
                     screenY,
-                    inspectionRadius,
+                    markerRadius,
                     headNormals[unitIndex],
                     units.FactionTag[unitIndex],
                     isAlive,
@@ -258,10 +247,7 @@ public sealed class UnitRenderSystem
                         _hitVolumeFills,
                         _bodyOutlines,
                         hitVolumeBuffer[volumeIndex],
-                        screenX,
-                        screenY,
                         tilePixelSize,
-                        inspectionScale,
                         screenScale);
                 }
 
@@ -269,12 +255,7 @@ public sealed class UnitRenderSystem
                     _bodyOutlines,
                     hitVolumeBuffer,
                     volumeCount,
-                    units.BodyNormal[unitIndex],
-                    screenX,
-                    screenY,
                     tilePixelSize,
-                    inspectionScale,
-                    inspectionRadius,
                     screenScale);
             }
             else
@@ -505,21 +486,8 @@ public void DrawSnapshot(
                         source.Center,
                         source.Forward,
                         source.Right,
-                        source.Radii,
-                        source.InspectionCenter,
-                        source.InspectionRotation);
+                        source.Radii);
                 }
-
-                float inspectionRadius = MathF.Max(
-                    markerRadius,
-                    9f / MathF.Max(0.001f, screenScale));
-
-                float inspectionScale = GetInspectionScale(
-                    snapshotHitVolumeBuffer,
-                    volumeCount,
-                    tilePixelSize,
-                    inspectionRadius,
-                    screenScale);
 
                 AppendUnitMarker(
                     _vertices,
@@ -527,7 +495,7 @@ public void DrawSnapshot(
                     _statusIcons,
                     x,
                     y,
-                    inspectionRadius,
+                    markerRadius,
                     unit.HeadNormal,
                     unit.FactionTag,
                     isAlive,
@@ -542,10 +510,7 @@ public void DrawSnapshot(
                         _hitVolumeFills,
                         _bodyOutlines,
                         snapshotHitVolumeBuffer[volumeIndex],
-                        x,
-                        y,
                         tilePixelSize,
-                        inspectionScale,
                         screenScale);
                 }
 
@@ -553,12 +518,7 @@ public void DrawSnapshot(
                     _bodyOutlines,
                     snapshotHitVolumeBuffer,
                     volumeCount,
-                    unit.BodyNormal,
-                    x,
-                    y,
                     tilePixelSize,
-                    inspectionScale,
-                    inspectionRadius,
                     screenScale);
             }
             else
@@ -631,91 +591,26 @@ public void DrawSnapshot(
             window.Draw(_aiDebug);
     }
 
-    private static float GetInspectionScale(
-        ReadOnlySpan<HitVolume> volumes,
-        int volumeCount,
-        float tilePixelSize,
-        float inspectionRadius,
-        float screenScale)
-    {
-        float maximumExtent = 0f;
-
-        for (int i = 0; i < volumeCount; i++)
-        {
-            ref readonly HitVolume volume = ref volumes[i];
-            float dx = volume.InspectionCenter.X;
-            float dy = volume.InspectionCenter.Y;
-            float distance = MathF.Sqrt(dx * dx + dy * dy);
-            float radius = MathF.Max(
-                MathF.Abs(volume.Radii.X),
-                MathF.Abs(volume.Radii.Y));
-
-            maximumExtent = MathF.Max(
-                maximumExtent,
-                distance + radius);
-        }
-
-        float sourceRadius = maximumExtent * tilePixelSize;
-        if (sourceRadius < 0.001f)
-            return 1f;
-
-        // A unit icon is an inspection view, not a second world coordinate
-        // system. Uniformly scale the real collision geometry to fit the disc.
-        // Centers, dimensions and orientations all come from UnitHitSystem.
-        float margin = 1.25f / MathF.Max(0.001f, screenScale);
-        float availableRadius = MathF.Max(
-            1f,
-            inspectionRadius - margin) * 0.76f;
-
-        return availableRadius / sourceRadius;
-    }
-
     private static void AppendHitVolume(
         VertexArray fills,
         VertexArray outlines,
         in HitVolume volume,
-        float unitX,
-        float unitY,
         float tilePixelSize,
-        float inspectionScale,
         float screenScale)
     {
-        // Magnify the actual collision volume relative to the unit root.
-        // Unlike the previous hand-authored layout, this preserves the rig's
-        // actual attachment points and the independent head/body normals.
-        // These coordinates belong to the inspection rig in UnitBodyCatalog.
-        // They are separate from world-space collision centers and form a
-        // parent-linked upright pose (head above torso, feet below).
-        float centerX = unitX +
-            volume.InspectionCenter.X * tilePixelSize * inspectionScale;
+        // Radii.X is measured along Right; Radii.Y along Forward.
+        // Ellipse local X follows Forward, so the two horizontal radii swap here.
+        float centerX = volume.Center.X * tilePixelSize;
+        float centerY = volume.Center.Y * tilePixelSize;
+        float radiusX = MathF.Abs(volume.Radii.Y) * tilePixelSize;
+        float radiusY = MathF.Abs(volume.Radii.X) * tilePixelSize;
+        float rotation = MathF.Atan2(volume.Forward.Y, volume.Forward.X);
 
-        float centerY = unitY +
-            volume.InspectionCenter.Y * tilePixelSize * inspectionScale;
+        int segments = MathF.Max(radiusX, radiusY) * screenScale >= 3f
+            ? 16
+            : 10;
 
-        float minimumRadius = 0.35f / MathF.Max(0.001f, screenScale);
-        float radiusX = MathF.Max(
-            minimumRadius,
-            MathF.Abs(volume.Radii.X) *
-            tilePixelSize *
-            inspectionScale);
-
-        float radiusY = MathF.Max(
-            minimumRadius,
-            MathF.Abs(volume.Radii.Y) *
-            tilePixelSize *
-            inspectionScale);
-
-        // Presentation orientation comes from the parent-linked inspection pose.
-        float rotation = volume.InspectionRotation;
-
-        float outlinePad = 0.5f / MathF.Max(0.001f, screenScale);
-        int segments = MathF.Max(radiusX, radiusY) *
-            screenScale >= 3f ? 16 : 10;
-
-        GetHitVolumeColors(
-            volume.Part,
-            out Color fill,
-            out Color outline);
+        GetHitVolumeColors(volume.Part, out Color fill, out Color outline);
 
         AppendEllipse(
             fills,
@@ -727,6 +622,9 @@ public void DrawSnapshot(
             fill,
             segments);
 
+        // The half-pixel pad improves outline visibility only; the filled
+        // ellipse remains the exact horizontal projection of the collision volume.
+        float outlinePad = 0.5f / MathF.Max(0.001f, screenScale);
         AppendEllipseOutline(
             outlines,
             centerX,
@@ -742,16 +640,9 @@ public void DrawSnapshot(
         VertexArray outlines,
         ReadOnlySpan<HitVolume> volumes,
         int volumeCount,
-        Vector3 bodyNormal,
-        float unitX,
-        float unitY,
         float tilePixelSize,
-        float inspectionScale,
-        float inspectionRadius,
         float screenScale)
     {
-        Vector3 bodyForward = NormalizeHorizontal(bodyNormal);
-        Vector3 bodyRight = new(-bodyForward.Y, bodyForward.X, 0f);
         int torsoIndex = -1;
         int headIndex = -1;
         float largestTorsoArea = -1f;
@@ -776,102 +667,75 @@ public void DrawSnapshot(
         }
 
         if (torsoIndex >= 0)
-        {
-            ref readonly HitVolume torso = ref volumes[torsoIndex];
-            AppendInspectionNormal(
-                outlines,
-                unitX + torso.InspectionCenter.X * tilePixelSize * inspectionScale,
-                unitY + torso.InspectionCenter.Y * tilePixelSize * inspectionScale,
-                ProjectNormalToBodyDiagram(torso.Forward, bodyForward, bodyRight),
-                MathF.Min(
-                    inspectionRadius * 0.23f,
-                    MathF.Max(
-                        3.5f / MathF.Max(0.001f, screenScale),
-                        MathF.Max(MathF.Abs(torso.Radii.X), MathF.Abs(torso.Radii.Y)) *
-                        tilePixelSize * inspectionScale)),
-                new Color(20, 68, 112, 255),
-                screenScale);
-        }
+            AppendHitVolumeDirection(outlines, volumes[torsoIndex], new Color(20, 68, 112, 255), tilePixelSize, screenScale);
 
         if (headIndex >= 0)
-        {
-            ref readonly HitVolume head = ref volumes[headIndex];
-            AppendInspectionNormal(
-                outlines,
-                unitX + head.InspectionCenter.X * tilePixelSize * inspectionScale,
-                unitY + head.InspectionCenter.Y * tilePixelSize * inspectionScale,
-                ProjectNormalToBodyDiagram(head.Forward, bodyForward, bodyRight),
-                MathF.Min(
-                    inspectionRadius * 0.18f,
-                    MathF.Max(
-                        2.5f / MathF.Max(0.001f, screenScale),
-                        MathF.Max(MathF.Abs(head.Radii.X), MathF.Abs(head.Radii.Y)) *
-                        tilePixelSize * inspectionScale)),
-                new Color(126, 72, 8, 255),
-                screenScale);
-        }
+            AppendHitVolumeDirection(outlines, volumes[headIndex], new Color(126, 72, 8, 255), tilePixelSize, screenScale);
     }
 
-    private static Vector3 ProjectNormalToBodyDiagram(
-        Vector3 normal,
-        Vector3 bodyForward,
-        Vector3 bodyRight)
+    private static void AppendHitVolumeDirection(
+        VertexArray outlines,
+        in HitVolume volume,
+        Color color,
+        float tilePixelSize,
+        float screenScale)
     {
-        normal = NormalizeHorizontal(normal);
-        return new Vector3(
-            Vector3.Dot(normal, bodyRight),
-            -Vector3.Dot(normal, bodyForward),
-            0f);
+        float radius = MathF.Max(
+            MathF.Abs(volume.Radii.X),
+            MathF.Abs(volume.Radii.Y));
+        float length = MathF.Max(
+            2.5f / MathF.Max(0.001f, screenScale),
+            radius * tilePixelSize * 0.9f);
+
+        AppendDirectionArrow(
+            outlines,
+            volume.Center.X * tilePixelSize,
+            volume.Center.Y * tilePixelSize,
+            volume.Forward,
+            length,
+            color,
+            screenScale);
     }
 
-    private static void AppendInspectionNormal(
+    private static void AppendDirectionArrow(
         VertexArray outlines,
         float startX,
         float startY,
-        Vector3 normal,
+        Vector3 direction,
         float length,
         Color color,
         float screenScale)
     {
-        normal.Z = 0f;
-        float normalLength = normal.LengthSquared();
-        if (normalLength < 0.000001f || length <= 0f)
+        direction.Z = 0f;
+        float directionLength = direction.LengthSquared();
+        if (directionLength < 0.000001f || length <= 0f)
             return;
 
-        normal /= MathF.Sqrt(normalLength);
-        float endX = startX + normal.X * length;
-        float endY = startY + normal.Y * length;
+        direction /= MathF.Sqrt(directionLength);
+        float endX = startX + direction.X * length;
+        float endY = startY + direction.Y * length;
 
-        AppendDebugLine(
-            outlines,
-            startX,
-            startY,
-            endX,
-            endY,
-            color);
+        AppendDebugLine(outlines, startX, startY, endX, endY, color);
 
         float arrowLength = MathF.Min(
             length * 0.42f,
             1.8f / MathF.Max(0.001f, screenScale));
-
-        float angle = MathF.Atan2(normal.Y, normal.X);
-        float leftAngle = angle + 2.55f;
-        float rightAngle = angle - 2.55f;
+        float angle = MathF.Atan2(direction.Y, direction.X);
 
         AppendDebugLine(
             outlines,
             endX,
             endY,
-            endX + MathF.Cos(leftAngle) * arrowLength,
-            endY + MathF.Sin(leftAngle) * arrowLength,
+            endX + MathF.Cos(angle + 2.55f) * arrowLength,
+            endY + MathF.Sin(angle + 2.55f) * arrowLength,
             color);
 
         AppendDebugLine(
             outlines,
             endX,
             endY,
-            endX + MathF.Cos(rightAngle) * arrowLength,
-            endY + MathF.Sin(rightAngle) * arrowLength,
+            endX + MathF.Cos(angle - 2.55f) * arrowLength,
+            endY + MathF.Sin(angle - 2.55f) * arrowLength,
             color);
     }
 

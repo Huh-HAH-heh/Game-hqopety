@@ -11,26 +11,18 @@ public readonly struct HitVolume
     public Vector3 Right { get; }
     public Vector3 Radii { get; }
 
-    // Canonical upright inspection pose. Collision tests never read these fields.
-    public Vector3 InspectionCenter { get; }
-    public float InspectionRotation { get; }
-
     public HitVolume(
         UnitHealthPartId part,
         Vector3 center,
         Vector3 forward,
         Vector3 right,
-        Vector3 radii,
-        Vector3 inspectionCenter = default,
-        float inspectionRotation = 0f)
+        Vector3 radii)
     {
         Part = part;
         Center = center;
         Forward = forward;
         Right = right;
         Radii = radii;
-        InspectionCenter = inspectionCenter;
-        InspectionRotation = inspectionRotation;
     }
 }
 
@@ -646,7 +638,6 @@ public sealed class UnitHitSystem
         Vector3[] positions = bodies.WorldPosition;
         Vector3[] scales = bodies.Scale;
         float[] rotations = bodies.WorldRotation;
-        int[] parents = bodies.Parent;
         BodyPartRole[] roles = bodies.Role;
         UnitType type = units.Type[unitIndex];
 
@@ -686,24 +677,6 @@ public sealed class UnitHitSystem
                 out float radiusZ);
 
             Vector3 position = positions[partIndex];
-            Vector3 inspectionCenter = bodies.InspectionPosition[partIndex];
-            float inspectionRotation = bodies.InspectionRotation[partIndex];
-
-            // Non-human creatures keep their actual top-down silhouette in the
-            // inspector. Colonists use the separate upright, parent-linked pose.
-            if (type != UnitType.Colonist)
-            {
-                Vector3 relative = position - rootPosition;
-                inspectionCenter = new Vector3(
-                    Vector3.Dot(relative, bodyRight),
-                    -Vector3.Dot(relative, bodyForward),
-                    0f);
-
-                inspectionRotation = MathF.Atan2(
-                    -Vector3.Dot(right, bodyForward),
-                    Vector3.Dot(right, bodyRight));
-            }
-
             volumes[offset] = new HitVolume(
                 partId,
                 new Vector3(position.X, position.Y, centerZ),
@@ -712,9 +685,7 @@ public sealed class UnitHitSystem
                 new Vector3(
                     MathF.Max(0.012f, MathF.Abs(scale.Y)),
                     MathF.Max(0.012f, MathF.Abs(scale.X)),
-                    MathF.Max(0.025f, radiusZ)),
-                inspectionCenter,
-                inspectionRotation);
+                    MathF.Max(0.025f, radiusZ)));
         }
 
         return count;
