@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Threading;
 using Core.Items;
 using Core.Combat;
 using Core.Map;
@@ -49,7 +51,7 @@ public sealed class GameRenderer
     private int _visibleMaxLayer;
     private bool _showVisionDebug;
     private bool _massCombatMode;
-    private bool _simulationPaused;
+    private volatile bool _simulationPaused;
     private bool _terrainStressMode;
     private bool _showCombatTracers = true;
     private bool _showCombatHud = true;
@@ -78,6 +80,11 @@ public sealed class GameRenderer
     private double _allocatedBytesPerSecond;
     private float _titleTimer;
     private string _windowTitle = "RimClone";
+    private Thread? _simulationThread;
+    private readonly ConcurrentQueue<Action> _simulationCommands = new();
+    private volatile bool _stopSimulationThread;
+    private volatile bool _simulationRunEnabled = true;
+    private SimulationFrameSnapshot? _latestSnapshot;
 
     public GameRenderer(
         WorldMap worldMap)
@@ -146,6 +153,9 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _worldMap);
 
+        if (_massCombatMode)
+            StartSimulationThread();
+
         Clock clock =
             new Clock();
 
@@ -167,6 +177,8 @@ public sealed class GameRenderer
             Draw();
         }
 
+        StopSimulationThread();
+
         // Release GPU resources while the graphics context still exists.
         _mapRenderer.Dispose();
         _projectileRenderer.Dispose();
@@ -180,7 +192,6 @@ public sealed class GameRenderer
         float deltaTime,
         float rawDeltaTime)
     {
-        _unitSimulation.BeginMetricsFrame();
         _input.Update();
 
         rawDeltaTime = MathF.Max(0f, rawDeltaTime);
@@ -199,7 +210,6 @@ public sealed class GameRenderer
         if (_perfTimer >= 1f)
         {
             float sampleSeconds = _perfTimer;
-
             _fps = _perfFrameTimeSum > 0f
                 ? _perfFrames / _perfFrameTimeSum
                 : 0f;
@@ -217,31 +227,26 @@ public sealed class GameRenderer
             _framesOver50Ms = 0;
             _perfTimer = 0f;
 
-            using Process process =
-                Process.GetCurrentProcess();
+            using Process process = Process.GetCurrentProcess();
+            _workingSetBytes = process.WorkingSet64;
+            _managedHeapBytes = GC.GetTotalMemory(false);
+            _allocatedBytes = GC.GetTotalAllocatedBytes(false);
+            _allocatedBytesPerSecond = Math.Max(
+                0L,
+                _allocatedBytes - _lastAllocatedBytesSample) / sampleSeconds;
+            _lastAllocatedBytesSample = _allocatedBytes;
 
-            _workingSetBytes =
-                process.WorkingSet64;
+            SimulationFrameSnapshot? snapshot = _simulationThread != null
+                ? Volatile.Read(ref _latestSnapshot)
+                : null;
 
-            _managedHeapBytes =
-                GC.GetTotalMemory(false);
-
-            _allocatedBytes =
-                GC.GetTotalAllocatedBytes(false);
-
-            _allocatedBytesPerSecond =
-                Math.Max(
-                    0L,
-                    _allocatedBytes - _lastAllocatedBytesSample) /
-                sampleSeconds;
-
-            _lastAllocatedBytesSample =
-                _allocatedBytes;
-
-            long totalShots = _unitSimulation.TotalShotsFired;
-            long totalRounds = _unitSimulation.TotalRoundsConsumed;
-            long totalProjectilesSpawned = _unitSimulation.TotalProjectilesSpawned;
-            long totalHits = _unitSimulation.Projectiles.TotalHits;
+            long totalShots = snapshot?.TotalShotsFired ?? _unitSimulation.TotalShotsFired;
+            long totalRounds = snapshot?.TotalRoundsConsumed ?? _unitSimulation.TotalRoundsConsumed;
+            long totalProjectilesSpawned = snapshot?.TotalProjectilesSpawned ?? _unitSimulation.TotalProjectilesSpawned;
+            long totalHits = snapshot?.TotalHits ?? _unitSimulation.Projectiles.TotalHits;
+            int activeUnits = snapshot?.UnitCount ?? _unitSimulation.Units.ActiveCount;
+            int activeProjectiles = snapshot?.ActiveProjectiles ?? _unitSimulation.Projectiles.ActiveCount;
+            int projectileCapacity = snapshot?.ProjectileCapacity ?? _unitSimulation.Projectiles.Capacity;
 
             long shotsDelta = Math.Max(0L, totalShots - _lastShotsSample);
             long roundsDelta = Math.Max(0L, totalRounds - _lastRoundsSample);
@@ -253,7 +258,7 @@ public sealed class GameRenderer
             double shotsPerSecond = shotsDelta / sampleSeconds;
             double roundsPerSecond = roundsDelta / sampleSeconds;
             double projectilesPerSecond = projectilesDelta / sampleSeconds;
-            _combatShotsPerSecond = shotsDelta / sampleSeconds;
+            _combatShotsPerSecond = shotsPerSecond;
             _combatHitEventsPerSecond = hitsDelta / sampleSeconds;
             _combatHitEventsPerRound = roundsDelta > 0
                 ? hitsDelta / (double)roundsDelta
@@ -264,14 +269,38 @@ public sealed class GameRenderer
             _lastProjectilesSpawnedSample = totalProjectilesSpawned;
             _lastHitsSample = totalHits;
 
-            string visionMetrics = _unitSimulation.VisionEnabled
-                ? $"{_unitSimulation.Vision.LastUpdateMilliseconds:0.0}ms " +
-                  $"{_unitSimulation.Vision.LastCandidatePairs:N0} pairs " +
-                  $"{_unitSimulation.Vision.LastTargetEvaluations:N0} targets " +
-                  $"{_unitSimulation.Vision.LastLineOfSightChecks:N0} LOS " +
-                  $"sampled={_unitSimulation.Vision.LastActiveCandidatesScanned:N0} " +
-                  $"cache={_unitSimulation.Vision.LastVisibilityMemoryEntriesScanned:N0}"
+            bool visionEnabled = snapshot?.VisionEnabled ?? _unitSimulation.VisionEnabled;
+            string visionMetrics = visionEnabled
+                ? snapshot != null
+                    ? $"{snapshot.VisionMs:0.0}ms {snapshot.VisionCandidatePairs:N0} pairs " +
+                      $"{snapshot.VisionTargetEvaluations:N0} targets {snapshot.VisionLineOfSightChecks:N0} LOS " +
+                      $"sampled={snapshot.VisionCandidatesScanned:N0} cache={snapshot.VisionMemoryEntriesScanned:N0}"
+                    : $"{_unitSimulation.Vision.LastUpdateMilliseconds:0.0}ms " +
+                      $"{_unitSimulation.Vision.LastCandidatePairs:N0} pairs " +
+                      $"{_unitSimulation.Vision.LastTargetEvaluations:N0} targets " +
+                      $"{_unitSimulation.Vision.LastLineOfSightChecks:N0} LOS " +
+                      $"sampled={_unitSimulation.Vision.LastActiveCandidatesScanned:N0} " +
+                      $"cache={_unitSimulation.Vision.LastVisibilityMemoryEntriesScanned:N0}"
                 : "OFF";
+
+            double simMs = snapshot?.SimulationMs ?? _unitSimulation.LastSimulationUpdateMilliseconds;
+            double aiMs = snapshot?.AiMs ?? _unitSimulation.LastAIUpdateMilliseconds;
+            double moveMs = snapshot?.MovementMs ?? _unitSimulation.LastMovementUpdateMilliseconds;
+            double weaponsMs = snapshot?.WeaponsMs ?? _unitSimulation.LastWeaponUpdateMilliseconds;
+            double ballisticsMs = snapshot?.BallisticsMs ?? _unitSimulation.LastProjectileUpdateMilliseconds;
+            double gridMs = snapshot?.ProjectileGridMs ?? _unitSimulation.LastProjectileGridBuildMilliseconds;
+            int pVisited = snapshot?.ProjectilesVisited ?? _unitSimulation.LastProjectilesVisited;
+            int traceCells = snapshot?.TerrainCellsTraced ?? _unitSimulation.LastProjectileTerrainCellsTraced;
+            int unitCandidates = snapshot?.ProjectileUnitCandidates ?? _unitSimulation.LastProjectileUnitCandidates;
+            double healthMs = snapshot?.HealthMs ?? _unitSimulation.LastHealthUpdateMilliseconds;
+            int routesBuilt = snapshot?.RoutesBuilt ?? _unitSimulation.Navigation.RoutesBuiltThisUpdate;
+            int routesFailed = snapshot?.RoutesFailed ?? _unitSimulation.Navigation.RoutesFailedThisUpdate;
+            int navSearches = snapshot?.NavigationSearches ?? _unitSimulation.Navigation.SearchesThisUpdate;
+            int navCells = snapshot?.NavigationCellsExpanded ?? _unitSimulation.Navigation.CellsExpandedThisUpdate;
+            double navMs = snapshot?.NavigationSearchMs ?? _unitSimulation.Navigation.SearchMillisecondsThisUpdate;
+            double navGridMs = snapshot?.NavigationGridMs ?? _unitSimulation.Navigation.NavigationGridBuildMilliseconds;
+            int routesReused = snapshot?.RoutesReused ?? _unitSimulation.Navigation.RoutesBuiltUsingPriorRoutesThisUpdate;
+            int routeTrafficCells = snapshot?.RouteTrafficCells ?? _unitSimulation.Navigation.RouteTrafficCellsConsideredThisUpdate;
 
             Console.WriteLine(
                 $"[PERF] FPS={_fps:0.0} " +
@@ -281,50 +310,29 @@ public sealed class GameRenderer
                 $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.00}MB/s " +
                 $"TotalAlloc={_allocatedBytes / 1024d / 1024d:0.0}MB " +
                 $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
-                $"Units={_unitSimulation.Units.ActiveCount} " +
-                $"SimPaused={_simulationPaused} " +
-                $"Sim={_unitSimulation.LastSimulationUpdateMilliseconds:0.0}ms " +
-                $"Vision={visionMetrics} " +
-                $"AI={_unitSimulation.LastAIUpdateMilliseconds:0.0}ms " +
-                $"Move={_unitSimulation.LastMovementUpdateMilliseconds:0.0}ms " +
-                $"Weapons={_unitSimulation.LastWeaponUpdateMilliseconds:0.0}ms " +
-                $"Ballistics={_unitSimulation.LastProjectileUpdateMilliseconds:0.0}ms " +
-                $"Grid={_unitSimulation.LastProjectileGridBuildMilliseconds:0.0}ms " +
-                $"P={_unitSimulation.LastProjectilesVisited} " +
-                $"TraceCells={_unitSimulation.LastProjectileTerrainCellsTraced} " +
-                $"UnitCandidates={_unitSimulation.LastProjectileUnitCandidates} " +
+                $"Units={activeUnits} SimPaused={_simulationPaused} Sim={simMs:0.0}ms " +
+                $"Vision={visionMetrics} AI={aiMs:0.0}ms Move={moveMs:0.0}ms " +
+                $"Weapons={weaponsMs:0.0}ms Ballistics={ballisticsMs:0.0}ms Grid={gridMs:0.0}ms " +
+                $"P={pVisited} TraceCells={traceCells} UnitCandidates={unitCandidates} " +
                 $"Shots/s={shotsPerSecond:0} Rounds/s={roundsPerSecond:0} " +
-                $"ProjectileSpawn/s={projectilesPerSecond:0} " +
-                $"HitEvents/s={_combatHitEventsPerSecond:0} " +
-                $"Events/Round={_combatHitEventsPerRound:0.00} TotalHitEvents={totalHits} " +
-                $"Health={_unitSimulation.LastHealthUpdateMilliseconds:0.0}ms " +
-                $"Nav={_unitSimulation.Navigation.RoutesBuiltThisUpdate} built/" +
-                    $"{_unitSimulation.Navigation.RoutesFailedThisUpdate} failed/" +
-                    $"{_unitSimulation.Navigation.SearchesThisUpdate} A*/" +
-                    $"{_unitSimulation.Navigation.CellsExpandedThisUpdate:N0} nodes/" +
-                    $"{_unitSimulation.Navigation.SearchMillisecondsThisUpdate:0.0}ms " +
-                $"NavGrid={_unitSimulation.Navigation.NavigationGridBuildMilliseconds:0.0}ms " +
-                $"RouteReuse={_unitSimulation.Navigation.RoutesBuiltUsingPriorRoutesThisUpdate}/" +
-                    $"{_unitSimulation.Navigation.RouteTrafficCellsConsideredThisUpdate:N0} " +
-                $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} " +
-                $"Chunks={_mapRenderer.TerrainChunkCacheCount} " +
-                $"LayerShader={_mapRenderer.UsesTerrainLayerShader} " +
-                $"VisibleV={_mapRenderer.TerrainVertexCount:N0} " +
-                $"CacheV={_mapRenderer.TerrainCachedVertexCount:N0} " +
-                $"ScratchV={_mapRenderer.TerrainScratchCapacity:N0} " +
-                $"VBO={_mapRenderer.UsesTerrainVertexBuffer} " +
-                $"LastChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
-                $"ChunkBuilds={_mapRenderer.TerrainMeshRebuildCount} " +
-                $"Projectiles={_unitSimulation.Projectiles.ActiveCount}/{_unitSimulation.Projectiles.Capacity}");
+                $"ProjectileSpawn/s={projectilesPerSecond:0} HitEvents/s={_combatHitEventsPerSecond:0} " +
+                $"Events/Round={_combatHitEventsPerRound:0.00} TotalHitEvents={totalHits} Health={healthMs:0.0}ms " +
+                $"Nav={routesBuilt} built/{routesFailed} failed/{navSearches} A*/{navCells:N0} nodes/{navMs:0.0}ms " +
+                $"NavGrid={navGridMs:0.0}ms RouteReuse={routesReused}/{routeTrafficCells:N0} " +
+                $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} Chunks={_mapRenderer.TerrainChunkCacheCount} " +
+                $"LayerShader={_mapRenderer.UsesTerrainLayerShader} VisibleV={_mapRenderer.TerrainVertexCount:N0} " +
+                $"CacheV={_mapRenderer.TerrainCachedVertexCount:N0} ScratchV={_mapRenderer.TerrainScratchCapacity:N0} " +
+                $"VBO={_mapRenderer.UsesTerrainVertexBuffer} LastChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
+                $"ChunkBuilds={_mapRenderer.TerrainMeshRebuildCount} Projectiles={activeProjectiles}/{projectileCapacity}");
         }
+
+        _simulationRunEnabled = _menuPage == GameMenuPage.Closed && !_simulationPaused;
 
         if (_menuPage == GameMenuPage.Closed)
         {
-            _camera.Update(
-                _input.MoveDirection,
-                deltaTime);
+            _camera.Update(_input.MoveDirection, deltaTime);
 
-            if (!_simulationPaused)
+            if (_simulationThread == null && !_simulationPaused)
             {
                 if (!_terrainStressMode && !_massCombatMode)
                 {
@@ -344,9 +352,8 @@ public sealed class GameRenderer
 
                 if (!_terrainStressMode)
                 {
-                    _unitSimulation.Update(
-                        _worldMap,
-                        deltaTime);
+                    _unitSimulation.BeginMetricsFrame();
+                    _unitSimulation.Update(_worldMap, deltaTime);
                 }
             }
         }
