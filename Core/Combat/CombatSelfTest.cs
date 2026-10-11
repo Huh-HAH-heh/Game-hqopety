@@ -44,6 +44,7 @@ public static class CombatSelfTest
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Combat: aim point uses an exposed hit volume", TestAimPointUsesExposedHitVolume, ref passed, ref failed);
+        RunTest("Anatomy: vision and hit volumes match every human posture", TestPostureCollisionVisionGeometry, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
@@ -1392,6 +1393,143 @@ public static class CombatSelfTest
         }
 
         return false;
+    }
+
+    private static bool TestPostureCollisionVisionGeometry()
+    {
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId unit = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10f, 10f, 0f),
+            Vector3.UnitX,
+            Vector3.UnitY);
+
+        UnitStore units = simulation.Units;
+        Span<HitVolume> volumes =
+            stackalloc HitVolume[UnitHitSystem.MaxHitVolumeCount];
+        Span<Vector3> visibilityPoints =
+            stackalloc Vector3[VisionSystem.VisibilityPointCount];
+        Span<Vector3> aimPoints =
+            stackalloc Vector3[UnitHitSystem.MaxAimPointCount];
+
+        UnitPosture[] postures =
+        {
+            UnitPosture.Standing,
+            UnitPosture.Crouching,
+            UnitPosture.Lying
+        };
+
+        float[] highestVisibilityPoints = new float[postures.Length];
+
+        for (int postureIndex = 0;
+             postureIndex < postures.Length;
+             postureIndex++)
+        {
+            simulation.SetPosture(unit, postures[postureIndex]);
+
+            int volumeCount = UnitHitSystem.BuildVolumes(
+                units,
+                unit.Index,
+                volumes);
+
+            if (volumeCount != UnitHitSystem.MaxHitVolumeCount)
+                return false;
+
+            Vector3 source =
+                units.Position[unit.Index] +
+                new Vector3(-5f, 0f, units.Height[unit.Index] * 2f);
+
+            int visibilityCount = simulation.Vision.GetVisibilityPoints(
+                units,
+                unit.Index,
+                source,
+                visibilityPoints);
+
+            if (visibilityCount != volumeCount)
+                return false;
+
+            int aimCount = UnitHitSystem.GetAimPoints(
+                units,
+                unit.Index,
+                source,
+                aimPoints);
+
+            for (int i = 0; i < volumeCount; i++)
+            {
+                if (!PointInsideHitVolume(visibilityPoints[i], volumes[i]))
+                    return false;
+
+                highestVisibilityPoints[postureIndex] =
+                    MathF.Max(
+                        highestVisibilityPoints[postureIndex],
+                        visibilityPoints[i].Z);
+
+                if (volumes[i].Part == UnitHealthPartId.Head)
+                {
+                    Vector3 eye = simulation.Vision.GetEyePosition(
+                        units,
+                        unit.Index);
+
+                    if (!PointInsideHitVolume(eye, volumes[i]))
+                        return false;
+
+                    Vector3 headOffset =
+                        volumes[i].Center - units.Position[unit.Index];
+
+                    // Head is anchored forward on the body; its independent
+                    // facing vector may turn without moving its hitbox sideways.
+                    if (Vector3.Dot(headOffset, units.BodyNormal[unit.Index]) < 0.20f ||
+                        MathF.Abs(Vector3.Dot(headOffset, units.HeadNormal[unit.Index])) > 0.01f)
+                        return false;
+                }
+
+                if (volumes[i].Part == UnitHealthPartId.LeftFoot ||
+                    volumes[i].Part == UnitHealthPartId.RightFoot)
+                {
+                    Vector3 footOffset =
+                        volumes[i].Center - units.Position[unit.Index];
+
+                    if (Vector3.Dot(footOffset, units.BodyNormal[unit.Index]) >= 0f)
+                        return false;
+                }
+            }
+
+            for (int i = 0; i < aimCount; i++)
+            {
+                bool insideAnyVolume = false;
+
+                for (int volumeIndex = 0; volumeIndex < volumeCount; volumeIndex++)
+                {
+                    if (!PointInsideHitVolume(aimPoints[i], volumes[volumeIndex]))
+                        continue;
+
+                    insideAnyVolume = true;
+                    break;
+                }
+
+                if (!insideAnyVolume)
+                    return false;
+            }
+        }
+
+        return highestVisibilityPoints[0] > highestVisibilityPoints[1] + 0.1f &&
+               highestVisibilityPoints[1] > highestVisibilityPoints[2] + 0.1f;
+    }
+
+    private static bool PointInsideHitVolume(
+        Vector3 point,
+        in HitVolume volume)
+    {
+        float rx = MathF.Max(0.001f, volume.Radii.X);
+        float ry = MathF.Max(0.001f, volume.Radii.Y);
+        float rz = MathF.Max(0.001f, volume.Radii.Z);
+        Vector3 delta = point - volume.Center;
+
+        float x = Vector3.Dot(delta, volume.Right) / rx;
+        float y = Vector3.Dot(delta, volume.Forward) / ry;
+        float z = delta.Z / rz;
+
+        return x * x + y * y + z * z <= 1.0001f;
     }
 
     private static bool TestVisionSampleMemory()
