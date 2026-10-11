@@ -54,29 +54,54 @@ public sealed class UnitHitSystem
         UnitStore units,
         int unitIndex)
     {
-        Span<HitVolume> volumes =
-            stackalloc HitVolume[MaxHitVolumeCount];
+        Vector3 position = units.Position[unitIndex];
+        float height = MathF.Max(0.05f, units.Height[unitIndex]);
 
-        int count = BuildVolumes(
-            units,
-            unitIndex,
-            volumes);
-
-        for (int i = 0; i < count; i++)
+        if (units.Type[unitIndex] != UnitType.Colonist)
         {
-            if (volumes[i].Part != UnitHealthPartId.Head)
-                continue;
-
-            return volumes[i].Center +
+            return position +
                 new Vector3(
                     0f,
                     0f,
-                    volumes[i].Radii.Z * 0.35f);
+                    height * 0.675f);
         }
 
-        return count > 0
-            ? volumes[0].Center
-            : units.Position[unitIndex];
+        Vector3 forward = NormalizeHorizontal(units.BodyNormal[unitIndex]);
+        float width = MathF.Max(0.05f, units.Width[unitIndex]);
+        float length = MathF.Max(0.05f, units.Length[unitIndex]);
+        float headRadius = MathF.Min(width, length) * 0.32f;
+
+        Vector3 headCenter = GetHeadCenter(
+            position,
+            forward,
+            length,
+            height,
+            units.Posture[unitIndex]);
+
+        return headCenter +
+            new Vector3(
+                0f,
+                0f,
+                headRadius * 1.1f * 0.35f);
+    }
+
+    private static Vector3 GetHeadCenter(
+        Vector3 position,
+        Vector3 bodyForward,
+        float length,
+        float height,
+        UnitPosture posture)
+    {
+        float headHeight = posture switch
+        {
+            UnitPosture.Lying => height * 0.30f,
+            UnitPosture.Crouching => height * 0.88f * 0.62f,
+            _ => height * 0.88f
+        };
+
+        return position +
+            bodyForward * (length * 0.53f) +
+            new Vector3(0f, 0f, headHeight);
     }
 
     public static int GetVisibilityPoints(
@@ -348,8 +373,12 @@ public sealed class UnitHitSystem
             // it does not make the head orbit around the pawn.
             volumes[1] = new HitVolume(
                 UnitHealthPartId.Head,
-                position + forward * (length * 0.53f) +
-                new Vector3(0f, 0f, height * 0.30f),
+                GetHeadCenter(
+                    position,
+                    forward,
+                    length,
+                    height,
+                    UnitPosture.Lying),
                 headForward,
                 headRight,
                 new Vector3(headRadius, headRadius, headRadius * 1.1f));
@@ -441,8 +470,12 @@ public sealed class UnitHitSystem
 
         volumes[1] = new HitVolume(
             UnitHealthPartId.Head,
-            position + forward * (length * 0.53f) +
-            new Vector3(0f, 0f, height * 0.88f),
+            GetHeadCenter(
+                position,
+                forward,
+                length,
+                height,
+                posture),
             headForward,
             headRight,
             new Vector3(headRadius, headRadius, headRadius * 1.1f));
