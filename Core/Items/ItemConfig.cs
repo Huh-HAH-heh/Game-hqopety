@@ -87,12 +87,23 @@ public enum UnitWeaponSlot : byte
 
         public ArmorLayer Layer;
         public float WorldRenderPadding = 0.075f;
+
+        // Powered frames improve movement while the equipped item has durability.
+        public float MovementSpeedMultiplier = 1f;
     }
 
     public enum WeaponType { Melee, Ranged }
 
+    public enum WeaponTechnology : byte
+    {
+        KineticRepeater,
+        Laser,
+        Railgun
+    }
+
     public abstract class WeaponConfig : ItemConfig
     {
+        public WeaponTechnology Technology = WeaponTechnology.KineticRepeater;
         public float WorldRenderLength = 0.55f;
         public float WorldRenderWidth = 0.065f;
         public WeaponType Type;
