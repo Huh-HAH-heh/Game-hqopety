@@ -253,7 +253,6 @@ public sealed class UnitRenderSystem
                         _hitVolumeFills,
                         _bodyOutlines,
                         hitVolumeBuffer[volumeIndex],
-                        volumeIndex,
                         screenX,
                         screenY,
                         inspectionRadius,
@@ -506,7 +505,6 @@ public void DrawSnapshot(
                             volume.Forward,
                             volume.Right,
                             volume.Radii),
-                        volumeIndex,
                         x,
                         y,
                         inspectionRadius,
@@ -587,119 +585,84 @@ public void DrawSnapshot(
         VertexArray fills,
         VertexArray outlines,
         in HitVolume volume,
-        int shapeIndex,
         float unitX,
         float unitY,
         float circleRadius,
         float screenScale)
     {
-        // Compact upright diagram. All coordinates are fractions of the
-        // white marker radius; every part stays comfortably inside that disc.
-        float side;
+        // Layout by the actual collision-part enum, not by array index.
+        // GetHitVolumes currently returns 10 zones: torso, head, arms/hands,
+        // legs/feet. Their order is defined in UnitHitSystem.BuildVolumes.
         float offsetX;
         float offsetY;
         float radiusX;
         float radiusY;
         float rotation = 0f;
 
-        switch (shapeIndex)
+        switch (volume.Part)
         {
-            case 0: // Torso
-                offsetX = 0f; offsetY = 0.02f;
-                radiusX = 0.22f; radiusY = 0.25f;
+            case UnitHealthPartId.Head:
+                offsetX = 0f; offsetY = -0.51f;
+                radiusX = 0.13f; radiusY = 0.13f;
                 break;
-            case 1: // Neck
-                offsetX = 0f; offsetY = -0.29f;
-                radiusX = 0.065f; radiusY = 0.065f;
-                break;
-            case 2: // Head
-                offsetX = 0f; offsetY = -0.52f;
-                radiusX = 0.14f; radiusY = 0.14f;
-                break;
-            case 3: // Upper arm, right
-                offsetX = 0.22f; offsetY = -0.17f;
-                radiusX = 0.12f; radiusY = 0.065f;
-                rotation = 0.28f;
-                break;
-            case 4: // Elbow, right
-                offsetX = 0.31f; offsetY = -0.015f;
-                radiusX = 0.06f; radiusY = 0.06f;
-                break;
-            case 5: // Forearm, right
-                offsetX = 0.31f; offsetY = 0.105f;
-                radiusX = 0.12f; radiusY = 0.055f;
-                rotation = -0.15f;
-                break;
-            case 6: // Hand, right
-                offsetX = 0.28f; offsetY = 0.225f;
-                radiusX = 0.065f; radiusY = 0.055f;
-                break;
-            case 7: // Upper arm, left
-                offsetX = -0.22f; offsetY = -0.17f;
-                radiusX = 0.12f; radiusY = 0.065f;
-                rotation = -0.28f;
-                break;
-            case 8: // Elbow, left
-                offsetX = -0.31f; offsetY = -0.015f;
-                radiusX = 0.06f; radiusY = 0.06f;
-                break;
-            case 9: // Forearm, left
-                offsetX = -0.31f; offsetY = 0.105f;
-                radiusX = 0.12f; radiusY = 0.055f;
-                rotation = 0.15f;
-                break;
-            case 10: // Hand, left
-                offsetX = -0.28f; offsetY = 0.225f;
-                radiusX = 0.065f; radiusY = 0.055f;
-                break;
-            case 11: // Thigh, right
-                offsetX = 0.115f; offsetY = 0.30f;
-                radiusX = 0.075f; radiusY = 0.11f;
-                rotation = -0.08f;
-                break;
-            case 12: // Knee, right
-                offsetX = 0.12f; offsetY = 0.42f;
-                radiusX = 0.055f; radiusY = 0.055f;
-                break;
-            case 13: // Shin, right
-                offsetX = 0.13f; offsetY = 0.535f;
-                radiusX = 0.055f; radiusY = 0.12f;
-                rotation = -0.035f;
-                break;
-            case 14: // Foot, right
-                offsetX = 0.145f; offsetY = 0.66f;
-                radiusX = 0.08f; radiusY = 0.045f;
-                break;
-            case 15: // Thigh, left
-                offsetX = -0.115f; offsetY = 0.30f;
-                radiusX = 0.075f; radiusY = 0.11f;
-                rotation = 0.08f;
-                break;
-            case 16: // Knee, left
-                offsetX = -0.12f; offsetY = 0.42f;
-                radiusX = 0.055f; radiusY = 0.055f;
-                break;
-            case 17: // Shin, left
-                offsetX = -0.13f; offsetY = 0.535f;
-                radiusX = 0.055f; radiusY = 0.12f;
-                rotation = 0.035f;
-                break;
-            case 18: // Foot, left
-                offsetX = -0.145f; offsetY = 0.66f;
-                radiusX = 0.08f; radiusY = 0.045f;
-                break;
-            default: // Non-human whole-body collider
-                offsetX = 0f; offsetY = 0f;
-                radiusX = 0.31f; radiusY = 0.25f;
-                break;
-        }
 
-        // For a single whole-body collider, use a compact central oval.
-        if (volume.Part == UnitHealthPartId.WholeBody)
-        {
-            offsetX = 0f; offsetY = 0.02f;
-            radiusX = 0.30f; radiusY = 0.22f;
-            rotation = 0f;
+            case UnitHealthPartId.Torso:
+                offsetX = 0f; offsetY = 0.015f;
+                radiusX = 0.20f; radiusY = 0.245f;
+                break;
+
+            case UnitHealthPartId.LeftArm:
+                offsetX = -0.205f; offsetY = -0.105f;
+                radiusX = 0.065f; radiusY = 0.145f;
+                rotation = -0.10f;
+                break;
+
+            case UnitHealthPartId.RightArm:
+                offsetX = 0.205f; offsetY = -0.105f;
+                radiusX = 0.065f; radiusY = 0.145f;
+                rotation = 0.10f;
+                break;
+
+            case UnitHealthPartId.LeftHand:
+                offsetX = -0.245f; offsetY = 0.065f;
+                radiusX = 0.052f; radiusY = 0.06f;
+                break;
+
+            case UnitHealthPartId.RightHand:
+                offsetX = 0.245f; offsetY = 0.065f;
+                radiusX = 0.052f; radiusY = 0.06f;
+                break;
+
+            case UnitHealthPartId.LeftLeg:
+                offsetX = -0.105f; offsetY = 0.315f;
+                radiusX = 0.068f; radiusY = 0.155f;
+                rotation = -0.025f;
+                break;
+
+            case UnitHealthPartId.RightLeg:
+                offsetX = 0.105f; offsetY = 0.315f;
+                radiusX = 0.068f; radiusY = 0.155f;
+                rotation = 0.025f;
+                break;
+
+            case UnitHealthPartId.LeftFoot:
+                offsetX = -0.13f; offsetY = 0.555f;
+                radiusX = 0.082f; radiusY = 0.043f;
+                rotation = -0.06f;
+                break;
+
+            case UnitHealthPartId.RightFoot:
+                offsetX = 0.13f; offsetY = 0.555f;
+                radiusX = 0.082f; radiusY = 0.043f;
+                rotation = 0.06f;
+                break;
+
+            case UnitHealthPartId.WholeBody:
+            default:
+                offsetX = 0f; offsetY = 0.02f;
+                radiusX = 0.30f; radiusY = 0.22f;
+                rotation = 0f;
+                break;
         }
 
         float centerX = unitX + offsetX * circleRadius;
