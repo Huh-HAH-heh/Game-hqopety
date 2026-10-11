@@ -1354,9 +1354,8 @@ private static void AppendSelection(
         position.Y + extent >= minY &&
         position.Y - extent <= maxY;
 
-;
 
-private static Color Shade(Color color, float amount) =>
+    private static Color Shade(Color color, float amount) =>
         new Color(
             (byte)Math.Clamp((int)(color.R * amount), 0, 255),
             (byte)Math.Clamp((int)(color.G * amount), 0, 255),
