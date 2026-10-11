@@ -949,13 +949,14 @@ private static void AppendSuppressionDebug(
                 continue;
             }
 
-            simulation.Vision.GetVisibilityPoints(
+            int pointCount = simulation.Vision.GetVisibilityPoints(
                 units,
                 targetIndex,
+                observerEye,
                 points);
 
             for (int pointIndex = 0;
-                 pointIndex < points.Length;
+                 pointIndex < pointCount;
                  pointIndex++)
             {
                 Vector3 point =
