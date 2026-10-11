@@ -1,5 +1,7 @@
 using System;
 using System.Numerics;
+using System.Collections.Generic;
+using Core.Items;
 using Core.Unit;
 
 namespace RimClone.Render;
@@ -12,6 +14,8 @@ public readonly record struct RenderUnitState(
     float HitPoints,
     ushort FactionTag,
     UnitAiState AiState);
+
+public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
 public readonly record struct RenderProjectileTrace(
     Vector3 Start,
@@ -33,6 +37,7 @@ public sealed class SimulationFrameSnapshot
 {
     public RenderUnitState[] Units { get; init; } = Array.Empty<RenderUnitState>();
     public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
+    public RenderAimRing[] AimRings { get; init; } = Array.Empty<RenderAimRing>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
 
     public int UnitCount => Units.Length;
@@ -152,6 +157,66 @@ public sealed class SimulationFrameSnapshot
             }
         }
 
+        List<RenderAimRing> aimRings = new(Math.Min(active.Length, 128));
+        bool[] targetDrawn = new bool[units.Capacity];
+        UnitInventoryStore inventory = simulation.Inventory;
+        UnitWeaponStore weaponStates = simulation.Weapons;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int shooterIndex = active[i];
+            for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+            {
+                UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+                int stateIndex = UnitWeaponStore.GetIndex(shooterIndex, weaponSlot);
+
+                if (!weaponStates.AimIndicatorActive[stateIndex] ||
+                    weaponStates.AimTimer[stateIndex] <= 0f)
+                {
+                    continue;
+                }
+
+                UnitId targetId = weaponStates.AimTarget[stateIndex];
+                if (!units.TryGetIndex(targetId, out int targetIndex) ||
+                    targetDrawn[targetIndex] ||
+                    hitPoints[targetIndex] <= 0f)
+                {
+                    continue;
+                }
+
+                short inventorySlot = inventory.GetWeaponEquipment(shooterIndex, weaponSlot);
+                if (inventorySlot < 0 ||
+                    inventory.GetItem(shooterIndex, inventorySlot) is not RangedWeaponConfig weapon)
+                {
+                    continue;
+                }
+
+                Vector3 aimPoint = weaponStates.AimPoint[stateIndex];
+                if (aimPoint == Vector3.Zero)
+                    continue;
+
+                Vector3 shooterPosition = positions[shooterIndex];
+                float dx = aimPoint.X - shooterPosition.X;
+                float dy = aimPoint.Y - shooterPosition.Y;
+                float distance = MathF.Sqrt(dx * dx + dy * dy);
+                float duration = UnitWeaponSystem.GetAimDuration(
+                    weapon,
+                    weaponStates.CurrentAimMode[stateIndex],
+                    distance);
+                if (duration <= 0f)
+                    continue;
+
+                float progress = Math.Clamp(
+                    weaponStates.AimTimer[stateIndex] / duration,
+                    0f,
+                    1f);
+
+                aimRings.Add(new RenderAimRing(aimPoint, progress));
+                targetDrawn[targetIndex] = true;
+                break;
+            }
+        }
+
         ProjectileStore projectiles = simulation.Projectiles;
         Vector3[] traceStarts = projectiles.TraceStarts;
         Vector3[] traceEnds = projectiles.TraceEnds;
@@ -214,6 +279,7 @@ public sealed class SimulationFrameSnapshot
         {
             Units = unitStates,
             Traces = traces,
+            AimRings = aimRings.ToArray(),
             Impacts = impacts,
             ActiveProjectiles = projectiles.ActiveCount,
             ProjectileCapacity = projectiles.Capacity,
