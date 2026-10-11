@@ -769,6 +769,8 @@ public void DrawSnapshot(
         float inspectionRadius,
         float screenScale)
     {
+        Vector3 bodyForward = NormalizeHorizontal(bodyNormal);
+        Vector3 bodyRight = new(-bodyForward.Y, bodyForward.X, 0f);
         int torsoIndex = -1;
         int headIndex = -1;
         float largestTorsoArea = -1f;
@@ -795,10 +797,11 @@ public void DrawSnapshot(
         if (torsoIndex >= 0)
         {
             ref readonly HitVolume torso = ref volumes[torsoIndex];
+            Vector3 torsoDelta = torso.Center - unitPosition;
             AppendInspectionNormal(
                 outlines,
-                unitX + (torso.Center.X - unitPosition.X) * tilePixelSize * inspectionScale,
-                unitY + (torso.Center.Y - unitPosition.Y) * tilePixelSize * inspectionScale,
+                unitX + Vector3.Dot(torsoDelta, bodyRight) * tilePixelSize * inspectionScale,
+                unitY - Vector3.Dot(torsoDelta, bodyForward) * tilePixelSize * inspectionScale,
                 ProjectNormalToBodyDiagram(torso.Forward, bodyForward, bodyRight),
                 MathF.Min(
                     inspectionRadius * 0.23f,
@@ -813,10 +816,11 @@ public void DrawSnapshot(
         if (headIndex >= 0)
         {
             ref readonly HitVolume head = ref volumes[headIndex];
+            Vector3 headDelta = head.Center - unitPosition;
             AppendInspectionNormal(
                 outlines,
-                unitX + (head.Center.X - unitPosition.X) * tilePixelSize * inspectionScale,
-                unitY + (head.Center.Y - unitPosition.Y) * tilePixelSize * inspectionScale,
+                unitX + Vector3.Dot(headDelta, bodyRight) * tilePixelSize * inspectionScale,
+                unitY - Vector3.Dot(headDelta, bodyForward) * tilePixelSize * inspectionScale,
                 ProjectNormalToBodyDiagram(head.Forward, bodyForward, bodyRight),
                 MathF.Min(
                     inspectionRadius * 0.18f,
