@@ -1,0 +1,264 @@
+using System;
+using System.Numerics;
+using Core.Unit;
+
+namespace RimClone.Render;
+
+public readonly record struct RenderUnitState(
+    int Index,
+    Vector3 Position,
+    float Width,
+    float Length,
+    float HitPoints,
+    ushort FactionTag,
+    UnitAiState AiState);
+
+public readonly record struct RenderProjectileTrace(
+    Vector3 Start,
+    Vector3 End,
+    ushort Faction,
+    bool IsLaser,
+    float Lifetime);
+
+public readonly record struct RenderProjectileImpact(
+    Vector3 Position,
+    float Lifetime,
+    ProjectileImpactKind Kind);
+
+/// <summary>
+/// Immutable data published by the simulation thread and consumed by the renderer.
+/// No mutable simulation-store arrays escape this object.
+/// </summary>
+public sealed class SimulationFrameSnapshot
+{
+    public RenderUnitState[] Units { get; init; } = Array.Empty<RenderUnitState>();
+    public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
+    public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
+
+    public int UnitCount => Units.Length;
+    public int ActiveProjectiles { get; init; }
+    public int ProjectileCapacity { get; init; }
+    public long TotalShotsFired { get; init; }
+    public long TotalRoundsConsumed { get; init; }
+    public long TotalProjectilesSpawned { get; init; }
+    public long TotalHits { get; init; }
+    public string LastHitPart { get; init; } = "None";
+
+    public bool AiEnabled { get; init; }
+    public bool VisionEnabled { get; init; }
+    public int BlueAlive { get; init; }
+    public int BlueDead { get; init; }
+    public int RedAlive { get; init; }
+    public int RedDead { get; init; }
+    public int AttackCount { get; init; }
+    public int SearchCount { get; init; }
+    public int CoverCount { get; init; }
+    public int IdleCount { get; init; }
+    public int DeadCount { get; init; }
+    public int SuppressedCount { get; init; }
+    public int PanickedCount { get; init; }
+
+    public double SimulationMs { get; init; }
+    public double VisionMs { get; init; }
+    public long VisionCandidatePairs { get; init; }
+    public long VisionTargetEvaluations { get; init; }
+    public long VisionLineOfSightChecks { get; init; }
+    public long VisionCandidatesScanned { get; init; }
+    public long VisionMemoryEntriesScanned { get; init; }
+    public double AiMs { get; init; }
+    public double MovementMs { get; init; }
+    public double WeaponsMs { get; init; }
+    public double BallisticsMs { get; init; }
+    public double ProjectileGridMs { get; init; }
+    public int ProjectilesVisited { get; init; }
+    public int TerrainCellsTraced { get; init; }
+    public int ProjectileUnitCandidates { get; init; }
+    public double HealthMs { get; init; }
+    public int RoutesBuilt { get; init; }
+    public int RoutesFailed { get; init; }
+    public int NavigationSearches { get; init; }
+    public int NavigationCellsExpanded { get; init; }
+    public double NavigationSearchMs { get; init; }
+    public double NavigationGridMs { get; init; }
+    public int RoutesReused { get; init; }
+    public int RouteTrafficCells { get; init; }
+
+    public static SimulationFrameSnapshot Capture(UnitSimulation simulation)
+    {
+        UnitStore units = simulation.Units;
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        RenderUnitState[] unitStates = new RenderUnitState[active.Length];
+
+        int blueAlive = 0;
+        int blueDead = 0;
+        int redAlive = 0;
+        int redDead = 0;
+        int attack = 0;
+        int search = 0;
+        int cover = 0;
+        int idle = 0;
+        int dead = 0;
+        int suppressed = 0;
+        int panicked = 0;
+
+        float[] hitPoints = simulation.Health.OverallHitPoints;
+        ushort[] factions = units.FactionTag;
+        Vector3[] positions = units.Position;
+        float[] widths = units.Width;
+        float[] lengths = units.Length;
+        UnitAiState[] aiStates = simulation.AI.Store.State;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int index = active[i];
+            float hp = hitPoints[index];
+            ushort faction = factions[index];
+            UnitAiState aiState = aiStates[index];
+
+            unitStates[i] = new RenderUnitState(
+                index,
+                positions[index],
+                widths[index],
+                lengths[index],
+                hp,
+                faction,
+                aiState);
+
+            bool alive = hp > 0f;
+            if (faction == 1)
+            {
+                if (alive) blueAlive++;
+                else blueDead++;
+            }
+            else if (faction == 2)
+            {
+                if (alive) redAlive++;
+                else redDead++;
+            }
+
+            switch (aiState)
+            {
+                case UnitAiState.Attack: attack++; break;
+                case UnitAiState.Search: search++; break;
+                case UnitAiState.SeekCover: cover++; break;
+                case UnitAiState.Dead: dead++; break;
+                default: idle++; break;
+            }
+
+            switch (simulation.Suppression.GetState(index))
+            {
+                case UnitSuppressionState.Suppressed: suppressed++; break;
+                case UnitSuppressionState.Panicked: panicked++; break;
+            }
+        }
+
+        ProjectileStore projectiles = simulation.Projectiles;
+        Vector3[] traceStarts = projectiles.TraceStarts;
+        Vector3[] traceEnds = projectiles.TraceEnds;
+        ushort[] traceFactions = projectiles.TraceFactions;
+        bool[] traceLasers = projectiles.TraceLasers;
+        float[] traceLifetimes = projectiles.TraceLifetimes;
+
+        int traceCount = 0;
+        for (int i = 0; i < projectiles.TraceCapacityCount; i++)
+        {
+            if (traceLifetimes[i] > 0f)
+                traceCount++;
+        }
+
+        RenderProjectileTrace[] traces = new RenderProjectileTrace[traceCount];
+        int traceWrite = 0;
+        for (int i = 0; i < projectiles.TraceCapacityCount; i++)
+        {
+            float lifetime = traceLifetimes[i];
+            if (lifetime <= 0f)
+                continue;
+
+            traces[traceWrite++] = new RenderProjectileTrace(
+                traceStarts[i],
+                traceEnds[i],
+                traceFactions[i],
+                traceLasers[i],
+                lifetime);
+        }
+
+        Vector3[] impactPositions = projectiles.ImpactPositions;
+        float[] impactLifetimes = projectiles.ImpactLifetimes;
+        ProjectileImpactKind[] impactKinds = projectiles.ImpactKinds;
+
+        int impactCount = 0;
+        for (int i = 0; i < projectiles.ImpactCapacityCount; i++)
+        {
+            if (impactLifetimes[i] > 0f)
+                impactCount++;
+        }
+
+        RenderProjectileImpact[] impacts = new RenderProjectileImpact[impactCount];
+        int impactWrite = 0;
+        for (int i = 0; i < projectiles.ImpactCapacityCount; i++)
+        {
+            float lifetime = impactLifetimes[i];
+            if (lifetime <= 0f)
+                continue;
+
+            impacts[impactWrite++] = new RenderProjectileImpact(
+                impactPositions[i],
+                lifetime,
+                impactKinds[i]);
+        }
+
+        VisionSystem vision = simulation.Vision;
+        UnitNavigationSystem navigation = simulation.Navigation;
+
+        return new SimulationFrameSnapshot
+        {
+            Units = unitStates,
+            Traces = traces,
+            Impacts = impacts,
+            ActiveProjectiles = projectiles.ActiveCount,
+            ProjectileCapacity = projectiles.Capacity,
+            TotalShotsFired = simulation.TotalShotsFired,
+            TotalRoundsConsumed = simulation.TotalRoundsConsumed,
+            TotalProjectilesSpawned = simulation.TotalProjectilesSpawned,
+            TotalHits = projectiles.TotalHits,
+            LastHitPart = projectiles.LastHitPart.ToString(),
+            AiEnabled = simulation.AI.Enabled,
+            VisionEnabled = simulation.VisionEnabled,
+            BlueAlive = blueAlive,
+            BlueDead = blueDead,
+            RedAlive = redAlive,
+            RedDead = redDead,
+            AttackCount = attack,
+            SearchCount = search,
+            CoverCount = cover,
+            IdleCount = idle,
+            DeadCount = dead,
+            SuppressedCount = suppressed,
+            PanickedCount = panicked,
+            SimulationMs = simulation.LastSimulationUpdateMilliseconds,
+            VisionMs = vision.LastUpdateMilliseconds,
+            VisionCandidatePairs = vision.LastCandidatePairs,
+            VisionTargetEvaluations = vision.LastTargetEvaluations,
+            VisionLineOfSightChecks = vision.LastLineOfSightChecks,
+            VisionCandidatesScanned = vision.LastActiveCandidatesScanned,
+            VisionMemoryEntriesScanned = vision.LastVisibilityMemoryEntriesScanned,
+            AiMs = simulation.LastAIUpdateMilliseconds,
+            MovementMs = simulation.LastMovementUpdateMilliseconds,
+            WeaponsMs = simulation.LastWeaponUpdateMilliseconds,
+            BallisticsMs = simulation.LastProjectileUpdateMilliseconds,
+            ProjectileGridMs = simulation.LastProjectileGridBuildMilliseconds,
+            ProjectilesVisited = simulation.LastProjectilesVisited,
+            TerrainCellsTraced = simulation.LastProjectileTerrainCellsTraced,
+            ProjectileUnitCandidates = simulation.LastProjectileUnitCandidates,
+            HealthMs = simulation.LastHealthUpdateMilliseconds,
+            RoutesBuilt = navigation.RoutesBuiltThisUpdate,
+            RoutesFailed = navigation.RoutesFailedThisUpdate,
+            NavigationSearches = navigation.SearchesThisUpdate,
+            NavigationCellsExpanded = navigation.CellsExpandedThisUpdate,
+            NavigationSearchMs = navigation.SearchMillisecondsThisUpdate,
+            NavigationGridMs = navigation.NavigationGridBuildMilliseconds,
+            RoutesReused = navigation.RoutesBuiltUsingPriorRoutesThisUpdate,
+            RouteTrafficCells = navigation.RouteTrafficCellsConsideredThisUpdate
+        };
+    }
+}
