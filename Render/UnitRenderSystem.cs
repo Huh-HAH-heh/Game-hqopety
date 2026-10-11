@@ -1427,7 +1427,8 @@ private static void AppendSuppressionDebug(
         Vector3 observerEye =
             simulation.Vision.GetEyePosition(
                 units,
-                observerIndex);
+                observerIndex,
+                simulation.Bodies);
 
         float headAngle =
             MathF.Atan2(
@@ -1562,7 +1563,8 @@ private static void AppendSuppressionDebug(
                 units,
                 targetIndex,
                 observerEye,
-                points);
+                points,
+                simulation.Bodies);
 
             for (int pointIndex = 0;
                  pointIndex < pointCount;
