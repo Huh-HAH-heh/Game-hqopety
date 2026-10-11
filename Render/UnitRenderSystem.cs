@@ -317,17 +317,16 @@ public sealed class UnitRenderSystem
                     outlineColor);
             }
 
-            // Back-to-front fill order: legs, torso/body, arms/hands, head.
-            for (int layer = 0; layer < 4; layer++)
+            // Back-to-front fill order: limbs, trunk, then head.
+            for (int layer = 0; layer < 3; layer++)
             {
                 for (int part = start; part < end; part++)
                 {
                     BodyPartRole role = bodyRoles[part];
                     Vector3 position = partPositions[part];
 
-                    // In a top-down view, the far-side limbs are painted
-                    // under the body and near-side limbs over it.
-                    if (GetBodyLayer(role, position.Y, unitPosition.Y) != layer)
+                    // Limbs stay behind the trunk; only parts outside its silhouette remain visible.
+                    if (GetBodyLayer(role) != layer)
                         continue;
 
                     Vector3 scale = partScales[part];
@@ -1431,36 +1430,22 @@ public sealed class UnitRenderSystem
         position.Y + extent >= minY &&
         position.Y - extent <= maxY;
 
-    private static int GetBodyLayer(
-        BodyPartRole role,
-        float partY,
-        float bodyY)
+    private static int GetBodyLayer(BodyPartRole role)
     {
+        // In a true overhead view, the trunk occludes proximal limb segments.
+        // Never choose layers by world Y: that paints a complete near-side pair
+        // over the torso and creates the outstretched "snow angel" silhouette.
         if (role == BodyPartRole.Head)
-            return 3;
+            return 2;
 
         if (role is BodyPartRole.Torso or
-            BodyPartRole.Neck or
-            BodyPartRole.Segment or
-            BodyPartRole.Generic)
+            BodyPartRole.Generic or
+            BodyPartRole.Segment)
         {
             return 1;
         }
 
-        bool limb = role is
-            BodyPartRole.UpperArm or
-            BodyPartRole.Forearm or
-            BodyPartRole.Elbow or
-            BodyPartRole.Hand or
-            BodyPartRole.Thigh or
-            BodyPartRole.Knee or
-            BodyPartRole.Shin or
-            BodyPartRole.Foot;
-
-        if (!limb)
-            return 1;
-
-        return partY < bodyY ? 0 : 2;
+        return 0;
     }
 
     private static Color GetBodyPartColor(

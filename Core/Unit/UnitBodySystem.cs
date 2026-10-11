@@ -217,7 +217,7 @@ public sealed class UnitBodySystem
                     break;
 
                 case BodyPartRole.Forearm:
-                    localRotation = MathF.CopySign(1.25f, localRotation);
+                    localRotation = MathF.CopySign(2.20f, localRotation);
                     break;
 
                 case BodyPartRole.Thigh:
@@ -241,12 +241,12 @@ public sealed class UnitBodySystem
             case BodyPartRole.UpperArm:
                 localPosition.Y *= 1.12f;
                 localRotation = MathF.CopySign(
-                    MathF.Max(MathF.Abs(localRotation), 1.34f),
+                    MathF.Max(MathF.Abs(localRotation), 1.55f),
                     localRotation);
                 break;
 
             case BodyPartRole.Forearm:
-                localRotation = MathF.CopySign(1.55f, localRotation);
+                localRotation = MathF.CopySign(1.80f, localRotation);
                 break;
 
             case BodyPartRole.Thigh:

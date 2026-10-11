@@ -1804,7 +1804,7 @@ public static class CombatSelfTest
             BodyPartRole.Head);
 
         Vector3 headPosition = definitions.WorldPosition[definitionHead];
-        if (MathF.Abs(headPosition.X - 0.195f) > 0.001f ||
+        if (MathF.Abs(headPosition.X - 0.155f) > 0.001f ||
             MathF.Abs(headPosition.Y) > 0.001f)
         {
             return false;
@@ -1898,7 +1898,7 @@ public static class CombatSelfTest
             new BodyHandle(start, count),
             BodyPartRole.Head);
         Vector3 aimedHeadPosition = simulation.Bodies.WorldPosition[head];
-        if (MathF.Abs(aimedHeadPosition.X - 10.195f) > 0.002f ||
+        if (MathF.Abs(aimedHeadPosition.X - 10.155f) > 0.002f ||
             MathF.Abs(aimedHeadPosition.Y - 10f) > 0.002f ||
             MathF.Abs(simulation.Bodies.WorldRotation[head] - MathF.PI * 0.5f) > 0.002f)
         {
@@ -1951,7 +1951,7 @@ public static class CombatSelfTest
         return MathF.Abs(bodyNormal.X) < 0.001f &&
                MathF.Abs(bodyNormal.Y - 1f) < 0.001f &&
                MathF.Abs(movedHead.X - 10f) < 0.002f &&
-               MathF.Abs(movedHead.Y - 10.195f) < 0.002f &&
+               MathF.Abs(movedHead.Y - 10.155f) < 0.002f &&
                MathF.Abs(simulation.Bodies.WorldRotation[head]) < 0.002f;
     }
 
