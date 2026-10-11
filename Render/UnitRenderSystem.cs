@@ -220,6 +220,27 @@ public sealed class UnitRenderSystem
 
             if (inspectHitVolumes)
             {
+                // Inspection view is an upright body diagram packed INSIDE
+                // the selected unit's circle, not the hit volumes' world offsets.
+                float inspectionRadius = MathF.Max(
+                    markerRadius,
+                    9f / MathF.Max(0.001f, screenScale));
+
+                AppendUnitMarker(
+                    _vertices,
+                    _bodyOutlines,
+                    _statusIcons,
+                    screenX,
+                    screenY,
+                    inspectionRadius,
+                    headNormals[unitIndex],
+                    units.FactionTag[unitIndex],
+                    isAlive,
+                    healthRatio,
+                    suppression,
+                    suppressionState,
+                    screenScale);
+
                 int volumeCount = UnitHitSystem.GetHitVolumes(
                     units,
                     unitIndex,
@@ -228,16 +249,15 @@ public sealed class UnitRenderSystem
 
                 for (int volumeIndex = 0; volumeIndex < volumeCount; volumeIndex++)
                 {
-                    AppendHitVolume(
+                    AppendPackedHitVolume(
                         _hitVolumeFills,
                         _bodyOutlines,
                         hitVolumeBuffer[volumeIndex],
-                        tilePixelSize,
-                        screenScale,
-                        minWorldX,
-                        maxWorldX,
-                        minWorldY,
-                        maxWorldY);
+                        volumeIndex,
+                        screenX,
+                        screenY,
+                        inspectionRadius,
+                        screenScale);
                 }
             }
             else
@@ -455,10 +475,29 @@ public void DrawSnapshot(
 
             if (inspectHitVolumes)
             {
+                float inspectionRadius = MathF.Max(
+                    markerRadius,
+                    9f / MathF.Max(0.001f, screenScale));
+
+                AppendUnitMarker(
+                    _vertices,
+                    _bodyOutlines,
+                    _statusIcons,
+                    x,
+                    y,
+                    inspectionRadius,
+                    unit.HeadNormal,
+                    unit.FactionTag,
+                    isAlive,
+                    unit.HealthRatio,
+                    unit.Suppression,
+                    unit.SuppressionState,
+                    screenScale);
+
                 for (int volumeIndex = 0; volumeIndex < selectedHitVolumes.Length; volumeIndex++)
                 {
                     RenderHitVolume volume = selectedHitVolumes[volumeIndex];
-                    AppendHitVolume(
+                    AppendPackedHitVolume(
                         _hitVolumeFills,
                         _bodyOutlines,
                         new HitVolume(
@@ -467,12 +506,11 @@ public void DrawSnapshot(
                             volume.Forward,
                             volume.Right,
                             volume.Radii),
-                        tilePixelSize,
-                        screenScale,
-                        minX,
-                        maxX,
-                        minY,
-                        maxY);
+                        volumeIndex,
+                        x,
+                        y,
+                        inspectionRadius,
+                        screenScale);
                 }
             }
             else
@@ -545,39 +583,131 @@ public void DrawSnapshot(
             window.Draw(_aiDebug);
     }
 
-    private static void AppendHitVolume(
+    private static void AppendPackedHitVolume(
         VertexArray fills,
         VertexArray outlines,
         in HitVolume volume,
-        float tilePixelSize,
-        float screenScale,
-        float minWorldX,
-        float maxWorldX,
-        float minWorldY,
-        float maxWorldY)
+        int shapeIndex,
+        float unitX,
+        float unitY,
+        float circleRadius,
+        float screenScale)
     {
-        float worldRadius = MathF.Max(volume.Radii.X, volume.Radii.Y);
-        if (volume.Center.X + worldRadius < minWorldX ||
-            volume.Center.X - worldRadius > maxWorldX ||
-            volume.Center.Y + worldRadius < minWorldY ||
-            volume.Center.Y - worldRadius > maxWorldY)
+        // Compact upright diagram. All coordinates are fractions of the
+        // white marker radius; every part stays comfortably inside that disc.
+        float side;
+        float offsetX;
+        float offsetY;
+        float radiusX;
+        float radiusY;
+        float rotation = 0f;
+
+        switch (shapeIndex)
         {
-            return;
+            case 0: // Torso
+                offsetX = 0f; offsetY = 0.02f;
+                radiusX = 0.22f; radiusY = 0.25f;
+                break;
+            case 1: // Neck
+                offsetX = 0f; offsetY = -0.29f;
+                radiusX = 0.065f; radiusY = 0.065f;
+                break;
+            case 2: // Head
+                offsetX = 0f; offsetY = -0.52f;
+                radiusX = 0.14f; radiusY = 0.14f;
+                break;
+            case 3: // Upper arm, right
+                offsetX = 0.22f; offsetY = -0.17f;
+                radiusX = 0.12f; radiusY = 0.065f;
+                rotation = 0.28f;
+                break;
+            case 4: // Elbow, right
+                offsetX = 0.31f; offsetY = -0.015f;
+                radiusX = 0.06f; radiusY = 0.06f;
+                break;
+            case 5: // Forearm, right
+                offsetX = 0.31f; offsetY = 0.105f;
+                radiusX = 0.12f; radiusY = 0.055f;
+                rotation = -0.15f;
+                break;
+            case 6: // Hand, right
+                offsetX = 0.28f; offsetY = 0.225f;
+                radiusX = 0.065f; radiusY = 0.055f;
+                break;
+            case 7: // Upper arm, left
+                offsetX = -0.22f; offsetY = -0.17f;
+                radiusX = 0.12f; radiusY = 0.065f;
+                rotation = -0.28f;
+                break;
+            case 8: // Elbow, left
+                offsetX = -0.31f; offsetY = -0.015f;
+                radiusX = 0.06f; radiusY = 0.06f;
+                break;
+            case 9: // Forearm, left
+                offsetX = -0.31f; offsetY = 0.105f;
+                radiusX = 0.12f; radiusY = 0.055f;
+                rotation = 0.15f;
+                break;
+            case 10: // Hand, left
+                offsetX = -0.28f; offsetY = 0.225f;
+                radiusX = 0.065f; radiusY = 0.055f;
+                break;
+            case 11: // Thigh, right
+                offsetX = 0.115f; offsetY = 0.30f;
+                radiusX = 0.075f; radiusY = 0.11f;
+                rotation = -0.08f;
+                break;
+            case 12: // Knee, right
+                offsetX = 0.12f; offsetY = 0.42f;
+                radiusX = 0.055f; radiusY = 0.055f;
+                break;
+            case 13: // Shin, right
+                offsetX = 0.13f; offsetY = 0.535f;
+                radiusX = 0.055f; radiusY = 0.12f;
+                rotation = -0.035f;
+                break;
+            case 14: // Foot, right
+                offsetX = 0.145f; offsetY = 0.66f;
+                radiusX = 0.08f; radiusY = 0.045f;
+                break;
+            case 15: // Thigh, left
+                offsetX = -0.115f; offsetY = 0.30f;
+                radiusX = 0.075f; radiusY = 0.11f;
+                rotation = 0.08f;
+                break;
+            case 16: // Knee, left
+                offsetX = -0.12f; offsetY = 0.42f;
+                radiusX = 0.055f; radiusY = 0.055f;
+                break;
+            case 17: // Shin, left
+                offsetX = -0.13f; offsetY = 0.535f;
+                radiusX = 0.055f; radiusY = 0.12f;
+                rotation = 0.035f;
+                break;
+            case 18: // Foot, left
+                offsetX = -0.145f; offsetY = 0.66f;
+                radiusX = 0.08f; radiusY = 0.045f;
+                break;
+            default: // Non-human whole-body collider
+                offsetX = 0f; offsetY = 0f;
+                radiusX = 0.31f; radiusY = 0.25f;
+                break;
         }
 
-        float centerX = volume.Center.X * tilePixelSize;
-        float centerY = volume.Center.Y * tilePixelSize;
-        float radiusX = MathF.Max(
-            0.015f * tilePixelSize,
-            volume.Radii.Y * tilePixelSize);
-        float radiusY = MathF.Max(
-            0.015f * tilePixelSize,
-            volume.Radii.X * tilePixelSize);
-        float rotation = MathF.Atan2(
-            volume.Forward.Y,
-            volume.Forward.X);
-        float outlinePad = 0.9f / MathF.Max(0.001f, screenScale);
-        int segments = tilePixelSize * screenScale >= 8f ? 24 : 12;
+        // For a single whole-body collider, use a compact central oval.
+        if (volume.Part == UnitHealthPartId.WholeBody)
+        {
+            offsetX = 0f; offsetY = 0.02f;
+            radiusX = 0.30f; radiusY = 0.22f;
+            rotation = 0f;
+        }
+
+        float centerX = unitX + offsetX * circleRadius;
+        float centerY = unitY + offsetY * circleRadius;
+        float rx = radiusX * circleRadius;
+        float ry = radiusY * circleRadius;
+        float outlinePad = 0.55f / MathF.Max(0.001f, screenScale);
+        int segments = circleRadius * screenScale >= 12f ? 16 : 10;
 
         GetHitVolumeColors(
             volume.Part,
@@ -588,8 +718,8 @@ public void DrawSnapshot(
             fills,
             centerX,
             centerY,
-            radiusX,
-            radiusY,
+            rx,
+            ry,
             rotation,
             fill,
             segments);
@@ -598,8 +728,8 @@ public void DrawSnapshot(
             outlines,
             centerX,
             centerY,
-            radiusX + outlinePad,
-            radiusY + outlinePad,
+            rx + outlinePad,
+            ry + outlinePad,
             rotation,
             outline,
             segments);
@@ -625,8 +755,8 @@ public void DrawSnapshot(
             _ => new Color(210, 220, 232)
         };
 
-        fill = new Color(solid.R, solid.G, solid.B, 76);
-        outline = new Color(solid.R, solid.G, solid.B, 245);
+        fill = new Color(solid.R, solid.G, solid.B, 155);
+        outline = new Color(solid.R, solid.G, solid.B, 250);
     }
 
     private static void AppendEllipse(
