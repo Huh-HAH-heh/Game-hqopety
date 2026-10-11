@@ -773,7 +773,7 @@ public sealed class GameRenderer
             {
                 try
                 {
-                    command();
+                    command?.Invoke();
                 }
                 catch (Exception exception)
                 {
