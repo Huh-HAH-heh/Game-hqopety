@@ -324,6 +324,12 @@ public sealed class UnitHitSystem
         return true;
     }
 
+    public static int GetHitVolumes(
+        UnitStore units,
+        int unitIndex,
+        Span<HitVolume> volumes) =>
+        BuildVolumes(units, unitIndex, volumes);
+
     internal static int BuildVolumes(
         UnitStore units,
         int unitIndex,
