@@ -34,6 +34,7 @@ public sealed class GameRenderer
     private readonly LongRangeCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
+    private volatile int _bodyPartDebugUnitIndex = -1;
 
     private RenderWindow _window = null!;
     private View? _uiView;
@@ -725,7 +726,7 @@ public sealed class GameRenderer
         // Publish a complete initial frame before starting the producer thread.
         Volatile.Write(
             ref _latestSnapshot,
-            SimulationFrameSnapshot.Capture(_unitSimulation));
+            SimulationFrameSnapshot.Capture(_unitSimulation, _bodyPartDebugUnitIndex));
 
         _simulationThread = new Thread(SimulationLoop)
         {
@@ -734,6 +735,12 @@ public sealed class GameRenderer
         };
         _simulationThread.Start();
         Console.WriteLine("[Threading] Simulation runs independently; SFML rendering stays on the window thread.");
+    }
+
+    private void SetSelectedUnit(UnitId unit)
+    {
+        _selectedUnit = unit;
+        _bodyPartDebugUnitIndex = unit.IsValid ? unit.Index : -1;
     }
 
     private void StopSimulationThread()
@@ -747,7 +754,7 @@ public sealed class GameRenderer
         _simulationThread = null;
         Volatile.Write(
             ref _latestSnapshot,
-            SimulationFrameSnapshot.Capture(_unitSimulation));
+            SimulationFrameSnapshot.Capture(_unitSimulation, _bodyPartDebugUnitIndex));
     }
 
     private void ExecuteSimulationCommand(Action command)
@@ -813,7 +820,7 @@ public sealed class GameRenderer
             {
                 Volatile.Write(
                     ref _latestSnapshot,
-                    SimulationFrameSnapshot.Capture(_unitSimulation));
+                    SimulationFrameSnapshot.Capture(_unitSimulation, _bodyPartDebugUnitIndex));
             }
             catch (Exception exception)
             {
@@ -1095,7 +1102,7 @@ public sealed class GameRenderer
             // with the simulation worker stopped rather than racing the map renderer.
             StopSimulationThread();
             _massCombatTestScene.CycleScale(_unitSimulation, _worldMap);
-            _selectedUnit = _massCombatTestScene.FirstUnit;
+            SetSelectedUnit(_massCombatTestScene.FirstUnit);
             _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
             Console.WriteLine($"[TEST] {_massCombatTestScene.GetStatus(_unitSimulation)}");
             StartSimulationThread();
@@ -1134,8 +1141,7 @@ public sealed class GameRenderer
         {
             if (_massCombatMode)
             {
-                _selectedUnit =
-                    _massCombatTestScene.FirstUnit;
+                SetSelectedUnit(_massCombatTestScene.FirstUnit);
 
                 return;
             }
@@ -1144,9 +1150,7 @@ public sealed class GameRenderer
                 (_visionTestIndex + 1) %
                 _visionTestScene.UnitCount;
 
-            _selectedUnit =
-                _visionTestScene.GetUnit(
-                    _visionTestIndex);
+            SetSelectedUnit(_visionTestScene.GetUnit(_visionTestIndex));
 
             return;
         }
@@ -1154,8 +1158,7 @@ public sealed class GameRenderer
         if (key == Keyboard.Key.R)
         {
             _visionTestIndex = 0;
-            _selectedUnit =
-                _visionTestScene.Observer;
+            SetSelectedUnit(_visionTestScene.Observer);
             return;
         }
 
@@ -1503,7 +1506,7 @@ public sealed class GameRenderer
         _menuPage = GameMenuPage.Closed;
         _draggingMenuSlider = null;
 
-        _selectedUnit = default;
+        SetSelectedUnit(default);
 
         _camera.CenterOnWorld(
             TerrainTilePixelSize,
@@ -1538,8 +1541,7 @@ public sealed class GameRenderer
             _unitSimulation,
             _worldMap);
 
-        _selectedUnit =
-            _massCombatTestScene.FirstUnit;
+        SetSelectedUnit(_massCombatTestScene.FirstUnit);
 
         _camera.CenterOnWorld(
             TerrainTilePixelSize,
@@ -1553,8 +1555,7 @@ public sealed class GameRenderer
             _unitSimulation,
             TerrainTilePixelSize);
 
-        _selectedUnit =
-            _visionTestScene.Observer;
+        SetSelectedUnit(_visionTestScene.Observer);
 
         ReadOnlySpan<UnitId> units =
             _visionTestScene.Units;
