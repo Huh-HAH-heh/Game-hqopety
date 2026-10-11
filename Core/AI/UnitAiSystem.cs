@@ -319,8 +319,14 @@ public sealed class UnitAiSystem
                     continue;
                 }
 
-                if (!Store.HasGoal[unit])
+                if (!Store.HasGoal[unit] &&
+                    Store.SuppressionCoverRetry[unit] <= 0f)
                 {
+                    // A failed low-health cover search also costs up to 32 LOS
+                    // traces. Keep the pawn responsive, but do not repeat the
+                    // same expensive search on every 150 ms AI tick.
+                    Store.SuppressionCoverRetry[unit] = 1f;
+
                     if (TryFindCover(
                             units,
                             vision,
