@@ -1395,6 +1395,38 @@ private static void AppendSelection(
         return false;
     }
 
+    private static bool IsPartInView(
+        Vector3 position,
+        float extent,
+        float minX,
+        float maxX,
+        float minY,
+        float maxY) =>
+        position.X + extent >= minX &&
+        position.X - extent <= maxX &&
+        position.Y + extent >= minY &&
+        position.Y - extent <= maxY;
+
+    private static Color GetBodyPartColor(
+        BodyPartRole role,
+        Color baseColor) =>
+        role switch
+        {
+            BodyPartRole.Torso => Shade(baseColor, 0.83f),
+            BodyPartRole.Neck => Shade(baseColor, 0.90f),
+            BodyPartRole.Head => Blend(baseColor, new Color(220, 205, 185), 0.48f),
+            BodyPartRole.UpperArm => Shade(baseColor, 0.74f),
+            BodyPartRole.Forearm => Shade(baseColor, 0.80f),
+            BodyPartRole.Elbow => Shade(baseColor, 0.76f),
+            BodyPartRole.Hand => Blend(baseColor, new Color(207, 179, 151), 0.42f),
+            BodyPartRole.Thigh => Shade(baseColor, 0.65f),
+            BodyPartRole.Knee => Shade(baseColor, 0.60f),
+            BodyPartRole.Shin => Shade(baseColor, 0.58f),
+            BodyPartRole.Foot => Shade(baseColor, 0.48f),
+            BodyPartRole.Segment => Shade(baseColor, 0.88f),
+            _ => baseColor
+        };
+
 private static Color Shade(Color color, float amount) =>
         new Color(
             (byte)Math.Clamp((int)(color.R * amount), 0, 255),
