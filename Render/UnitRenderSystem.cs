@@ -123,9 +123,6 @@ public sealed class UnitRenderSystem
             simulation.Units;
 
         Vector3[] headNormals = units.HeadNormal;
-        UnitInventoryStore inventory = simulation.Inventory;
-        UnitWeaponStore weaponStates = simulation.Weapons;
-
         if (showUnitDetails)
         {
             if (_aimTargetDrawn.Length < units.Capacity)
