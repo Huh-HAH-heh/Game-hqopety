@@ -79,6 +79,11 @@ public sealed class UnitAiSystem
                 unit,
                 thinkDelta);
 
+            Store.SuppressionCoverRetry[unit] =
+                MathF.Max(
+                    0f,
+                    Store.SuppressionCoverRetry[unit] - thinkDelta);
+
             if (health.OverallMaxHitPoints[unit] <= 0f ||
                 health.OverallHitPoints[unit] <= 0f)
             {
@@ -95,18 +100,44 @@ public sealed class UnitAiSystem
             if (suppressionState == UnitSuppressionState.Panicked ||
                 suppressionState == UnitSuppressionState.Suppressed)
             {
+                Vector3 suppressionSource =
+                    suppression.Source[unit];
+
+                Vector3 previousSource =
+                    Store.SuppressionRetrySource[unit];
+
+                float sourceDx =
+                    suppressionSource.X - previousSource.X;
+
+                float sourceDy =
+                    suppressionSource.Y - previousSource.Y;
+
+                bool threatChanged =
+                    sourceDx * sourceDx + sourceDy * sourceDy >= 16f;
+
+                // Failure to find cover must not trigger 32 terrain LOS rays
+                // every AI tick. Retry once per second unless fire comes from
+                // a substantially different position.
                 if (!Store.HasGoal[unit] &&
-                    TryFindSuppressionCover(
-                        units,
-                        vision,
-                        worldMap,
-                        unit,
-                        suppression.Source[unit],
-                        out Vector3 suppressionCover))
+                    (Store.SuppressionCoverRetry[unit] <= 0f ||
+                     threatChanged))
                 {
-                    Store.SetGoal(
-                        unit,
-                        suppressionCover);
+                    Store.SuppressionCoverRetry[unit] = 1f;
+                    Store.SuppressionRetrySource[unit] =
+                        suppressionSource;
+
+                    if (TryFindSuppressionCover(
+                            units,
+                            vision,
+                            worldMap,
+                            unit,
+                            suppressionSource,
+                            out Vector3 suppressionCover))
+                    {
+                        Store.SetGoal(
+                            unit,
+                            suppressionCover);
+                    }
                 }
 
                 if (Store.HasGoal[unit])
@@ -373,22 +404,11 @@ public sealed class UnitAiSystem
                     continue;
                 }
 
-                if (!TryChooseVisibleAimPoint(
-                        units,
-                        worldMap,
-                        vision,
-                        unit,
-                        target.Index,
-                        out Vector3 aimPoint))
-                {
-                    // A broad silhouette point can be visible while not belonging
-                    // to the actual body collider. Do not shoot at that arbitrary point.
-                    ClearNonSuppressiveAiming(weapons, inventory, unit);
-                    units.Target[unit] = Store.LastSeenPosition[unit];
-                    units.HasTarget[unit] = true;
-                    Store.State[unit] = UnitAiState.Search;
-                    continue;
-                }
+                // Evaluate returns a clear point from the same hit volume used
+                // by projectile collision. Reuse it instead of tracing another
+                // set of up to 40 aim-point rays for every firing unit.
+                Vector3 aimPoint =
+                    shotCheck.VisibleTargetPoint;
 
                 bool fired =
                     TryFireAnyRangedWeapon(
@@ -544,48 +564,6 @@ public sealed class UnitAiSystem
             waypoint.Y - position.Y);
 
         return delta.LengthSquared() > 1f;
-    }
-
-    private static bool TryChooseVisibleAimPoint(
-        UnitStore units,
-        WorldMap worldMap,
-        VisionSystem vision,
-        int shooter,
-        int target,
-        out Vector3 aimPoint)
-    {
-        Vector3 eye = vision.GetEyePosition(units, shooter);
-        Span<Vector3> candidates =
-            stackalloc Vector3[UnitHitSystem.MaxAimPointCount];
-
-        int count = UnitHitSystem.GetAimPoints(
-            units,
-            target,
-            eye,
-            candidates);
-
-        // These candidates come from the same ellipsoids used for projectile
-        // collision. If the torso is hidden, test its exposed edge and then
-        // real head/limb volumes rather than aiming at target-center coordinates.
-        for (int i = 0; i < count; i++)
-        {
-            Vector3 candidate = candidates[i];
-
-            if (!vision.HasLineOfSight(
-                    worldMap,
-                    eye,
-                    candidate,
-                    out _))
-            {
-                continue;
-            }
-
-            aimPoint = candidate;
-            return true;
-        }
-
-        aimPoint = Vector3.Zero;
-        return false;
     }
 
     private static int FindNearestVisibleEnemy(
