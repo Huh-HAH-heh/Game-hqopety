@@ -94,6 +94,106 @@ public sealed class ProjectileRenderSystem : IDisposable
             window.Draw(_impacts);
     }
 
+    public void DrawSnapshot(
+        RenderWindow window,
+        SimulationFrameSnapshot snapshot,
+        float tilePixelSize,
+        bool showTracers = true)
+    {
+        _tracers.Clear();
+        _impacts.Clear();
+
+        if (showTracers)
+        {
+            RenderProjectileTrace[] traces = snapshot.Traces;
+            for (int i = 0; i < traces.Length; i++)
+            {
+                RenderProjectileTrace trace = traces[i];
+                Vector3 start = trace.Start;
+                Vector3 end = trace.End;
+                Vector2 delta = new Vector2(end.X - start.X, end.Y - start.Y);
+                if (delta.LengthSquared() < 0.025f)
+                    continue;
+
+                Color trail;
+                Color head;
+                if (trace.IsLaser)
+                {
+                    trail = new Color(40, 190, 245, 150);
+                    head = new Color(175, 245, 255, 255);
+                }
+                else
+                {
+                    GetTeamColors(trace.Faction, out trail, out head);
+                }
+
+                byte fade = (byte)(255f * Math.Clamp(
+                    trace.Lifetime / ProjectileStore.TraceLifetimeSeconds, 0f, 1f));
+                trail = new Color(trail.R, trail.G, trail.B,
+                    (byte)(trail.A * fade / 255));
+                head = new Color(head.R, head.G, head.B,
+                    (byte)(head.A * fade / 255));
+
+                Vector2 screenStart = new Vector2(
+                    start.X * tilePixelSize,
+                    start.Y * tilePixelSize);
+                Vector2 screenEnd = new Vector2(
+                    end.X * tilePixelSize,
+                    end.Y * tilePixelSize);
+
+                _tracers.Append(new Vertex(
+                    new Vector2f(screenStart.X, screenStart.Y), trail));
+                _tracers.Append(new Vertex(
+                    new Vector2f(screenEnd.X, screenEnd.Y), head));
+
+                Vector2 coreStart = screenEnd - delta * tilePixelSize * 0.22f;
+                _tracers.Append(new Vertex(
+                    new Vector2f(coreStart.X, coreStart.Y),
+                    new Color(255, 246, 210, fade)));
+                _tracers.Append(new Vertex(
+                    new Vector2f(screenEnd.X, screenEnd.Y),
+                    new Color(255, 255, 245, fade)));
+            }
+        }
+
+        if (_tracers.VertexCount > 0)
+            window.Draw(_tracers);
+
+        RenderProjectileImpact[] impacts = snapshot.Impacts;
+        for (int i = 0; i < impacts.Length; i++)
+        {
+            RenderProjectileImpact impact = impacts[i];
+            float duration = impact.Kind switch
+            {
+                ProjectileImpactKind.MuzzleFlash => 0.10f,
+                ProjectileImpactKind.UnitHit => 0.30f,
+                _ => 0.24f
+            };
+
+            float age = 1f - Math.Clamp(impact.Lifetime / duration, 0f, 1f);
+            float x = impact.Position.X * tilePixelSize;
+            float y = impact.Position.Y * tilePixelSize;
+
+            if (impact.Kind == ProjectileImpactKind.MuzzleFlash)
+            {
+                AppendFlash(x, y, tilePixelSize, age);
+            }
+            else if (impact.Kind == ProjectileImpactKind.UnitHit)
+            {
+                AppendRing(x, y, tilePixelSize, age,
+                    new Color(255, 72, 52, (byte)(255f * (1f - age))));
+            }
+            else
+            {
+                AppendRing(x, y, tilePixelSize, age,
+                    new Color(255, 190, 90, (byte)(230f * (1f - age))));
+            }
+        }
+
+        if (_impacts.VertexCount > 0)
+            window.Draw(_impacts);
+    }
+
     private void AppendImpacts(
         ProjectileStore projectiles,
         float tilePixelSize)
