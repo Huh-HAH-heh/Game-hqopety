@@ -398,7 +398,111 @@ public sealed class UnitRenderSystem
         }
     }
 
-private static Color GetItemColor(ItemConfig item) =>
+public void DrawSnapshot(
+        RenderWindow window,
+        SimulationFrameSnapshot snapshot,
+        View cameraView,
+        float tilePixelSize,
+        int selectedUnitIndex,
+        bool showAiDebug)
+    {
+        if (tilePixelSize <= 0f)
+            return;
+
+        float screenScale = MathF.Max(
+            0.001f,
+            window.Size.X / MathF.Max(1f, cameraView.Size.X));
+
+        float centerX = cameraView.Center.X;
+        float centerY = cameraView.Center.Y;
+        float halfWidth = cameraView.Size.X * 0.5f;
+        float halfHeight = cameraView.Size.Y * 0.5f;
+        float minX = (centerX - halfWidth) / tilePixelSize - 2f;
+        float maxX = (centerX + halfWidth) / tilePixelSize + 2f;
+        float minY = (centerY - halfHeight) / tilePixelSize - 2f;
+        float maxY = (centerY + halfHeight) / tilePixelSize + 2f;
+
+        _vertices.Clear();
+        _bodyOutlines.Clear();
+        _selection.Clear();
+        _equipment.Clear();
+        _weaponVisuals.Clear();
+        _aiming.Clear();
+        _visionArea.Clear();
+        _visionDebug.Clear();
+        _aiDebug.Clear();
+
+        RenderUnitState[] units = snapshot.Units;
+        for (int i = 0; i < units.Length; i++)
+        {
+            RenderUnitState unit = units[i];
+            Vector3 position = unit.Position;
+
+            if (position.X < minX || position.X > maxX ||
+                position.Y < minY || position.Y > maxY)
+            {
+                continue;
+            }
+
+            float x = position.X * tilePixelSize;
+            float y = position.Y * tilePixelSize;
+
+            if (unit.HitPoints <= 0f)
+            {
+                AppendDeathMarker(
+                    _selection,
+                    x,
+                    y,
+                    MathF.Max(3f, tilePixelSize * 0.62f));
+                continue;
+            }
+
+            Color fill = showAiDebug
+                ? GetAiColor(unit.AiState)
+                : new Color(238, 238, 238);
+
+            float radius = MathF.Max(0.24f, unit.Width * 0.55f);
+            float markerRadius = MathF.Max(
+                radius * tilePixelSize,
+                1.45f / screenScale);
+
+            Color factionAccent = GetFactionAccent(unit.FactionTag);
+            AppendCircleOutline(
+                _bodyOutlines,
+                x,
+                y,
+                markerRadius + 0.60f / screenScale,
+                new Color(13, 15, 18, 245),
+                CircleSegments);
+            AppendCircleOutline(
+                _bodyOutlines,
+                x,
+                y,
+                markerRadius + 0.15f / screenScale,
+                factionAccent,
+                CircleSegments);
+            AppendCircle(_vertices, x, y, markerRadius, fill);
+
+            if (unit.Index == selectedUnitIndex)
+            {
+                float selectionRadius = MathF.Max(unit.Width, unit.Length) * 0.6f;
+                AppendSelection(
+                    _selection,
+                    x,
+                    y,
+                    MathF.Max(selectionRadius, 0.45f) * tilePixelSize);
+            }
+        }
+
+        if (_bodyOutlines.VertexCount > 0)
+            window.Draw(_bodyOutlines);
+        if (_vertices.VertexCount > 0)
+            window.Draw(_vertices);
+        if (_selection.VertexCount > 0)
+            window.Draw(_selection);
+    }
+
+    private static Color GetItemColor(ItemConfig item) =>
         new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
 
     private static Color GetFactionAccent(ushort factionTag) =>
