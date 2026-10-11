@@ -790,7 +790,6 @@ public sealed class UnitHitSystem
         switch (role)
         {
             case BodyPartRole.Head:
-                centerFactor = GetHeadHeight(unitHeight, posture) / unitHeight;
                 centerZ = rootZ + GetHeadHeight(unitHeight, posture);
                 radiusZ = MathF.Max(0.025f, MathF.Abs(scale.Z) * 1.1f);
                 return;
