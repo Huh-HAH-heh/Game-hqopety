@@ -1199,10 +1199,10 @@ public void DrawSnapshot(
             dy *= inverseLength;
         }
 
-        // In screen coordinates this perpendicular points to the body's right
-        // side relative to its facing direction. The whole weapon rotates with aim.
-        float px = dy;
-        float py = -dx;
+        // With SFML's downward-positive screen Y, this perpendicular is the
+        // body's right side relative to facing. The weapon rotates with the aim direction.
+        float px = -dy;
+        float py = dx;
         float pixel = 1f / MathF.Max(0.001f, screenScale);
 
         // Anchor the weapon on the right flank, not the centre of the white disc.
