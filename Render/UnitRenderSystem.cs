@@ -390,6 +390,65 @@ public sealed class UnitRenderSystem
 private static Color GetItemColor(ItemConfig item) =>
         new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
 
+    private static void AppendEquippedApparel(
+        VertexArray vertices,
+        UnitInventoryStore inventory,
+        int unitIndex,
+        Vector3 unitPosition,
+        float bodyRadius,
+        float tilePixelSize)
+    {
+        // An item can cover several zones; draw its ring only once.
+        Span<short> drawnSlots = stackalloc short[UnitInventoryStore.MaxInventorySlots];
+        int drawnCount = 0;
+
+        for (int zone = 0; zone < UnitInventoryStore.BodyZoneCount; zone++)
+        {
+            for (int layer = 0; layer < UnitInventoryStore.ArmorLayerCount; layer++)
+            {
+                short itemSlot = inventory.GetBodyEquipment(
+                    unitIndex,
+                    zone,
+                    (ArmorLayer)layer);
+
+                if (itemSlot < 0)
+                    continue;
+
+                bool alreadyDrawn = false;
+                for (int i = 0; i < drawnCount; i++)
+                {
+                    if (drawnSlots[i] == itemSlot)
+                    {
+                        alreadyDrawn = true;
+                        break;
+                    }
+                }
+
+                if (alreadyDrawn)
+                    continue;
+
+                if (inventory.GetItem(unitIndex, itemSlot) is not ArmorConfig apparel)
+                    continue;
+
+                if (drawnCount >= drawnSlots.Length)
+                    continue;
+
+                drawnSlots[drawnCount++] = itemSlot;
+
+                float padding = MathF.Max(0.02f, apparel.WorldRenderPadding);
+                float radius = (bodyRadius + padding) * tilePixelSize;
+
+                AppendCircleOutline(
+                    vertices,
+                    unitPosition.X * tilePixelSize,
+                    unitPosition.Y * tilePixelSize,
+                    radius,
+                    GetItemColor(apparel),
+                    CircleSegments);
+            }
+        }
+    }
+
     private static void AppendEquippedWeapons(
         VertexArray vertices,
         UnitInventoryStore inventory,
