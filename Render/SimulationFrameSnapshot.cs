@@ -135,7 +135,7 @@ public sealed class SimulationFrameSnapshot
 
     public static SimulationFrameSnapshot Capture(
         UnitSimulation simulation,
-        int bodyPartUnitIndex = -1)
+        int hitVolumeUnitIndex = -1)
     {
         UnitStore units = simulation.Units;
         ReadOnlySpan<int> active = units.ActiveIndices;
@@ -272,12 +272,12 @@ public sealed class SimulationFrameSnapshot
         Span<HitVolume> hitVolumeBuffer =
             stackalloc HitVolume[UnitHitSystem.MaxHitVolumeCount];
 
-        if (bodyPartUnitIndex >= 0)
+        if (hitVolumeUnitIndex >= 0)
         {
             for (int i = 0; i < active.Length; i++)
             {
                 int unitIndex = active[i];
-                if (unitIndex != bodyPartUnitIndex)
+                if (unitIndex != hitVolumeUnitIndex)
                     continue;
 
                 int volumeCount = UnitHitSystem.GetHitVolumes(
