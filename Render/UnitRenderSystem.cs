@@ -260,6 +260,7 @@ public sealed class UnitRenderSystem
                         _bodyOutlines,
                         hitVolumeBuffer[volumeIndex],
                         unitPosition,
+                        units.BodyNormal[unitIndex],
                         screenX,
                         screenY,
                         tilePixelSize,
@@ -272,6 +273,7 @@ public sealed class UnitRenderSystem
                     hitVolumeBuffer,
                     volumeCount,
                     unitPosition,
+                    units.BodyNormal[unitIndex],
                     screenX,
                     screenY,
                     tilePixelSize,
@@ -544,6 +546,7 @@ public void DrawSnapshot(
                         _bodyOutlines,
                         snapshotHitVolumeBuffer[volumeIndex],
                         position,
+                        unit.BodyNormal,
                         x,
                         y,
                         tilePixelSize,
@@ -556,6 +559,7 @@ public void DrawSnapshot(
                     snapshotHitVolumeBuffer,
                     volumeCount,
                     position,
+                    unit.BodyNormal,
                     x,
                     y,
                     tilePixelSize,
@@ -678,6 +682,7 @@ public void DrawSnapshot(
         VertexArray outlines,
         in HitVolume volume,
         Vector3 unitPosition,
+        Vector3 bodyNormal,
         float unitX,
         float unitY,
         float tilePixelSize,
@@ -687,15 +692,20 @@ public void DrawSnapshot(
         // Magnify the actual collision volume relative to the unit root.
         // Unlike the previous hand-authored layout, this preserves the rig's
         // actual attachment points and the independent head/body normals.
+        Vector3 bodyForward = NormalizeHorizontal(bodyNormal);
+        Vector3 bodyRight = new(-bodyForward.Y, bodyForward.X, 0f);
+        Vector3 relativeCenter = volume.Center - unitPosition;
+
+        // The simulation rig is top-down: body-forward is the character's
+        // head-to-feet axis in world space. Rotate the inspection projection
+        // into an upright diagram so forward is screen-up and lateral is X.
+        float localX = Vector3.Dot(relativeCenter, bodyRight);
+        float localY = -Vector3.Dot(relativeCenter, bodyForward);
         float centerX = unitX +
-            (volume.Center.X - unitPosition.X) *
-            tilePixelSize *
-            inspectionScale;
+            localX * tilePixelSize * inspectionScale;
 
         float centerY = unitY +
-            (volume.Center.Y - unitPosition.Y) *
-            tilePixelSize *
-            inspectionScale;
+            localY * tilePixelSize * inspectionScale;
 
         float minimumRadius = 0.35f / MathF.Max(0.001f, screenScale);
         float radiusX = MathF.Max(
@@ -711,9 +721,10 @@ public void DrawSnapshot(
             inspectionScale);
 
         // Radii.X lies along Right; Radii.Y lies along Forward.
-        float rotation = MathF.Atan2(
-            volume.Right.Y,
-            volume.Right.X);
+        Vector3 volumeRight = NormalizeHorizontal(volume.Right);
+        float volumeLocalX = Vector3.Dot(volumeRight, bodyRight);
+        float volumeLocalY = -Vector3.Dot(volumeRight, bodyForward);
+        float rotation = MathF.Atan2(volumeLocalY, volumeLocalX);
 
         float outlinePad = 0.5f / MathF.Max(0.001f, screenScale);
         int segments = MathF.Max(radiusX, radiusY) *
@@ -750,6 +761,7 @@ public void DrawSnapshot(
         ReadOnlySpan<HitVolume> volumes,
         int volumeCount,
         Vector3 unitPosition,
+        Vector3 bodyNormal,
         float unitX,
         float unitY,
         float tilePixelSize,
@@ -787,7 +799,7 @@ public void DrawSnapshot(
                 outlines,
                 unitX + (torso.Center.X - unitPosition.X) * tilePixelSize * inspectionScale,
                 unitY + (torso.Center.Y - unitPosition.Y) * tilePixelSize * inspectionScale,
-                torso.Forward,
+                ProjectNormalToBodyDiagram(torso.Forward, bodyForward, bodyRight),
                 MathF.Min(
                     inspectionRadius * 0.23f,
                     MathF.Max(
@@ -805,7 +817,7 @@ public void DrawSnapshot(
                 outlines,
                 unitX + (head.Center.X - unitPosition.X) * tilePixelSize * inspectionScale,
                 unitY + (head.Center.Y - unitPosition.Y) * tilePixelSize * inspectionScale,
-                head.Forward,
+                ProjectNormalToBodyDiagram(head.Forward, bodyForward, bodyRight),
                 MathF.Min(
                     inspectionRadius * 0.18f,
                     MathF.Max(
@@ -815,6 +827,18 @@ public void DrawSnapshot(
                 new Color(126, 72, 8, 255),
                 screenScale);
         }
+    }
+
+    private static Vector3 ProjectNormalToBodyDiagram(
+        Vector3 normal,
+        Vector3 bodyForward,
+        Vector3 bodyRight)
+    {
+        normal = NormalizeHorizontal(normal);
+        return new Vector3(
+            Vector3.Dot(normal, bodyRight),
+            -Vector3.Dot(normal, bodyForward),
+            0f);
     }
 
     private static void AppendInspectionNormal(
