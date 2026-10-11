@@ -87,9 +87,11 @@ public sealed class GameCamera
                 ? _zoomLevel / zoomFactor
                 : _zoomLevel * zoomFactor;
 
+        // No gameplay zoom-in limit. Keep only the smallest positive float
+        // to prevent the view size from reaching zero after extreme wheel input.
         newZoom =
             Math.Max(
-                0.05f,
+                float.Epsilon,
                 newZoom);
 
         float viewFactor =
