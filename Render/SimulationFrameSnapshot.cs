@@ -13,6 +13,7 @@ public readonly record struct RenderWeaponVisual(
 
 public readonly record struct RenderUnitState(
     int Index,
+    uint Generation,
     Vector3 Position,
     Vector3 HeadNormal,
     float Width,
@@ -221,6 +222,7 @@ public sealed class SimulationFrameSnapshot
 
             unitStates[i] = new RenderUnitState(
                 index,
+                units.GetId(index).Generation,
                 positions[index],
                 headNormals[index],
                 widths[index],
