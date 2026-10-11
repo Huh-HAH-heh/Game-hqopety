@@ -1348,7 +1348,8 @@ public static class CombatSelfTest
         VisionSystem vision = simulation.Vision;
         Vector3 eye = vision.GetEyePosition(
             simulation.Units,
-            shooter.Index);
+            shooter.Index,
+            simulation.Bodies);
 
         Vector3 torsoCenter =
             simulation.Units.Position[target.Index] +
@@ -1367,7 +1368,8 @@ public static class CombatSelfTest
             simulation.Units,
             target.Index,
             eye,
-            candidates);
+            candidates,
+            simulation.Bodies);
 
         UnitHitSystem hitSystem = new UnitHitSystem();
 
@@ -1385,7 +1387,8 @@ public static class CombatSelfTest
                     candidate,
                     0f,
                     UnitHealthPartId.None,
-                    out UnitHitResult hit) &&
+                    out UnitHitResult hit,
+                    simulation.Bodies) &&
                 hit.Part == UnitHealthPartId.Head)
             {
                 return true;
@@ -1430,7 +1433,8 @@ public static class CombatSelfTest
             int volumeCount = UnitHitSystem.BuildVolumes(
                 units,
                 unit.Index,
-                volumes);
+                volumes,
+                simulation.Bodies);
 
             if (volumeCount != UnitHitSystem.MaxHitVolumeCount)
                 return false;
@@ -1443,7 +1447,8 @@ public static class CombatSelfTest
                 units,
                 unit.Index,
                 source,
-                visibilityPoints);
+                visibilityPoints,
+                simulation.Bodies);
 
             if (visibilityCount != volumeCount)
                 return false;
@@ -1452,7 +1457,8 @@ public static class CombatSelfTest
                 units,
                 unit.Index,
                 source,
-                aimPoints);
+                aimPoints,
+                simulation.Bodies);
 
             for (int i = 0; i < volumeCount; i++)
             {
@@ -1468,7 +1474,8 @@ public static class CombatSelfTest
                 {
                     Vector3 eye = simulation.Vision.GetEyePosition(
                         units,
-                        unit.Index);
+                        unit.Index,
+                        simulation.Bodies);
 
                     if (!PointInsideHitVolume(eye, volumes[i]))
                         return false;
