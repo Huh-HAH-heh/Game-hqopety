@@ -43,6 +43,7 @@ public sealed class GameRenderer
     private bool _showHeightContours = true;
     private bool _showContourLabels = true;
     private bool _closeRequested;
+    private bool _graphicsRecoveryPending;
 
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
@@ -353,6 +354,28 @@ public sealed class GameRenderer
 
     private void Draw()
     {
+        // Re-activate the render context explicitly. On some desktop/window
+        // switches the window can regain focus while its GL context is not
+        // current yet; drawing against it can leave the window black.
+        if (!_window.SetActive(true))
+        {
+            _graphicsRecoveryPending = true;
+            return;
+        }
+
+        if (_graphicsRecoveryPending)
+        {
+            Vector2u size = _window.Size;
+            if (size.X > 0 && size.Y > 0)
+                UpdateWindowViews(size);
+
+            // Only dispose/rebuild cached GPU objects after SetActive succeeds.
+            _mapRenderer.InvalidateGraphicsResources();
+            _graphicsRecoveryPending = false;
+            Console.WriteLine(
+                "[Render] Graphics context restored; terrain GPU cache will rebuild.");
+        }
+
         _window.Clear(
             new Color(
                 7,
@@ -644,13 +667,9 @@ public sealed class GameRenderer
         _window.GainedFocus +=
             (_, _) =>
             {
-                Vector2u size = _window.Size;
-                if (size.X > 0 && size.Y > 0)
-                    UpdateWindowViews(size);
-
-                _mapRenderer.InvalidateGraphicsResources();
-                Console.WriteLine(
-                    "[Render] Window focus restored; terrain GPU cache will rebuild.");
+                // Focus events may arrive before the window's OpenGL context
+                // is active again. Defer GPU resource disposal until Draw().
+                _graphicsRecoveryPending = true;
             };
 
         _window.MouseWheelScrolled +=
