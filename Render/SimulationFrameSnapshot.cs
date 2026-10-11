@@ -15,6 +15,7 @@ public readonly record struct RenderUnitState(
     int Index,
     uint Generation,
     Vector3 Position,
+    Vector3 BodyNormal,
     Vector3 HeadNormal,
     float Width,
     float Length,
@@ -159,6 +160,7 @@ public sealed class SimulationFrameSnapshot
         Vector3[] positions = units.Position;
         float[] widths = units.Width;
         float[] lengths = units.Length;
+        Vector3[] bodyNormals = units.BodyNormal;
         Vector3[] headNormals = units.HeadNormal;
         UnitAiStore aiStore = simulation.AI.Store;
         UnitAiState[] aiStates = aiStore.State;
@@ -221,6 +223,7 @@ public sealed class SimulationFrameSnapshot
                 index,
                 units.GetId(index).Generation,
                 positions[index],
+                bodyNormals[index],
                 headNormals[index],
                 widths[index],
                 lengths[index],
