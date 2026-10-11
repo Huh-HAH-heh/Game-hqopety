@@ -52,6 +52,7 @@ public static class CombatSelfTest
         RunTest("Combat log: hit and blocked events survive shot spam", TestCombatLogPriorities, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
         RunTest("Anatomy: all built-in and custom body definitions transform correctly", TestAnatomyProfiles, ref passed, ref failed);
+        RunTest("Armor: starting colonist armor mitigates repeated rifle hits", TestStartingArmorMitigatesRifleHits, ref passed, ref failed);
         RunTest("Equipment: clothing coverage and visual metadata", TestEquipmentVisualMetadata, ref passed, ref failed);
 
         Console.WriteLine("---------------------------------------");
@@ -1765,26 +1766,121 @@ public static class CombatSelfTest
     }
 
 
+    private static bool TestStartingArmorMitigatesRifleHits()
+    {
+        UnitSimulation simulation = new UnitSimulation(2, 32);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            Vector3.Zero,
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        int vestSlot = simulation.Inventory.GetBodyEquipment(
+            target.Index,
+            1,
+            ArmorLayer.Armor);
+
+        if (vestSlot < 0 ||
+            simulation.Inventory.GetItem(target.Index, vestSlot) != ApparelCatalog.CombatVest)
+            return false;
+
+        int durabilityIndex =
+            target.Index * UnitInventoryStore.MaxInventorySlots + vestSlot;
+        float armorDurabilityBefore = simulation.Inventory.Durability[durabilityIndex];
+        float healthBefore = simulation.Health.OverallHitPoints[target.Index];
+
+        DamageSystem damageSystem = new DamageSystem();
+        UnitHealthSystem healthSystem = new UnitHealthSystem();
+        const float initialEnergy = 1729.8f;
+
+        for (int i = 0; i < 5; i++)
+        {
+            DamageEvent hit = new DamageEvent(
+                default,
+                target,
+                UnitHealthPartId.Torso,
+                Vector3.Zero,
+                Vector3.UnitX,
+                34f,
+                initialEnergy,
+                initialEnergy,
+                90f,
+                70f,
+                DamageType.Ballistic,
+                0f);
+
+            ProjectileDamageResult result = damageSystem.ApplyProjectile(
+                simulation.Units,
+                simulation.Inventory,
+                simulation.Health,
+                healthSystem,
+                in hit);
+
+            if (result.DamageApplied <= 0f || result.DamageApplied >= 10f)
+                return false;
+        }
+
+        float healthAfterRifleHits =
+            simulation.Health.OverallHitPoints[target.Index];
+        float armorDurabilityAfter =
+            simulation.Inventory.Durability[durabilityIndex];
+
+        if (healthAfterRifleHits <= 0f ||
+            healthAfterRifleHits >= healthBefore ||
+            armorDurabilityAfter >= armorDurabilityBefore ||
+            armorDurabilityAfter <= 0f)
+        {
+            return false;
+        }
+
+        UnitDamageResult genericHit = simulation.ApplyDamage(
+            target,
+            UnitHealthPartId.Torso,
+            34f);
+
+        return genericHit.FinalDamage > 0f &&
+               genericHit.FinalDamage < 20f &&
+               simulation.Health.OverallHitPoints[target.Index] > 0f;
+    }
+
     private static bool TestEquipmentVisualMetadata()
     {
         if (WeaponCatalog.AssaultRifle.WorldRenderLength <= WeaponCatalog.Pistol.WorldRenderLength ||
             ApparelCatalog.WorkShirt.WorldRenderPadding <= 0f ||
-            ApparelCatalog.WorkTrousers.WorldRenderPadding <= 0f)
+            ApparelCatalog.WorkTrousers.WorldRenderPadding <= 0f ||
+            ApparelCatalog.CombatVest.WorldRenderPadding <= 0f ||
+            ApparelCatalog.CombatHelmet.WorldRenderPadding <= 0f)
             return false;
 
         UnitSimulation simulation = new UnitSimulation(2, 32);
-        UnitId unit = simulation.Spawn(UnitType.Colonist, Vector3.Zero, Vector3.UnitX, Vector3.UnitX);
-        int shirt = simulation.AddInventoryItem(unit, ApparelCatalog.WorkShirt);
-        int trousers = simulation.AddInventoryItem(unit, ApparelCatalog.WorkTrousers);
-        if (shirt < 0 || trousers < 0 ||
-            !simulation.EquipArmor(unit, shirt) ||
-            !simulation.EquipArmor(unit, trousers))
+        UnitId unit = simulation.Spawn(
+            UnitType.Colonist,
+            Vector3.Zero,
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        int shirt = simulation.Inventory.GetBodyEquipment(
+            unit.Index, 1, ArmorLayer.Clothing);
+        int trousers = simulation.Inventory.GetBodyEquipment(
+            unit.Index, 6, ArmorLayer.Clothing);
+        int vest = simulation.Inventory.GetBodyEquipment(
+            unit.Index, 1, ArmorLayer.Armor);
+        int helmet = simulation.Inventory.GetBodyEquipment(
+            unit.Index, 0, ArmorLayer.Armor);
+
+        if (shirt < 0 || trousers < 0 || vest < 0 || helmet < 0)
             return false;
 
-        return simulation.Inventory.GetBodyEquipment(unit.Index, 1, ArmorLayer.Clothing) == shirt &&
-               simulation.Inventory.GetBodyEquipment(unit.Index, 2, ArmorLayer.Clothing) == shirt &&
-               simulation.Inventory.GetBodyEquipment(unit.Index, 6, ArmorLayer.Clothing) == trousers &&
-               simulation.Inventory.GetBodyEquipment(unit.Index, 8, ArmorLayer.Clothing) == trousers;
+        int itemStart = unit.Index * UnitInventoryStore.MaxInventorySlots;
+
+        return simulation.Inventory.GetItem(unit.Index, shirt) == ApparelCatalog.WorkShirt &&
+               simulation.Inventory.GetItem(unit.Index, trousers) == ApparelCatalog.WorkTrousers &&
+               simulation.Inventory.GetItem(unit.Index, vest) == ApparelCatalog.CombatVest &&
+               simulation.Inventory.GetItem(unit.Index, helmet) == ApparelCatalog.CombatHelmet &&
+               simulation.Inventory.Durability[itemStart + shirt] > 0f &&
+               simulation.Inventory.Durability[itemStart + trousers] > 0f &&
+               simulation.Inventory.Durability[itemStart + vest] > 0f &&
+               simulation.Inventory.Durability[itemStart + helmet] > 0f;
     }
 
     private static bool TestAnatomyProfiles()

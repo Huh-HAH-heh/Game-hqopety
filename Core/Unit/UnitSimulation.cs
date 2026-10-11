@@ -248,7 +248,29 @@ public sealed class UnitSimulation
         Weapons.InitializeUnit(id.Index);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
+
+        if (type == UnitType.Colonist)
+            EquipStartingArmor(id);
+
         return id;
+    }
+
+    private void EquipStartingArmor(UnitId id)
+    {
+        EquipStartingArmorItem(id, ApparelCatalog.WorkShirt, 55f);
+        EquipStartingArmorItem(id, ApparelCatalog.WorkTrousers, 60f);
+        EquipStartingArmorItem(id, ApparelCatalog.CombatVest, 130f);
+        EquipStartingArmorItem(id, ApparelCatalog.CombatHelmet, 95f);
+    }
+
+    private void EquipStartingArmorItem(
+        UnitId id,
+        ArmorConfig armor,
+        float durability)
+    {
+        int slot = Inventory.AddItem(id.Index, armor, durability);
+        if (slot >= 0)
+            _inventorySystem.EquipArmor(Units, Inventory, id, slot);
     }
 
     public bool Destroy(
