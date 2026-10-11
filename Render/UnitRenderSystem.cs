@@ -260,6 +260,7 @@ public sealed class UnitRenderSystem
                     screenY,
                     markerRadius,
                     weaponDirection,
+                    headNormals[unitIndex],
                     screenScale);
             }
 
@@ -482,6 +483,7 @@ public void DrawSnapshot(
                     y,
                     markerRadius,
                     weaponDirection,
+                    unit.HeadNormal,
                     screenScale);
             }
 
@@ -1182,6 +1184,7 @@ public void DrawSnapshot(
         float y,
         float radius,
         Vector3 direction,
+        Vector3 bodyFacing,
         float screenScale)
     {
         float dx = direction.X;
@@ -1199,31 +1202,47 @@ public void DrawSnapshot(
             dy *= inverseLength;
         }
 
-        // With SFML's downward-positive screen Y, this perpendicular is the
-        // body's right side relative to facing. The weapon rotates with the aim direction.
-        float px = -dy;
-        float py = dx;
         float pixel = 1f / MathF.Max(0.001f, screenScale);
 
-        // Anchor the weapon on the right flank, not the centre of the white disc.
-        // Its long tip projects well beyond the body and the skewed base adds a clear silhouette.
+        // Keep the attachment point on the body's right flank even when aim
+        // direction differs from the head normal. Y grows downward in SFML.
+        float fx = bodyFacing.X;
+        float fy = bodyFacing.Y;
+        float facingLengthSquared = fx * fx + fy * fy;
+        if (facingLengthSquared < 0.0001f)
+        {
+            fx = dx;
+            fy = dy;
+        }
+        else
+        {
+            float inverseFacingLength = 1f / MathF.Sqrt(facingLengthSquared);
+            fx *= inverseFacingLength;
+            fy *= inverseFacingLength;
+        }
+
+        float sideX = -fy;
+        float sideY = fx;
+        float weaponPerpX = -dy;
+        float weaponPerpY = dx;
+
+        // A long weapon projects beyond the small body disk. Its base corners
+        // have different forward offsets to create the slightly skewed profile.
         float side = radius * 0.62f;
         float baseForward = radius * 0.10f;
         float tipForward = radius * 2.45f + pixel * 3.2f;
         float halfWidth = MathF.Max(pixel * 1.45f, radius * 0.34f);
 
-        float tx = x + dx * tipForward + px * side;
-        float ty = y + dy * tipForward + py * side;
+        float tx = x + dx * tipForward + sideX * side;
+        float ty = y + dy * tipForward + sideY * side;
 
-        // The two base corners have different forward offsets: a slanted, asymmetric base.
         float baseAForward = baseForward - radius * 0.20f;
         float baseBForward = baseForward + radius * 0.24f;
-        float baseAX = x + dx * baseAForward + px * (side - halfWidth);
-        float baseAY = y + dy * baseAForward + py * (side - halfWidth);
-        float baseBX = x + dx * baseBForward + px * (side + halfWidth);
-        float baseBY = y + dy * baseBForward + py * (side + halfWidth);
+        float baseAX = x + dx * baseAForward + sideX * side - weaponPerpX * halfWidth;
+        float baseAY = y + dy * baseAForward + sideY * side - weaponPerpY * halfWidth;
+        float baseBX = x + dx * baseBForward + sideX * side + weaponPerpX * halfWidth;
+        float baseBY = y + dy * baseBForward + sideY * side + weaponPerpY * halfWidth;
 
-        // Dark outline separates the enlarged weapon from terrain and white body.
         AppendTriangle(
             vertices,
             tx, ty,
@@ -1231,18 +1250,20 @@ public void DrawSnapshot(
             baseBX, baseBY,
             new Color(15, 21, 28, 255));
 
-        // Bright steel inner triangle follows the same skew so the weapon reads at zoom.
+        // Bright inset follows the weapon axis, while the mounting offset remains
+        // tied to the body facing. This avoids the weapon sliding to another flank
+        // during aim rotation.
         float insetStart = radius * 0.56f;
         float insetTip = tipForward - pixel * 1.1f;
         float insetHalfWidth = halfWidth * 0.40f;
         AppendTriangle(
             vertices,
-            x + dx * insetTip + px * side,
-            y + dy * insetTip + py * side,
-            x + dx * insetStart + px * (side - insetHalfWidth * 0.70f),
-            y + dy * insetStart + py * (side - insetHalfWidth * 0.70f),
-            x + dx * (insetStart + radius * 0.20f) + px * (side + insetHalfWidth),
-            y + dy * (insetStart + radius * 0.20f) + py * (side + insetHalfWidth),
+            x + dx * insetTip + sideX * side,
+            y + dy * insetTip + sideY * side,
+            x + dx * insetStart + sideX * side - weaponPerpX * (insetHalfWidth * 0.70f),
+            y + dy * insetStart + sideY * side - weaponPerpY * (insetHalfWidth * 0.70f),
+            x + dx * (insetStart + radius * 0.20f) + sideX * side + weaponPerpX * insetHalfWidth,
+            y + dy * (insetStart + radius * 0.20f) + sideY * side + weaponPerpY * insetHalfWidth,
             new Color(225, 235, 243, 255));
     }
 
