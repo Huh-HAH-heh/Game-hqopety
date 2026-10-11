@@ -411,6 +411,30 @@ public void DrawSnapshot(
         _visionDebug.Clear();
         _aiDebug.Clear();
 
+        RenderBodyPart[] bodyParts = snapshot.BodyParts;
+        for (int i = 0; i < bodyParts.Length; i++)
+        {
+            RenderBodyPart part = bodyParts[i];
+            AppendLogicalBodyPart(
+                _vertices,
+                _bodyOutlines,
+                part.Position,
+                part.Scale,
+                part.Rotation,
+                part.Primitive,
+                part.Role,
+                part.FactionTag,
+                part.AiState,
+                part.IsAlive,
+                showAiDebug,
+                tilePixelSize,
+                screenScale,
+                minX,
+                maxX,
+                minY,
+                maxY);
+        }
+
         RenderUnitState[] units = snapshot.Units;
         for (int i = 0; i < units.Length; i++)
         {
@@ -489,35 +513,11 @@ public void DrawSnapshot(
                     _selection,
                     x,
                     y,
-                    MathF.Max(3f, tilePixelSize * 0.62f));
+                    MathF.Max(1.2f / screenScale, tilePixelSize * 0.16f));
                 continue;
             }
 
-            Color fill = showAiDebug
-                ? GetAiColor(unit.AiState)
-                : new Color(238, 238, 238);
-
             float radius = MathF.Max(0.24f, unit.Width * 0.55f);
-            float markerRadius = MathF.Max(
-                radius * tilePixelSize,
-                1.45f / screenScale);
-
-            Color factionAccent = GetFactionAccent(unit.FactionTag);
-            AppendCircleOutline(
-                _bodyOutlines,
-                x,
-                y,
-                markerRadius + 0.60f / screenScale,
-                new Color(13, 15, 18, 245),
-                CircleSegments);
-            AppendCircleOutline(
-                _bodyOutlines,
-                x,
-                y,
-                markerRadius + 0.15f / screenScale,
-                factionAccent,
-                CircleSegments);
-            AppendCircle(_vertices, x, y, markerRadius, fill);
 
             if (showUnitDetails)
             {
@@ -584,10 +584,10 @@ public void DrawSnapshot(
             }
         }
 
-        if (_bodyOutlines.VertexCount > 0)
-            window.Draw(_bodyOutlines);
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
+        if (_bodyOutlines.VertexCount > 0)
+            window.Draw(_bodyOutlines);
         if (_equipment.VertexCount > 0)
             window.Draw(_equipment);
         if (_weaponVisuals.VertexCount > 0)
