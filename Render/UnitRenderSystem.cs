@@ -124,6 +124,15 @@ public sealed class UnitRenderSystem
         UnitStore units =
             simulation.Units;
 
+        UnitBodyStore bodyStore = simulation.Bodies;
+        Vector3[] bodyPositions = bodyStore.WorldPosition;
+        Vector3[] bodyScales = bodyStore.Scale;
+        float[] bodyRotations = bodyStore.WorldRotation;
+        BodyPrimitive[] bodyPrimitives = bodyStore.Primitive;
+        BodyPartRole[] bodyRoles = bodyStore.Role;
+        int[] bodyStarts = units.BodyStart;
+        short[] bodyCounts = units.BodyCount;
+
         UnitInventoryStore inventory =
             simulation.Inventory;
 
@@ -209,92 +218,67 @@ public sealed class UnitRenderSystem
 
             float screenX = unitPosition.X * tilePixelSize;
             float screenY = unitPosition.Y * tilePixelSize;
+            bool isAlive = simulation.Health.OverallHitPoints[unitIndex] > 0f;
+            UnitAiState aiState = simulation.AI.Store.State[unitIndex];
 
-            if (simulation.Health.OverallHitPoints[unitIndex] <= 0f)
+            int bodyStart = bodyStarts[unitIndex];
+            int bodyEnd = bodyStart + Math.Max(0, bodyCounts[unitIndex]);
+            for (int bodyPart = bodyStart;
+                 bodyPart < bodyEnd && bodyPart < bodyStore.Count;
+                 bodyPart++)
+            {
+                AppendLogicalBodyPart(
+                    _vertices,
+                    _bodyOutlines,
+                    bodyPositions[bodyPart],
+                    bodyScales[bodyPart],
+                    bodyRotations[bodyPart],
+                    bodyPrimitives[bodyPart],
+                    bodyRoles[bodyPart],
+                    units.FactionTag[unitIndex],
+                    aiState,
+                    isAlive,
+                    showAiDebug && simulation.AI.Enabled,
+                    tilePixelSize,
+                    screenScale,
+                    minWorldX,
+                    maxWorldX,
+                    minWorldY,
+                    maxWorldY);
+            }
+
+            if (!isAlive)
             {
                 AppendDeathMarker(
                     _selection,
                     screenX,
                     screenY,
-                    MathF.Max(3f, tilePixelSize * 0.62f));
+                    MathF.Max(1.2f / screenScale, tilePixelSize * 0.16f));
                 continue;
             }
 
-            Color color =
-                new Color(
-                    238,
-                    238,
-                    238);
-
-            UnitAiState aiState =
-                simulation.AI.Store.State[unitIndex];
-
             if (showAiDebug &&
-                simulation.AI.Enabled)
+                simulation.AI.Enabled &&
+                hasSelection &&
+                selectedIndex == unitIndex)
             {
-                color = GetAiColor(aiState);
+                AppendAiDebug(
+                    _aiDebug,
+                    simulation,
+                    unitIndex,
+                    tilePixelSize);
 
-                // Full target/goal vectors are useful for the selected unit,
-                // but drawing 800 vectors at once hides the battlefield.
-                if (hasSelection && selectedIndex == unitIndex)
-                {
-                    AppendAiDebug(
-                        _aiDebug,
-                        simulation,
-                        unitIndex,
-                        tilePixelSize);
-
-                    AppendSuppressionDebug(
-                        _aiDebug,
-                        simulation,
-                        unitIndex,
-                        tilePixelSize);
-                }
+                AppendSuppressionDebug(
+                    _aiDebug,
+                    simulation,
+                    unitIndex,
+                    tilePixelSize);
             }
 
             float radius =
                 MathF.Max(
                     0.24f,
                     widths[unitIndex] * 0.55f);
-
-            float markerRadius =
-                MathF.Max(
-                    radius * tilePixelSize,
-                    1.45f / screenScale);
-
-            float pixelX =
-                unitPosition.X * tilePixelSize;
-
-            float pixelY =
-                unitPosition.Y * tilePixelSize;
-
-            Color factionAccent =
-                GetFactionAccent(units.FactionTag[unitIndex]);
-
-            // A clean off-white disk with one faction edge and a dark keyline:
-            // the map stays monochrome, while factions remain readable at a glance.
-            AppendCircleOutline(
-                _bodyOutlines,
-                pixelX,
-                pixelY,
-                markerRadius + 0.60f / screenScale,
-                new Color(13, 15, 18, 245),
-                CircleSegments);
-
-            AppendCircleOutline(
-                _bodyOutlines,
-                pixelX,
-                pixelY,
-                markerRadius + 0.15f / screenScale,
-                factionAccent,
-                CircleSegments);
-
-            AppendCircle(
-                _vertices,
-                pixelX,
-                pixelY,
-                markerRadius,
-                color);
 
             if (showUnitDetails)
             {
@@ -355,17 +339,11 @@ public sealed class UnitRenderSystem
                 _visionArea);
         }
 
-        if (_bodyOutlines.VertexCount > 0)
-        {
-            window.Draw(
-                _bodyOutlines);
-        }
-
         if (_vertices.VertexCount > 0)
-        {
-            window.Draw(
-                _vertices);
-        }
+            window.Draw(_vertices);
+
+        if (_bodyOutlines.VertexCount > 0)
+            window.Draw(_bodyOutlines);
 
         if (_equipment.VertexCount > 0)
             window.Draw(_equipment);
