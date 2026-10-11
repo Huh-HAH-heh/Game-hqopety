@@ -133,12 +133,6 @@ public sealed class UnitRenderSystem
         Vector3[] partScales =
             bodies.Scale;
 
-        float[] partRotations =
-            bodies.WorldRotation;
-
-        BodyPrimitive[] primitives =
-            bodies.Primitive;
-
         BodyPartRole[] bodyRoles =
             bodies.Role;
 
@@ -274,24 +268,24 @@ public sealed class UnitRenderSystem
             int end = start + count;
             float screenScale = window.Size.X / MathF.Max(1f, cameraView.Size.X);
             float pixelScale = MathF.Max(1f, tilePixelSize * screenScale);
-            float outline = 0.42f / pixelScale;
-            float minLimbRadius = 0.50f / pixelScale;
+            float minRadius = 1.4f / pixelScale;
+            float outline = 0.45f / pixelScale;
             Color outlineColor = new Color(20, 22, 26, 238);
 
-            // Outline every part first. Fill batches are layered afterwards,
-            // so legs disappear under the torso instead of covering it.
+            // Simple body debug rendering: one circle per body part at its
+            // calculated world coordinate. No capsules, boxes, or layering.
             for (int part = start; part < end; part++)
             {
                 Vector3 position = partPositions[part];
                 Vector3 scale = partScales[part];
                 BodyPartRole role = bodyRoles[part];
-                float radiusX = MathF.Max(0.015f, MathF.Abs(scale.X));
-                float radiusY = MathF.Max(0.015f, MathF.Abs(scale.Y));
-                if (IsAnatomicalLimb(role))
-                    radiusY = MathF.Max(radiusY, minLimbRadius);
-                float extent = MathF.Sqrt(
-                    radiusX * radiusX +
-                    radiusY * radiusY) + outline;
+
+                // Segment length must not stretch a point into an arm/leg.
+                // Use the narrower dimension for a round marker.
+                float radius = MathF.Max(
+                    minRadius,
+                    MathF.Min(MathF.Abs(scale.X), MathF.Abs(scale.Y)));
+                float extent = radius + outline;
 
                 if (!IsPartInView(
                     position,
@@ -304,83 +298,23 @@ public sealed class UnitRenderSystem
                     continue;
                 }
 
-                AppendBodyPart(
+                float pixelX = position.X * tilePixelSize;
+                float pixelY = position.Y * tilePixelSize;
+
+                AppendCircleOutline(
                     _bodyOutlines,
-                    primitives[part],
-                    role,
-                    position.X * tilePixelSize,
-                    position.Y * tilePixelSize,
-                    radiusX * tilePixelSize,
-                    radiusY * tilePixelSize,
-                    partRotations[part],
-                    outline * tilePixelSize,
-                    outlineColor);
-            }
+                    pixelX,
+                    pixelY,
+                    (radius + outline) * tilePixelSize,
+                    outlineColor,
+                    CircleSegments);
 
-            // Back-to-front fill order: limbs, trunk, then head.
-            for (int layer = 0; layer < 3; layer++)
-            {
-                for (int part = start; part < end; part++)
-                {
-                    BodyPartRole role = bodyRoles[part];
-                    Vector3 position = partPositions[part];
-
-                    // Limbs stay behind the trunk; only parts outside its silhouette remain visible.
-                    if (GetBodyLayer(role) != layer)
-                        continue;
-
-                    Vector3 scale = partScales[part];
-                    float radiusX = MathF.Max(0.015f, MathF.Abs(scale.X));
-                    float radiusY = MathF.Max(0.015f, MathF.Abs(scale.Y));
-                    if (IsAnatomicalLimb(role))
-                        radiusY = MathF.Max(radiusY, minLimbRadius);
-                    float extent = MathF.Sqrt(
-                        radiusX * radiusX +
-                        radiusY * radiusY);
-
-                    if (!IsPartInView(
-                        position,
-                        extent,
-                        minWorldX,
-                        maxWorldX,
-                        minWorldY,
-                        maxWorldY))
-                    {
-                        continue;
-                    }
-
-                    float pixelX = position.X * tilePixelSize;
-                    float pixelY = position.Y * tilePixelSize;
-                    float rotation = partRotations[part];
-
-                    AppendBodyPart(
-                        _vertices,
-                        primitives[part],
-                        role,
-                        pixelX,
-                        pixelY,
-                        radiusX * tilePixelSize,
-                        radiusY * tilePixelSize,
-                        rotation,
-                        0f,
-                        GetBodyPartColor(role, color));
-
-                    if (role == BodyPartRole.Head)
-                    {
-                        float faceRadius = MathF.Max(
-                            0.30f,
-                            MathF.Min(radiusX, radiusY) * tilePixelSize * 0.18f);
-
-                        AppendEllipse(
-                            _vertices,
-                            pixelX + MathF.Cos(rotation) * radiusX * tilePixelSize * 0.48f,
-                            pixelY + MathF.Sin(rotation) * radiusX * tilePixelSize * 0.48f,
-                            faceRadius,
-                            faceRadius,
-                            rotation,
-                            new Color(28, 30, 34, 255));
-                    }
-                }
+                AppendCircle(
+                    _vertices,
+                    pixelX,
+                    pixelY,
+                    radius * tilePixelSize,
+                    GetBodyPartColor(role, color));
             }
 
             if (hasSelection &&
