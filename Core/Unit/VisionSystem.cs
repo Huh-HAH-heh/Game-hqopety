@@ -45,7 +45,7 @@ public readonly struct VisionCheck
 
 public sealed class VisionSystem
 {
-    public const int VisibilityPointCount = 7;
+    public const int VisibilityPointCount = UnitHitSystem.MaxHitVolumeCount;
 
     private const float UpdateInterval = 0.10f;
     private const float Epsilon = 0.02f;
@@ -641,16 +641,17 @@ public sealed class VisionSystem
             stackalloc Vector3[
                 VisibilityPointCount];
 
-        GetVisibilityPoints(
+        int pointCount = GetVisibilityPoints(
             units,
             targetIndex,
+            observerEye,
             points);
 
         Vector3 firstBlockingPoint =
             Vector3.Zero;
 
         for (int i = 0;
-             i < points.Length;
+             i < pointCount;
              i++)
         {
             Vector3 point =
@@ -693,59 +694,9 @@ public sealed class VisionSystem
         UnitStore units,
         int unitIndex)
     {
-        Vector3 position =
-            units.Position[unitIndex];
-
-        Vector3 headNormal =
-            NormalizeHorizontal(
-                units.HeadNormal[unitIndex]);
-
-        float width =
-            MathF.Max(
-                0.05f,
-                units.Width[unitIndex]);
-
-        float length =
-            MathF.Max(
-                0.05f,
-                units.Length[unitIndex]);
-
-        float height =
-            MathF.Max(
-                0.05f,
-                units.Height[unitIndex]);
-
-        float bodyLength =
-            units.Posture[unitIndex] ==
-            UnitPosture.Lying
-                ? length
-                : length * 0.60f;
-
-        float headRadius =
-            MathF.Min(
-                width,
-                length) *
-            0.32f;
-
-        float headDistance =
-            bodyLength * 0.5f +
-            headRadius * 1.15f;
-
-        float eyeHeight =
-            units.Posture[unitIndex] switch
-            {
-                UnitPosture.Lying => height * 0.55f,
-                UnitPosture.Crouching => height * 0.62f,
-                _ => height
-            };
-
-        return
-            position +
-            headNormal * headDistance +
-            new Vector3(
-                0f,
-                0f,
-                eyeHeight);
+        return UnitHitSystem.GetEyePosition(
+            units,
+            unitIndex);
     }
 
     public void GetVisibilityPoints(
@@ -753,132 +704,31 @@ public sealed class VisionSystem
         int unitIndex,
         Span<Vector3> points)
     {
-        if (points.Length <
-            VisibilityPointCount)
-        {
-            throw new ArgumentException(
-                "Недостаточно места для точек видимости.",
-                nameof(points));
-        }
-
-        Vector3 center =
-            units.Position[unitIndex];
-
-        Vector3 forward =
-            NormalizeHorizontal(
-                units.HeadNormal[unitIndex]);
-
-        Vector3 right =
-            new Vector3(
-                -forward.Y,
-                forward.X,
-                0f);
-
-        float width =
-            MathF.Max(
-                0.05f,
-                units.Width[unitIndex]);
-
-        float length =
-            MathF.Max(
-                0.05f,
-                units.Length[unitIndex]);
-
-        float height =
-            MathF.Max(
-                0.05f,
-                units.Height[unitIndex]);
-
-        bool lying =
-            units.Posture[unitIndex] ==
-            UnitPosture.Lying;
-
-        float heightFactor =
-            units.Posture[unitIndex] ==
-            UnitPosture.Crouching
-                ? 0.62f
-                : 1f;
-
-        height *= heightFactor;
-
-        float halfWidth =
-            width * 0.5f;
-
-        float halfLength =
-            lying
-                ? length * 0.5f
-                : length * 0.30f;
-
-        points[0] =
-            center +
-            forward *
-            (halfLength + width * 0.12f) +
+        Vector3 source =
+            units.Position[unitIndex] +
             new Vector3(
                 0f,
                 0f,
-                height);
+                MathF.Max(0.05f, units.Height[unitIndex]) * 2f);
 
-        points[1] =
-            center +
-            forward *
-            (halfLength * 0.45f) +
-            new Vector3(
-                0f,
-                0f,
-                height * 0.72f);
+        _ = GetVisibilityPoints(
+            units,
+            unitIndex,
+            source,
+            points);
+    }
 
-        points[2] =
-            center +
-            forward *
-            (halfLength * 0.35f) +
-            right *
-            halfWidth * 0.85f +
-            new Vector3(
-                0f,
-                0f,
-                height * 0.66f);
-
-        points[3] =
-            center +
-            forward *
-            (halfLength * 0.35f) -
-            right *
-            halfWidth * 0.85f +
-            new Vector3(
-                0f,
-                0f,
-                height * 0.66f);
-
-        points[4] =
-            center -
-            forward *
-            (halfLength * 0.25f) +
-            new Vector3(
-                0f,
-                0f,
-                height * 0.45f);
-
-        points[5] =
-            center -
-            forward *
-            (halfLength * 0.15f) +
-            right *
-            halfWidth * 0.90f +
-            new Vector3(
-                0f,
-                0f,
-                height * 0.22f);
-
-        points[6] =
-            center -
-            forward *
-            (halfLength * 0.15f) -
-            right *
-            halfWidth * 0.90f +
-            new Vector3(
-                0f,
-                0f,
-                height * 0.22f);
+    public int GetVisibilityPoints(
+        UnitStore units,
+        int unitIndex,
+        Vector3 source,
+        Span<Vector3> points)
+    {
+        return UnitHitSystem.GetVisibilityPoints(
+            units,
+            unitIndex,
+            source,
+            points);
     }
 
     public bool HasLineOfSight(
