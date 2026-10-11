@@ -384,7 +384,8 @@ public sealed class UnitWeaponSystem
                 weapon.SuppressionFactor,
                 weapon.BleedChance > 0f
                     ? weapon.BleedChance
-                    : ammo.BleedChance);
+                    : ammo.BleedChance,
+                ammo.IsLaser);
         }
 
         // Show a representative muzzle flash instead of one marker per round.
@@ -669,54 +670,84 @@ public sealed class UnitWeaponSystem
         bool suppressing =
             weapons.CurrentAimMode[stateIndex] == AimMode.SuppressFire;
 
-        // Suppressive fire targets the last known point, not the target's
-        // current movement vector. Aimed shots and snapshots still lead targets.
-        for (int iteration = 0;
-             !suppressing && iteration < 3;
-             iteration++)
+        if (ammo.IsLaser)
         {
-            solved =
-                ProjectileBallistics.TrySolve(
-                    muzzle,
-                    predictedTarget,
-                    ammo.ProjectileMassKg,
-                    ammo.ProjectileDiameterM,
-                    ammo.MuzzleVelocity,
-                    ammo.DragCoefficient,
-                    ammo.BallisticCoefficient,
-                    out solution);
+            // Lasers aim directly with modest target lead and no ballistic drop.
+            float distance = Vector3.Distance(muzzle, targetPoint);
+            float speed = MathF.Max(1f, ammo.MuzzleVelocity);
+            float flightTime = distance / speed;
+
+            if (!suppressing)
+            {
+                predictedTarget +=
+                    units.Velocity[targetIndex] *
+                    Math.Clamp(flightTime, 0f, 0.35f);
+            }
+
+            Vector3 laserDelta = predictedTarget - muzzle;
+            float laserLength = laserDelta.Length();
+            Vector3 laserDirection = laserLength > 0.001f
+                ? laserDelta / laserLength
+                : Vector3.UnitX;
+
+            solution = new BallisticSolution(
+                laserDirection,
+                laserLength / speed,
+                speed,
+                0.5f * ammo.ProjectileMassKg * speed * speed);
+            solved = true;
+        }
+        else
+        {
+            // Suppressive fire targets the last known point, not the target's
+            // current movement vector. Aimed shots and snapshots still lead targets.
+            for (int iteration = 0;
+                 !suppressing && iteration < 3;
+                 iteration++)
+            {
+                solved =
+                    ProjectileBallistics.TrySolve(
+                        muzzle,
+                        predictedTarget,
+                        ammo.ProjectileMassKg,
+                        ammo.ProjectileDiameterM,
+                        ammo.MuzzleVelocity,
+                        ammo.DragCoefficient,
+                        ammo.BallisticCoefficient,
+                        out solution);
+
+                if (!solved)
+                    break;
+
+                predictedTarget =
+                    targetPoint +
+                    units.Velocity[targetIndex] *
+                    solution.TimeOfFlight;
+            }
 
             if (!solved)
-                break;
-
-            predictedTarget =
-                targetPoint +
-                units.Velocity[targetIndex] *
-                solution.TimeOfFlight;
-        }
-
-        if (!solved)
-        {
-            predictedTarget =
-                targetPoint;
-
-            if (!ProjectileBallistics.TrySolve(
-                    muzzle,
-                    predictedTarget,
-                    ammo.ProjectileMassKg,
-                    ammo.ProjectileDiameterM,
-                    ammo.MuzzleVelocity,
-                    ammo.DragCoefficient,
-                    ammo.BallisticCoefficient,
-                    out solution))
             {
-                solution =
-                    new BallisticSolution(
-                        Normalize(
-                            targetPoint - muzzle),
-                        0f,
+                predictedTarget =
+                    targetPoint;
+
+                if (!ProjectileBallistics.TrySolve(
+                        muzzle,
+                        predictedTarget,
+                        ammo.ProjectileMassKg,
+                        ammo.ProjectileDiameterM,
                         ammo.MuzzleVelocity,
-                        0f);
+                        ammo.DragCoefficient,
+                        ammo.BallisticCoefficient,
+                        out solution))
+                {
+                    solution =
+                        new BallisticSolution(
+                            Normalize(
+                                targetPoint - muzzle),
+                            0f,
+                            ammo.MuzzleVelocity,
+                            0f);
+                }
             }
         }
 

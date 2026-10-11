@@ -28,6 +28,7 @@ public sealed class ProjectileRenderSystem : IDisposable
             Vector3[] starts = projectiles.TraceStarts;
             Vector3[] ends = projectiles.TraceEnds;
             ushort[] factions = projectiles.TraceFactions;
+            bool[] laserTraces = projectiles.TraceLasers;
             float[] traceLifetimes = projectiles.TraceLifetimes;
 
         for (int i = 0; i < projectiles.TraceCapacityCount; i++)
@@ -41,7 +42,17 @@ public sealed class ProjectileRenderSystem : IDisposable
             if (delta.LengthSquared() < 0.025f)
                 continue;
 
-            GetTeamColors(factions[i], out Color trail, out Color head);
+            Color trail;
+            Color head;
+            if (laserTraces[i])
+            {
+                trail = new Color(40, 190, 245, 150);
+                head = new Color(175, 245, 255, 255);
+            }
+            else
+            {
+                GetTeamColors(factions[i], out trail, out head);
+            }
 
             // Fade old segments instead of losing a fast bullet the same frame it hits.
             byte fade = (byte)(255f * Math.Clamp(

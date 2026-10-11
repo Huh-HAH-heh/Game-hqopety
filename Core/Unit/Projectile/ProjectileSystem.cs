@@ -112,7 +112,8 @@ public sealed class ProjectileSystem
                 projectiles.RegisterTrace(
                     start,
                     end,
-                    projectiles.FactionTag[projectileIndex]);
+                    projectiles.FactionTag[projectileIndex],
+                    projectiles.IsLaser[projectileIndex]);
             }
 
             bool alive =
@@ -1015,6 +1016,10 @@ public sealed class ProjectileSystem
         int index,
         float deltaTime)
     {
+        // Coherent laser pulses travel straight, without gravity or ballistic drag.
+        if (projectiles.IsLaser[index])
+            return;
+
         Vector3 velocity =
             projectiles.Velocity[index];
 

@@ -37,6 +37,7 @@ public sealed class ProjectileStore
     private float[] _lifetime;
     private uint[] _generation;
     private bool[] _showTracer;
+    private bool[] _isLaser;
     private uint _projectileSpawnSequence;
 
     private readonly Vector3[] _impactPositions = new Vector3[ImpactCapacity];
@@ -46,6 +47,7 @@ public sealed class ProjectileStore
     private readonly Vector3[] _traceStarts = new Vector3[TraceCapacity];
     private readonly Vector3[] _traceEnds = new Vector3[TraceCapacity];
     private readonly ushort[] _traceFactions = new ushort[TraceCapacity];
+    private readonly bool[] _traceLasers = new bool[TraceCapacity];
     private readonly float[] _traceLifetimes = new float[TraceCapacity];
     private int _nextImpact;
     private int _nextTrace;
@@ -79,6 +81,7 @@ public sealed class ProjectileStore
     public Vector3[] TraceStarts => _traceStarts;
     public Vector3[] TraceEnds => _traceEnds;
     public ushort[] TraceFactions => _traceFactions;
+    public bool[] TraceLasers => _traceLasers;
     public float[] TraceLifetimes => _traceLifetimes;
     public int TraceCapacityCount => TraceCapacity;
     public UnitId[] Owner => _owner;
@@ -96,6 +99,7 @@ public sealed class ProjectileStore
     public float[] BleedChance => _bleedChance;
     public float[] Lifetime => _lifetime;
     public bool[] ShowTracer => _showTracer;
+    public bool[] IsLaser => _isLaser;
 
     public ReadOnlySpan<int> ActiveIndices =>
         _activeIndices.AsSpan(
@@ -128,6 +132,7 @@ public sealed class ProjectileStore
         _lifetime = new float[initialCapacity];
         _generation = new uint[initialCapacity];
         _showTracer = new bool[initialCapacity];
+        _isLaser = new bool[initialCapacity];
 
         _activeIndices = new int[initialCapacity];
         _activeSlots = new int[initialCapacity];
@@ -153,7 +158,8 @@ public sealed class ProjectileStore
         float lifetime,
         DamageType damageType = Core.Combat.DamageType.Ballistic,
         float suppressionFactor = 1f,
-        float bleedChance = 0f)
+        float bleedChance = 0f,
+        bool isLaser = false)
     {
         int index;
 
@@ -234,6 +240,7 @@ public sealed class ProjectileStore
                 0f,
                 lifetime);
         _showTracer[index] = (_projectileSpawnSequence++ % 5u) == 0;
+        _isLaser[index] = isLaser;
 
         _activeSlots[index] =
             _activeCount;
@@ -267,12 +274,14 @@ public sealed class ProjectileStore
     public void RegisterTrace(
         Vector3 start,
         Vector3 end,
-        ushort faction)
+        ushort faction,
+        bool isLaser = false)
     {
         int index = _nextTrace;
         _traceStarts[index] = start;
         _traceEnds[index] = end;
         _traceFactions[index] = faction;
+        _traceLasers[index] = isLaser;
         _traceLifetimes[index] = TraceLifetimeSeconds;
         _nextTrace = (index + 1) % TraceCapacity;
     }
@@ -461,6 +470,9 @@ public sealed class ProjectileStore
             newCapacity);
         Array.Resize(
             ref _showTracer,
+            newCapacity);
+        Array.Resize(
+            ref _isLaser,
             newCapacity);
         Array.Resize(
             ref _activeIndices,
