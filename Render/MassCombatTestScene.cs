@@ -433,10 +433,13 @@ public sealed class MassCombatTestScene
         _units[testIndex] = id;
         _side[testIndex] = (byte)side;
 
-        ItemConfig weapon =
-            (testIndex % 5 == 0)
-                ? WeaponCatalog.Pistol
-                : WeaponCatalog.AssaultRifle;
+        RangedWeaponConfig weapon =
+            (testIndex % 3) switch
+            {
+                0 => WeaponCatalog.PulseRepeater,
+                1 => WeaponCatalog.LaserCarbine,
+                _ => WeaponCatalog.Railgun
+            };
 
         int weaponSlot =
             simulation.AddInventoryItem(

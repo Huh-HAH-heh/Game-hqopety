@@ -1362,10 +1362,18 @@ public sealed class GameRenderer
                 continue;
             }
 
+            RangedWeaponConfig weapon =
+                (i % 3) switch
+                {
+                    0 => WeaponCatalog.PulseRepeater,
+                    1 => WeaponCatalog.LaserCarbine,
+                    _ => WeaponCatalog.Railgun
+                };
+
             int inventorySlot =
                 _unitSimulation.AddInventoryItem(
                     units[i],
-                    WeaponCatalog.AssaultRifle);
+                    weapon);
 
             if (inventorySlot >= 0)
             {

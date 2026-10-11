@@ -53,6 +53,8 @@ public static class CombatSelfTest
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
         RunTest("Anatomy: all built-in and custom body definitions transform correctly", TestAnatomyProfiles, ref passed, ref failed);
         RunTest("Armor: starting colonist armor mitigates repeated rifle hits", TestStartingArmorMitigatesRifleHits, ref passed, ref failed);
+        RunTest("High-tech: repeater, laser and railgun profiles differ", TestHighTechWeaponProfiles, ref passed, ref failed);
+        RunTest("High-tech: powered exoskeleton boosts speed while intact", TestExoskeletonMovementBonus, ref passed, ref failed);
         RunTest("Equipment: clothing coverage and visual metadata", TestEquipmentVisualMetadata, ref passed, ref failed);
 
         Console.WriteLine("---------------------------------------");
@@ -1843,13 +1845,57 @@ public static class CombatSelfTest
                simulation.Health.OverallHitPoints[target.Index] > 0f;
     }
 
+    private static bool TestHighTechWeaponProfiles()
+    {
+        RangedWeaponConfig repeater = WeaponCatalog.PulseRepeater;
+        RangedWeaponConfig laser = WeaponCatalog.LaserCarbine;
+        RangedWeaponConfig railgun = WeaponCatalog.Railgun;
+
+        return repeater.Technology == WeaponTechnology.KineticRepeater &&
+               repeater.DefaultFireMode == FireMode.Auto &&
+               repeater.FireRate < laser.FireRate &&
+               repeater.MagazineSize > laser.MagazineSize &&
+               laser.Technology == WeaponTechnology.Laser &&
+               laser.DefaultFireMode == FireMode.Auto &&
+               laser.DefaultAmmunition?.IsLaser == true &&
+               laser.DefaultAmmunition?.DamageType == DamageType.Heat &&
+               railgun.Technology == WeaponTechnology.Railgun &&
+               railgun.DefaultFireMode == FireMode.Single &&
+               railgun.FireRate > 1f &&
+               railgun.MagazineSize < repeater.MagazineSize &&
+               railgun.DefaultAmmunition!.Penetration > laser.DefaultAmmunition!.Penetration &&
+               railgun.Recoil > repeater.Recoil &&
+               repeater.WorldColorG != laser.WorldColorG &&
+               laser.WorldColorB > railgun.WorldColorB;
+    }
+
+    private static bool TestExoskeletonMovementBonus()
+    {
+        UnitSimulation simulation = new UnitSimulation(2, 32);
+        UnitId unit = simulation.Spawn(UnitType.Colonist, Vector3.Zero, Vector3.UnitX, Vector3.UnitX);
+        float baseSpeed = UnitCatalog.Get(UnitType.Colonist).MoveSpeed;
+        float expectedSpeed = baseSpeed * ApparelCatalog.PoweredExoskeleton.MovementSpeedMultiplier;
+        int frameSlot = simulation.Inventory.GetBodyEquipment(unit.Index, 6, ArmorLayer.Base);
+
+        if (frameSlot < 0 ||
+            simulation.Inventory.GetItem(unit.Index, frameSlot) != ApparelCatalog.PoweredExoskeleton ||
+            MathF.Abs(simulation.Units.MoveSpeed[unit.Index] - expectedSpeed) > 0.001f)
+            return false;
+
+        simulation.Inventory.Durability[
+            unit.Index * UnitInventoryStore.MaxInventorySlots + frameSlot] = 0f;
+        simulation.Update(new WorldMap(1, 1, 32), 1f / 60f);
+        return MathF.Abs(simulation.Units.MoveSpeed[unit.Index] - baseSpeed) < 0.001f;
+    }
+
     private static bool TestEquipmentVisualMetadata()
     {
         if (WeaponCatalog.AssaultRifle.WorldRenderLength <= WeaponCatalog.Pistol.WorldRenderLength ||
             ApparelCatalog.WorkShirt.WorldRenderPadding <= 0f ||
             ApparelCatalog.WorkTrousers.WorldRenderPadding <= 0f ||
             ApparelCatalog.CombatVest.WorldRenderPadding <= 0f ||
-            ApparelCatalog.CombatHelmet.WorldRenderPadding <= 0f)
+            ApparelCatalog.CombatHelmet.WorldRenderPadding <= 0f ||
+            ApparelCatalog.PoweredExoskeleton.WorldRenderPadding <= 0f)
             return false;
 
         UnitSimulation simulation = new UnitSimulation(2, 32);
@@ -1867,8 +1913,10 @@ public static class CombatSelfTest
             unit.Index, 1, ArmorLayer.Armor);
         int helmet = simulation.Inventory.GetBodyEquipment(
             unit.Index, 0, ArmorLayer.Armor);
+        int exoskeleton = simulation.Inventory.GetBodyEquipment(
+            unit.Index, 6, ArmorLayer.Base);
 
-        if (shirt < 0 || trousers < 0 || vest < 0 || helmet < 0)
+        if (shirt < 0 || trousers < 0 || vest < 0 || helmet < 0 || exoskeleton < 0)
             return false;
 
         int itemStart = unit.Index * UnitInventoryStore.MaxInventorySlots;
@@ -1877,6 +1925,8 @@ public static class CombatSelfTest
                simulation.Inventory.GetItem(unit.Index, trousers) == ApparelCatalog.WorkTrousers &&
                simulation.Inventory.GetItem(unit.Index, vest) == ApparelCatalog.CombatVest &&
                simulation.Inventory.GetItem(unit.Index, helmet) == ApparelCatalog.CombatHelmet &&
+               simulation.Inventory.GetItem(unit.Index, exoskeleton) == ApparelCatalog.PoweredExoskeleton &&
+               simulation.Inventory.Durability[itemStart + exoskeleton] > 0f &&
                simulation.Inventory.Durability[itemStart + shirt] > 0f &&
                simulation.Inventory.Durability[itemStart + trousers] > 0f &&
                simulation.Inventory.Durability[itemStart + vest] > 0f &&

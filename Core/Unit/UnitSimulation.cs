@@ -17,6 +17,7 @@ public sealed class UnitSimulation
     private readonly ProjectileSystem _projectileSystem;
     private readonly UnitAiSystem _aiSystem;
     private bool[] _deathHandled = Array.Empty<bool>();
+    private float[] _baseMoveSpeed = Array.Empty<float>();
 
     public UnitStore Units { get; }
     public UnitNavigationSystem Navigation => _movementSystem.Navigation;
@@ -242,6 +243,7 @@ public sealed class UnitSimulation
 
         EnsureDeathCapacity();
         _deathHandled[id.Index] = false;
+        _baseMoveSpeed[id.Index] = Units.MoveSpeed[id.Index];
 
         Health.InitializeUnit(id.Index, type);
         Inventory.InitializeUnit(id.Index);
@@ -259,8 +261,12 @@ public sealed class UnitSimulation
     {
         EquipStartingArmorItem(id, ApparelCatalog.WorkShirt, 55f);
         EquipStartingArmorItem(id, ApparelCatalog.WorkTrousers, 60f);
-        EquipStartingArmorItem(id, ApparelCatalog.CombatVest, 130f);
-        EquipStartingArmorItem(id, ApparelCatalog.CombatHelmet, 95f);
+        EquipStartingArmorItem(id, ApparelCatalog.CombatVest, 120f);
+        EquipStartingArmorItem(id, ApparelCatalog.CombatHelmet, 90f);
+        EquipStartingArmorItem(id, ApparelCatalog.PoweredExoskeleton, 160f);
+
+        if (Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
     }
 
     private void EquipStartingArmorItem(
@@ -329,11 +335,16 @@ public sealed class UnitSimulation
         UnitId id,
         int inventorySlot)
     {
-        return _inventorySystem.RemoveItem(
+        bool removed = _inventorySystem.RemoveItem(
             Units,
             Inventory,
             id,
             inventorySlot);
+
+        if (removed && Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
+
+        return removed;
     }
 
     public void UnequipArmor(
@@ -347,6 +358,9 @@ public sealed class UnitSimulation
             id,
             zone,
             layer);
+
+        if (Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
     }
 
     public void UnequipWeapon(
@@ -364,11 +378,16 @@ public sealed class UnitSimulation
         UnitId id,
         int inventorySlot)
     {
-        return _inventorySystem.EquipArmor(
+        bool equipped = _inventorySystem.EquipArmor(
             Units,
             Inventory,
             id,
             inventorySlot);
+
+        if (equipped && Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
+
+        return equipped;
     }
 
     public bool EquipWeapon(
@@ -646,6 +665,8 @@ public sealed class UnitSimulation
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();
+        RefreshMovementSpeeds();
+
         _healthSystem.Update(Units, Health, deltaTime);
         LastHealthUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
@@ -657,10 +678,44 @@ public sealed class UnitSimulation
 
     private void EnsureDeathCapacity()
     {
-        if (_deathHandled.Length >= Units.Capacity)
-            return;
+        if (_deathHandled.Length < Units.Capacity)
+            Array.Resize(ref _deathHandled, Units.Capacity);
 
-        Array.Resize(ref _deathHandled, Units.Capacity);
+        if (_baseMoveSpeed.Length < Units.Capacity)
+            Array.Resize(ref _baseMoveSpeed, Units.Capacity);
+    }
+
+    private void RefreshMovementSpeeds()
+    {
+        ReadOnlySpan<int> active = Units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+            RefreshMovementSpeed(active[i]);
+    }
+
+    private void RefreshMovementSpeed(int unitIndex)
+    {
+        float multiplier = 1f;
+
+        for (int zone = 0; zone < UnitInventoryStore.BodyZoneCount; zone++)
+        {
+            for (int layer = 0; layer < UnitInventoryStore.ArmorLayerCount; layer++)
+            {
+                short slot = Inventory.GetBodyEquipment(unitIndex, zone, (ArmorLayer)layer);
+                if (slot < 0)
+                    continue;
+
+                if (Inventory.GetItem(unitIndex, slot) is not ArmorConfig armor ||
+                    armor.MovementSpeedMultiplier <= multiplier)
+                    continue;
+
+                int durabilityIndex =
+                    unitIndex * UnitInventoryStore.MaxInventorySlots + slot;
+                if (Inventory.Durability[durabilityIndex] > 0f)
+                    multiplier = armor.MovementSpeedMultiplier;
+            }
+        }
+
+        Units.MoveSpeed[unitIndex] = _baseMoveSpeed[unitIndex] * multiplier;
     }
 
     private void ProcessDeadUnits()
