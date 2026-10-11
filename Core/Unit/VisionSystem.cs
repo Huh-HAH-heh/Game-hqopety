@@ -138,7 +138,8 @@ public sealed class VisionSystem
         UnitStore units,
         WorldMap worldMap,
         float deltaTime,
-        UnitHealthStore? health = null)
+        UnitHealthStore? health = null,
+        UnitBodyStore? bodies = null)
     {
         if (deltaTime < 0f)
             return;
@@ -384,7 +385,8 @@ public sealed class VisionSystem
                     units,
                     worldMap,
                     observer,
-                    target);
+                    target,
+                    bodies);
 
                 int pairIndex = observer * _visibilityCapacity + target;
                 _lastVisibleUpdate[pairIndex] = check.IsVisible
@@ -545,14 +547,16 @@ public sealed class VisionSystem
         UnitStore units,
         WorldMap worldMap,
         int observerIndex,
-        int targetIndex)
+        int targetIndex,
+        UnitBodyStore? bodies = null)
     {
         if (observerIndex == targetIndex)
         {
             Vector3 eye =
                 GetEyePosition(
                     units,
-                    observerIndex);
+                    observerIndex,
+                    bodies);
 
             return new VisionCheck(
                 VisionState.Self,
@@ -588,7 +592,8 @@ public sealed class VisionSystem
                 -1,
                 GetEyePosition(
                     units,
-                    observerIndex),
+                    observerIndex,
+                    bodies),
                 targetCenter,
                 targetCenter,
                 Vector3.Zero);
@@ -605,7 +610,8 @@ public sealed class VisionSystem
                 0,
                 GetEyePosition(
                     units,
-                    observerIndex),
+                    observerIndex,
+                    bodies),
                 targetCenter,
                 targetCenter,
                 Vector3.Zero);
@@ -634,7 +640,8 @@ public sealed class VisionSystem
                 -1,
                 GetEyePosition(
                     units,
-                    observerIndex),
+                    observerIndex,
+                    bodies),
                 targetCenter,
                 targetCenter,
                 Vector3.Zero);
@@ -643,7 +650,8 @@ public sealed class VisionSystem
         Vector3 observerEye =
             GetEyePosition(
                 units,
-                observerIndex);
+                observerIndex,
+                bodies);
 
         Span<Vector3> points =
             stackalloc Vector3[
@@ -653,7 +661,8 @@ public sealed class VisionSystem
             units,
             targetIndex,
             observerEye,
-            points);
+            points,
+            bodies);
 
         Vector3 firstBlockingPoint =
             Vector3.Zero;
@@ -700,17 +709,20 @@ public sealed class VisionSystem
 
     public Vector3 GetEyePosition(
         UnitStore units,
-        int unitIndex)
+        int unitIndex,
+        UnitBodyStore? bodies = null)
     {
         return UnitHitSystem.GetEyePosition(
             units,
-            unitIndex);
+            unitIndex,
+            bodies);
     }
 
     public void GetVisibilityPoints(
         UnitStore units,
         int unitIndex,
-        Span<Vector3> points)
+        Span<Vector3> points,
+        UnitBodyStore? bodies = null)
     {
         Vector3 source =
             units.Position[unitIndex] +
@@ -723,20 +735,23 @@ public sealed class VisionSystem
             units,
             unitIndex,
             source,
-            points);
+            points,
+            bodies);
     }
 
     public int GetVisibilityPoints(
         UnitStore units,
         int unitIndex,
         Vector3 source,
-        Span<Vector3> points)
+        Span<Vector3> points,
+        UnitBodyStore? bodies = null)
     {
         return UnitHitSystem.GetVisibilityPoints(
             units,
             unitIndex,
             source,
-            points);
+            points,
+            bodies);
     }
 
     public bool HasLineOfSight(
