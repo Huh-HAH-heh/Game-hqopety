@@ -400,10 +400,7 @@ public sealed class UnitRenderSystem
         }
     }
 
-private static Color GetItemColor(ItemConfig item) =>
-        new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
-
-    private static Color GetFactionAccent(ushort factionTag) =>
+private static Color GetFactionAccent(ushort factionTag) =>
         factionTag switch
         {
             1 => new Color(91, 157, 225),
@@ -419,9 +416,8 @@ private static Color GetItemColor(ItemConfig item) =>
         float bodyRadius,
         float tilePixelSize)
     {
-        // An item can cover several zones; draw its ring only once.
-        Span<short> drawnSlots = stackalloc short[UnitInventoryStore.MaxInventorySlots];
-        int drawnCount = 0;
+        bool hasApparel = false;
+        bool hasPoweredArmor = false;
 
         for (int zone = 0; zone < UnitInventoryStore.BodyZoneCount; zone++)
         {
@@ -432,42 +428,33 @@ private static Color GetItemColor(ItemConfig item) =>
                     zone,
                     (ArmorLayer)layer);
 
-                if (itemSlot < 0)
-                    continue;
-
-                bool alreadyDrawn = false;
-                for (int i = 0; i < drawnCount; i++)
+                if (itemSlot < 0 ||
+                    inventory.GetItem(unitIndex, itemSlot) is not ArmorConfig apparel)
                 {
-                    if (drawnSlots[i] == itemSlot)
-                    {
-                        alreadyDrawn = true;
-                        break;
-                    }
+                    continue;
                 }
 
-                if (alreadyDrawn)
-                    continue;
-
-                if (inventory.GetItem(unitIndex, itemSlot) is not ArmorConfig apparel)
-                    continue;
-
-                if (drawnCount >= drawnSlots.Length)
-                    continue;
-
-                drawnSlots[drawnCount++] = itemSlot;
-
-                float padding = MathF.Max(0.02f, apparel.WorldRenderPadding);
-                float radius = (bodyRadius + padding) * tilePixelSize;
-
-                AppendCircleOutline(
-                    vertices,
-                    unitPosition.X * tilePixelSize,
-                    unitPosition.Y * tilePixelSize,
-                    radius,
-                    GetItemColor(apparel),
-                    CircleSegments);
+                hasApparel = true;
+                hasPoweredArmor |= apparel.MovementSpeedMultiplier > 1f;
             }
         }
+
+        if (!hasApparel)
+            return;
+
+        // One restrained gear accent replaces the stack of differently
+        // coloured rings that made units look noisy and inconsistent.
+        Color accent = hasPoweredArmor
+            ? new Color(105, 185, 202, 190)
+            : new Color(161, 171, 181, 150);
+
+        AppendCircleOutline(
+            vertices,
+            unitPosition.X * tilePixelSize,
+            unitPosition.Y * tilePixelSize,
+            (bodyRadius + 0.10f) * tilePixelSize,
+            accent,
+            CircleSegments);
     }
 
     private static void AppendEquippedWeapons(
