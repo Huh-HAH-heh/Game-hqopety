@@ -484,6 +484,38 @@ public void DrawSnapshot(
                 CircleSegments);
             AppendCircle(_vertices, x, y, markerRadius, fill);
 
+            if (showUnitDetails)
+            {
+                if (unit.HasApparel)
+                {
+                    Color apparelAccent = unit.HasPoweredArmor
+                        ? new Color(105, 185, 202, 190)
+                        : new Color(161, 171, 181, 150);
+                    AppendCircleOutline(
+                        _equipment,
+                        x,
+                        y,
+                        (radius + 0.10f) * tilePixelSize,
+                        apparelAccent,
+                        CircleSegments);
+                }
+
+                AppendSnapshotWeapon(
+                    _weaponVisuals,
+                    unit.PrimaryWeapon,
+                    position,
+                    unit.HeadNormal,
+                    tilePixelSize,
+                    false);
+                AppendSnapshotWeapon(
+                    _weaponVisuals,
+                    unit.SecondaryWeapon,
+                    position,
+                    unit.HeadNormal,
+                    tilePixelSize,
+                    true);
+            }
+
             if (unit.Index == selectedUnitIndex)
             {
                 float selectionRadius = MathF.Max(unit.Width, unit.Length) * 0.6f;
@@ -521,13 +553,70 @@ public void DrawSnapshot(
             window.Draw(_bodyOutlines);
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
+        if (_equipment.VertexCount > 0)
+            window.Draw(_equipment);
+        if (_weaponVisuals.VertexCount > 0)
+            window.Draw(_weaponVisuals);
         if (_selection.VertexCount > 0)
             window.Draw(_selection);
         if (_aiming.VertexCount > 0)
             window.Draw(_aiming);
     }
 
-private static Color GetItemColor(ItemConfig item) =>
+    private static void AppendSnapshotWeapon(
+        VertexArray vertices,
+        RenderWeaponVisual visual,
+        Vector3 position,
+        Vector3 facing,
+        float tilePixelSize,
+        bool secondary)
+    {
+        WeaponConfig? weapon = visual.Config;
+        if (weapon == null)
+            return;
+
+        float dx = facing.X;
+        float dy = facing.Y;
+        float facingLength = MathF.Sqrt(dx * dx + dy * dy);
+        if (facingLength < 0.001f)
+        {
+            dx = 1f;
+            dy = 0f;
+        }
+        else
+        {
+            dx /= facingLength;
+            dy /= facingLength;
+        }
+
+        if (visual.AimIndicatorActive && visual.AimPoint != Vector3.Zero)
+        {
+            float aimX = visual.AimPoint.X - position.X;
+            float aimY = visual.AimPoint.Y - position.Y;
+            float aimLength = MathF.Sqrt(aimX * aimX + aimY * aimY);
+            if (aimLength > 0.001f)
+            {
+                dx = aimX / aimLength;
+                dy = aimY / aimLength;
+            }
+        }
+
+        float sideOffset = secondary ? 0.10f : 0f;
+        float centerDistance = weapon.WorldRenderLength * 0.43f;
+        float centerX = position.X + dx * centerDistance - dy * sideOffset;
+        float centerY = position.Y + dy * centerDistance + dx * sideOffset;
+
+        AppendOrientedRect(
+            vertices,
+            centerX * tilePixelSize,
+            centerY * tilePixelSize,
+            MathF.Max(0.025f, weapon.WorldRenderWidth * 0.5f) * tilePixelSize,
+            MathF.Max(0.12f, weapon.WorldRenderLength * 0.5f) * tilePixelSize,
+            MathF.Atan2(dy, dx),
+            GetItemColor(weapon));
+    }
+
+    private static Color GetItemColor(ItemConfig item) =>
         new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
 
     private static Color GetFactionAccent(ushort factionTag) =>
