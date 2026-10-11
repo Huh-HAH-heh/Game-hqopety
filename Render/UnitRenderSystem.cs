@@ -183,7 +183,8 @@ public sealed class UnitRenderSystem
                         units,
                         worldMap,
                         selectedIndex,
-                        unitIndex).State;
+                        unitIndex,
+                        simulation.Bodies).State;
 
                 if (state != VisionState.Visible)
                     continue;
@@ -222,7 +223,8 @@ public sealed class UnitRenderSystem
                 int volumeCount = UnitHitSystem.GetHitVolumes(
                     units,
                     unitIndex,
-                    hitVolumeBuffer);
+                    hitVolumeBuffer,
+                    simulation.Bodies);
 
                 for (int volumeIndex = 0; volumeIndex < volumeCount; volumeIndex++)
                 {
@@ -1525,7 +1527,8 @@ private static void AppendSuppressionDebug(
                     units,
                     worldMap,
                     observerIndex,
-                    targetIndex);
+                    targetIndex,
+                    simulation.Bodies);
 
             Color targetColor =
                 GetVisionColor(
