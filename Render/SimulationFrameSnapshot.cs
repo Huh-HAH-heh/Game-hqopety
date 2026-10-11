@@ -283,7 +283,8 @@ public sealed class SimulationFrameSnapshot
                 int volumeCount = UnitHitSystem.GetHitVolumes(
                     units,
                     unitIndex,
-                    hitVolumeBuffer);
+                    hitVolumeBuffer,
+                    simulation.Bodies);
 
                 if (volumeCount > 0)
                 {
