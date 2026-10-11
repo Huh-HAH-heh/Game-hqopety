@@ -605,7 +605,7 @@ public sealed class UnitSimulation
         if (VisionEnabled)
         {
             phaseStarted = Stopwatch.GetTimestamp();
-            _visionSystem.Update(Units, worldMap, deltaTime, Health);
+            _visionSystem.Update(Units, worldMap, deltaTime, Health, Bodies);
             LastVisionCallMilliseconds =
                 Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
         }
@@ -654,6 +654,7 @@ public sealed class UnitSimulation
         phaseStarted = Stopwatch.GetTimestamp();
         _projectileSystem.Update(
             Units,
+            Bodies,
             Inventory,
             Health,
             _healthSystem,
