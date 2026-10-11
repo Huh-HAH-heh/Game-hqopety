@@ -24,6 +24,7 @@ public sealed class ProjectileSystem
 
     public void Update(
         UnitStore units,
+        UnitBodyStore bodies,
         UnitInventoryStore inventory,
         UnitHealthStore health,
         UnitHealthSystem healthSystem,
@@ -119,6 +120,7 @@ public sealed class ProjectileSystem
             bool alive =
                 Trace(
                     units,
+                    bodies,
                     inventory,
                     health,
                     healthSystem,
@@ -160,6 +162,7 @@ public sealed class ProjectileSystem
 
     private bool Trace(
         UnitStore units,
+        UnitBodyStore bodies,
         UnitInventoryStore inventory,
         UnitHealthStore health,
         UnitHealthSystem healthSystem,
@@ -381,7 +384,8 @@ public sealed class ProjectileSystem
                             projectileIndex] *
                         0.5f,
                         UnitHealthPartId.None,
-                        out UnitHitResult localHit))
+                        out UnitHitResult localHit,
+                        bodies))
                 {
                     if (projectiles.Owner[projectileIndex].Index != unitIndex &&
                         (projectiles.FactionTag[projectileIndex] == 0 ||
