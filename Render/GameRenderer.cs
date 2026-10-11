@@ -714,6 +714,129 @@ public sealed class GameRenderer
             $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
     }
 
+    private void StartSimulationThread()
+    {
+        if (_simulationThread != null || !_massCombatMode)
+            return;
+
+        _stopSimulationThread = false;
+        _simulationRunEnabled = _menuPage == GameMenuPage.Closed && !_simulationPaused;
+
+        // Publish a complete initial frame before starting the producer thread.
+        Volatile.Write(
+            ref _latestSnapshot,
+            SimulationFrameSnapshot.Capture(_unitSimulation));
+
+        _simulationThread = new Thread(SimulationLoop)
+        {
+            IsBackground = true,
+            Name = "RimClone.Simulation"
+        };
+        _simulationThread.Start();
+        Console.WriteLine("[Threading] Simulation runs independently; SFML rendering stays on the window thread.");
+    }
+
+    private void StopSimulationThread()
+    {
+        Thread? thread = _simulationThread;
+        if (thread == null)
+            return;
+
+        _stopSimulationThread = true;
+        thread.Join();
+        _simulationThread = null;
+        Volatile.Write(
+            ref _latestSnapshot,
+            SimulationFrameSnapshot.Capture(_unitSimulation));
+    }
+
+    private void ExecuteSimulationCommand(Action command)
+    {
+        if (_simulationThread == null)
+        {
+            command();
+            return;
+        }
+
+        _simulationCommands.Enqueue(command);
+    }
+
+    private void SimulationLoop()
+    {
+        long lastTick = Stopwatch.GetTimestamp();
+        long nextFrame = lastTick;
+        long frameTicks = Math.Max(1L, Stopwatch.Frequency / 60L);
+
+        while (true)
+        {
+            while (_simulationCommands.TryDequeue(out Action? command))
+            {
+                try
+                {
+                    command();
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine($"[Simulation command] {exception}");
+                }
+            }
+
+            if (_stopSimulationThread)
+                break;
+
+            long now = Stopwatch.GetTimestamp();
+            float deltaTime = (float)((now - lastTick) / (double)Stopwatch.Frequency);
+            lastTick = now;
+            if (deltaTime <= 0f)
+                deltaTime = 1f / 60f;
+            if (deltaTime > 0.1f)
+                deltaTime = 0.1f;
+
+            if (_simulationRunEnabled)
+            {
+                try
+                {
+                    _unitSimulation.BeginMetricsFrame();
+                    _massCombatTestScene.Update(
+                        _unitSimulation,
+                        _worldMap,
+                        deltaTime);
+                    _unitSimulation.Update(_worldMap, deltaTime);
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine($"[Simulation thread] {exception}");
+                }
+            }
+
+            try
+            {
+                Volatile.Write(
+                    ref _latestSnapshot,
+                    SimulationFrameSnapshot.Capture(_unitSimulation));
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"[Simulation snapshot] {exception}");
+            }
+
+            nextFrame += frameTicks;
+            long afterUpdate = Stopwatch.GetTimestamp();
+            if (nextFrame < afterUpdate)
+                nextFrame = afterUpdate;
+
+            while (!_stopSimulationThread)
+            {
+                long remainingTicks = nextFrame - Stopwatch.GetTimestamp();
+                if (remainingTicks <= 0)
+                    break;
+
+                int sleepMilliseconds = (int)(remainingTicks * 1000L / Stopwatch.Frequency) - 1;
+                Thread.Sleep(Math.Max(1, sleepMilliseconds));
+            }
+        }
+    }
+
     private void InitializeWindow()
     {
         _window =
