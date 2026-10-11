@@ -642,7 +642,8 @@ public sealed class GameRenderer
                         _unitSimulation.Units,
                         _worldMap,
                         observerIndex,
-                        targetIndex).State;
+                        targetIndex,
+                        _unitSimulation.Bodies).State;
 
                 switch (state)
                 {
