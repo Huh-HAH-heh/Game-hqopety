@@ -11,7 +11,7 @@ namespace RimClone.Render;
 
 public sealed class UnitRenderSystem
 {
-    private const int CircleSegments = 10;
+    private const int CircleSegments = 16;
     private const int VisionConeSegments = 20;
     private const int VisionRingSegments = 48;
 
@@ -67,6 +67,20 @@ public sealed class UnitRenderSystem
         if (tilePixelSize <= 0f)
             return;
 
+        float screenScale =
+            MathF.Max(
+                0.001f,
+                window.Size.X / MathF.Max(1f, cameraView.Size.X));
+
+        float pixelsPerWorldUnit =
+            tilePixelSize * screenScale;
+
+        // At battle zoom, render stable faction discs only. Gear rings, weapon
+        // silhouettes and aim bubbles appear after the unit is large enough to
+        // read them instead of flickering into sub-pixel coloured noise.
+        bool showUnitDetails =
+            pixelsPerWorldUnit >= 8f;
+
         _vertices.Clear();
         _bodyOutlines.Clear();
         _equipment.Clear();
@@ -119,13 +133,13 @@ public sealed class UnitRenderSystem
         Vector3[] headNormals =
             units.HeadNormal;
 
-        if (_aimTargetDrawn.Length < units.Capacity)
-            Array.Resize(ref _aimTargetDrawn, units.Capacity);
+        if (showUnitDetails)
+        {
+            if (_aimTargetDrawn.Length < units.Capacity)
+                Array.Resize(ref _aimTargetDrawn, units.Capacity);
 
-        Array.Clear(_aimTargetDrawn);
-
-        UnitBodyStore bodies =
-            simulation.Bodies;
+            Array.Clear(_aimTargetDrawn);
+        }
 
         ReadOnlySpan<int> active =
             units.ActiveIndices;
@@ -138,21 +152,6 @@ public sealed class UnitRenderSystem
 
         float[] lengths =
             units.Length;
-
-        int[] bodyStarts =
-            units.BodyStart;
-
-        short[] bodyCounts =
-            units.BodyCount;
-
-        Vector3[] partPositions =
-            bodies.WorldPosition;
-
-        Vector3[] partScales =
-            bodies.Scale;
-
-        BodyPartRole[] bodyRoles =
-            bodies.Role;
 
         bool hasSelection =
             units.TryGetIndex(
@@ -171,7 +170,8 @@ public sealed class UnitRenderSystem
 
             // A shooter can be outside the camera while its target is visible.
             // Aim state is simulation data, so collect it before view culling.
-            if (simulation.Health.OverallHitPoints[unitIndex] > 0f)
+            if (showUnitDetails &&
+                simulation.Health.OverallHitPoints[unitIndex] > 0f)
             {
                 AppendAimProgress(
                     _aiming,
@@ -196,27 +196,16 @@ public sealed class UnitRenderSystem
                     continue;
             }
 
-            int bodyStart = bodyStarts[unitIndex];
-            int bodyCount = bodyCounts[unitIndex];
             bool rootVisible =
                 unitPosition.X >= minWorldX &&
                 unitPosition.X <= maxWorldX &&
                 unitPosition.Y >= minWorldY &&
                 unitPosition.Y <= maxWorldY;
 
-            if (!rootVisible &&
-                !IsBodyVisible(
-                    bodyStart,
-                    bodyCount,
-                    partPositions,
-                    partScales,
-                    minWorldX,
-                    maxWorldX,
-                    minWorldY,
-                    maxWorldY))
-            {
+            // This renderer draws a single marker, not body-part geometry;
+            // cull by the marker's root instead of walking every limb.
+            if (!rootVisible)
                 continue;
-            }
 
             float screenX = unitPosition.X * tilePixelSize;
             float screenY = unitPosition.Y * tilePixelSize;
@@ -265,45 +254,69 @@ public sealed class UnitRenderSystem
 
             int start = bodyStarts[unitIndex];
             int count = bodyCounts[unitIndex];
-            float screenScale = window.Size.X / MathF.Max(1f, cameraView.Size.X);
-            float pixelScale = MathF.Max(1f, tilePixelSize * screenScale);
-            float radius = MathF.Max(0.24f, widths[unitIndex] * 0.55f);
-            float pixelX = unitPosition.X * tilePixelSize;
-            float pixelY = unitPosition.Y * tilePixelSize;
-            Color outlineColor = new Color(20, 22, 26, 238);
+            float radius =
+                MathF.Max(
+                    0.24f,
+                    widths[unitIndex] * 0.55f);
 
-            // Restored simple body model: the whole unit is one circle at its root position.
+            float markerRadius =
+                MathF.Max(
+                    radius * tilePixelSize,
+                    1.45f / screenScale);
+
+            float pixelX =
+                unitPosition.X * tilePixelSize;
+
+            float pixelY =
+                unitPosition.Y * tilePixelSize;
+
+            Color factionAccent =
+                GetFactionAccent(units.FactionTag[unitIndex]);
+
+            // A clean off-white disk with one faction edge and a dark keyline:
+            // the map stays monochrome, while factions remain readable at a glance.
             AppendCircleOutline(
                 _bodyOutlines,
                 pixelX,
                 pixelY,
-                radius * tilePixelSize + 0.30f / pixelScale,
-                outlineColor,
+                markerRadius + 0.60f / screenScale,
+                new Color(13, 15, 18, 245),
+                CircleSegments);
+
+            AppendCircleOutline(
+                _bodyOutlines,
+                pixelX,
+                pixelY,
+                markerRadius + 0.15f / screenScale,
+                factionAccent,
                 CircleSegments);
 
             AppendCircle(
                 _vertices,
                 pixelX,
                 pixelY,
-                radius * tilePixelSize,
+                markerRadius,
                 color);
 
-            AppendEquippedApparel(
-                _equipment,
-                inventory,
-                unitIndex,
-                unitPosition,
-                radius,
-                tilePixelSize);
+            if (showUnitDetails)
+            {
+                AppendEquippedApparel(
+                    _equipment,
+                    inventory,
+                    unitIndex,
+                    unitPosition,
+                    radius,
+                    tilePixelSize);
 
-            AppendEquippedWeapons(
-                _weaponVisuals,
-                inventory,
-                simulation.Weapons,
-                unitIndex,
-                unitPosition,
-                headNormals[unitIndex],
-                tilePixelSize);
+                AppendEquippedWeapons(
+                    _weaponVisuals,
+                    inventory,
+                    simulation.Weapons,
+                    unitIndex,
+                    unitPosition,
+                    headNormals[unitIndex],
+                    tilePixelSize);
+            }
 
             if (hasSelection &&
                 selectedIndex == unitIndex)
@@ -389,6 +402,14 @@ public sealed class UnitRenderSystem
 
 private static Color GetItemColor(ItemConfig item) =>
         new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
+
+    private static Color GetFactionAccent(ushort factionTag) =>
+        factionTag switch
+        {
+            1 => new Color(91, 157, 225),
+            2 => new Color(217, 125, 97),
+            _ => new Color(151, 163, 174)
+        };
 
     private static void AppendEquippedApparel(
         VertexArray vertices,
@@ -1367,39 +1388,6 @@ private static void AppendSelection(
                         radius),
                     color));
         }
-    }
-
-    private static bool IsBodyVisible(
-        int start,
-        int count,
-        Vector3[] positions,
-        Vector3[] scales,
-        float minX,
-        float maxX,
-        float minY,
-        float maxY)
-    {
-        int end = start + count;
-        for (int part = start; part < end; part++)
-        {
-            Vector3 position = positions[part];
-            Vector3 scale = scales[part];
-            float radiusX = MathF.Max(0.06f, MathF.Abs(scale.X));
-            float radiusY = MathF.Max(0.06f, MathF.Abs(scale.Y));
-            float extent = MathF.Sqrt(
-                radiusX * radiusX +
-                radiusY * radiusY);
-
-            if (position.X + extent >= minX &&
-                position.X - extent <= maxX &&
-                position.Y + extent >= minY &&
-                position.Y - extent <= maxY)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static bool IsPartInView(
