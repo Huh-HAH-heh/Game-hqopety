@@ -412,6 +412,7 @@ public void DrawSnapshot(
         float screenScale = MathF.Max(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
+        bool showUnitDetails = tilePixelSize * screenScale >= 8f;
 
         float centerX = cameraView.Center.X;
         float centerY = cameraView.Center.Y;
@@ -494,15 +495,39 @@ public void DrawSnapshot(
             }
         }
 
+        if (showUnitDetails)
+        {
+            RenderAimRing[] aimRings = snapshot.AimRings;
+            for (int i = 0; i < aimRings.Length; i++)
+            {
+                RenderAimRing aim = aimRings[i];
+                float radius = tilePixelSize * (0.72f - 0.60f * aim.Progress);
+                byte alpha = (byte)Math.Clamp(
+                    (int)(78f * (1f - aim.Progress) + 12f),
+                    0,
+                    90);
+
+                AppendCircleOutline(
+                    _aiming,
+                    aim.AimPoint.X * tilePixelSize,
+                    aim.AimPoint.Y * tilePixelSize,
+                    MathF.Max(0.10f * tilePixelSize, radius),
+                    new Color(205, 218, 232, alpha),
+                    24);
+            }
+        }
+
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
         if (_selection.VertexCount > 0)
             window.Draw(_selection);
+        if (_aiming.VertexCount > 0)
+            window.Draw(_aiming);
     }
 
-    private static Color GetItemColor(ItemConfig item) =>
+private static Color GetItemColor(ItemConfig item) =>
         new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
 
     private static Color GetFactionAccent(ushort factionTag) =>
