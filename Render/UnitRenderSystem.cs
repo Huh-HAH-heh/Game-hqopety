@@ -1000,8 +1000,8 @@ public void DrawSnapshot(
     {
         float footprint = MathF.Max(width, length);
         return MathF.Max(
-            2.6f / MathF.Max(0.001f, screenScale),
-            MathF.Max(0.16f, footprint * 0.165f) * tilePixelSize);
+            2.0f / MathF.Max(0.001f, screenScale),
+            MathF.Max(0.13f, footprint * 0.125f) * tilePixelSize);
     }
 
     private static void AppendUnitMarker(
@@ -1199,43 +1199,51 @@ public void DrawSnapshot(
             dy *= inverseLength;
         }
 
-        float px = -dy;
-        float py = dx;
+        // In screen coordinates this perpendicular points to the body's right
+        // side relative to its facing direction. The whole weapon rotates with aim.
+        float px = dy;
+        float py = -dx;
         float pixel = 1f / MathF.Max(0.001f, screenScale);
 
-        // The body remains the small anchor; the triangular weapon projects
-        // far beyond its edge so it reads as a weapon, not a dark bump on the disc.
-        float side = radius * 0.36f;
-        float baseForward = radius * 0.22f;
-        float tipForward = radius * 1.78f + pixel * 1.8f;
-        float halfWidth = MathF.Max(pixel * 1.05f, radius * 0.25f);
+        // Anchor the weapon on the right flank, not the centre of the white disc.
+        // Its long tip projects well beyond the body and the skewed base adds a clear silhouette.
+        float side = radius * 0.62f;
+        float baseForward = radius * 0.10f;
+        float tipForward = radius * 2.45f + pixel * 3.2f;
+        float halfWidth = MathF.Max(pixel * 1.45f, radius * 0.34f);
 
-        float bx = x + dx * baseForward + px * side;
-        float by = y + dy * baseForward + py * side;
         float tx = x + dx * tipForward + px * side;
         float ty = y + dy * tipForward + py * side;
 
-        // Dark keyline makes the complete triangular silhouette distinct at battle zoom.
+        // The two base corners have different forward offsets: a slanted, asymmetric base.
+        float baseAForward = baseForward - radius * 0.20f;
+        float baseBForward = baseForward + radius * 0.24f;
+        float baseAX = x + dx * baseAForward + px * (side - halfWidth);
+        float baseAY = y + dy * baseAForward + py * (side - halfWidth);
+        float baseBX = x + dx * baseBForward + px * (side + halfWidth);
+        float baseBY = y + dy * baseBForward + py * (side + halfWidth);
+
+        // Dark outline separates the enlarged weapon from terrain and white body.
         AppendTriangle(
             vertices,
             tx, ty,
-            bx + px * halfWidth, by + py * halfWidth,
-            bx - px * halfWidth, by - py * halfWidth,
-            new Color(20, 27, 35, 255));
+            baseAX, baseAY,
+            baseBX, baseBY,
+            new Color(15, 21, 28, 255));
 
-        // A broad enough steel inset stays visible without looking rectangular.
-        float insetBase = baseForward + (tipForward - baseForward) * 0.43f;
-        float insetTip = tipForward - pixel * 1.0f;
-        float insetWidth = halfWidth * 0.36f;
+        // Bright steel inner triangle follows the same skew so the weapon reads at zoom.
+        float insetStart = radius * 0.56f;
+        float insetTip = tipForward - pixel * 1.1f;
+        float insetHalfWidth = halfWidth * 0.40f;
         AppendTriangle(
             vertices,
             x + dx * insetTip + px * side,
             y + dy * insetTip + py * side,
-            x + dx * insetBase + px * (side + insetWidth),
-            y + dy * insetBase + py * (side + insetWidth),
-            x + dx * insetBase + px * (side - insetWidth),
-            y + dy * insetBase + py * (side - insetWidth),
-            new Color(221, 231, 239, 250));
+            x + dx * insetStart + px * (side - insetHalfWidth * 0.70f),
+            y + dy * insetStart + py * (side - insetHalfWidth * 0.70f),
+            x + dx * (insetStart + radius * 0.20f) + px * (side + insetHalfWidth),
+            y + dy * (insetStart + radius * 0.20f) + py * (side + insetHalfWidth),
+            new Color(225, 235, 243, 255));
     }
 
     private static void AppendTriangle(
