@@ -397,8 +397,9 @@ public sealed class ProjectileSystem
                     {
                         UnitSuppressionSystem.AddNearMiss(
                             suppression,
+                            units,
+                            hitRegions,
                             unitIndex,
-                            units.Position[unitIndex],
                             subStart,
                             subEnd,
                             projectiles.BaseDamage[projectileIndex] +
