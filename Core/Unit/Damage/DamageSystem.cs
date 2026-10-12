@@ -21,6 +21,7 @@ public readonly struct DamageEvent
     public float BleedChance { get; }
     public int RegionIndex { get; }
     public float HitRadius { get; }
+    public int BindingIndex { get; }
 
     public DamageEvent(
         UnitId attacker,
@@ -36,7 +37,8 @@ public readonly struct DamageEvent
         DamageType damageType,
         float bleedChance,
         int regionIndex = -1,
-        float hitRadius = 0f)
+        float hitRadius = 0f,
+        int bindingIndex = -1)
     {
         Attacker = attacker;
         Target = target;
@@ -52,6 +54,7 @@ public readonly struct DamageEvent
         BleedChance = bleedChance;
         RegionIndex = regionIndex;
         HitRadius = MathF.Max(0f, hitRadius);
+        BindingIndex = bindingIndex;
     }
 }
 
@@ -98,7 +101,23 @@ public sealed class DamageSystem
 
         float hitTolerance = damageEvent.HitRadius + 0.01f;
         int regionIndex = damageEvent.RegionIndex;
-        if (regionIndex < 0)
+        HitRegionPartBinding anatomyBinding = default;
+        bool hasAnatomyBinding = damageEvent.BindingIndex >= 0;
+
+        if (hasAnatomyBinding)
+        {
+            if (regionIndex < 0 ||
+                !UnitHitSystem.IsBindingInRegion(
+                    units, targetIndex, regionIndex, damageEvent.BindingIndex, hitRegions) ||
+                !UnitHitSystem.IsPointInsideRegion(
+                    units, targetIndex, regionIndex, damageEvent.ImpactPosition, hitTolerance, hitRegions) ||
+                !UnitHitSystem.TryGetBinding(
+                    units, targetIndex, regionIndex, damageEvent.BindingIndex, out anatomyBinding, hitRegions))
+            {
+                return new ProjectileDamageResult(0f, 0f, 0f, true);
+            }
+        }
+        else if (regionIndex < 0)
         {
             regionIndex = UnitHitSystem.FindRegionAtPoint(
                 units,
@@ -122,11 +141,7 @@ public sealed class DamageSystem
 
         if (regionIndex < 0)
         {
-            return new ProjectileDamageResult(
-                0f,
-                0f,
-                0f,
-                true);
+            return new ProjectileDamageResult(0f, 0f, 0f, true);
         }
 
         float energy =
@@ -156,9 +171,9 @@ public sealed class DamageSystem
 
         bool stopped = false;
 
-        int zone =
-            MapBodyPartToArmorZone(
-                damageEvent.Part);
+        int zone = hasAnatomyBinding && anatomyBinding.ArmorZone >= 0
+            ? anatomyBinding.ArmorZone
+            : MapBodyPartToArmorZone(damageEvent.Part);
 
         if (zone >= 0)
         {
@@ -231,13 +246,19 @@ public sealed class DamageSystem
                         GetOuterPart(
                             damageEvent.Part);
 
-                    healthSystem.ApplyDamage(
-                        units,
-                        health,
-                        damageEvent.Target,
-                        bluntPart,
-                        resolution.BluntImpactDamage,
-                        hitRegions);
+                    if (hasAnatomyBinding)
+                    {
+                        healthSystem.ApplyRegionDamage(
+                            units, health, damageEvent.Target,
+                            regionIndex, damageEvent.BindingIndex,
+                            resolution.BluntImpactDamage);
+                    }
+                    else
+                    {
+                        healthSystem.ApplyDamage(
+                            units, health, damageEvent.Target, bluntPart,
+                            resolution.BluntImpactDamage, hitRegions);
+                    }
                 }
 
                 if (resolution.Stopped)
@@ -269,13 +290,18 @@ public sealed class DamageSystem
                 penetration <= 0.01f;
         }
 
-        healthSystem.ApplyDamage(
-            units,
-            health,
-            damageEvent.Target,
-            damageEvent.Part,
-            damage,
-            hitRegions);
+        if (hasAnatomyBinding)
+        {
+            healthSystem.ApplyRegionDamage(
+                units, health, damageEvent.Target,
+                regionIndex, damageEvent.BindingIndex, damage);
+        }
+        else
+        {
+            healthSystem.ApplyDamage(
+                units, health, damageEvent.Target,
+                damageEvent.Part, damage, hitRegions);
+        }
 
         if (damage > 0f &&
             damageEvent.BleedChance > 0f &&
@@ -289,13 +315,18 @@ public sealed class DamageSystem
                     1f) *
                 0.05f;
 
-            healthSystem.AddBleed(
-                units,
-                health,
-                damageEvent.Target,
-                damageEvent.Part,
-                bleed,
-                hitRegions);
+            if (hasAnatomyBinding)
+            {
+                healthSystem.AddRegionBleed(
+                    units, health, damageEvent.Target,
+                    regionIndex, damageEvent.BindingIndex, bleed);
+            }
+            else
+            {
+                healthSystem.AddBleed(
+                    units, health, damageEvent.Target,
+                    damageEvent.Part, bleed, hitRegions);
+            }
         }
 
         return new ProjectileDamageResult(
