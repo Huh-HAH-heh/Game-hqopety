@@ -21,7 +21,6 @@ public sealed class UnitBodyStore
     private BodyPartAnchor[] _anchor;
     private BodyPartRole[] _role;
     private BodyPartPivot[] _pivot;
-    private UnitHealthPartId[] _damagePart;
 
     private int _count;
 
@@ -68,8 +67,6 @@ public sealed class UnitBodyStore
     public BodyPartPivot[] Pivot =>
         _pivot;
 
-    public UnitHealthPartId[] DamagePart =>
-        _damagePart;
 
     public UnitBodyStore(
         int initialCapacity = DefaultCapacity)
@@ -94,7 +91,6 @@ public sealed class UnitBodyStore
         _anchor = new BodyPartAnchor[initialCapacity];
         _role = new BodyPartRole[initialCapacity];
         _pivot = new BodyPartPivot[initialCapacity];
-        _damagePart = new UnitHealthPartId[initialCapacity];
     }
 
     public BodyHandle CreateBody(
@@ -142,8 +138,8 @@ public sealed class UnitBodyStore
                 part.Motion,
                 part.Anchor,
                 part.Role,
-                part.Pivot,
-                part.DamagePart);
+                part.Pivot
+                part.Pivot);
         }
 
         return new BodyHandle(start, parts.Length);
@@ -243,8 +239,7 @@ public sealed class UnitBodyStore
         BodyPartMotion motion,
         BodyPartAnchor anchor,
         BodyPartRole role,
-        BodyPartPivot pivot,
-        UnitHealthPartId damagePart)
+        BodyPartPivot pivot)
     {
         int index = _writeIndex++;
 
@@ -267,7 +262,6 @@ public sealed class UnitBodyStore
         _anchor[index] = anchor;
         _role[index] = role;
         _pivot[index] = pivot;
-        _damagePart[index] = damagePart;
     }
 
     private void EnsureCapacityAt(
@@ -335,10 +329,6 @@ Array.Resize(
 
         Array.Resize(
             ref _pivot,
-            newCapacity);
-
-        Array.Resize(
-            ref _damagePart,
             newCapacity);
     }
 
