@@ -149,12 +149,22 @@ public sealed class SimulationFrameSnapshot
         // Flatten all active rigs into one immutable array for the render thread.
         // Each unit stores a range, avoiding a small managed array per unit per frame.
         UnitBodyStore bodyStore = simulation.Bodies;
+        UnitHitRegionStore hitRegionStore = simulation.HitRegions;
         int[] sourceBodyStarts = units.BodyStart;
         short[] sourceBodyCounts = units.BodyCount;
+        UnitType[] unitTypes = units.Type;
         int totalBodyParts = 0;
         for (int i = 0; i < active.Length; i++)
         {
             int unitIndex = active[i];
+            UnitHitRegionProfile? profile = hitRegionStore.GetProfile(unitIndex);
+
+            if (unitTypes[unitIndex] == UnitType.Colonist && profile != null)
+            {
+                totalBodyParts += profile.RegionCount;
+                continue;
+            }
+
             int start = Math.Max(0, sourceBodyStarts[unitIndex]);
             int count = Math.Max(0, (int)sourceBodyCounts[unitIndex]);
             totalBodyParts += Math.Min(count, Math.Max(0, bodyStore.Count - start));
@@ -252,15 +262,41 @@ public sealed class SimulationFrameSnapshot
                 sourceBodyCount,
                 Math.Max(0, bodyStore.Count - sourceBodyStart));
 
-            for (int part = 0; part < sourceBodyCount; part++)
+            UnitHitRegionProfile? hitProfile = hitRegionStore.GetProfile(index);
+
+            if (unitTypes[index] == UnitType.Colonist && hitProfile != null)
             {
-                int sourceIndex = sourceBodyStart + part;
-                renderBodyParts[renderBodyPartWrite++] = new RenderBodyPart(
-                    sourceBodyPositions[sourceIndex],
-                    sourceBodyScales[sourceIndex],
-                    sourceBodyRotations[sourceIndex],
-                    sourceBodyPrimitives[sourceIndex],
-                    sourceBodyRoles[sourceIndex]);
+                ReadOnlySpan<UnitCircleHitRegion> regions = hitProfile.Regions;
+
+                for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
+                {
+                    UnitCircleHitRegion region = regions[regionIndex];
+                    UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                        units,
+                        index,
+                        regionIndex,
+                        hitRegionStore);
+
+                    renderBodyParts[renderBodyPartWrite++] =
+                        UnitHitRegionRenderGeometry.CreatePart(
+                            units,
+                            index,
+                            region,
+                            geometry);
+                }
+            }
+            else
+            {
+                for (int part = 0; part < sourceBodyCount; part++)
+                {
+                    int sourceIndex = sourceBodyStart + part;
+                    renderBodyParts[renderBodyPartWrite++] = new RenderBodyPart(
+                        sourceBodyPositions[sourceIndex],
+                        sourceBodyScales[sourceIndex],
+                        sourceBodyRotations[sourceIndex],
+                        sourceBodyPrimitives[sourceIndex],
+                        sourceBodyRoles[sourceIndex]);
+                }
             }
 
             unitStates[i] = new RenderUnitState(
