@@ -602,7 +602,7 @@ public static class UnitHitRegionCatalog
             nodes[i] = UnitAnatomyNode.RelativeCircle(
                 id,
                 parentId,
-                new Vector3(-0.62f * i, 0f, 0.50f),
+                new Vector3(i == 0 ? 0f : -0.62f, 0f, i == 0 ? 0.50f : 0f),
                 widthRadiusFactor: 0.48f,
                 lengthRadiusFactor: 0f,
                 heightHalfExtentFactor: 0.50f,
