@@ -44,6 +44,7 @@ public static class CombatSelfTest
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);
+        RunTest("Hit regions: colonist is three stacked circles", TestColonistUsesThreeStackedRegions, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
@@ -1409,6 +1410,54 @@ public static class CombatSelfTest
 
         return damage.ArmorAbsorbed > 0f &&
             damage.FinalDamage < damage.RawDamage;
+    }
+
+    private static bool TestColonistUsesThreeStackedRegions()
+    {
+        UnitHitRegionProfile profile = UnitHitRegionCatalog.Get(UnitBodyType.Colonist);
+        if (profile.RegionCount != 3)
+            return false;
+
+        bool HasPart(in UnitCircleHitRegion region, UnitHealthPartId part)
+        {
+            foreach (HitRegionPartBinding binding in region.Parts)
+            {
+                if (binding.Part == part)
+                    return true;
+            }
+
+            return false;
+        }
+
+        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+        if (!HasPart(regions[0], UnitHealthPartId.LeftLeg) ||
+            !HasPart(regions[0], UnitHealthPartId.RightLeg) ||
+            !HasPart(regions[1], UnitHealthPartId.Torso) ||
+            !HasPart(regions[1], UnitHealthPartId.LeftArm) ||
+            !HasPart(regions[1], UnitHealthPartId.RightArm) ||
+            !HasPart(regions[2], UnitHealthPartId.Head))
+        {
+            return false;
+        }
+
+        UnitSimulation simulation = new UnitSimulation(4, 32);
+        UnitId unit = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10f, 10f, 0.1f));
+
+        float legsZ = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 0, simulation.HitRegions).Center.Z;
+        float torsoZ = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 1, simulation.HitRegions).Center.Z;
+        float headZ = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 2, simulation.HitRegions).Center.Z;
+
+        return legsZ < torsoZ &&
+            torsoZ < headZ &&
+            UnitHitSystem.GetVisibilityPointCount(
+                simulation.Units,
+                unit.Index,
+                simulation.HitRegions) == 3;
     }
 
 private static bool TestVisionSampleMemory()
