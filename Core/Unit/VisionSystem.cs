@@ -202,7 +202,6 @@ public sealed class VisionSystem
         }
 
         ReadOnlySpan<int> active = _aliveUnits.AsSpan(0, aliveCount);
-        Vector3[] positions = units.Position;
         float[] ranges = units.ViewRange;
 
         EnsureSpatialGrid(worldMap, units.Capacity);
@@ -230,7 +229,11 @@ public sealed class VisionSystem
             int start = _visibleTargetCount;
             _visibleStarts[observer] = start;
 
-            Vector3 position = positions[observer];
+            Vector3 observerEye = UnitHitSystem.GetEyePosition(
+                units,
+                observer,
+                bodies,
+                _hitRegions);
             float range = MathF.Max(0f, ranges[observer]);
             float rangeSquared = range * range;
             Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
@@ -251,7 +254,7 @@ public sealed class VisionSystem
 
             int sampledCount = CollectNearbyTargets(
                 observer,
-                position,
+                observerEye,
                 sampledTargets,
                 sampleMark);
 
@@ -306,13 +309,22 @@ public sealed class VisionSystem
 
                 _candidatePairCount++;
 
-                Vector3 targetPosition = positions[target];
-                float dx = targetPosition.X - position.X;
-                float dy = targetPosition.Y - position.Y;
-                float distanceSquared = dx * dx + dy * dy;
-
-                if (distanceSquared > rangeSquared)
+                if (!TryGetInViewRegionPoint(
+                        units,
+                        observer,
+                        target,
+                        observerEye,
+                        forward,
+                        rangeSquared,
+                        minFacingDot,
+                        out Vector3 targetPoint,
+                        out float distanceSquared))
+                {
                     continue;
+                }
+
+                float dx = targetPoint.X - observerEye.X;
+                float dy = targetPoint.Y - observerEye.Y;
 
                 int sector;
                 if (dx >= 0f)
@@ -328,16 +340,6 @@ public sealed class VisionSystem
                         sector = dy >= -dx ? 2 : 3;
                     else
                         sector = -dx >= -dy ? 4 : 5;
-                }
-
-                if (distanceSquared > 0.0001f)
-                {
-                    float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
-                    float facingDot =
-                        (forward.X * dx + forward.Y * dy) * inverseDistance;
-
-                    if (facingDot < minFacingDot)
-                        continue;
                 }
 
                 int slot = sector * CandidatesPerSector;
@@ -552,120 +554,41 @@ public sealed class VisionSystem
         int targetIndex,
         UnitBodyStore? bodies = null)
     {
+        Vector3 targetCenter = units.Position[targetIndex];
+        Vector3 observerEye = UnitHitSystem.GetEyePosition(
+            units,
+            observerIndex,
+            bodies,
+            _hitRegions);
+
         if (observerIndex == targetIndex)
         {
-            Vector3 eye =
-                GetEyePosition(
-                    units,
-                    observerIndex,
-                    bodies);
-
             return new VisionCheck(
                 VisionState.Self,
                 -1,
-                eye,
-                units.Position[targetIndex],
-                units.Position[targetIndex],
-                Vector3.Zero);
-        }
-
-        Vector3 observerPosition =
-            units.Position[observerIndex];
-
-        Vector3 targetCenter =
-            units.Position[targetIndex];
-
-        Vector2 toTarget =
-            new Vector2(
-                targetCenter.X - observerPosition.X,
-                targetCenter.Y - observerPosition.Y);
-
-        float distanceSquared =
-            toTarget.LengthSquared();
-
-        float range =
-            units.ViewRange[observerIndex];
-
-        if (distanceSquared >
-            range * range)
-        {
-            return new VisionCheck(
-                VisionState.OutOfRange,
-                -1,
-                GetEyePosition(
-                    units,
-                    observerIndex,
-                    bodies),
+                observerEye,
                 targetCenter,
                 targetCenter,
                 Vector3.Zero);
         }
 
-        float distance =
-            MathF.Sqrt(
-                distanceSquared);
-
-        if (distance < 0.0001f)
-        {
-            return new VisionCheck(
-                VisionState.Visible,
-                0,
-                GetEyePosition(
-                    units,
-                    observerIndex,
-                    bodies),
-                targetCenter,
-                targetCenter,
-                Vector3.Zero);
-        }
-
-        toTarget /= distance;
-
-        Vector3 forward =
-            NormalizeHorizontal(
-                units.HeadNormal[observerIndex]);
-
-        float dot =
-            forward.X * toTarget.X +
-            forward.Y * toTarget.Y;
-
-        float halfFovRadians =
-            units.FieldOfView[observerIndex] *
-            MathF.PI /
-            360f;
-
-        if (dot <
-            MathF.Cos(halfFovRadians))
-        {
-            return new VisionCheck(
-                VisionState.OutsideFieldOfView,
-                -1,
-                GetEyePosition(
-                    units,
-                    observerIndex,
-                    bodies),
-                targetCenter,
-                targetCenter,
-                Vector3.Zero);
-        }
-
-        Vector3 observerEye =
-            GetEyePosition(
-                units,
-                observerIndex,
-                bodies);
+        float range = MathF.Max(0f, units.ViewRange[observerIndex]);
+        float rangeSquared = range * range;
+        Vector3 forward = NormalizeHorizontal(units.HeadNormal[observerIndex]);
+        float halfFovRadians = units.FieldOfView[observerIndex] * MathF.PI / 360f;
+        float minFacingDot = MathF.Cos(halfFovRadians);
 
         int pointCount = UnitHitSystem.GetVisibilityPointCount(
             units,
             targetIndex,
             _hitRegions);
 
-        Vector3 firstBlockingPoint =
-            Vector3.Zero;
+        bool anyRegionInRange = false;
+        bool anyRegionInFov = false;
+        bool hasBlockingPoint = false;
+        Vector3 firstBlockingPoint = Vector3.Zero;
 
-        for (int i = 0;
-             i < pointCount;
-             i++)
+        for (int i = 0; i < pointCount; i++)
         {
             Vector3 point = UnitHitSystem.GetRegionPoint(
                 units,
@@ -674,6 +597,24 @@ public sealed class VisionSystem
                 observerEye,
                 _hitRegions);
 
+            float dx = point.X - observerEye.X;
+            float dy = point.Y - observerEye.Y;
+            float distanceSquared = dx * dx + dy * dy;
+
+            if (distanceSquared > rangeSquared)
+                continue;
+
+            anyRegionInRange = true;
+
+            if (distanceSquared > 0.0001f)
+            {
+                float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
+                float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
+                if (facingDot < minFacingDot)
+                    continue;
+            }
+
+            anyRegionInFov = true;
             _lineOfSightChecks++;
 
             if (HasLineOfSight(
@@ -691,20 +632,78 @@ public sealed class VisionSystem
                     Vector3.Zero);
             }
 
-            if (i == 0)
+            if (!hasBlockingPoint)
             {
-                firstBlockingPoint =
-                    blockingPoint;
+                firstBlockingPoint = blockingPoint;
+                hasBlockingPoint = true;
             }
         }
 
+        VisionState state = !anyRegionInRange
+            ? VisionState.OutOfRange
+            : !anyRegionInFov
+                ? VisionState.OutsideFieldOfView
+                : VisionState.HiddenByTerrain;
+
         return new VisionCheck(
-            VisionState.HiddenByTerrain,
+            state,
             -1,
             observerEye,
             targetCenter,
             targetCenter,
             firstBlockingPoint);
+    }
+
+    private bool TryGetInViewRegionPoint(
+        UnitStore units,
+        int observerIndex,
+        int targetIndex,
+        Vector3 observerEye,
+        Vector3 forward,
+        float rangeSquared,
+        float minFacingDot,
+        out Vector3 targetPoint,
+        out float bestDistanceSquared)
+    {
+        targetPoint = Vector3.Zero;
+        bestDistanceSquared = float.PositiveInfinity;
+        int pointCount = UnitHitSystem.GetVisibilityPointCount(
+            units,
+            targetIndex,
+            _hitRegions);
+
+        for (int i = 0; i < pointCount; i++)
+        {
+            Vector3 point = UnitHitSystem.GetRegionPoint(
+                units,
+                targetIndex,
+                i,
+                observerEye,
+                _hitRegions);
+
+            float dx = point.X - observerEye.X;
+            float dy = point.Y - observerEye.Y;
+            float distanceSquared = dx * dx + dy * dy;
+
+            if (distanceSquared > rangeSquared ||
+                distanceSquared >= bestDistanceSquared)
+            {
+                continue;
+            }
+
+            if (distanceSquared > 0.0001f)
+            {
+                float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
+                float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
+                if (facingDot < minFacingDot)
+                    continue;
+            }
+
+            targetPoint = point;
+            bestDistanceSquared = distanceSquared;
+        }
+
+        return float.IsFinite(bestDistanceSquared);
     }
 
     public int GetVisibilityPointCount(
@@ -735,12 +734,10 @@ public sealed class VisionSystem
         Span<Vector3> points,
         UnitBodyStore? bodies = null)
     {
-        Vector3 source =
-            units.Position[unitIndex] +
-            new Vector3(
-                0f,
-                0f,
-                MathF.Max(0.05f, units.Height[unitIndex]) * 2f);
+        Vector3 source = GetEyePosition(
+            units,
+            unitIndex,
+            bodies);
 
         _ = GetVisibilityPoints(
             units,
