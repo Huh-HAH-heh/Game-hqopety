@@ -746,8 +746,8 @@ public void DrawSnapshot(
                     RatOutlineCircle other = circles[j];
                     float dx = testX - other.X;
                     float dy = testY - other.Y;
-                    float radius = other.Radius - 0.15f;
-                    if (dx * dx + dy * dy < radius * radius)
+                    float radius = MathF.Max(0f, other.Radius - 0.15f);
+                    if (radius > 0f && dx * dx + dy * dy < radius * radius)
                     {
                         covered = true;
                         break;
