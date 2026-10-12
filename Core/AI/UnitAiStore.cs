@@ -18,6 +18,7 @@ public sealed class UnitAiStore
     private bool[] _hasTarget;
     private UnitId[] _target;
     private Vector3[] _lastSeenPosition;
+    private Vector3[] _lastSeenAimPoint;
     private float[] _targetMemory;
     private bool[] _hasGoal;
     private Vector3[] _goal;
@@ -38,6 +39,9 @@ public sealed class UnitAiStore
 
     public Vector3[] LastSeenPosition =>
         _lastSeenPosition;
+
+    public Vector3[] LastSeenAimPoint =>
+        _lastSeenAimPoint;
 
     public float[] TargetMemory =>
         _targetMemory;
@@ -67,6 +71,7 @@ public sealed class UnitAiStore
         _hasTarget = new bool[initialUnitCapacity];
         _target = new UnitId[initialUnitCapacity];
         _lastSeenPosition = new Vector3[initialUnitCapacity];
+        _lastSeenAimPoint = new Vector3[initialUnitCapacity];
         _targetMemory = new float[initialUnitCapacity];
         _hasGoal = new bool[initialUnitCapacity];
         _goal = new Vector3[initialUnitCapacity];
@@ -83,6 +88,7 @@ public sealed class UnitAiStore
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
+        _lastSeenAimPoint[unitIndex] = Vector3.Zero;
         _targetMemory[unitIndex] = 0f;
         _hasGoal[unitIndex] = false;
         _goal[unitIndex] = Vector3.Zero;
@@ -120,6 +126,16 @@ public sealed class UnitAiStore
         _target[unitIndex] = target;
         _lastSeenPosition[unitIndex] = position;
         _targetMemory[unitIndex] = memorySeconds;
+    }
+
+    public void RememberAimPoint(int unitIndex, Vector3 point)
+    {
+        if (float.IsFinite(point.X) &&
+            float.IsFinite(point.Y) &&
+            float.IsFinite(point.Z))
+        {
+            _lastSeenAimPoint[unitIndex] = point;
+        }
     }
 
     public void TickMemory(
@@ -186,6 +202,8 @@ public sealed class UnitAiStore
         Array.Resize(
             ref _lastSeenPosition,
             newCapacity);
+
+        Array.Resize(ref _lastSeenAimPoint, newCapacity);
 
         Array.Resize(
             ref _targetMemory,
