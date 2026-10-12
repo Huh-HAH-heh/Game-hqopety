@@ -14,29 +14,60 @@ public static class UnitSuppressionSystem
         float danger,
         float factor)
     {
-        float distance =
-            DistanceToSegment2D(
-                unitPosition,
+        float distance = DistanceToSegment2D(
+            unitPosition,
+            segmentStart,
+            segmentEnd);
+
+        ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
+    }
+
+    public static void AddNearMiss(
+        UnitSuppressionStore suppression,
+        UnitStore units,
+        UnitHitRegionStore? hitRegions,
+        int unitIndex,
+        Vector3 segmentStart,
+        Vector3 segmentEnd,
+        float danger,
+        float factor)
+    {
+        UnitHitRegionProfile profile = hitRegions?.GetProfile(unitIndex) ??
+            UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unitIndex]).BodyType);
+
+        float distance = float.PositiveInfinity;
+        for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
+        {
+            UnitHitRegionGeometry region = UnitHitSystem.GetRegionGeometry(
+                units,
+                unitIndex,
+                regionIndex,
+                hitRegions);
+
+            float centerDistance = DistanceToSegment2D(
+                region.Center,
                 segmentStart,
                 segmentEnd);
+            distance = MathF.Min(distance, MathF.Max(0f, centerDistance - region.Radius));
+        }
 
+        ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
+    }
+
+    private static void ApplyNearMiss(
+        UnitSuppressionStore suppression,
+        int unitIndex,
+        float distance,
+        Vector3 impactPosition,
+        float danger,
+        float factor)
+    {
         if (distance > 1.5f)
             return;
 
-        float proximity =
-            1f /
-            (0.25f + distance * distance);
-
-        float amount =
-            danger *
-            factor *
-            proximity *
-            0.0025f;
-
-        suppression.Add(
-            unitIndex,
-            amount,
-            segmentEnd);
+        float proximity = 1f / (0.25f + distance * distance);
+        float amount = danger * factor * proximity * 0.0025f;
+        suppression.Add(unitIndex, amount, impactPosition);
     }
 
     private static float DistanceToSegment2D(
