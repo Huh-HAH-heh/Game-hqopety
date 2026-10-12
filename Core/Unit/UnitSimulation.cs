@@ -566,6 +566,47 @@ public sealed class UnitSimulation
         return result;
     }
 
+    public UnitDamageResult ApplyAnatomyDamage(
+        UnitId id,
+        int regionIndex,
+        int bindingIndex,
+        float rawDamage)
+    {
+        if (!Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f ||
+            !UnitHitSystem.TryGetBinding(
+                Units, unitIndex, regionIndex, bindingIndex,
+                out HitRegionPartBinding binding, HitRegions) ||
+            !Health.TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out _))
+        {
+            return default;
+        }
+
+        UnitDamageResult result;
+        if (binding.ArmorZone >= 0)
+        {
+            result = _inventorySystem.ResolveIncomingDamage(
+                binding.ArmorZone, rawDamage, id, Inventory);
+        }
+        else if (binding.Part != UnitHealthPartId.None)
+        {
+            result = _inventorySystem.ResolveIncomingDamage(
+                binding.Part, rawDamage, id, Inventory);
+        }
+        else
+        {
+            result = new UnitDamageResult(rawDamage, MathF.Max(0f, rawDamage), 0f, 0f);
+        }
+
+        _healthSystem.ApplyRegionDamage(
+            Units, Health, id, regionIndex, bindingIndex, result.FinalDamage);
+
+        if (Health.OverallHitPoints[unitIndex] <= 0f)
+            MarkUnitDead(unitIndex);
+
+        return result;
+    }
+
     public void SetTarget(
         UnitId id,
         Vector3 target)
@@ -651,6 +692,39 @@ public sealed class UnitSimulation
             normal);
     }
 
+    private static bool IsAppendOnlyAnatomy(
+        UnitHitRegionProfile? previous,
+        UnitHitRegionProfile next)
+    {
+        if (previous == null || previous.RegionCount > next.RegionCount)
+            return false;
+
+        ReadOnlySpan<UnitCircleHitRegion> oldNodes = previous.Regions;
+        ReadOnlySpan<UnitCircleHitRegion> newNodes = next.Regions;
+
+        for (int i = 0; i < oldNodes.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(oldNodes[i].Id) ||
+                !string.Equals(oldNodes[i].Id, newNodes[i].Id, StringComparison.Ordinal))
+                return false;
+
+            ReadOnlySpan<HitRegionPartBinding> oldTissues = oldNodes[i].Parts;
+            ReadOnlySpan<HitRegionPartBinding> newTissues = newNodes[i].Parts;
+            if (oldTissues.Length != newTissues.Length)
+                return false;
+
+            for (int j = 0; j < oldTissues.Length; j++)
+            {
+                if (oldTissues[j].Part != newTissues[j].Part ||
+                    !string.Equals(oldTissues[j].Id, newTissues[j].Id, StringComparison.Ordinal) ||
+                    oldTissues[j].MaxHitPoints != newTissues[j].MaxHitPoints)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
     public bool SetHitRegionProfile(
         UnitId id,
         UnitHitRegionProfile profile)
@@ -660,6 +734,12 @@ public sealed class UnitSimulation
         {
             return false;
         }
+
+        UnitHitRegionProfile? previous = HitRegions.GetProfile(index);
+        bool appendOnly = IsAppendOnlyAnatomy(previous, profile);
+
+        if (!appendOnly)
+            Health.ClearHitRegionParts(index);
 
         HitRegions.SetProfile(index, profile);
         Health.RegisterHitRegionParts(index, profile);
