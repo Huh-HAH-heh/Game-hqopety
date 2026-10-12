@@ -2160,9 +2160,17 @@ private static bool TestVisionDetectsRegionInsideRange()
             return false;
         }
 
+        UnitHitRegionGeometry firstGeometry = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 0, simulation.HitRegions);
+        UnitHitRegionGeometry secondGeometry = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 1, simulation.HitRegions);
+
         return MathF.Abs(simulation.Health.HitPoints[preservedHealthIndex] - 20f) < 0.001f &&
                MathF.Abs(simulation.Health.HitPoints[secondHealthIndex] - 40f) < 0.001f &&
-               simulation.Health.Parent[secondHealthIndex] == preservedHealthIndex;
+               simulation.Health.Parent[secondHealthIndex] == preservedHealthIndex &&
+               MathF.Abs(secondGeometry.Center.X - firstGeometry.Center.X) < 0.001f &&
+               MathF.Abs(secondGeometry.Center.Y - firstGeometry.Center.Y) < 0.001f &&
+               MathF.Abs(secondGeometry.Center.Z - firstGeometry.Center.Z - 0.85f) < 0.001f;
     }
 
     private static bool TestStartingArmorMitigatesRifleHits()
