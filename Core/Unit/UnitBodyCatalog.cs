@@ -197,7 +197,7 @@ internal static class UnitBodyCatalog
 
     private static BodyPartDefinition[] CreateScavenRat()
     {
-        var parts = new System.Collections.Generic.List<BodyPartDefinition>(59);
+        var parts = new System.Collections.Generic.List<BodyPartDefinition>(31);
 
         void Add(
             float x,
@@ -220,93 +220,54 @@ internal static class UnitBodyCatalog
                 role: role));
         }
 
-        // Top-down silhouette. +X is forward; +/-Y are the two sides.
-        // Z is deliberately flat so the renderer can never turn this into a side view.
-        Add(0f, 0f, 0.25f);                                        // 0 torso
-        Add(-0.16f, 0f, 0.24f, 0, BodyPartRole.RatBody);           // 1 rump
-        Add(-0.13f, 0.105f, 0.22f, 0, BodyPartRole.RatBody);       // 2 back left
-        Add(-0.13f, -0.105f, 0.22f, 0, BodyPartRole.RatBody);      // 3 back right
-        Add(0.16f, 0f, 0.22f, 0, BodyPartRole.RatBody);            // 4 shoulders
-        Add(0.09f, 0.11f, 0.16f, 0, BodyPartRole.RatBody);         // 5 left chest
-        Add(0.09f, -0.11f, 0.16f, 0, BodyPartRole.RatBody);        // 6 right chest
-        Add(0.28f, 0f, 0.14f, 0, BodyPartRole.Neck);               // 7 neck
+        // Clean top-down Skaven silhouette: only the circles needed to read
+        // the rump, shoulders, head, tucked arms, two hind legs and tail.
+        Add(0f, 0f, 0.25f);                                          // 0 torso
+        Add(-0.17f, 0f, 0.22f, 0, BodyPartRole.RatBody);             // 1 rump
+        Add(0.13f, 0f, 0.20f, 0, BodyPartRole.RatBody);              // 2 shoulders
+        Add(0.39f, 0f, 0.19f, -1, BodyPartRole.Head,
+            anchor: BodyPartAnchor.UnitHead);                        // 3 head
+        Add(0.15f, 0f, 0.105f, 3, BodyPartRole.Muzzle);              // 4 snout
+        Add(0.09f, 0f, 0.042f, 4, BodyPartRole.Muzzle);              // 5 nose
+        Add(-0.10f, 0.13f, 0.075f, 3, BodyPartRole.Ear);             // 6 ear
+        Add(-0.10f, -0.13f, 0.075f, 3, BodyPartRole.Ear);            // 7 ear
+        Add(0.055f, 0.083f, 0.026f, 3, BodyPartRole.Eye);            // 8 eye
+        Add(0.055f, -0.083f, 0.026f, 3, BodyPartRole.Eye);           // 9 eye
 
-        Add(0.39f, 0f, 0.20f, -1, BodyPartRole.Head,
-            anchor: BodyPartAnchor.UnitHead);                     // 8 head
-        Add(0.015f, 0.085f, 0.105f, 8, BodyPartRole.Muzzle);       // 9 cheek
-        Add(0.015f, -0.085f, 0.105f, 8, BodyPartRole.Muzzle);      // 10 cheek
-        Add(0.16f, 0f, 0.12f, 8, BodyPartRole.Muzzle);             // 11 snout
-        Add(0.10f, 0f, 0.045f, 11, BodyPartRole.Muzzle);           // 12 nose
-        Add(0.07f, 0.035f, 0.065f, 11, BodyPartRole.Muzzle);       // 13 jaw left
-        Add(0.07f, -0.035f, 0.065f, 11, BodyPartRole.Muzzle);      // 14 jaw right
+        // Front arms are tucked into the silhouette, not split into many joints.
+        Add(0.06f, 0.16f, 0.105f, 0, BodyPartRole.UpperArm,
+            BodyPartMotion.WalkCycleProfile);                        // 10 arm
+        Add(0.10f, -0.035f, 0.067f, 10, BodyPartRole.Hand,
+            BodyPartMotion.WalkCycleProfile);                         // 11 paw
+        Add(0.06f, -0.16f, 0.105f, 0, BodyPartRole.UpperArm,
+            BodyPartMotion.WalkCycleProfileOpposite);                 // 12 arm
+        Add(0.10f, 0.035f, 0.067f, 12, BodyPartRole.Hand,
+            BodyPartMotion.WalkCycleProfileOpposite);                 // 13 paw
 
-        Add(-0.105f, 0.14f, 0.095f, 8, BodyPartRole.Ear);          // 15 ear
-        Add(0.015f, 0.005f, 0.045f, 15, BodyPartRole.Ear);         // 16 inner ear
-        Add(-0.105f, -0.14f, 0.095f, 8, BodyPartRole.Ear);         // 17 ear
-        Add(0.015f, -0.005f, 0.045f, 17, BodyPartRole.Ear);        // 18 inner ear
-        Add(0.06f, 0.095f, 0.038f, 8, BodyPartRole.Eye);           // 19 eye
-        Add(0.018f, 0.002f, 0.018f, 19, BodyPartRole.Eye);         // 20 pupil
-        Add(0.06f, -0.095f, 0.038f, 8, BodyPartRole.Eye);          // 21 eye
-        Add(0.018f, -0.002f, 0.018f, 21, BodyPartRole.Eye);        // 22 pupil
-        Add(0.16f, 0.07f, 0.014f, 8, BodyPartRole.Whisker);        // 23 whisker root
-        Add(0.17f, 0.11f, 0.012f, 8, BodyPartRole.Whisker);        // 24 whisker
-        Add(0.16f, -0.07f, 0.014f, 8, BodyPartRole.Whisker);       // 25 whisker root
-        Add(0.17f, -0.11f, 0.012f, 8, BodyPartRole.Whisker);       // 26 whisker
+        // Two hind legs: one large joint and one foot on each side.
+        Add(-0.13f, 0.13f, 0.13f, 0, BodyPartRole.Thigh,
+            BodyPartMotion.WalkCycleProfile);                         // 14 thigh
+        Add(-0.12f, 0.045f, 0.078f, 14, BodyPartRole.Foot,
+            BodyPartMotion.WalkCycleProfileOpposite);                 // 15 foot
+        Add(-0.13f, -0.13f, 0.13f, 0, BodyPartRole.Thigh,
+            BodyPartMotion.WalkCycleProfileOpposite);                 // 16 thigh
+        Add(-0.12f, -0.045f, 0.078f, 16, BodyPartRole.Foot,
+            BodyPartMotion.WalkCycleProfile);                         // 17 foot
 
-        // Front paws tucked in close to the chest, moving opposite each other.
-        Add(0.07f, 0.18f, 0.12f, 0, BodyPartRole.UpperArm,
-            BodyPartMotion.WalkCycleProfile);                      // 27 shoulder
-        Add(0.09f, -0.045f, 0.09f, 27, BodyPartRole.Forearm,
-            BodyPartMotion.WalkCycleProfile);                      // 28 forearm
-        Add(0.075f, -0.02f, 0.06f, 28, BodyPartRole.Hand,
-            BodyPartMotion.WalkCycleProfile);                      // 29 paw
-        Add(0.07f, -0.18f, 0.12f, 0, BodyPartRole.UpperArm,
-            BodyPartMotion.WalkCycleProfileOpposite);               // 30 shoulder
-        Add(0.09f, 0.045f, 0.09f, 30, BodyPartRole.Forearm,
-            BodyPartMotion.WalkCycleProfileOpposite);               // 31 forearm
-        Add(0.075f, 0.02f, 0.06f, 31, BodyPartRole.Hand,
-            BodyPartMotion.WalkCycleProfileOpposite);               // 32 paw
-
-        // Exactly two rear legs with a small alternating stride.
-        Add(-0.13f, 0.14f, 0.14f, 0, BodyPartRole.Thigh,
-            BodyPartMotion.WalkCycleProfile);                       // 33 hip/thigh
-        Add(-0.105f, 0.045f, 0.11f, 33, BodyPartRole.Knee,
-            BodyPartMotion.WalkCycleProfileOpposite);               // 34 knee
-        Add(-0.10f, 0.025f, 0.09f, 34, BodyPartRole.Shin,
-            BodyPartMotion.WalkCycleProfile);                       // 35 lower leg
-        Add(-0.045f, 0.02f, 0.075f, 35, BodyPartRole.Foot);         // 36 paw
-        Add(-0.13f, -0.14f, 0.14f, 0, BodyPartRole.Thigh,
-            BodyPartMotion.WalkCycleProfileOpposite);               // 37 hip/thigh
-        Add(-0.105f, -0.045f, 0.11f, 37, BodyPartRole.Knee,
-            BodyPartMotion.WalkCycleProfile);                       // 38 knee
-        Add(-0.10f, -0.025f, 0.09f, 38, BodyPartRole.Shin,
-            BodyPartMotion.WalkCycleProfileOpposite);               // 39 lower leg
-        Add(-0.045f, -0.02f, 0.075f, 39, BodyPartRole.Foot);        // 40 paw
-
-        // Verlet-like tail chain: each circle keeps its own inertia and a fixed
-        // link length, so it swings wide after turns instead of teleporting
-        // into a smoothed straight line behind the body.
-        Add(-0.20f, 0f, 0.115f, 1, BodyPartRole.Tail,
-            BodyPartMotion.PhysicalTail, 0.20f);                    // 41 tail root
+        // A shorter, cleaner chain with progressive taper. Each link still
+        // has inertia, length constraints and its own phase of the tail wave.
+        Add(-0.20f, 0f, 0.105f, 1, BodyPartRole.Tail,
+            BodyPartMotion.PhysicalTail, 0.20f);                      // 18 tail root
         float[] tailRadii =
         {
-            0.105f, 0.098f, 0.092f, 0.086f, 0.080f, 0.074f,
-            0.068f, 0.062f, 0.056f, 0.050f, 0.044f, 0.039f,
-            0.034f, 0.030f, 0.026f, 0.022f, 0.018f
+            0.092f, 0.082f, 0.072f, 0.062f, 0.052f, 0.043f,
+            0.034f, 0.026f, 0.019f, 0.014f, 0.010f, 0.008f
         };
 
         for (int i = 0; i < tailRadii.Length; i++)
         {
-            float curve = (i % 4) switch
-            {
-                0 => 0.012f,
-                1 => 0.004f,
-                2 => -0.009f,
-                _ => -0.003f
-            };
-
-            Add(-0.115f, curve, tailRadii[i], parts.Count - 1,
-                BodyPartRole.Tail, BodyPartMotion.PhysicalTail, 0.115f);
+            Add(-0.11f, 0f, tailRadii[i], parts.Count - 1,
+                BodyPartRole.Tail, BodyPartMotion.PhysicalTail, 0.11f);
         }
 
         return parts.ToArray();
