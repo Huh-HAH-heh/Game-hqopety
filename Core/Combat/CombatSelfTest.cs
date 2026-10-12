@@ -45,6 +45,9 @@ public static class CombatSelfTest
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);
         RunTest("Hit regions: colonist is three stacked circles", TestColonistUsesThreeStackedRegions, ref passed, ref failed);
+        RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
+        RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
+        RunTest("Damage: projectile events outside hit regions are rejected", TestDamageRequiresHitRegion, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
@@ -1467,7 +1470,146 @@ public static class CombatSelfTest
                 simulation.HitRegions) == 3;
     }
 
-private static bool TestVisionSampleMemory()
+private static bool TestVisionDetectsRegionInsideRange()
+    {
+        WorldMap worldMap = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 32);
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+
+        UnitId observer = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitHitRegionProfile offsetTargetProfile = new UnitHitRegionProfile(
+            new UnitCircleHitRegion(
+                new Vector3(-3f, 0f, 0.5f),
+                radius: 0.35f,
+                halfHeight: 0.30f,
+                new HitRegionPartBinding(UnitHealthPartId.Torso, maxHitPoints: 60f)));
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(14.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 2,
+            hitProfile: offsetTargetProfile);
+
+        simulation.Units.ViewRange[observer.Index] = 1f;
+        simulation.Units.FieldOfView[observer.Index] = 360f;
+
+        // The root is four world units away; only the configured hit region
+        // is within range and it occupies a cell next to the observer.
+        VisionCheck direct = simulation.Vision.Evaluate(
+            simulation.Units,
+            worldMap,
+            observer.Index,
+            target.Index,
+            simulation.Bodies);
+
+        if (!direct.IsVisible)
+            return false;
+
+        simulation.Vision.Update(
+            simulation.Units,
+            worldMap,
+            0.11f,
+            simulation.Health,
+            simulation.Bodies);
+
+        ReadOnlySpan<int> visible = simulation.Vision.GetVisibleTargets(observer.Index);
+        for (int i = 0; i < visible.Length; i++)
+        {
+            if (visible[i] == target.Index)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool TestTargetModesAimAtHitRegions()
+    {
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter,
+            WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(shooter, inventorySlot, UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        int stateIndex = UnitWeaponStore.GetIndex(shooter.Index, UnitWeaponSlot.Primary);
+        simulation.Weapons.CurrentTargetMode[stateIndex] = TargetMode.Head;
+        simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target);
+        float headZ = simulation.Weapons.AimPoint[stateIndex].Z;
+
+        simulation.Weapons.CurrentTargetMode[stateIndex] = TargetMode.Torso;
+        simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target);
+        float torsoZ = simulation.Weapons.AimPoint[stateIndex].Z;
+
+        simulation.Weapons.CurrentTargetMode[stateIndex] = TargetMode.Legs;
+        simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target);
+        float legsZ = simulation.Weapons.AimPoint[stateIndex].Z;
+
+        return headZ > torsoZ &&
+               torsoZ > legsZ &&
+               simulation.Weapons.AimPoint[stateIndex] != Vector3.Zero;
+    }
+
+    private static bool TestDamageRequiresHitRegion()
+    {
+        UnitSimulation simulation = new UnitSimulation(2, 32);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10f, 10f, 0.1f));
+
+        float healthBefore = simulation.Health.OverallHitPoints[target.Index];
+        DamageSystem damageSystem = new DamageSystem();
+        UnitHealthSystem healthSystem = new UnitHealthSystem();
+
+        DamageEvent outside = new DamageEvent(
+            default,
+            target,
+            UnitHealthPartId.Torso,
+            new Vector3(10f, 10f, 4f),
+            Vector3.UnitX,
+            30f,
+            1000f,
+            1000f,
+            100f,
+            70f,
+            DamageType.Ballistic,
+            0f);
+
+        ProjectileDamageResult result = damageSystem.ApplyProjectile(
+            simulation.Units,
+            simulation.Inventory,
+            simulation.Health,
+            healthSystem,
+            in outside,
+            simulation.HitRegions);
+
+        return result.ProjectileStopped &&
+               result.DamageApplied == 0f &&
+               simulation.Health.OverallHitPoints[target.Index] == healthBefore;
+    }
+
+    private static bool TestVisionSampleMemory()
     {
         WorldMap worldMap = new WorldMap(
             regionsX: 1,
@@ -1870,11 +2012,17 @@ private static bool TestVisionSampleMemory()
 
         for (int i = 0; i < 5; i++)
         {
+            Vector3 torsoCenter = UnitHitSystem.GetRegionGeometry(
+                simulation.Units,
+                target.Index,
+                1,
+                simulation.HitRegions).Center;
+
             DamageEvent hit = new DamageEvent(
                 default,
                 target,
                 UnitHealthPartId.Torso,
-                Vector3.Zero,
+                torsoCenter,
                 Vector3.UnitX,
                 34f,
                 initialEnergy,
@@ -1882,14 +2030,16 @@ private static bool TestVisionSampleMemory()
                 110f,
                 70f,
                 DamageType.Ballistic,
-                0f);
+                0f,
+                regionIndex: 1);
 
             ProjectileDamageResult result = damageSystem.ApplyProjectile(
                 simulation.Units,
                 simulation.Inventory,
                 simulation.Health,
                 healthSystem,
-                in hit);
+                in hit,
+                simulation.HitRegions);
 
             if (result.DamageApplied <= 0f || result.DamageApplied >= 10f)
                 return false;
