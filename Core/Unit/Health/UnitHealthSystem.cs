@@ -161,14 +161,13 @@ public sealed class UnitHealthSystem
         if (amountPerSecond <= 0f ||
             !units.TryGetIndex(unitId, out int unitIndex) ||
             health.OverallHitPoints[unitIndex] <= 0f ||
-            !UnitHitSystem.IsPartInProfile(units, unitIndex, partId, hitRegions) ||
-            !health.TryFindPart(unitIndex, partId, out int partIndex))
+            !UnitHitSystem.TryFindBindingForPart(
+                units, unitIndex, partId,
+                out int regionIndex, out int bindingIndex, hitRegions))
             return;
 
-        health.BleedRate[partIndex] =
-            MathF.Min(
-                10f,
-                health.BleedRate[partIndex] + amountPerSecond);
+        AddRegionBleed(
+            units, health, unitId, regionIndex, bindingIndex, amountPerSecond);
     }
 
     public bool ApplyDamage(
@@ -180,24 +179,17 @@ public sealed class UnitHealthSystem
         UnitHitRegionStore? hitRegions = null)
     {
         if (amount <= 0f ||
-            !units.TryGetIndex(
-                unitId,
-                out int unitIndex) ||
+            !units.TryGetIndex(unitId, out int unitIndex) ||
             health.OverallHitPoints[unitIndex] <= 0f ||
-            !UnitHitSystem.IsPartInProfile(units, unitIndex, partId, hitRegions))
+            !UnitHitSystem.TryFindBindingForPart(
+                units, unitIndex, partId,
+                out int regionIndex, out int bindingIndex, hitRegions))
         {
             return false;
         }
 
-        if (!health.TryFindPart(
-                unitIndex,
-                partId,
-                out int partIndex))
-        {
-            return false;
-        }
-
-        return ApplyDamageAtIndex(health, unitIndex, partIndex, amount);
+        return ApplyRegionDamage(
+            units, health, unitId, regionIndex, bindingIndex, amount);
     }
 
     private static bool ApplyDamageAtIndex(
