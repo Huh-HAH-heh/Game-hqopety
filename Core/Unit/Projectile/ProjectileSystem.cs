@@ -426,7 +426,8 @@ public sealed class ProjectileSystem
                         start +
                         (end - start) *
                         globalT,
-                        globalT);
+                        globalT,
+                        localHit.RegionIndex);
             }
 
             if (terrainT > 1f &&
@@ -574,7 +575,10 @@ public sealed class ProjectileSystem
                     projectiles.DamageType[
                         projectileIndex],
                     projectiles.BleedChance[
-                        projectileIndex]);
+                        projectileIndex],
+                    bestHit.RegionIndex,
+                    projectiles.DiameterM[
+                        projectileIndex] * 0.5f);
 
             ProjectileDamageResult damage =
                 _damageSystem.ApplyProjectile(
@@ -582,7 +586,8 @@ public sealed class ProjectileSystem
                     inventory,
                     health,
                     healthSystem,
-                    damageEvent);
+                    damageEvent,
+                    hitRegions);
 
             projectiles.Energy[
                 projectileIndex] =
