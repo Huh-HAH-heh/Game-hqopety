@@ -845,7 +845,7 @@ public void DrawSnapshot(
             float a1 = (i + 1) * MathF.Tau / segments;
             float middle = (a0 + a1) * 0.5f;
             float forwardDot = MathF.Cos(middle) * dx + MathF.Sin(middle) * dy;
-            if (forwardDot > 0.50f)
+            if (forwardDot > 0.94f)
                 continue;
 
             AppendDebugLine(
@@ -857,8 +857,8 @@ public void DrawSnapshot(
                 color);
         }
 
-        float attachForward = radius * 0.50f;
-        float attachSide = radius * 0.8660254f;
+        float attachForward = radius * 0.94f;
+        float attachSide = radius * 0.341174f;
         AppendDebugLine(
             outlines,
             head.X + dx * attachForward + sideX * attachSide,
