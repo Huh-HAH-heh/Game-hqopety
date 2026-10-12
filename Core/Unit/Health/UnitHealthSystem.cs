@@ -120,11 +120,13 @@ public sealed class UnitHealthSystem
         UnitHealthStore health,
         UnitId unitId,
         UnitHealthPartId partId,
-        float amountPerSecond)
+        float amountPerSecond,
+        UnitHitRegionStore? hitRegions = null)
     {
         if (amountPerSecond <= 0f ||
             !units.TryGetIndex(unitId, out int unitIndex) ||
             health.OverallHitPoints[unitIndex] <= 0f ||
+            !UnitHitSystem.IsPartInProfile(units, unitIndex, partId, hitRegions) ||
             !health.TryFindPart(unitIndex, partId, out int partIndex))
             return;
 
@@ -139,13 +141,15 @@ public sealed class UnitHealthSystem
         UnitHealthStore health,
         UnitId unitId,
         UnitHealthPartId partId,
-        float amount)
+        float amount,
+        UnitHitRegionStore? hitRegions = null)
     {
         if (amount <= 0f ||
             !units.TryGetIndex(
                 unitId,
                 out int unitIndex) ||
-            health.OverallHitPoints[unitIndex] <= 0f)
+            health.OverallHitPoints[unitIndex] <= 0f ||
+            !UnitHitSystem.IsPartInProfile(units, unitIndex, partId, hitRegions))
         {
             return false;
         }
