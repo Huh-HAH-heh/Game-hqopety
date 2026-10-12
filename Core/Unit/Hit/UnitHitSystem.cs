@@ -121,6 +121,113 @@ public sealed class UnitHitSystem
         return new UnitHitRegionGeometry(center, radius, halfHeight);
     }
 
+    public static bool IsPartInProfile(
+        UnitStore units,
+        int unitIndex,
+        UnitHealthPartId part,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        if (part == UnitHealthPartId.None)
+            return false;
+
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+
+        for (int i = 0; i < regions.Length; i++)
+        {
+            if (RegionHasPart(regions[i], part))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static bool IsPartInRegion(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        UnitHealthPartId part,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        return (uint)regionIndex < (uint)profile.RegionCount &&
+               RegionHasPart(profile.Regions[regionIndex], part);
+    }
+
+    public static bool IsPointInsideRegion(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        UnitHealthPartId part,
+        Vector3 point,
+        float tolerance = 0f,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        if (!float.IsFinite(tolerance) || tolerance < 0f ||
+            !float.IsFinite(point.X) ||
+            !float.IsFinite(point.Y) ||
+            !float.IsFinite(point.Z) ||
+            !IsPartInRegion(units, unitIndex, regionIndex, part, hitRegions))
+        {
+            return false;
+        }
+
+        UnitHitRegionGeometry geometry = GetRegionGeometry(
+            units,
+            unitIndex,
+            regionIndex,
+            hitRegions);
+
+        float dx = point.X - geometry.Center.X;
+        float dy = point.Y - geometry.Center.Y;
+        float radius = geometry.Radius + tolerance;
+
+        return dx * dx + dy * dy <= radius * radius &&
+               MathF.Abs(point.Z - geometry.Center.Z) <=
+                   geometry.HalfHeight + tolerance;
+    }
+
+    public static int FindRegionAtPoint(
+        UnitStore units,
+        int unitIndex,
+        UnitHealthPartId part,
+        Vector3 point,
+        float tolerance = 0f,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+
+        for (int i = 0; i < profile.RegionCount; i++)
+        {
+            if (IsPointInsideRegion(
+                    units,
+                    unitIndex,
+                    i,
+                    part,
+                    point,
+                    tolerance,
+                    hitRegions))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool RegionHasPart(
+        in UnitCircleHitRegion region,
+        UnitHealthPartId part)
+    {
+        foreach (HitRegionPartBinding binding in region.Parts)
+        {
+            if (binding.Part == part)
+                return true;
+        }
+
+        return false;
+    }
+
     public static Vector3 GetRegionPoint(
         UnitStore units,
         int unitIndex,
