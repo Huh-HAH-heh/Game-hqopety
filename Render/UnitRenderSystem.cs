@@ -11,6 +11,22 @@ namespace RimClone.Render;
 
 public sealed class UnitRenderSystem
 {
+    private readonly struct RatOutlineCircle
+    {
+        public readonly float X;
+        public readonly float Y;
+        public readonly float Radius;
+        public readonly BodyPartRole Role;
+
+        public RatOutlineCircle(float x, float y, float radius, BodyPartRole role)
+        {
+            X = x;
+            Y = y;
+            Radius = radius;
+            Role = role;
+        }
+    }
+
     private const int CircleSegments = 16;
     private const int VisionConeSegments = 20;
     private const int VisionRingSegments = 48;
@@ -554,6 +570,10 @@ public void DrawSnapshot(
             return 0;
 
         count = Math.Min(count, bodies.Count - start);
+        if (lineOnly)
+            return AppendRatBodyParts(
+                fills, outlines, bodies, start, count, tilePixelSize);
+
         Vector3[] positions = bodies.WorldPosition;
         Vector3[] scales = bodies.Scale;
         float[] rotations = bodies.WorldRotation;
@@ -595,6 +615,10 @@ public void DrawSnapshot(
             return 0;
 
         count = Math.Min(count, bodyParts.Length - start);
+        if (bodyParts[start].LineOnly)
+            return AppendRatBodyParts(
+                fills, outlines, bodyParts, start, count, tilePixelSize);
+
         for (int i = start; i < start + count; i++)
         {
             RenderBodyPart part = bodyParts[i];
@@ -614,6 +638,134 @@ public void DrawSnapshot(
         }
 
         return count;
+    }
+
+    private static int AppendRatBodyParts(
+        VertexArray fills,
+        VertexArray outlines,
+        UnitBodyStore bodies,
+        int start,
+        int count,
+        float tilePixelSize)
+    {
+        Span<RatOutlineCircle> circles = stackalloc RatOutlineCircle[count];
+        int circleCount = 0;
+        Vector3[] positions = bodies.WorldPosition;
+        Vector3[] scales = bodies.Scale;
+        BodyPartRole[] roles = bodies.Role;
+        BodyPrimitive[] primitives = bodies.Primitive;
+
+        for (int i = start; i < start + count; i++)
+        {
+            if (primitives[i] != BodyPrimitive.Circle || scales[i].X <= 0f)
+                continue;
+
+            if (roles[i] == BodyPartRole.Eye)
+            {
+                AppendBodyPart(
+                    fills, outlines, positions[i], scales[i], 0f,
+                    BodyPrimitive.Circle, roles[i], 0, true,
+                    tilePixelSize, 1f, lineOnly: true);
+                continue;
+            }
+
+            circles[circleCount++] = new RatOutlineCircle(
+                positions[i].X * tilePixelSize,
+                positions[i].Y * tilePixelSize,
+                MathF.Abs(scales[i].X) * tilePixelSize,
+                roles[i]);
+        }
+
+        AppendRatCircleUnion(outlines, circles[..circleCount]);
+        return count;
+    }
+
+    private static int AppendRatBodyParts(
+        VertexArray fills,
+        VertexArray outlines,
+        RenderBodyPart[] bodyParts,
+        int start,
+        int count,
+        float tilePixelSize)
+    {
+        Span<RatOutlineCircle> circles = stackalloc RatOutlineCircle[count];
+        int circleCount = 0;
+
+        for (int i = start; i < start + count; i++)
+        {
+            RenderBodyPart part = bodyParts[i];
+            if (part.Primitive != BodyPrimitive.Circle || part.Scale.X <= 0f)
+                continue;
+
+            if (part.Role == BodyPartRole.Eye)
+            {
+                AppendBodyPart(
+                    fills, outlines, part.Position, part.Scale, 0f,
+                    BodyPrimitive.Circle, part.Role, 0, true,
+                    tilePixelSize, 1f, lineOnly: true);
+                continue;
+            }
+
+            circles[circleCount++] = new RatOutlineCircle(
+                part.Position.X * tilePixelSize,
+                part.Position.Y * tilePixelSize,
+                MathF.Abs(part.Scale.X) * tilePixelSize,
+                part.Role);
+        }
+
+        AppendRatCircleUnion(outlines, circles[..circleCount]);
+        return count;
+    }
+
+    private static void AppendRatCircleUnion(
+        VertexArray outlines,
+        ReadOnlySpan<RatOutlineCircle> circles)
+    {
+        for (int i = 0; i < circles.Length; i++)
+        {
+            RatOutlineCircle circle = circles[i];
+            int segments = Math.Clamp(
+                (int)MathF.Ceiling(circle.Radius * 2.2f),
+                12,
+                40);
+
+            for (int segment = 0; segment < segments; segment++)
+            {
+                float a0 = segment * MathF.Tau / segments;
+                float a1 = (segment + 1) * MathF.Tau / segments;
+                float middle = (a0 + a1) * 0.5f;
+                float testX = circle.X + MathF.Cos(middle) * circle.Radius;
+                float testY = circle.Y + MathF.Sin(middle) * circle.Radius;
+                bool covered = false;
+
+                for (int j = 0; j < circles.Length; j++)
+                {
+                    if (i == j)
+                        continue;
+
+                    RatOutlineCircle other = circles[j];
+                    float dx = testX - other.X;
+                    float dy = testY - other.Y;
+                    float radius = other.Radius - 0.15f;
+                    if (dx * dx + dy * dy < radius * radius)
+                    {
+                        covered = true;
+                        break;
+                    }
+                }
+
+                if (covered)
+                    continue;
+
+                float x0 = circle.X + MathF.Cos(a0) * circle.Radius;
+                float y0 = circle.Y + MathF.Sin(a0) * circle.Radius;
+                float x1 = circle.X + MathF.Cos(a1) * circle.Radius;
+                float y1 = circle.Y + MathF.Sin(a1) * circle.Radius;
+                AppendDebugLine(
+                    outlines, x0, y0, x1, y1,
+                    GetRatLineColor(circle.Role));
+            }
+        }
     }
 
     private static int AppendHitRegions(
