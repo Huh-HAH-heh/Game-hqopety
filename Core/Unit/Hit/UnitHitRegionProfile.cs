@@ -3,33 +3,93 @@ using System.Numerics;
 
 namespace Core.Unit;
 
+[Flags]
+public enum UnitAnatomyMarkerRole : ushort
+{
+    None = 0,
+    Vision = 1,
+    Target = 2,
+    Aim = 4,
+    Eye = 8,
+    Vital = 16,
+    Interaction = 32,
+    Locomotion = 64,
+    WeaponMount = 128,
+    Muzzle = 256
+}
+
+/// <summary>
+/// A named functional point attached to a circular anatomy node.
+/// LocalOffset is relative to that node's center and rotates with the unit.
+/// </summary>
+public readonly struct UnitAnatomyMarker
+{
+    public string Id { get; }
+    public UnitAnatomyMarkerRole Roles { get; }
+    public Vector3 LocalOffset { get; }
+
+    public UnitAnatomyMarker(
+        string id,
+        UnitAnatomyMarkerRole roles,
+        Vector3 localOffset = default)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            throw new ArgumentException("A marker needs a stable ID.", nameof(id));
+        if (!float.IsFinite(localOffset.X) ||
+            !float.IsFinite(localOffset.Y) ||
+            !float.IsFinite(localOffset.Z))
+            throw new ArgumentOutOfRangeException(nameof(localOffset));
+
+        Id = id;
+        Roles = roles;
+        LocalOffset = localOffset;
+    }
+}
+
+/// <summary>
+/// A named health/tissue attachment on a geometry node. Part is optional legacy
+/// metadata for old armor/diagnostic code; Id identifies this exact tissue.
+/// </summary>
 public readonly struct HitRegionPartBinding
 {
+    public string Id { get; }
+    public string Name { get; }
+    public string ParentId { get; }
     public UnitHealthPartId Part { get; }
     public float Weight { get; }
     public UnitHealthPartKind Kind { get; }
     public float MaxHitPoints { get; }
     public UnitHealthPartId ParentPart { get; }
+    public int ArmorZone { get; }
 
     public HitRegionPartBinding(
         UnitHealthPartId part,
         float weight = 1f,
         UnitHealthPartKind kind = UnitHealthPartKind.BodyPart,
         float maxHitPoints = 40f,
-        UnitHealthPartId parentPart = UnitHealthPartId.None)
+        UnitHealthPartId parentPart = UnitHealthPartId.None,
+        string? id = null,
+        string? parentId = null,
+        int armorZone = -1)
     {
-        if (part == UnitHealthPartId.None)
-            throw new ArgumentOutOfRangeException(nameof(part));
+        if (part == UnitHealthPartId.None && string.IsNullOrWhiteSpace(id))
+            throw new ArgumentException("Generic anatomy parts require a stable ID.", nameof(id));
+        if (armorZone < -1 || armorZone >= UnitInventoryStore.ArmorZoneCount)
+            throw new ArgumentOutOfRangeException(nameof(armorZone));
         if (!float.IsFinite(weight) || weight <= 0f)
             throw new ArgumentOutOfRangeException(nameof(weight));
         if (!float.IsFinite(maxHitPoints) || maxHitPoints <= 0f)
             throw new ArgumentOutOfRangeException(nameof(maxHitPoints));
 
+        Id = id ?? string.Empty;
+        Name = string.IsNullOrWhiteSpace(id) ? part.ToString() : id;
+        ParentId = parentId ?? string.Empty;
         Part = part;
         Weight = weight;
         Kind = kind;
         MaxHitPoints = maxHitPoints;
         ParentPart = parentPart;
+        ArmorZone = armorZone;
     }
 }
 
@@ -40,7 +100,11 @@ public readonly struct HitRegionPartBinding
 public readonly struct UnitCircleHitRegion
 {
     private readonly HitRegionPartBinding[] _parts;
+    private readonly UnitAnatomyMarker[] _markers;
 
+    public string Id { get; }
+    public string ParentId { get; }
+    public ReadOnlySpan<UnitAnatomyMarker> Markers => _markers;
     public Vector3 LocalCenter { get; }
     public Vector3 DimensionCenterFactors { get; }
     public float Radius { get; }
@@ -63,7 +127,32 @@ public readonly struct UnitCircleHitRegion
             0f,
             halfHeight,
             0f,
-            parts)
+            parts,
+            string.Empty,
+            string.Empty,
+            Array.Empty<UnitAnatomyMarker>())
+    {
+    }
+
+    public UnitCircleHitRegion(
+        string id,
+        Vector3 localCenter,
+        float radius,
+        float halfHeight,
+        HitRegionPartBinding[] parts,
+        params UnitAnatomyMarker[] markers)
+        : this(
+            localCenter,
+            Vector3.Zero,
+            radius,
+            0f,
+            0f,
+            halfHeight,
+            0f,
+            parts,
+            id,
+            string.Empty,
+            markers)
     {
     }
 
@@ -75,7 +164,10 @@ public readonly struct UnitCircleHitRegion
         float lengthRadiusFactor,
         float halfHeight,
         float heightHalfExtentFactor,
-        HitRegionPartBinding[] parts)
+        HitRegionPartBinding[] parts,
+        string id,
+        string parentId,
+        UnitAnatomyMarker[] markers)
     {
         if (!IsFinite(localCenter) || !IsFinite(dimensionCenterFactors))
             throw new ArgumentOutOfRangeException(nameof(localCenter));
@@ -89,6 +181,21 @@ public readonly struct UnitCircleHitRegion
         if (parts == null || parts.Length == 0)
             throw new ArgumentException("A hit region must register at least one body part.", nameof(parts));
 
+        if (markers == null)
+            throw new ArgumentNullException(nameof(markers));
+
+        for (int i = 0; i < markers.Length; i++)
+        {
+            for (int j = i + 1; j < markers.Length; j++)
+            {
+                if (string.Equals(markers[i].Id, markers[j].Id, StringComparison.Ordinal))
+                    throw new ArgumentException("Marker IDs must be unique within a node.", nameof(markers));
+            }
+        }
+
+        Id = id ?? string.Empty;
+        ParentId = parentId ?? string.Empty;
+        _markers = (UnitAnatomyMarker[])markers.Clone();
         LocalCenter = localCenter;
         DimensionCenterFactors = dimensionCenterFactors;
         Radius = radius;
@@ -106,6 +213,20 @@ public readonly struct UnitCircleHitRegion
         float heightHalfExtentFactor,
         params HitRegionPartBinding[] parts)
     {
+        return RelativeToUnit(
+            string.Empty, centerFactors, widthRadiusFactor, lengthRadiusFactor,
+            heightHalfExtentFactor, parts, Array.Empty<UnitAnatomyMarker>());
+    }
+
+    public static UnitCircleHitRegion RelativeToUnit(
+        string id,
+        Vector3 centerFactors,
+        float widthRadiusFactor,
+        float lengthRadiusFactor,
+        float heightHalfExtentFactor,
+        HitRegionPartBinding[] parts,
+        params UnitAnatomyMarker[] markers)
+    {
         return new UnitCircleHitRegion(
             Vector3.Zero,
             centerFactors,
@@ -114,7 +235,36 @@ public readonly struct UnitCircleHitRegion
             lengthRadiusFactor,
             0f,
             heightHalfExtentFactor,
-            parts);
+            parts,
+            id,
+            string.Empty,
+            markers);
+    }
+
+    public bool TryGetMarker(UnitAnatomyMarkerRole role, out UnitAnatomyMarker marker)
+    {
+        for (int i = 0; i < _markers.Length; i++)
+        {
+            if ((_markers[i].Roles & role) == role)
+            {
+                marker = _markers[i];
+                return true;
+            }
+        }
+
+        marker = default;
+        return false;
+    }
+
+    public bool HasMarker(string id)
+    {
+        for (int i = 0; i < _markers.Length; i++)
+        {
+            if (string.Equals(_markers[i].Id, id, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     private static bool IsFinite(Vector3 value) =>
@@ -141,6 +291,33 @@ public sealed class UnitHitRegionProfile
         {
             UnitCircleHitRegion region = _regions[i];
 
+            if (!string.IsNullOrWhiteSpace(region.Id))
+            {
+                for (int j = i + 1; j < _regions.Length; j++)
+                {
+                    if (string.Equals(region.Id, _regions[j].Id, StringComparison.Ordinal))
+                        throw new ArgumentException($"Duplicate anatomy node ID '{region.Id}'.", nameof(regions));
+                }
+            }
+
+            for (int p = 0; p < region.Parts.Length; p++)
+            {
+                HitRegionPartBinding part = region.Parts[p];
+                if (string.IsNullOrWhiteSpace(part.Id))
+                    continue;
+
+                for (int otherRegion = 0; otherRegion <= i; otherRegion++)
+                {
+                    ReadOnlySpan<HitRegionPartBinding> otherParts = _regions[otherRegion].Parts;
+                    int limit = otherRegion == i ? p : otherParts.Length;
+                    for (int otherPart = 0; otherPart < limit; otherPart++)
+                    {
+                        if (string.Equals(part.Id, otherParts[otherPart].Id, StringComparison.Ordinal))
+                            throw new ArgumentException($"Duplicate anatomy part ID '{part.Id}'.", nameof(regions));
+                    }
+                }
+            }
+
             if (region.Parts.Length == 0)
                 throw new ArgumentException("Every hit region must register body parts.", nameof(regions));
 
@@ -151,6 +328,38 @@ public sealed class UnitHitRegionProfile
             if (!float.IsFinite(totalWeight) || totalWeight <= 0f)
                 throw new ArgumentException("Hit-region part weights must have a positive finite total.", nameof(regions));
         }
+    }
+
+    public int FindRegion(string id)
+    {
+        for (int i = 0; i < _regions.Length; i++)
+        {
+            if (string.Equals(_regions[i].Id, id, StringComparison.Ordinal))
+                return i;
+        }
+
+        return -1;
+    }
+
+    public bool TryFindPart(string id, out int regionIndex, out int bindingIndex)
+    {
+        for (int i = 0; i < _regions.Length; i++)
+        {
+            ReadOnlySpan<HitRegionPartBinding> parts = _regions[i].Parts;
+            for (int j = 0; j < parts.Length; j++)
+            {
+                if (!string.Equals(parts[j].Id, id, StringComparison.Ordinal))
+                    continue;
+
+                regionIndex = i;
+                bindingIndex = j;
+                return true;
+            }
+        }
+
+        regionIndex = -1;
+        bindingIndex = -1;
+        return false;
     }
 }
 
