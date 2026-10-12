@@ -109,6 +109,7 @@ public sealed class UnitAiStore
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
+        _lastSeenAimPoint[unitIndex] = Vector3.Zero;
         _targetMemory[unitIndex] = 0f;
         _hasGoal[unitIndex] = false;
         _goal[unitIndex] = Vector3.Zero;
@@ -122,6 +123,9 @@ public sealed class UnitAiStore
         Vector3 position,
         float memorySeconds)
     {
+        if (!_hasTarget[unitIndex] || !_target[unitIndex].Equals(target))
+            _lastSeenAimPoint[unitIndex] = Vector3.Zero;
+
         _hasTarget[unitIndex] = true;
         _target[unitIndex] = target;
         _lastSeenPosition[unitIndex] = position;
@@ -158,6 +162,7 @@ public sealed class UnitAiStore
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _targetMemory[unitIndex] = 0f;
+        _lastSeenAimPoint[unitIndex] = Vector3.Zero;
         _hasGoal[unitIndex] = false;
     }
 
