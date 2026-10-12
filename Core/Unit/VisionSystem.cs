@@ -613,6 +613,18 @@ public sealed class VisionSystem
         Vector3 selectedTargetPoint = targetCenter;
         float selectedTargetHeight = 0f;
         float selectedMiddleDistance = float.PositiveInfinity;
+        const int MaxCapturedVisibleMarkers = 128;
+        Span<float> visibleHeights = targetMode.HasValue
+            ? stackalloc float[MaxCapturedVisibleMarkers]
+            : Span<float>.Empty;
+        Span<int> visibleIndices = targetMode.HasValue
+            ? stackalloc int[MaxCapturedVisibleMarkers]
+            : Span<int>.Empty;
+        Span<Vector3> visiblePoints = targetMode.HasValue
+            ? stackalloc Vector3[MaxCapturedVisibleMarkers]
+            : Span<Vector3>.Empty;
+        int visiblePointCount = 0;
+        int capturedVisiblePointCount = 0;
         float minTargetHeight = float.PositiveInfinity;
         float maxTargetHeight = float.NegativeInfinity;
 
@@ -676,6 +688,16 @@ public sealed class VisionSystem
 
                 float height = UnitHitSystem.GetRegionGeometry(
                     units, targetIndex, i, _hitRegions).Center.Z;
+                visiblePointCount++;
+
+                if (capturedVisiblePointCount < visibleHeights.Length)
+                {
+                    visibleHeights[capturedVisiblePointCount] = height;
+                    visibleIndices[capturedVisiblePointCount] = i;
+                    visiblePoints[capturedVisiblePointCount] = point;
+                    capturedVisiblePointCount++;
+                }
+
                 bool preferred = !hasVisibleTargetPoint;
                 float middleDistance = MathF.Abs(height - middleTargetHeight);
 
@@ -710,6 +732,32 @@ public sealed class VisionSystem
 
         if (hasVisibleTargetPoint)
         {
+            // Middle targeting means the median of the visible segment markers,
+            // not a hardcoded humanoid torso or the middle of hidden body parts.
+            if (targetMode.HasValue &&
+                targetMode.Value != TargetMode.Head &&
+                targetMode.Value != TargetMode.Legs &&
+                visiblePointCount > 0 &&
+                visiblePointCount == capturedVisiblePointCount)
+            {
+                Span<float> sortedHeights = stackalloc float[MaxCapturedVisibleMarkers];
+                visibleHeights[..capturedVisiblePointCount].CopyTo(sortedHeights);
+                sortedHeights[..capturedVisiblePointCount].Sort();
+                float medianHeight = sortedHeights[capturedVisiblePointCount / 2];
+                float bestDistance = float.PositiveInfinity;
+
+                for (int i = 0; i < capturedVisiblePointCount; i++)
+                {
+                    float distance = MathF.Abs(visibleHeights[i] - medianHeight);
+                    if (distance >= bestDistance)
+                        continue;
+
+                    bestDistance = distance;
+                    selectedPointIndex = visibleIndices[i];
+                    selectedTargetPoint = visiblePoints[i];
+                }
+            }
+
             return new VisionCheck(
                 VisionState.Visible,
                 selectedPointIndex,
