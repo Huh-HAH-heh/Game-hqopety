@@ -45,8 +45,6 @@ public readonly struct VisionCheck
 
 public sealed class VisionSystem
 {
-    public const int VisibilityPointCount = 1;
-
     private const float UpdateInterval = 0.10f;
     private const float Epsilon = 0.02f;
     private const float LayerEpsilon = Epsilon * WorldMap.HeightUnitsPerMeter;
@@ -707,6 +705,16 @@ public sealed class VisionSystem
             targetCenter,
             targetCenter,
             firstBlockingPoint);
+    }
+
+    public int GetVisibilityPointCount(
+        UnitStore units,
+        int unitIndex)
+    {
+        return UnitHitSystem.GetVisibilityPointCount(
+            units,
+            unitIndex,
+            _hitRegions);
     }
 
     public Vector3 GetEyePosition(
