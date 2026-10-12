@@ -8,6 +8,13 @@ namespace Core.Unit;
 
 public sealed class UnitWeaponSystem
 {
+    private readonly UnitHitRegionStore? _hitRegions;
+
+    public UnitWeaponSystem(UnitHitRegionStore? hitRegions = null)
+    {
+        _hitRegions = hitRegions;
+    }
+
     public long TotalShotsFired { get; private set; }
     public long TotalRoundsConsumed { get; private set; }
     public long TotalProjectilesSpawned { get; private set; }
@@ -453,18 +460,13 @@ public sealed class UnitWeaponSystem
                 return false;
         }
 
-        float targetHeight = MathF.Max(0.05f, units.Height[targetIndex]);
-        float targetHeightFactor = weapons.CurrentTargetMode[stateIndex] switch
-        {
-            TargetMode.Head => 0.88f,
-            TargetMode.Legs => 0.22f,
-            TargetMode.Torso => 0.55f,
-            _ => 0.55f
-        };
-
+        Vector3 aimOrigin = GetMuzzlePosition(units, shooterIndex);
         Vector3 requestedAimPoint = aimPoint ??
-            (units.Position[targetIndex] +
-             new Vector3(0f, 0f, targetHeight * targetHeightFactor));
+            GetTargetRegionAimPoint(
+                units,
+                targetIndex,
+                aimOrigin,
+                weapons.CurrentTargetMode[stateIndex]);
 
         Vector3 shooterPosition = units.Position[shooterIndex];
         float dx = requestedAimPoint.X - shooterPosition.X;
@@ -638,27 +640,12 @@ public sealed class UnitWeaponSystem
                 units,
                 shooterIndex);
 
-        float targetHeight =
-            units.Height[targetIndex];
-
-        float targetZ =
-            weapons.CurrentTargetMode[stateIndex] switch
-            {
-                TargetMode.Head => targetHeight * 0.88f,
-                TargetMode.Legs => targetHeight * 0.22f,
-                TargetMode.Torso => targetHeight * 0.55f,
-                _ => targetHeight * 0.55f
-            };
-
-        Vector3 targetPoint =
-            aimPoint ??
-            (units.Position[targetIndex] +
-             new Vector3(
-                 0f,
-                 0f,
-                 MathF.Max(
-                     0.05f,
-                     targetZ)));
+        Vector3 targetPoint = aimPoint ??
+            GetTargetRegionAimPoint(
+                units,
+                targetIndex,
+                muzzle,
+                weapons.CurrentTargetMode[stateIndex]);
 
         Vector3 predictedTarget =
             targetPoint;
@@ -780,6 +767,69 @@ public sealed class UnitWeaponSystem
                 solution.TimeOfFlight + 0.25f),
             solution.TimeOfFlight,
             units.Velocity[targetIndex].Length());
+    }
+
+    private Vector3 GetTargetRegionAimPoint(
+        UnitStore units,
+        int targetIndex,
+        Vector3 source,
+        TargetMode targetMode)
+    {
+        UnitHitRegionProfile profile = _hitRegions?.GetProfile(targetIndex) ??
+            UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[targetIndex]).BodyType);
+
+        int regionIndex = FindTargetModeRegion(profile, targetMode);
+        return UnitHitSystem.GetRegionPoint(
+            units,
+            targetIndex,
+            regionIndex,
+            source,
+            _hitRegions);
+    }
+
+    private static int FindTargetModeRegion(
+        UnitHitRegionProfile profile,
+        TargetMode targetMode)
+    {
+        int torsoRegion = -1;
+        int headRegion = -1;
+        int legsRegion = -1;
+        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+
+        for (int i = 0; i < regions.Length; i++)
+        {
+            foreach (HitRegionPartBinding binding in regions[i].Parts)
+            {
+                switch (binding.Part)
+                {
+                    case UnitHealthPartId.Torso:
+                        torsoRegion = i;
+                        break;
+                    case UnitHealthPartId.Head:
+                    case UnitHealthPartId.Brain:
+                        headRegion = i;
+                        break;
+                    case UnitHealthPartId.LeftLeg:
+                    case UnitHealthPartId.RightLeg:
+                    case UnitHealthPartId.LeftFoot:
+                    case UnitHealthPartId.RightFoot:
+                        legsRegion = i;
+                        break;
+                }
+            }
+        }
+
+        int preferred = targetMode switch
+        {
+            TargetMode.Head => headRegion,
+            TargetMode.Legs => legsRegion,
+            TargetMode.Torso or TargetMode.Automatic => torsoRegion,
+            _ => torsoRegion
+        };
+
+        return preferred >= 0
+            ? preferred
+            : profile.RegionCount / 2;
     }
 
     private static AmmunitionConfig? GetCurrentAmmunition(
