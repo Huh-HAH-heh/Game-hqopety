@@ -2165,8 +2165,33 @@ private static bool TestVisionDetectsRegionInsideRange()
         UnitHitRegionGeometry secondGeometry = UnitHitSystem.GetRegionGeometry(
             simulation.Units, unit.Index, 1, simulation.HitRegions);
 
+        DamageEvent segmentHit = new DamageEvent(
+            default,
+            unit,
+            UnitHealthPartId.WholeBody,
+            secondGeometry.Center,
+            Vector3.UnitX,
+            10f,
+            1000f,
+            1000f,
+            100f,
+            70f,
+            DamageType.Ballistic,
+            0f,
+            regionIndex: 1,
+            bindingIndex: 0);
+
+        ProjectileDamageResult hitResult = new DamageSystem().ApplyProjectile(
+            simulation.Units,
+            simulation.Inventory,
+            simulation.Health,
+            new UnitHealthSystem(),
+            in segmentHit,
+            simulation.HitRegions);
+
         return MathF.Abs(simulation.Health.HitPoints[preservedHealthIndex] - 20f) < 0.001f &&
-               MathF.Abs(simulation.Health.HitPoints[secondHealthIndex] - 40f) < 0.001f &&
+               MathF.Abs(simulation.Health.HitPoints[secondHealthIndex] - 30f) < 0.001f &&
+               hitResult.DamageApplied > 0f &&
                simulation.Health.Parent[secondHealthIndex] == preservedHealthIndex &&
                MathF.Abs(secondGeometry.Center.X - firstGeometry.Center.X) < 0.001f &&
                MathF.Abs(secondGeometry.Center.Y - firstGeometry.Center.Y) < 0.001f &&
