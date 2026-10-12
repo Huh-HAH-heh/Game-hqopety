@@ -243,8 +243,7 @@ public sealed class UnitRenderSystem
                     isAlive,
                     tilePixelSize,
                     screenScale,
-                    unitTypes[unitIndex] == UnitType.ScavenRat,
-                    unitPosition.Z);
+                    unitTypes[unitIndex] == UnitType.ScavenRat);
 
             // Keep the marker only for a unit with no model rig at all.
             if (renderedParts == 0)
@@ -469,8 +468,7 @@ public void DrawSnapshot(
                 unit.FactionTag,
                 isAlive,
                 tilePixelSize,
-                screenScale,
-                position.Z);
+                screenScale);
 
             if (renderedParts == 0)
             {
@@ -550,8 +548,7 @@ public void DrawSnapshot(
         bool isAlive,
         float tilePixelSize,
         float screenScale,
-        bool lineOnly = false,
-        float baseHeight = 0f)
+        bool lineOnly = false)
     {
         if (start < 0 || count <= 0 || start >= bodies.Count)
             return 0;
@@ -577,8 +574,7 @@ public void DrawSnapshot(
                 isAlive,
                 tilePixelSize,
                 screenScale,
-                lineOnly,
-                baseHeight);
+                lineOnly);
         }
 
         return count;
@@ -593,8 +589,7 @@ public void DrawSnapshot(
         ushort factionTag,
         bool isAlive,
         float tilePixelSize,
-        float screenScale,
-        float baseHeight = 0f)
+        float screenScale)
     {
         if (start < 0 || count <= 0 || start >= bodyParts.Length)
             return 0;
@@ -615,8 +610,7 @@ public void DrawSnapshot(
                 isAlive,
                 tilePixelSize,
                 screenScale,
-                part.LineOnly,
-                baseHeight);
+                part.LineOnly);
         }
 
         return count;
@@ -681,8 +675,7 @@ public void DrawSnapshot(
         bool isAlive,
         float tilePixelSize,
         float screenScale,
-        bool lineOnly = false,
-        float baseHeight = 0f)
+        bool lineOnly = false)
     {
         float radiusX = MathF.Abs(scale.X) * tilePixelSize;
         float radiusY = MathF.Abs(scale.Y) * tilePixelSize;
@@ -692,8 +685,6 @@ public void DrawSnapshot(
 
         float centerX = position.X * tilePixelSize;
         float centerY = position.Y * tilePixelSize;
-        if (lineOnly)
-            centerY -= (position.Z - baseHeight) * tilePixelSize * 0.65f;
 
         Color fill = GetBodyPartColor(role, factionTag, isAlive);
         Color outline = lineOnly
