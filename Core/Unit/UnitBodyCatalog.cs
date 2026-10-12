@@ -197,150 +197,119 @@ internal static class UnitBodyCatalog
 
     private static BodyPartDefinition[] CreateScavenRat()
     {
-        static Vector3 Circle(float radius) => new(radius, radius, radius);
+        var parts = new System.Collections.Generic.List<BodyPartDefinition>(59);
 
-        // Side-profile Skaven: X is forward, Z is height. Every visible
-        // primitive is a circle, including the muzzle, limbs and tapered tail.
-        // The raised spine slopes down into the forward-thrust head.
-        return new BodyPartDefinition[]
+        void Add(
+            float x,
+            float y,
+            float radius,
+            int parent = -1,
+            BodyPartRole role = BodyPartRole.RatBody,
+            BodyPartMotion motion = BodyPartMotion.StaticRelative,
+            float followDistance = 0f,
+            BodyPartAnchor anchor = BodyPartAnchor.Parent)
         {
-            new(new Vector3(0f, 0f, 0.82f), Circle(0.34f),
-                BodyPrimitive.Circle, role: BodyPartRole.RatBody),
-            new(new Vector3(-0.18f, 0f, 0.02f), Circle(0.28f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.RatBody),
-            new(new Vector3(-0.10f, 0f, 0.23f), Circle(0.29f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.RatBody),
-            new(new Vector3(0.09f, 0f, 0.21f), Circle(0.28f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.RatBody),
-            new(new Vector3(0.22f, 0f, 0.09f), Circle(0.27f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.RatBody),
-            new(new Vector3(0.16f, 0f, -0.14f), Circle(0.22f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.RatBody),
-            new(new Vector3(-0.16f, 0f, -0.20f), Circle(0.22f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.RatBody),
-            new(new Vector3(0.32f, 0f, 0.02f), Circle(0.18f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Neck),
+            parts.Add(new BodyPartDefinition(
+                new Vector3(x, y, 0f),
+                new Vector3(radius, radius, radius),
+                BodyPrimitive.Circle,
+                parentIndex: parent,
+                motion: motion,
+                followDistance: followDistance,
+                anchor: anchor,
+                role: role));
+        }
 
-            // The skull sits forward and lower than the back hump.
-            new(new Vector3(0.53f, 0f, 0.82f), Circle(0.235f),
-                BodyPrimitive.Circle, anchor: BodyPartAnchor.UnitHead, role: BodyPartRole.Head),
-            new(new Vector3(0.08f, 0f, -0.10f), Circle(0.14f),
-                BodyPrimitive.Circle, parentIndex: 8, role: BodyPartRole.Head),
-            new(new Vector3(0.21f, 0f, -0.07f), Circle(0.13f),
-                BodyPrimitive.Circle, parentIndex: 8, role: BodyPartRole.Muzzle),
-            new(new Vector3(0.115f, 0f, 0f), Circle(0.05f),
-                BodyPrimitive.Circle, parentIndex: 10, role: BodyPartRole.Muzzle),
-            new(new Vector3(0.17f, 0f, -0.15f), Circle(0.10f),
-                BodyPrimitive.Circle, parentIndex: 8, role: BodyPartRole.Muzzle),
+        // Top-down silhouette. +X is forward; +/-Y are the two sides.
+        // Z is deliberately flat so the renderer can never turn this into a side view.
+        Add(0f, 0f, 0.25f);                                        // 0 torso
+        Add(-0.16f, 0f, 0.24f, 0, BodyPartRole.RatBody);           // 1 rump
+        Add(-0.13f, 0.105f, 0.22f, 0, BodyPartRole.RatBody);       // 2 back left
+        Add(-0.13f, -0.105f, 0.22f, 0, BodyPartRole.RatBody);      // 3 back right
+        Add(0.16f, 0f, 0.22f, 0, BodyPartRole.RatBody);            // 4 shoulders
+        Add(0.09f, 0.11f, 0.16f, 0, BodyPartRole.RatBody);         // 5 left chest
+        Add(0.09f, -0.11f, 0.16f, 0, BodyPartRole.RatBody);        // 6 right chest
+        Add(0.28f, 0f, 0.14f, 0, BodyPartRole.Neck);               // 7 neck
 
-            // Rounded ears and simple ring-like eyes keep the primitive style.
-            new(new Vector3(-0.12f, 0f, 0.20f), Circle(0.125f),
-                BodyPrimitive.Circle, parentIndex: 8, role: BodyPartRole.Ear),
-            new(new Vector3(0.015f, 0f, 0f), Circle(0.065f),
-                BodyPrimitive.Circle, parentIndex: 13, role: BodyPartRole.Ear),
-            new(new Vector3(-0.01f, 0f, 0.24f), Circle(0.105f),
-                BodyPrimitive.Circle, parentIndex: 8, role: BodyPartRole.Ear),
-            new(new Vector3(0.01f, 0f, 0f), Circle(0.052f),
-                BodyPrimitive.Circle, parentIndex: 15, role: BodyPartRole.Ear),
-            new(new Vector3(0.12f, 0f, 0.07f), Circle(0.045f),
-                BodyPrimitive.Circle, parentIndex: 8, role: BodyPartRole.Eye),
-            new(new Vector3(0.015f, 0f, 0f), Circle(0.020f),
-                BodyPrimitive.Circle, parentIndex: 17, role: BodyPartRole.Eye),
-            new(new Vector3(-0.02f, 0f, 0.08f), Circle(0.015f),
-                BodyPrimitive.Circle, parentIndex: 10, role: BodyPartRole.Whisker),
-            new(new Vector3(0.05f, 0f, 0.09f), Circle(0.013f),
-                BodyPrimitive.Circle, parentIndex: 10, role: BodyPartRole.Whisker),
-            new(new Vector3(0.10f, 0f, 0.04f), Circle(0.012f),
-                BodyPrimitive.Circle, parentIndex: 10, role: BodyPartRole.Whisker),
+        Add(0.39f, 0f, 0.20f, 8, BodyPartRole.Head,
+            anchor: BodyPartAnchor.UnitHead);                     // 8 head
+        Add(0.015f, 0.085f, 0.105f, 8, BodyPartRole.Muzzle);       // 9 cheek
+        Add(0.015f, -0.085f, 0.105f, 8, BodyPartRole.Muzzle);      // 10 cheek
+        Add(0.16f, 0f, 0.12f, 8, BodyPartRole.Muzzle);             // 11 snout
+        Add(0.10f, 0f, 0.045f, 11, BodyPartRole.Muzzle);           // 12 nose
+        Add(0.07f, 0.035f, 0.065f, 11, BodyPartRole.Muzzle);       // 13 jaw left
+        Add(0.07f, -0.035f, 0.065f, 11, BodyPartRole.Muzzle);      // 14 jaw right
 
-            // Two tucked arms made from overlapping circles, with a restrained swing.
-            new(new Vector3(0.25f, 0f, -0.03f), Circle(0.15f),
-                BodyPrimitive.Circle, parentIndex: 0,
-                motion: BodyPartMotion.WalkCycleProfile, role: BodyPartRole.UpperArm),
-            new(new Vector3(0.12f, 0f, -0.10f), Circle(0.115f),
-                BodyPrimitive.Circle, parentIndex: 22,
-                motion: BodyPartMotion.WalkCycleProfileOpposite, role: BodyPartRole.Elbow),
-            new(new Vector3(0.13f, 0f, -0.045f), Circle(0.08f),
-                BodyPrimitive.Circle, parentIndex: 23,
-                motion: BodyPartMotion.WalkCycleProfileOpposite, role: BodyPartRole.Hand),
-            new(new Vector3(0.21f, 0f, 0.04f), Circle(0.13f),
-                BodyPrimitive.Circle, parentIndex: 0,
-                motion: BodyPartMotion.WalkCycleProfileOpposite, role: BodyPartRole.UpperArm),
-            new(new Vector3(0.11f, 0f, -0.10f), Circle(0.10f),
-                BodyPrimitive.Circle, parentIndex: 25,
-                motion: BodyPartMotion.WalkCycleProfile, role: BodyPartRole.Elbow),
-            new(new Vector3(0.12f, 0f, -0.035f), Circle(0.075f),
-                BodyPrimitive.Circle, parentIndex: 26,
-                motion: BodyPartMotion.WalkCycleProfile, role: BodyPartRole.Hand),
-            new(new Vector3(0.05f, 0f, -0.025f), Circle(0.03f),
-                BodyPrimitive.Circle, parentIndex: 27, role: BodyPartRole.Hand),
+        Add(-0.105f, 0.14f, 0.095f, 8, BodyPartRole.Ear);          // 15 ear
+        Add(0.015f, 0.005f, 0.045f, 15, BodyPartRole.Ear);         // 16 inner ear
+        Add(-0.105f, -0.14f, 0.095f, 8, BodyPartRole.Ear);         // 17 ear
+        Add(0.015f, -0.005f, 0.045f, 17, BodyPartRole.Ear);        // 18 inner ear
+        Add(0.06f, 0.095f, 0.038f, 8, BodyPartRole.Eye);           // 19 eye
+        Add(0.018f, 0.002f, 0.018f, 19, BodyPartRole.Eye);         // 20 pupil
+        Add(0.06f, -0.095f, 0.038f, 8, BodyPartRole.Eye);          // 21 eye
+        Add(0.018f, -0.002f, 0.018f, 21, BodyPartRole.Eye);        // 22 pupil
+        Add(0.16f, 0.07f, 0.014f, 8, BodyPartRole.Whisker);        // 23 whisker root
+        Add(0.17f, 0.11f, 0.012f, 8, BodyPartRole.Whisker);        // 24 whisker
+        Add(0.16f, -0.07f, 0.014f, 8, BodyPartRole.Whisker);       // 25 whisker root
+        Add(0.17f, -0.11f, 0.012f, 8, BodyPartRole.Whisker);       // 26 whisker
 
-            // Only two hind legs. Feet lift alternately while the body remains hunched.
-            new(new Vector3(-0.12f, 0f, -0.31f), Circle(0.19f),
-                BodyPrimitive.Circle, parentIndex: 0,
-                motion: BodyPartMotion.WalkCycleProfile, role: BodyPartRole.Thigh),
-            new(new Vector3(0.12f, 0f, -0.15f), Circle(0.135f),
-                BodyPrimitive.Circle, parentIndex: 29,
-                motion: BodyPartMotion.WalkCycleProfileOpposite, role: BodyPartRole.Knee),
-            new(new Vector3(-0.02f, 0f, -0.13f), Circle(0.105f),
-                BodyPrimitive.Circle, parentIndex: 30,
-                motion: BodyPartMotion.WalkCycleProfile, role: BodyPartRole.Shin),
-            new(new Vector3(0.08f, 0f, -0.095f), Circle(0.085f),
-                BodyPrimitive.Circle, parentIndex: 31,
-                motion: BodyPartMotion.WalkCycleProfile, role: BodyPartRole.Foot),
-            new(new Vector3(0.075f, 0f, 0f), Circle(0.055f),
-                BodyPrimitive.Circle, parentIndex: 32, role: BodyPartRole.Foot),
-            new(new Vector3(-0.26f, 0f, -0.30f), Circle(0.17f),
-                BodyPrimitive.Circle, parentIndex: 0,
-                motion: BodyPartMotion.WalkCycleProfileOpposite, role: BodyPartRole.Thigh),
-            new(new Vector3(-0.02f, 0f, -0.14f), Circle(0.12f),
-                BodyPrimitive.Circle, parentIndex: 34,
-                motion: BodyPartMotion.WalkCycleProfile, role: BodyPartRole.Knee),
-            new(new Vector3(0.04f, 0f, -0.13f), Circle(0.09f),
-                BodyPrimitive.Circle, parentIndex: 35,
-                motion: BodyPartMotion.WalkCycleProfileOpposite, role: BodyPartRole.Shin),
-            new(new Vector3(0.08f, 0f, -0.09f), Circle(0.075f),
-                BodyPrimitive.Circle, parentIndex: 36,
-                motion: BodyPartMotion.WalkCycleProfileOpposite, role: BodyPartRole.Foot),
-            new(new Vector3(0.065f, 0f, 0f), Circle(0.05f),
-                BodyPrimitive.Circle, parentIndex: 37, role: BodyPartRole.Foot),
+        // Front paws tucked in close to the chest, moving opposite each other.
+        Add(0.07f, 0.18f, 0.12f, 0, BodyPartRole.UpperArm,
+            BodyPartMotion.WalkCycleProfile);                      // 27 shoulder
+        Add(0.09f, -0.045f, 0.09f, 27, BodyPartRole.Forearm,
+            BodyPartMotion.WalkCycleProfile);                      // 28 forearm
+        Add(0.075f, -0.02f, 0.06f, 28, BodyPartRole.Hand,
+            BodyPartMotion.WalkCycleProfile);                      // 29 paw
+        Add(0.07f, -0.18f, 0.12f, 0, BodyPartRole.UpperArm,
+            BodyPartMotion.WalkCycleProfileOpposite);               // 30 shoulder
+        Add(0.09f, 0.045f, 0.09f, 30, BodyPartRole.Forearm,
+            BodyPartMotion.WalkCycleProfileOpposite);               // 31 forearm
+        Add(0.075f, 0.02f, 0.06f, 31, BodyPartRole.Hand,
+            BodyPartMotion.WalkCycleProfileOpposite);               // 32 paw
 
-            // A long taper made only from circles; its slight downward curve follows the rump.
-            new(new Vector3(-0.40f, 0f, -0.10f), Circle(0.13f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Tail),
-            new(new Vector3(-0.13f, 0f, -0.015f), Circle(0.115f),
-                BodyPrimitive.Circle, parentIndex: 39, role: BodyPartRole.Tail),
-            new(new Vector3(-0.13f, 0f, -0.012f), Circle(0.11f),
-                BodyPrimitive.Circle, parentIndex: 40, role: BodyPartRole.Tail),
-            new(new Vector3(-0.13f, 0f, -0.010f), Circle(0.10f),
-                BodyPrimitive.Circle, parentIndex: 41, role: BodyPartRole.Tail),
-            new(new Vector3(-0.12f, 0f, -0.010f), Circle(0.095f),
-                BodyPrimitive.Circle, parentIndex: 42, role: BodyPartRole.Tail),
-            new(new Vector3(-0.12f, 0f, -0.010f), Circle(0.09f),
-                BodyPrimitive.Circle, parentIndex: 43, role: BodyPartRole.Tail),
-            new(new Vector3(-0.12f, 0f, -0.008f), Circle(0.085f),
-                BodyPrimitive.Circle, parentIndex: 44, role: BodyPartRole.Tail),
-            new(new Vector3(-0.115f, 0f, -0.008f), Circle(0.08f),
-                BodyPrimitive.Circle, parentIndex: 45, role: BodyPartRole.Tail),
-            new(new Vector3(-0.11f, 0f, -0.006f), Circle(0.075f),
-                BodyPrimitive.Circle, parentIndex: 46, role: BodyPartRole.Tail),
-            new(new Vector3(-0.11f, 0f, -0.005f), Circle(0.07f),
-                BodyPrimitive.Circle, parentIndex: 47, role: BodyPartRole.Tail),
-            new(new Vector3(-0.105f, 0f, -0.005f), Circle(0.065f),
-                BodyPrimitive.Circle, parentIndex: 48, role: BodyPartRole.Tail),
-            new(new Vector3(-0.10f, 0f, -0.005f), Circle(0.06f),
-                BodyPrimitive.Circle, parentIndex: 49, role: BodyPartRole.Tail),
-            new(new Vector3(-0.095f, 0f, -0.003f), Circle(0.055f),
-                BodyPrimitive.Circle, parentIndex: 50, role: BodyPartRole.Tail),
-            new(new Vector3(-0.09f, 0f, -0.003f), Circle(0.05f),
-                BodyPrimitive.Circle, parentIndex: 51, role: BodyPartRole.Tail),
-            new(new Vector3(-0.08f, 0f, -0.002f), Circle(0.045f),
-                BodyPrimitive.Circle, parentIndex: 52, role: BodyPartRole.Tail),
-            new(new Vector3(-0.075f, 0f, -0.002f), Circle(0.04f),
-                BodyPrimitive.Circle, parentIndex: 53, role: BodyPartRole.Tail),
-            new(new Vector3(-0.065f, 0f, 0f), Circle(0.032f),
-                BodyPrimitive.Circle, parentIndex: 54, role: BodyPartRole.Tail)
+        // Exactly two rear legs with a small alternating stride.
+        Add(-0.13f, 0.14f, 0.14f, 0, BodyPartRole.Thigh,
+            BodyPartMotion.WalkCycleProfile);                       // 33 hip/thigh
+        Add(-0.105f, 0.045f, 0.11f, 33, BodyPartRole.Knee,
+            BodyPartMotion.WalkCycleProfileOpposite);               // 34 knee
+        Add(-0.10f, 0.025f, 0.09f, 34, BodyPartRole.Shin,
+            BodyPartMotion.WalkCycleProfile);                       // 35 lower leg
+        Add(-0.045f, 0.02f, 0.075f, 35, BodyPartRole.Foot);         // 36 paw
+        Add(-0.13f, -0.14f, 0.14f, 0, BodyPartRole.Thigh,
+            BodyPartMotion.WalkCycleProfileOpposite);               // 37 hip/thigh
+        Add(-0.105f, -0.045f, 0.11f, 37, BodyPartRole.Knee,
+            BodyPartMotion.WalkCycleProfile);                       // 38 knee
+        Add(-0.10f, -0.025f, 0.09f, 38, BodyPartRole.Shin,
+            BodyPartMotion.WalkCycleProfileOpposite);               // 39 lower leg
+        Add(-0.045f, -0.02f, 0.075f, 39, BodyPartRole.Foot);        // 40 paw
+
+        // Verlet-like tail chain: each circle keeps its own inertia and a fixed
+        // link length, so it swings wide after turns instead of teleporting
+        // into a smoothed straight line behind the body.
+        Add(-0.20f, 0f, 0.115f, 1, BodyPartRole.Tail,
+            BodyPartMotion.PhysicalTail, 0.20f);                    // 41 tail root
+        float[] tailRadii =
+        {
+            0.105f, 0.098f, 0.092f, 0.086f, 0.080f, 0.074f,
+            0.068f, 0.062f, 0.056f, 0.050f, 0.044f, 0.039f,
+            0.034f, 0.030f, 0.026f, 0.022f, 0.018f
         };
+
+        for (int i = 0; i < tailRadii.Length; i++)
+        {
+            float curve = (i % 4) switch
+            {
+                0 => 0.012f,
+                1 => 0.004f,
+                2 => -0.009f,
+                _ => -0.003f
+            };
+
+            Add(-0.115f, curve, tailRadii[i], parts.Count - 1,
+                BodyPartRole.Tail, BodyPartMotion.PhysicalTail, 0.115f);
+        }
+
+        return parts.ToArray();
     }
 
     private static BodyPartDefinition[] CreateSegmented()
