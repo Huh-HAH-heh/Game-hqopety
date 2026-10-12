@@ -73,9 +73,11 @@ public sealed class VisionSystem
     private int[] _spatialCellCounts = Array.Empty<int>();
     private int[] _spatialCellStarts = Array.Empty<int>();
     private int[] _spatialCellWriteCursors = Array.Empty<int>();
+    private int[] _spatialCellLastUnit = Array.Empty<int>();
     private int[] _spatialUnits = Array.Empty<int>();
     private int[] _occupiedSpatialCells = Array.Empty<int>();
     private int _occupiedSpatialCellCount;
+    private int _spatialMarkSequence;
     private int[] _candidateTargetMarks = Array.Empty<int>();
     private int _candidateTargetMarkSequence;
 
@@ -1006,14 +1008,16 @@ public sealed class VisionSystem
             _spatialCellCounts = new int[cellCount];
             _spatialCellStarts = new int[cellCount];
             _spatialCellWriteCursors = new int[cellCount];
+            _spatialCellLastUnit = new int[cellCount];
+            _occupiedSpatialCells = new int[cellCount];
             _spatialWidth = width;
             _spatialHeight = height;
             _occupiedSpatialCellCount = 0;
+            _spatialMarkSequence = 0;
         }
         else
         {
-            // Only occupied cells need reset; clearing the entire map-sized
-            // array every 100 ms cost more than maintaining the 800-unit grid.
+            // Only cells touched by hit regions need resetting each update.
             for (int i = 0; i < _occupiedSpatialCellCount; i++)
                 _spatialCellCounts[_occupiedSpatialCells[i]] = 0;
 
@@ -1023,9 +1027,6 @@ public sealed class VisionSystem
         if (_spatialUnits.Length < unitCapacity)
             Array.Resize(ref _spatialUnits, unitCapacity);
 
-        if (_occupiedSpatialCells.Length < unitCapacity)
-            Array.Resize(ref _occupiedSpatialCells, unitCapacity);
-
         if (_candidateTargetMarks.Length < unitCapacity)
             Array.Resize(ref _candidateTargetMarks, unitCapacity);
     }
@@ -1034,29 +1035,35 @@ public sealed class VisionSystem
         UnitStore units,
         ReadOnlySpan<int> active)
     {
-        Vector3[] positions = units.Position;
-
+        // Index each hit region's footprint, not just the unit root. This keeps
+        // extended/custom profiles discoverable when a region is near an observer
+        // but its root is in another cell.
         for (int i = 0; i < active.Length; i++)
         {
-            Vector3 position = positions[active[i]];
-            int x = (int)MathF.Floor(position.X);
-            int y = (int)MathF.Floor(position.Y);
+            int unit = active[i];
+            UnitHitRegionProfile profile =
+                _hitRegions?.GetProfile(unit) ??
+                UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unit]).BodyType);
+            int mark = NextSpatialMark();
 
-            if (x < 0 || y < 0 ||
-                x >= _spatialWidth || y >= _spatialHeight)
+            for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
             {
-                continue;
+                UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                    units,
+                    unit,
+                    regionIndex,
+                    _hitRegions);
+
+                AddRegionToSpatialGrid(
+                    unit,
+                    geometry.Center,
+                    geometry.Radius,
+                    mark,
+                    writeUnit: false);
             }
-
-            int cell = x + y * _spatialWidth;
-            if (_spatialCellCounts[cell] == 0)
-                _occupiedSpatialCells[_occupiedSpatialCellCount++] = cell;
-
-            _spatialCellCounts[cell]++;
         }
 
-        // Only cells that contain units participate in the prefix sum. The
-        // grid's lookup remains O(1), but build cost now scales with unit count.
+        // Prefix sums are calculated only for cells touched by any hit region.
         int offset = 0;
         for (int i = 0; i < _occupiedSpatialCellCount; i++)
         {
@@ -1066,22 +1073,99 @@ public sealed class VisionSystem
             offset += _spatialCellCounts[cell];
         }
 
+        if (_spatialUnits.Length < offset)
+        {
+            int capacity = Math.Max(1, _spatialUnits.Length);
+            while (capacity < offset)
+                capacity = checked(capacity * 2);
+
+            Array.Resize(ref _spatialUnits, capacity);
+        }
+
+        // Use fresh marks on this pass to de-duplicate a unit across overlapping
+        // regions within each cell while writing the compact cell lists.
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
-            Vector3 position = positions[unit];
-            int x = (int)MathF.Floor(position.X);
-            int y = (int)MathF.Floor(position.Y);
+            UnitHitRegionProfile profile =
+                _hitRegions?.GetProfile(unit) ??
+                UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unit]).BodyType);
+            int mark = NextSpatialMark();
 
-            if (x < 0 || y < 0 ||
-                x >= _spatialWidth || y >= _spatialHeight)
+            for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
             {
-                continue;
-            }
+                UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                    units,
+                    unit,
+                    regionIndex,
+                    _hitRegions);
 
-            int cell = x + y * _spatialWidth;
-            _spatialUnits[_spatialCellWriteCursors[cell]++] = unit;
+                AddRegionToSpatialGrid(
+                    unit,
+                    geometry.Center,
+                    geometry.Radius,
+                    mark,
+                    writeUnit: true);
+            }
         }
+    }
+
+    private void AddRegionToSpatialGrid(
+        int unit,
+        Vector3 center,
+        float regionRadius,
+        int mark,
+        bool writeUnit)
+    {
+        float radius = MathF.Max(0.001f, regionRadius);
+        float radiusSquared = radius * radius;
+        int minX = Math.Max(0, (int)MathF.Floor(center.X - radius));
+        int maxX = Math.Min(_spatialWidth - 1, (int)MathF.Floor(center.X + radius));
+        int minY = Math.Max(0, (int)MathF.Floor(center.Y - radius));
+        int maxY = Math.Min(_spatialHeight - 1, (int)MathF.Floor(center.Y + radius));
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                // Only keep cells whose square actually overlaps the region.
+                float closestX = Math.Clamp(center.X, x, x + 1f);
+                float closestY = Math.Clamp(center.Y, y, y + 1f);
+                float dx = center.X - closestX;
+                float dy = center.Y - closestY;
+                if (dx * dx + dy * dy > radiusSquared)
+                    continue;
+
+                int cell = x + y * _spatialWidth;
+                if (_spatialCellLastUnit[cell] == mark)
+                    continue;
+
+                _spatialCellLastUnit[cell] = mark;
+
+                if (writeUnit)
+                {
+                    _spatialUnits[_spatialCellWriteCursors[cell]++] = unit;
+                }
+                else
+                {
+                    if (_spatialCellCounts[cell] == 0)
+                        _occupiedSpatialCells[_occupiedSpatialCellCount++] = cell;
+
+                    _spatialCellCounts[cell]++;
+                }
+            }
+        }
+    }
+
+    private int NextSpatialMark()
+    {
+        if (_spatialMarkSequence == int.MaxValue)
+        {
+            Array.Clear(_spatialCellLastUnit);
+            _spatialMarkSequence = 0;
+        }
+
+        return ++_spatialMarkSequence;
     }
 
     private int NextCandidateMark()
