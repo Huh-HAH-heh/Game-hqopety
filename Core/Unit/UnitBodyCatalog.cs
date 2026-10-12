@@ -197,7 +197,7 @@ internal static class UnitBodyCatalog
 
     private static BodyPartDefinition[] CreateScavenRat()
     {
-        var parts = new System.Collections.Generic.List<BodyPartDefinition>(24);
+        var parts = new System.Collections.Generic.List<BodyPartDefinition>(25);
 
         void Add(
             float x,
@@ -220,42 +220,46 @@ internal static class UnitBodyCatalog
                 role: role));
         }
 
-        // Minimal top-down Skaven: torso, shoulders, paired arms,
-        // two long rear legs, compact rat head and a tapered tail.
-        Add(0f, 0f, 0.20f);                                         // 0 torso
-        Add(-0.12f, 0f, 0.15f, 0, BodyPartRole.RatBody);            // 1 hips
-        Add(0.12f, 0f, 0.145f, 0, BodyPartRole.RatBody);            // 2 shoulders
+        // Lean top-down Skaven: long narrow torso, high shoulders,
+        // small skull, sharply tapered muzzle, thin limbs and one tail.
+        Add(0f, 0f, 0.17f);                                          // 0 torso
+        Add(-0.15f, 0f, 0.115f, 0, BodyPartRole.RatBody);            // 1 hips
+        Add(0.13f, 0f, 0.11f, 0, BodyPartRole.RatBody);              // 2 shoulders
 
-        Add(0.36f, 0f, 0.135f, -1, BodyPartRole.Head,
-            anchor: BodyPartAnchor.UnitHead);                       // 3 head
-        Add(0.13f, 0f, 0.075f, 3, BodyPartRole.Muzzle);              // 4 snout
-        Add(-0.085f, 0.105f, 0.055f, 3, BodyPartRole.Ear);           // 5 ear
-        Add(-0.085f, -0.105f, 0.055f, 3, BodyPartRole.Ear);          // 6 ear
-        Add(0.045f, 0.066f, 0.018f, 3, BodyPartRole.Eye);            // 7 eye
-        Add(0.045f, -0.066f, 0.018f, 3, BodyPartRole.Eye);           // 8 eye
+        Add(0.34f, 0f, 0.105f, -1, BodyPartRole.Head,
+            anchor: BodyPartAnchor.UnitHead);                        // 3 narrow skull
+        Add(0.105f, 0f, 0.055f, 3, BodyPartRole.Muzzle);              // 4 muzzle base
+        Add(0.115f, 0f, 0.030f, 4, BodyPartRole.Muzzle);              // 5 long narrow bridge
+        Add(0.065f, 0f, 0.016f, 5, BodyPartRole.Muzzle);              // 6 nose tip
+        Add(-0.075f, 0.078f, 0.038f, 3, BodyPartRole.Ear);            // 7 small ear
+        Add(-0.075f, -0.078f, 0.038f, 3, BodyPartRole.Ear);           // 8 small ear
+        Add(0.04f, 0.053f, 0.012f, 3, BodyPartRole.Eye);              // 9 eye
+        Add(0.04f, -0.053f, 0.012f, 3, BodyPartRole.Eye);             // 10 eye
 
-        Add(0.035f, 0.155f, 0.075f, 0, BodyPartRole.UpperArm,
-            BodyPartMotion.WalkCycleProfile);                       // 9 arm
-        Add(0.105f, -0.025f, 0.045f, 9, BodyPartRole.Hand,
-            BodyPartMotion.WalkCycleProfile);                       // 10 hand
-        Add(0.035f, -0.155f, 0.075f, 0, BodyPartRole.UpperArm,
-            BodyPartMotion.WalkCycleProfileOpposite);                // 11 arm
-        Add(0.105f, 0.025f, 0.045f, 11, BodyPartRole.Hand,
-            BodyPartMotion.WalkCycleProfileOpposite);                // 12 hand
+        // Narrow forearms held close to the ribs.
+        Add(0.025f, 0.125f, 0.055f, 0, BodyPartRole.UpperArm,
+            BodyPartMotion.WalkCycleProfile);                         // 11 arm
+        Add(0.085f, -0.018f, 0.032f, 11, BodyPartRole.Hand,
+            BodyPartMotion.WalkCycleProfile);                         // 12 hand
+        Add(0.025f, -0.125f, 0.055f, 0, BodyPartRole.UpperArm,
+            BodyPartMotion.WalkCycleProfileOpposite);                  // 13 arm
+        Add(0.085f, 0.018f, 0.032f, 13, BodyPartRole.Hand,
+            BodyPartMotion.WalkCycleProfileOpposite);                  // 14 hand
 
-        Add(-0.13f, 0.115f, 0.095f, 0, BodyPartRole.Thigh,
-            BodyPartMotion.WalkCycleProfile);                        // 13 leg
-        Add(-0.10f, 0.035f, 0.055f, 13, BodyPartRole.Foot,
-            BodyPartMotion.WalkCycleProfileOpposite);                // 14 foot
-        Add(-0.13f, -0.115f, 0.095f, 0, BodyPartRole.Thigh,
-            BodyPartMotion.WalkCycleProfileOpposite);                // 15 leg
-        Add(-0.10f, -0.035f, 0.055f, 15, BodyPartRole.Foot,
-            BodyPartMotion.WalkCycleProfile);                        // 16 foot
+        // Two slender hind legs read as a biped in the overhead projection.
+        Add(-0.13f, 0.09f, 0.075f, 0, BodyPartRole.Thigh,
+            BodyPartMotion.WalkCycleProfile);                          // 15 leg
+        Add(-0.095f, 0.028f, 0.043f, 15, BodyPartRole.Foot,
+            BodyPartMotion.WalkCycleProfileOpposite);                  // 16 foot
+        Add(-0.13f, -0.09f, 0.075f, 0, BodyPartRole.Thigh,
+            BodyPartMotion.WalkCycleProfileOpposite);                  // 17 leg
+        Add(-0.095f, -0.028f, 0.043f, 17, BodyPartRole.Foot,
+            BodyPartMotion.WalkCycleProfile);                          // 18 foot
 
-        // These are articulated path points; renderer draws a continuous tube.
-        Add(-0.19f, 0f, 0.060f, 1, BodyPartRole.Tail,
-            BodyPartMotion.PhysicalTail, 0.18f);                     // 17 root
-        float[] tailRadii = { 0.050f, 0.041f, 0.032f, 0.024f, 0.016f, 0.010f };
+        // Tail path points are rendered as a continuous tapered line.
+        Add(-0.19f, 0f, 0.052f, 1, BodyPartRole.Tail,
+            BodyPartMotion.PhysicalTail, 0.18f);                       // 19 root
+        float[] tailRadii = { 0.043f, 0.035f, 0.027f, 0.020f, 0.014f, 0.009f };
         for (int i = 0; i < tailRadii.Length; i++)
         {
             Add(-0.105f, 0f, tailRadii[i], parts.Count - 1,
