@@ -360,11 +360,11 @@ public sealed class UnitHealthStore
             start,
             MaxPartsPerUnit);
 
-        for (int i = 0;
-             i < MaxPartsPerUnit;
-             i++)
+        for (int i = 0; i < MaxPartsPerUnit; i++)
         {
             _parent[start + i] = -1;
+            _regionIndex[start + i] = -1;
+            _bindingIndex[start + i] = -1;
         }
 
         _partCount[unitIndex] = 0;
