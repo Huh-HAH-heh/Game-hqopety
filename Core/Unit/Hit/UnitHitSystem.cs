@@ -26,17 +26,20 @@ public readonly struct UnitHitResult
     public Vector3 Position { get; }
     public float T { get; }
     public int RegionIndex { get; }
+    public int BindingIndex { get; }
 
     public UnitHitResult(
         UnitHealthPartId part,
         Vector3 position,
         float t,
-        int regionIndex = -1)
+        int regionIndex = -1,
+        int bindingIndex = -1)
     {
         Part = part;
         Position = position;
         T = t;
         RegionIndex = regionIndex;
+        BindingIndex = bindingIndex;
     }
 }
 
@@ -55,6 +58,12 @@ public sealed class UnitHitSystem
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+
+        for (int i = 0; i < regions.Length; i++)
+        {
+            if (regions[i].TryGetMarker(UnitAnatomyMarkerRole.Eye, out UnitAnatomyMarker marker))
+                return GetMarkerWorldPosition(units, unitIndex, i, marker, hitRegions);
+        }
 
         for (int i = 0; i < regions.Length; i++)
         {
@@ -163,28 +172,95 @@ public sealed class UnitHitSystem
         float tolerance = 0f,
         UnitHitRegionStore? hitRegions = null)
     {
+        return IsPartInRegion(units, unitIndex, regionIndex, part, hitRegions) &&
+               IsPointInsideRegion(units, unitIndex, regionIndex, point, tolerance, hitRegions);
+    }
+
+    public static bool IsPointInsideRegion(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        Vector3 point,
+        float tolerance = 0f,
+        UnitHitRegionStore? hitRegions = null)
+    {
         if (!float.IsFinite(tolerance) || tolerance < 0f ||
             !float.IsFinite(point.X) ||
             !float.IsFinite(point.Y) ||
-            !float.IsFinite(point.Z) ||
-            !IsPartInRegion(units, unitIndex, regionIndex, part, hitRegions))
+            !float.IsFinite(point.Z))
         {
             return false;
         }
 
         UnitHitRegionGeometry geometry = GetRegionGeometry(
-            units,
-            unitIndex,
-            regionIndex,
-            hitRegions);
+            units, unitIndex, regionIndex, hitRegions);
 
         float dx = point.X - geometry.Center.X;
         float dy = point.Y - geometry.Center.Y;
         float radius = geometry.Radius + tolerance;
 
         return dx * dx + dy * dy <= radius * radius &&
-               MathF.Abs(point.Z - geometry.Center.Z) <=
-                   geometry.HalfHeight + tolerance;
+               MathF.Abs(point.Z - geometry.Center.Z) <= geometry.HalfHeight + tolerance;
+    }
+
+    public static bool IsBindingInRegion(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        int bindingIndex,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        return (uint)regionIndex < (uint)profile.RegionCount &&
+               (uint)bindingIndex < (uint)profile.Regions[regionIndex].Parts.Length;
+    }
+
+    public static bool TryGetBinding(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        int bindingIndex,
+        out HitRegionPartBinding binding,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if ((uint)regionIndex < (uint)profile.RegionCount &&
+            (uint)bindingIndex < (uint)profile.Regions[regionIndex].Parts.Length)
+        {
+            binding = profile.Regions[regionIndex].Parts[bindingIndex];
+            return true;
+        }
+
+        binding = default;
+        return false;
+    }
+
+    public static bool TryGetMarkerPoint(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        string markerId,
+        out Vector3 point,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if ((uint)regionIndex >= (uint)profile.RegionCount)
+        {
+            point = Vector3.Zero;
+            return false;
+        }
+
+        foreach (UnitAnatomyMarker marker in profile.Regions[regionIndex].Markers)
+        {
+            if (!string.Equals(marker.Id, markerId, StringComparison.Ordinal))
+                continue;
+
+            point = GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions);
+            return true;
+        }
+
+        point = Vector3.Zero;
+        return false;
     }
 
     public static int FindRegionAtPoint(
@@ -243,6 +319,13 @@ public sealed class UnitHitSystem
         GetWorldGeometry(units, unitIndex, region,
             out Vector3 center, out float radius, out float halfHeight);
 
+        if (region.TryGetMarker(UnitAnatomyMarkerRole.Target, out UnitAnatomyMarker marker) ||
+            region.TryGetMarker(UnitAnatomyMarkerRole.Aim, out marker) ||
+            region.TryGetMarker(UnitAnatomyMarkerRole.Vision, out marker))
+        {
+            return GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions);
+        }
+
         Vector2 direction = new Vector2(source.X - center.X, source.Y - center.Y);
         float lengthSquared = direction.LengthSquared();
 
@@ -280,6 +363,7 @@ public sealed class UnitHitSystem
         float bestT = 2f;
         UnitHealthPartId bestPart = UnitHealthPartId.None;
         int bestRegion = -1;
+        int bestBinding = -1;
         Vector3 bestPosition = default;
 
         for (int i = 0; i < regions.Length; i++)
@@ -303,14 +387,15 @@ public sealed class UnitHitSystem
                 continue;
 
             Vector3 hitPosition = start + (end - start) * t;
-            UnitHealthPartId part = SelectPart(region, hitPosition, unitIndex, i);
+            int bindingIndex = SelectPart(region, hitPosition, unitIndex, i, out UnitHealthPartId part);
 
-            if (part == ignoredPart)
+            if (ignoredPart != UnitHealthPartId.None && part == ignoredPart)
                 continue;
 
             bestT = t;
             bestPart = part;
             bestRegion = i;
+            bestBinding = bindingIndex;
             bestPosition = hitPosition;
             found = true;
         }
@@ -321,7 +406,7 @@ public sealed class UnitHitSystem
             return false;
         }
 
-        result = new UnitHitResult(bestPart, bestPosition, bestT, bestRegion);
+        result = new UnitHitResult(bestPart, bestPosition, bestT, bestRegion, bestBinding);
         return true;
     }
 
@@ -343,11 +428,12 @@ public sealed class UnitHitSystem
         return profile.RegionCount;
     }
 
-    private static UnitHealthPartId SelectPart(
+    private static int SelectPart(
         in UnitCircleHitRegion region,
         Vector3 point,
         int unitIndex,
-        int regionIndex)
+        int regionIndex,
+        out UnitHealthPartId part)
     {
         ReadOnlySpan<HitRegionPartBinding> parts = region.Parts;
         float totalWeight = 0f;
@@ -370,10 +456,34 @@ public sealed class UnitHitSystem
         {
             selection -= parts[i].Weight;
             if (selection <= 0f)
-                return parts[i].Part;
+            {
+                part = parts[i].Part;
+                return i;
+            }
         }
 
-        return parts[^1].Part;
+        part = parts[^1].Part;
+        return parts.Length - 1;
+    }
+
+    private static Vector3 GetMarkerWorldPosition(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        UnitAnatomyMarker marker,
+        UnitHitRegionStore? hitRegions)
+    {
+        Vector3 center = GetRegionGeometry(units, unitIndex, regionIndex, hitRegions).Center;
+        Vector3 bodyNormal = units.BodyNormal[unitIndex];
+        float angle = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
+        float cos = MathF.Cos(angle);
+        float sin = MathF.Sin(angle);
+        Vector3 offset = marker.LocalOffset;
+
+        return center + new Vector3(
+            offset.X * cos - offset.Y * sin,
+            offset.X * sin + offset.Y * cos,
+            offset.Z);
     }
 
     private static UnitHitRegionProfile GetProfile(
