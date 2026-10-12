@@ -3,6 +3,23 @@ using System.Numerics;
 
 namespace Core.Unit;
 
+public readonly struct UnitHitRegionGeometry
+{
+    public Vector3 Center { get; }
+    public float Radius { get; }
+    public float HalfHeight { get; }
+
+    public UnitHitRegionGeometry(
+        Vector3 center,
+        float radius,
+        float halfHeight)
+    {
+        Center = center;
+        Radius = radius;
+        HalfHeight = halfHeight;
+    }
+}
+
 public readonly struct UnitHitResult
 {
     public UnitHealthPartId Part { get; }
@@ -82,6 +99,29 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null) =>
         FillRegionPoints(units, unitIndex, source, points, hitRegions);
+
+    public static UnitHitRegionGeometry GetRegionGeometry(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+
+        if ((uint)regionIndex >= (uint)profile.RegionCount)
+            throw new ArgumentOutOfRangeException(nameof(regionIndex));
+
+        UnitCircleHitRegion region = profile.Regions[regionIndex];
+        GetWorldGeometry(
+            units,
+            unitIndex,
+            region,
+            out Vector3 center,
+            out float radius,
+            out float halfHeight);
+
+        return new UnitHitRegionGeometry(center, radius, halfHeight);
+    }
 
     public static Vector3 GetRegionPoint(
         UnitStore units,
