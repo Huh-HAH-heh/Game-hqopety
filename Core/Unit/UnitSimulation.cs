@@ -729,6 +729,24 @@ public sealed class UnitSimulation
         return true;
     }
 
+    /// <summary>
+    /// Append a named anatomy circle at runtime without rebuilding the caller's
+    /// profile manually. Existing named tissue health is preserved.
+    /// </summary>
+    public bool AddAnatomyNode(UnitId id, UnitAnatomyNode node)
+    {
+        if (!Units.TryGetIndex(id, out int index) ||
+            HitRegions.GetProfile(index) is not UnitHitRegionProfile current)
+        {
+            return false;
+        }
+
+        var nextNodes = new UnitCircleHitRegion[current.RegionCount + 1];
+        current.Regions.CopyTo(nextNodes);
+        nextNodes[^1] = node;
+        return SetHitRegionProfile(id, new UnitHitRegionProfile(nextNodes));
+    }
+
     public bool SetHitRegionProfile(
         UnitId id,
         UnitHitRegionProfile profile)
