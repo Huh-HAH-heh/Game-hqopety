@@ -204,32 +204,26 @@ public sealed class UnitInventorySystem
         UnitHealthPartId part,
         float rawDamage,
         UnitId unitId,
+        UnitInventoryStore inventory) =>
+        ResolveIncomingDamage(
+            MapHealthPartToZone(part), rawDamage, unitId, inventory);
+
+    public UnitDamageResult ResolveIncomingDamage(
+        int zone,
+        float rawDamage,
+        UnitId unitId,
         UnitInventoryStore inventory)
     {
         if (rawDamage <= 0f ||
             !unitId.IsValid)
         {
-            return new UnitDamageResult(
-                rawDamage,
-                0f,
-                0f,
-                0f);
+            return new UnitDamageResult(rawDamage, 0f, 0f, 0f);
         }
 
-        int unitIndex =
-            unitId.Index;
-
-        int zone =
-            MapHealthPartToZone(
-                part);
-
-        if (zone < 0)
+        int unitIndex = unitId.Index;
+        if (zone < 0 || zone >= UnitInventoryStore.BodyZoneCount)
         {
-            return new UnitDamageResult(
-                rawDamage,
-                rawDamage,
-                0f,
-                0f);
+            return new UnitDamageResult(rawDamage, rawDamage, 0f, 0f);
         }
 
         float remaining =
