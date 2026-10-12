@@ -194,13 +194,11 @@ public sealed class UnitHealthStore
         EnsureUnitCapacity(unitIndex + 1);
 
         ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
-        int[] starts = new int[regions.Length];
 
         // Every node/binding owns a separate health pool, even when several
         // segments share legacy Part=WholeBody or another compatibility enum.
         for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
         {
-            starts[regionIndex] = _partCount[unitIndex];
             ReadOnlySpan<HitRegionPartBinding> bindings = regions[regionIndex].Parts;
 
             for (int bindingIndex = 0; bindingIndex < bindings.Length; bindingIndex++)
@@ -256,6 +254,38 @@ public sealed class UnitHealthStore
                     _parent[childIndex] = checked((short)(parentIndex % MaxPartsPerUnit));
             }
         }
+    }
+
+    public void ClearHitRegionParts(int unitIndex)
+    {
+        if ((uint)unitIndex >= (uint)Capacity)
+            return;
+
+        int start = GetStart(unitIndex);
+        int legacyCount = 0;
+        while (legacyCount < _partCount[unitIndex] &&
+               _regionIndex[start + legacyCount] < 0)
+        {
+            legacyCount++;
+        }
+
+        int clearStart = start + legacyCount;
+        int clearCount = MaxPartsPerUnit - legacyCount;
+        Array.Clear(_part, clearStart, clearCount);
+        Array.Clear(_kind, clearStart, clearCount);
+        Array.Clear(_maxHitPoints, clearStart, clearCount);
+        Array.Clear(_hitPoints, clearStart, clearCount);
+        Array.Clear(_bleedRate, clearStart, clearCount);
+        Array.Clear(_present, clearStart, clearCount);
+
+        for (int i = legacyCount; i < MaxPartsPerUnit; i++)
+        {
+            _parent[start + i] = -1;
+            _regionIndex[start + i] = -1;
+            _bindingIndex[start + i] = -1;
+        }
+
+        _partCount[unitIndex] = checked((short)legacyCount);
     }
 
     public bool TryFindRegionPart(
@@ -349,7 +379,8 @@ public sealed class UnitHealthStore
     {
         partIndex = -1;
 
-        if (unitIndex < 0 ||
+        if (partId == UnitHealthPartId.None ||
+            unitIndex < 0 ||
             unitIndex >= Capacity)
         {
             return false;
