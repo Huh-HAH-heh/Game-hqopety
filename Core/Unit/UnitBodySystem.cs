@@ -30,6 +30,8 @@ public sealed class UnitBodySystem
 
         Vector3[] localPositions = bodies.LocalPosition;
         Vector3[] worldPositions = bodies.WorldPosition;
+        Vector3[] previousWorldPositions = bodies.PreviousWorldPosition;
+        bool[] tailInitialized = bodies.TailInitialized;
         float[] localRotations = bodies.LocalRotation;
         float[] worldRotations = bodies.WorldRotation;
         float[] followDistances = bodies.FollowDistance;
@@ -61,6 +63,8 @@ public sealed class UnitBodySystem
                 postures[unit],
                 _animationTime,
                 worldPositions,
+                previousWorldPositions,
+                tailInitialized,
                 worldRotations,
                 localPositions,
                 localRotations,
@@ -71,7 +75,8 @@ public sealed class UnitBodySystem
                 pivots,
                 scales,
                 followDistances,
-                followAlpha);
+                followAlpha,
+                Math.Clamp(deltaTime, 0f, 0.05f));
         }
     }
 
@@ -87,6 +92,8 @@ public sealed class UnitBodySystem
         UnitPosture posture,
         float animationTime,
         Vector3[] worldPositions,
+        Vector3[] previousWorldPositions,
+        bool[] tailInitialized,
         float[] worldRotations,
         Vector3[] localPositions,
         float[] localRotations,
@@ -97,7 +104,8 @@ public sealed class UnitBodySystem
         BodyPartPivot[] pivots,
         Vector3[] scales,
         float[] followDistances,
-        float followAlpha)
+        float followAlpha,
+        float deltaTime)
     {
         Vector3 bodyNormal = NormalizeHorizontal(bodyNormals[unit]);
         Vector3 headNormal = NormalizeHorizontal(headNormals[unit]);
@@ -140,6 +148,21 @@ public sealed class UnitBodySystem
                 // Keep the head center anchored ahead of the torso even when
                 // its facing direction changes independently.
                 partBaseRotation = headRotation;
+            }
+            else if (anchors[part] == BodyPartAnchor.Parent &&
+                     parent >= start &&
+                     motions[part] == BodyPartMotion.PhysicalTail)
+            {
+                UpdatePhysicalTail(
+                    part,
+                    parent,
+                    worldPositions,
+                    previousWorldPositions,
+                    tailInitialized,
+                    worldRotations,
+                    followDistances,
+                    deltaTime);
+                continue;
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      motions[part] == BodyPartMotion.FollowParent &&
@@ -276,6 +299,66 @@ public sealed class UnitBodySystem
                 localRotation *= 0.5f;
                 break;
         }
+    }
+
+    private static void UpdatePhysicalTail(
+        int part,
+        int parent,
+        Vector3[] positions,
+        Vector3[] previousPositions,
+        bool[] initialized,
+        float[] rotations,
+        float[] distances,
+        float deltaTime)
+    {
+        Vector3 parentPosition = positions[parent];
+        Vector3 current = positions[part];
+
+        if (!initialized[part])
+        {
+            // Use the rig's authored curve on first spawn/reset.
+            previousPositions[part] = current;
+            initialized[part] = true;
+            current.Z = parentPosition.Z;
+            positions[part] = current;
+            rotations[part] = MathF.Atan2(
+                parentPosition.Y - current.Y,
+                parentPosition.X - current.X);
+            return;
+        }
+
+        Vector3 previous = previousPositions[part];
+        previousPositions[part] = current;
+
+        float frameScale = Math.Clamp(deltaTime * 60f, 0f, 3f);
+        float damping = MathF.Pow(0.90f, frameScale);
+        Vector3 predicted = current + (current - previous) * damping * frameScale;
+        predicted.Z = parentPosition.Z;
+
+        Vector3 delta = predicted - parentPosition;
+        delta.Z = 0f;
+        float lengthSquared = delta.LengthSquared();
+        Vector3 direction;
+
+        if (lengthSquared < 0.000001f)
+        {
+            float angle = rotations[parent];
+            direction = new Vector3(-MathF.Cos(angle), -MathF.Sin(angle), 0f);
+        }
+        else
+        {
+            direction = delta / MathF.Sqrt(lengthSquared);
+        }
+
+        // Distance constraint acts like an inextensible tail link; inertia
+        // determines its angle, while the parent anchors it to the body.
+        float length = MathF.Max(0.015f, distances[part]);
+        current = parentPosition + direction * length;
+        current.Z = parentPosition.Z;
+        positions[part] = current;
+        rotations[part] = MathF.Atan2(
+            parentPosition.Y - current.Y,
+            parentPosition.X - current.X);
     }
 
     private static void UpdateFollower(
