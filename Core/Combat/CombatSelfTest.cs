@@ -2130,28 +2130,26 @@ private static bool TestVisionDetectsRegionInsideRange()
             return false;
         }
 
-        UnitAnatomyProfile expanded = new(
-            firstSegment,
-            UnitAnatomyNode.Circle(
-                "track-segment-1",
-                "track-segment-0",
-                new Vector3(0f, 0f, 0.85f),
-                0.32f,
-                0.18f,
-                new[]
-                {
-                    new HitRegionPartBinding(
-                        UnitHealthPartId.WholeBody,
-                        kind: UnitHealthPartKind.BodyPart,
-                        maxHitPoints: 40f,
-                        id: "track-tissue-1",
-                        parentId: "track-tissue-0")
-                },
-                new UnitAnatomyMarker(
-                    "aim",
-                    UnitAnatomyMarkerRole.Target)));
+        UnitAnatomyNode secondSegment = UnitAnatomyNode.Circle(
+            "track-segment-1",
+            "track-segment-0",
+            new Vector3(0f, 0f, 0.85f),
+            0.32f,
+            0.18f,
+            new[]
+            {
+                new HitRegionPartBinding(
+                    UnitHealthPartId.WholeBody,
+                    kind: UnitHealthPartKind.BodyPart,
+                    maxHitPoints: 40f,
+                    id: "track-tissue-1",
+                    parentId: "track-tissue-0")
+            },
+            new UnitAnatomyMarker(
+                "aim",
+                UnitAnatomyMarkerRole.Target));
 
-        if (!simulation.SetHitRegionProfile(unit, expanded) ||
+        if (!simulation.AddAnatomyNode(unit, secondSegment) ||
             !simulation.Health.TryFindRegionPart(
                 unit.Index, 0, 0, out int preservedHealthIndex) ||
             !simulation.Health.TryFindRegionPart(
