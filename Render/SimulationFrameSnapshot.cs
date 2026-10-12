@@ -59,7 +59,8 @@ public readonly record struct RenderBodyPart(
     Vector3 Scale,
     float Rotation,
     BodyPrimitive Primitive,
-    BodyPartRole Role);
+    BodyPartRole Role,
+    bool LineOnly = false);
 
 /// <summary>
 /// Immutable data published by the simulation thread and consumed by the renderer.
@@ -295,7 +296,8 @@ public sealed class SimulationFrameSnapshot
                         sourceBodyScales[sourceIndex],
                         sourceBodyRotations[sourceIndex],
                         sourceBodyPrimitives[sourceIndex],
-                        sourceBodyRoles[sourceIndex]);
+                        sourceBodyRoles[sourceIndex],
+                        unitTypes[index] == UnitType.ScavenRat);
                 }
             }
 
