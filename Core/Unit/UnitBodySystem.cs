@@ -335,9 +335,18 @@ public sealed class UnitBodySystem
             ? bodyRotation + MathF.PI
             : tailAngles[parent];
 
-        float response = roles[part] == BodyPartRole.Tail ? 5.5f : 12f;
+        float response = roles[part] == BodyPartRole.Tail ? 8f : 12f;
         float blend = 1f - MathF.Exp(-response * Math.Clamp(deltaTime, 0f, 0.05f));
         angle = WrapAngle(angle + WrapAngle(targetAngle - angle) * blend);
+
+        // Keep fixed link lengths and limit the bend between neighboring links.
+        // This prevents sharp kinks without integrating velocity or stretching the chain.
+        if (roles[parent] != BodyPartRole.Head)
+        {
+            float maxBend = roles[part] == BodyPartRole.Tail ? 0.55f : 0.42f;
+            float bend = Math.Clamp(WrapAngle(angle - targetAngle), -maxBend, maxBend);
+            angle = WrapAngle(targetAngle + bend);
+        }
 
         float length = MathF.Max(0.015f, distances[part]);
         Vector3 directionToChild = new(MathF.Cos(angle), MathF.Sin(angle), 0f);
