@@ -43,6 +43,7 @@ public static class CombatSelfTest
         RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
+        RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
@@ -1313,7 +1314,104 @@ public static class CombatSelfTest
         return aboveWallVisible && !throughWallVisible;
     }
 
-                private static bool TestVisionSampleMemory()
+                    private static bool TestHitRegionProfilesDriveVisionCollisionAndArmor()
+    {
+        UnitHitRegionProfile profile = new UnitHitRegionProfile(
+            new UnitCircleHitRegion(
+                new Vector3(0f, 0f, 0.50f),
+                radius: 0.50f,
+                halfHeight: 0.25f,
+                new HitRegionPartBinding(UnitHealthPartId.Torso, maxHitPoints: 60f)),
+            new UnitCircleHitRegion(
+                new Vector3(0f, 0f, 1.50f),
+                radius: 0.20f,
+                halfHeight: 0.20f,
+                new HitRegionPartBinding(UnitHealthPartId.Head, maxHitPoints: 40f)),
+            new UnitCircleHitRegion(
+                new Vector3(1.10f, 0f, 0.50f),
+                radius: 0.30f,
+                halfHeight: 0.20f,
+                new HitRegionPartBinding(UnitHealthPartId.LeftArm, maxHitPoints: 30f)));
+
+        UnitSimulation simulation = new UnitSimulation(8, 64);
+        UnitId unit = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10f, 10f, 0.1f),
+            hitProfile: profile);
+
+        if (simulation.HitRegions.GetProfile(unit.Index)?.RegionCount != 3)
+            return false;
+
+        Span<Vector3> visibilityPoints = stackalloc Vector3[3];
+        int visibilityCount = UnitHitSystem.GetVisibilityPoints(
+            simulation.Units,
+            unit.Index,
+            new Vector3(7f, 10f, 2f),
+            visibilityPoints,
+            simulation.Bodies,
+            simulation.HitRegions);
+
+        if (visibilityCount != 3)
+            return false;
+
+        UnitHitSystem hitSystem = new UnitHitSystem();
+
+        if (!hitSystem.TryHitUnit(
+                simulation.Units,
+                unit.Index,
+                new Vector3(8f, 10f, 0.6f),
+                new Vector3(12f, 10f, 0.6f),
+                0f,
+                UnitHealthPartId.None,
+                out UnitHitResult torsoHit,
+                simulation.Bodies,
+                simulation.HitRegions) ||
+            torsoHit.Part != UnitHealthPartId.Torso ||
+            torsoHit.RegionIndex != 0)
+        {
+            return false;
+        }
+
+        if (!hitSystem.TryHitUnit(
+                simulation.Units,
+                unit.Index,
+                new Vector3(8f, 10f, 1.6f),
+                new Vector3(12f, 10f, 1.6f),
+                0f,
+                UnitHealthPartId.None,
+                out UnitHitResult headHit,
+                simulation.Bodies,
+                simulation.HitRegions) ||
+            headHit.Part != UnitHealthPartId.Head ||
+            headHit.RegionIndex != 1)
+        {
+            return false;
+        }
+
+        if (hitSystem.TryHitUnit(
+                simulation.Units,
+                unit.Index,
+                new Vector3(8f, 10f, 2.4f),
+                new Vector3(12f, 10f, 2.4f),
+                0f,
+                UnitHealthPartId.None,
+                out _,
+                simulation.Bodies,
+                simulation.HitRegions))
+        {
+            return false;
+        }
+
+        UnitDamageResult damage = simulation.ApplyDamage(
+            unit,
+            torsoHit.Part,
+            20f);
+
+        return damage.ArmorAbsorbed > 0f &&
+            damage.FinalDamage < damage.RawDamage;
+    }
+
+private static bool TestVisionSampleMemory()
     {
         WorldMap worldMap = new WorldMap(
             regionsX: 1,
