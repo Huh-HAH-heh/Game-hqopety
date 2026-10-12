@@ -9,6 +9,8 @@ public sealed class UnitBodyStore
 
     private Vector3[] _localPosition;
     private Vector3[] _worldPosition;
+    private Vector3[] _previousWorldPosition;
+    private bool[] _tailInitialized;
     private Vector3[] _scale;
 
     private float[] _localRotation;
@@ -36,6 +38,12 @@ public sealed class UnitBodyStore
 
     public Vector3[] WorldPosition =>
         _worldPosition;
+
+    public Vector3[] PreviousWorldPosition =>
+        _previousWorldPosition;
+
+    public bool[] TailInitialized =>
+        _tailInitialized;
 
     public Vector3[] Scale =>
         _scale;
@@ -79,6 +87,8 @@ public sealed class UnitBodyStore
 
         _localPosition = new Vector3[initialCapacity];
         _worldPosition = new Vector3[initialCapacity];
+        _previousWorldPosition = new Vector3[initialCapacity];
+        _tailInitialized = new bool[initialCapacity];
         _scale = new Vector3[initialCapacity];
 
         _localRotation = new float[initialCapacity];
@@ -216,6 +226,8 @@ public sealed class UnitBodyStore
             }
 
             _worldPosition[i] = pivot;
+            _previousWorldPosition[i] = pivot;
+            _tailInitialized[i] = false;
             _worldRotation[i] = partRotation;
         }
     }
@@ -249,6 +261,8 @@ public sealed class UnitBodyStore
 
         _localPosition[index] = localPosition;
         _worldPosition[index] = Vector3.Zero;
+        _previousWorldPosition[index] = Vector3.Zero;
+        _tailInitialized[index] = false;
         _scale[index] = scale;
 
         _localRotation[index] = localRotation;
@@ -290,7 +304,15 @@ public sealed class UnitBodyStore
             ref _worldPosition,
             newCapacity);
 
-Array.Resize(
+        Array.Resize(
+            ref _previousWorldPosition,
+            newCapacity);
+
+        Array.Resize(
+            ref _tailInitialized,
+            newCapacity);
+
+        Array.Resize(
             ref _scale,
             newCapacity);
 
