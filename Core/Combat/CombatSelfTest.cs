@@ -57,6 +57,8 @@ public static class CombatSelfTest
         RunTest("Combat log: hit and blocked events survive shot spam", TestCombatLogPriorities, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
         RunTest("Anatomy: all built-in and custom body definitions transform correctly", TestAnatomyProfiles, ref passed, ref failed);
+        RunTest("Anatomy: named markers drive eye, aim and muzzle points", TestNamedAnatomyMarkers, ref passed, ref failed);
+        RunTest("Anatomy: custom segments own health and can be appended live", TestGenericAnatomyTissueHealth, ref passed, ref failed);
         RunTest("Armor: starting colonist armor mitigates repeated rifle hits", TestStartingArmorMitigatesRifleHits, ref passed, ref failed);
         RunTest("High-tech: repeater, laser and railgun profiles differ", TestHighTechWeaponProfiles, ref passed, ref failed);
         RunTest("High-tech: powered exoskeleton boosts speed while intact", TestExoskeletonMovementBonus, ref passed, ref failed);
@@ -2038,6 +2040,131 @@ private static bool TestVisionDetectsRegionInsideRange()
                !simulation.Units.IsAlive(dead);
     }
 
+
+    private static bool TestNamedAnatomyMarkers()
+    {
+        UnitAnatomyProfile profile = new(
+            UnitAnatomyNode.Circle(
+                "sensor-core",
+                new Vector3(0f, 0f, 0.70f),
+                0.35f,
+                0.25f,
+                new[]
+                {
+                    new HitRegionPartBinding(
+                        UnitHealthPartId.None,
+                        kind: UnitHealthPartKind.Organ,
+                        maxHitPoints: 18f,
+                        id: "sensor-core.tissue")
+                },
+                new UnitAnatomyMarker(
+                    "eye",
+                    UnitAnatomyMarkerRole.Eye,
+                    new Vector3(0f, 0f, 0.10f)),
+                new UnitAnatomyMarker(
+                    "aim",
+                    UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim,
+                    new Vector3(0.12f, 0f, 0.04f)),
+                new UnitAnatomyMarker(
+                    "muzzle",
+                    UnitAnatomyMarkerRole.Muzzle,
+                    new Vector3(0.30f, 0f, 0.15f))));
+
+        UnitSimulation simulation = new UnitSimulation(4, 32);
+        UnitId unit = simulation.Spawn(
+            UnitType.Drone,
+            new Vector3(10f, 12f, 0.1f),
+            hitProfile: profile);
+
+        Vector3 center = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 0, simulation.HitRegions).Center;
+
+        bool eyeFound = UnitHitSystem.TryGetMarkerPoint(
+            simulation.Units, unit.Index, UnitAnatomyMarkerRole.Eye,
+            out Vector3 eye, simulation.HitRegions);
+        bool muzzleFound = UnitHitSystem.TryGetMarkerPoint(
+            simulation.Units, unit.Index, UnitAnatomyMarkerRole.Muzzle,
+            out Vector3 muzzle, simulation.HitRegions);
+        Vector3 aim = UnitHitSystem.GetRegionPoint(
+            simulation.Units, unit.Index, 0, center + Vector3.UnitX * 10f,
+            simulation.HitRegions, UnitAnatomyMarkerRole.Aim);
+
+        return eyeFound && muzzleFound &&
+               Vector3.Distance(eye, center + new Vector3(0f, 0f, 0.10f)) < 0.001f &&
+               Vector3.Distance(muzzle, center + new Vector3(0.30f, 0f, 0.15f)) < 0.001f &&
+               Vector3.Distance(aim, center + new Vector3(0.12f, 0f, 0.04f)) < 0.001f;
+    }
+
+    private static bool TestGenericAnatomyTissueHealth()
+    {
+        UnitAnatomyNode firstSegment = UnitAnatomyNode.Circle(
+            "track-segment-0",
+            new Vector3(0f, 0f, 0.25f),
+            0.35f,
+            0.20f,
+            new[]
+            {
+                new HitRegionPartBinding(
+                    UnitHealthPartId.WholeBody,
+                    kind: UnitHealthPartKind.BodyPart,
+                    maxHitPoints: 30f,
+                    id: "track-tissue-0")
+            },
+            new UnitAnatomyMarker(
+                "aim",
+                UnitAnatomyMarkerRole.Target,
+                new Vector3(0f, 0f, 0.02f)));
+
+        UnitAnatomyProfile initial = new(firstSegment);
+        UnitSimulation simulation = new UnitSimulation(4, 32);
+        UnitId unit = simulation.Spawn(
+            UnitType.Drone,
+            new Vector3(10f, 12f, 0.1f),
+            hitProfile: initial);
+
+        if (!simulation.Health.TryFindRegionPart(
+                unit.Index, 0, 0, out int firstHealthIndex) ||
+            !simulation.ApplyAnatomyDamage(unit, 0, 0, 10f).FinalDamage.Equals(10f) ||
+            MathF.Abs(simulation.Health.HitPoints[firstHealthIndex] - 20f) > 0.001f)
+        {
+            return false;
+        }
+
+        UnitAnatomyProfile expanded = new(
+            firstSegment,
+            UnitAnatomyNode.Circle(
+                "track-segment-1",
+                "track-segment-0",
+                new Vector3(0f, 0f, 0.85f),
+                0.32f,
+                0.18f,
+                new[]
+                {
+                    new HitRegionPartBinding(
+                        UnitHealthPartId.WholeBody,
+                        kind: UnitHealthPartKind.BodyPart,
+                        maxHitPoints: 40f,
+                        id: "track-tissue-1",
+                        parentId: "track-tissue-0")
+                },
+                new UnitAnatomyMarker(
+                    "aim",
+                    UnitAnatomyMarkerRole.Target)));
+
+        if (!simulation.SetHitRegionProfile(unit, expanded) ||
+            !simulation.Health.TryFindRegionPart(
+                unit.Index, 0, 0, out int preservedHealthIndex) ||
+            !simulation.Health.TryFindRegionPart(
+                unit.Index, 1, 0, out int secondHealthIndex))
+        {
+            return false;
+        }
+
+        return MathF.Abs(simulation.Health.HitPoints[preservedHealthIndex] - 20f) < 0.001f &&
+               MathF.Abs(simulation.Health.HitPoints[secondHealthIndex] - 40f) < 0.001f &&
+               simulation.Health.Parent[secondHealthIndex] ==
+                   preservedHealthIndex % simulation.Health.MaxParts;
+    }
 
     private static bool TestStartingArmorMitigatesRifleHits()
     {
