@@ -9,7 +9,7 @@ public sealed class UnitBodyStore
 
     private Vector3[] _localPosition;
     private Vector3[] _worldPosition;
-    private Vector3[] _previousWorldPosition;
+    private float[] _tailAngle;
     private bool[] _tailInitialized;
     private Vector3[] _scale;
 
@@ -39,8 +39,8 @@ public sealed class UnitBodyStore
     public Vector3[] WorldPosition =>
         _worldPosition;
 
-    public Vector3[] PreviousWorldPosition =>
-        _previousWorldPosition;
+    public float[] TailAngle =>
+        _tailAngle;
 
     public bool[] TailInitialized =>
         _tailInitialized;
@@ -87,7 +87,7 @@ public sealed class UnitBodyStore
 
         _localPosition = new Vector3[initialCapacity];
         _worldPosition = new Vector3[initialCapacity];
-        _previousWorldPosition = new Vector3[initialCapacity];
+        _tailAngle = new float[initialCapacity];
         _tailInitialized = new bool[initialCapacity];
         _scale = new Vector3[initialCapacity];
 
@@ -226,7 +226,7 @@ public sealed class UnitBodyStore
             }
 
             _worldPosition[i] = pivot;
-            _previousWorldPosition[i] = pivot;
+            _tailAngle[i] = partRotation;
             _tailInitialized[i] = false;
             _worldRotation[i] = partRotation;
         }
@@ -261,7 +261,7 @@ public sealed class UnitBodyStore
 
         _localPosition[index] = localPosition;
         _worldPosition[index] = Vector3.Zero;
-        _previousWorldPosition[index] = Vector3.Zero;
+        _tailAngle[index] = 0f;
         _tailInitialized[index] = false;
         _scale[index] = scale;
 
@@ -305,7 +305,7 @@ public sealed class UnitBodyStore
             newCapacity);
 
         Array.Resize(
-            ref _previousWorldPosition,
+            ref _tailAngle,
             newCapacity);
 
         Array.Resize(
