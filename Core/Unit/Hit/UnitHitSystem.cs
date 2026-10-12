@@ -96,7 +96,7 @@ public sealed class UnitHitSystem
         Span<Vector3> points,
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null) =>
-        FillRegionPoints(units, unitIndex, source, points, hitRegions);
+        FillRegionPoints(units, unitIndex, source, points, hitRegions, UnitAnatomyMarkerRole.Vision);
 
     public static int GetAimPoints(
         UnitStore units,
@@ -105,7 +105,7 @@ public sealed class UnitHitSystem
         Span<Vector3> points,
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null) =>
-        FillRegionPoints(units, unitIndex, source, points, hitRegions);
+        FillRegionPoints(units, unitIndex, source, points, hitRegions, UnitAnatomyMarkerRole.Aim);
 
     public static UnitHitRegionGeometry GetRegionGeometry(
         UnitStore units,
@@ -238,6 +238,27 @@ public sealed class UnitHitSystem
     public static bool TryGetMarkerPoint(
         UnitStore units,
         int unitIndex,
+        UnitAnatomyMarkerRole role,
+        out Vector3 point,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
+        {
+            if (!profile.Regions[regionIndex].TryGetMarker(role, out UnitAnatomyMarker marker))
+                continue;
+
+            point = GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions);
+            return true;
+        }
+
+        point = Vector3.Zero;
+        return false;
+    }
+
+    public static bool TryGetMarkerPoint(
+        UnitStore units,
+        int unitIndex,
         int regionIndex,
         string markerId,
         out Vector3 point,
@@ -309,7 +330,8 @@ public sealed class UnitHitSystem
         int unitIndex,
         int regionIndex,
         Vector3 source,
-        UnitHitRegionStore? hitRegions = null)
+        UnitHitRegionStore? hitRegions = null,
+        UnitAnatomyMarkerRole markerRole = UnitAnatomyMarkerRole.Target)
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         if ((uint)regionIndex >= (uint)profile.RegionCount)
@@ -319,12 +341,25 @@ public sealed class UnitHitSystem
         GetWorldGeometry(units, unitIndex, region,
             out Vector3 center, out float radius, out float halfHeight);
 
-        if (region.TryGetMarker(UnitAnatomyMarkerRole.Target, out UnitAnatomyMarker marker) ||
-            region.TryGetMarker(UnitAnatomyMarkerRole.Aim, out marker) ||
-            region.TryGetMarker(UnitAnatomyMarkerRole.Vision, out marker))
+        UnitAnatomyMarker marker;
+        bool hasMarker = markerRole switch
         {
+            UnitAnatomyMarkerRole.Vision =>
+                region.TryGetMarker(UnitAnatomyMarkerRole.Vision, out marker) ||
+                region.TryGetMarker(UnitAnatomyMarkerRole.Target, out marker) ||
+                region.TryGetMarker(UnitAnatomyMarkerRole.Aim, out marker),
+            UnitAnatomyMarkerRole.Aim =>
+                region.TryGetMarker(UnitAnatomyMarkerRole.Aim, out marker) ||
+                region.TryGetMarker(UnitAnatomyMarkerRole.Target, out marker) ||
+                region.TryGetMarker(UnitAnatomyMarkerRole.Vision, out marker),
+            _ =>
+                region.TryGetMarker(UnitAnatomyMarkerRole.Target, out marker) ||
+                region.TryGetMarker(UnitAnatomyMarkerRole.Aim, out marker) ||
+                region.TryGetMarker(UnitAnatomyMarkerRole.Vision, out marker)
+        };
+
+        if (hasMarker)
             return GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions);
-        }
 
         Vector2 direction = new Vector2(source.X - center.X, source.Y - center.Y);
         float lengthSquared = direction.LengthSquared();
@@ -415,7 +450,8 @@ public sealed class UnitHitSystem
         int unitIndex,
         Vector3 source,
         Span<Vector3> points,
-        UnitHitRegionStore? hitRegions)
+        UnitHitRegionStore? hitRegions,
+        UnitAnatomyMarkerRole markerRole)
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
 
@@ -423,7 +459,7 @@ public sealed class UnitHitSystem
             throw new ArgumentException("Insufficient hit-region point buffer.", nameof(points));
 
         for (int i = 0; i < profile.RegionCount; i++)
-            points[i] = GetRegionPoint(units, unitIndex, i, source, hitRegions);
+            points[i] = GetRegionPoint(units, unitIndex, i, source, hitRegions, markerRole);
 
         return profile.RegionCount;
     }
