@@ -45,7 +45,7 @@ public readonly struct VisionCheck
 
 public sealed class VisionSystem
 {
-    public const int VisibilityPointCount = UnitHitSystem.MaxHitVolumeCount;
+    public const int VisibilityPointCount = 1;
 
     private const float UpdateInterval = 0.10f;
     private const float Epsilon = 0.02f;
