@@ -193,7 +193,7 @@ public sealed class UnitWeaponSystem
                (health == null || health.OverallHitPoints[target.Index] > 0f);
     }
 
-    private static bool HasCurrentLineOfSight(
+    private bool HasCurrentLineOfSight(
         UnitStore units,
         UnitWeaponStore weapons,
         VisionSystem? vision,
@@ -782,6 +782,7 @@ public sealed class UnitWeaponSystem
             units,
             targetIndex,
             profile,
+            source,
             targetMode);
 
         return UnitHitSystem.GetRegionPoint(
@@ -789,7 +790,8 @@ public sealed class UnitWeaponSystem
             targetIndex,
             regionIndex,
             source,
-            _hitRegions);
+            _hitRegions,
+            UnitAnatomyMarkerRole.Aim);
     }
 
     // Target modes are vertical targeting bands, not anatomical labels:
@@ -799,6 +801,7 @@ public sealed class UnitWeaponSystem
         UnitStore units,
         int targetIndex,
         UnitHitRegionProfile profile,
+        Vector3 source,
         TargetMode targetMode)
     {
         float minHeight = float.PositiveInfinity;
@@ -806,8 +809,8 @@ public sealed class UnitWeaponSystem
 
         for (int i = 0; i < profile.RegionCount; i++)
         {
-            float height = UnitHitSystem.GetRegionGeometry(
-                units, targetIndex, i, _hitRegions).Center.Z;
+            float height = UnitHitSystem.GetRegionPoint(
+                units, targetIndex, i, source, _hitRegions, UnitAnatomyMarkerRole.Aim).Z;
 
             minHeight = MathF.Min(minHeight, height);
             maxHeight = MathF.Max(maxHeight, height);
@@ -820,8 +823,8 @@ public sealed class UnitWeaponSystem
 
         for (int i = 0; i < profile.RegionCount; i++)
         {
-            float height = UnitHitSystem.GetRegionGeometry(
-                units, targetIndex, i, _hitRegions).Center.Z;
+            float height = UnitHitSystem.GetRegionPoint(
+                units, targetIndex, i, source, _hitRegions, UnitAnatomyMarkerRole.Aim).Z;
 
             if (i == 0)
             {
@@ -885,10 +888,20 @@ public sealed class UnitWeaponSystem
             as RangedWeaponConfig;
     }
 
-    private static Vector3 GetMuzzlePosition(
+    private Vector3 GetMuzzlePosition(
         UnitStore units,
         int unitIndex)
     {
+        if (UnitHitSystem.TryGetMarkerPoint(
+                units,
+                unitIndex,
+                UnitAnatomyMarkerRole.Muzzle,
+                out Vector3 markerPosition,
+                _hitRegions))
+        {
+            return markerPosition;
+        }
+
         Vector3 head =
             NormalizeHorizontal(
                 units.HeadNormal[unitIndex]);
