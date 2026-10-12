@@ -540,30 +540,31 @@ public sealed class UnitSimulation
     {
         if (!Units.TryGetIndex(id, out int unitIndex) ||
             Health.OverallHitPoints[unitIndex] <= 0f ||
-            !UnitHitSystem.IsPartInProfile(Units, unitIndex, part, HitRegions))
+            !UnitHitSystem.TryFindBindingForPart(
+                Units, unitIndex, part,
+                out int regionIndex, out int bindingIndex, HitRegions))
         {
             return default;
         }
 
-        UnitDamageResult result =
-            _inventorySystem.ResolveIncomingDamage(
-                part,
-                rawDamage,
-                id,
-                Inventory);
+        return ApplyAnatomyDamage(id, regionIndex, bindingIndex, rawDamage);
+    }
 
-        _healthSystem.ApplyDamage(
-            Units,
-            Health,
-            id,
-            part,
-            result.FinalDamage,
-            HitRegions);
+    public UnitDamageResult ApplyAnatomyDamage(
+        UnitId id,
+        string tissueId,
+        float rawDamage)
+    {
+        if (string.IsNullOrWhiteSpace(tissueId) ||
+            !Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f ||
+            HitRegions.GetProfile(unitIndex) is not UnitHitRegionProfile profile ||
+            !profile.TryFindPart(tissueId, out int regionIndex, out int bindingIndex))
+        {
+            return default;
+        }
 
-        if (Health.OverallHitPoints[unitIndex] <= 0f)
-            MarkUnitDead(unitIndex);
-
-        return result;
+        return ApplyAnatomyDamage(id, regionIndex, bindingIndex, rawDamage);
     }
 
     public UnitDamageResult ApplyAnatomyDamage(
