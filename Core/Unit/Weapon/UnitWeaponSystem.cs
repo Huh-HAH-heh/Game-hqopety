@@ -778,7 +778,12 @@ public sealed class UnitWeaponSystem
         UnitHitRegionProfile profile = _hitRegions?.GetProfile(targetIndex) ??
             UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[targetIndex]).BodyType);
 
-        int regionIndex = FindTargetModeRegion(profile, targetMode);
+        int regionIndex = FindTargetModeRegion(
+            units,
+            targetIndex,
+            profile,
+            targetMode);
+
         return UnitHitSystem.GetRegionPoint(
             units,
             targetIndex,
@@ -787,49 +792,61 @@ public sealed class UnitWeaponSystem
             _hitRegions);
     }
 
-    private static int FindTargetModeRegion(
+    // Target modes are vertical targeting bands, not anatomical labels:
+    // Legs = lowest available segment, Torso/Automatic = middle, Head = highest.
+    // This works for bipeds, segmented creatures and arbitrary custom profiles.
+    private int FindTargetModeRegion(
+        UnitStore units,
+        int targetIndex,
         UnitHitRegionProfile profile,
         TargetMode targetMode)
     {
-        int torsoRegion = -1;
-        int headRegion = -1;
-        int legsRegion = -1;
-        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+        float minHeight = float.PositiveInfinity;
+        float maxHeight = float.NegativeInfinity;
 
-        for (int i = 0; i < regions.Length; i++)
+        for (int i = 0; i < profile.RegionCount; i++)
         {
-            foreach (HitRegionPartBinding binding in regions[i].Parts)
-            {
-                switch (binding.Part)
-                {
-                    case UnitHealthPartId.Torso:
-                        torsoRegion = i;
-                        break;
-                    case UnitHealthPartId.Head:
-                    case UnitHealthPartId.Brain:
-                        headRegion = i;
-                        break;
-                    case UnitHealthPartId.LeftLeg:
-                    case UnitHealthPartId.RightLeg:
-                    case UnitHealthPartId.LeftFoot:
-                    case UnitHealthPartId.RightFoot:
-                        legsRegion = i;
-                        break;
-                }
-            }
+            float height = UnitHitSystem.GetRegionGeometry(
+                units, targetIndex, i, _hitRegions).Center.Z;
+
+            minHeight = MathF.Min(minHeight, height);
+            maxHeight = MathF.Max(maxHeight, height);
         }
 
-        int preferred = targetMode switch
-        {
-            TargetMode.Head => headRegion,
-            TargetMode.Legs => legsRegion,
-            TargetMode.Torso or TargetMode.Automatic => torsoRegion,
-            _ => torsoRegion
-        };
+        float middleHeight = (minHeight + maxHeight) * 0.5f;
+        int selected = 0;
+        float selectedHeight = 0f;
+        float selectedMiddleDistance = float.PositiveInfinity;
 
-        return preferred >= 0
-            ? preferred
-            : profile.RegionCount / 2;
+        for (int i = 0; i < profile.RegionCount; i++)
+        {
+            float height = UnitHitSystem.GetRegionGeometry(
+                units, targetIndex, i, _hitRegions).Center.Z;
+
+            if (i == 0)
+            {
+                selected = 0;
+                selectedHeight = height;
+                selectedMiddleDistance = MathF.Abs(height - middleHeight);
+                continue;
+            }
+
+            bool preferred = targetMode switch
+            {
+                TargetMode.Head => height > selectedHeight,
+                TargetMode.Legs => height < selectedHeight,
+                _ => MathF.Abs(height - middleHeight) < selectedMiddleDistance
+            };
+
+            if (!preferred)
+                continue;
+
+            selected = i;
+            selectedHeight = height;
+            selectedMiddleDistance = MathF.Abs(height - middleHeight);
+        }
+
+        return selected;
     }
 
     private static AmmunitionConfig? GetCurrentAmmunition(
