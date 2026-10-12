@@ -151,9 +151,9 @@ public sealed class UnitBodySystem
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start &&
-                     motions[part] == BodyPartMotion.PhysicalTail)
+                     motions[part] is BodyPartMotion.SpinalChain or BodyPartMotion.PhysicalTail)
             {
-                UpdatePhysicalTail(
+                UpdateChainLink(
                     part,
                     parent,
                     worldPositions,
@@ -303,7 +303,7 @@ public sealed class UnitBodySystem
         }
     }
 
-    private static void UpdatePhysicalTail(
+    private static void UpdateChainLink(
         int part,
         int parent,
         Vector3[] positions,
@@ -329,13 +329,13 @@ public sealed class UnitBodySystem
             initialized[part] = true;
         }
 
-        // The bend is stored as an angle, not velocity/impulse. Each link
-        // gently aligns with the preceding link, so turns leave a curved tail.
-        float targetAngle = roles[parent] == BodyPartRole.Tail
-            ? tailAngles[parent]
-            : bodyRotation + MathF.PI;
+        // Only the bend angle is persistent. Every body section follows the
+        // previous section, so the whole unit curves through turns without momentum.
+        float targetAngle = roles[parent] == BodyPartRole.Head
+            ? bodyRotation + MathF.PI
+            : tailAngles[parent];
 
-        float response = roles[parent] == BodyPartRole.Tail ? 5.5f : 11f;
+        float response = roles[part] == BodyPartRole.Tail ? 5.5f : 12f;
         float blend = 1f - MathF.Exp(-response * Math.Clamp(deltaTime, 0f, 0.05f));
         angle = WrapAngle(angle + WrapAngle(targetAngle - angle) * blend);
 
