@@ -428,7 +428,8 @@ public sealed class ProjectileSystem
                         (end - start) *
                         globalT,
                         globalT,
-                        localHit.RegionIndex);
+                        localHit.RegionIndex,
+                        localHit.BindingIndex);
             }
 
             if (terrainT > 1f &&
@@ -579,7 +580,8 @@ public sealed class ProjectileSystem
                         projectileIndex],
                     bestHit.RegionIndex,
                     projectiles.DiameterM[
-                        projectileIndex] * 0.5f);
+                        projectileIndex] * 0.5f,
+                    bestHit.BindingIndex);
 
             ProjectileDamageResult damage =
                 _damageSystem.ApplyProjectile(
