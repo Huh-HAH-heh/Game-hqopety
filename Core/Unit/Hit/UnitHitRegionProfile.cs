@@ -470,43 +470,77 @@ public sealed class UnitHitRegionStore
 /// </summary>
 public static class UnitHitRegionCatalog
 {
-    private static readonly UnitHitRegionProfile Colonist = new(
-        UnitCircleHitRegion.RelativeToUnit(
+    private static readonly UnitAnatomyProfile Colonist = new(
+        UnitAnatomyNode.RelativeCircle(
+            "legs",
+            "torso",
             new Vector3(0f, 0f, 0.15f),
             widthRadiusFactor: 0.22f,
             lengthRadiusFactor: 0.18f,
             heightHalfExtentFactor: 0.15f,
-            new HitRegionPartBinding(UnitHealthPartId.LeftLeg, 1f, maxHitPoints: 35f),
-            new HitRegionPartBinding(UnitHealthPartId.RightLeg, 1f, maxHitPoints: 35f),
-            new HitRegionPartBinding(UnitHealthPartId.LeftFoot, 0.5f, maxHitPoints: 14f),
-            new HitRegionPartBinding(UnitHealthPartId.RightFoot, 0.5f, maxHitPoints: 14f)),
-        UnitCircleHitRegion.RelativeToUnit(
+            new[]
+            {
+                new HitRegionPartBinding(UnitHealthPartId.LeftLeg, 1f, maxHitPoints: 35f, id: "leg.left"),
+                new HitRegionPartBinding(UnitHealthPartId.LeftFoot, 0.5f, maxHitPoints: 14f, parentPart: UnitHealthPartId.LeftLeg, id: "foot.left", parentId: "leg.left"),
+                new HitRegionPartBinding(UnitHealthPartId.RightLeg, 1f, maxHitPoints: 35f, id: "leg.right"),
+                new HitRegionPartBinding(UnitHealthPartId.RightFoot, 0.5f, maxHitPoints: 14f, parentPart: UnitHealthPartId.RightLeg, id: "foot.right", parentId: "leg.right")
+            },
+            new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
+            new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
+        UnitAnatomyNode.RelativeCircle(
+            "torso",
             new Vector3(0f, 0f, 0.50f),
             widthRadiusFactor: 0.22f,
             lengthRadiusFactor: 0.18f,
             heightHalfExtentFactor: 0.22f,
-            new HitRegionPartBinding(UnitHealthPartId.Torso, 5f, maxHitPoints: 60f),
-            new HitRegionPartBinding(UnitHealthPartId.LeftArm, 1f, maxHitPoints: 30f),
-            new HitRegionPartBinding(UnitHealthPartId.RightArm, 1f, maxHitPoints: 30f),
-            new HitRegionPartBinding(UnitHealthPartId.LeftHand, 0.5f, maxHitPoints: 12f),
-            new HitRegionPartBinding(UnitHealthPartId.RightHand, 0.5f, maxHitPoints: 12f)),
-        UnitCircleHitRegion.RelativeToUnit(
+            new[]
+            {
+                new HitRegionPartBinding(UnitHealthPartId.Torso, 5f, maxHitPoints: 60f, id: "torso.main"),
+                new HitRegionPartBinding(UnitHealthPartId.LeftArm, 1f, maxHitPoints: 30f, id: "arm.left"),
+                new HitRegionPartBinding(UnitHealthPartId.LeftHand, 0.5f, maxHitPoints: 12f, parentPart: UnitHealthPartId.LeftArm, id: "hand.left", parentId: "arm.left"),
+                new HitRegionPartBinding(UnitHealthPartId.RightArm, 1f, maxHitPoints: 30f, id: "arm.right"),
+                new HitRegionPartBinding(UnitHealthPartId.RightHand, 0.5f, maxHitPoints: 12f, parentPart: UnitHealthPartId.RightArm, id: "hand.right", parentId: "arm.right"),
+                new HitRegionPartBinding(UnitHealthPartId.Heart, 0.25f, UnitHealthPartKind.Organ, 15f, UnitHealthPartId.Torso, "organ.heart", "torso.main"),
+                new HitRegionPartBinding(UnitHealthPartId.LeftLung, 0.20f, UnitHealthPartKind.Organ, 12f, UnitHealthPartId.Torso, "organ.lung.left", "torso.main"),
+                new HitRegionPartBinding(UnitHealthPartId.RightLung, 0.20f, UnitHealthPartKind.Organ, 12f, UnitHealthPartId.Torso, "organ.lung.right", "torso.main"),
+                new HitRegionPartBinding(UnitHealthPartId.Stomach, 0.15f, UnitHealthPartKind.Organ, 12f, UnitHealthPartId.Torso, "organ.stomach", "torso.main"),
+                new HitRegionPartBinding(UnitHealthPartId.Liver, 0.15f, UnitHealthPartKind.Organ, 15f, UnitHealthPartId.Torso, "organ.liver", "torso.main"),
+                new HitRegionPartBinding(UnitHealthPartId.LeftKidney, 0.10f, UnitHealthPartKind.Organ, 10f, UnitHealthPartId.Torso, "organ.kidney.left", "torso.main"),
+                new HitRegionPartBinding(UnitHealthPartId.RightKidney, 0.10f, UnitHealthPartKind.Organ, 10f, UnitHealthPartId.Torso, "organ.kidney.right", "torso.main")
+            },
+            new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
+            new UnitAnatomyMarker("muzzle", UnitAnatomyMarkerRole.Muzzle, new Vector3(0.30f, 0f, 0.25f)),
+            new UnitAnatomyMarker("interaction", UnitAnatomyMarkerRole.Interaction)),
+        UnitAnatomyNode.RelativeCircle(
+            "head",
+            "torso",
             new Vector3(0f, 0f, 0.84f),
             widthRadiusFactor: 0.20f,
             lengthRadiusFactor: 0.05f,
             heightHalfExtentFactor: 0.13f,
-            new HitRegionPartBinding(UnitHealthPartId.Head, 4f, maxHitPoints: 40f),
-            new HitRegionPartBinding(UnitHealthPartId.Brain, 1f, UnitHealthPartKind.Organ, 10f, UnitHealthPartId.Head)));
+            new[]
+            {
+                new HitRegionPartBinding(UnitHealthPartId.Head, 4f, maxHitPoints: 40f, id: "head.main"),
+                new HitRegionPartBinding(UnitHealthPartId.Brain, 1f, UnitHealthPartKind.Organ, 10f, UnitHealthPartId.Head, "organ.brain", "head.main")
+            },
+            new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye, new Vector3(0f, 0f, 0.05f)),
+            new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision, new Vector3(0f, 0f, 0.02f))));
 
-    private static readonly UnitHitRegionProfile SmallCreature = new(
-        UnitCircleHitRegion.RelativeToUnit(
+    private static readonly UnitAnatomyProfile SmallCreature = new(
+        UnitAnatomyNode.RelativeCircle(
+            "body",
             new Vector3(0f, 0f, 0.50f),
             widthRadiusFactor: 0.25f,
             lengthRadiusFactor: 0.10f,
             heightHalfExtentFactor: 0.50f,
-            new HitRegionPartBinding(UnitHealthPartId.WholeBody, 1f, maxHitPoints: 100f)));
+            new[]
+            {
+                new HitRegionPartBinding(UnitHealthPartId.WholeBody, 1f, maxHitPoints: 100f, id: "body.main")
+            },
+            new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye, new Vector3(0f, 0f, 0.15f)),
+            new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision)));
 
-    private static readonly UnitHitRegionProfile SegmentedCreature = CreateSegmented();
+    private static readonly UnitAnatomyProfile SegmentedCreature = CreateSegmented();
 
     public static UnitHitRegionProfile Get(UnitBodyType bodyType) =>
         bodyType switch
@@ -514,23 +548,40 @@ public static class UnitHitRegionCatalog
             UnitBodyType.Colonist => Colonist,
             UnitBodyType.SmallCreature => SmallCreature,
             UnitBodyType.SegmentedCreature => SegmentedCreature,
-            _ => throw new ArgumentOutOfRangeException(nameof(bodyType), bodyType, "Unknown hit-region profile.")
+            _ => throw new ArgumentOutOfRangeException(nameof(bodyType), bodyType, "Unknown anatomy profile.")
         };
 
-    private static UnitHitRegionProfile CreateSegmented()
+    private static UnitAnatomyProfile CreateSegmented()
     {
-        var regions = new UnitCircleHitRegion[10];
+        var nodes = new UnitAnatomyNode[10];
 
-        for (int i = 0; i < regions.Length; i++)
+        for (int i = 0; i < nodes.Length; i++)
         {
-            regions[i] = UnitCircleHitRegion.RelativeToUnit(
+            string id = $"segment.{i}";
+            string parentId = i == 0 ? string.Empty : $"segment.{i - 1}";
+            string tissueId = $"{id}.tissue";
+            string parentTissueId = i == 0 ? string.Empty : $"segment.{i - 1}.tissue";
+
+            var tissue = new HitRegionPartBinding(
+                UnitHealthPartId.WholeBody,
+                1f,
+                UnitHealthPartKind.BodyPart,
+                100f,
+                id: tissueId,
+                parentId: parentTissueId);
+
+            nodes[i] = UnitAnatomyNode.RelativeCircle(
+                id,
+                parentId,
                 new Vector3(-0.62f * i, 0f, 0.50f),
                 widthRadiusFactor: 0.48f,
                 lengthRadiusFactor: 0f,
                 heightHalfExtentFactor: 0.50f,
-                new HitRegionPartBinding(UnitHealthPartId.WholeBody, 1f, maxHitPoints: 100f));
+                new[] { tissue },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
+                new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion));
         }
 
-        return new UnitHitRegionProfile(regions);
+        return new UnitAnatomyProfile(nodes);
     }
 }
