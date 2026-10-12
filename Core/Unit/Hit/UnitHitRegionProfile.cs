@@ -572,10 +572,10 @@ public static class UnitHitRegionCatalog
     private static readonly UnitAnatomyProfile ScavenRat = new(
         UnitAnatomyNode.RelativeCircle(
             "rat.body",
-            new Vector3(0f, 0f, 0.45f),
+            new Vector3(0f, 0f, 0.80f),
             widthRadiusFactor: 0.70f,
             lengthRadiusFactor: 0.32f,
-            heightHalfExtentFactor: 0.38f,
+            heightHalfExtentFactor: 0.40f,
             new[]
             {
                 new HitRegionPartBinding(
@@ -589,10 +589,10 @@ public static class UnitHitRegionCatalog
         UnitAnatomyNode.RelativeCircle(
             "rat.head",
             "rat.body",
-            new Vector3(0.26f, 0f, 0.05f),
-            widthRadiusFactor: 0.35f,
+            new Vector3(0.53f, 0f, 0.02f),
+            widthRadiusFactor: 0.32f,
             lengthRadiusFactor: 0.12f,
-            heightHalfExtentFactor: 0.22f,
+            heightHalfExtentFactor: 0.20f,
             new[]
             {
                 new HitRegionPartBinding(
