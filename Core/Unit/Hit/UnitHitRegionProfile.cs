@@ -74,7 +74,7 @@ public readonly struct HitRegionPartBinding
     {
         if (part == UnitHealthPartId.None && string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Generic anatomy parts require a stable ID.", nameof(id));
-        if (armorZone < -1 || armorZone >= UnitInventoryStore.ArmorZoneCount)
+        if (armorZone < -1 || armorZone >= UnitInventoryStore.BodyZoneCount)
             throw new ArgumentOutOfRangeException(nameof(armorZone));
         if (!float.IsFinite(weight) || weight <= 0f)
             throw new ArgumentOutOfRangeException(nameof(weight));
