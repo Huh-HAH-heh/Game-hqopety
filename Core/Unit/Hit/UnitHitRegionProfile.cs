@@ -589,9 +589,9 @@ public static class UnitHitRegionCatalog
         UnitAnatomyNode.RelativeCircle(
             "rat.head",
             "rat.body",
-            new Vector3(0.53f, 0f, 0.02f),
-            widthRadiusFactor: 0.32f,
-            lengthRadiusFactor: 0.12f,
+            new Vector3(0.34f, 0f, 0.02f),
+            widthRadiusFactor: 0.24f,
+            lengthRadiusFactor: 0.08f,
             heightHalfExtentFactor: 0.20f,
             new[]
             {
