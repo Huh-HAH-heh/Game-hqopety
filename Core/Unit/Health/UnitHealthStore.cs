@@ -204,6 +204,9 @@ public sealed class UnitHealthStore
             for (int bindingIndex = 0; bindingIndex < bindings.Length; bindingIndex++)
             {
                 HitRegionPartBinding binding = bindings[bindingIndex];
+                if (TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out _))
+                    continue;
+
                 AddPart(
                     unitIndex,
                     binding.Part,
