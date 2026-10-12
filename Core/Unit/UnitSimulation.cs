@@ -22,6 +22,7 @@ public sealed class UnitSimulation
     public UnitStore Units { get; }
     public UnitNavigationSystem Navigation => _movementSystem.Navigation;
     public UnitBodyStore Bodies { get; }
+    public UnitHitRegionStore HitRegions { get; }
     public UnitHealthStore Health { get; }
     public UnitInventoryStore Inventory { get; }
     public UnitWeaponStore Weapons { get; }
@@ -85,6 +86,8 @@ public sealed class UnitSimulation
             new UnitStore(
                 unitCapacity);
 
+        HitRegions = new UnitHitRegionStore(unitCapacity);
+
         _deathHandled = new bool[Units.Capacity];
 
         Bodies =
@@ -129,7 +132,8 @@ public sealed class UnitSimulation
 
         _visionSystem =
             new VisionSystem(
-                unitCapacity);
+                unitCapacity,
+                HitRegions);
 
         _aiSystem =
             new UnitAiSystem(
@@ -142,7 +146,8 @@ public sealed class UnitSimulation
         Vector3 position,
         float bodyAngle = 0f,
         int locationId = 0,
-        ushort factionTag = 0)
+        ushort factionTag = 0,
+        UnitHitRegionProfile? hitProfile = null)
     {
         Vector3 bodyNormal =
             new Vector3(
@@ -156,7 +161,8 @@ public sealed class UnitSimulation
             bodyNormal,
             bodyNormal,
             locationId,
-            factionTag);
+            factionTag,
+            hitProfile);
     }
 
     public UnitId Spawn(
@@ -165,7 +171,8 @@ public sealed class UnitSimulation
         Vector3 bodyNormal,
         Vector3 headNormal,
         int locationId = 0,
-        ushort factionTag = 0)
+        ushort factionTag = 0,
+        UnitHitRegionProfile? hitProfile = null)
     {
         UnitDefinition definition =
             UnitCatalog.Get(type);
@@ -184,13 +191,17 @@ public sealed class UnitSimulation
                 locationId,
                 factionTag);
 
+        UnitHitRegionProfile profile =
+            hitProfile ?? UnitHitRegionCatalog.Get(definition.BodyType);
+
         return FinishSpawn(
             id,
             type,
             position,
             bodyNormal,
             headNormal,
-            body);
+            body,
+            profile);
     }
 
     public UnitId SpawnCustom(
@@ -199,7 +210,8 @@ public sealed class UnitSimulation
         ReadOnlySpan<BodyPartDefinition> bodyParts,
         float bodyAngle = 0f,
         int locationId = 0,
-        ushort factionTag = 0)
+        ushort factionTag = 0,
+        UnitHitRegionProfile? hitProfile = null)
     {
         UnitDefinition definition = UnitCatalog.Get(type);
         BodyHandle body = Bodies.CreateBody(bodyParts);
@@ -218,13 +230,17 @@ public sealed class UnitSimulation
             locationId,
             factionTag);
 
+        UnitHitRegionProfile profile =
+            hitProfile ?? UnitHitRegionCatalog.Get(definition.BodyType);
+
         return FinishSpawn(
             id,
             type,
             position,
             bodyNormal,
             bodyNormal,
-            body);
+            body,
+            profile);
     }
 
     private UnitId FinishSpawn(
@@ -233,7 +249,8 @@ public sealed class UnitSimulation
         Vector3 position,
         Vector3 bodyNormal,
         Vector3 headNormal,
-        BodyHandle body)
+        BodyHandle body,
+        UnitHitRegionProfile hitProfile)
     {
         Bodies.SetInitialWorldPosition(
             body,
@@ -246,6 +263,8 @@ public sealed class UnitSimulation
         _baseMoveSpeed[id.Index] = Units.MoveSpeed[id.Index];
 
         Health.InitializeUnit(id.Index, type);
+        HitRegions.SetProfile(id.Index, hitProfile);
+        Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);
         Weapons.InitializeUnit(id.Index);
         Suppression.InitializeUnit(id.Index);
@@ -300,6 +319,8 @@ public sealed class UnitSimulation
 
         Bodies.FreeBody(
             body);
+
+        HitRegions.ClearUnit(index);
 
         Health.ClearUnit(
             index);
@@ -590,6 +611,21 @@ public sealed class UnitSimulation
             normal);
     }
 
+    public bool SetHitRegionProfile(
+        UnitId id,
+        UnitHitRegionProfile profile)
+    {
+        if (profile == null ||
+            !Units.TryGetIndex(id, out int index))
+        {
+            return false;
+        }
+
+        HitRegions.SetProfile(index, profile);
+        Health.RegisterHitRegionParts(index, profile);
+        return true;
+    }
+
     public void Update(
         WorldMap worldMap,
         float deltaTime)
@@ -655,6 +691,7 @@ public sealed class UnitSimulation
         _projectileSystem.Update(
             Units,
             Bodies,
+            HitRegions,
             Inventory,
             Health,
             _healthSystem,
