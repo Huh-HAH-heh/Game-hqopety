@@ -212,11 +212,11 @@ public sealed class UnitBodySystem
             if (profilePhase != 0f)
             {
                 joint += Rotate2D(
-                    new Vector3(profilePhase * 0.17f * gait, 0f, 0f),
+                    new Vector3(
+                        profilePhase * 0.17f * gait,
+                        profilePhase * 0.025f * gait,
+                        0f),
                     positionRotation);
-
-                if (roles[part] == BodyPartRole.Foot && profilePhase > 0f)
-                    joint.Z += profilePhase * 0.09f * gait;
             }
 
             // Rotating a limb around its center makes the shoulder/hip drift
