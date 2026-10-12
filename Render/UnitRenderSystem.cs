@@ -27,10 +27,6 @@ public sealed class UnitRenderSystem
         new VertexArray(
             PrimitiveType.Lines);
 
-    private readonly VertexArray _hitVolumeFills =
-        new VertexArray(
-            PrimitiveType.Triangles);
-
     private readonly VertexArray _visionArea =
         new VertexArray(
             PrimitiveType.Triangles);
@@ -82,7 +78,6 @@ public sealed class UnitRenderSystem
         _vertices.Clear();
         _bodyOutlines.Clear();
         _statusIcons.Clear();
-        _hitVolumeFills.Clear();
         _visionArea.Clear();
         _selection.Clear();
         _aiming.Clear();
@@ -314,8 +309,6 @@ public sealed class UnitRenderSystem
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
 
-        if (_hitVolumeFills.VertexCount > 0)
-            window.Draw(_hitVolumeFills);
 
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
@@ -377,7 +370,6 @@ public void DrawSnapshot(
         _bodyOutlines.Clear();
         _selection.Clear();
         _statusIcons.Clear();
-        _hitVolumeFills.Clear();
         _aiming.Clear();
         _visionArea.Clear();
         _visionDebug.Clear();
@@ -521,8 +513,6 @@ public void DrawSnapshot(
 
         if (_vertices.VertexCount > 0)
             window.Draw(_vertices);
-        if (_hitVolumeFills.VertexCount > 0)
-            window.Draw(_hitVolumeFills);
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
         if (_statusIcons.VertexCount > 0)
@@ -785,178 +775,6 @@ public void DrawSnapshot(
         }
 
         return false;
-    }
-
-    private static void AppendHitVolume(
-        VertexArray fills,
-        VertexArray outlines,
-        in HitVolume volume,
-        float tilePixelSize,
-        float screenScale)
-    {
-        // Radii.X is measured along Right; Radii.Y along Forward.
-        // Ellipse local X follows Forward, so the two horizontal radii swap here.
-        float centerX = volume.Center.X * tilePixelSize;
-        float centerY = volume.Center.Y * tilePixelSize;
-        float radiusX = MathF.Abs(volume.Radii.Y) * tilePixelSize;
-        float radiusY = MathF.Abs(volume.Radii.X) * tilePixelSize;
-        float rotation = MathF.Atan2(volume.Forward.Y, volume.Forward.X);
-
-        int segments = MathF.Max(radiusX, radiusY) * screenScale >= 3f
-            ? 16
-            : 10;
-
-        GetHitVolumeColors(volume.Part, out Color fill, out Color outline);
-
-        AppendEllipse(
-            fills,
-            centerX,
-            centerY,
-            radiusX,
-            radiusY,
-            rotation,
-            fill,
-            segments);
-
-        // The half-pixel pad improves outline visibility only; the filled
-        // ellipse remains the exact horizontal projection of the collision volume.
-        float outlinePad = 0.5f / MathF.Max(0.001f, screenScale);
-        AppendEllipseOutline(
-            outlines,
-            centerX,
-            centerY,
-            radiusX + outlinePad,
-            radiusY + outlinePad,
-            rotation,
-            outline,
-            segments);
-    }
-
-    private static void AppendHitVolumeNormals(
-        VertexArray outlines,
-        ReadOnlySpan<HitVolume> volumes,
-        int volumeCount,
-        float tilePixelSize,
-        float screenScale)
-    {
-        int torsoIndex = -1;
-        int headIndex = -1;
-        float largestTorsoArea = -1f;
-
-        for (int i = 0; i < volumeCount; i++)
-        {
-            ref readonly HitVolume volume = ref volumes[i];
-
-            if (volume.Part == UnitHealthPartId.Torso)
-            {
-                float area = MathF.Abs(volume.Radii.X * volume.Radii.Y);
-                if (area > largestTorsoArea)
-                {
-                    largestTorsoArea = area;
-                    torsoIndex = i;
-                }
-            }
-            else if (volume.Part == UnitHealthPartId.Head)
-            {
-                headIndex = i;
-            }
-        }
-
-        if (torsoIndex >= 0)
-            AppendHitVolumeDirection(outlines, volumes[torsoIndex], new Color(20, 68, 112, 255), tilePixelSize, screenScale);
-
-        if (headIndex >= 0)
-            AppendHitVolumeDirection(outlines, volumes[headIndex], new Color(126, 72, 8, 255), tilePixelSize, screenScale);
-    }
-
-    private static void AppendHitVolumeDirection(
-        VertexArray outlines,
-        in HitVolume volume,
-        Color color,
-        float tilePixelSize,
-        float screenScale)
-    {
-        float radius = MathF.Max(
-            MathF.Abs(volume.Radii.X),
-            MathF.Abs(volume.Radii.Y));
-        float length = MathF.Max(
-            2.5f / MathF.Max(0.001f, screenScale),
-            radius * tilePixelSize * 0.9f);
-
-        AppendDirectionArrow(
-            outlines,
-            volume.Center.X * tilePixelSize,
-            volume.Center.Y * tilePixelSize,
-            volume.Forward,
-            length,
-            color,
-            screenScale);
-    }
-
-    private static void AppendDirectionArrow(
-        VertexArray outlines,
-        float startX,
-        float startY,
-        Vector3 direction,
-        float length,
-        Color color,
-        float screenScale)
-    {
-        direction.Z = 0f;
-        float directionLength = direction.LengthSquared();
-        if (directionLength < 0.000001f || length <= 0f)
-            return;
-
-        direction /= MathF.Sqrt(directionLength);
-        float endX = startX + direction.X * length;
-        float endY = startY + direction.Y * length;
-
-        AppendDebugLine(outlines, startX, startY, endX, endY, color);
-
-        float arrowLength = MathF.Min(
-            length * 0.42f,
-            1.8f / MathF.Max(0.001f, screenScale));
-        float angle = MathF.Atan2(direction.Y, direction.X);
-
-        AppendDebugLine(
-            outlines,
-            endX,
-            endY,
-            endX + MathF.Cos(angle + 2.55f) * arrowLength,
-            endY + MathF.Sin(angle + 2.55f) * arrowLength,
-            color);
-
-        AppendDebugLine(
-            outlines,
-            endX,
-            endY,
-            endX + MathF.Cos(angle - 2.55f) * arrowLength,
-            endY + MathF.Sin(angle - 2.55f) * arrowLength,
-            color);
-    }
-
-    private static void GetHitVolumeColors(
-        UnitHealthPartId part,
-        out Color fill,
-        out Color outline)
-    {
-        Color solid = part switch
-        {
-            UnitHealthPartId.Head => new Color(255, 204, 74),
-            UnitHealthPartId.Torso => new Color(72, 166, 255),
-            UnitHealthPartId.LeftArm => new Color(255, 139, 61),
-            UnitHealthPartId.RightArm => new Color(255, 91, 112),
-            UnitHealthPartId.LeftHand => new Color(255, 211, 117),
-            UnitHealthPartId.RightHand => new Color(255, 157, 184),
-            UnitHealthPartId.LeftLeg => new Color(86, 220, 156),
-            UnitHealthPartId.RightLeg => new Color(50, 190, 191),
-            UnitHealthPartId.LeftFoot => new Color(169, 139, 255),
-            UnitHealthPartId.RightFoot => new Color(204, 122, 240),
-            _ => new Color(210, 220, 232)
-        };
-
-        fill = new Color(solid.R, solid.G, solid.B, 155);
-        outline = new Color(solid.R, solid.G, solid.B, 250);
     }
 
     private static void AppendEllipse(
