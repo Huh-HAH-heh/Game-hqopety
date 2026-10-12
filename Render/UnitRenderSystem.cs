@@ -242,7 +242,8 @@ public sealed class UnitRenderSystem
                     units.FactionTag[unitIndex],
                     isAlive,
                     tilePixelSize,
-                    screenScale);
+                    screenScale,
+                    unitTypes[unitIndex] == UnitType.ScavenRat);
 
             // Keep the marker only for a unit with no model rig at all.
             if (renderedParts == 0)
@@ -546,7 +547,8 @@ public void DrawSnapshot(
         ushort factionTag,
         bool isAlive,
         float tilePixelSize,
-        float screenScale)
+        float screenScale,
+        bool lineOnly = false)
     {
         if (start < 0 || count <= 0 || start >= bodies.Count)
             return 0;
@@ -571,7 +573,8 @@ public void DrawSnapshot(
                 factionTag,
                 isAlive,
                 tilePixelSize,
-                screenScale);
+                screenScale,
+                lineOnly);
         }
 
         return count;
@@ -606,7 +609,8 @@ public void DrawSnapshot(
                 factionTag,
                 isAlive,
                 tilePixelSize,
-                screenScale);
+                screenScale,
+                part.LineOnly);
         }
 
         return count;
@@ -670,48 +674,84 @@ public void DrawSnapshot(
         ushort factionTag,
         bool isAlive,
         float tilePixelSize,
-        float screenScale)
+        float screenScale,
+        bool lineOnly = false)
     {
         float radiusX = MathF.Abs(scale.X) * tilePixelSize;
         float radiusY = MathF.Abs(scale.Y) * tilePixelSize;
-        if (radiusX <= 0f || radiusY <= 0f)
+        if (radiusX <= 0f ||
+            (primitive != BodyPrimitive.Line && radiusY <= 0f))
             return;
 
         float centerX = position.X * tilePixelSize;
         float centerY = position.Y * tilePixelSize;
         Color fill = GetBodyPartColor(role, factionTag, isAlive);
-        Color outline = new Color(20, 26, 32, 245);
+        Color outline = lineOnly
+            ? GetRatLineColor(role)
+            : new Color(20, 26, 32, 245);
+
+        if (primitive == BodyPrimitive.Line)
+        {
+            float dx = MathF.Cos(rotation) * radiusX;
+            float dy = MathF.Sin(rotation) * radiusX;
+            Color lineColor = lineOnly
+                ? GetRatLineColor(role)
+                : GetBodyPartColor(role, factionTag, isAlive);
+
+            AppendDebugLine(
+                outlines,
+                centerX - dx,
+                centerY - dy,
+                centerX + dx,
+                centerY + dy,
+                lineColor);
+            return;
+        }
+
         int segments = MathF.Max(radiusX, radiusY) * screenScale >= 5f
             ? 16
             : 10;
 
-        if (primitive == BodyPrimitive.Box)
+        if (!lineOnly)
         {
-            AppendOrientedRect(
-                fills,
-                centerX,
-                centerY,
-                radiusY,
-                radiusX,
-                rotation,
-                fill);
-        }
-        else
-        {
-            AppendEllipse(
-                fills,
-                centerX,
-                centerY,
-                radiusX,
-                radiusY,
-                rotation,
-                fill,
-                segments);
+            if (primitive == BodyPrimitive.Box)
+            {
+                AppendOrientedRect(
+                    fills,
+                    centerX,
+                    centerY,
+                    radiusY,
+                    radiusX,
+                    rotation,
+                    fill);
+            }
+            else if (primitive == BodyPrimitive.Triangle)
+            {
+                AppendTriangleFill(
+                    fills,
+                    centerX,
+                    centerY,
+                    radiusX,
+                    radiusY,
+                    rotation,
+                    fill);
+            }
+            else
+            {
+                AppendEllipse(
+                    fills,
+                    centerX,
+                    centerY,
+                    radiusX,
+                    radiusY,
+                    rotation,
+                    fill,
+                    segments);
+            }
         }
 
-        // The thin border makes adjacent parts readable, but it does not grow
-        // the filled model geometry or the matching collision volume.
-        float outlinePad = 0.45f / MathF.Max(0.001f, screenScale);
+        // Terrain-like line art: no fill, just high-contrast geometry.
+        float outlinePad = lineOnly ? 0f : 0.45f / MathF.Max(0.001f, screenScale);
         if (primitive == BodyPrimitive.Box)
         {
             AppendOrientedRectOutline(
@@ -720,6 +760,17 @@ public void DrawSnapshot(
                 centerY,
                 radiusY + outlinePad,
                 radiusX + outlinePad,
+                rotation,
+                outline);
+        }
+        else if (primitive == BodyPrimitive.Triangle)
+        {
+            AppendTriangleOutline(
+                outlines,
+                centerX,
+                centerY,
+                radiusX + outlinePad,
+                radiusY + outlinePad,
                 rotation,
                 outline);
         }
@@ -783,6 +834,15 @@ public void DrawSnapshot(
             ? color
             : Blend(color, new Color(91, 96, 102, 255), 0.72f);
     }
+
+    private static Color GetRatLineColor(BodyPartRole role) =>
+        role switch
+        {
+            BodyPartRole.Whisker => new Color(190, 204, 218, 225),
+            BodyPartRole.Eye or BodyPartRole.Muzzle => new Color(247, 249, 251, 245),
+            BodyPartRole.Tail => new Color(222, 230, 237, 235),
+            _ => new Color(235, 240, 245, 240)
+        };
 
     private static bool IsAnyBodyPartInView(
         UnitBodyStore bodies,
@@ -910,6 +970,61 @@ public void DrawSnapshot(
         return new Vector2f(
             centerX + localX * cos - localY * sin,
             centerY + localX * sin + localY * cos);
+    }
+
+    private static void AppendTriangleFill(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float halfLength,
+        float halfWidth,
+        float rotation,
+        Color color)
+    {
+        float dx = MathF.Cos(rotation);
+        float dy = MathF.Sin(rotation);
+        float px = -dy;
+        float py = dx;
+
+        Vector2f tip = new(
+            centerX + dx * halfLength,
+            centerY + dy * halfLength);
+        Vector2f baseA = new(
+            centerX - dx * halfLength - px * halfWidth,
+            centerY - dy * halfLength - py * halfWidth);
+        Vector2f baseB = new(
+            centerX - dx * halfLength + px * halfWidth,
+            centerY - dy * halfLength + py * halfWidth);
+
+        vertices.Append(new Vertex(tip, color));
+        vertices.Append(new Vertex(baseA, color));
+        vertices.Append(new Vertex(baseB, color));
+    }
+
+    private static void AppendTriangleOutline(
+        VertexArray vertices,
+        float centerX,
+        float centerY,
+        float halfLength,
+        float halfWidth,
+        float rotation,
+        Color color)
+    {
+        float dx = MathF.Cos(rotation);
+        float dy = MathF.Sin(rotation);
+        float px = -dy;
+        float py = dx;
+
+        float tipX = centerX + dx * halfLength;
+        float tipY = centerY + dy * halfLength;
+        float baseAX = centerX - dx * halfLength - px * halfWidth;
+        float baseAY = centerY - dy * halfLength - py * halfWidth;
+        float baseBX = centerX - dx * halfLength + px * halfWidth;
+        float baseBY = centerY - dy * halfLength + py * halfWidth;
+
+        AppendDebugLine(vertices, tipX, tipY, baseAX, baseAY, color);
+        AppendDebugLine(vertices, baseAX, baseAY, baseBX, baseBY, color);
+        AppendDebugLine(vertices, baseBX, baseBY, tipX, tipY, color);
     }
 
     private static void AppendOrientedRectOutline(
