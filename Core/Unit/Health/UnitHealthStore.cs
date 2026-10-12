@@ -182,6 +182,46 @@ public sealed class UnitHealthStore
             maxHitPoints: 100f);
     }
 
+    public void RegisterHitRegionParts(
+        int unitIndex,
+        UnitHitRegionProfile profile)
+    {
+        EnsureUnitCapacity(unitIndex + 1);
+
+        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+
+        for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
+        {
+            foreach (HitRegionPartBinding binding in regions[regionIndex].Parts)
+            {
+                if (!TryFindPart(unitIndex, binding.Part, out _))
+                {
+                    AddPart(
+                        unitIndex,
+                        binding.Part,
+                        binding.Kind,
+                        parent: -1,
+                        maxHitPoints: binding.MaxHitPoints);
+                }
+            }
+        }
+
+        for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
+        {
+            foreach (HitRegionPartBinding binding in regions[regionIndex].Parts)
+            {
+                if (binding.ParentPart == UnitHealthPartId.None ||
+                    !TryFindPart(unitIndex, binding.Part, out int childIndex) ||
+                    !TryFindPart(unitIndex, binding.ParentPart, out int parentIndex))
+                {
+                    continue;
+                }
+
+                _parent[childIndex] = checked((short)parentIndex);
+            }
+        }
+    }
+
     public void ClearUnit(
         int unitIndex)
     {
