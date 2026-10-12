@@ -47,6 +47,7 @@ public static class CombatSelfTest
         RunTest("Hit regions: colonist is three stacked circles", TestColonistUsesThreeStackedRegions, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
+        RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
         RunTest("Damage: projectile events outside hit regions are rejected", TestDamageRequiresHitRegion, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
@@ -1568,6 +1569,61 @@ private static bool TestVisionDetectsRegionInsideRange()
 
         return headZ > torsoZ &&
                torsoZ > legsZ &&
+               simulation.Weapons.AimPoint[stateIndex] != Vector3.Zero;
+    }
+
+    private static bool TestTargetModesRankVerticalSegments()
+    {
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitHitRegionProfile verticalProfile = new UnitHitRegionProfile(
+            new UnitCircleHitRegion(new Vector3(0f, 0f, 0.20f), 0.25f, 0.18f,
+                new HitRegionPartBinding(UnitHealthPartId.WholeBody, maxHitPoints: 100f)),
+            new UnitCircleHitRegion(new Vector3(0f, 0f, 0.60f), 0.25f, 0.18f,
+                new HitRegionPartBinding(UnitHealthPartId.WholeBody, maxHitPoints: 100f)),
+            new UnitCircleHitRegion(new Vector3(0f, 0f, 1.00f), 0.25f, 0.18f,
+                new HitRegionPartBinding(UnitHealthPartId.WholeBody, maxHitPoints: 100f)),
+            new UnitCircleHitRegion(new Vector3(0f, 0f, 1.40f), 0.25f, 0.18f,
+                new HitRegionPartBinding(UnitHealthPartId.WholeBody, maxHitPoints: 100f)),
+            new UnitCircleHitRegion(new Vector3(0f, 0f, 1.80f), 0.25f, 0.18f,
+                new HitRegionPartBinding(UnitHealthPartId.WholeBody, maxHitPoints: 100f)));
+
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(15.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            hitProfile: verticalProfile);
+
+        int inventorySlot = simulation.AddInventoryItem(
+            shooter, WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(shooter, inventorySlot, UnitWeaponSlot.Primary))
+        {
+            return false;
+        }
+
+        int stateIndex = UnitWeaponStore.GetIndex(
+            shooter.Index, UnitWeaponSlot.Primary);
+
+        simulation.Weapons.CurrentTargetMode[stateIndex] = TargetMode.Head;
+        simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target);
+        float upperZ = simulation.Weapons.AimPoint[stateIndex].Z;
+
+        simulation.Weapons.CurrentTargetMode[stateIndex] = TargetMode.Torso;
+        simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target);
+        float middleZ = simulation.Weapons.AimPoint[stateIndex].Z;
+
+        simulation.Weapons.CurrentTargetMode[stateIndex] = TargetMode.Legs;
+        simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target);
+        float lowerZ = simulation.Weapons.AimPoint[stateIndex].Z;
+
+        return upperZ > middleZ &&
+               middleZ > lowerZ &&
                simulation.Weapons.AimPoint[stateIndex] != Vector3.Zero;
     }
 
