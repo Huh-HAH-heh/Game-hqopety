@@ -977,7 +977,8 @@ public void DrawSnapshot(
 
                 // The tail root overlaps the rump. Hide only its inner arc so
                 // the contour joins the body instead of showing a closed ring.
-                if (bodyPolygon.Length >= 3 &&
+                if (i == 0 &&
+                    bodyPolygon.Length >= 3 &&
                     IsPointInPolygon(testX, testY, bodyPolygon))
                 {
                     continue;
