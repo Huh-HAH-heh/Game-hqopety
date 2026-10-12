@@ -118,6 +118,7 @@ public sealed class UnitRenderSystem
             simulation.Units;
 
         Vector3[] headNormals = units.HeadNormal;
+        UnitType[] unitTypes = units.Type;
         UnitBodyStore bodies = simulation.Bodies;
 
         if (showUnitDetails)
@@ -221,16 +222,27 @@ public sealed class UnitRenderSystem
                 tilePixelSize,
                 screenScale);
 
-            int renderedParts = AppendBodyParts(
-                _vertices,
-                _bodyOutlines,
-                bodies,
-                bodyStart,
-                bodyCount,
-                units.FactionTag[unitIndex],
-                isAlive,
-                tilePixelSize,
-                screenScale);
+            int renderedParts = unitTypes[unitIndex] == UnitType.Colonist
+                ? AppendHitRegions(
+                    _vertices,
+                    _bodyOutlines,
+                    units,
+                    simulation.HitRegions,
+                    unitIndex,
+                    units.FactionTag[unitIndex],
+                    isAlive,
+                    tilePixelSize,
+                    screenScale)
+                : AppendBodyParts(
+                    _vertices,
+                    _bodyOutlines,
+                    bodies,
+                    bodyStart,
+                    bodyCount,
+                    units.FactionTag[unitIndex],
+                    isAlive,
+                    tilePixelSize,
+                    screenScale);
 
             // Keep the marker only for a unit with no model rig at all.
             if (renderedParts == 0)
@@ -598,6 +610,53 @@ public void DrawSnapshot(
         }
 
         return count;
+    }
+
+    private static int AppendHitRegions(
+        VertexArray fills,
+        VertexArray outlines,
+        UnitStore units,
+        UnitHitRegionStore hitRegions,
+        int unitIndex,
+        ushort factionTag,
+        bool isAlive,
+        float tilePixelSize,
+        float screenScale)
+    {
+        UnitHitRegionProfile? profile = hitRegions.GetProfile(unitIndex);
+        if (profile == null)
+            return 0;
+
+        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+        for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
+        {
+            UnitCircleHitRegion region = regions[regionIndex];
+            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                units,
+                unitIndex,
+                regionIndex,
+                hitRegions);
+            RenderBodyPart part = UnitHitRegionRenderGeometry.CreatePart(
+                units,
+                unitIndex,
+                region,
+                geometry);
+
+            AppendBodyPart(
+                fills,
+                outlines,
+                part.Position,
+                part.Scale,
+                part.Rotation,
+                part.Primitive,
+                part.Role,
+                factionTag,
+                isAlive,
+                tilePixelSize,
+                screenScale);
+        }
+
+        return regions.Length;
     }
 
     private static void AppendBodyPart(
