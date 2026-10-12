@@ -59,6 +59,7 @@ public sealed class VisionSystem
     private const int MaxNearbyUnitsPerCell = 4;
     private const int NearbyCellRadius = 1;
 
+    private readonly UnitHitRegionStore? _hitRegions;
     private float _updateTimer;
     private int _candidatePairCount;
     private int _lineOfSightChecks;
@@ -95,11 +96,14 @@ public sealed class VisionSystem
     private int _visibleTargetCount;
 
     public VisionSystem(
-        int initialUnitCapacity = 1024)
+        int initialUnitCapacity = 1024,
+        UnitHitRegionStore? hitRegions = null)
     {
         if (initialUnitCapacity <= 0)
             throw new ArgumentOutOfRangeException(
                 nameof(initialUnitCapacity));
+
+        _hitRegions = hitRegions;
 
         _aliveUnits =
             new int[initialUnitCapacity];
@@ -653,16 +657,10 @@ public sealed class VisionSystem
                 observerIndex,
                 bodies);
 
-        Span<Vector3> points =
-            stackalloc Vector3[
-                VisibilityPointCount];
-
-        int pointCount = GetVisibilityPoints(
+        int pointCount = UnitHitSystem.GetVisibilityPointCount(
             units,
             targetIndex,
-            observerEye,
-            points,
-            bodies);
+            _hitRegions);
 
         Vector3 firstBlockingPoint =
             Vector3.Zero;
@@ -671,8 +669,12 @@ public sealed class VisionSystem
              i < pointCount;
              i++)
         {
-            Vector3 point =
-                points[i];
+            Vector3 point = UnitHitSystem.GetRegionPoint(
+                units,
+                targetIndex,
+                i,
+                observerEye,
+                _hitRegions);
 
             _lineOfSightChecks++;
 
@@ -715,7 +717,8 @@ public sealed class VisionSystem
         return UnitHitSystem.GetEyePosition(
             units,
             unitIndex,
-            bodies);
+            bodies,
+            _hitRegions);
     }
 
     public void GetVisibilityPoints(
@@ -751,7 +754,8 @@ public sealed class VisionSystem
             unitIndex,
             source,
             points,
-            bodies);
+            bodies,
+            _hitRegions);
     }
 
     public bool HasLineOfSight(
