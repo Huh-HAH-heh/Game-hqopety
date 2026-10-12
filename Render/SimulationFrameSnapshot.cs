@@ -50,13 +50,6 @@ public readonly record struct RenderProjectileImpact(
     float Lifetime,
     ProjectileImpactKind Kind);
 
-public readonly record struct RenderHitVolume(
-    UnitHealthPartId Part,
-    Vector3 Center,
-    Vector3 Forward,
-    Vector3 Right,
-    Vector3 Radii);
-
 /// <summary>
 /// Immutable horizontal body geometry captured for one render frame.
 /// Scale and rotation come from the same articulated body transforms used by hit testing.
@@ -79,8 +72,6 @@ public sealed class SimulationFrameSnapshot
     public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
     public RenderAimRing[] AimRings { get; init; } = Array.Empty<RenderAimRing>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
-    public RenderHitVolume[] HitVolumes { get; init; } = Array.Empty<RenderHitVolume>();
-    public int HitVolumeUnitIndex { get; init; } = -1;
 
     public int UnitCount => Units.Length;
     public int ActiveProjectiles { get; init; }
@@ -149,8 +140,7 @@ public sealed class SimulationFrameSnapshot
     }
 
     public static SimulationFrameSnapshot Capture(
-        UnitSimulation simulation,
-        int hitVolumeUnitIndex = -1)
+        UnitSimulation simulation)
     {
         UnitStore units = simulation.Units;
         ReadOnlySpan<int> active = units.ActiveIndices;
@@ -326,46 +316,6 @@ public sealed class SimulationFrameSnapshot
             }
         }
 
-        RenderHitVolume[] hitVolumes = Array.Empty<RenderHitVolume>();
-        int capturedHitVolumeUnitIndex = -1;
-        Span<HitVolume> hitVolumeBuffer =
-            stackalloc HitVolume[UnitHitSystem.MaxHitVolumeCount];
-
-        if (hitVolumeUnitIndex >= 0)
-        {
-            for (int i = 0; i < active.Length; i++)
-            {
-                int unitIndex = active[i];
-                if (unitIndex != hitVolumeUnitIndex)
-                    continue;
-
-                int volumeCount = UnitHitSystem.GetHitVolumes(
-                    units,
-                    unitIndex,
-                    hitVolumeBuffer,
-                    simulation.Bodies);
-
-                if (volumeCount > 0)
-                {
-                    hitVolumes = new RenderHitVolume[volumeCount];
-                    for (int part = 0; part < volumeCount; part++)
-                    {
-                        ref readonly HitVolume volume = ref hitVolumeBuffer[part];
-                        hitVolumes[part] = new RenderHitVolume(
-                            volume.Part,
-                            volume.Center,
-                            volume.Forward,
-                            volume.Right,
-                            volume.Radii);
-                    }
-
-                    capturedHitVolumeUnitIndex = unitIndex;
-                }
-
-                break;
-            }
-        }
-
         List<RenderAimRing> aimRings = new(Math.Min(active.Length, 128));
         bool[] targetDrawn = new bool[units.Capacity];
         UnitInventoryStore inventory = simulation.Inventory;
@@ -491,8 +441,6 @@ public sealed class SimulationFrameSnapshot
             Traces = traces,
             AimRings = aimRings.ToArray(),
             Impacts = impacts,
-            HitVolumes = hitVolumes,
-            HitVolumeUnitIndex = capturedHitVolumeUnitIndex,
             ActiveProjectiles = projectiles.ActiveCount,
             ProjectileCapacity = projectiles.Capacity,
             TotalShotsFired = simulation.TotalShotsFired,
