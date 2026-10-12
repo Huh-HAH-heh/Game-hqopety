@@ -410,6 +410,10 @@ public sealed class UnitAiSystem
                     continue;
                 }
 
+                // Retain the last observed anatomical point; suppressive fire must
+                // not reconstruct a target point from unit height after LOS is lost.
+                Store.RememberAimPoint(unit, shotCheck.VisibleTargetPoint);
+
                 // Aim independently for each weapon slot. TargetMode selects a
                 // visible vertical anatomy layer, so one shared point would make
                 // Head/Torso/Legs settings ineffective when the AI supplies it.
@@ -471,14 +475,9 @@ public sealed class UnitAiSystem
             {
                 if (HasSuppressFireWeapon(inventory, weapons, unit))
                 {
-                    Vector3 lastSeenAimPoint =
-                        Store.LastSeenPosition[unit] +
-                        new Vector3(
-                            0f,
-                            0f,
-                            MathF.Max(
-                                0.05f,
-                                units.Height[target.Index] * 0.55f));
+                    Vector3 lastSeenAimPoint = Store.LastSeenAimPoint[unit];
+                    if (lastSeenAimPoint == Vector3.Zero)
+                        lastSeenAimPoint = Store.LastSeenPosition[unit];
 
                     TryFireSuppressiveWeapons(
                         units,
@@ -841,6 +840,12 @@ public sealed class UnitAiSystem
             // This deliberately updates the stored aim point even while the
             // weapon is on cooldown. Auto fire can then keep suppressing that
             // last-known position without requiring a fresh visible target.
+            Vector3 suppressPoint =
+                weapons.AimTarget[stateIndex] == target &&
+                weapons.AimPoint[stateIndex] != Vector3.Zero
+                    ? weapons.AimPoint[stateIndex]
+                    : aimPoint;
+
             _weaponSystem.TryFireAt(
                 units,
                 inventory,
@@ -850,7 +855,7 @@ public sealed class UnitAiSystem
                 weaponSlot,
                 target,
                 accuracyMultiplier,
-                aimPoint);
+                suppressPoint);
         }
 
         return attempted;
