@@ -1445,15 +1445,22 @@ public static class CombatSelfTest
             UnitType.Colonist,
             new Vector3(10f, 10f, 0.1f));
 
-        float legsZ = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 0, simulation.HitRegions).Center.Z;
-        float torsoZ = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 1, simulation.HitRegions).Center.Z;
-        float headZ = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 2, simulation.HitRegions).Center.Z;
+        Vector3 legsCenter = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 0, simulation.HitRegions).Center;
+        Vector3 torsoCenter = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 1, simulation.HitRegions).Center;
+        Vector3 headCenter = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 2, simulation.HitRegions).Center;
 
-        return legsZ < torsoZ &&
-            torsoZ < headZ &&
+        bool sameXY =
+            MathF.Abs(legsCenter.X - torsoCenter.X) < 0.001f &&
+            MathF.Abs(torsoCenter.X - headCenter.X) < 0.001f &&
+            MathF.Abs(legsCenter.Y - torsoCenter.Y) < 0.001f &&
+            MathF.Abs(torsoCenter.Y - headCenter.Y) < 0.001f;
+
+        return sameXY &&
+            legsCenter.Z < torsoCenter.Z &&
+            torsoCenter.Z < headCenter.Z &&
             UnitHitSystem.GetVisibilityPointCount(
                 simulation.Units,
                 unit.Index,
