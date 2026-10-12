@@ -2072,7 +2072,7 @@ private static bool TestVisionDetectsRegionInsideRange()
 
         UnitSimulation simulation = new UnitSimulation(4, 32);
         UnitId unit = simulation.Spawn(
-            UnitType.Drone,
+            UnitType.SegmentedMonster,
             new Vector3(10f, 12f, 0.1f),
             hitProfile: profile);
 
@@ -2118,7 +2118,7 @@ private static bool TestVisionDetectsRegionInsideRange()
         UnitAnatomyProfile initial = new(firstSegment);
         UnitSimulation simulation = new UnitSimulation(4, 32);
         UnitId unit = simulation.Spawn(
-            UnitType.Drone,
+            UnitType.SegmentedMonster,
             new Vector3(10f, 12f, 0.1f),
             hitProfile: initial);
 
@@ -2162,8 +2162,7 @@ private static bool TestVisionDetectsRegionInsideRange()
 
         return MathF.Abs(simulation.Health.HitPoints[preservedHealthIndex] - 20f) < 0.001f &&
                MathF.Abs(simulation.Health.HitPoints[secondHealthIndex] - 40f) < 0.001f &&
-               simulation.Health.Parent[secondHealthIndex] ==
-                   preservedHealthIndex % simulation.Health.MaxParts;
+               simulation.Health.Parent[secondHealthIndex] == preservedHealthIndex;
     }
 
     private static bool TestStartingArmorMitigatesRifleHits()
