@@ -352,6 +352,29 @@ public class UnitHitRegionProfile
             if (!float.IsFinite(totalWeight) || totalWeight <= 0f)
                 throw new ArgumentException("Hit-region part weights must have a positive finite total.", nameof(regions));
         }
+
+        for (int i = 0; i < _regions.Length; i++)
+        {
+            UnitCircleHitRegion region = _regions[i];
+            if (!string.IsNullOrWhiteSpace(region.ParentId) &&
+                FindRegion(region.ParentId) < 0)
+            {
+                throw new ArgumentException(
+                    $"Anatomy node '{region.Id}' references missing parent node '{region.ParentId}'.",
+                    nameof(regions));
+            }
+
+            foreach (HitRegionPartBinding binding in region.Parts)
+            {
+                if (!string.IsNullOrWhiteSpace(binding.ParentId) &&
+                    !TryFindPart(binding.ParentId, out _, out _))
+                {
+                    throw new ArgumentException(
+                        $"Anatomy tissue '{binding.Id}' references missing parent tissue '{binding.ParentId}'.",
+                        nameof(regions));
+                }
+            }
+        }
     }
 
     public int FindRegion(string id)
