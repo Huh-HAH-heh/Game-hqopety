@@ -243,6 +243,44 @@ public sealed class UnitSimulation
             profile);
     }
 
+    public UnitId SpawnCustom(
+        in UnitDefinition definition,
+        Vector3 position,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        UnitHitRegionProfile hitProfile,
+        float bodyAngle = 0f,
+        int locationId = 0,
+        ushort factionTag = 0)
+    {
+        if (hitProfile == null)
+            throw new ArgumentNullException(nameof(hitProfile));
+
+        BodyHandle body = Bodies.CreateBody(bodyParts);
+
+        Vector3 bodyNormal = new Vector3(
+            MathF.Cos(bodyAngle),
+            MathF.Sin(bodyAngle),
+            0f);
+
+        UnitId id = Units.Create(
+            definition,
+            position,
+            bodyNormal,
+            bodyNormal,
+            body,
+            locationId,
+            factionTag);
+
+        return FinishSpawn(
+            id,
+            definition.Type,
+            position,
+            bodyNormal,
+            bodyNormal,
+            body,
+            hitProfile);
+    }
+
     private UnitId FinishSpawn(
         UnitId id,
         UnitType type,
