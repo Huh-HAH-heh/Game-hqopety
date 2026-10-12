@@ -29,7 +29,9 @@ public enum BodyPartMotion : byte
     StaticRelative = 0,
     FollowParent = 1,
     WalkCycle = 2,
-    WalkCycleOpposite = 3
+    WalkCycleOpposite = 3,
+    WalkCycleProfile = 4,
+    WalkCycleProfileOpposite = 5
 }
 
 public enum BodyPartRole : byte
