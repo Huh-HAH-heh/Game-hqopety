@@ -84,7 +84,7 @@ public static class UnitCatalog
                     moveSpeed: 3.0f,
                     width: 0.55f,
                     length: 1.5f,
-                    height: 0.40f,
+                    height: 1.45f,
                     viewRange: 15f,
                     fieldOfView: 140f),
 
