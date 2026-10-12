@@ -127,7 +127,6 @@ public sealed class UnitBodySystem
             0f,
             1f);
         float gaitPhase = animationTime * 11f + unit * 1.317f;
-        int tailSegment = 0;
         int end = start + count;
 
         // Definitions are parent-first, so every parent's transform has
@@ -162,11 +161,6 @@ public sealed class UnitBodySystem
                     tailInitialized,
                     worldRotations,
                     followDistances,
-                    bodyRotation,
-                    animationTime,
-                    gait,
-                    unit,
-                    tailSegment++,
                     deltaTime);
                 continue;
             }
@@ -315,11 +309,6 @@ public sealed class UnitBodySystem
         bool[] initialized,
         float[] rotations,
         float[] distances,
-        float bodyRotation,
-        float animationTime,
-        float gait,
-        int unit,
-        int tailSegment,
         float deltaTime)
     {
         Vector3 parentPosition = positions[parent];
@@ -342,19 +331,11 @@ public sealed class UnitBodySystem
         previousPositions[part] = current;
 
         float frameScale = Math.Clamp(deltaTime * 60f, 0f, 3f);
-        float damping = MathF.Pow(0.90f, frameScale);
+        float damping = MathF.Pow(0.965f, frameScale);
         Vector3 predicted = current + (current - previous) * damping * frameScale;
 
-        // A travelling lateral wave makes the tail sway even while standing.
-        // The tip moves more than the root; body motion adds extra amplitude.
-        float phase = animationTime * (5.2f + gait * 2.8f)
-            - tailSegment * 0.52f
-            + unit * 0.73f;
-        float amplitude = (0.055f + gait * 0.10f)
-            * (0.65f + MathF.Min(0.65f, tailSegment * 0.055f));
-        float sway = MathF.Sin(phase) * amplitude;
-        Vector3 side = new(-MathF.Sin(bodyRotation), MathF.Cos(bodyRotation), 0f);
-        predicted += side * sway;
+        // No idle oscillation: movement comes from inertia only.
+        // Reduced damping lets the distal links lag naturally on turns.
         predicted.Z = parentPosition.Z;
 
         Vector3 delta = predicted - parentPosition;
