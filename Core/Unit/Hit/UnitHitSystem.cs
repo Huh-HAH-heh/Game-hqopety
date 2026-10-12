@@ -203,6 +203,39 @@ public sealed class UnitHitSystem
                MathF.Abs(point.Z - geometry.Center.Z) <= geometry.HalfHeight + tolerance;
     }
 
+    public static bool TryFindBindingForPart(
+        UnitStore units,
+        int unitIndex,
+        UnitHealthPartId part,
+        out int regionIndex,
+        out int bindingIndex,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        return GetProfile(units, unitIndex, hitRegions).TryFindPart(
+            part, out regionIndex, out bindingIndex);
+    }
+
+    public static int FindBindingInRegion(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        UnitHealthPartId part,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if ((uint)regionIndex >= (uint)profile.RegionCount)
+            return -1;
+
+        ReadOnlySpan<HitRegionPartBinding> bindings = profile.Regions[regionIndex].Parts;
+        for (int i = 0; i < bindings.Length; i++)
+        {
+            if (bindings[i].Part == part)
+                return i;
+        }
+
+        return -1;
+    }
+
     public static bool IsBindingInRegion(
         UnitStore units,
         int unitIndex,
@@ -307,6 +340,24 @@ public sealed class UnitHitSystem
             {
                 return i;
             }
+        }
+
+        return -1;
+    }
+
+    public static int FindRegionAtPoint(
+        UnitStore units,
+        int unitIndex,
+        Vector3 point,
+        float tolerance = 0f,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        for (int i = 0; i < profile.RegionCount; i++)
+        {
+            if (IsPointInsideRegion(
+                    units, unitIndex, i, point, tolerance, hitRegions))
+                return i;
         }
 
         return -1;
@@ -510,8 +561,11 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions)
     {
         Vector3 center = GetRegionGeometry(units, unitIndex, regionIndex, hitRegions).Center;
-        Vector3 bodyNormal = units.BodyNormal[unitIndex];
-        float angle = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
+        Vector3 direction = (marker.Roles &
+            (UnitAnatomyMarkerRole.Eye | UnitAnatomyMarkerRole.Muzzle)) != 0
+            ? units.HeadNormal[unitIndex]
+            : units.BodyNormal[unitIndex];
+        float angle = MathF.Atan2(direction.Y, direction.X);
         float cos = MathF.Cos(angle);
         float sin = MathF.Sin(angle);
         Vector3 offset = marker.LocalOffset;
