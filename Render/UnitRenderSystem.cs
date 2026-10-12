@@ -652,6 +652,10 @@ public void DrawSnapshot(
         Span<RatOutlineCircle> tail = stackalloc RatOutlineCircle[count];
         int circleCount = 0;
         int tailCount = 0;
+        RatOutlineCircle head = default;
+        RatOutlineCircle muzzleTip = default;
+        bool hasHead = false;
+        bool hasMuzzleTip = false;
         Vector3[] positions = bodies.WorldPosition;
         Vector3[] scales = bodies.Scale;
         BodyPartRole[] roles = bodies.Role;
@@ -672,6 +676,26 @@ public void DrawSnapshot(
                 continue;
             }
 
+            RatOutlineCircle circle = new(
+                positions[i].X * tilePixelSize,
+                positions[i].Y * tilePixelSize,
+                MathF.Abs(scales[i].X) * tilePixelSize,
+                roles[i]);
+
+            if (roles[i] == BodyPartRole.Head)
+            {
+                head = circle;
+                hasHead = true;
+                continue;
+            }
+
+            if (roles[i] == BodyPartRole.Muzzle)
+            {
+                muzzleTip = circle;
+                hasMuzzleTip = true;
+                continue;
+            }
+
             if (roles[i] == BodyPartRole.Eye)
             {
                 AppendBodyPart(
@@ -681,15 +705,13 @@ public void DrawSnapshot(
                 continue;
             }
 
-            circles[circleCount++] = new RatOutlineCircle(
-                positions[i].X * tilePixelSize,
-                positions[i].Y * tilePixelSize,
-                MathF.Abs(scales[i].X) * tilePixelSize,
-                roles[i]);
+            circles[circleCount++] = circle;
         }
 
         AppendRatCircleUnion(outlines, circles[..circleCount]);
-        AppendRatTailOutline(outlines, tail[..tailCount]);
+        AppendRatTailCircles(outlines, tail[..tailCount]);
+        if (hasHead)
+            AppendRatHeadOutline(outlines, head, muzzleTip, hasMuzzleTip);
         return count;
     }
 
@@ -705,6 +727,10 @@ public void DrawSnapshot(
         Span<RatOutlineCircle> tail = stackalloc RatOutlineCircle[count];
         int circleCount = 0;
         int tailCount = 0;
+        RatOutlineCircle head = default;
+        RatOutlineCircle muzzleTip = default;
+        bool hasHead = false;
+        bool hasMuzzleTip = false;
 
         for (int i = start; i < start + count; i++)
         {
@@ -722,6 +748,26 @@ public void DrawSnapshot(
                 continue;
             }
 
+            RatOutlineCircle circle = new(
+                part.Position.X * tilePixelSize,
+                part.Position.Y * tilePixelSize,
+                MathF.Abs(part.Scale.X) * tilePixelSize,
+                part.Role);
+
+            if (part.Role == BodyPartRole.Head)
+            {
+                head = circle;
+                hasHead = true;
+                continue;
+            }
+
+            if (part.Role == BodyPartRole.Muzzle)
+            {
+                muzzleTip = circle;
+                hasMuzzleTip = true;
+                continue;
+            }
+
             if (part.Role == BodyPartRole.Eye)
             {
                 AppendBodyPart(
@@ -731,56 +777,102 @@ public void DrawSnapshot(
                 continue;
             }
 
-            circles[circleCount++] = new RatOutlineCircle(
-                part.Position.X * tilePixelSize,
-                part.Position.Y * tilePixelSize,
-                MathF.Abs(part.Scale.X) * tilePixelSize,
-                part.Role);
+            circles[circleCount++] = circle;
         }
 
         AppendRatCircleUnion(outlines, circles[..circleCount]);
-        AppendRatTailOutline(outlines, tail[..tailCount]);
+        AppendRatTailCircles(outlines, tail[..tailCount]);
+        if (hasHead)
+            AppendRatHeadOutline(outlines, head, muzzleTip, hasMuzzleTip);
         return count;
     }
 
-    private static void AppendRatTailOutline(
+    private static void AppendRatTailCircles(
         VertexArray outlines,
         ReadOnlySpan<RatOutlineCircle> tail)
     {
-        if (tail.Length < 2)
-            return;
-
-        Span<Vector2f> left = stackalloc Vector2f[tail.Length];
-        Span<Vector2f> right = stackalloc Vector2f[tail.Length];
-
         for (int i = 0; i < tail.Length; i++)
         {
-            RatOutlineCircle point = tail[i];
-            Vector2f tangent;
-
-            if (i == 0)
-                tangent = new Vector2f(tail[1].X - point.X, tail[1].Y - point.Y);
-            else if (i == tail.Length - 1)
-                tangent = new Vector2f(point.X - tail[i - 1].X, point.Y - tail[i - 1].Y);
-            else
-                tangent = new Vector2f(tail[i + 1].X - tail[i - 1].X, tail[i + 1].Y - tail[i - 1].Y);
-
-            float lengthSquared = tangent.X * tangent.X + tangent.Y * tangent.Y;
-            float invLength = lengthSquared > 0.0001f ? 1f / MathF.Sqrt(lengthSquared) : 1f;
-            float normalX = -tangent.Y * invLength;
-            float normalY = tangent.X * invLength;
-            float radius = point.Radius * 0.82f;
-
-            left[i] = new Vector2f(point.X + normalX * radius, point.Y + normalY * radius);
-            right[i] = new Vector2f(point.X - normalX * radius, point.Y - normalY * radius);
+            RatOutlineCircle bead = tail[i];
+            float radius = MathF.Max(0.35f, bead.Radius);
+            int segments = Math.Clamp((int)MathF.Ceiling(radius * 2.5f), 8, 14);
+            AppendCircleOutline(
+                outlines,
+                bead.X,
+                bead.Y,
+                radius,
+                GetRatLineColor(BodyPartRole.Tail),
+                segments);
         }
+    }
 
-        Color color = GetRatLineColor(BodyPartRole.Tail);
-        for (int i = 0; i < tail.Length - 1; i++)
+    private static void AppendRatHeadOutline(
+        VertexArray outlines,
+        RatOutlineCircle head,
+        RatOutlineCircle muzzleTip,
+        bool hasMuzzleTip)
+    {
+        float radius = MathF.Max(0.5f, head.Radius);
+        Color color = GetRatLineColor(BodyPartRole.Head);
+
+        if (!hasMuzzleTip)
         {
-            AppendDebugLine(outlines, left[i].X, left[i].Y, left[i + 1].X, left[i + 1].Y, color);
-            AppendDebugLine(outlines, right[i].X, right[i].Y, right[i + 1].X, right[i + 1].Y, color);
+            AppendCircleOutline(outlines, head.X, head.Y, radius, color, 20);
+            return;
         }
+
+        float dx = muzzleTip.X - head.X;
+        float dy = muzzleTip.Y - head.Y;
+        float lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared < 0.0001f)
+        {
+            AppendCircleOutline(outlines, head.X, head.Y, radius, color, 20);
+            return;
+        }
+
+        float invLength = 1f / MathF.Sqrt(lengthSquared);
+        dx *= invLength;
+        dy *= invLength;
+        float sideX = -dy;
+        float sideY = dx;
+
+        // Leave the forward arc open and close the skull with two lines
+        // ending at the nose, so the head reads as pointed rather than round.
+        const int segments = 24;
+        for (int i = 0; i < segments; i++)
+        {
+            float a0 = i * MathF.Tau / segments;
+            float a1 = (i + 1) * MathF.Tau / segments;
+            float middle = (a0 + a1) * 0.5f;
+            float forwardDot = MathF.Cos(middle) * dx + MathF.Sin(middle) * dy;
+            if (forwardDot > 0.50f)
+                continue;
+
+            AppendDebugLine(
+                outlines,
+                head.X + MathF.Cos(a0) * radius,
+                head.Y + MathF.Sin(a0) * radius,
+                head.X + MathF.Cos(a1) * radius,
+                head.Y + MathF.Sin(a1) * radius,
+                color);
+        }
+
+        float attachForward = radius * 0.50f;
+        float attachSide = radius * 0.8660254f;
+        AppendDebugLine(
+            outlines,
+            head.X + dx * attachForward + sideX * attachSide,
+            head.Y + dy * attachForward + sideY * attachSide,
+            muzzleTip.X,
+            muzzleTip.Y,
+            color);
+        AppendDebugLine(
+            outlines,
+            head.X + dx * attachForward - sideX * attachSide,
+            head.Y + dy * attachForward - sideY * attachSide,
+            muzzleTip.X,
+            muzzleTip.Y,
+            color);
     }
 
     private static void AppendRatCircleUnion(
