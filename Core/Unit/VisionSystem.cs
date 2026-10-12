@@ -603,6 +603,9 @@ public sealed class VisionSystem
             units,
             targetIndex,
             _hitRegions);
+        UnitAnatomyMarkerRole pointRole = targetMode.HasValue
+            ? UnitAnatomyMarkerRole.Aim
+            : UnitAnatomyMarkerRole.Vision;
 
         bool anyRegionInRange = false;
         bool anyRegionInFov = false;
@@ -630,8 +633,8 @@ public sealed class VisionSystem
 
         for (int i = 0; i < pointCount; i++)
         {
-            float height = UnitHitSystem.GetRegionGeometry(
-                units, targetIndex, i, _hitRegions).Center.Z;
+            float height = UnitHitSystem.GetRegionPoint(
+                units, targetIndex, i, observerEye, _hitRegions, pointRole).Z;
             minTargetHeight = MathF.Min(minTargetHeight, height);
             maxTargetHeight = MathF.Max(maxTargetHeight, height);
         }
@@ -647,7 +650,8 @@ public sealed class VisionSystem
                 targetIndex,
                 i,
                 observerEye,
-                _hitRegions);
+                _hitRegions,
+                pointRole);
 
             float dx = point.X - observerEye.X;
             float dy = point.Y - observerEye.Y;
@@ -686,8 +690,7 @@ public sealed class VisionSystem
                         Vector3.Zero);
                 }
 
-                float height = UnitHitSystem.GetRegionGeometry(
-                    units, targetIndex, i, _hitRegions).Center.Z;
+                float height = point.Z;
                 visiblePointCount++;
 
                 if (capturedVisiblePointCount < visibleHeights.Length)
@@ -807,7 +810,8 @@ public sealed class VisionSystem
                 targetIndex,
                 i,
                 observerEye,
-                _hitRegions);
+                _hitRegions,
+                UnitAnatomyMarkerRole.Vision);
 
             float dx = point.X - observerEye.X;
             float dy = point.Y - observerEye.Y;
