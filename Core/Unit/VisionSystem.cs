@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
+using Core.Combat;
 
 namespace Core.Unit;
 
@@ -554,7 +555,25 @@ public sealed class VisionSystem
         WorldMap worldMap,
         int observerIndex,
         int targetIndex,
-        UnitBodyStore? bodies = null)
+        UnitBodyStore? bodies = null) =>
+        EvaluateCore(units, worldMap, observerIndex, targetIndex, null, bodies);
+
+    public VisionCheck EvaluateTargetMode(
+        UnitStore units,
+        WorldMap worldMap,
+        int observerIndex,
+        int targetIndex,
+        TargetMode targetMode,
+        UnitBodyStore? bodies = null) =>
+        EvaluateCore(units, worldMap, observerIndex, targetIndex, targetMode, bodies);
+
+    private VisionCheck EvaluateCore(
+        UnitStore units,
+        WorldMap worldMap,
+        int observerIndex,
+        int targetIndex,
+        TargetMode? targetMode,
+        UnitBodyStore? bodies)
     {
         Vector3 targetCenter = units.Position[targetIndex];
         Vector3 observerEye = UnitHitSystem.GetEyePosition(
@@ -589,6 +608,25 @@ public sealed class VisionSystem
         bool anyRegionInFov = false;
         bool hasBlockingPoint = false;
         Vector3 firstBlockingPoint = Vector3.Zero;
+        bool hasVisibleTargetPoint = false;
+        int selectedPointIndex = -1;
+        Vector3 selectedTargetPoint = targetCenter;
+        float selectedTargetHeight = 0f;
+        float selectedMiddleDistance = float.PositiveInfinity;
+        float minTargetHeight = float.PositiveInfinity;
+        float maxTargetHeight = float.NegativeInfinity;
+
+        for (int i = 0; i < pointCount; i++)
+        {
+            float height = UnitHitSystem.GetRegionGeometry(
+                units, targetIndex, i, _hitRegions).Center.Z;
+            minTargetHeight = MathF.Min(minTargetHeight, height);
+            maxTargetHeight = MathF.Max(maxTargetHeight, height);
+        }
+
+        float middleTargetHeight = pointCount == 0
+            ? targetCenter.Z
+            : (minTargetHeight + maxTargetHeight) * 0.5f;
 
         for (int i = 0; i < pointCount; i++)
         {
@@ -625,13 +663,42 @@ public sealed class VisionSystem
                     point,
                     out Vector3 blockingPoint))
             {
-                return new VisionCheck(
-                    VisionState.Visible,
-                    i,
-                    observerEye,
-                    targetCenter,
-                    point,
-                    Vector3.Zero);
+                if (!targetMode.HasValue)
+                {
+                    return new VisionCheck(
+                        VisionState.Visible,
+                        i,
+                        observerEye,
+                        targetCenter,
+                        point,
+                        Vector3.Zero);
+                }
+
+                float height = UnitHitSystem.GetRegionGeometry(
+                    units, targetIndex, i, _hitRegions).Center.Z;
+                bool preferred = !hasVisibleTargetPoint;
+                float middleDistance = MathF.Abs(height - middleTargetHeight);
+
+                if (hasVisibleTargetPoint)
+                {
+                    preferred = targetMode.Value switch
+                    {
+                        TargetMode.Head => height > selectedTargetHeight,
+                        TargetMode.Legs => height < selectedTargetHeight,
+                        _ => middleDistance < selectedMiddleDistance
+                    };
+                }
+
+                if (preferred)
+                {
+                    hasVisibleTargetPoint = true;
+                    selectedPointIndex = i;
+                    selectedTargetPoint = point;
+                    selectedTargetHeight = height;
+                    selectedMiddleDistance = middleDistance;
+                }
+
+                continue;
             }
 
             if (!hasBlockingPoint)
@@ -639,6 +706,17 @@ public sealed class VisionSystem
                 firstBlockingPoint = blockingPoint;
                 hasBlockingPoint = true;
             }
+        }
+
+        if (hasVisibleTargetPoint)
+        {
+            return new VisionCheck(
+                VisionState.Visible,
+                selectedPointIndex,
+                observerEye,
+                targetCenter,
+                selectedTargetPoint,
+                Vector3.Zero);
         }
 
         VisionState state = !anyRegionInRange
