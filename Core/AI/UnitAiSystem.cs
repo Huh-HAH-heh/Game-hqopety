@@ -887,11 +887,7 @@ public sealed class UnitAiSystem
         int unit,
         UnitId target)
     {
-        Vector3 shooterPosition = units.Position[unit];
-        Vector3 eye = shooterPosition + new Vector3(
-            0f,
-            0f,
-            MathF.Max(0.1f, units.Height[unit] * 0.75f));
+        Vector3 eye = vision.GetEyePosition(units, unit);
 
         for (int slot = 0;
              slot < UnitInventoryStore.WeaponSlotCount;
