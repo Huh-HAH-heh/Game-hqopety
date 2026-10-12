@@ -34,7 +34,6 @@ public sealed class GameRenderer
     private readonly LongRangeCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
-    private volatile int _hitVolumeDebugUnitIndex = -1;
 
     private RenderWindow _window = null!;
     private View? _uiView;
@@ -727,7 +726,7 @@ public sealed class GameRenderer
         // Publish a complete initial frame before starting the producer thread.
         Volatile.Write(
             ref _latestSnapshot,
-            SimulationFrameSnapshot.Capture(_unitSimulation, _hitVolumeDebugUnitIndex));
+            SimulationFrameSnapshot.Capture(_unitSimulation));
 
         _simulationThread = new Thread(SimulationLoop)
         {
@@ -741,7 +740,6 @@ public sealed class GameRenderer
     private void SetSelectedUnit(UnitId unit)
     {
         _selectedUnit = unit;
-        _hitVolumeDebugUnitIndex = unit.IsValid ? unit.Index : -1;
     }
 
     private void CycleMassCombatSelection()
@@ -781,7 +779,7 @@ public sealed class GameRenderer
         _simulationThread = null;
         Volatile.Write(
             ref _latestSnapshot,
-            SimulationFrameSnapshot.Capture(_unitSimulation, _hitVolumeDebugUnitIndex));
+            SimulationFrameSnapshot.Capture(_unitSimulation));
     }
 
     private void ExecuteSimulationCommand(Action command)
@@ -847,7 +845,7 @@ public sealed class GameRenderer
             {
                 Volatile.Write(
                     ref _latestSnapshot,
-                    SimulationFrameSnapshot.Capture(_unitSimulation, _hitVolumeDebugUnitIndex));
+                    SimulationFrameSnapshot.Capture(_unitSimulation));
             }
             catch (Exception exception)
             {
