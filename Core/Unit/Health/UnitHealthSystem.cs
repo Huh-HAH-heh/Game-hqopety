@@ -115,6 +115,41 @@ public sealed class UnitHealthSystem
         }
     }
 
+    public void AddRegionBleed(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitId unitId,
+        int regionIndex,
+        int bindingIndex,
+        float amountPerSecond)
+    {
+        if (amountPerSecond <= 0f ||
+            !units.TryGetIndex(unitId, out int unitIndex) ||
+            health.OverallHitPoints[unitIndex] <= 0f ||
+            !health.TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out int partIndex))
+            return;
+
+        health.BleedRate[partIndex] =
+            MathF.Min(10f, health.BleedRate[partIndex] + amountPerSecond);
+    }
+
+    public bool ApplyRegionDamage(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitId unitId,
+        int regionIndex,
+        int bindingIndex,
+        float amount)
+    {
+        if (amount <= 0f ||
+            !units.TryGetIndex(unitId, out int unitIndex) ||
+            health.OverallHitPoints[unitIndex] <= 0f ||
+            !health.TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out int partIndex))
+            return false;
+
+        return ApplyDamageAtIndex(health, unitIndex, partIndex, amount);
+    }
+
     public void AddBleed(
         UnitStore units,
         UnitHealthStore health,
@@ -162,22 +197,22 @@ public sealed class UnitHealthSystem
             return false;
         }
 
-        float hitPoints =
-            health.HitPoints[partIndex];
+        return ApplyDamageAtIndex(health, unitIndex, partIndex, amount);
+    }
 
-        float applied =
-            MathF.Min(
-                amount,
-                hitPoints);
+    private static bool ApplyDamageAtIndex(
+        UnitHealthStore health,
+        int unitIndex,
+        int partIndex,
+        float amount)
+    {
+        float hitPoints = health.HitPoints[partIndex];
+        float applied = MathF.Min(amount, hitPoints);
 
-        health.HitPoints[partIndex] =
-            hitPoints - applied;
-
+        health.HitPoints[partIndex] = hitPoints - applied;
         health.OverallHitPoints[unitIndex] =
-            MathF.Max(
-                0f,
-                health.OverallHitPoints[unitIndex] - applied);
+            MathF.Max(0f, health.OverallHitPoints[unitIndex] - applied);
 
-        return true;
+        return applied > 0f;
     }
 }
