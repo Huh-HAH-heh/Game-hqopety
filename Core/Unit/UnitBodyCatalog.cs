@@ -197,7 +197,7 @@ internal static class UnitBodyCatalog
 
     private static BodyPartDefinition[] CreateScavenRat()
     {
-        var parts = new System.Collections.Generic.List<BodyPartDefinition>(14);
+        var parts = new System.Collections.Generic.List<BodyPartDefinition>(17);
 
         void Add(
             float x,
@@ -220,23 +220,36 @@ internal static class UnitBodyCatalog
                 role: role));
         }
 
-        // A compact rat silhouette: one skull, a pointed muzzle, two body
-        // sections and a thin chain of small tail beads. No limbs or ornaments.
-        Add(0.30f, 0f, 0.095f, -1, BodyPartRole.Head,
+        // Inspired by real rat silhouettes: a compact pointed head, broad middle
+        // of the trunk, narrower rump and a bare tail longer than the body.
+        // Keep the rig as a few overlapping circles instead of a bead-like torso.
+        Add(0.245f, 0f, 0.090f, -1, BodyPartRole.Head,
             anchor: BodyPartAnchor.UnitHead);                         // 0 skull
-        Add(0.105f, 0f, 0.045f, 0, BodyPartRole.Muzzle);              // 1 snout
-        Add(0.090f, 0f, 0.014f, 1, BodyPartRole.Muzzle);              // 2 nose tip
+        Add(0.085f, 0f, 0.035f, 0, BodyPartRole.Muzzle);              // 1 muzzle base
+        Add(0.065f, 0f, 0.012f, 1, BodyPartRole.Muzzle);              // 2 nose tip
 
-        Add(-0.175f, 0f, 0.125f, 0, BodyPartRole.RatBody,
-            BodyPartMotion.SpinalChain, 0.175f);                      // 3 shoulders
-        Add(-0.180f, 0f, 0.092f, 3, BodyPartRole.RatBody,
-            BodyPartMotion.SpinalChain, 0.180f);                      // 4 rump
+        Add(-0.130f, 0f, 0.120f, 0, BodyPartRole.RatBody,
+            BodyPartMotion.SpinalChain, 0.130f);                      // 3 shoulders
+        Add(-0.145f, 0f, 0.145f, 3, BodyPartRole.RatBody,
+            BodyPartMotion.SpinalChain, 0.145f);                      // 4 broad trunk
+        Add(-0.140f, 0f, 0.108f, 4, BodyPartRole.RatBody,
+            BodyPartMotion.SpinalChain, 0.140f);                      // 5 narrowing rump
 
-        Add(-0.100f, 0f, 0.035f, 4, BodyPartRole.Tail,
-            BodyPartMotion.PhysicalTail, 0.100f);                     // 5 tail root
+        Add(-0.120f, 0f, 0.034f, 5, BodyPartRole.Tail,
+            BodyPartMotion.PhysicalTail, 0.120f);                     // 6 tail root
 
-        float[] tailRadii = { 0.030f, 0.026f, 0.022f, 0.018f, 0.014f, 0.011f, 0.008f, 0.005f };
-        float[] tailDistances = { 0.052f, 0.048f, 0.044f, 0.040f, 0.035f, 0.030f, 0.024f, 0.018f };
+        // Wider spacing gives the tail a long, light profile. The circles taper
+        // continuously towards the tip rather than forming a solid plastic tube.
+        float[] tailRadii =
+        {
+            0.034f, 0.030f, 0.026f, 0.022f, 0.018f,
+            0.014f, 0.011f, 0.008f, 0.005f
+        };
+        float[] tailDistances =
+        {
+            0.075f, 0.070f, 0.065f, 0.060f, 0.055f,
+            0.050f, 0.045f, 0.040f, 0.035f
+        };
 
         for (int i = 0; i < tailRadii.Length; i++)
         {
