@@ -125,7 +125,7 @@ public sealed class UnitSimulation
             new UnitSuppressionStore(unitCapacity);
 
         _weaponSystem =
-            new UnitWeaponSystem();
+            new UnitWeaponSystem(HitRegions);
 
         _projectileSystem =
             new ProjectileSystem();
