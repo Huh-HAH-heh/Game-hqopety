@@ -19,6 +19,8 @@ public readonly struct DamageEvent
     public float BluntPenetration { get; }
     public DamageType DamageType { get; }
     public float BleedChance { get; }
+    public int RegionIndex { get; }
+    public float HitRadius { get; }
 
     public DamageEvent(
         UnitId attacker,
@@ -32,7 +34,9 @@ public readonly struct DamageEvent
         float penetration,
         float bluntPenetration,
         DamageType damageType,
-        float bleedChance)
+        float bleedChance,
+        int regionIndex = -1,
+        float hitRadius = 0f)
     {
         Attacker = attacker;
         Target = target;
@@ -46,6 +50,8 @@ public readonly struct DamageEvent
         BluntPenetration = bluntPenetration;
         DamageType = damageType;
         BleedChance = bleedChance;
+        RegionIndex = regionIndex;
+        HitRadius = MathF.Max(0f, hitRadius);
     }
 }
 
@@ -76,11 +82,45 @@ public sealed class DamageSystem
         UnitInventoryStore inventory,
         UnitHealthStore health,
         UnitHealthSystem healthSystem,
-        in DamageEvent damageEvent)
+        in DamageEvent damageEvent,
+        UnitHitRegionStore? hitRegions = null)
     {
         if (!units.TryGetIndex(
                 damageEvent.Target,
                 out int targetIndex))
+        {
+            return new ProjectileDamageResult(
+                0f,
+                0f,
+                0f,
+                true);
+        }
+
+        float hitTolerance = damageEvent.HitRadius + 0.01f;
+        int regionIndex = damageEvent.RegionIndex;
+        if (regionIndex < 0)
+        {
+            regionIndex = UnitHitSystem.FindRegionAtPoint(
+                units,
+                targetIndex,
+                damageEvent.Part,
+                damageEvent.ImpactPosition,
+                hitTolerance,
+                hitRegions);
+        }
+        else if (!UnitHitSystem.IsPointInsideRegion(
+                     units,
+                     targetIndex,
+                     regionIndex,
+                     damageEvent.Part,
+                     damageEvent.ImpactPosition,
+                     hitTolerance,
+                     hitRegions))
+        {
+            regionIndex = -1;
+        }
+
+        if (regionIndex < 0)
         {
             return new ProjectileDamageResult(
                 0f,
@@ -196,7 +236,8 @@ public sealed class DamageSystem
                         health,
                         damageEvent.Target,
                         bluntPart,
-                        resolution.BluntImpactDamage);
+                        resolution.BluntImpactDamage,
+                        hitRegions);
                 }
 
                 if (resolution.Stopped)
@@ -233,7 +274,8 @@ public sealed class DamageSystem
             health,
             damageEvent.Target,
             damageEvent.Part,
-            damage);
+            damage,
+            hitRegions);
 
         if (damage > 0f &&
             damageEvent.BleedChance > 0f &&
@@ -252,7 +294,8 @@ public sealed class DamageSystem
                 health,
                 damageEvent.Target,
                 damageEvent.Part,
-                bleed);
+                bleed,
+                hitRegions);
         }
 
         return new ProjectileDamageResult(
