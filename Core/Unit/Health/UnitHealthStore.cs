@@ -12,7 +12,7 @@ public sealed class UnitHealthStore
 
     private UnitHealthPartId[] _part;
     private UnitHealthPartKind[] _kind;
-    private short[] _parent;
+    private int[] _parent;
     private short[] _regionIndex;
     private short[] _bindingIndex;
     private float[] _maxHitPoints;
@@ -37,7 +37,7 @@ public sealed class UnitHealthStore
     public UnitHealthPartKind[] Kind =>
         _kind;
 
-    public short[] Parent =>
+    public int[] Parent =>
         _parent;
 
     public float[] MaxHitPoints =>
@@ -90,7 +90,7 @@ public sealed class UnitHealthStore
             new UnitHealthPartKind[nodeCapacity];
 
         _parent =
-            new short[nodeCapacity];
+            new int[nodeCapacity];
 
         _regionIndex = new short[nodeCapacity];
         _bindingIndex = new short[nodeCapacity];
@@ -107,7 +107,7 @@ public sealed class UnitHealthStore
         _present =
             new bool[nodeCapacity];
 
-        Array.Fill(_parent, (short)-1);
+        Array.Fill(_parent, -1);
         Array.Fill(_regionIndex, (short)-1);
         Array.Fill(_bindingIndex, (short)-1);
     }
@@ -254,7 +254,7 @@ public sealed class UnitHealthStore
                 }
 
                 if (childIndex >= 0 && parentIndex >= 0)
-                    _parent[childIndex] = checked((short)(parentIndex % MaxPartsPerUnit));
+                    _parent[childIndex] = parentIndex;
             }
         }
     }
@@ -486,7 +486,7 @@ public sealed class UnitHealthStore
 
         Array.Fill(
             _parent,
-            (short)-1,
+            -1,
             oldNodeCapacity,
             newNodeCapacity - oldNodeCapacity);
         Array.Fill(_regionIndex, (short)-1, oldNodeCapacity, newNodeCapacity - oldNodeCapacity);
@@ -656,7 +656,7 @@ public sealed class UnitHealthStore
 
         _part[index] = part;
         _kind[index] = kind;
-        _parent[index] = parent < 0 ? (short)-1 : checked((short)(parent % MaxPartsPerUnit));
+        _parent[index] = parent;
         _regionIndex[index] = checked((short)regionIndex);
         _bindingIndex[index] = checked((short)bindingIndex);
 
