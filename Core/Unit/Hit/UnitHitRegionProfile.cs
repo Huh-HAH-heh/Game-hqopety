@@ -356,12 +356,15 @@ public class UnitHitRegionProfile
         for (int i = 0; i < _regions.Length; i++)
         {
             UnitCircleHitRegion region = _regions[i];
-            if (!string.IsNullOrWhiteSpace(region.ParentId) &&
-                FindRegion(region.ParentId) < 0)
+            if (!string.IsNullOrWhiteSpace(region.ParentId))
             {
-                throw new ArgumentException(
-                    $"Anatomy node '{region.Id}' references missing parent node '{region.ParentId}'.",
-                    nameof(regions));
+                int parentIndex = FindRegion(region.ParentId);
+                if (parentIndex < 0 || parentIndex >= i)
+                {
+                    throw new ArgumentException(
+                        $"Parent node '{region.ParentId}' of anatomy node '{region.Id}' must exist earlier in the profile.",
+                        nameof(regions));
+                }
             }
 
             foreach (HitRegionPartBinding binding in region.Parts)
@@ -500,7 +503,6 @@ public static class UnitHitRegionCatalog
     private static readonly UnitAnatomyProfile Colonist = new(
         UnitAnatomyNode.RelativeCircle(
             "legs",
-            "torso",
             new Vector3(0f, 0f, 0.15f),
             widthRadiusFactor: 0.22f,
             lengthRadiusFactor: 0.18f,
@@ -541,7 +543,7 @@ public static class UnitHitRegionCatalog
         UnitAnatomyNode.RelativeCircle(
             "head",
             "torso",
-            new Vector3(0f, 0f, 0.84f),
+            new Vector3(0f, 0f, 0.34f),
             widthRadiusFactor: 0.20f,
             lengthRadiusFactor: 0.05f,
             heightHalfExtentFactor: 0.13f,
