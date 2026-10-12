@@ -717,8 +717,11 @@ public sealed class UnitSimulation
             for (int j = 0; j < oldTissues.Length; j++)
             {
                 if (oldTissues[j].Part != newTissues[j].Part ||
+                    oldTissues[j].Kind != newTissues[j].Kind ||
                     !string.Equals(oldTissues[j].Id, newTissues[j].Id, StringComparison.Ordinal) ||
-                    oldTissues[j].MaxHitPoints != newTissues[j].MaxHitPoints)
+                    !string.Equals(oldTissues[j].ParentId, newTissues[j].ParentId, StringComparison.Ordinal) ||
+                    oldTissues[j].MaxHitPoints != newTissues[j].MaxHitPoints ||
+                    oldTissues[j].ArmorZone != newTissues[j].ArmorZone)
                     return false;
             }
         }
