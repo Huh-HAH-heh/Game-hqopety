@@ -410,12 +410,9 @@ public sealed class UnitAiSystem
                     continue;
                 }
 
-                // Evaluate returns a clear point from the same hit volume used
-                // by projectile collision. Reuse it instead of tracing another
-                // set of up to 40 aim-point rays for every firing unit.
-                Vector3 aimPoint =
-                    shotCheck.VisibleTargetPoint;
-
+                // Aim independently for each weapon slot. TargetMode selects a
+                // visible vertical anatomy layer, so one shared point would make
+                // Head/Torso/Legs settings ineffective when the AI supplies it.
                 bool fired =
                     TryFireAnyRangedWeapon(
                         units,
@@ -424,7 +421,8 @@ public sealed class UnitAiSystem
                         projectiles,
                         unit,
                         target,
-                        aimPoint,
+                        vision,
+                        worldMap,
                         suppression.GetAccuracyMultiplier(unit));
 
                 if (fired)
@@ -707,7 +705,8 @@ public sealed class UnitAiSystem
         ProjectileStore projectiles,
         int unit,
         UnitId target,
-        Vector3 aimPoint,
+        VisionSystem vision,
+        WorldMap worldMap,
         float accuracyMultiplier)
     {
         for (int slot = 0;
@@ -738,13 +737,19 @@ public sealed class UnitAiSystem
             UnitWeaponSlot weaponSlot =
                 (UnitWeaponSlot)slot;
 
-            if (weapons.Cooldown[
-                    UnitWeaponStore.GetIndex(
-                        unit,
-                        weaponSlot)] > 0f)
-            {
+            int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
+            if (weapons.Cooldown[stateIndex] > 0f)
                 continue;
-            }
+
+            VisionCheck targetCheck = vision.EvaluateTargetMode(
+                units,
+                worldMap,
+                unit,
+                target.Index,
+                weapons.CurrentTargetMode[stateIndex]);
+
+            if (!targetCheck.IsVisible)
+                continue;
 
             if (TryFire(
                     units,
@@ -754,7 +759,7 @@ public sealed class UnitAiSystem
                     unit,
                     weaponSlot,
                     target,
-                    aimPoint,
+                    targetCheck.VisibleTargetPoint,
                     accuracyMultiplier))
             {
                 return true;
