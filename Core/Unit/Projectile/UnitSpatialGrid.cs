@@ -105,15 +105,7 @@ public sealed class UnitSpatialGrid
             if (health != null && health.OverallHitPoints[unit] <= 0f)
                 continue;
 
-            float radius =
-                MathF.Max(
-                    0.05f,
-                    MathF.Max(
-                        units.Radius[unit],
-                        MathF.Max(
-                            units.Width[unit],
-                            units.Length[unit]) *
-                        0.65f));
+            float radius = 0f;
 
             // Broad-phase bounds come exclusively from the same hit regions
             // used by exact projectile intersection below. The articulated render
@@ -143,6 +135,8 @@ public sealed class UnitSpatialGrid
 
                 radius = MathF.Max(radius, reach + 0.02f);
             }
+
+            radius = MathF.Max(0.05f, radius);
 
             int minX =
                 Math.Max(
