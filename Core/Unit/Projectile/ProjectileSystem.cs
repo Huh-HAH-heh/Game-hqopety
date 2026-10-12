@@ -25,6 +25,7 @@ public sealed class ProjectileSystem
     public void Update(
         UnitStore units,
         UnitBodyStore bodies,
+        UnitHitRegionStore hitRegions,
         UnitInventoryStore inventory,
         UnitHealthStore health,
         UnitHealthSystem healthSystem,
@@ -121,6 +122,7 @@ public sealed class ProjectileSystem
                 Trace(
                     units,
                     bodies,
+                    hitRegions,
                     inventory,
                     health,
                     healthSystem,
@@ -163,6 +165,7 @@ public sealed class ProjectileSystem
     private bool Trace(
         UnitStore units,
         UnitBodyStore bodies,
+        UnitHitRegionStore hitRegions,
         UnitInventoryStore inventory,
         UnitHealthStore health,
         UnitHealthSystem healthSystem,
@@ -385,7 +388,8 @@ public sealed class ProjectileSystem
                         0.5f,
                         UnitHealthPartId.None,
                         out UnitHitResult localHit,
-                        bodies))
+                        bodies,
+                        hitRegions))
                 {
                     if (projectiles.Owner[projectileIndex].Index != unitIndex &&
                         (projectiles.FactionTag[projectileIndex] == 0 ||
