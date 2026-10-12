@@ -1421,33 +1421,49 @@ public sealed class VisionSystem
         }
     }
 
-    private static bool IsWithinRangeAndFov(
+    private bool IsWithinRangeAndFov(
         UnitStore units,
         int observer,
         int target,
         out float distanceSquared)
     {
-        Vector3 observerPosition = units.Position[observer];
-        Vector3 targetPosition = units.Position[target];
-
-        float dx = targetPosition.X - observerPosition.X;
-        float dy = targetPosition.Y - observerPosition.Y;
-        distanceSquared = dx * dx + dy * dy;
-
+        Vector3 observerEye = UnitHitSystem.GetEyePosition(
+            units, observer, hitRegions: _hitRegions);
         float range = MathF.Max(0f, units.ViewRange[observer]);
-        if (distanceSquared > range * range)
-            return false;
-
-        if (distanceSquared < 0.0001f)
-            return true;
-
-        float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
+        float rangeSquared = range * range;
         Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
-        float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
         float minFacingDot = MathF.Cos(
             units.FieldOfView[observer] * MathF.PI / 360f);
 
-        return facingDot >= minFacingDot;
+        distanceSquared = float.PositiveInfinity;
+        int pointCount = UnitHitSystem.GetVisibilityPointCount(
+            units, target, _hitRegions);
+
+        for (int i = 0; i < pointCount; i++)
+        {
+            Vector3 point = UnitHitSystem.GetRegionPoint(
+                units, target, i, observerEye, _hitRegions,
+                UnitAnatomyMarkerRole.Vision);
+
+            float dx = point.X - observerEye.X;
+            float dy = point.Y - observerEye.Y;
+            float candidateDistanceSquared = dx * dx + dy * dy;
+
+            if (candidateDistanceSquared > rangeSquared)
+                continue;
+
+            if (candidateDistanceSquared > 0.0001f)
+            {
+                float inverseDistance = 1f / MathF.Sqrt(candidateDistanceSquared);
+                float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
+                if (facingDot < minFacingDot)
+                    continue;
+            }
+
+            distanceSquared = MathF.Min(distanceSquared, candidateDistanceSquared);
+        }
+
+        return float.IsFinite(distanceSquared);
     }
 
     private void AppendVisibleTarget(
