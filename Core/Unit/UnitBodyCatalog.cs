@@ -231,7 +231,7 @@ internal static class UnitBodyCatalog
         Add(0.09f, -0.11f, 0.16f, 0, BodyPartRole.RatBody);        // 6 right chest
         Add(0.28f, 0f, 0.14f, 0, BodyPartRole.Neck);               // 7 neck
 
-        Add(0.39f, 0f, 0.20f, 8, BodyPartRole.Head,
+        Add(0.39f, 0f, 0.20f, -1, BodyPartRole.Head,
             anchor: BodyPartAnchor.UnitHead);                     // 8 head
         Add(0.015f, 0.085f, 0.105f, 8, BodyPartRole.Muzzle);       // 9 cheek
         Add(0.015f, -0.085f, 0.105f, 8, BodyPartRole.Muzzle);      // 10 cheek
