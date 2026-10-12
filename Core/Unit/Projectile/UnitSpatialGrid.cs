@@ -65,12 +65,19 @@ public sealed class UnitSpatialGrid
     public void Build(
         UnitStore units,
         UnitHealthStore? health = null) =>
-        Build(units, null, health);
+        Build(units, null, health, null);
 
     public void Build(
         UnitStore units,
         UnitBodyStore? bodies,
-        UnitHealthStore? health = null)
+        UnitHealthStore? health = null) =>
+        Build(units, bodies, health, null);
+
+    public void Build(
+        UnitStore units,
+        UnitBodyStore? bodies,
+        UnitHealthStore? health,
+        UnitHitRegionStore? hitRegions)
     {
         for (int i = 0;
              i < _touchedCount;
@@ -127,6 +134,31 @@ public sealed class UnitSpatialGrid
                         MathF.Sqrt(scale.X * scale.X + scale.Y * scale.Y);
                     radius = MathF.Max(radius, reach + 0.02f);
                 }
+            }
+
+            UnitHitRegionProfile profile =
+                hitRegions?.GetProfile(unit) ??
+                UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unit]).BodyType);
+
+            Vector3 rootPosition = units.Position[unit];
+
+            for (int regionIndex = 0;
+                 regionIndex < profile.RegionCount;
+                 regionIndex++)
+            {
+                UnitHitRegionGeometry geometry =
+                    UnitHitSystem.GetRegionGeometry(
+                        units,
+                        unit,
+                        regionIndex,
+                        hitRegions);
+
+                float offsetX = geometry.Center.X - rootPosition.X;
+                float offsetY = geometry.Center.Y - rootPosition.Y;
+                float reach = MathF.Sqrt(offsetX * offsetX + offsetY * offsetY) +
+                    geometry.Radius;
+
+                radius = MathF.Max(radius, reach + 0.02f);
             }
 
             int minX =
