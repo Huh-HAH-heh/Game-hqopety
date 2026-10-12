@@ -32,7 +32,8 @@ public enum BodyPartMotion : byte
     WalkCycleOpposite = 3,
     WalkCycleProfile = 4,
     WalkCycleProfileOpposite = 5,
-    PhysicalTail = 6
+    PhysicalTail = 6,
+    SpinalChain = 7
 }
 
 public enum BodyPartRole : byte
