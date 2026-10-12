@@ -6,13 +6,15 @@ public sealed class UnitHealthStore
 {
     private const int DefaultUnitCapacity = 1024;
 
-    // Fixed-size per-unit storage keeps health data contiguous and
-    // avoids allocating objects for individual limbs or organs.
-    private const int MaxPartsPerUnit = 32;
+    // Flat per-unit blocks keep combat health data contiguous and allocation-free.
+    // The slot count covers large custom anatomies with many segments and organs.
+    private const int MaxPartsPerUnit = 256;
 
     private UnitHealthPartId[] _part;
     private UnitHealthPartKind[] _kind;
     private short[] _parent;
+    private short[] _regionIndex;
+    private short[] _bindingIndex;
     private float[] _maxHitPoints;
     private float[] _hitPoints;
     private float[] _bleedRate;
@@ -90,6 +92,9 @@ public sealed class UnitHealthStore
         _parent =
             new short[nodeCapacity];
 
+        _regionIndex = new short[nodeCapacity];
+        _bindingIndex = new short[nodeCapacity];
+
         _maxHitPoints =
             new float[nodeCapacity];
 
@@ -102,9 +107,9 @@ public sealed class UnitHealthStore
         _present =
             new bool[nodeCapacity];
 
-        Array.Fill(
-            _parent,
-            (short)-1);
+        Array.Fill(_parent, (short)-1);
+        Array.Fill(_regionIndex, (short)-1);
+        Array.Fill(_bindingIndex, (short)-1);
     }
 
     public void InitializeUnit(
@@ -148,11 +153,11 @@ public sealed class UnitHealthStore
             start,
             MaxPartsPerUnit);
 
-        for (int i = 0;
-             i < MaxPartsPerUnit;
-             i++)
+        for (int i = 0; i < MaxPartsPerUnit; i++)
         {
-            _parent[start + i] = (short)-1;
+            _parent[start + i] = -1;
+            _regionIndex[start + i] = -1;
+            _bindingIndex[start + i] = -1;
         }
 
         _partCount[unitIndex] = 0;
@@ -189,37 +194,97 @@ public sealed class UnitHealthStore
         EnsureUnitCapacity(unitIndex + 1);
 
         ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+        int[] starts = new int[regions.Length];
 
+        // Every node/binding owns a separate health pool, even when several
+        // segments share legacy Part=WholeBody or another compatibility enum.
         for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
         {
-            foreach (HitRegionPartBinding binding in regions[regionIndex].Parts)
+            starts[regionIndex] = _partCount[unitIndex];
+            ReadOnlySpan<HitRegionPartBinding> bindings = regions[regionIndex].Parts;
+
+            for (int bindingIndex = 0; bindingIndex < bindings.Length; bindingIndex++)
             {
-                if (!TryFindPart(unitIndex, binding.Part, out _))
-                {
-                    AddPart(
-                        unitIndex,
-                        binding.Part,
-                        binding.Kind,
-                        parent: -1,
-                        maxHitPoints: binding.MaxHitPoints);
-                }
+                HitRegionPartBinding binding = bindings[bindingIndex];
+                AddPart(
+                    unitIndex,
+                    binding.Part,
+                    binding.Kind,
+                    parent: -1,
+                    maxHitPoints: binding.MaxHitPoints,
+                    regionIndex: regionIndex,
+                    bindingIndex: bindingIndex);
             }
         }
 
+        // Parent links use stable string IDs first. Legacy enum parent links
+        // remain supported for existing human profiles.
         for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
         {
-            foreach (HitRegionPartBinding binding in regions[regionIndex].Parts)
+            ReadOnlySpan<HitRegionPartBinding> bindings = regions[regionIndex].Parts;
+
+            for (int bindingIndex = 0; bindingIndex < bindings.Length; bindingIndex++)
             {
-                if (binding.ParentPart == UnitHealthPartId.None ||
-                    !TryFindPart(unitIndex, binding.Part, out int childIndex) ||
-                    !TryFindPart(unitIndex, binding.ParentPart, out int parentIndex))
+                HitRegionPartBinding binding = bindings[bindingIndex];
+                int childIndex = FindRegionPartIndex(unitIndex, regionIndex, bindingIndex);
+                int parentIndex = -1;
+
+                if (!string.IsNullOrWhiteSpace(binding.ParentId) &&
+                    profile.TryFindPart(binding.ParentId, out int parentRegion, out int parentBinding))
                 {
-                    continue;
+                    parentIndex = FindRegionPartIndex(unitIndex, parentRegion, parentBinding);
+                }
+                else if (binding.ParentPart != UnitHealthPartId.None)
+                {
+                    for (int candidate = 0; candidate < bindings.Length; candidate++)
+                    {
+                        if (bindings[candidate].Part == binding.ParentPart)
+                        {
+                            parentIndex = FindRegionPartIndex(unitIndex, regionIndex, candidate);
+                            break;
+                        }
+                    }
+
+                    if (parentIndex < 0 &&
+                        TryFindPart(unitIndex, binding.ParentPart, out int legacyParent))
+                    {
+                        parentIndex = legacyParent;
+                    }
                 }
 
-                _parent[childIndex] = checked((short)parentIndex);
+                if (childIndex >= 0 && parentIndex >= 0)
+                    _parent[childIndex] = checked((short)(parentIndex % MaxPartsPerUnit));
             }
         }
+    }
+
+    public bool TryFindRegionPart(
+        int unitIndex,
+        int regionIndex,
+        int bindingIndex,
+        out int partIndex)
+    {
+        partIndex = FindRegionPartIndex(unitIndex, regionIndex, bindingIndex);
+        return partIndex >= 0 && _present[partIndex];
+    }
+
+    private int FindRegionPartIndex(int unitIndex, int regionIndex, int bindingIndex)
+    {
+        if ((uint)unitIndex >= (uint)Capacity)
+            return -1;
+
+        int start = GetStart(unitIndex);
+        int count = _partCount[unitIndex];
+
+        for (int i = 0; i < count; i++)
+        {
+            int index = start + i;
+            if (_regionIndex[index] == regionIndex &&
+                _bindingIndex[index] == bindingIndex)
+                return index;
+        }
+
+        return -1;
     }
 
     public void ClearUnit(
@@ -366,6 +431,9 @@ public sealed class UnitHealthStore
             ref _parent,
             newNodeCapacity);
 
+        Array.Resize(ref _regionIndex, newNodeCapacity);
+        Array.Resize(ref _bindingIndex, newNodeCapacity);
+
         Array.Resize(
             ref _maxHitPoints,
             newNodeCapacity);
@@ -386,8 +454,9 @@ public sealed class UnitHealthStore
             _parent,
             (short)-1,
             oldNodeCapacity,
-            newNodeCapacity -
-            oldNodeCapacity);
+            newNodeCapacity - oldNodeCapacity);
+        Array.Fill(_regionIndex, (short)-1, oldNodeCapacity, newNodeCapacity - oldNodeCapacity);
+        Array.Fill(_bindingIndex, (short)-1, oldNodeCapacity, newNodeCapacity - oldNodeCapacity);
     }
 
     private void BuildColonist(
@@ -531,7 +600,9 @@ public sealed class UnitHealthStore
         UnitHealthPartId part,
         UnitHealthPartKind kind,
         int parent,
-        float maxHitPoints)
+        float maxHitPoints,
+        int regionIndex = -1,
+        int bindingIndex = -1)
     {
         int localIndex =
             _partCount[unitIndex];
@@ -551,8 +622,9 @@ public sealed class UnitHealthStore
 
         _part[index] = part;
         _kind[index] = kind;
-        _parent[index] =
-            checked((short)parent);
+        _parent[index] = parent < 0 ? (short)-1 : checked((short)(parent % MaxPartsPerUnit));
+        _regionIndex[index] = checked((short)regionIndex);
+        _bindingIndex[index] = checked((short)bindingIndex);
 
         _maxHitPoints[index] =
             maxHitPoints;
