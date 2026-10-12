@@ -649,7 +649,9 @@ public void DrawSnapshot(
         float tilePixelSize)
     {
         Span<RatOutlineCircle> circles = stackalloc RatOutlineCircle[count];
+        Span<RatOutlineCircle> tail = stackalloc RatOutlineCircle[count];
         int circleCount = 0;
+        int tailCount = 0;
         Vector3[] positions = bodies.WorldPosition;
         Vector3[] scales = bodies.Scale;
         BodyPartRole[] roles = bodies.Role;
@@ -659,6 +661,16 @@ public void DrawSnapshot(
         {
             if (primitives[i] != BodyPrimitive.Circle || scales[i].X <= 0f)
                 continue;
+
+            if (roles[i] == BodyPartRole.Tail)
+            {
+                tail[tailCount++] = new RatOutlineCircle(
+                    positions[i].X * tilePixelSize,
+                    positions[i].Y * tilePixelSize,
+                    MathF.Abs(scales[i].X) * tilePixelSize,
+                    roles[i]);
+                continue;
+            }
 
             if (roles[i] == BodyPartRole.Eye)
             {
@@ -677,6 +689,7 @@ public void DrawSnapshot(
         }
 
         AppendRatCircleUnion(outlines, circles[..circleCount]);
+        AppendRatTailOutline(outlines, tail[..tailCount]);
         return count;
     }
 
@@ -689,13 +702,25 @@ public void DrawSnapshot(
         float tilePixelSize)
     {
         Span<RatOutlineCircle> circles = stackalloc RatOutlineCircle[count];
+        Span<RatOutlineCircle> tail = stackalloc RatOutlineCircle[count];
         int circleCount = 0;
+        int tailCount = 0;
 
         for (int i = start; i < start + count; i++)
         {
             RenderBodyPart part = bodyParts[i];
             if (part.Primitive != BodyPrimitive.Circle || part.Scale.X <= 0f)
                 continue;
+
+            if (part.Role == BodyPartRole.Tail)
+            {
+                tail[tailCount++] = new RatOutlineCircle(
+                    part.Position.X * tilePixelSize,
+                    part.Position.Y * tilePixelSize,
+                    MathF.Abs(part.Scale.X) * tilePixelSize,
+                    part.Role);
+                continue;
+            }
 
             if (part.Role == BodyPartRole.Eye)
             {
@@ -714,7 +739,48 @@ public void DrawSnapshot(
         }
 
         AppendRatCircleUnion(outlines, circles[..circleCount]);
+        AppendRatTailOutline(outlines, tail[..tailCount]);
         return count;
+    }
+
+    private static void AppendRatTailOutline(
+        VertexArray outlines,
+        ReadOnlySpan<RatOutlineCircle> tail)
+    {
+        if (tail.Length < 2)
+            return;
+
+        Span<Vector2f> left = stackalloc Vector2f[tail.Length];
+        Span<Vector2f> right = stackalloc Vector2f[tail.Length];
+
+        for (int i = 0; i < tail.Length; i++)
+        {
+            RatOutlineCircle point = tail[i];
+            Vector2f tangent;
+
+            if (i == 0)
+                tangent = new Vector2f(tail[1].X - point.X, tail[1].Y - point.Y);
+            else if (i == tail.Length - 1)
+                tangent = new Vector2f(point.X - tail[i - 1].X, point.Y - tail[i - 1].Y);
+            else
+                tangent = new Vector2f(tail[i + 1].X - tail[i - 1].X, tail[i + 1].Y - tail[i - 1].Y);
+
+            float lengthSquared = tangent.X * tangent.X + tangent.Y * tangent.Y;
+            float invLength = lengthSquared > 0.0001f ? 1f / MathF.Sqrt(lengthSquared) : 1f;
+            float normalX = -tangent.Y * invLength;
+            float normalY = tangent.X * invLength;
+            float radius = point.Radius * 0.82f;
+
+            left[i] = new Vector2f(point.X + normalX * radius, point.Y + normalY * radius);
+            right[i] = new Vector2f(point.X - normalX * radius, point.Y - normalY * radius);
+        }
+
+        Color color = GetRatLineColor(BodyPartRole.Tail);
+        for (int i = 0; i < tail.Length - 1; i++)
+        {
+            AppendDebugLine(outlines, left[i].X, left[i].Y, left[i + 1].X, left[i + 1].Y, color);
+            AppendDebugLine(outlines, right[i].X, right[i].Y, right[i + 1].X, right[i + 1].Y, color);
+        }
     }
 
     private static void AppendRatCircleUnion(
@@ -746,7 +812,7 @@ public void DrawSnapshot(
                     RatOutlineCircle other = circles[j];
                     float dx = testX - other.X;
                     float dy = testY - other.Y;
-                    float radius = MathF.Max(0f, other.Radius - 0.15f);
+                    float radius = MathF.Max(0f, other.Radius - 0.65f);
                     if (radius > 0f && dx * dx + dy * dy < radius * radius)
                     {
                         covered = true;
