@@ -264,7 +264,7 @@ public sealed class DamageSystem
                     {
                         healthSystem.ApplyRegionDamage(
                             units, health, damageEvent.Target,
-                            regionIndex, damageEvent.BindingIndex,
+                            regionIndex, bindingIndex,
                             resolution.BluntImpactDamage);
                     }
                     else
@@ -308,7 +308,7 @@ public sealed class DamageSystem
         {
             healthSystem.ApplyRegionDamage(
                 units, health, damageEvent.Target,
-                regionIndex, damageEvent.BindingIndex, damage);
+                regionIndex, bindingIndex, damage);
         }
         else
         {
@@ -333,7 +333,7 @@ public sealed class DamageSystem
             {
                 healthSystem.AddRegionBleed(
                     units, health, damageEvent.Target,
-                    regionIndex, damageEvent.BindingIndex, bleed);
+                    regionIndex, bindingIndex, bleed);
             }
             else
             {
