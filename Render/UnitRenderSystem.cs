@@ -123,8 +123,7 @@ public sealed class UnitRenderSystem
             simulation.Units;
 
         Vector3[] headNormals = units.HeadNormal;
-        Span<HitVolume> hitVolumeBuffer =
-            stackalloc HitVolume[UnitHitSystem.MaxHitVolumeCount];
+        UnitBodyStore bodies = simulation.Bodies;
 
         if (showUnitDetails)
         {
@@ -196,10 +195,22 @@ public sealed class UnitRenderSystem
                 unitPosition.Y >= minWorldY &&
                 unitPosition.Y <= maxWorldY;
 
-            // Body parts extend less than two world units from the root.
-            // This padded root cull rejects distant units before visiting their parts.
-            if (!rootVisible)
+            int bodyStart = units.BodyStart[unitIndex];
+            int bodyCount = Math.Max(0, (int)units.BodyCount[unitIndex]);
+
+            // Long/segmented bodies can enter the camera while their root is off-screen.
+            if (!rootVisible &&
+                !IsAnyBodyPartInView(
+                    bodies,
+                    bodyStart,
+                    bodyCount,
+                    minWorldX,
+                    maxWorldX,
+                    minWorldY,
+                    maxWorldY))
+            {
                 continue;
+            }
 
             float screenX = unitPosition.X * tilePixelSize;
             float screenY = unitPosition.Y * tilePixelSize;
@@ -215,50 +226,19 @@ public sealed class UnitRenderSystem
                 tilePixelSize,
                 screenScale);
 
-            bool inspectHitVolumes =
-                hasSelection && selectedIndex == unitIndex;
+            int renderedParts = AppendBodyParts(
+                _vertices,
+                _bodyOutlines,
+                bodies,
+                bodyStart,
+                bodyCount,
+                units.FactionTag[unitIndex],
+                isAlive,
+                tilePixelSize,
+                screenScale);
 
-            if (inspectHitVolumes)
-            {
-                int volumeCount = UnitHitSystem.GetHitVolumes(
-                    units,
-                    unitIndex,
-                    hitVolumeBuffer,
-                    simulation.Bodies);
-
-                AppendUnitMarker(
-                    _vertices,
-                    _bodyOutlines,
-                    _statusIcons,
-                    screenX,
-                    screenY,
-                    markerRadius,
-                    headNormals[unitIndex],
-                    units.FactionTag[unitIndex],
-                    isAlive,
-                    healthRatio,
-                    suppression,
-                    suppressionState,
-                    screenScale);
-
-                for (int volumeIndex = 0; volumeIndex < volumeCount; volumeIndex++)
-                {
-                    AppendHitVolume(
-                        _hitVolumeFills,
-                        _bodyOutlines,
-                        hitVolumeBuffer[volumeIndex],
-                        tilePixelSize,
-                        screenScale);
-                }
-
-                AppendHitVolumeNormals(
-                    _bodyOutlines,
-                    hitVolumeBuffer,
-                    volumeCount,
-                    tilePixelSize,
-                    screenScale);
-            }
-            else
+            // Keep the marker only for a unit with no model rig at all.
+            if (renderedParts == 0)
             {
                 AppendUnitMarker(
                     _vertices,
@@ -404,7 +384,7 @@ public void DrawSnapshot(
         _aiDebug.Clear();
 
         RenderUnitState[] units = snapshot.Units;
-        Span<HitVolume> snapshotHitVolumeBuffer = stackalloc HitVolume[UnitHitSystem.MaxHitVolumeCount];
+        RenderBodyPart[] bodyParts = snapshot.BodyParts;
         for (int i = 0; i < units.Length; i++)
         {
             RenderUnitState unit = units[i];
@@ -453,8 +433,16 @@ public void DrawSnapshot(
 
             }
 
-            if (position.X < minX || position.X > maxX ||
-                position.Y < minY || position.Y > maxY)
+            if ((position.X < minX || position.X > maxX ||
+                 position.Y < minY || position.Y > maxY) &&
+                !IsAnyBodyPartInView(
+                    bodyParts,
+                    unit.BodyPartStart,
+                    unit.BodyPartCount,
+                    minX,
+                    maxX,
+                    minY,
+                    maxY))
             {
                 continue;
             }
@@ -466,62 +454,18 @@ public void DrawSnapshot(
                 tilePixelSize,
                 screenScale);
 
-            RenderHitVolume[] selectedHitVolumes = snapshot.HitVolumes;
-            bool inspectHitVolumes =
-                unit.Index == selectedUnitIndex &&
-                snapshot.HitVolumeUnitIndex == selectedUnitIndex &&
-                selectedHitVolumes.Length > 0;
+            int renderedParts = AppendBodyParts(
+                _vertices,
+                _bodyOutlines,
+                bodyParts,
+                unit.BodyPartStart,
+                unit.BodyPartCount,
+                unit.FactionTag,
+                isAlive,
+                tilePixelSize,
+                screenScale);
 
-            if (inspectHitVolumes)
-            {
-                int volumeCount = Math.Min(
-                    selectedHitVolumes.Length,
-                    snapshotHitVolumeBuffer.Length);
-
-                for (int volumeIndex = 0; volumeIndex < volumeCount; volumeIndex++)
-                {
-                    RenderHitVolume source = selectedHitVolumes[volumeIndex];
-                    snapshotHitVolumeBuffer[volumeIndex] = new HitVolume(
-                        source.Part,
-                        source.Center,
-                        source.Forward,
-                        source.Right,
-                        source.Radii);
-                }
-
-                AppendUnitMarker(
-                    _vertices,
-                    _bodyOutlines,
-                    _statusIcons,
-                    x,
-                    y,
-                    markerRadius,
-                    unit.HeadNormal,
-                    unit.FactionTag,
-                    isAlive,
-                    unit.HealthRatio,
-                    unit.Suppression,
-                    unit.SuppressionState,
-                    screenScale);
-
-                for (int volumeIndex = 0; volumeIndex < volumeCount; volumeIndex++)
-                {
-                    AppendHitVolume(
-                        _hitVolumeFills,
-                        _bodyOutlines,
-                        snapshotHitVolumeBuffer[volumeIndex],
-                        tilePixelSize,
-                        screenScale);
-                }
-
-                AppendHitVolumeNormals(
-                    _bodyOutlines,
-                    snapshotHitVolumeBuffer,
-                    volumeCount,
-                    tilePixelSize,
-                    screenScale);
-            }
-            else
+            if (renderedParts == 0)
             {
                 AppendUnitMarker(
                     _vertices,
@@ -589,6 +533,258 @@ public void DrawSnapshot(
             window.Draw(_aiming);
         if (_aiDebug.VertexCount > 0)
             window.Draw(_aiDebug);
+    }
+
+    private static int AppendBodyParts(
+        VertexArray fills,
+        VertexArray outlines,
+        UnitBodyStore bodies,
+        int start,
+        int count,
+        ushort factionTag,
+        bool isAlive,
+        float tilePixelSize,
+        float screenScale)
+    {
+        if (start < 0 || count <= 0 || start >= bodies.Count)
+            return 0;
+
+        count = Math.Min(count, bodies.Count - start);
+        Vector3[] positions = bodies.WorldPosition;
+        Vector3[] scales = bodies.Scale;
+        float[] rotations = bodies.WorldRotation;
+        BodyPrimitive[] primitives = bodies.Primitive;
+        BodyPartRole[] roles = bodies.Role;
+
+        for (int i = start; i < start + count; i++)
+        {
+            AppendBodyPart(
+                fills,
+                outlines,
+                positions[i],
+                scales[i],
+                rotations[i],
+                primitives[i],
+                roles[i],
+                factionTag,
+                isAlive,
+                tilePixelSize,
+                screenScale);
+        }
+
+        return count;
+    }
+
+    private static int AppendBodyParts(
+        VertexArray fills,
+        VertexArray outlines,
+        RenderBodyPart[] bodyParts,
+        int start,
+        int count,
+        ushort factionTag,
+        bool isAlive,
+        float tilePixelSize,
+        float screenScale)
+    {
+        if (start < 0 || count <= 0 || start >= bodyParts.Length)
+            return 0;
+
+        count = Math.Min(count, bodyParts.Length - start);
+        for (int i = start; i < start + count; i++)
+        {
+            RenderBodyPart part = bodyParts[i];
+            AppendBodyPart(
+                fills,
+                outlines,
+                part.Position,
+                part.Scale,
+                part.Rotation,
+                part.Primitive,
+                part.Role,
+                factionTag,
+                isAlive,
+                tilePixelSize,
+                screenScale);
+        }
+
+        return count;
+    }
+
+    private static void AppendBodyPart(
+        VertexArray fills,
+        VertexArray outlines,
+        Vector3 position,
+        Vector3 scale,
+        float rotation,
+        BodyPrimitive primitive,
+        BodyPartRole role,
+        ushort factionTag,
+        bool isAlive,
+        float tilePixelSize,
+        float screenScale)
+    {
+        float radiusX = MathF.Abs(scale.X) * tilePixelSize;
+        float radiusY = MathF.Abs(scale.Y) * tilePixelSize;
+        if (radiusX <= 0f || radiusY <= 0f)
+            return;
+
+        float centerX = position.X * tilePixelSize;
+        float centerY = position.Y * tilePixelSize;
+        Color fill = GetBodyPartColor(role, factionTag, isAlive);
+        Color outline = new Color(20, 26, 32, 245);
+        int segments = MathF.Max(radiusX, radiusY) * screenScale >= 5f
+            ? 16
+            : 10;
+
+        if (primitive == BodyPrimitive.Box)
+        {
+            AppendOrientedRect(
+                fills,
+                centerX,
+                centerY,
+                radiusY,
+                radiusX,
+                rotation,
+                fill);
+        }
+        else
+        {
+            AppendEllipse(
+                fills,
+                centerX,
+                centerY,
+                radiusX,
+                radiusY,
+                rotation,
+                fill,
+                segments);
+        }
+
+        // The thin border makes adjacent parts readable, but it does not grow
+        // the filled model geometry or the matching collision volume.
+        float outlinePad = 0.45f / MathF.Max(0.001f, screenScale);
+        if (primitive == BodyPrimitive.Box)
+        {
+            AppendOrientedRectOutline(
+                outlines,
+                centerX,
+                centerY,
+                radiusY + outlinePad,
+                radiusX + outlinePad,
+                rotation,
+                outline);
+        }
+        else
+        {
+            AppendEllipseOutline(
+                outlines,
+                centerX,
+                centerY,
+                radiusX + outlinePad,
+                radiusY + outlinePad,
+                rotation,
+                outline,
+                segments);
+        }
+    }
+
+    private static Color GetBodyPartColor(
+        BodyPartRole role,
+        ushort factionTag,
+        bool isAlive)
+    {
+        Color faction = factionTag switch
+        {
+            1 => new Color(76, 125, 171, 255),
+            2 => new Color(167, 76, 80, 255),
+            _ => new Color(122, 137, 151, 255)
+        };
+
+        Color color = role switch
+        {
+            BodyPartRole.Head =>
+                Blend(faction, new Color(219, 202, 176, 255), 0.58f),
+
+            BodyPartRole.Torso =>
+                Shade(faction, 0.92f),
+
+            BodyPartRole.UpperArm or
+            BodyPartRole.Forearm or
+            BodyPartRole.Thigh or
+            BodyPartRole.Shin =>
+                Blend(faction, new Color(190, 200, 210, 255), 0.20f),
+
+            BodyPartRole.Hand or
+            BodyPartRole.Foot =>
+                Blend(faction, new Color(218, 205, 183, 255), 0.42f),
+
+            BodyPartRole.Neck or
+            BodyPartRole.Elbow or
+            BodyPartRole.Knee =>
+                Blend(faction, new Color(185, 195, 205, 255), 0.28f),
+
+            BodyPartRole.Segment =>
+                Shade(faction, 0.90f),
+
+            _ =>
+                Blend(faction, new Color(188, 199, 208, 255), 0.16f)
+        };
+
+        return isAlive
+            ? color
+            : Blend(color, new Color(91, 96, 102, 255), 0.72f);
+    }
+
+    private static bool IsAnyBodyPartInView(
+        UnitBodyStore bodies,
+        int start,
+        int count,
+        float minX,
+        float maxX,
+        float minY,
+        float maxY)
+    {
+        if (start < 0 || count <= 0 || start >= bodies.Count)
+            return false;
+
+        count = Math.Min(count, bodies.Count - start);
+        Vector3[] positions = bodies.WorldPosition;
+        Vector3[] scales = bodies.Scale;
+        for (int i = start; i < start + count; i++)
+        {
+            Vector3 scale = scales[i];
+            float extent = MathF.Max(MathF.Abs(scale.X), MathF.Abs(scale.Y));
+            if (IsPartInView(positions[i], extent, minX, maxX, minY, maxY))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsAnyBodyPartInView(
+        RenderBodyPart[] bodyParts,
+        int start,
+        int count,
+        float minX,
+        float maxX,
+        float minY,
+        float maxY)
+    {
+        if (start < 0 || count <= 0 || start >= bodyParts.Length)
+            return false;
+
+        count = Math.Min(count, bodyParts.Length - start);
+        for (int i = start; i < start + count; i++)
+        {
+            RenderBodyPart part = bodyParts[i];
+            float extent = MathF.Max(
+                MathF.Abs(part.Scale.X),
+                MathF.Abs(part.Scale.Y));
+            if (IsPartInView(part.Position, extent, minX, maxX, minY, maxY))
+                return true;
+        }
+
+        return false;
     }
 
     private static void AppendHitVolume(
