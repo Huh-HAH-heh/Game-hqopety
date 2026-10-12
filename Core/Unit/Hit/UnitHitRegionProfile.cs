@@ -388,6 +388,33 @@ public class UnitHitRegionProfile
         return -1;
     }
 
+    public bool TryFindPart(
+        UnitHealthPartId part,
+        out int regionIndex,
+        out int bindingIndex)
+    {
+        if (part != UnitHealthPartId.None)
+        {
+            for (int i = 0; i < _regions.Length; i++)
+            {
+                ReadOnlySpan<HitRegionPartBinding> bindings = _regions[i].Parts;
+                for (int j = 0; j < bindings.Length; j++)
+                {
+                    if (bindings[j].Part != part)
+                        continue;
+
+                    regionIndex = i;
+                    bindingIndex = j;
+                    return true;
+                }
+            }
+        }
+
+        regionIndex = -1;
+        bindingIndex = -1;
+        return false;
+    }
+
     public bool TryFindPart(string id, out int regionIndex, out int bindingIndex)
     {
         for (int i = 0; i < _regions.Length; i++)
