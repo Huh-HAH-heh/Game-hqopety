@@ -101,48 +101,62 @@ public sealed class DamageSystem
 
         float hitTolerance = damageEvent.HitRadius + 0.01f;
         int regionIndex = damageEvent.RegionIndex;
+        int bindingIndex = damageEvent.BindingIndex;
         HitRegionPartBinding anatomyBinding = default;
-        bool hasAnatomyBinding = damageEvent.BindingIndex >= 0;
+        bool hasAnatomyBinding = bindingIndex >= 0;
 
         if (hasAnatomyBinding)
         {
             if (regionIndex < 0 ||
                 !UnitHitSystem.IsBindingInRegion(
-                    units, targetIndex, regionIndex, damageEvent.BindingIndex, hitRegions) ||
+                    units, targetIndex, regionIndex, bindingIndex, hitRegions) ||
                 !UnitHitSystem.IsPointInsideRegion(
                     units, targetIndex, regionIndex, damageEvent.ImpactPosition, hitTolerance, hitRegions) ||
                 !UnitHitSystem.TryGetBinding(
-                    units, targetIndex, regionIndex, damageEvent.BindingIndex, out anatomyBinding, hitRegions))
+                    units, targetIndex, regionIndex, bindingIndex, out anatomyBinding, hitRegions))
             {
                 return new ProjectileDamageResult(0f, 0f, 0f, true);
             }
         }
-        else if (regionIndex < 0)
+        else
         {
-            regionIndex = UnitHitSystem.FindRegionAtPoint(
-                units,
-                targetIndex,
-                damageEvent.Part,
-                damageEvent.ImpactPosition,
-                hitTolerance,
-                hitRegions);
-        }
-        else if (!UnitHitSystem.IsPointInsideRegion(
-                     units,
-                     targetIndex,
-                     regionIndex,
-                     damageEvent.Part,
-                     damageEvent.ImpactPosition,
-                     hitTolerance,
-                     hitRegions))
-        {
-            regionIndex = -1;
+            if (regionIndex < 0)
+            {
+                regionIndex = damageEvent.Part == UnitHealthPartId.None
+                    ? UnitHitSystem.FindRegionAtPoint(
+                        units, targetIndex, damageEvent.ImpactPosition, hitTolerance, hitRegions)
+                    : UnitHitSystem.FindRegionAtPoint(
+                        units, targetIndex, damageEvent.Part,
+                        damageEvent.ImpactPosition, hitTolerance, hitRegions);
+            }
+            else
+            {
+                bool inside = damageEvent.Part == UnitHealthPartId.None
+                    ? UnitHitSystem.IsPointInsideRegion(
+                        units, targetIndex, regionIndex,
+                        damageEvent.ImpactPosition, hitTolerance, hitRegions)
+                    : UnitHitSystem.IsPointInsideRegion(
+                        units, targetIndex, regionIndex, damageEvent.Part,
+                        damageEvent.ImpactPosition, hitTolerance, hitRegions);
+
+                if (!inside)
+                    regionIndex = -1;
+            }
+
+            if (regionIndex >= 0)
+            {
+                bindingIndex = UnitHitSystem.FindBindingInRegion(
+                    units, targetIndex, regionIndex, damageEvent.Part, hitRegions);
+
+                hasAnatomyBinding = bindingIndex >= 0 &&
+                    UnitHitSystem.TryGetBinding(
+                        units, targetIndex, regionIndex, bindingIndex,
+                        out anatomyBinding, hitRegions);
+            }
         }
 
-        if (regionIndex < 0)
-        {
+        if (regionIndex < 0 || !hasAnatomyBinding)
             return new ProjectileDamageResult(0f, 0f, 0f, true);
-        }
 
         float energy =
             MathF.Max(
