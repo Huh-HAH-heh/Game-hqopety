@@ -216,6 +216,15 @@ public static class UnitHitRegionCatalog
 {
     private static readonly UnitHitRegionProfile Colonist = new(
         UnitCircleHitRegion.RelativeToUnit(
+            new Vector3(0f, 0f, 0.15f),
+            widthRadiusFactor: 0.22f,
+            lengthRadiusFactor: 0.18f,
+            heightHalfExtentFactor: 0.15f,
+            new HitRegionPartBinding(UnitHealthPartId.LeftLeg, 1f, maxHitPoints: 35f),
+            new HitRegionPartBinding(UnitHealthPartId.RightLeg, 1f, maxHitPoints: 35f),
+            new HitRegionPartBinding(UnitHealthPartId.LeftFoot, 0.5f, maxHitPoints: 14f),
+            new HitRegionPartBinding(UnitHealthPartId.RightFoot, 0.5f, maxHitPoints: 14f)),
+        UnitCircleHitRegion.RelativeToUnit(
             new Vector3(0f, 0f, 0.50f),
             widthRadiusFactor: 0.22f,
             lengthRadiusFactor: 0.18f,
@@ -231,16 +240,7 @@ public static class UnitHitRegionCatalog
             lengthRadiusFactor: 0.05f,
             heightHalfExtentFactor: 0.13f,
             new HitRegionPartBinding(UnitHealthPartId.Head, 4f, maxHitPoints: 40f),
-            new HitRegionPartBinding(UnitHealthPartId.Brain, 1f, UnitHealthPartKind.Organ, 10f, UnitHealthPartId.Head)),
-        UnitCircleHitRegion.RelativeToUnit(
-            new Vector3(0f, 0f, 0.15f),
-            widthRadiusFactor: 0.22f,
-            lengthRadiusFactor: 0.18f,
-            heightHalfExtentFactor: 0.15f,
-            new HitRegionPartBinding(UnitHealthPartId.LeftLeg, 1f, maxHitPoints: 35f),
-            new HitRegionPartBinding(UnitHealthPartId.RightLeg, 1f, maxHitPoints: 35f),
-            new HitRegionPartBinding(UnitHealthPartId.LeftFoot, 0.5f, maxHitPoints: 14f),
-            new HitRegionPartBinding(UnitHealthPartId.RightFoot, 0.5f, maxHitPoints: 14f)));
+            new HitRegionPartBinding(UnitHealthPartId.Brain, 1f, UnitHealthPartKind.Organ, 10f, UnitHealthPartId.Head)));
 
     private static readonly UnitHitRegionProfile SmallCreature = new(
         UnitCircleHitRegion.RelativeToUnit(
