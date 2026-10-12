@@ -47,8 +47,6 @@ public readonly struct UnitHitResult
 /// </summary>
 public sealed class UnitHitSystem
 {
-    public const int MaxAimPointCount = 1;
-
     public static Vector3 GetEyePosition(
         UnitStore units,
         int unitIndex,
