@@ -74,7 +74,7 @@ public sealed class UnitHitSystem
                     continue;
 
                 GetWorldGeometry(units, unitIndex, region,
-                    out Vector3 center, out _, out float halfHeight);
+                    out Vector3 center, out _, out float halfHeight, hitRegions);
                 return center + new Vector3(0f, 0f, halfHeight * 0.55f);
             }
         }
@@ -125,7 +125,8 @@ public sealed class UnitHitSystem
             region,
             out Vector3 center,
             out float radius,
-            out float halfHeight);
+            out float halfHeight,
+            hitRegions);
 
         return new UnitHitRegionGeometry(center, radius, halfHeight);
     }
@@ -390,7 +391,7 @@ public sealed class UnitHitSystem
 
         UnitCircleHitRegion region = profile.Regions[regionIndex];
         GetWorldGeometry(units, unitIndex, region,
-            out Vector3 center, out float radius, out float halfHeight);
+            out Vector3 center, out float radius, out float halfHeight, hitRegions);
 
         UnitAnatomyMarker marker;
         bool hasMarker = markerRole switch
@@ -456,7 +457,7 @@ public sealed class UnitHitSystem
         {
             UnitCircleHitRegion region = regions[i];
             GetWorldGeometry(units, unitIndex, region,
-                out Vector3 center, out float radius, out float halfHeight);
+                out Vector3 center, out float radius, out float halfHeight, hitRegions);
 
             if (!TryIntersectCylinder(
                     start,
@@ -591,7 +592,8 @@ public sealed class UnitHitSystem
         in UnitCircleHitRegion region,
         out Vector3 center,
         out float radius,
-        out float halfHeight)
+        out float halfHeight,
+        UnitHitRegionStore? hitRegions = null)
     {
         Vector3 position = units.Position[unitIndex];
         Vector3 factors = region.DimensionCenterFactors;
@@ -605,11 +607,33 @@ public sealed class UnitHitSystem
         float angle = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
         float cos = MathF.Cos(angle);
         float sin = MathF.Sin(angle);
-
-        center = position + new Vector3(
+        Vector3 rotatedOffset = new Vector3(
             offset.X * cos - offset.Y * sin,
             offset.X * sin + offset.Y * cos,
             offset.Z);
+
+        if (!string.IsNullOrWhiteSpace(region.ParentId))
+        {
+            UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+            int parentIndex = profile.FindRegion(region.ParentId);
+
+            if (parentIndex >= 0 && parentIndex < profile.RegionCount)
+            {
+                UnitCircleHitRegion parent = profile.Regions[parentIndex];
+                GetWorldGeometry(
+                    units, unitIndex, parent,
+                    out Vector3 parentCenter, out _, out _, hitRegions);
+                center = parentCenter + rotatedOffset;
+            }
+            else
+            {
+                center = position + rotatedOffset;
+            }
+        }
+        else
+        {
+            center = position + rotatedOffset;
+        }
 
         radius = MathF.Max(
             0.001f,
