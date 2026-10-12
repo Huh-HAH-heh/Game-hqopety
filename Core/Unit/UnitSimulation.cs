@@ -539,7 +539,8 @@ public sealed class UnitSimulation
         float rawDamage)
     {
         if (!Units.TryGetIndex(id, out int unitIndex) ||
-            Health.OverallHitPoints[unitIndex] <= 0f)
+            Health.OverallHitPoints[unitIndex] <= 0f ||
+            !UnitHitSystem.IsPartInProfile(Units, unitIndex, part, HitRegions))
         {
             return default;
         }
@@ -556,7 +557,8 @@ public sealed class UnitSimulation
             Health,
             id,
             part,
-            result.FinalDamage);
+            result.FinalDamage,
+            HitRegions);
 
         if (Health.OverallHitPoints[unitIndex] <= 0f)
             MarkUnitDead(unitIndex);
