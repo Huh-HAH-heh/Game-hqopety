@@ -179,6 +179,23 @@ public sealed class UnitBodySystem
             Vector3 joint =
                 origin + Rotate2D(localPosition, positionRotation);
 
+            float profilePhase = motions[part] switch
+            {
+                BodyPartMotion.WalkCycleProfile => MathF.Sin(gaitPhase),
+                BodyPartMotion.WalkCycleProfileOpposite => -MathF.Sin(gaitPhase),
+                _ => 0f
+            };
+
+            if (profilePhase != 0f)
+            {
+                joint += Rotate2D(
+                    new Vector3(profilePhase * 0.17f * gait, 0f, 0f),
+                    positionRotation);
+
+                if (roles[part] == BodyPartRole.Foot && profilePhase > 0f)
+                    joint.Z += profilePhase * 0.09f * gait;
+            }
+
             // Rotating a limb around its center makes the shoulder/hip drift
             // away from the torso. Start-pivot parts are instead positioned
             // from their proximal joint, then offset to their visual center.
