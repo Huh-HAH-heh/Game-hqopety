@@ -6,22 +6,16 @@ namespace RimClone.Render;
 
 internal static class UnitHitRegionRenderGeometry
 {
-    // The top-down renderer has no camera pitch. Compress vertical world height
-    // into screen Y so stacked Z regions remain individually visible.
-    private const float VerticalScreenScale = 0.45f;
-
+    // This renderer is top-down, so preserve the region's real XY coordinates.
+    // Height remains in Z for simulation, hit testing, and visibility.
     public static RenderBodyPart CreatePart(
         UnitStore units,
         int unitIndex,
         in UnitCircleHitRegion region,
         in UnitHitRegionGeometry geometry)
     {
-        Vector3 root = units.Position[unitIndex];
-        Vector3 center = geometry.Center;
-        center.Y -= (geometry.Center.Z - root.Z) * VerticalScreenScale;
-
         return new RenderBodyPart(
-            center,
+            geometry.Center,
             new Vector3(geometry.Radius, geometry.Radius, geometry.HalfHeight),
             0f,
             BodyPrimitive.Circle,
