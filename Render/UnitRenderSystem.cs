@@ -1657,10 +1657,6 @@ private static void AppendSuppressionDebug(
         ReadOnlySpan<int> active =
             units.ActiveIndices;
 
-        Span<Vector3> points =
-            stackalloc Vector3[
-                VisionSystem.VisibilityPointCount];
-
         for (int i = 0;
              i < active.Length;
              i++)
@@ -1705,94 +1701,6 @@ private static void AppendSuppressionDebug(
                 VisionState.OutsideFieldOfView)
             {
                 continue;
-            }
-
-            int pointCount = simulation.Vision.GetVisibilityPoints(
-                units,
-                targetIndex,
-                observerEye,
-                points,
-                simulation.Bodies);
-
-            for (int pointIndex = 0;
-                 pointIndex < pointCount;
-                 pointIndex++)
-            {
-                Vector3 point =
-                    points[pointIndex];
-
-                bool clear =
-                    simulation.Vision.HasLineOfSight(
-                        worldMap,
-                        observerEye,
-                        point,
-                        out Vector3 blockingPoint);
-
-                Color pointColor =
-                    clear
-                        ? new Color(
-                            70,
-                            220,
-                            120,
-                            210)
-                        : new Color(
-                            240,
-                            80,
-                            80,
-                            180);
-
-                float pointX =
-                    point.X *
-                    tilePixelSize;
-
-                float pointY =
-                    point.Y *
-                    tilePixelSize;
-
-                AppendCircleOutline(
-                    debug,
-                    pointX,
-                    pointY,
-                    0.075f * tilePixelSize,
-                    pointColor,
-                    8);
-
-                if (clear)
-                {
-                    AppendDebugLine(
-                        debug,
-                        eyeX,
-                        eyeY,
-                        pointX,
-                        pointY,
-                        pointColor);
-                }
-                else
-                {
-                    AppendDebugLine(
-                        debug,
-                        eyeX,
-                        eyeY,
-                        blockingPoint.X *
-                        tilePixelSize,
-                        blockingPoint.Y *
-                        tilePixelSize,
-                        pointColor);
-
-                    AppendDebugLine(
-                        debug,
-                        blockingPoint.X *
-                        tilePixelSize,
-                        blockingPoint.Y *
-                        tilePixelSize,
-                        pointX,
-                        pointY,
-                        new Color(
-                            240,
-                            80,
-                            80,
-                            70));
-                }
             }
 
             if (check.State ==
