@@ -138,7 +138,6 @@ public sealed class UnitBodyStore
                 part.Motion,
                 part.Anchor,
                 part.Role,
-                part.Pivot
                 part.Pivot);
         }
 
