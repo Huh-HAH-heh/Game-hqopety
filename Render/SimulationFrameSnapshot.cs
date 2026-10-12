@@ -32,7 +32,9 @@ public readonly record struct RenderUnitState(
     bool HasApparel,
     bool HasPoweredArmor,
     RenderWeaponVisual PrimaryWeapon,
-    RenderWeaponVisual SecondaryWeapon);
+    RenderWeaponVisual SecondaryWeapon,
+    int BodyPartStart,
+    int BodyPartCount);
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
@@ -56,12 +58,24 @@ public readonly record struct RenderHitVolume(
     Vector3 Radii);
 
 /// <summary>
+/// Immutable horizontal body geometry captured for one render frame.
+/// Scale and rotation come from the same articulated body transforms used by hit testing.
+/// </summary>
+public readonly record struct RenderBodyPart(
+    Vector3 Position,
+    Vector3 Scale,
+    float Rotation,
+    BodyPrimitive Primitive,
+    BodyPartRole Role);
+
+/// <summary>
 /// Immutable data published by the simulation thread and consumed by the renderer.
 /// No mutable simulation-store arrays escape this object.
 /// </summary>
 public sealed class SimulationFrameSnapshot
 {
     public RenderUnitState[] Units { get; init; } = Array.Empty<RenderUnitState>();
+    public RenderBodyPart[] BodyParts { get; init; } = Array.Empty<RenderBodyPart>();
     public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
     public RenderAimRing[] AimRings { get; init; } = Array.Empty<RenderAimRing>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
@@ -142,6 +156,28 @@ public sealed class SimulationFrameSnapshot
         ReadOnlySpan<int> active = units.ActiveIndices;
         RenderUnitState[] unitStates = new RenderUnitState[active.Length];
 
+        // Flatten all active rigs into one immutable array for the render thread.
+        // Each unit stores a range, avoiding a small managed array per unit per frame.
+        UnitBodyStore bodyStore = simulation.Bodies;
+        int[] sourceBodyStarts = units.BodyStart;
+        short[] sourceBodyCounts = units.BodyCount;
+        int totalBodyParts = 0;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unitIndex = active[i];
+            int start = Math.Max(0, sourceBodyStarts[unitIndex]);
+            int count = Math.Max(0, (int)sourceBodyCounts[unitIndex]);
+            totalBodyParts += Math.Min(count, Math.Max(0, bodyStore.Count - start));
+        }
+
+        RenderBodyPart[] renderBodyParts = new RenderBodyPart[totalBodyParts];
+        Vector3[] sourceBodyPositions = bodyStore.WorldPosition;
+        Vector3[] sourceBodyScales = bodyStore.Scale;
+        float[] sourceBodyRotations = bodyStore.WorldRotation;
+        BodyPrimitive[] sourceBodyPrimitives = bodyStore.Primitive;
+        BodyPartRole[] sourceBodyRoles = bodyStore.Role;
+        int renderBodyPartWrite = 0;
+
         int blueAlive = 0;
         int blueDead = 0;
         int redAlive = 0;
@@ -219,6 +255,24 @@ public sealed class SimulationFrameSnapshot
             float suppression = suppressionStore.Value[index];
             UnitSuppressionState suppressionState = suppressionStore.GetState(index);
 
+            int renderBodyPartStart = renderBodyPartWrite;
+            int sourceBodyStart = Math.Max(0, sourceBodyStarts[index]);
+            int sourceBodyCount = Math.Max(0, (int)sourceBodyCounts[index]);
+            sourceBodyCount = Math.Min(
+                sourceBodyCount,
+                Math.Max(0, bodyStore.Count - sourceBodyStart));
+
+            for (int part = 0; part < sourceBodyCount; part++)
+            {
+                int sourceIndex = sourceBodyStart + part;
+                renderBodyParts[renderBodyPartWrite++] = new RenderBodyPart(
+                    sourceBodyPositions[sourceIndex],
+                    sourceBodyScales[sourceIndex],
+                    sourceBodyRotations[sourceIndex],
+                    sourceBodyPrimitives[sourceIndex],
+                    sourceBodyRoles[sourceIndex]);
+            }
+
             unitStates[i] = new RenderUnitState(
                 index,
                 units.GetId(index).Generation,
@@ -240,7 +294,9 @@ public sealed class SimulationFrameSnapshot
                 hasApparel,
                 hasPoweredArmor,
                 primaryWeapon,
-                secondaryWeapon);
+                secondaryWeapon,
+                renderBodyPartStart,
+                renderBodyPartWrite - renderBodyPartStart);
 
             bool alive = hp > 0f;
             if (faction == 1)
@@ -431,6 +487,7 @@ public sealed class SimulationFrameSnapshot
         return new SimulationFrameSnapshot
         {
             Units = unitStates,
+            BodyParts = renderBodyParts,
             Traces = traces,
             AimRings = aimRings.ToArray(),
             Impacts = impacts,
