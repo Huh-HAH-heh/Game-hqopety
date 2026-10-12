@@ -141,6 +141,18 @@ public readonly struct UnitCircleHitRegion
         float halfHeight,
         HitRegionPartBinding[] parts,
         params UnitAnatomyMarker[] markers)
+        : this(id, string.Empty, localCenter, radius, halfHeight, parts, markers)
+    {
+    }
+
+    public UnitCircleHitRegion(
+        string id,
+        string parentId,
+        Vector3 localCenter,
+        float radius,
+        float halfHeight,
+        HitRegionPartBinding[] parts,
+        params UnitAnatomyMarker[] markers)
         : this(
             localCenter,
             Vector3.Zero,
@@ -151,7 +163,7 @@ public readonly struct UnitCircleHitRegion
             0f,
             parts,
             id,
-            string.Empty,
+            parentId ?? string.Empty,
             markers)
     {
     }
@@ -225,6 +237,18 @@ public readonly struct UnitCircleHitRegion
         float lengthRadiusFactor,
         float heightHalfExtentFactor,
         HitRegionPartBinding[] parts,
+        params UnitAnatomyMarker[] markers) =>
+        RelativeToUnit(id, string.Empty, centerFactors, widthRadiusFactor,
+            lengthRadiusFactor, heightHalfExtentFactor, parts, markers);
+
+    public static UnitCircleHitRegion RelativeToUnit(
+        string id,
+        string parentId,
+        Vector3 centerFactors,
+        float widthRadiusFactor,
+        float lengthRadiusFactor,
+        float heightHalfExtentFactor,
+        HitRegionPartBinding[] parts,
         params UnitAnatomyMarker[] markers)
     {
         return new UnitCircleHitRegion(
@@ -237,7 +261,7 @@ public readonly struct UnitCircleHitRegion
             heightHalfExtentFactor,
             parts,
             id,
-            string.Empty,
+            parentId ?? string.Empty,
             markers);
     }
 
@@ -273,7 +297,7 @@ public readonly struct UnitCircleHitRegion
         float.IsFinite(value.Z);
 }
 
-public sealed class UnitHitRegionProfile
+public class UnitHitRegionProfile
 {
     private readonly UnitCircleHitRegion[] _regions;
 
