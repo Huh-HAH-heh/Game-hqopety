@@ -1246,8 +1246,6 @@ public sealed class VisionSystem
         if (_spatialUnits.Length < unitCapacity)
             Array.Resize(ref _spatialUnits, unitCapacity);
 
-        if (_candidateTargetMarks.Length < unitCapacity)
-            Array.Resize(ref _candidateTargetMarks, unitCapacity);
     }
 
     private void BuildSpatialGrid(
