@@ -105,4 +105,9 @@ Game-specific world queries should supply terrain, cover, target geometry and fa
 
 The follow-up pass now contains the core fixes: shared ballistic flight solution, moving-target prediction, a combined shot-accuracy kernel, layered terrain material penetration, AmmoSet/per-type reserve storage, and pellet projectiles.
 
-Build note: GitHub reports no workflow runs/status checks for the latest branch head, so local `dotnet build` is still required before merge.
+## Build verification update — 2026-10-13
+
+The earlier build note was stale. GitHub Actions passed the .NET build and simulation self-tests on commit 4a126aea8cbe4b8477f107b94275f540e4335a43 in branch feature/unit-navigation-800-battle:
+https://github.com/Huh-HAH-heh/Game-hqopety/actions/runs/38409878030
+
+This combat audit is a specialized mechanics checklist captured earlier than the current system-wide review. Use SUMMARY.md for the current architecture assessment and outstanding cross-system design issues.
