@@ -11,6 +11,7 @@ public sealed class LongRangeCombatTestScene
 {
     private const int InitialUnitsPerFaction = 400;
     private const int Columns = 40;
+    private const float FormationSpacing = 2.5f;
 
     private int _unitsPerFaction = InitialUnitsPerFaction;
     private int UnitsPerFaction => _unitsPerFaction;
@@ -416,13 +417,13 @@ public sealed class LongRangeCombatTestScene
                         baseX +
                         (row -
                          (Rows - 1) * 0.5f) *
-                        1.5f;
+                        FormationSpacing;
 
                     float y =
                         centerY -
-                        (Columns - 1) * 0.75f +
-                        column * 1.5f +
-                        (row % 2) * 0.75f;
+                        (Columns - 1) * FormationSpacing * 0.5f +
+                        column * FormationSpacing +
+                        (row % 2) * FormationSpacing * 0.5f;
 
                     SpawnUnit(
                         simulation,
@@ -577,13 +578,13 @@ public sealed class LongRangeCombatTestScene
                 baseX +
                 (row -
                  (Rows - 1) * 0.5f) *
-                1.5f;
+                FormationSpacing;
 
             float y =
                 centerY -
-                (Columns - 1) * 0.75f +
-                column * 1.5f +
-                (row % 2) * 0.75f;
+                (Columns - 1) * FormationSpacing * 0.5f +
+                column * FormationSpacing +
+                (row % 2) * FormationSpacing * 0.5f;
 
             int tileX =
                 Math.Clamp(
