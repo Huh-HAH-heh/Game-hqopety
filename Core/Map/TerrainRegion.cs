@@ -1,327 +1,380 @@
+using System;
+
 namespace Core.Map;
 
+/// <summary>
+/// A region owned by exactly one TerrainLayer (one Z level).
+/// Each entry is a 1 x 1 x 0.1 meter terrain cell's material ID.
+/// </summary>
 public sealed class TerrainRegion
 {
     public const int TilesPerSide = 48;
 
     public const int TotalTiles =
-        TilesPerSide *
-        TilesPerSide;
+        TilesPerSide * TilesPerSide;
 
     public int RegionX { get; }
     public int RegionY { get; }
+    public int ZLevel { get; }
 
-    private readonly Tile[] _tiles;
+    // Most voxel chunks are entirely empty or entirely solid at a given Z.
+    // Store those chunks as one material ID and allocate the 48x48 buffer
+    // only for layers that actually contain mixed materials.
+    private ushort[]? _materialIds;
+    private ulong[]? _overrideBits;
+    private ushort _uniformMaterialId;
+    private ushort _overrideMaterialId;
+    private int _overrideCount;
+    private ushort _nonZeroMaterialId;
+    private int _nonZeroCount;
+    private bool _allNonZeroSame = true;
 
-    private readonly int[] _rangeStarts;
-    private readonly byte[] _rangeCounts;
-    private readonly byte[] _rangeCapacities;
-    private readonly ushort[] _surfaceHeights;
+    public ReadOnlySpan<ushort> MaterialIds =>
+        GetOrCreateMaterialBuffer();
 
-    private TileRange[] _ranges;
-    private int _rangeUsed;
+    internal bool HasDenseMaterialBuffer =>
+        _materialIds != null;
 
-    public TerrainRegion(
+    internal bool HasSparseMaterialBuffer =>
+        _overrideBits != null;
+
+    private readonly TerrainTileRegion?[] _tileRegions;
+    private readonly int _regionIndex;
+
+    internal TerrainRegion(
         int regionX,
-        int regionY)
+        int regionY,
+        int zLevel,
+        TerrainTileRegion?[] tileRegions,
+        int regionIndex)
     {
+        if (regionX < 0)
+            throw new ArgumentOutOfRangeException(nameof(regionX));
+
+        if (regionY < 0)
+            throw new ArgumentOutOfRangeException(nameof(regionY));
+
+        if (zLevel < 0)
+            throw new ArgumentOutOfRangeException(nameof(zLevel));
+
+        if (regionIndex < 0 || regionIndex >= tileRegions.Length)
+            throw new ArgumentOutOfRangeException(nameof(regionIndex));
+
         RegionX = regionX;
         RegionY = regionY;
+        ZLevel = zLevel;
+        _tileRegions = tileRegions;
+        _regionIndex = regionIndex;
+    }
 
-        _tiles =
-            new Tile[TotalTiles];
+    public ushort GetMaterialId(
+        int localX,
+        int localY)
+    {
+        if (!IsInside(localX, localY))
+            return 0;
 
-        _rangeStarts =
-            new int[TotalTiles];
+        int index = localX + localY * TilesPerSide;
 
-        _rangeCounts =
-            new byte[TotalTiles];
+        if (_materialIds != null)
+            return _materialIds[index];
 
-        _rangeCapacities =
-            new byte[TotalTiles];
+        return IsOverrideSet(index)
+            ? _overrideMaterialId
+            : _uniformMaterialId;
+    }
 
-        _surfaceHeights =
-            new ushort[TotalTiles];
+    // Compatibility overload for callers that still pass Z explicitly.
+    public ushort GetMaterialId(
+        int localX,
+        int localY,
+        int z)
+    {
+        return z == ZLevel
+            ? GetMaterialId(localX, localY)
+            : (ushort)0;
+    }
 
-        _ranges =
-            new TileRange[TotalTiles];
+    internal ushort GetMaterialIdAtIndex(
+        int localIndex)
+    {
+        if (localIndex < 0 || localIndex >= TotalTiles)
+            throw new IndexOutOfRangeException();
 
-        for (int y = 0;
-             y < TilesPerSide;
-             y++)
+        if (_materialIds != null)
+            return _materialIds[localIndex];
+
+        return IsOverrideSet(localIndex)
+            ? _overrideMaterialId
+            : _uniformMaterialId;
+    }
+
+    internal void SetMaterialId(
+        int localX,
+        int localY,
+        ushort materialId)
+    {
+        if (!IsInside(localX, localY))
+            throw new IndexOutOfRangeException();
+
+        SetCellMaterial(
+            localX + localY * TilesPerSide,
+            materialId);
+    }
+
+    // Compatibility overload for callers that still pass Z explicitly.
+    internal void SetMaterialId(
+        int localX,
+        int localY,
+        int z,
+        ushort materialId)
+    {
+        if (z != ZLevel)
+            throw new ArgumentOutOfRangeException(nameof(z));
+
+        SetMaterialId(
+            localX,
+            localY,
+            materialId);
+    }
+
+    internal void SetMaterialIdAtIndex(
+        int localIndex,
+        ushort materialId)
+    {
+        if (localIndex < 0 || localIndex >= TotalTiles)
+            throw new IndexOutOfRangeException();
+
+        SetCellMaterial(localIndex, materialId);
+    }
+
+    internal void Clear()
+    {
+        _materialIds = null;
+        _overrideBits = null;
+        _uniformMaterialId = 0;
+        _overrideMaterialId = 0;
+        _overrideCount = 0;
+        _nonZeroMaterialId = 0;
+        _nonZeroCount = 0;
+        _allNonZeroSame = true;
+    }
+
+    private void SetCellMaterial(
+        int index,
+        ushort materialId)
+    {
+        if (_materialIds == null)
         {
-            for (int x = 0;
-                 x < TilesPerSide;
-                 x++)
+            bool overridden = IsOverrideSet(index);
+            ushort previous = overridden
+                ? _overrideMaterialId
+                : _uniformMaterialId;
+
+            if (previous == materialId)
+                return;
+
+            if (materialId == _uniformMaterialId)
             {
-                _tiles[
-                    x +
-                    y * TilesPerSide] =
-                    new Tile(
-                        (byte)x,
-                        (byte)y);
+                ClearOverrideBit(index);
+                if (_overrideCount == 0)
+                {
+                    _overrideBits = null;
+                    _overrideMaterialId = 0;
+                }
+
+                return;
             }
+
+            if (_overrideBits == null)
+            {
+                _overrideBits = new ulong[(TotalTiles + 63) / 64];
+                _overrideMaterialId = materialId;
+                SetOverrideBit(index);
+                _overrideCount = 1;
+                return;
+            }
+
+            if (materialId == _overrideMaterialId)
+            {
+                SetOverrideBit(index);
+                _overrideCount++;
+
+                if (_overrideCount == TotalTiles)
+                    CollapseUniform(_overrideMaterialId);
+
+                return;
+            }
+
+            // A third distinct value requires general dense storage.
+            GetOrCreateMaterialBuffer();
+        }
+
+        ushort previousDense = _materialIds![index];
+        if (previousDense == materialId)
+            return;
+
+        ushort[] values = _materialIds!;
+
+        if (previousDense == 0 && materialId != 0)
+        {
+            if (_nonZeroCount == 0)
+            {
+                _nonZeroMaterialId = materialId;
+                _allNonZeroSame = true;
+            }
+            else if (_allNonZeroSame && materialId != _nonZeroMaterialId)
+            {
+                _allNonZeroSame = false;
+            }
+
+            _nonZeroCount++;
+        }
+        else if (previousDense != 0 && materialId == 0)
+        {
+            _nonZeroCount--;
+
+            if (_nonZeroCount == 0)
+            {
+                _nonZeroMaterialId = 0;
+                _allNonZeroSame = true;
+            }
+        }
+        else if (previousDense != 0 && materialId != 0 &&
+                 previousDense != materialId && _allNonZeroSame)
+        {
+            if (_nonZeroCount == 1)
+            {
+                _nonZeroMaterialId = materialId;
+            }
+            else
+            {
+                _allNonZeroSame = false;
+            }
+        }
+
+        values[index] = materialId;
+
+        if (_nonZeroCount == 0)
+        {
+            CollapseUniform(0);
+        }
+        else if (_nonZeroCount == TotalTiles && _allNonZeroSame)
+        {
+            CollapseUniform(_nonZeroMaterialId);
         }
     }
 
-    // ============================================================
-    // TILE
-    // ============================================================
+    private bool IsOverrideSet(int index)
+    {
+        return _overrideBits != null &&
+               (_overrideBits[index >> 6] & (1UL << (index & 63))) != 0;
+    }
+
+    private void SetOverrideBit(int index)
+    {
+        _overrideBits![index >> 6] |= 1UL << (index & 63);
+    }
+
+    private void ClearOverrideBit(int index)
+    {
+        if (!IsOverrideSet(index))
+            return;
+
+        _overrideBits![index >> 6] &= ~(1UL << (index & 63));
+        _overrideCount--;
+    }
+
+    private ushort[] GetOrCreateMaterialBuffer()
+    {
+        if (_materialIds != null)
+            return _materialIds;
+
+        _materialIds = new ushort[TotalTiles];
+        Array.Fill(_materialIds, _uniformMaterialId);
+
+        if (_overrideBits != null)
+        {
+            for (int i = 0; i < TotalTiles; i++)
+            {
+                if (IsOverrideSet(i))
+                    _materialIds[i] = _overrideMaterialId;
+            }
+        }
+
+        _overrideBits = null;
+        _overrideMaterialId = 0;
+        _overrideCount = 0;
+
+        _nonZeroMaterialId = 0;
+        _nonZeroCount = 0;
+        _allNonZeroSame = true;
+
+        for (int i = 0; i < TotalTiles; i++)
+        {
+            ushort value = _materialIds[i];
+            if (value == 0)
+                continue;
+
+            if (_nonZeroCount == 0)
+                _nonZeroMaterialId = value;
+            else if (_nonZeroMaterialId != value)
+                _allNonZeroSame = false;
+
+            _nonZeroCount++;
+        }
+
+        return _materialIds;
+    }
+
+    private void CollapseUniform(ushort materialId)
+    {
+        _materialIds = null;
+        _overrideBits = null;
+        _uniformMaterialId = materialId;
+        _overrideMaterialId = 0;
+        _overrideCount = 0;
+        _nonZeroMaterialId = materialId;
+        _nonZeroCount = materialId == 0 ? 0 : TotalTiles;
+        _allNonZeroSame = true;
+    }
 
     public ref Tile GetLocalTile(
         int localX,
         int localY)
     {
-        return ref _tiles[
-            localX +
-            localY * TilesPerSide];
-    }
-
-    // ============================================================
-    // RANGES
-    // ============================================================
-
-    public ReadOnlySpan<TileRange> GetRanges(
-        int localX,
-        int localY)
-    {
-        int tileIndex =
-            localX +
-            localY * TilesPerSide;
-
-        int count =
-            _rangeCounts[tileIndex];
-
-        if (count == 0)
-            return ReadOnlySpan<TileRange>.Empty;
-
-        return _ranges.AsSpan(
-            _rangeStarts[tileIndex],
-            count);
-    }
-
-    public int GetRangeCount(
-        int localX,
-        int localY)
-    {
-        return _rangeCounts[
-            localX +
-            localY * TilesPerSide];
-    }
-
-    public void ClearRanges(
-        int localX,
-        int localY)
-    {
-        int tileIndex =
-            localX +
-            localY * TilesPerSide;
-
-        _rangeCounts[tileIndex] = 0;
-        _surfaceHeights[tileIndex] = 0;
-    }
-
-    public bool TryAddRange(
-        int localX,
-        int localY,
-        ushort startZ,
-        ushort endZ,
-        ushort materialId,
-        byte state)
-    {
-        if (startZ > endZ)
-        {
-            throw new ArgumentException(
-                "StartZ не может быть больше EndZ.");
-        }
-
-        int tileIndex =
-            localX +
-            localY * TilesPerSide;
-
-        int count =
-            _rangeCounts[tileIndex];
-
-        if (count >= Tile.MaxRanges)
-            return false;
-
-        EnsureRangeCapacity(
-            tileIndex,
-            count + 1);
-
-        int rangeIndex =
-            _rangeStarts[tileIndex] +
-            count;
-
-        _ranges[rangeIndex] =
-            new TileRange
-            {
-                StartZ = startZ,
-                EndZ = endZ,
-                MaterialId = materialId,
-                State = state
-            };
-
-        _rangeCounts[tileIndex] =
-            (byte)(count + 1);
-
-        if (state == WorldMap.StateSolid &&
-            endZ > _surfaceHeights[tileIndex])
-        {
-            _surfaceHeights[tileIndex] =
-                endZ;
-        }
-
-        return true;
-    }
-
-    public void SetRanges(
-        int localX,
-        int localY,
-        ReadOnlySpan<TileRange> ranges)
-    {
-        if (ranges.Length > Tile.MaxRanges)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(ranges));
-        }
-
-        int tileIndex =
-            localX +
-            localY * TilesPerSide;
-
-        if (ranges.Length == 0)
-        {
-            _rangeCounts[tileIndex] = 0;
-            _surfaceHeights[tileIndex] = 0;
-            return;
-        }
-
-        EnsureRangeCapacity(
-            tileIndex,
-            ranges.Length);
-
-        ranges.CopyTo(
-            _ranges.AsSpan(
-                _rangeStarts[tileIndex],
-                ranges.Length));
-
-        _rangeCounts[tileIndex] =
-            (byte)ranges.Length;
-
-        ushort surfaceZ = 0;
-
-        for (int i = 0;
-             i < ranges.Length;
-             i++)
-        {
-            ref readonly TileRange range =
-                ref ranges[i];
-
-            if (range.State == WorldMap.StateSolid &&
-                range.EndZ > surfaceZ)
-            {
-                surfaceZ =
-                    range.EndZ;
-            }
-        }
-
-        _surfaceHeights[tileIndex] =
-            surfaceZ;
-    }
-
-    public ushort GetSurfaceHeightUnits(
-        int localX,
-        int localY)
-    {
-        return _surfaceHeights[
-            localX +
-            localY * TilesPerSide];
-    }
-
-    // ============================================================
-    // STORAGE
-    // ============================================================
-
-    private void EnsureRangeCapacity(
-        int tileIndex,
-        int required)
-    {
-        int currentCapacity =
-            _rangeCapacities[tileIndex];
-
-        if (required <= currentCapacity)
-            return;
-
-        int newCapacity =
-            currentCapacity == 0
-                ? 1
-                : currentCapacity * 2;
-
-        if (newCapacity < required)
-            newCapacity = required;
-
-        if (newCapacity > Tile.MaxRanges)
-            newCapacity = Tile.MaxRanges;
-
-        int newStart =
-            AllocateRangeBlock(
-                newCapacity);
-
-        int oldCount =
-            _rangeCounts[tileIndex];
-
-        if (oldCount > 0)
-        {
-            _ranges
-                .AsSpan(
-                    _rangeStarts[tileIndex],
-                    oldCount)
-                .CopyTo(
-                    _ranges.AsSpan(
-                        newStart,
-                        oldCount));
-        }
-
-        _rangeStarts[tileIndex] =
-            newStart;
-
-        _rangeCapacities[tileIndex] =
-            (byte)newCapacity;
-    }
-
-    private int AllocateRangeBlock(
-        int count)
-    {
-        EnsureRangeStorageCapacity(
-            _rangeUsed + count);
-
-        int start =
-            _rangeUsed;
-
-        _rangeUsed +=
-            count;
-
-        return start;
-    }
-
-    private void EnsureRangeStorageCapacity(
-        int required)
-    {
-        if (required <= _ranges.Length)
-            return;
-
-        int newCapacity =
-            _ranges.Length * 2;
-
-        if (newCapacity < required)
-            newCapacity = required;
-
-        Array.Resize(
-            ref _ranges,
-            newCapacity);
+        return ref GetOrCreateTileMetadata().GetLocalTile(
+            localX,
+            localY);
     }
 
     public ReadOnlySpan<Tile> Tiles =>
-        _tiles.AsSpan();
+        GetOrCreateTileMetadata().Tiles;
+
+    private TerrainTileRegion GetOrCreateTileMetadata()
+    {
+        TerrainTileRegion? region =
+            _tileRegions[_regionIndex];
+
+        if (region != null)
+            return region;
+
+        region = new TerrainTileRegion(
+            RegionX,
+            RegionY);
+
+        _tileRegions[_regionIndex] = region;
+        return region;
+    }
+
+    private static bool IsInside(
+        int x,
+        int y)
+    {
+        return
+            x >= 0 &&
+            y >= 0 &&
+            x < TilesPerSide &&
+            y < TilesPerSide;
+    }
 }

@@ -37,6 +37,12 @@ public sealed class GameCamera
             moveSpeed;
     }
 
+    public void CenterOnPosition(Vector2f position)
+    {
+        _targetPosition = position;
+        _view.Center = position;
+    }
+
     public void CenterOnWorld(
         float tilePixelSize,
         Core.Map.WorldMap worldMap)
@@ -58,6 +64,16 @@ public sealed class GameCamera
             _targetPosition;
     }
 
+    public void Resize(Vector2f windowSize)
+    {
+        if (windowSize.X <= 0f || windowSize.Y <= 0f)
+            return;
+
+        _view.Size = new Vector2f(
+            windowSize.X * _zoomLevel,
+            windowSize.Y * _zoomLevel);
+    }
+
     public void HandleZoom(
         float delta)
     {
@@ -71,9 +87,11 @@ public sealed class GameCamera
                 ? _zoomLevel / zoomFactor
                 : _zoomLevel * zoomFactor;
 
+        // No gameplay zoom-in limit. Keep only the smallest positive float
+        // to prevent the view size from reaching zero after extreme wheel input.
         newZoom =
             Math.Max(
-                0.05f,
+                float.Epsilon,
                 newZoom);
 
         float viewFactor =

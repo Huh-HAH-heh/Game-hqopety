@@ -9,60 +9,33 @@ public static class TerrainMetadataSystem
         int x,
         int y)
     {
-        StringBuilder sb =
-            new StringBuilder();
+        StringBuilder sb = new StringBuilder();
 
+        sb.AppendLine("=== TERRAIN VOXEL COLUMN ===");
+        sb.AppendLine($"Координаты: ({x}, {y})");
         sb.AppendLine(
-            "=== TERRAIN COLUMN ===");
+            $"Высота поверхности: {worldMap.GetSurfaceHeight(x, y):F1} м");
+        sb.AppendLine($"Слоёв: {worldMap.LayerCount}");
 
-        sb.AppendLine(
-            $"Координаты: ({x}, {y})");
+        int occupied = 0;
 
-        sb.AppendLine(
-            $"Высота поверхности: " +
-            $"{worldMap.GetSurfaceHeight(x, y):F1} м");
+        for (int z = 0; z < worldMap.LayerCount; z++)
+        {
+            if (worldMap.GetMaterialId(x, y, z) != 0)
+                occupied++;
+        }
 
-        ReadOnlySpan<TileRange> ranges =
-            worldMap.GetTileRanges(
-                x,
-                y);
-
-        sb.AppendLine(
-            $"Диапазонов: {ranges.Length}");
-
+        sb.AppendLine($"Занято ячеек: {occupied}/{worldMap.LayerCount}");
         sb.AppendLine();
 
-        for (int i = 0;
-             i < ranges.Length;
-             i++)
+        for (int z = 0; z < worldMap.LayerCount; z++)
         {
-            ref readonly TileRange range =
-                ref ranges[i];
+            ushort materialId =
+                worldMap.GetMaterialId(x, y, z);
 
             sb.AppendLine(
-                $"Range {i}");
-
-            sb.AppendLine(
-                $"  Start Z: " +
-                $"{range.StartZ * 0.1f:F1} м");
-
-            sb.AppendLine(
-                $"  End Z: " +
-                $"{range.EndZ * 0.1f:F1} м");
-
-            sb.AppendLine(
-                $"  Thickness: " +
-                $"{range.Thickness * 0.1f:F1} м");
-
-            sb.AppendLine(
-                $"  Material ID: " +
-                $"{range.MaterialId}");
-
-            sb.AppendLine(
-                $"  State: " +
-                $"{range.State}");
-
-            sb.AppendLine();
+                $"Z={z,2} м | ID={materialId} | " +
+                (materialId == 0 ? "пусто" : "материал"));
         }
 
         return sb.ToString();

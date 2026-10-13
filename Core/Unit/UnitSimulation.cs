@@ -1,4 +1,7 @@
+using Core.Items;
 using Core.Map;
+using System;
+using System.Diagnostics;
 using System.Numerics;
 
 namespace Core.Unit;
@@ -7,9 +10,73 @@ public sealed class UnitSimulation
 {
     private readonly UnitMovementSystem _movementSystem;
     private readonly UnitBodySystem _bodySystem;
+    private readonly UnitHealthSystem _healthSystem;
+    private readonly UnitInventorySystem _inventorySystem;
+    private readonly VisionSystem _visionSystem;
+    private readonly UnitWeaponSystem _weaponSystem;
+    private readonly ProjectileSystem _projectileSystem;
+    private readonly UnitAiSystem _aiSystem;
+    private bool[] _deathHandled = Array.Empty<bool>();
+    private float[] _baseMoveSpeed = Array.Empty<float>();
 
     public UnitStore Units { get; }
+    public UnitNavigationSystem Navigation => _movementSystem.Navigation;
     public UnitBodyStore Bodies { get; }
+    public UnitHitRegionStore HitRegions { get; }
+    public UnitHealthStore Health { get; }
+    public UnitInventoryStore Inventory { get; }
+    public UnitWeaponStore Weapons { get; }
+    public ProjectileStore Projectiles { get; }
+    public UnitSuppressionStore Suppression { get; }
+
+    private bool _visionEnabled = true;
+
+    public bool VisionEnabled
+    {
+        get => _visionEnabled;
+        set
+        {
+            if (_visionEnabled == value)
+                return;
+
+            _visionEnabled = value;
+
+            if (!value)
+                _visionSystem.ClearAll();
+        }
+    }
+
+    public double LastSimulationUpdateMilliseconds { get; private set; }
+    public double LastSuppressionUpdateMilliseconds { get; private set; }
+    public double LastVisionCallMilliseconds { get; private set; }
+    public double LastAIUpdateMilliseconds { get; private set; }
+    public double LastMovementUpdateMilliseconds { get; private set; }
+    public double LastWeaponUpdateMilliseconds { get; private set; }
+    public double LastBodyUpdateMilliseconds { get; private set; }
+    public double LastProjectileUpdateMilliseconds { get; private set; }
+    public double LastHealthUpdateMilliseconds { get; private set; }
+    public long TotalShotsFired => _weaponSystem.TotalShotsFired;
+    public long TotalRoundsConsumed => _weaponSystem.TotalRoundsConsumed;
+    public long TotalProjectilesSpawned => _weaponSystem.TotalProjectilesSpawned;
+    public int ShotsFiredThisFrame => _weaponSystem.ShotsFiredThisFrame;
+
+    public void BeginMetricsFrame()
+    {
+        _weaponSystem.BeginMetricsFrame();
+    }
+    public double LastProjectileGridBuildMilliseconds =>
+        _projectileSystem.LastGridBuildMilliseconds;
+    public int LastProjectilesVisited =>
+        _projectileSystem.LastProjectilesVisited;
+    public int LastProjectileTerrainCellsTraced =>
+        _projectileSystem.LastTerrainCellsTraced;
+    public int LastProjectileUnitCandidates =>
+        _projectileSystem.LastUnitCandidates;
+
+    public UnitAiSystem AI =>
+        _aiSystem;
+    public VisionSystem Vision =>
+        _visionSystem;
 
     public UnitSimulation(
         int unitCapacity = 1024,
@@ -19,42 +86,250 @@ public sealed class UnitSimulation
             new UnitStore(
                 unitCapacity);
 
+        HitRegions = new UnitHitRegionStore(unitCapacity);
+
+        _deathHandled = new bool[Units.Capacity];
+
         Bodies =
             new UnitBodyStore(
                 bodyCapacity);
+
+        Health =
+            new UnitHealthStore(
+                unitCapacity);
+
+        Inventory =
+            new UnitInventoryStore(
+                unitCapacity);
 
         _movementSystem =
             new UnitMovementSystem();
 
         _bodySystem =
             new UnitBodySystem();
+
+        _healthSystem =
+            new UnitHealthSystem();
+
+        _inventorySystem =
+            new UnitInventorySystem();
+
+        Weapons =
+            new UnitWeaponStore(
+                unitCapacity);
+
+        Projectiles =
+            new ProjectileStore();
+
+        Suppression =
+            new UnitSuppressionStore(unitCapacity);
+
+        _weaponSystem =
+            new UnitWeaponSystem(HitRegions, Bodies);
+
+        _projectileSystem =
+            new ProjectileSystem();
+
+        _visionSystem =
+            new VisionSystem(
+                unitCapacity,
+                HitRegions);
+
+        _aiSystem =
+            new UnitAiSystem(
+                unitCapacity,
+                _weaponSystem);
     }
 
     public UnitId Spawn(
         UnitType type,
         Vector3 position,
-        float rotation = 0f)
+        float bodyAngle = 0f,
+        int locationId = 0,
+        ushort factionTag = 0,
+        UnitHitRegionProfile? hitProfile = null)
     {
-        UnitDefinition definition =
-            UnitCatalog.Get(type);
+        Vector3 bodyNormal =
+            new Vector3(
+                MathF.Cos(bodyAngle),
+                MathF.Sin(bodyAngle),
+                0f);
 
-        BodyHandle body =
-            Bodies.CreateBody(
-                definition.BodyType);
+        return Spawn(
+            type,
+            position,
+            bodyNormal,
+            bodyNormal,
+            locationId,
+            factionTag,
+            hitProfile);
+    }
+
+    public UnitId Spawn(
+        UnitType type,
+        Vector3 position,
+        Vector3 bodyNormal,
+        Vector3 headNormal,
+        int locationId = 0,
+        ushort factionTag = 0,
+        UnitHitRegionProfile? hitProfile = null)
+    {
+        UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(type);
+        UnitDefinition definition = archetype.Definition;
+        BodyHandle body = Bodies.CreateBody(archetype.BodyParts);
 
         UnitId id =
             Units.Create(
                 definition,
                 position,
-                rotation,
-                body);
+                bodyNormal,
+                headNormal,
+                body,
+                locationId,
+                factionTag);
 
+        UnitHitRegionProfile profile = hitProfile ?? archetype.Anatomy;
+
+        return FinishSpawn(
+            id,
+            type,
+            position,
+            bodyNormal,
+            headNormal,
+            body,
+            profile);
+    }
+
+    public UnitId SpawnCustom(
+        UnitType type,
+        Vector3 position,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        float bodyAngle = 0f,
+        int locationId = 0,
+        ushort factionTag = 0,
+        UnitHitRegionProfile? hitProfile = null)
+    {
+        UnitDefinition definition = UnitCatalog.Get(type);
+        BodyHandle body = Bodies.CreateBody(bodyParts);
+
+        Vector3 bodyNormal = new Vector3(
+            MathF.Cos(bodyAngle),
+            MathF.Sin(bodyAngle),
+            0f);
+
+        UnitId id = Units.Create(
+            definition,
+            position,
+            bodyNormal,
+            bodyNormal,
+            body,
+            locationId,
+            factionTag);
+
+        UnitHitRegionProfile profile =
+            hitProfile ?? UnitAnatomyProfile.FromBodyParts(bodyParts);
+
+        return FinishSpawn(
+            id,
+            type,
+            position,
+            bodyNormal,
+            bodyNormal,
+            body,
+            profile);
+    }
+
+    public UnitId SpawnCustom(
+        in UnitDefinition definition,
+        Vector3 position,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        UnitHitRegionProfile hitProfile,
+        float bodyAngle = 0f,
+        int locationId = 0,
+        ushort factionTag = 0)
+    {
+        if (hitProfile == null)
+            throw new ArgumentNullException(nameof(hitProfile));
+
+        BodyHandle body = Bodies.CreateBody(bodyParts);
+
+        Vector3 bodyNormal = new Vector3(
+            MathF.Cos(bodyAngle),
+            MathF.Sin(bodyAngle),
+            0f);
+
+        UnitId id = Units.Create(
+            definition,
+            position,
+            bodyNormal,
+            bodyNormal,
+            body,
+            locationId,
+            factionTag);
+
+        return FinishSpawn(
+            id,
+            definition.Type,
+            position,
+            bodyNormal,
+            bodyNormal,
+            body,
+            hitProfile);
+    }
+
+    private UnitId FinishSpawn(
+        UnitId id,
+        UnitType type,
+        Vector3 position,
+        Vector3 bodyNormal,
+        Vector3 headNormal,
+        BodyHandle body,
+        UnitHitRegionProfile hitProfile)
+    {
         Bodies.SetInitialWorldPosition(
             body,
             position,
-            rotation);
+            MathF.Atan2(bodyNormal.Y, bodyNormal.X),
+            MathF.Atan2(headNormal.Y, headNormal.X));
+
+        EnsureDeathCapacity();
+        _deathHandled[id.Index] = false;
+        _baseMoveSpeed[id.Index] = Units.MoveSpeed[id.Index];
+
+        bool initializeLegacyHealth =
+            hitProfile is not UnitAnatomyProfile anatomy ||
+            !anatomy.HasSharedShapes ||
+            body.Count != anatomy.NodeCount;
+        Health.InitializeUnit(id.Index, type, initializeLegacyHealth);
+        HitRegions.SetProfile(id.Index, hitProfile);
+        Health.RegisterHitRegionParts(id.Index, hitProfile);
+        Inventory.InitializeUnit(id.Index);
+        Weapons.InitializeUnit(id.Index);
+        Suppression.InitializeUnit(id.Index);
+        _aiSystem.Store.InitializeUnit(id.Index);
+
+        ReadOnlySpan<UnitStartingEquipment> startingEquipment =
+            UnitAnatomyCatalog.Get(type).StartingEquipment;
+        for (int i = 0; i < startingEquipment.Length; i++)
+        {
+            UnitStartingEquipment item = startingEquipment[i];
+            EquipStartingItem(id, item.Item, item.Durability);
+        }
+
+        if (startingEquipment.Length > 0 && Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
 
         return id;
+    }
+
+    private void EquipStartingItem(
+        UnitId id,
+        ArmorConfig armor,
+        float durability)
+    {
+        int slot = Inventory.AddItem(id.Index, armor, durability);
+        if (slot >= 0)
+            _inventorySystem.EquipArmor(Units, Inventory, id, slot);
     }
 
     public bool Destroy(
@@ -67,6 +342,10 @@ public sealed class UnitSimulation
             return false;
         }
 
+        _movementSystem.Navigation.ClearRoute(index);
+        _visionSystem.ClearUnit(index);
+        _deathHandled[index] = false;
+
         BodyHandle body =
             new BodyHandle(
                 Units.BodyStart[index],
@@ -75,30 +354,604 @@ public sealed class UnitSimulation
         Bodies.FreeBody(
             body);
 
+        HitRegions.ClearUnit(index);
+
+        Health.ClearUnit(
+            index);
+
+        Inventory.ClearUnit(
+            index);
+
+        Weapons.ClearUnit(
+            index);
+
+        Suppression.ClearUnit(
+            index);
+
+        _aiSystem.Store.ClearUnit(
+            index);
+
         return Units.Destroy(id);
+    }
+
+    public int AddInventoryItem(
+        UnitId id,
+        ItemConfig item,
+        float maxDurability = 0f)
+    {
+        return _inventorySystem.AddItem(
+            Inventory,
+            id,
+            item,
+            maxDurability);
+    }
+
+    public bool RemoveInventoryItem(
+        UnitId id,
+        int inventorySlot)
+    {
+        bool removed = _inventorySystem.RemoveItem(
+            Units,
+            Inventory,
+            id,
+            inventorySlot);
+
+        if (removed && Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
+
+        return removed;
+    }
+
+    public void UnequipArmor(
+        UnitId id,
+        int zone,
+        ArmorLayer layer)
+    {
+        _inventorySystem.UnequipArmor(
+            Units,
+            Inventory,
+            id,
+            zone,
+            layer);
+
+        if (Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
+    }
+
+    public void UnequipWeapon(
+        UnitId id,
+        UnitWeaponSlot slot)
+    {
+        _inventorySystem.UnequipWeapon(
+            Units,
+            Inventory,
+            id,
+            slot);
+    }
+
+    public bool EquipArmor(
+        UnitId id,
+        int inventorySlot)
+    {
+        bool equipped = _inventorySystem.EquipArmor(
+            Units,
+            Inventory,
+            id,
+            inventorySlot);
+
+        if (equipped && Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
+
+        return equipped;
+    }
+
+    public bool EquipWeapon(
+        UnitId id,
+        int inventorySlot,
+        UnitWeaponSlot slot)
+    {
+        bool equipped =
+            _inventorySystem.EquipWeapon(
+                Units,
+                Inventory,
+                id,
+                inventorySlot,
+                slot);
+
+        if (!equipped ||
+            !Units.TryGetIndex(
+                id,
+                out int unitIndex))
+        {
+            return equipped;
+        }
+
+        WeaponConfig? weapon =
+            Inventory.GetItem(
+                unitIndex,
+                inventorySlot) as WeaponConfig;
+
+        if (weapon != null)
+        {
+            Weapons.ConfigureSlot(
+                unitIndex,
+                slot,
+                weapon);
+        }
+
+        return true;
+    }
+
+    public bool FireWeapon(
+        UnitId id,
+        UnitWeaponSlot slot,
+        Vector3 direction)
+    {
+        if (!Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f)
+        {
+            return false;
+        }
+
+        return _weaponSystem.TryFire(
+            Units,
+            Inventory,
+            Weapons,
+            Projectiles,
+            id,
+            slot,
+            direction);
+    }
+
+    public bool FireWeaponAt(
+        UnitId id,
+        UnitWeaponSlot slot,
+        UnitId target,
+        Vector3? aimPoint = null)
+    {
+        if (!Units.TryGetIndex(id, out int shooterIndex) ||
+            Health.OverallHitPoints[shooterIndex] <= 0f ||
+            !Units.TryGetIndex(target, out int targetIndex) ||
+            Health.OverallHitPoints[targetIndex] <= 0f)
+        {
+            return false;
+        }
+
+        return _weaponSystem.TryFireAt(
+            Units,
+            Inventory,
+            Weapons,
+            Projectiles,
+            id,
+            slot,
+            target,
+            1f,
+            aimPoint);
+    }
+
+    public UnitDamageResult ApplyDamage(
+        UnitId id,
+        UnitHealthPartId part,
+        float rawDamage)
+    {
+        if (!Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f ||
+            !UnitHitSystem.TryFindBindingForPart(
+                Units, unitIndex, part,
+                out int regionIndex, out int bindingIndex, HitRegions))
+        {
+            return default;
+        }
+
+        return ApplyAnatomyDamage(id, regionIndex, bindingIndex, rawDamage);
+    }
+
+    public UnitDamageResult ApplyAnatomyDamage(
+        UnitId id,
+        string tissueId,
+        float rawDamage)
+    {
+        if (string.IsNullOrWhiteSpace(tissueId) ||
+            !Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f ||
+            HitRegions.GetProfile(unitIndex) is not UnitHitRegionProfile profile ||
+            !profile.TryFindPart(tissueId, out int regionIndex, out int bindingIndex))
+        {
+            return default;
+        }
+
+        return ApplyAnatomyDamage(id, regionIndex, bindingIndex, rawDamage);
+    }
+
+    public UnitDamageResult ApplyAnatomyDamage(
+        UnitId id,
+        int regionIndex,
+        int bindingIndex,
+        float rawDamage)
+    {
+        if (!Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f ||
+            !UnitHitSystem.TryGetBinding(
+                Units, unitIndex, regionIndex, bindingIndex,
+                out HitRegionPartBinding binding, HitRegions) ||
+            !Health.TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out _))
+        {
+            return default;
+        }
+
+        UnitDamageResult result;
+        if (binding.ArmorZone >= 0)
+        {
+            result = _inventorySystem.ResolveIncomingDamage(
+                binding.ArmorZone, rawDamage, id, Inventory);
+        }
+        else if (binding.Part != UnitHealthPartId.None)
+        {
+            result = _inventorySystem.ResolveIncomingDamage(
+                binding.Part, rawDamage, id, Inventory);
+        }
+        else
+        {
+            result = new UnitDamageResult(rawDamage, MathF.Max(0f, rawDamage), 0f, 0f);
+        }
+
+        _healthSystem.ApplyRegionDamage(
+            Units, Health, id, regionIndex, bindingIndex, result.FinalDamage);
+
+        if (Health.OverallHitPoints[unitIndex] <= 0f)
+            MarkUnitDead(unitIndex);
+
+        return result;
     }
 
     public void SetTarget(
         UnitId id,
         Vector3 target)
     {
-        Units.SetTarget(
+        if (!Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f)
+        {
+            return;
+        }
+
+        Units.SetTarget(id, target);
+    }
+
+    public void SetFactionTag(
+        UnitId id,
+        ushort factionTag)
+    {
+        Units.SetFactionTag(
             id,
-            target);
+            factionTag);
+    }
+
+    public bool SelectAmmunition(
+        UnitId id,
+        UnitWeaponSlot slot,
+        int ammoType)
+    {
+        if (!Units.TryGetIndex(
+                id,
+                out int unitIndex))
+        {
+            return false;
+        }
+
+        return Weapons.SelectAmmunition(
+            unitIndex,
+            slot,
+            ammoType);
+    }
+
+    public void AddReserveAmmo(
+        UnitId id,
+        UnitWeaponSlot slot,
+        int amount)
+    {
+        if (!Units.TryGetIndex(
+                id,
+                out int unitIndex))
+        {
+            return;
+        }
+
+        Weapons.AddReserveAmmo(
+            unitIndex,
+            slot,
+            amount);
+    }
+
+    public void SetPosture(
+        UnitId id,
+        UnitPosture posture)
+    {
+        Units.SetPosture(
+            id,
+            posture);
+    }
+
+    public void SetBodyNormal(
+        UnitId id,
+        Vector3 normal)
+    {
+        Units.SetBodyNormal(
+            id,
+            normal);
+    }
+
+    public void SetHeadNormal(
+        UnitId id,
+        Vector3 normal)
+    {
+        Units.SetHeadNormal(
+            id,
+            normal);
+    }
+
+    private static bool IsAppendOnlyAnatomy(
+        UnitHitRegionProfile? previous,
+        UnitHitRegionProfile next)
+    {
+        if (previous == null || previous.RegionCount > next.RegionCount)
+            return false;
+
+        ReadOnlySpan<UnitCircleHitRegion> oldNodes = previous.Regions;
+        ReadOnlySpan<UnitCircleHitRegion> newNodes = next.Regions;
+
+        for (int i = 0; i < oldNodes.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(oldNodes[i].Id) ||
+                !string.Equals(oldNodes[i].Id, newNodes[i].Id, StringComparison.Ordinal))
+                return false;
+
+            ReadOnlySpan<HitRegionPartBinding> oldTissues = oldNodes[i].Parts;
+            ReadOnlySpan<HitRegionPartBinding> newTissues = newNodes[i].Parts;
+            if (oldTissues.Length != newTissues.Length)
+                return false;
+
+            for (int j = 0; j < oldTissues.Length; j++)
+            {
+                if (oldTissues[j].Part != newTissues[j].Part ||
+                    oldTissues[j].Kind != newTissues[j].Kind ||
+                    !string.Equals(oldTissues[j].Id, newTissues[j].Id, StringComparison.Ordinal) ||
+                    !string.Equals(oldTissues[j].ParentId, newTissues[j].ParentId, StringComparison.Ordinal) ||
+                    oldTissues[j].MaxHitPoints != newTissues[j].MaxHitPoints ||
+                    oldTissues[j].ArmorZone != newTissues[j].ArmorZone)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Append a named anatomy circle at runtime without rebuilding the caller's
+    /// profile manually. Existing named tissue health is preserved.
+    /// </summary>
+    public bool AddAnatomyNode(UnitId id, UnitAnatomyNode node)
+    {
+        if (!Units.TryGetIndex(id, out int index) ||
+            HitRegions.GetProfile(index) is not UnitHitRegionProfile current)
+        {
+            return false;
+        }
+
+        var nextNodes = new UnitCircleHitRegion[current.RegionCount + 1];
+        current.Regions.CopyTo(nextNodes);
+        nextNodes[^1] = node;
+        return SetHitRegionProfile(id, new UnitHitRegionProfile(nextNodes));
+    }
+
+    public bool SetHitRegionProfile(
+        UnitId id,
+        UnitHitRegionProfile profile)
+    {
+        if (profile == null ||
+            !Units.TryGetIndex(id, out int index))
+        {
+            return false;
+        }
+
+        UnitHitRegionProfile? previous = HitRegions.GetProfile(index);
+        bool appendOnly = IsAppendOnlyAnatomy(previous, profile);
+
+        if (!appendOnly)
+            Health.ClearHitRegionParts(index);
+
+        HitRegions.SetProfile(index, profile);
+        Health.RegisterHitRegionParts(index, profile);
+        return true;
     }
 
     public void Update(
         WorldMap worldMap,
         float deltaTime)
     {
-        _movementSystem.Update(
+        long totalStarted = Stopwatch.GetTimestamp();
+        EnsureDeathCapacity();
+
+        long phaseStarted = Stopwatch.GetTimestamp();
+        Suppression.Update(Units, deltaTime);
+        LastSuppressionUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+
+        if (VisionEnabled)
+        {
+            phaseStarted = Stopwatch.GetTimestamp();
+            _visionSystem.Update(Units, worldMap, deltaTime, Health, Bodies);
+            LastVisionCallMilliseconds =
+                Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+        }
+        else
+        {
+            LastVisionCallMilliseconds = 0d;
+        }
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        _aiSystem.Update(
             Units,
+            Health,
+            Inventory,
+            Weapons,
+            Projectiles,
+            Suppression,
+            _visionSystem,
             worldMap,
             deltaTime);
+        LastAIUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
-        _bodySystem.Update(
+        phaseStarted = Stopwatch.GetTimestamp();
+        _movementSystem.Update(Units, worldMap, deltaTime, Health);
+        LastMovementUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        _weaponSystem.Update(
+            Units,
+            Inventory,
+            Weapons,
+            Projectiles,
+            deltaTime,
+            Health,
+            _visionSystem,
+            worldMap);
+        LastWeaponUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        _bodySystem.Update(Units, Bodies, deltaTime);
+        LastBodyUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        _projectileSystem.Update(
             Units,
             Bodies,
+            HitRegions,
+            Inventory,
+            Health,
+            _healthSystem,
+            Projectiles,
+            Suppression,
+            worldMap,
             deltaTime);
+        LastProjectileUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        RefreshMovementSpeeds();
+
+        _healthSystem.Update(Units, Health, deltaTime);
+        LastHealthUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+
+        ProcessDeadUnits();
+        LastSimulationUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(totalStarted).TotalMilliseconds;
+    }
+
+    private void EnsureDeathCapacity()
+    {
+        if (_deathHandled.Length < Units.Capacity)
+            Array.Resize(ref _deathHandled, Units.Capacity);
+
+        if (_baseMoveSpeed.Length < Units.Capacity)
+            Array.Resize(ref _baseMoveSpeed, Units.Capacity);
+    }
+
+    private void RefreshMovementSpeeds()
+    {
+        ReadOnlySpan<int> active = Units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+            RefreshMovementSpeed(active[i]);
+    }
+
+    private void RefreshMovementSpeed(int unitIndex)
+    {
+        float multiplier = 1f;
+
+        for (int zone = 0; zone < UnitInventoryStore.BodyZoneCount; zone++)
+        {
+            for (int layer = 0; layer < UnitInventoryStore.ArmorLayerCount; layer++)
+            {
+                short slot = Inventory.GetBodyEquipment(unitIndex, zone, (ArmorLayer)layer);
+                if (slot < 0)
+                    continue;
+
+                if (Inventory.GetItem(unitIndex, slot) is not ArmorConfig armor ||
+                    armor.MovementSpeedMultiplier <= multiplier)
+                    continue;
+
+                int durabilityIndex =
+                    unitIndex * UnitInventoryStore.MaxInventorySlots + slot;
+                if (Inventory.Durability[durabilityIndex] > 0f)
+                    multiplier = armor.MovementSpeedMultiplier;
+            }
+        }
+
+        Units.MoveSpeed[unitIndex] = _baseMoveSpeed[unitIndex] * multiplier;
+    }
+
+    private void ProcessDeadUnits()
+    {
+        ReadOnlySpan<int> active = Units.ActiveIndices;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+
+            if (Health.OverallHitPoints[unit] > 0f)
+            {
+                _deathHandled[unit] = false;
+                continue;
+            }
+
+            MarkUnitDead(unit);
+        }
+    }
+
+    private void MarkUnitDead(int unitIndex)
+    {
+        if ((uint)unitIndex >= (uint)_deathHandled.Length ||
+            _deathHandled[unitIndex])
+        {
+            return;
+        }
+
+        _deathHandled[unitIndex] = true;
+        UnitId deadId = Units.GetId(unitIndex);
+
+        // Do not leave live units' AI or weapon state pointing at the corpse.
+        ReadOnlySpan<int> active = Units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int other = active[i];
+            if (other == unitIndex)
+                continue;
+
+            if (_aiSystem.Store.HasTarget[other] &&
+                _aiSystem.Store.Target[other] == deadId)
+            {
+                _aiSystem.Store.ClearTarget(other);
+                _aiSystem.Store.ClearGoal(other);
+                _aiSystem.Store.State[other] = UnitAiState.Idle;
+                Units.HasTarget[other] = false;
+                Units.Target[other] = Units.Position[other];
+                Units.Velocity[other] = Vector3.Zero;
+                _movementSystem.Navigation.ClearRoute(other);
+            }
+
+            Weapons.ClearReferencesToTarget(other, deadId);
+        }
+
+        Units.HasTarget[unitIndex] = false;
+        Units.Velocity[unitIndex] = Vector3.Zero;
+        _movementSystem.Navigation.ClearRoute(unitIndex);
+        _visionSystem.ClearUnit(unitIndex);
+        Weapons.CancelActions(unitIndex);
+        _aiSystem.Store.ClearUnit(unitIndex);
+        _aiSystem.Store.State[unitIndex] = UnitAiState.Dead;
     }
 }

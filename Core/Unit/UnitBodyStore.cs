@@ -9,6 +9,8 @@ public sealed class UnitBodyStore
 
     private Vector3[] _localPosition;
     private Vector3[] _worldPosition;
+    private float[] _tailAngle;
+    private bool[] _tailInitialized;
     private Vector3[] _scale;
 
     private float[] _localRotation;
@@ -18,6 +20,9 @@ public sealed class UnitBodyStore
     private int[] _parent;
     private BodyPrimitive[] _primitive;
     private BodyPartMotion[] _motion;
+    private BodyPartAnchor[] _anchor;
+    private BodyPartRole[] _role;
+    private BodyPartPivot[] _pivot;
 
     private int _count;
 
@@ -33,6 +38,12 @@ public sealed class UnitBodyStore
 
     public Vector3[] WorldPosition =>
         _worldPosition;
+
+    public float[] TailAngle =>
+        _tailAngle;
+
+    public bool[] TailInitialized =>
+        _tailInitialized;
 
     public Vector3[] Scale =>
         _scale;
@@ -55,6 +66,16 @@ public sealed class UnitBodyStore
     public BodyPartMotion[] Motion =>
         _motion;
 
+    public BodyPartAnchor[] Anchor =>
+        _anchor;
+
+    public BodyPartRole[] Role =>
+        _role;
+
+    public BodyPartPivot[] Pivot =>
+        _pivot;
+
+
     public UnitBodyStore(
         int initialCapacity = DefaultCapacity)
     {
@@ -66,6 +87,8 @@ public sealed class UnitBodyStore
 
         _localPosition = new Vector3[initialCapacity];
         _worldPosition = new Vector3[initialCapacity];
+        _tailAngle = new float[initialCapacity];
+        _tailInitialized = new bool[initialCapacity];
         _scale = new Vector3[initialCapacity];
 
         _localRotation = new float[initialCapacity];
@@ -75,36 +98,60 @@ public sealed class UnitBodyStore
         _parent = new int[initialCapacity];
         _primitive = new BodyPrimitive[initialCapacity];
         _motion = new BodyPartMotion[initialCapacity];
+        _anchor = new BodyPartAnchor[initialCapacity];
+        _role = new BodyPartRole[initialCapacity];
+        _pivot = new BodyPartPivot[initialCapacity];
     }
 
     public BodyHandle CreateBody(
-        UnitBodyType bodyType)
+        UnitBodyType bodyType) =>
+        CreateBody(UnitBodyCatalog.Get(bodyType));
+
+    public BodyHandle CreateBody(
+        ReadOnlySpan<BodyPartDefinition> parts)
     {
-        int count =
-            bodyType switch
-            {
-                UnitBodyType.Colonist => 2,
-                UnitBodyType.SmallCreature => 1,
-                UnitBodyType.SegmentedCreature => 10,
-                _ => throw new ArgumentOutOfRangeException(
-                    nameof(bodyType),
-                    bodyType,
-                    "Неизвестный тип тела.")
-            };
-
-        int reusedStart =
-            TakeFreeRange(count);
-
-        if (reusedStart >= 0)
+        if (parts.Length == 0 || parts.Length > short.MaxValue)
         {
-            return CreateBodyAt(
-                bodyType,
-                reusedStart);
+            throw new ArgumentOutOfRangeException(
+                nameof(parts),
+                "Тело должно содержать от 1 до 32767 частей.");
         }
 
-        return CreateBodyAt(
-            bodyType,
-            _count);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            int parent = parts[i].ParentIndex;
+            if (parent < -1 || parent >= i)
+            {
+                throw new ArgumentException(
+                    "Родитель должен быть -1 или предшествовать дочерней части.",
+                    nameof(parts));
+            }
+        }
+
+        int start = TakeFreeRange(parts.Length);
+        if (start < 0)
+            start = _count;
+
+        EnsureCapacityAt(start, parts.Length);
+        SetWriteIndex(start);
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            BodyPartDefinition part = parts[i];
+            AddPart(
+                part.LocalPosition,
+                part.Scale,
+                part.LocalRotation,
+                part.FollowDistance,
+                part.ParentIndex < 0 ? -1 : start + part.ParentIndex,
+                part.Primitive,
+                part.Motion,
+                part.Anchor,
+                part.Role,
+                part.Pivot);
+        }
+
+        return new BodyHandle(start, parts.Length);
     }
 
     public void FreeBody(
@@ -125,158 +172,64 @@ public sealed class UnitBodyStore
         _freeRangeCount++;
     }
 
-    private BodyHandle CreateBodyAt(
-        UnitBodyType bodyType,
-        int start)
-    {
-        return bodyType switch
-        {
-            UnitBodyType.Colonist =>
-                CreateColonistAt(start),
-
-            UnitBodyType.SmallCreature =>
-                CreateSmallCreatureAt(start),
-
-            UnitBodyType.SegmentedCreature =>
-                CreateSegmentedCreatureAt(start),
-
-            _ =>
-                throw new ArgumentOutOfRangeException(
-                    nameof(bodyType),
-                    bodyType,
-                    "Неизвестный тип тела.")
-        };
-    }
+    public void SetInitialWorldPosition(
+        BodyHandle handle,
+        Vector3 unitPosition,
+        float unitRotation) =>
+        SetInitialWorldPosition(
+            handle,
+            unitPosition,
+            unitRotation,
+            unitRotation);
 
     public void SetInitialWorldPosition(
         BodyHandle handle,
         Vector3 unitPosition,
-        float unitRotation)
+        float unitRotation,
+        float headRotation)
     {
         int end =
             handle.Start +
             handle.Count;
 
-        for (int i = handle.Start;
-             i < end;
-             i++)
+        for (int i = handle.Start; i < end; i++)
         {
-            Vector3 local =
-                _localPosition[i];
+            int parent = _parent[i];
+            Vector3 origin = unitPosition;
+            float positionRotation = unitRotation;
+            float partRotation = unitRotation;
 
-            Vector3 rotated =
-                Rotate2D(
-                    local,
-                    unitRotation);
+            if (_anchor[i] == BodyPartAnchor.UnitHead)
+            {
+                // The head may look independently, but its center stays at
+                // the front of the torso instead of orbiting around the unit.
+                partRotation = headRotation;
+            }
+            else if (_anchor[i] == BodyPartAnchor.Parent &&
+                     parent >= handle.Start)
+            {
+                origin = _worldPosition[parent];
+                positionRotation = _worldRotation[parent];
+                partRotation = _worldRotation[parent];
+            }
 
-            _worldPosition[i] =
-                unitPosition +
-                rotated;
+            Vector3 pivot =
+                origin + Rotate2D(_localPosition[i], positionRotation);
 
-            _worldRotation[i] =
-                unitRotation +
-                _localRotation[i];
+            partRotation += _localRotation[i];
+
+            if (_pivot[i] == BodyPartPivot.Start)
+            {
+                pivot += Rotate2D(
+                    new Vector3(MathF.Abs(_scale[i].X), 0f, 0f),
+                    partRotation);
+            }
+
+            _worldPosition[i] = pivot;
+            _tailAngle[i] = partRotation;
+            _tailInitialized[i] = false;
+            _worldRotation[i] = partRotation;
         }
-    }
-
-    private BodyHandle CreateColonistAt(
-        int start)
-    {
-        EnsureCapacityAt(start, 2);
-        if (start == _count)
-            _count = start;
-
-        SetWriteIndex(start);
-
-        AddPart(
-            localPosition: Vector3.Zero,
-            scale: new Vector3(0.28f, 0.42f, 0.3f),
-            localRotation: 0f,
-            followDistance: 0f,
-            parent: -1,
-            primitive: BodyPrimitive.Box,
-            motion: BodyPartMotion.StaticRelative);
-
-        AddPart(
-            localPosition: new Vector3(0f, 0.42f, 0f),
-            scale: new Vector3(0.17f, 0.17f, 0.17f),
-            localRotation: 0f,
-            followDistance: 0f,
-            parent: start,
-            primitive: BodyPrimitive.Circle,
-            motion: BodyPartMotion.StaticRelative);
-
-        return new BodyHandle(
-            start,
-            2);
-    }
-
-    private BodyHandle CreateSmallCreatureAt(
-        int start)
-    {
-        EnsureCapacityAt(start, 1);
-        SetWriteIndex(start);
-
-        AddPart(
-            localPosition: Vector3.Zero,
-            scale: new Vector3(0.24f, 0.24f, 0.24f),
-            localRotation: 0f,
-            followDistance: 0f,
-            parent: -1,
-            primitive: BodyPrimitive.Circle,
-            motion: BodyPartMotion.StaticRelative);
-
-        return new BodyHandle(
-            start,
-            1);
-    }
-
-    private BodyHandle CreateSegmentedCreatureAt(
-        int start)
-    {
-        const int segmentCount = 10;
-
-        EnsureCapacityAt(
-            start,
-            segmentCount);
-        SetWriteIndex(start);
-
-        AddPart(
-            localPosition: Vector3.Zero,
-            scale: new Vector3(0.52f, 0.52f, 0.45f),
-            localRotation: 0f,
-            followDistance: 0f,
-            parent: -1,
-            primitive: BodyPrimitive.Circle,
-            motion: BodyPartMotion.StaticRelative);
-
-        for (int i = 1;
-             i < segmentCount;
-             i++)
-        {
-            float radius =
-                0.46f -
-                (i - 1) * 0.025f;
-
-            AddPart(
-                localPosition: new Vector3(
-                    -(i * 0.62f),
-                    0f,
-                    0f),
-                scale: new Vector3(
-                    radius,
-                    radius,
-                    radius),
-                localRotation: 0f,
-                followDistance: 0.62f,
-                parent: start + i - 1,
-                primitive: BodyPrimitive.Circle,
-                motion: BodyPartMotion.FollowParent);
-        }
-
-        return new BodyHandle(
-            start,
-            segmentCount);
     }
 
     private int _writeIndex;
@@ -294,7 +247,10 @@ public sealed class UnitBodyStore
         float followDistance,
         int parent,
         BodyPrimitive primitive,
-        BodyPartMotion motion)
+        BodyPartMotion motion,
+        BodyPartAnchor anchor,
+        BodyPartRole role,
+        BodyPartPivot pivot)
     {
         int index = _writeIndex++;
 
@@ -305,6 +261,8 @@ public sealed class UnitBodyStore
 
         _localPosition[index] = localPosition;
         _worldPosition[index] = Vector3.Zero;
+        _tailAngle[index] = 0f;
+        _tailInitialized[index] = false;
         _scale[index] = scale;
 
         _localRotation[index] = localRotation;
@@ -314,6 +272,9 @@ public sealed class UnitBodyStore
         _parent[index] = parent;
         _primitive[index] = primitive;
         _motion[index] = motion;
+        _anchor[index] = anchor;
+        _role[index] = role;
+        _pivot[index] = pivot;
     }
 
     private void EnsureCapacityAt(
@@ -344,6 +305,14 @@ public sealed class UnitBodyStore
             newCapacity);
 
         Array.Resize(
+            ref _tailAngle,
+            newCapacity);
+
+        Array.Resize(
+            ref _tailInitialized,
+            newCapacity);
+
+        Array.Resize(
             ref _scale,
             newCapacity);
 
@@ -369,6 +338,18 @@ public sealed class UnitBodyStore
 
         Array.Resize(
             ref _motion,
+            newCapacity);
+
+        Array.Resize(
+            ref _anchor,
+            newCapacity);
+
+        Array.Resize(
+            ref _role,
+            newCapacity);
+
+        Array.Resize(
+            ref _pivot,
             newCapacity);
     }
 
