@@ -59,8 +59,7 @@ public readonly record struct RenderBodyPart(
     Vector3 Scale,
     float Rotation,
     BodyPrimitive Primitive,
-    BodyPartRole Role,
-);
+    BodyPartRole Role);
 
 /// <summary>
 /// Immutable data published by the simulation thread and consumed by the renderer.
