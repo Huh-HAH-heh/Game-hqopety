@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
 using Core.Map;
 using Core.Combat;
 
@@ -57,6 +59,12 @@ public sealed class VisionSystem
     private const int TargetObserverOffset = 37;
     private const int MaxNearbyUnitsPerCell = 4;
     private const int NearbyCellRadius = 1;
+    private const int CandidateSlots = VisibilitySectorCount * CandidatesPerSector;
+    private static readonly int MaxVisionParallelism = Math.Max(1, Environment.ProcessorCount - 1);
+    private static readonly ParallelOptions VisionParallelOptions = new()
+    {
+        MaxDegreeOfParallelism = MaxVisionParallelism
+    };
 
     private readonly UnitHitRegionStore? _hitRegions;
     private UnitBodyStore? _bodies;
@@ -80,8 +88,13 @@ public sealed class VisionSystem
     private int[] _occupiedSpatialCells = Array.Empty<int>();
     private int _occupiedSpatialCellCount;
     private int _spatialMarkSequence;
-    private int[] _candidateTargetMarks = Array.Empty<int>();
-    private int _candidateTargetMarkSequence;
+    private int[][] _workerCandidateTargetMarks = Array.Empty<int[]>();
+    private int[] _candidateTargetsByObserver = Array.Empty<int>();
+    private int[] _observerCandidatePairs = Array.Empty<int>();
+    private int[] _observerLineOfSightChecks = Array.Empty<int>();
+    private int[] _observerTargetEvaluations = Array.Empty<int>();
+    private int[] _observerActiveCandidatesScanned = Array.Empty<int>();
+    private int[] _observerVisibleCandidates = Array.Empty<int>();
 
     public double LastUpdateMilliseconds { get; private set; }
     public int LastCandidatePairs { get; private set; }
@@ -212,215 +225,51 @@ public sealed class VisionSystem
         EnsureSpatialGrid(worldMap, units.Capacity);
         BuildSpatialGrid(units, active);
 
-        // Sample nearby cells first so close hostiles are never skipped solely
-        // because of their active-list index. A bounded rolling window fills the
-        // remaining slots to preserve gradual discovery at longer ranges.
-        const int SectorCount = VisibilitySectorCount;
-        const int SlotCount = CandidatesPerSector;
-        const int CandidateSlots = SectorCount * SlotCount;
-
-        Span<int> candidateTargets = stackalloc int[CandidateSlots];
-        Span<float> candidateDistances = stackalloc float[CandidateSlots];
-        Span<int> rotationDistances = stackalloc int[SectorCount];
-        Span<int> sampledTargets = stackalloc int[MaxTargetCandidatesPerObserver];
-
-        for (int i = 0; i < active.Length; i++)
+        // Candidate gathering and LOS checks are independent per observer.
+        // BuildSpatialGrid above is read-only from this point through the worker phase.
+        if (aliveCount >= 32 && MaxVisionParallelism > 1)
         {
-            int observer = active[i];
+            int partitionCount = Math.Min(MaxVisionParallelism, aliveCount);
+            Parallel.For(0, partitionCount, VisionParallelOptions, partition =>
+            {
+                int[] marks = _workerCandidateTargetMarks[partition];
+                int markSequence = 0;
+                int begin = partition * aliveCount / partitionCount;
+                int finish = (partition + 1) * aliveCount / partitionCount;
 
-            if (health != null && health.OverallHitPoints[observer] <= 0f)
-                continue;
+                for (int i = begin; i < finish; i++)
+                    ProcessObserver(
+                        i, aliveCount, units, worldMap, health, bodies,
+                        marks, ref markSequence);
+            });
+        }
+        else
+        {
+            int markSequence = 0;
+            int[] marks = _workerCandidateTargetMarks[0];
+            for (int i = 0; i < aliveCount; i++)
+                ProcessObserver(
+                    i, aliveCount, units, worldMap, health, bodies,
+                    marks, ref markSequence);
+        }
+
+        // Workers only touch per-observer rows. Assemble the compact shared visible
+        // target list on this thread after all visibility cache writes are complete.
+        for (int i = 0; i < aliveCount; i++)
+        {
+            int observer = _aliveUnits[i];
+            _candidatePairCount += _observerCandidatePairs[observer];
+            _lineOfSightChecks += _observerLineOfSightChecks[observer];
+            _targetEvaluationCount += _observerTargetEvaluations[observer];
+            LastActiveCandidatesScanned += _observerActiveCandidatesScanned[observer];
 
             int start = _visibleTargetCount;
             _visibleStarts[observer] = start;
-
-            Vector3 observerEye = UnitHitSystem.GetEyePosition(
-                units,
-                observer,
-                bodies,
-                _hitRegions);
-            float range = MathF.Max(0f, ranges[observer]);
-            float rangeSquared = range * range;
-            Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
-            float halfFovRadians = units.FieldOfView[observer] * MathF.PI / 360f;
-            float minFacingDot = MathF.Cos(halfFovRadians);
-
-            for (int sector = 0; sector < SectorCount; sector++)
-            {
-                int slot = sector * CandidatesPerSector;
-                candidateTargets[slot] = -1;
-                candidateTargets[slot + 1] = -1;
-                candidateDistances[slot] = float.PositiveInfinity;
-                candidateDistances[slot + 1] = 0f;
-                rotationDistances[sector] = int.MaxValue;
-            }
-
-            int sampleMark = NextCandidateMark();
-
-            int sampledCount = CollectNearbyTargets(
-                observer,
-                observerEye,
-                sampledTargets,
-                sampleMark);
-
-            // Nearby spatial targets have priority. Fill the remaining slots
-            // from a rolling global window so distant enemies are still found
-            // without restoring the all-pairs scan.
-            int scanCount = Math.Min(
-                active.Length,
-                MaxTargetCandidatesPerObserver + sampledCount);
-            int scanStart = (int)(
-                ((long)observer * TargetObserverOffset +
-                 (long)_visionUpdateSequence * TargetScanStride) %
-                active.Length);
-
-            for (int sample = 0;
-                 sample < scanCount &&
-                 sampledCount < MaxTargetCandidatesPerObserver;
-                 sample++)
-            {
-                LastActiveCandidatesScanned++;
-                int activeSlot = scanStart + sample;
-                if (activeSlot >= active.Length)
-                    activeSlot -= active.Length;
-
-                int target = active[activeSlot];
-                if (target == observer ||
-                    _candidateTargetMarks[target] == sampleMark)
-                {
-                    continue;
-                }
-
-                _candidateTargetMarks[target] = sampleMark;
-                sampledTargets[sampledCount++] = target;
-            }
-
-            for (int sample = 0; sample < sampledCount; sample++)
-            {
-                int target = sampledTargets[sample];
-
-                if (target == observer ||
-                    (health != null && health.OverallHitPoints[target] <= 0f))
-                {
-                    continue;
-                }
-
-                if (!FactionRules.ShouldAttack(
-                        units.FactionTag[observer],
-                        units.FactionTag[target]))
-                {
-                    continue;
-                }
-
-                _candidatePairCount++;
-
-                if (!TryGetInViewRegionPoint(
-                        units,
-                        observer,
-                        target,
-                        observerEye,
-                        forward,
-                        rangeSquared,
-                        minFacingDot,
-                        out Vector3 targetPoint,
-                        out float distanceSquared,
-                        bodies))
-                {
-                    continue;
-                }
-
-                float dx = targetPoint.X - observerEye.X;
-                float dy = targetPoint.Y - observerEye.Y;
-
-                int sector;
-                if (dx >= 0f)
-                {
-                    if (dy >= 0f)
-                        sector = dx >= dy ? 0 : 1;
-                    else
-                        sector = dx >= -dy ? 7 : 6;
-                }
-                else
-                {
-                    if (dy >= 0f)
-                        sector = dy >= -dx ? 2 : 3;
-                    else
-                        sector = -dx >= -dy ? 4 : 5;
-                }
-
-                int slot = sector * CandidatesPerSector;
-
-                // Keep the nearest sampled target and one rotating candidate
-                // in each sector, with close targets sampled first.
-                if (distanceSquared < candidateDistances[slot])
-                {
-                    candidateTargets[slot] = target;
-                    candidateDistances[slot] = distanceSquared;
-                }
-
-                int cursor = _sectorTargetCursors[
-                    observer * SectorCount + sector];
-                int rotationDistance = target >= cursor
-                    ? target - cursor
-                    : _visibilityCapacity - cursor + target;
-
-                if (rotationDistance < rotationDistances[sector])
-                {
-                    rotationDistances[sector] = rotationDistance;
-                    candidateTargets[slot + 1] = target;
-                }
-            }
-
-            for (int candidate = 0; candidate < CandidateSlots; candidate++)
-            {
-                int target = candidateTargets[candidate];
-                if (target < 0)
-                    continue;
-
-                bool duplicate = false;
-                for (int previous = 0; previous < candidate; previous++)
-                {
-                    if (candidateTargets[previous] == target)
-                    {
-                        duplicate = true;
-                        break;
-                    }
-                }
-
-                if (duplicate)
-                    continue;
-
-                _targetEvaluationCount++;
-                VisionCheck check = Evaluate(
-                    units,
-                    worldMap,
-                    observer,
-                    target,
-                    bodies);
-
-                int pairIndex = observer * _visibilityCapacity + target;
-                _lastVisibleUpdate[pairIndex] = check.IsVisible
-                    ? _visionUpdateSequence
-                    : 0;
-            }
-
-            // Advance sector cursors independently from nearest candidates so
-            // the rotating slot eventually tests every hostile in a crowded sector.
-            for (int sector = 0; sector < SectorCount; sector++)
-            {
-                int sampledTarget =
-                    candidateTargets[sector * SlotCount + 1];
-
-                if (sampledTarget >= 0)
-                {
-                    _sectorTargetCursors[observer * SectorCount + sector] =
-                        (sampledTarget + 1) % _visibilityCapacity;
-                }
-            }
+            int candidateOffset = observer * CandidateSlots;
 
             BuildVisibleTargetList(
                 observer,
-                candidateTargets);
+                _candidateTargetsByObserver.AsSpan(candidateOffset, CandidateSlots));
 
             _visibleCounts[observer] = _visibleTargetCount - start;
         }
@@ -432,6 +281,214 @@ public sealed class VisionSystem
         LastLineOfSightChecks = _lineOfSightChecks;
         LastVisibleTargetCount = _visibleTargetCount;
         UpdateCount++;
+    }
+
+    private void ProcessObserver(
+        int activeSlot,
+        int activeCount,
+        UnitStore units,
+        WorldMap worldMap,
+        UnitHealthStore? health,
+        UnitBodyStore? bodies,
+        int[] candidateTargetMarks,
+        ref int markSequence)
+    {
+        int observer = _aliveUnits[activeSlot];
+        int candidateOffset = observer * CandidateSlots;
+        Span<int> candidateTargets = _candidateTargetsByObserver.AsSpan(
+            candidateOffset, CandidateSlots);
+        candidateTargets.Fill(-1);
+
+        Span<float> candidateDistances = stackalloc float[CandidateSlots];
+        Span<int> rotationDistances = stackalloc int[VisibilitySectorCount];
+        Span<int> sampledTargets = stackalloc int[MaxTargetCandidatesPerObserver];
+
+        int candidatePairs = 0;
+        int lineOfSightChecks = 0;
+        int targetEvaluations = 0;
+        int activeCandidatesScanned = 0;
+
+        if (health != null && health.OverallHitPoints[observer] <= 0f)
+        {
+            _observerCandidatePairs[observer] = 0;
+            _observerLineOfSightChecks[observer] = 0;
+            _observerTargetEvaluations[observer] = 0;
+            _observerActiveCandidatesScanned[observer] = 0;
+            return;
+        }
+
+        Vector3 observerEye = UnitHitSystem.GetEyePosition(
+            units, observer, bodies, _hitRegions);
+        float range = MathF.Max(0f, units.ViewRange[observer]);
+        float rangeSquared = range * range;
+        Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
+        float halfFovRadians = units.FieldOfView[observer] * MathF.PI / 360f;
+        float minFacingDot = MathF.Cos(halfFovRadians);
+
+        for (int sector = 0; sector < VisibilitySectorCount; sector++)
+        {
+            int slot = sector * CandidatesPerSector;
+            candidateDistances[slot] = float.PositiveInfinity;
+            candidateDistances[slot + 1] = 0f;
+            rotationDistances[sector] = int.MaxValue;
+        }
+
+        if (markSequence >= int.MaxValue - 1)
+        {
+            Array.Clear(candidateTargetMarks);
+            markSequence = 0;
+        }
+        int sampleMark = ++markSequence;
+
+        int sampledCount = CollectNearbyTargets(
+            observer,
+            observerEye,
+            sampledTargets,
+            candidateTargetMarks,
+            sampleMark);
+
+        // Nearby spatial targets have priority. Fill the remaining slots from a
+        // rolling global window without restoring the quadratic all-pairs scan.
+        int scanCount = Math.Min(
+            activeCount,
+            MaxTargetCandidatesPerObserver + sampledCount);
+        int scanStart = (int)(
+            ((long)observer * TargetObserverOffset +
+             (long)_visionUpdateSequence * TargetScanStride) %
+            activeCount);
+
+        for (int sample = 0;
+             sample < scanCount &&
+             sampledCount < MaxTargetCandidatesPerObserver;
+             sample++)
+        {
+            activeCandidatesScanned++;
+            int activeSlotInList = scanStart + sample;
+            if (activeSlotInList >= activeCount)
+                activeSlotInList -= activeCount;
+
+            int target = _aliveUnits[activeSlotInList];
+            if (target == observer || candidateTargetMarks[target] == sampleMark)
+                continue;
+
+            candidateTargetMarks[target] = sampleMark;
+            sampledTargets[sampledCount++] = target;
+        }
+
+        for (int sample = 0; sample < sampledCount; sample++)
+        {
+            int target = sampledTargets[sample];
+            if (target == observer ||
+                (health != null && health.OverallHitPoints[target] <= 0f))
+            {
+                continue;
+            }
+
+            if (!FactionRules.ShouldAttack(
+                    units.FactionTag[observer],
+                    units.FactionTag[target]))
+            {
+                continue;
+            }
+
+            candidatePairs++;
+            if (!TryGetInViewRegionPoint(
+                    units,
+                    observer,
+                    target,
+                    observerEye,
+                    forward,
+                    rangeSquared,
+                    minFacingDot,
+                    out Vector3 targetPoint,
+                    out float distanceSquared,
+                    bodies))
+            {
+                continue;
+            }
+
+            float dx = targetPoint.X - observerEye.X;
+            float dy = targetPoint.Y - observerEye.Y;
+            int sector;
+            if (dx >= 0f)
+            {
+                if (dy >= 0f)
+                    sector = dx >= dy ? 0 : 1;
+                else
+                    sector = dx >= -dy ? 7 : 6;
+            }
+            else
+            {
+                if (dy >= 0f)
+                    sector = dy >= -dx ? 2 : 3;
+                else
+                    sector = -dx >= -dy ? 4 : 5;
+            }
+
+            int slot = sector * CandidatesPerSector;
+            if (distanceSquared < candidateDistances[slot])
+            {
+                candidateTargets[slot] = target;
+                candidateDistances[slot] = distanceSquared;
+            }
+
+            int cursor = _sectorTargetCursors[observer * VisibilitySectorCount + sector];
+            int rotationDistance = target >= cursor
+                ? target - cursor
+                : _visibilityCapacity - cursor + target;
+
+            if (rotationDistance < rotationDistances[sector])
+            {
+                rotationDistances[sector] = rotationDistance;
+                candidateTargets[slot + 1] = target;
+            }
+        }
+
+        for (int candidate = 0; candidate < CandidateSlots; candidate++)
+        {
+            int target = candidateTargets[candidate];
+            if (target < 0)
+                continue;
+
+            bool duplicate = false;
+            for (int previous = 0; previous < candidate; previous++)
+            {
+                if (candidateTargets[previous] == target)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (duplicate)
+                continue;
+
+            targetEvaluations++;
+            VisionCheck check = EvaluateCore(
+                units, worldMap, observer, target, null, bodies,
+                ref lineOfSightChecks);
+
+            int pairIndex = observer * _visibilityCapacity + target;
+            _lastVisibleUpdate[pairIndex] = check.IsVisible
+                ? _visionUpdateSequence
+                : 0;
+        }
+
+        // Rotate the far-target pick independently from the nearest target.
+        for (int sector = 0; sector < VisibilitySectorCount; sector++)
+        {
+            int sampledTarget = candidateTargets[sector * CandidatesPerSector + 1];
+            if (sampledTarget >= 0)
+            {
+                _sectorTargetCursors[observer * VisibilitySectorCount + sector] =
+                    (sampledTarget + 1) % _visibilityCapacity;
+            }
+        }
+
+        _observerCandidatePairs[observer] = candidatePairs;
+        _observerLineOfSightChecks[observer] = lineOfSightChecks;
+        _observerTargetEvaluations[observer] = targetEvaluations;
+        _observerActiveCandidatesScanned[observer] = activeCandidatesScanned;
     }
 
     public bool IsRecentlyVisible(
@@ -558,8 +615,15 @@ public sealed class VisionSystem
         WorldMap worldMap,
         int observerIndex,
         int targetIndex,
-        UnitBodyStore? bodies = null) =>
-        EvaluateCore(units, worldMap, observerIndex, targetIndex, null, bodies);
+        UnitBodyStore? bodies = null)
+    {
+        int lineOfSightChecks = 0;
+        VisionCheck result = EvaluateCore(
+            units, worldMap, observerIndex, targetIndex, null, bodies,
+            ref lineOfSightChecks);
+        Interlocked.Add(ref _lineOfSightChecks, lineOfSightChecks);
+        return result;
+    }
 
     public VisionCheck EvaluateTargetMode(
         UnitStore units,
@@ -567,8 +631,15 @@ public sealed class VisionSystem
         int observerIndex,
         int targetIndex,
         TargetMode targetMode,
-        UnitBodyStore? bodies = null) =>
-        EvaluateCore(units, worldMap, observerIndex, targetIndex, targetMode, bodies);
+        UnitBodyStore? bodies = null)
+    {
+        int lineOfSightChecks = 0;
+        VisionCheck result = EvaluateCore(
+            units, worldMap, observerIndex, targetIndex, targetMode, bodies,
+            ref lineOfSightChecks);
+        Interlocked.Add(ref _lineOfSightChecks, lineOfSightChecks);
+        return result;
+    }
 
     private VisionCheck EvaluateCore(
         UnitStore units,
@@ -576,7 +647,8 @@ public sealed class VisionSystem
         int observerIndex,
         int targetIndex,
         TargetMode? targetMode,
-        UnitBodyStore? bodies)
+        UnitBodyStore? bodies,
+        ref int lineOfSightChecks)
     {
         Vector3 targetCenter = units.Position[targetIndex];
         Vector3 observerEye = UnitHitSystem.GetEyePosition(
@@ -634,14 +706,25 @@ public sealed class VisionSystem
         float minTargetHeight = float.PositiveInfinity;
         float maxTargetHeight = float.NegativeInfinity;
 
+        // Cache target marker coordinates once. Geometry lookup can traverse the
+        // articulated anatomy and used to be repeated for the LOS pass below.
+        Span<int> visibilityRegionIndices = pointCount <= 64
+            ? stackalloc int[pointCount]
+            : new int[pointCount];
+        Span<Vector3> visibilityPoints = pointCount <= 64
+            ? stackalloc Vector3[pointCount]
+            : new Vector3[pointCount];
+
         for (int i = 0; i < pointCount; i++)
         {
             int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
                 units, targetIndex, i, _hitRegions);
-            float height = UnitHitSystem.GetRegionPoint(
-                units, targetIndex, regionIndex, observerEye, _hitRegions, pointRole, bodies).Z;
-            minTargetHeight = MathF.Min(minTargetHeight, height);
-            maxTargetHeight = MathF.Max(maxTargetHeight, height);
+            Vector3 point = UnitHitSystem.GetRegionPoint(
+                units, targetIndex, regionIndex, observerEye, _hitRegions, pointRole, bodies);
+            visibilityRegionIndices[i] = regionIndex;
+            visibilityPoints[i] = point;
+            minTargetHeight = MathF.Min(minTargetHeight, point.Z);
+            maxTargetHeight = MathF.Max(maxTargetHeight, point.Z);
         }
 
         float middleTargetHeight = pointCount == 0
@@ -650,16 +733,8 @@ public sealed class VisionSystem
 
         for (int i = 0; i < pointCount; i++)
         {
-            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
-                units, targetIndex, i, _hitRegions);
-            Vector3 point = UnitHitSystem.GetRegionPoint(
-                units,
-                targetIndex,
-                regionIndex,
-                observerEye,
-                _hitRegions,
-                pointRole,
-                bodies);
+            int regionIndex = visibilityRegionIndices[i];
+            Vector3 point = visibilityPoints[i];
 
             float dx = point.X - observerEye.X;
             float dy = point.Y - observerEye.Y;
@@ -679,7 +754,7 @@ public sealed class VisionSystem
             }
 
             anyRegionInFov = true;
-            _lineOfSightChecks++;
+            lineOfSightChecks++;
 
             if (HasLineOfSight(
                     worldMap,
@@ -1310,21 +1385,11 @@ public sealed class VisionSystem
         return ++_spatialMarkSequence;
     }
 
-    private int NextCandidateMark()
-    {
-        if (_candidateTargetMarkSequence == int.MaxValue)
-        {
-            Array.Clear(_candidateTargetMarks);
-            _candidateTargetMarkSequence = 0;
-        }
-
-        return ++_candidateTargetMarkSequence;
-    }
-
     private int CollectNearbyTargets(
         int observer,
         Vector3 position,
         Span<int> targets,
+        int[] candidateTargetMarks,
         int sampleMark)
     {
         int centerX = (int)MathF.Floor(position.X);
@@ -1381,12 +1446,12 @@ public sealed class VisionSystem
 
                         int target = _spatialUnits[cellStart + slot];
                         if (target == observer ||
-                            _candidateTargetMarks[target] == sampleMark)
+                            candidateTargetMarks[target] == sampleMark)
                         {
                             continue;
                         }
 
-                        _candidateTargetMarks[target] = sampleMark;
+                        candidateTargetMarks[target] = sampleMark;
                         targets[count++] = target;
                     }
                 }
@@ -1498,6 +1563,30 @@ public sealed class VisionSystem
             Array.Resize(ref _aliveUnits, capacity);
             Array.Resize(ref _visibleStarts, capacity);
             Array.Resize(ref _visibleCounts, capacity);
+        }
+
+        if (_observerCandidatePairs.Length < capacity)
+        {
+            Array.Resize(ref _observerCandidatePairs, capacity);
+            Array.Resize(ref _observerLineOfSightChecks, capacity);
+            Array.Resize(ref _observerTargetEvaluations, capacity);
+            Array.Resize(ref _observerActiveCandidatesScanned, capacity);
+            Array.Resize(ref _observerVisibleCandidates, capacity);
+        }
+
+        int candidateCapacity = checked(capacity * CandidateSlots);
+        if (_candidateTargetsByObserver.Length < candidateCapacity)
+            Array.Resize(ref _candidateTargetsByObserver, candidateCapacity);
+
+        if (_workerCandidateTargetMarks.Length < MaxVisionParallelism)
+            Array.Resize(ref _workerCandidateTargetMarks, MaxVisionParallelism);
+
+        for (int i = 0; i < MaxVisionParallelism; i++)
+        {
+            int[] marks = _workerCandidateTargetMarks[i] ?? Array.Empty<int>();
+            if (marks.Length < capacity)
+                Array.Resize(ref marks, capacity);
+            _workerCandidateTargetMarks[i] = marks;
         }
 
         EnsureVisibilityCacheCapacity(capacity);
