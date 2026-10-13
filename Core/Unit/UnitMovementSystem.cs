@@ -1,6 +1,6 @@
 using System;
-using Core.Map;
 using System.Numerics;
+using Core.Map;
 
 namespace Core.Unit;
 
@@ -104,7 +104,6 @@ public sealed class UnitMovementSystem
                 continue;
             }
 
-            float distance = MathF.Sqrt(distanceSquared);
             float step = MathF.Max(0f, speeds[unit]) * deltaTime;
 
             if (step <= 0f)
@@ -113,9 +112,7 @@ public sealed class UnitMovementSystem
                 continue;
             }
 
-            Vector2 direction = delta / distance;
-
-            if (distance <= step)
+            if (distanceSquared <= step * step)
             {
                 position.X = waypoint.X;
                 position.Y = waypoint.Y;
@@ -123,6 +120,9 @@ public sealed class UnitMovementSystem
             }
             else
             {
+                float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
+                Vector2 direction = delta * inverseDistance;
+
                 position.X += direction.X * step;
                 position.Y += direction.Y * step;
                 velocities[unit] = new Vector3(
