@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Items;
 
 namespace Core.Unit;
 
@@ -9,16 +10,40 @@ namespace Core.Unit;
 /// </summary>
 public sealed class UnitArchetypeProfile
 {
+    private readonly UnitStartingEquipment[] _startingEquipment;
+
     public UnitDefinition Definition { get; }
     public UnitAnatomyProfile Anatomy { get; }
     public ReadOnlySpan<BodyPartDefinition> BodyParts => Anatomy.BodyParts;
+    public ReadOnlySpan<UnitStartingEquipment> StartingEquipment => _startingEquipment;
 
-    public UnitArchetypeProfile(UnitDefinition definition, UnitAnatomyProfile anatomy)
+    public UnitArchetypeProfile(
+        UnitDefinition definition,
+        UnitAnatomyProfile anatomy,
+        UnitStartingEquipment[]? startingEquipment = null)
     {
         Definition = definition;
         Anatomy = anatomy ?? throw new ArgumentNullException(nameof(anatomy));
         if (!anatomy.HasSharedShapes)
             throw new ArgumentException("An archetype requires a shared render/hit shape for every node.", nameof(anatomy));
+
+        _startingEquipment = startingEquipment == null
+            ? Array.Empty<UnitStartingEquipment>()
+            : (UnitStartingEquipment[])startingEquipment.Clone();
+    }
+}
+
+public readonly struct UnitStartingEquipment
+{
+    public ArmorConfig Item { get; }
+    public float Durability { get; }
+
+    public UnitStartingEquipment(ArmorConfig item, float durability)
+    {
+        Item = item ?? throw new ArgumentNullException(nameof(item));
+        if (!float.IsFinite(durability) || durability <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(durability));
+        Durability = durability;
     }
 }
 
@@ -92,7 +117,15 @@ public static class UnitAnatomyCatalog
                 UnitHealthPartId.LeftKidney, 10f, "kidney.left", UnitHealthPartKind.Organ, "torso.main"),
             Node("kidney.right", "torso", Part(V(-0.045f, -0.032f, -0.035f), V(0.012f, 0.010f, 0.010f),
                 BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Internal), 0.055f,
-                UnitHealthPartId.RightKidney, 10f, "kidney.right", UnitHealthPartKind.Organ, "torso.main")));
+                UnitHealthPartId.RightKidney, 10f, "kidney.right", UnitHealthPartKind.Organ, "torso.main")),
+        new[]
+        {
+            new UnitStartingEquipment(ApparelCatalog.WorkShirt, 55f),
+            new UnitStartingEquipment(ApparelCatalog.WorkTrousers, 60f),
+            new UnitStartingEquipment(ApparelCatalog.CombatVest, 120f),
+            new UnitStartingEquipment(ApparelCatalog.CombatHelmet, 90f),
+            new UnitStartingEquipment(ApparelCatalog.PoweredExoskeleton, 160f)
+        });
 
     private static readonly UnitArchetypeProfile Greenbob = new(
         new UnitDefinition(UnitType.Greenbob, UnitBodyType.SmallCreature, 3.2f, 0.40f, 0.40f, 0.40f, 20f, 110f),

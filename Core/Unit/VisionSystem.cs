@@ -636,8 +636,10 @@ public sealed class VisionSystem
 
         for (int i = 0; i < pointCount; i++)
         {
+            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+                units, targetIndex, i, _hitRegions);
             float height = UnitHitSystem.GetRegionPoint(
-                units, targetIndex, i, observerEye, _hitRegions, pointRole, bodies).Z;
+                units, targetIndex, regionIndex, observerEye, _hitRegions, pointRole, bodies).Z;
             minTargetHeight = MathF.Min(minTargetHeight, height);
             maxTargetHeight = MathF.Max(maxTargetHeight, height);
         }
@@ -648,10 +650,12 @@ public sealed class VisionSystem
 
         for (int i = 0; i < pointCount; i++)
         {
+            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+                units, targetIndex, i, _hitRegions);
             Vector3 point = UnitHitSystem.GetRegionPoint(
                 units,
                 targetIndex,
-                i,
+                regionIndex,
                 observerEye,
                 _hitRegions,
                 pointRole,
@@ -700,7 +704,7 @@ public sealed class VisionSystem
                 if (capturedVisiblePointCount < visibleHeights.Length)
                 {
                     visibleHeights[capturedVisiblePointCount] = height;
-                    visibleIndices[capturedVisiblePointCount] = i;
+                    visibleIndices[capturedVisiblePointCount] = regionIndex;
                     visiblePoints[capturedVisiblePointCount] = point;
                     capturedVisiblePointCount++;
                 }
@@ -721,7 +725,7 @@ public sealed class VisionSystem
                 if (preferred)
                 {
                     hasVisibleTargetPoint = true;
-                    selectedPointIndex = i;
+                    selectedPointIndex = regionIndex;
                     selectedTargetPoint = point;
                     selectedTargetHeight = height;
                     selectedMiddleDistance = middleDistance;
@@ -810,10 +814,12 @@ public sealed class VisionSystem
 
         for (int i = 0; i < pointCount; i++)
         {
+            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+                units, targetIndex, i, _hitRegions);
             Vector3 point = UnitHitSystem.GetRegionPoint(
                 units,
                 targetIndex,
-                i,
+                regionIndex,
                 observerEye,
                 _hitRegions,
                 UnitAnatomyMarkerRole.Vision,
@@ -1447,10 +1453,11 @@ public sealed class VisionSystem
 
         for (int i = 0; i < pointCount; i++)
         {
+            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+                units, target, i, _hitRegions);
             Vector3 point = UnitHitSystem.GetRegionPoint(
-                units, target, i, observerEye, _hitRegions,
-                UnitAnatomyMarkerRole.Vision,
-                _bodies);
+                units, target, regionIndex, observerEye, _hitRegions,
+                UnitAnatomyMarkerRole.Vision, _bodies);
 
             float dx = point.X - observerEye.X;
             float dy = point.Y - observerEye.Y;

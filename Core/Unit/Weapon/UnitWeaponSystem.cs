@@ -814,28 +814,39 @@ public sealed class UnitWeaponSystem
 
         for (int i = 0; i < profile.RegionCount; i++)
         {
-            float height = UnitHitSystem.GetRegionPoint(
-                units, targetIndex, i, source, _hitRegions, UnitAnatomyMarkerRole.Aim, _bodies).Z;
+            if (profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(i))
+                continue;
 
+            float height = UnitHitSystem.GetRegionPoint(
+                units, targetIndex, i, source, _hitRegions,
+                UnitAnatomyMarkerRole.Aim, _bodies).Z;
             minHeight = MathF.Min(minHeight, height);
             maxHeight = MathF.Max(maxHeight, height);
         }
 
+        if (!float.IsFinite(minHeight))
+            return 0;
+
         float middleHeight = (minHeight + maxHeight) * 0.5f;
-        int selected = 0;
+        int selected = -1;
         float selectedHeight = 0f;
         float selectedMiddleDistance = float.PositiveInfinity;
 
         for (int i = 0; i < profile.RegionCount; i++)
         {
-            float height = UnitHitSystem.GetRegionPoint(
-                units, targetIndex, i, source, _hitRegions, UnitAnatomyMarkerRole.Aim).Z;
+            if (profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(i))
+                continue;
 
-            if (i == 0)
+            float height = UnitHitSystem.GetRegionPoint(
+                units, targetIndex, i, source, _hitRegions,
+                UnitAnatomyMarkerRole.Aim, _bodies).Z;
+            float middleDistance = MathF.Abs(height - middleHeight);
+
+            if (selected < 0)
             {
-                selected = 0;
+                selected = i;
                 selectedHeight = height;
-                selectedMiddleDistance = MathF.Abs(height - middleHeight);
+                selectedMiddleDistance = middleDistance;
                 continue;
             }
 
@@ -843,7 +854,7 @@ public sealed class UnitWeaponSystem
             {
                 TargetMode.Head => height > selectedHeight,
                 TargetMode.Legs => height < selectedHeight,
-                _ => MathF.Abs(height - middleHeight) < selectedMiddleDistance
+                _ => middleDistance < selectedMiddleDistance
             };
 
             if (!preferred)
@@ -851,10 +862,10 @@ public sealed class UnitWeaponSystem
 
             selected = i;
             selectedHeight = height;
-            selectedMiddleDistance = MathF.Abs(height - middleHeight);
+            selectedMiddleDistance = middleDistance;
         }
 
-        return selected;
+        return selected >= 0 ? selected : 0;
     }
 
     private static AmmunitionConfig? GetCurrentAmmunition(

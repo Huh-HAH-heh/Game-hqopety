@@ -308,25 +308,21 @@ public sealed class UnitSimulation
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
 
-        if (type == UnitType.Colonist)
-            EquipStartingArmor(id);
+        ReadOnlySpan<UnitStartingEquipment> startingEquipment =
+            UnitAnatomyCatalog.Get(type).StartingEquipment;
+        for (int i = 0; i < startingEquipment.Length; i++)
+        {
+            UnitStartingEquipment item = startingEquipment[i];
+            EquipStartingItem(id, item.Item, item.Durability);
+        }
+
+        if (startingEquipment.Length > 0 && Units.TryGetIndex(id, out int unitIndex))
+            RefreshMovementSpeed(unitIndex);
 
         return id;
     }
 
-    private void EquipStartingArmor(UnitId id)
-    {
-        EquipStartingArmorItem(id, ApparelCatalog.WorkShirt, 55f);
-        EquipStartingArmorItem(id, ApparelCatalog.WorkTrousers, 60f);
-        EquipStartingArmorItem(id, ApparelCatalog.CombatVest, 120f);
-        EquipStartingArmorItem(id, ApparelCatalog.CombatHelmet, 90f);
-        EquipStartingArmorItem(id, ApparelCatalog.PoweredExoskeleton, 160f);
-
-        if (Units.TryGetIndex(id, out int unitIndex))
-            RefreshMovementSpeed(unitIndex);
-    }
-
-    private void EquipStartingArmorItem(
+    private void EquipStartingItem(
         UnitId id,
         ArmorConfig armor,
         float durability)

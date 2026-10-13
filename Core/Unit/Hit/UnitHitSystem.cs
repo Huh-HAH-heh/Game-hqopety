@@ -89,6 +89,22 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions = null) =>
         CountTargetRegions(GetProfile(units, unitIndex, hitRegions));
 
+    public static int GetVisibilityRegionIndex(
+        UnitStore units,
+        int unitIndex,
+        int visibleIndex,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if (profile is UnitAnatomyProfile anatomy)
+            return anatomy.GetVisibleRegionIndex(visibleIndex);
+
+        if ((uint)visibleIndex >= (uint)profile.RegionCount)
+            throw new ArgumentOutOfRangeException(nameof(visibleIndex));
+
+        return visibleIndex;
+    }
+
     public static int GetVisibilityPoints(
         UnitStore units,
         int unitIndex,
@@ -701,17 +717,10 @@ public sealed class UnitHitSystem
     }
 
 
-    private static int CountTargetRegions(UnitHitRegionProfile profile)
-    {
-        int count = 0;
-        for (int i = 0; i < profile.RegionCount; i++)
-        {
-            if (!IsInternalNode(profile, i))
-                count++;
-        }
-
-        return count;
-    }
+    private static int CountTargetRegions(UnitHitRegionProfile profile) =>
+        profile is UnitAnatomyProfile anatomy
+            ? anatomy.VisibleRegionCount
+            : profile.RegionCount;
 
     private static bool IsInternalNode(UnitHitRegionProfile profile, int index) =>
         profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(index);

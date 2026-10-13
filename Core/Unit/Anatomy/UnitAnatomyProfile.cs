@@ -134,8 +134,10 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
 {
     private readonly UnitAnatomyNode[] _nodes;
     private readonly BodyPartDefinition[] _bodyParts;
+    private readonly int[] _visibleRegions;
 
     public int NodeCount => _nodes.Length;
+    public int VisibleRegionCount => _visibleRegions.Length;
     public bool HasSharedShapes { get; }
     public ReadOnlySpan<BodyPartDefinition> BodyParts => _bodyParts;
     public ReadOnlySpan<UnitAnatomyNode> Nodes => _nodes;
@@ -149,6 +151,11 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         (uint)index < (uint)_nodes.Length
             ? _nodes[index]
             : throw new ArgumentOutOfRangeException(nameof(index));
+
+    public int GetVisibleRegionIndex(int visibleIndex) =>
+        (uint)visibleIndex < (uint)_visibleRegions.Length
+            ? _visibleRegions[visibleIndex]
+            : throw new ArgumentOutOfRangeException(nameof(visibleIndex));
 
     public float GetHitHalfHeight(int index)
     {
@@ -177,6 +184,21 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         _bodyParts = sharedShapes
             ? new BodyPartDefinition[nodes.Length]
             : Array.Empty<BodyPartDefinition>();
+
+        int visibleCount = 0;
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            if (!nodes[i].HasShape || nodes[i].Shape.Role != BodyPartRole.Internal)
+                visibleCount++;
+        }
+
+        _visibleRegions = new int[visibleCount];
+        int visibleIndex = 0;
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            if (!nodes[i].HasShape || nodes[i].Shape.Role != BodyPartRole.Internal)
+                _visibleRegions[visibleIndex++] = i;
+        }
 
         if (!sharedShapes)
             return;
