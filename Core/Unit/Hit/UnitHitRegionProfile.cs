@@ -569,42 +569,6 @@ public static class UnitHitRegionCatalog
             new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye, new Vector3(0f, 0f, 0.15f)),
             new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision)));
 
-    private static readonly UnitAnatomyProfile ScavenRat = new(
-        UnitAnatomyNode.RelativeCircle(
-            "rat.body",
-            new Vector3(0f, 0f, 0.80f),
-            widthRadiusFactor: 0.70f,
-            lengthRadiusFactor: 0.32f,
-            heightHalfExtentFactor: 0.40f,
-            new[]
-            {
-                new HitRegionPartBinding(
-                    UnitHealthPartId.WholeBody, 1f,
-                    maxHitPoints: 80f, id: "rat.body.tissue")
-            },
-            new UnitAnatomyMarker(
-                "target",
-                UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
-            new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
-        UnitAnatomyNode.RelativeCircle(
-            "rat.head",
-            "rat.body",
-            new Vector3(0.245f, 0f, 0.02f),
-            widthRadiusFactor: 0.24f,
-            lengthRadiusFactor: 0.08f,
-            heightHalfExtentFactor: 0.20f,
-            new[]
-            {
-                new HitRegionPartBinding(
-                    UnitHealthPartId.Head, 0.6f,
-                    maxHitPoints: 30f, id: "rat.head.tissue",
-                    parentId: "rat.body.tissue")
-            },
-            new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye),
-            new UnitAnatomyMarker(
-                "target",
-                UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision)));
-
     private static readonly UnitAnatomyProfile SegmentedCreature = CreateSegmented();
 
     public static UnitHitRegionProfile Get(UnitBodyType bodyType) =>
@@ -612,7 +576,6 @@ public static class UnitHitRegionCatalog
         {
             UnitBodyType.Colonist => Colonist,
             UnitBodyType.SmallCreature => SmallCreature,
-            UnitBodyType.ScavenRat => ScavenRat,
             UnitBodyType.SegmentedCreature => SegmentedCreature,
             _ => throw new ArgumentOutOfRangeException(nameof(bodyType), bodyType, "Unknown anatomy profile.")
         };
