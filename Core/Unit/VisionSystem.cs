@@ -89,12 +89,12 @@ public sealed class VisionSystem
     private int _occupiedSpatialCellCount;
     private int _spatialMarkSequence;
     private int[][] _workerCandidateTargetMarks = Array.Empty<int[]>();
+    private readonly int[] _workerCandidateMarkSequences = new int[MaxVisionParallelism];
     private int[] _candidateTargetsByObserver = Array.Empty<int>();
     private int[] _observerCandidatePairs = Array.Empty<int>();
     private int[] _observerLineOfSightChecks = Array.Empty<int>();
     private int[] _observerTargetEvaluations = Array.Empty<int>();
     private int[] _observerActiveCandidatesScanned = Array.Empty<int>();
-    private int[] _observerVisibleCandidates = Array.Empty<int>();
 
     public double LastUpdateMilliseconds { get; private set; }
     public int LastCandidatePairs { get; private set; }
@@ -220,7 +220,6 @@ public sealed class VisionSystem
         }
 
         ReadOnlySpan<int> active = _aliveUnits.AsSpan(0, aliveCount);
-        float[] ranges = units.ViewRange;
 
         EnsureSpatialGrid(worldMap, units.Capacity);
         BuildSpatialGrid(units, active);
@@ -233,7 +232,7 @@ public sealed class VisionSystem
             Parallel.For(0, partitionCount, VisionParallelOptions, partition =>
             {
                 int[] marks = _workerCandidateTargetMarks[partition];
-                int markSequence = 0;
+                int markSequence = _workerCandidateMarkSequences[partition];
                 int begin = partition * aliveCount / partitionCount;
                 int finish = (partition + 1) * aliveCount / partitionCount;
 
@@ -241,16 +240,19 @@ public sealed class VisionSystem
                     ProcessObserver(
                         i, aliveCount, units, worldMap, health, bodies,
                         marks, ref markSequence);
+
+                _workerCandidateMarkSequences[partition] = markSequence;
             });
         }
         else
         {
-            int markSequence = 0;
+            int markSequence = _workerCandidateMarkSequences[0];
             int[] marks = _workerCandidateTargetMarks[0];
             for (int i = 0; i < aliveCount; i++)
                 ProcessObserver(
                     i, aliveCount, units, worldMap, health, bodies,
                     marks, ref markSequence);
+            _workerCandidateMarkSequences[0] = markSequence;
         }
 
         // Workers only touch per-observer rows. Assemble the compact shared visible
@@ -1571,7 +1573,6 @@ public sealed class VisionSystem
             Array.Resize(ref _observerLineOfSightChecks, capacity);
             Array.Resize(ref _observerTargetEvaluations, capacity);
             Array.Resize(ref _observerActiveCandidatesScanned, capacity);
-            Array.Resize(ref _observerVisibleCandidates, capacity);
         }
 
         int candidateCapacity = checked(capacity * CandidateSlots);
