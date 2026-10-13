@@ -174,12 +174,9 @@ public sealed class UnitSimulation
         ushort factionTag = 0,
         UnitHitRegionProfile? hitProfile = null)
     {
-        UnitDefinition definition =
-            UnitCatalog.Get(type);
-
-        BodyHandle body =
-            Bodies.CreateBody(
-                definition.BodyType);
+        UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(type);
+        UnitDefinition definition = archetype.Definition;
+        BodyHandle body = Bodies.CreateBody(archetype.BodyParts);
 
         UnitId id =
             Units.Create(
@@ -191,8 +188,7 @@ public sealed class UnitSimulation
                 locationId,
                 factionTag);
 
-        UnitHitRegionProfile profile =
-            hitProfile ?? UnitHitRegionCatalog.Get(definition.BodyType);
+        UnitHitRegionProfile profile = hitProfile ?? archetype.Anatomy;
 
         return FinishSpawn(
             id,
@@ -300,7 +296,11 @@ public sealed class UnitSimulation
         _deathHandled[id.Index] = false;
         _baseMoveSpeed[id.Index] = Units.MoveSpeed[id.Index];
 
-        Health.InitializeUnit(id.Index, type);
+        bool initializeLegacyHealth =
+            hitProfile is not UnitAnatomyProfile anatomy ||
+            !anatomy.HasSharedShapes ||
+            body.Count != anatomy.NodeCount;
+        Health.InitializeUnit(id.Index, type, initializeLegacyHealth);
         HitRegions.SetProfile(id.Index, hitProfile);
         Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);

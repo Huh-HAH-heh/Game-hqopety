@@ -114,7 +114,8 @@ public sealed class UnitHealthStore
 
     public void InitializeUnit(
         int unitIndex,
-        UnitType type)
+        UnitType type,
+        bool initializeLegacyBody = true)
     {
         EnsureUnitCapacity(
             unitIndex + 1);
@@ -131,6 +132,9 @@ public sealed class UnitHealthStore
 
         _overallHitPoints[unitIndex] =
             _overallMaxHitPoints[unitIndex];
+
+        if (!initializeLegacyBody)
+            return;
 
         if (type ==
             UnitType.Colonist)

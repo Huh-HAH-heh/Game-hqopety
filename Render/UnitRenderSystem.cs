@@ -222,27 +222,16 @@ public sealed class UnitRenderSystem
                 tilePixelSize,
                 screenScale);
 
-            int renderedParts = unitTypes[unitIndex] == UnitType.Colonist
-                ? AppendHitRegions(
-                    _vertices,
-                    _bodyOutlines,
-                    units,
-                    simulation.HitRegions,
-                    unitIndex,
-                    units.FactionTag[unitIndex],
-                    isAlive,
-                    tilePixelSize,
-                    screenScale)
-                : AppendBodyParts(
-                    _vertices,
-                    _bodyOutlines,
-                    bodies,
-                    bodyStart,
-                    bodyCount,
-                    units.FactionTag[unitIndex],
-                    isAlive,
-                    tilePixelSize,
-                    screenScale);
+            int renderedParts = AppendBodyParts(
+                _vertices,
+                _bodyOutlines,
+                bodies,
+                bodyStart,
+                bodyCount,
+                units.FactionTag[unitIndex],
+                isAlive,
+                tilePixelSize,
+                screenScale);
 
             // Keep the marker only for a unit with no model rig at all.
             if (renderedParts == 0)
@@ -558,8 +547,12 @@ public void DrawSnapshot(
         BodyPrimitive[] primitives = bodies.Primitive;
         BodyPartRole[] roles = bodies.Role;
 
+        int rendered = 0;
         for (int i = start; i < start + count; i++)
         {
+            if (roles[i] == BodyPartRole.Internal)
+                continue;
+
             AppendBodyPart(
                 fills,
                 outlines,
@@ -572,9 +565,10 @@ public void DrawSnapshot(
                 isAlive,
                 tilePixelSize,
                 screenScale);
+            rendered++;
         }
 
-        return count;
+        return rendered;
     }
 
     private static int AppendBodyParts(
@@ -592,9 +586,13 @@ public void DrawSnapshot(
             return 0;
 
         count = Math.Min(count, bodyParts.Length - start);
+        int rendered = 0;
         for (int i = start; i < start + count; i++)
         {
             RenderBodyPart part = bodyParts[i];
+            if (part.Role == BodyPartRole.Internal)
+                continue;
+
             AppendBodyPart(
                 fills,
                 outlines,
@@ -607,9 +605,10 @@ public void DrawSnapshot(
                 isAlive,
                 tilePixelSize,
                 screenScale);
+            rendered++;
         }
 
-        return count;
+        return rendered;
     }
 
     private static int AppendHitRegions(
