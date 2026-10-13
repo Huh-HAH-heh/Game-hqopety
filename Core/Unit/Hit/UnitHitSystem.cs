@@ -557,10 +557,11 @@ public sealed class UnitHitSystem
         Vector3 parentScale;
         float parentRotation;
         float parentHalfHeight;
+        BodyPrimitive parentPrimitive;
         if (!TryGetBodyShape(
                 units, unitIndex, profile, parentRegionIndex, bodies,
                 out _, out parentCenter, out parentScale,
-                out parentRotation, out _, out parentHalfHeight))
+                out parentRotation, out parentPrimitive, out parentHalfHeight))
         {
             GetWorldGeometry(
                 units, unitIndex, parentRegionIndex, profile,
@@ -568,15 +569,29 @@ public sealed class UnitHitSystem
                 hitRegions, bodies);
             parentScale = new Vector3(radius, radius, parentHalfHeight);
             parentRotation = 0f;
+            parentPrimitive = BodyPrimitive.Circle;
         }
 
-        float maximumDistance =
+        float rayLength =
             2f * MathF.Sqrt(
                 parentScale.X * parentScale.X +
                 parentScale.Y * parentScale.Y +
                 parentHalfHeight * parentHalfHeight) +
             MathF.Max(0f, padding) * 2f + 0.001f;
-        if (maximumDistance <= 0.001f)
+        if (rayLength <= 0.001f)
+            return false;
+
+        // Keep the internal ray inside the actual entry body volume. This prevents
+        // malformed/custom internal-volume data outside the torso from being hit.
+        Vector3 rayEnd = origin + direction * rayLength;
+        if (!TryIntersectPrimitive(
+                origin, rayEnd, parentCenter, parentScale, parentRotation,
+                parentPrimitive, parentHalfHeight, MathF.Max(0f, padding),
+                out _, out float parentExitT))
+            return false;
+
+        float maximumDistance = rayLength * parentExitT;
+        if (maximumDistance <= 0.0001f)
             return false;
 
         Vector3 end = origin + direction * maximumDistance;
@@ -1019,9 +1034,25 @@ public sealed class UnitHitSystem
         BodyPrimitive primitive,
         float halfHeight,
         float padding,
-        out float t)
+        out float t) =>
+        TryIntersectPrimitive(
+            start, end, center, scale, rotation, primitive,
+            halfHeight, padding, out t, out _);
+
+    private static bool TryIntersectPrimitive(
+        Vector3 start,
+        Vector3 end,
+        Vector3 center,
+        Vector3 scale,
+        float rotation,
+        BodyPrimitive primitive,
+        float halfHeight,
+        float padding,
+        out float t,
+        out float exitT)
     {
         t = 0f;
+        exitT = 0f;
         float cos = MathF.Cos(rotation);
         float sin = MathF.Sin(rotation);
         float dx = end.X - start.X;
@@ -1081,6 +1112,7 @@ public sealed class UnitHitSystem
             return false;
 
         t = Math.Clamp(enter, 0f, 1f);
+        exitT = Math.Clamp(exit, 0f, 1f);
         return true;
     }
 
