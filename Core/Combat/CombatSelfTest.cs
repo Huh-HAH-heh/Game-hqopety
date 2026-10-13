@@ -2576,13 +2576,11 @@ private static bool TestVisionDetectsRegionInsideRange()
 
         Vector3 bodyNormal = simulation.Units.BodyNormal[colonist.Index];
         Vector3 movedHead = simulation.Bodies.WorldPosition[head];
-        bool followsTravel = MathF.Abs(bodyNormal.X) < 0.001f &&
+        return MathF.Abs(bodyNormal.X) < 0.001f &&
                MathF.Abs(bodyNormal.Y - 1f) < 0.001f &&
                MathF.Abs(movedHead.X - 10f) < 0.002f &&
                MathF.Abs(movedHead.Y - 10.155f) < 0.002f &&
                MathF.Abs(simulation.Bodies.WorldRotation[head]) < 0.002f;
-        if (!followsTravel)
-        return followsTravel;
     }
 
     private static bool BodyLinksConnected(
