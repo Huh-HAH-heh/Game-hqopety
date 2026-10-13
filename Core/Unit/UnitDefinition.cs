@@ -77,17 +77,6 @@ public static class UnitCatalog
                     viewRange: 20f,
                     fieldOfView: 110f),
 
-            UnitType.ScavenRat =>
-                new UnitDefinition(
-                    UnitType.ScavenRat,
-                    UnitBodyType.ScavenRat,
-                    moveSpeed: 3.0f,
-                    width: 0.55f,
-                    length: 1.5f,
-                    height: 1.45f,
-                    viewRange: 15f,
-                    fieldOfView: 140f),
-
             _ =>
                 throw new ArgumentOutOfRangeException(
                     nameof(type),
