@@ -54,6 +54,11 @@ public sealed class GameRenderer
     private View? _uiView;
     private GameMenuOverlay? _gameMenuOverlay;
     private ContextMenuOverlay? _contextMenuOverlay;
+    private UnitCardOverlay? _unitCardOverlay;
+    private UnitId _contextMenuUnit;
+    private UnitId _unitCardUnit;
+    private UnitCardDetailsSnapshot? _latestUnitCardDetails;
+    private long _unitCardRequestKey;
     private GameMenuActionType? _draggingMenuSlider;
     private GameMenuPage _menuPage;
     private int _selectedResolutionIndex;
@@ -200,6 +205,7 @@ public sealed class GameRenderer
         _projectileRenderer.Dispose();
         _gameMenuOverlay?.Dispose();
         _contextMenuOverlay?.Dispose();
+        _unitCardOverlay?.Dispose();
         _combatStatusOverlay?.Dispose();
         _uiView?.Dispose();
         _selectionBox.Dispose();
@@ -528,6 +534,31 @@ public sealed class GameRenderer
                 _window,
                 _window.Size.X,
                 _window.Size.Y);
+
+            if (_unitCardOverlay?.IsOpen == true)
+            {
+                SimulationFrameSnapshot? cardSnapshot = renderSnapshot;
+                if (cardSnapshot == null)
+                    cardSnapshot = SimulationFrameSnapshot.Capture(_unitSimulation);
+
+                if (TryFindRenderUnit(cardSnapshot, _unitCardUnit, out RenderUnitState cardUnit))
+                {
+                    UnitCardDetailsSnapshot? details = _simulationThread != null
+                        ? Volatile.Read(ref _latestUnitCardDetails)
+                        : UnitCardDetailsSnapshot.Capture(_unitSimulation, _unitCardUnit);
+
+                    _unitCardOverlay.Draw(
+                        _window,
+                        cardUnit,
+                        details,
+                        _window.Size.X,
+                        _window.Size.Y);
+                }
+                else
+                {
+                    CloseUnitCard();
+                }
+            }
         }
 
         if (_titleTimer >= 0.25f)
@@ -1100,6 +1131,29 @@ public sealed class GameRenderer
                 Console.WriteLine($"[Simulation snapshot] {exception}");
             }
 
+            long detailKey = Volatile.Read(ref _unitCardRequestKey);
+            if (detailKey != 0)
+            {
+                try
+                {
+                    uint encodedIndex = (uint)detailKey;
+                    int unitIndex = (int)encodedIndex - 1;
+                    uint generation = (uint)(detailKey >> 32);
+                    UnitId detailUnit = new UnitId(unitIndex, generation);
+                    Volatile.Write(
+                        ref _latestUnitCardDetails,
+                        UnitCardDetailsSnapshot.Capture(_unitSimulation, detailUnit));
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine($"[Unit card snapshot] {exception}");
+                }
+            }
+            else
+            {
+                Volatile.Write(ref _latestUnitCardDetails, null);
+            }
+
             nextFrame += frameTicks;
             long afterUpdate = Stopwatch.GetTimestamp();
             if (nextFrame < afterUpdate)
@@ -1132,6 +1186,7 @@ public sealed class GameRenderer
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
+        _unitCardOverlay = new UnitCardOverlay();
         _combatStatusOverlay = new CombatStatusOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
@@ -1162,6 +1217,18 @@ public sealed class GameRenderer
                 if (_menuPage != GameMenuPage.Closed)
                     return;
 
+                Vector2i wheelPixels = Mouse.GetPosition(_window);
+                Vector2f wheelUiCoordinates = _uiView != null
+                    ? _window.MapPixelToCoords(wheelPixels, _uiView)
+                    : new Vector2f(wheelPixels.X, wheelPixels.Y);
+
+                if (_unitCardOverlay?.HandleWheel(
+                        new Vector2i((int)wheelUiCoordinates.X, (int)wheelUiCoordinates.Y),
+                        e.Delta) == true)
+                {
+                    return;
+                }
+
                 bool shiftPressed =
                     Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
                     Keyboard.IsKeyPressed(Keyboard.Key.RShift);
@@ -1184,23 +1251,48 @@ public sealed class GameRenderer
                     _isSelectingUnits = false;
                     _selectionBox.Size = new Vector2f(0f, 0f);
 
+                    Vector2f contextCoordinates = _uiView != null
+                        ? _window.MapPixelToCoords(e.Position, _uiView)
+                        : new Vector2f(e.Position.X, e.Position.Y);
+                    Vector2i contextPosition = new(
+                        (int)contextCoordinates.X,
+                        (int)contextCoordinates.Y);
+
+                    CloseUnitCard();
+
                     if (_menuPage == GameMenuPage.Closed &&
                         _contextMenuOverlay != null)
                     {
-                        Vector2f contextCoordinates =
-                            _uiView != null
-                                ? _window.MapPixelToCoords(e.Position, _uiView)
-                                : new Vector2f(e.Position.X, e.Position.Y);
+                        SimulationFrameSnapshot? inputSnapshot = GetInputSnapshot();
+                        Vector2f worldPosition = _window.MapPixelToCoords(e.Position, _camera.View);
+                        float pixelsPerUnit = TerrainTilePixelSize *
+                            _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
+                        float hitPadding = 4f / MathF.Max(1f, pixelsPerUnit);
+
+                        bool hasUnit = inputSnapshot != null &&
+                            TryPickWorldUnit(
+                                inputSnapshot,
+                                worldPosition.X / TerrainTilePixelSize,
+                                worldPosition.Y / TerrainTilePixelSize,
+                                hitPadding,
+                                out RenderUnitState contextUnit);
+
+                        _contextMenuUnit = hasUnit
+                            ? new UnitId(contextUnit.Index, contextUnit.Generation)
+                            : default;
 
                         _contextMenuOverlay.ToggleAt(
-                            new Vector2i(
-                                (int)contextCoordinates.X,
-                                (int)contextCoordinates.Y),
+                            contextPosition,
                             _window.Size.X,
-                            _window.Size.Y);
+                            _window.Size.Y,
+                            hasUnit);
+
+                        if (!_contextMenuOverlay.IsOpen)
+                            _contextMenuUnit = default;
                     }
                     else
                     {
+                        _contextMenuUnit = default;
                         _contextMenuOverlay?.Close();
                     }
 
@@ -1210,13 +1302,6 @@ public sealed class GameRenderer
                 if (e.Button != Mouse.Button.Left)
                     return;
 
-                // A click dismissing the empty popup must not also select a unit.
-                if (_contextMenuOverlay?.IsOpen == true)
-                {
-                    _contextMenuOverlay.Close();
-                    return;
-                }
-
                 Vector2f uiCoordinates =
                     _uiView != null
                         ? _window.MapPixelToCoords(e.Position, _uiView)
@@ -1225,6 +1310,27 @@ public sealed class GameRenderer
                 Vector2i uiPosition = new Vector2i(
                     (int)uiCoordinates.X,
                     (int)uiCoordinates.Y);
+
+                if (_unitCardOverlay?.HandleClick(uiPosition) == true)
+                    return;
+
+                if (_contextMenuOverlay?.IsOpen == true)
+                {
+                    bool menuHandled = _contextMenuOverlay.HandleClick(
+                        uiPosition,
+                        out bool openUnitCard);
+
+                    if (menuHandled)
+                    {
+                        UnitId contextUnit = _contextMenuUnit;
+                        _contextMenuUnit = default;
+                        if (openUnitCard && contextUnit.IsValid)
+                            OpenUnitCard(contextUnit);
+                        return;
+                    }
+
+                    _contextMenuUnit = default;
+                }
 
                 if (_gameMenuOverlay != null &&
                     _gameMenuOverlay.IsSliderHit(
@@ -1365,7 +1471,9 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.F2)
         {
+            CloseUnitCard();
             _contextMenuOverlay?.Close();
+            _contextMenuUnit = default;
             _menuPage = _menuPage == GameMenuPage.Settings
                 ? GameMenuPage.Closed
                 : GameMenuPage.Settings;
@@ -1375,9 +1483,16 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.Escape)
         {
+            if (_unitCardOverlay?.IsOpen == true)
+            {
+                CloseUnitCard();
+                return;
+            }
+
             if (_contextMenuOverlay?.IsOpen == true)
             {
                 _contextMenuOverlay.Close();
+                _contextMenuUnit = default;
                 return;
             }
 
