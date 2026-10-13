@@ -9,10 +9,14 @@ namespace Core.Unit;
 public sealed class UnitWeaponSystem
 {
     private readonly UnitHitRegionStore? _hitRegions;
+    private readonly UnitBodyStore? _bodies;
 
-    public UnitWeaponSystem(UnitHitRegionStore? hitRegions = null)
+    public UnitWeaponSystem(
+        UnitHitRegionStore? hitRegions = null,
+        UnitBodyStore? bodies = null)
     {
         _hitRegions = hitRegions;
+        _bodies = bodies;
     }
 
     public long TotalShotsFired { get; private set; }
@@ -791,7 +795,8 @@ public sealed class UnitWeaponSystem
             regionIndex,
             source,
             _hitRegions,
-            UnitAnatomyMarkerRole.Aim);
+            UnitAnatomyMarkerRole.Aim,
+            _bodies);
     }
 
     // Target modes are vertical targeting bands, not anatomical labels:
@@ -810,7 +815,7 @@ public sealed class UnitWeaponSystem
         for (int i = 0; i < profile.RegionCount; i++)
         {
             float height = UnitHitSystem.GetRegionPoint(
-                units, targetIndex, i, source, _hitRegions, UnitAnatomyMarkerRole.Aim).Z;
+                units, targetIndex, i, source, _hitRegions, UnitAnatomyMarkerRole.Aim, _bodies).Z;
 
             minHeight = MathF.Min(minHeight, height);
             maxHeight = MathF.Max(maxHeight, height);
@@ -897,7 +902,8 @@ public sealed class UnitWeaponSystem
                 unitIndex,
                 UnitAnatomyMarkerRole.Muzzle,
                 out Vector3 markerPosition,
-                _hitRegions))
+                _hitRegions,
+                _bodies))
         {
             return markerPosition;
         }

@@ -59,6 +59,7 @@ public sealed class VisionSystem
     private const int NearbyCellRadius = 1;
 
     private readonly UnitHitRegionStore? _hitRegions;
+    private UnitBodyStore? _bodies;
     private float _updateTimer;
     private int _candidatePairCount;
     private int _lineOfSightChecks;
@@ -146,6 +147,7 @@ public sealed class VisionSystem
         UnitHealthStore? health = null,
         UnitBodyStore? bodies = null)
     {
+        _bodies = bodies;
         if (deltaTime < 0f)
             return;
 
@@ -1432,7 +1434,7 @@ public sealed class VisionSystem
         out float distanceSquared)
     {
         Vector3 observerEye = UnitHitSystem.GetEyePosition(
-            units, observer, hitRegions: _hitRegions);
+            units, observer, _bodies, _hitRegions);
         float range = MathF.Max(0f, units.ViewRange[observer]);
         float rangeSquared = range * range;
         Vector3 forward = NormalizeHorizontal(units.HeadNormal[observer]);
@@ -1447,7 +1449,8 @@ public sealed class VisionSystem
         {
             Vector3 point = UnitHitSystem.GetRegionPoint(
                 units, target, i, observerEye, _hitRegions,
-                UnitAnatomyMarkerRole.Vision);
+                UnitAnatomyMarkerRole.Vision,
+                _bodies);
 
             float dx = point.X - observerEye.X;
             float dy = point.Y - observerEye.Y;
