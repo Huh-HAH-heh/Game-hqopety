@@ -5,6 +5,7 @@ using Core.Unit;
 using SFML.Graphics;
 using SFML.System;
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 
 namespace RimClone.Render;
@@ -58,7 +59,8 @@ public sealed class UnitRenderSystem
         UnitId selectedUnit,
         bool showVisionDebug,
         bool showAiDebug = true,
-        bool hideUnseenTargets = false)
+        bool hideUnseenTargets = false,
+        HashSet<UnitId>? selectedUnits = null)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -268,8 +270,11 @@ public sealed class UnitRenderSystem
 
             }
 
-            if (hasSelection &&
-                selectedIndex == unitIndex)
+            bool isSelected = selectedUnits != null
+                ? selectedUnits.Contains(units.GetId(unitIndex))
+                : hasSelection && selectedIndex == unitIndex;
+
+            if (isSelected)
             {
                 float selectionRadius =
                     MathF.Max(
@@ -348,7 +353,8 @@ public void DrawSnapshot(
         View cameraView,
         float tilePixelSize,
         int selectedUnitIndex,
-        bool showAiDebug)
+        bool showAiDebug,
+        HashSet<UnitId>? selectedUnits = null)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -479,7 +485,11 @@ public void DrawSnapshot(
             if (!isAlive)
                 continue;
 
-            if (unit.Index == selectedUnitIndex)
+            bool isSelected = selectedUnits != null
+                ? selectedUnits.Contains(new UnitId(unit.Index, unit.Generation))
+                : unit.Index == selectedUnitIndex;
+
+            if (isSelected)
             {
                 float selectionRadius = MathF.Max(unit.Width, unit.Length) * 0.6f;
                 AppendSelection(
