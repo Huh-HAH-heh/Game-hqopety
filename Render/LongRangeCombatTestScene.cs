@@ -17,7 +17,7 @@ public sealed class LongRangeCombatTestScene
     private int UnitsPerFaction => _unitsPerFaction;
     private int TotalUnits => _unitsPerFaction * 2;
     private int Rows => _unitsPerFaction / Columns;
-    private const float CombatDistance = 130f;
+    private const float CombatDistance = 90f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
     private const float AdvanceDistance = 25f;
@@ -340,7 +340,7 @@ public sealed class LongRangeCombatTestScene
         int dy = y - centerY;
 
         if (Math.Abs(
-                dx + (int)(42f * scale)) <= 2f * scale &&
+                dx + (int)(34f * scale)) <= 2f * scale &&
             Math.Abs(
                 dy) <= 12f * scale)
         {
@@ -348,7 +348,7 @@ public sealed class LongRangeCombatTestScene
         }
 
         if (Math.Abs(
-                dx - (int)(46f * scale)) <= 2f * scale &&
+                dx - (int)(38f * scale)) <= 2f * scale &&
             Math.Abs(
                 dy + (int)(8f * scale)) <= 13f * scale)
         {

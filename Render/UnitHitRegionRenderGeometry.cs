@@ -34,9 +34,6 @@ internal static class UnitHitRegionRenderGeometry
             {
                 case UnitHealthPartId.Head:
                     return BodyPartRole.Head;
-                case UnitHealthPartId.LowerBody:
-                    legs = true;
-                    break;
                 case UnitHealthPartId.Torso:
                     torso = true;
                     break;

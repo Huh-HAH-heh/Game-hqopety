@@ -358,7 +358,6 @@ public sealed class UnitInventorySystem
     {
         return part switch
         {
-            UnitHealthPartId.LowerBody => 6,
             UnitHealthPartId.WholeBody => 1,
             UnitHealthPartId.Head =>
                 0,
