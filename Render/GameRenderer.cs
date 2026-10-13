@@ -835,7 +835,7 @@ public sealed class GameRenderer
 
             if (!intersects && count == 0)
             {
-                Vector3 position = unit.Position;
+                System.Numerics.Vector3 position = unit.Position;
                 intersects = position.X >= minX && position.X <= maxX &&
                              position.Y >= minY && position.Y <= maxY;
             }
