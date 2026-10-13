@@ -44,7 +44,7 @@ public static class CombatSelfTest
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);
-        RunTest("Hit regions: colonist is three stacked circles", TestColonistUsesThreeStackedRegions, ref passed, ref failed);
+        RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1418,59 +1418,43 @@ public static class CombatSelfTest
             damage.FinalDamage < damage.RawDamage;
     }
 
-    private static bool TestColonistUsesThreeStackedRegions()
+    private static bool TestColonistUsesAnatomyNodes()
     {
-        UnitHitRegionProfile profile = UnitHitRegionCatalog.Get(UnitBodyType.Colonist);
-        if (profile.RegionCount != 3)
+        UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        if (profile.RegionCount != 18 || profile.NodeCount != 18 || !profile.HasSharedShapes)
             return false;
 
-        bool HasPart(in UnitCircleHitRegion region, UnitHealthPartId part)
-        {
-            foreach (HitRegionPartBinding binding in region.Parts)
-            {
-                if (binding.Part == part)
-                    return true;
-            }
+        int torso = profile.FindRegion("torso");
+        int leftLeg = profile.FindRegion("leg.left");
+        int head = profile.FindRegion("head");
+        int heart = profile.FindRegion("heart");
+        int brain = profile.FindRegion("brain");
 
+        if (torso < 0 || leftLeg < 0 || head < 0 || heart < 0 || brain < 0 ||
+            !profile.IsInternalNode(heart) || !profile.IsInternalNode(brain) ||
+            !profile.TryFindPart(UnitHealthPartId.Torso, out int torsoBindingRegion, out _) ||
+            torsoBindingRegion != torso ||
+            !profile.TryFindPart(UnitHealthPartId.LeftLeg, out int legBindingRegion, out _) ||
+            legBindingRegion != leftLeg)
             return false;
-        }
-
-        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
-        if (!HasPart(regions[0], UnitHealthPartId.LeftLeg) ||
-            !HasPart(regions[0], UnitHealthPartId.RightLeg) ||
-            !HasPart(regions[1], UnitHealthPartId.Torso) ||
-            !HasPart(regions[1], UnitHealthPartId.LeftArm) ||
-            !HasPart(regions[1], UnitHealthPartId.RightArm) ||
-            !HasPart(regions[2], UnitHealthPartId.Head))
-        {
-            return false;
-        }
 
         UnitSimulation simulation = new UnitSimulation(4, 32);
-        UnitId unit = simulation.Spawn(
-            UnitType.Colonist,
-            new Vector3(10f, 10f, 0.1f));
+        UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f));
 
         Vector3 legsCenter = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 0, simulation.HitRegions).Center;
+            simulation.Units, unit.Index, leftLeg, simulation.HitRegions, simulation.Bodies).Center;
         Vector3 torsoCenter = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 1, simulation.HitRegions).Center;
+            simulation.Units, unit.Index, torso, simulation.HitRegions, simulation.Bodies).Center;
         Vector3 headCenter = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 2, simulation.HitRegions).Center;
+            simulation.Units, unit.Index, head, simulation.HitRegions, simulation.Bodies).Center;
 
-        bool sameXY =
-            MathF.Abs(legsCenter.X - torsoCenter.X) < 0.001f &&
+        return MathF.Abs(legsCenter.X - torsoCenter.X) < 0.001f &&
             MathF.Abs(torsoCenter.X - headCenter.X) < 0.001f &&
             MathF.Abs(legsCenter.Y - torsoCenter.Y) < 0.001f &&
-            MathF.Abs(torsoCenter.Y - headCenter.Y) < 0.001f;
-
-        return sameXY &&
+            MathF.Abs(torsoCenter.Y - headCenter.Y) < 0.001f &&
             legsCenter.Z < torsoCenter.Z &&
             torsoCenter.Z < headCenter.Z &&
-            UnitHitSystem.GetVisibilityPointCount(
-                simulation.Units,
-                unit.Index,
-                simulation.HitRegions) == 3;
+            UnitHitSystem.GetVisibilityPointCount(simulation.Units, unit.Index, simulation.HitRegions) == 10;
     }
 
 private static bool TestVisionDetectsRegionInsideRange()
@@ -2223,13 +2207,18 @@ private static bool TestVisionDetectsRegionInsideRange()
         UnitHealthSystem healthSystem = new UnitHealthSystem();
         const float initialEnergy = 1729.8f;
 
+        int torsoRegion = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy.FindRegion("torso");
+        if (torsoRegion < 0)
+            return false;
+
         for (int i = 0; i < 5; i++)
         {
             Vector3 torsoCenter = UnitHitSystem.GetRegionGeometry(
                 simulation.Units,
                 target.Index,
-                1,
-                simulation.HitRegions).Center;
+                torsoRegion,
+                simulation.HitRegions,
+                simulation.Bodies).Center;
 
             DamageEvent hit = new DamageEvent(
                 default,
@@ -2244,7 +2233,7 @@ private static bool TestVisionDetectsRegionInsideRange()
                 70f,
                 DamageType.Ballistic,
                 0f,
-                regionIndex: 1);
+                regionIndex: torsoRegion);
 
             ProjectileDamageResult result = damageSystem.ApplyProjectile(
                 simulation.Units,
@@ -2374,7 +2363,7 @@ private static bool TestVisionDetectsRegionInsideRange()
         UnitBodyStore definitions = new UnitBodyStore(4);
         BodyHandle colonistBody = definitions.CreateBody(UnitBodyType.Colonist);
 
-        if (colonistBody.Count != 10 ||
+        if (colonistBody.Count != 18 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Head) != 1 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Torso) != 1 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.UpperArm) != 2 ||
@@ -2465,7 +2454,7 @@ private static bool TestVisionDetectsRegionInsideRange()
             new Vector3(16f, 10f, 0f),
             customParts);
 
-        if (simulation.Units.BodyCount[colonist.Index] != 10 ||
+        if (simulation.Units.BodyCount[colonist.Index] != 18 ||
             simulation.Units.BodyCount[greenbob.Index] != 10 ||
             simulation.Units.BodyCount[segmented.Index] != 10 ||
             simulation.Units.BodyCount[custom.Index] != customParts.Length)
