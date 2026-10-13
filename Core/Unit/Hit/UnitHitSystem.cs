@@ -658,7 +658,17 @@ public sealed class UnitHitSystem
         if (profile is UnitAnatomyProfile anatomy)
             return anatomy.TryGetMarker(regionIndex, markerId, out marker);
 
-        return profile.Regions[regionIndex].TryGetMarker(markerId, out marker);
+        foreach (UnitAnatomyMarker candidate in profile.Regions[regionIndex].Markers)
+        {
+            if (!string.Equals(candidate.Id, markerId, StringComparison.Ordinal))
+                continue;
+
+            marker = candidate;
+            return true;
+        }
+
+        marker = default;
+        return false;
     }
 
     private static bool TryGetPreferredMarker(
