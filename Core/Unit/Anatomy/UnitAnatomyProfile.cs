@@ -4,39 +4,85 @@ using System.Numerics;
 namespace Core.Unit;
 
 /// <summary>
-/// One anatomical node. The same shape transform feeds the body rig and the
-/// hit/aim/vision queries; tissues and markers are attached to that shape.
+/// One authored anatomy node. Rendering shape, collision primitive, internal/external
+/// classification, health tissues and functional markers live in this single record.
+/// Runtime transforms are compiled to UnitBodyStore's flat arrays.
 /// </summary>
 public readonly struct UnitAnatomyNode
 {
-    private readonly UnitCircleHitRegion _geometry;
-    private readonly BodyPartDefinition _shape;
     private readonly string _id;
     private readonly string _parentId;
+    private readonly BodyPartDefinition _shape;
     private readonly float _hitHalfHeight;
+    private readonly HitRegionPartBinding[] _tissues;
+    private readonly UnitAnatomyMarker[] _markers;
     private readonly bool _hasShape;
+
+    // Only used to build compatibility views for older custom hit-profile callers.
+    private readonly Vector3 _legacyCenterFactors;
+    private readonly Vector3 _legacyLocalCenter;
+    private readonly float _legacyRadius;
+    private readonly float _legacyWidthRadiusFactor;
+    private readonly float _legacyLengthRadiusFactor;
+    private readonly float _legacyHeightHalfExtentFactor;
 
     public string Id => _id;
     public string ParentId => _parentId;
-    public UnitCircleHitRegion Geometry => _geometry;
     public BodyPartDefinition Shape => _shape;
     public float HitHalfHeight => _hitHalfHeight;
     public bool HasShape => _hasShape;
+    public ReadOnlySpan<HitRegionPartBinding> Tissues => _tissues;
+    public ReadOnlySpan<UnitAnatomyMarker> Markers => _markers;
+
+    // Compatibility only. Runtime anatomy queries read the node fields above.
+    public UnitCircleHitRegion Geometry => ToCompatibilityRegion();
 
     private UnitAnatomyNode(
         string id,
         string parentId,
-        UnitCircleHitRegion geometry,
         BodyPartDefinition shape,
         float hitHalfHeight,
-        bool hasShape)
+        HitRegionPartBinding[] tissues,
+        UnitAnatomyMarker[] markers,
+        bool hasShape,
+        Vector3 legacyLocalCenter,
+        Vector3 legacyCenterFactors,
+        float legacyRadius,
+        float legacyWidthRadiusFactor,
+        float legacyLengthRadiusFactor,
+        float legacyHeightHalfExtentFactor)
     {
+        if (string.IsNullOrWhiteSpace(id))
+            throw new ArgumentException("An anatomy node requires a stable ID.", nameof(id));
+        if (!float.IsFinite(hitHalfHeight) || hitHalfHeight <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(hitHalfHeight));
+        if (tissues == null || tissues.Length == 0)
+            throw new ArgumentException("An anatomy node requires at least one tissue.", nameof(tissues));
+        if (markers == null)
+            throw new ArgumentNullException(nameof(markers));
+
+        for (int i = 0; i < markers.Length; i++)
+        {
+            for (int j = i + 1; j < markers.Length; j++)
+            {
+                if (string.Equals(markers[i].Id, markers[j].Id, StringComparison.Ordinal))
+                    throw new ArgumentException("Marker IDs must be unique within an anatomy node.", nameof(markers));
+            }
+        }
+
         _id = id;
-        _parentId = parentId;
-        _geometry = geometry;
+        _parentId = parentId ?? string.Empty;
         _shape = shape;
         _hitHalfHeight = hitHalfHeight;
+        _tissues = (HitRegionPartBinding[])tissues.Clone();
+        _markers = (UnitAnatomyMarker[])markers.Clone();
         _hasShape = hasShape;
+        _legacyLocalCenter = legacyLocalCenter;
+        _legacyCenterFactors = legacyCenterFactors;
+        _legacyRadius = legacyRadius;
+        _legacyWidthRadiusFactor = legacyWidthRadiusFactor;
+        _legacyLengthRadiusFactor = legacyLengthRadiusFactor;
+        _legacyHeightHalfExtentFactor = legacyHeightHalfExtentFactor;
     }
 
     public static UnitAnatomyNode Part(
@@ -47,26 +93,13 @@ public readonly struct UnitAnatomyNode
         HitRegionPartBinding[] tissues,
         params UnitAnatomyMarker[] markers)
     {
-        if (string.IsNullOrWhiteSpace(id))
-            throw new ArgumentException("An anatomy node requires a stable ID.", nameof(id));
-        if (!float.IsFinite(hitHalfHeight) || hitHalfHeight <= 0f)
-            throw new ArgumentOutOfRangeException(nameof(hitHalfHeight));
-        if (tissues == null || tissues.Length == 0)
-            throw new ArgumentException("An anatomy node requires at least one tissue.", nameof(tissues));
-
         float radius = MathF.Max(MathF.Abs(shape.Scale.X), MathF.Abs(shape.Scale.Y));
-        string geometryParent = shape.Anchor == BodyPartAnchor.UnitHead
-            ? string.Empty
-            : parentId ?? string.Empty;
-
-        var geometry = new UnitCircleHitRegion(
-            id, geometryParent, shape.LocalPosition, radius, hitHalfHeight, tissues, markers);
-
         return new UnitAnatomyNode(
-            id, parentId ?? string.Empty, geometry, shape, hitHalfHeight, true);
+            id, parentId, shape, hitHalfHeight, tissues, markers, true,
+            shape.LocalPosition, Vector3.Zero, radius, 0f, 0f, 0f);
     }
 
-    // Compatibility factories for callers that still author collision-only nodes.
+    // Compatibility factories for collision-only custom anatomy.
     public static UnitAnatomyNode Circle(
         string id,
         Vector3 localCenter,
@@ -83,13 +116,10 @@ public readonly struct UnitAnatomyNode
         float radius,
         float halfHeight,
         HitRegionPartBinding[] tissues,
-        params UnitAnatomyMarker[] markers)
-    {
-        var geometry = new UnitCircleHitRegion(
-            id, parentId, localCenter, radius, halfHeight, tissues, markers);
-        return new UnitAnatomyNode(
-            id, parentId ?? string.Empty, geometry, default, halfHeight, false);
-    }
+        params UnitAnatomyMarker[] markers) =>
+        new(
+            id, parentId, default, halfHeight, tissues, markers, false,
+            localCenter, Vector3.Zero, radius, 0f, 0f, 0f);
 
     public static UnitAnatomyNode RelativeCircle(
         string id,
@@ -111,24 +141,78 @@ public readonly struct UnitAnatomyNode
         float lengthRadiusFactor,
         float heightHalfExtentFactor,
         HitRegionPartBinding[] tissues,
-        params UnitAnatomyMarker[] markers)
+        params UnitAnatomyMarker[] markers) =>
+        new(
+            id, parentId, default, MathF.Max(0.001f, heightHalfExtentFactor),
+            tissues, markers, false, Vector3.Zero, centerFactors, 0f,
+            widthRadiusFactor, lengthRadiusFactor, heightHalfExtentFactor);
+
+    public bool TryGetMarker(UnitAnatomyMarkerRole role, out UnitAnatomyMarker marker)
     {
-        var geometry = UnitCircleHitRegion.RelativeToUnit(
-            id, parentId, centerFactors, widthRadiusFactor,
-            lengthRadiusFactor, heightHalfExtentFactor, tissues, markers);
-        return new UnitAnatomyNode(
-            id, parentId ?? string.Empty, geometry, default,
-            geometry.HalfHeight, false);
+        for (int i = 0; i < _markers.Length; i++)
+        {
+            if ((_markers[i].Roles & role) != 0)
+            {
+                marker = _markers[i];
+                return true;
+            }
+        }
+
+        marker = default;
+        return false;
+    }
+
+    public bool TryGetMarker(string id, out UnitAnatomyMarker marker)
+    {
+        for (int i = 0; i < _markers.Length; i++)
+        {
+            if (string.Equals(_markers[i].Id, id, StringComparison.Ordinal))
+            {
+                marker = _markers[i];
+                return true;
+            }
+        }
+
+        marker = default;
+        return false;
+    }
+
+    internal UnitCircleHitRegion ToCompatibilityRegion()
+    {
+        if (_hasShape)
+        {
+            string parentId = _shape.Anchor == BodyPartAnchor.UnitHead
+                ? string.Empty
+                : _parentId;
+
+            return new UnitCircleHitRegion(
+                _id, parentId, _legacyLocalCenter, _legacyRadius,
+                _hitHalfHeight, _tissues, _markers);
+        }
+
+        if (_legacyWidthRadiusFactor != 0f ||
+            _legacyLengthRadiusFactor != 0f ||
+            _legacyHeightHalfExtentFactor != 0f ||
+            _legacyCenterFactors != Vector3.Zero)
+        {
+            return UnitCircleHitRegion.RelativeToUnit(
+                _id, _parentId, _legacyCenterFactors,
+                _legacyWidthRadiusFactor, _legacyLengthRadiusFactor,
+                _legacyHeightHalfExtentFactor, _tissues, _markers);
+        }
+
+        return new UnitCircleHitRegion(
+            _id, _parentId, _legacyLocalCenter, _legacyRadius,
+            _hitHalfHeight, _tissues, _markers);
     }
 
     public static implicit operator UnitCircleHitRegion(UnitAnatomyNode node) =>
-        node._geometry;
+        node.ToCompatibilityRegion();
 }
 
 /// <summary>
-/// Immutable anatomy used by rendering, health registration, aiming, vision,
-/// and projectile collision. Canonical profiles keep node order identical to
-/// the compact body-store block for O(1) transform lookup.
+/// Canonical immutable profile used by body rendering, vision and hit resolution.
+/// The inherited regions are a legacy compatibility projection, not runtime source data.
 /// </summary>
 public sealed class UnitAnatomyProfile : UnitHitRegionProfile
 {
@@ -152,30 +236,97 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
             ? _nodes[index]
             : throw new ArgumentOutOfRangeException(nameof(index));
 
+    public ReadOnlySpan<HitRegionPartBinding> GetTissues(int index) =>
+        GetNode(index).Tissues;
+
+    public ReadOnlySpan<UnitAnatomyMarker> GetMarkers(int index) =>
+        GetNode(index).Markers;
+
     public int GetVisibleRegionIndex(int visibleIndex) =>
         (uint)visibleIndex < (uint)_visibleRegions.Length
             ? _visibleRegions[visibleIndex]
             : throw new ArgumentOutOfRangeException(nameof(visibleIndex));
 
-    public float GetHitHalfHeight(int index)
-    {
-        if ((uint)index >= (uint)_nodes.Length)
-            throw new ArgumentOutOfRangeException(nameof(index));
-
-        return _nodes[index].HasShape
-            ? _nodes[index].HitHalfHeight
-            : MathF.Max(0.001f, _nodes[index].Geometry.HalfHeight);
-    }
+    public float GetHitHalfHeight(int index) => GetNode(index).HitHalfHeight;
 
     public bool IsInternalNode(int index) =>
         (uint)index < (uint)_nodes.Length &&
         _nodes[index].HasShape &&
         _nodes[index].Shape.Role == BodyPartRole.Internal;
 
-    private UnitAnatomyProfile(UnitAnatomyNode[] nodes, UnitCircleHitRegion[] regions)
-        : base(regions)
+    public new int FindRegion(string id)
+    {
+        for (int i = 0; i < _nodes.Length; i++)
+        {
+            if (string.Equals(_nodes[i].Id, id, StringComparison.Ordinal))
+                return i;
+        }
+
+        return -1;
+    }
+
+    public new bool TryFindPart(
+        UnitHealthPartId part,
+        out int regionIndex,
+        out int bindingIndex)
+    {
+        for (int i = 0; i < _nodes.Length; i++)
+        {
+            ReadOnlySpan<HitRegionPartBinding> tissues = _nodes[i].Tissues;
+            for (int j = 0; j < tissues.Length; j++)
+            {
+                if (part != UnitHealthPartId.None && tissues[j].Part == part)
+                {
+                    regionIndex = i;
+                    bindingIndex = j;
+                    return true;
+                }
+            }
+        }
+
+        regionIndex = -1;
+        bindingIndex = -1;
+        return false;
+    }
+
+    public new bool TryFindPart(string id, out int regionIndex, out int bindingIndex)
+    {
+        for (int i = 0; i < _nodes.Length; i++)
+        {
+            ReadOnlySpan<HitRegionPartBinding> tissues = _nodes[i].Tissues;
+            for (int j = 0; j < tissues.Length; j++)
+            {
+                if (string.Equals(tissues[j].Id, id, StringComparison.Ordinal))
+                {
+                    regionIndex = i;
+                    bindingIndex = j;
+                    return true;
+                }
+            }
+        }
+
+        regionIndex = -1;
+        bindingIndex = -1;
+        return false;
+    }
+
+    public bool TryGetMarker(
+        int nodeIndex,
+        UnitAnatomyMarkerRole role,
+        out UnitAnatomyMarker marker) =>
+        GetNode(nodeIndex).TryGetMarker(role, out marker);
+
+    public bool TryGetMarker(
+        int nodeIndex,
+        string markerId,
+        out UnitAnatomyMarker marker) =>
+        GetNode(nodeIndex).TryGetMarker(markerId, out marker);
+
+    private UnitAnatomyProfile(UnitAnatomyNode[] nodes, UnitCircleHitRegion[] compatibilityRegions)
+        : base(compatibilityRegions)
     {
         _nodes = (UnitAnatomyNode[])nodes.Clone();
+
         bool sharedShapes = nodes.Length > 0;
         for (int i = 0; i < nodes.Length; i++)
             sharedShapes &= nodes[i].HasShape;
@@ -207,7 +358,9 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         {
             BodyPartDefinition shape = nodes[i].Shape;
             if (shape.ParentIndex < -1 || shape.ParentIndex >= i)
-                throw new ArgumentException($"Parent index of anatomy node '{nodes[i].Id}' must precede the node.", nameof(nodes));
+                throw new ArgumentException(
+                    $"Parent index of anatomy node '{nodes[i].Id}' must precede the node.",
+                    nameof(nodes));
 
             _bodyParts[i] = shape;
         }
@@ -222,7 +375,7 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
 
         var regions = new UnitCircleHitRegion[nodes.Length];
         for (int i = 0; i < nodes.Length; i++)
-            regions[i] = nodes[i].Geometry;
+            regions[i] = nodes[i].ToCompatibilityRegion();
 
         return regions;
     }

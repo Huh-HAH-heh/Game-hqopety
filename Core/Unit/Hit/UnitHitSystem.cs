@@ -58,26 +58,21 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions = null)
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
 
-        for (int i = 0; i < regions.Length; i++)
+        for (int i = 0; i < profile.RegionCount; i++)
         {
-            if (regions[i].TryGetMarker(UnitAnatomyMarkerRole.Eye, out UnitAnatomyMarker marker))
+            if (TryGetMarker(profile, i, UnitAnatomyMarkerRole.Eye, out UnitAnatomyMarker marker))
                 return GetMarkerWorldPosition(units, unitIndex, i, marker, hitRegions, bodies);
         }
 
-        for (int i = 0; i < regions.Length; i++)
+        for (int i = 0; i < profile.RegionCount; i++)
         {
-            UnitCircleHitRegion region = regions[i];
-            foreach (HitRegionPartBinding part in region.Parts)
-            {
-                if (part.Part != UnitHealthPartId.Head)
-                    continue;
+            if (!RegionHasPart(profile, i, UnitHealthPartId.Head))
+                continue;
 
-                GetWorldGeometry(units, unitIndex, region,
-                    out Vector3 center, out _, out float halfHeight, hitRegions, bodies);
-                return center + new Vector3(0f, 0f, halfHeight * 0.55f);
-            }
+            GetWorldGeometry(units, unitIndex, i, profile,
+                out Vector3 center, out _, out float halfHeight, hitRegions, bodies);
+            return center + new Vector3(0f, 0f, halfHeight * 0.55f);
         }
 
         return units.Position[unitIndex] +
@@ -136,11 +131,11 @@ public sealed class UnitHitSystem
         if ((uint)regionIndex >= (uint)profile.RegionCount)
             throw new ArgumentOutOfRangeException(nameof(regionIndex));
 
-        UnitCircleHitRegion region = profile.Regions[regionIndex];
         GetWorldGeometry(
             units,
             unitIndex,
-            region,
+            regionIndex,
+            profile,
             out Vector3 center,
             out float radius,
             out float halfHeight,
@@ -160,11 +155,10 @@ public sealed class UnitHitSystem
             return false;
 
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
 
-        for (int i = 0; i < regions.Length; i++)
+        for (int i = 0; i < profile.RegionCount; i++)
         {
-            if (RegionHasPart(regions[i], part))
+            if (RegionHasPart(profile, i, part))
                 return true;
         }
 
@@ -180,7 +174,7 @@ public sealed class UnitHitSystem
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         return (uint)regionIndex < (uint)profile.RegionCount &&
-               RegionHasPart(profile.Regions[regionIndex], part);
+               RegionHasPart(profile, regionIndex, part);
     }
 
     public static bool IsPointInsideRegion(
@@ -231,7 +225,7 @@ public sealed class UnitHitSystem
         out int bindingIndex,
         UnitHitRegionStore? hitRegions = null)
     {
-        return GetProfile(units, unitIndex, hitRegions).TryFindPart(
+        return TryFindPart(GetProfile(units, unitIndex, hitRegions),
             part, out regionIndex, out bindingIndex);
     }
 
@@ -246,7 +240,7 @@ public sealed class UnitHitSystem
         if ((uint)regionIndex >= (uint)profile.RegionCount)
             return -1;
 
-        ReadOnlySpan<HitRegionPartBinding> bindings = profile.Regions[regionIndex].Parts;
+        ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, regionIndex);
         for (int i = 0; i < bindings.Length; i++)
         {
             if (bindings[i].Part == part)
@@ -265,7 +259,7 @@ public sealed class UnitHitSystem
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         return (uint)regionIndex < (uint)profile.RegionCount &&
-               (uint)bindingIndex < (uint)profile.Regions[regionIndex].Parts.Length;
+               (uint)bindingIndex < (uint)GetBindings(profile, regionIndex).Length;
     }
 
     public static bool TryGetBinding(
@@ -278,9 +272,9 @@ public sealed class UnitHitSystem
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         if ((uint)regionIndex < (uint)profile.RegionCount &&
-            (uint)bindingIndex < (uint)profile.Regions[regionIndex].Parts.Length)
+            (uint)bindingIndex < (uint)GetBindings(profile, regionIndex).Length)
         {
-            binding = profile.Regions[regionIndex].Parts[bindingIndex];
+            binding = GetBindings(profile, regionIndex)[bindingIndex];
             return true;
         }
 
@@ -299,7 +293,7 @@ public sealed class UnitHitSystem
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
         {
-            if (!profile.Regions[regionIndex].TryGetMarker(role, out UnitAnatomyMarker marker))
+            if (!TryGetMarker(profile, regionIndex, role, out UnitAnatomyMarker marker))
                 continue;
 
             point = GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions, bodies);
@@ -326,11 +320,8 @@ public sealed class UnitHitSystem
             return false;
         }
 
-        foreach (UnitAnatomyMarker marker in profile.Regions[regionIndex].Markers)
+        if (TryGetMarker(profile, regionIndex, markerId, out UnitAnatomyMarker marker))
         {
-            if (!string.Equals(marker.Id, markerId, StringComparison.Ordinal))
-                continue;
-
             point = GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions, bodies);
             return true;
         }
@@ -386,10 +377,11 @@ public sealed class UnitHitSystem
     }
 
     private static bool RegionHasPart(
-        in UnitCircleHitRegion region,
+        UnitHitRegionProfile profile,
+        int regionIndex,
         UnitHealthPartId part)
     {
-        foreach (HitRegionPartBinding binding in region.Parts)
+        foreach (HitRegionPartBinding binding in GetBindings(profile, regionIndex))
         {
             if (binding.Part == part)
                 return true;
@@ -411,26 +403,11 @@ public sealed class UnitHitSystem
         if ((uint)regionIndex >= (uint)profile.RegionCount)
             throw new ArgumentOutOfRangeException(nameof(regionIndex));
 
-        UnitCircleHitRegion region = profile.Regions[regionIndex];
-        GetWorldGeometry(units, unitIndex, region,
+        GetWorldGeometry(units, unitIndex, regionIndex, profile,
             out Vector3 center, out float radius, out float halfHeight, hitRegions, bodies);
 
-        UnitAnatomyMarker marker;
-        bool hasMarker = markerRole switch
-        {
-            UnitAnatomyMarkerRole.Vision =>
-                region.TryGetMarker(UnitAnatomyMarkerRole.Vision, out marker) ||
-                region.TryGetMarker(UnitAnatomyMarkerRole.Target, out marker) ||
-                region.TryGetMarker(UnitAnatomyMarkerRole.Aim, out marker),
-            UnitAnatomyMarkerRole.Aim =>
-                region.TryGetMarker(UnitAnatomyMarkerRole.Aim, out marker) ||
-                region.TryGetMarker(UnitAnatomyMarkerRole.Target, out marker) ||
-                region.TryGetMarker(UnitAnatomyMarkerRole.Vision, out marker),
-            _ =>
-                region.TryGetMarker(UnitAnatomyMarkerRole.Target, out marker) ||
-                region.TryGetMarker(UnitAnatomyMarkerRole.Aim, out marker) ||
-                region.TryGetMarker(UnitAnatomyMarkerRole.Vision, out marker)
-        };
+        bool hasMarker = TryGetPreferredMarker(
+            profile, regionIndex, markerRole, out UnitAnatomyMarker marker);
 
         if (hasMarker)
             return GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions, bodies);
@@ -466,7 +443,6 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions = null)
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
 
         bool found = false;
         bool bestIsInternal = false;
@@ -476,9 +452,8 @@ public sealed class UnitHitSystem
         int bestBinding = -1;
         Vector3 bestPosition = default;
 
-        for (int i = 0; i < regions.Length; i++)
+        for (int i = 0; i < profile.RegionCount; i++)
         {
-            UnitCircleHitRegion region = regions[i];
             float padding = MathF.Max(0f, projectileRadius);
             float t;
             bool intersects;
@@ -494,7 +469,7 @@ public sealed class UnitHitSystem
             }
             else
             {
-                GetWorldGeometry(units, unitIndex, region,
+                GetWorldGeometry(units, unitIndex, i, profile,
                     out Vector3 center, out float radius, out float halfHeight,
                     hitRegions, bodies);
                 intersects = TryIntersectCylinder(
@@ -508,7 +483,7 @@ public sealed class UnitHitSystem
                 continue;
 
             Vector3 hitPosition = start + (end - start) * t;
-            int bindingIndex = SelectPart(region, hitPosition, unitIndex, i, out UnitHealthPartId part);
+            int bindingIndex = SelectPart(profile, i, hitPosition, unitIndex, out UnitHealthPartId part);
 
             if (ignoredPart != UnitHealthPartId.None && part == ignoredPart)
                 continue;
@@ -547,26 +522,27 @@ public sealed class UnitHitSystem
             throw new ArgumentException("Insufficient anatomy target-point buffer.", nameof(points));
 
         int written = 0;
-        for (int i = 0; i < profile.RegionCount; i++)
+        for (int visibleIndex = 0; visibleIndex < required; visibleIndex++)
         {
-            if (IsInternalNode(profile, i))
-                continue;
+            int regionIndex = profile is UnitAnatomyProfile anatomy
+                ? anatomy.GetVisibleRegionIndex(visibleIndex)
+                : visibleIndex;
 
             points[written++] = GetRegionPoint(
-                units, unitIndex, i, source, hitRegions, markerRole, bodies);
+                units, unitIndex, regionIndex, source, hitRegions, markerRole, bodies);
         }
 
         return written;
     }
 
     private static int SelectPart(
-        in UnitCircleHitRegion region,
+        UnitHitRegionProfile profile,
+        int regionIndex,
         Vector3 point,
         int unitIndex,
-        int regionIndex,
         out UnitHealthPartId part)
     {
-        ReadOnlySpan<HitRegionPartBinding> parts = region.Parts;
+        ReadOnlySpan<HitRegionPartBinding> parts = GetBindings(profile, regionIndex);
         float totalWeight = 0f;
 
         for (int i = 0; i < parts.Length; i++)
@@ -605,8 +581,9 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions,
         UnitBodyStore? bodies)
     {
-        Vector3 center = GetRegionGeometry(
-            units, unitIndex, regionIndex, hitRegions, bodies).Center;
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        GetWorldGeometry(units, unitIndex, regionIndex, profile,
+            out Vector3 center, out _, out _, hitRegions, bodies);
 
         if (bodies != null &&
             TryGetBodyShape(units, unitIndex, GetProfile(units, unitIndex, hitRegions),
@@ -636,6 +613,98 @@ public sealed class UnitHitSystem
             fallbackOffset.Z);
     }
 
+    private static ReadOnlySpan<HitRegionPartBinding> GetBindings(
+        UnitHitRegionProfile profile,
+        int regionIndex) =>
+        profile is UnitAnatomyProfile anatomy
+            ? anatomy.GetTissues(regionIndex)
+            : profile.Regions[regionIndex].Parts;
+
+    private static bool TryGetMarker(
+        UnitHitRegionProfile profile,
+        int regionIndex,
+        UnitAnatomyMarkerRole role,
+        out UnitAnatomyMarker marker)
+    {
+        if (profile is UnitAnatomyProfile anatomy)
+            return anatomy.TryGetMarker(regionIndex, role, out marker);
+
+        return profile.Regions[regionIndex].TryGetMarker(role, out marker);
+    }
+
+    private static bool TryGetMarker(
+        UnitHitRegionProfile profile,
+        int regionIndex,
+        string markerId,
+        out UnitAnatomyMarker marker)
+    {
+        if (profile is UnitAnatomyProfile anatomy)
+            return anatomy.TryGetMarker(regionIndex, markerId, out marker);
+
+        return profile.Regions[regionIndex].TryGetMarker(markerId, out marker);
+    }
+
+    private static bool TryGetPreferredMarker(
+        UnitHitRegionProfile profile,
+        int regionIndex,
+        UnitAnatomyMarkerRole role,
+        out UnitAnatomyMarker marker)
+    {
+        UnitAnatomyMarkerRole first = role == UnitAnatomyMarkerRole.Vision
+            ? UnitAnatomyMarkerRole.Vision
+            : role == UnitAnatomyMarkerRole.Aim
+                ? UnitAnatomyMarkerRole.Aim
+                : UnitAnatomyMarkerRole.Target;
+        UnitAnatomyMarkerRole second = role == UnitAnatomyMarkerRole.Vision
+            ? UnitAnatomyMarkerRole.Target
+            : role == UnitAnatomyMarkerRole.Aim
+                ? UnitAnatomyMarkerRole.Target
+                : UnitAnatomyMarkerRole.Aim;
+        UnitAnatomyMarkerRole third = role == UnitAnatomyMarkerRole.Vision
+            ? UnitAnatomyMarkerRole.Aim
+            : role == UnitAnatomyMarkerRole.Aim
+                ? UnitAnatomyMarkerRole.Vision
+                : UnitAnatomyMarkerRole.Vision;
+
+        return TryGetMarker(profile, regionIndex, first, out marker) ||
+               TryGetMarker(profile, regionIndex, second, out marker) ||
+               TryGetMarker(profile, regionIndex, third, out marker);
+    }
+
+    private static bool RegionHasPart(
+        UnitHitRegionProfile profile,
+        int regionIndex,
+        UnitHealthPartId part)
+    {
+        foreach (HitRegionPartBinding binding in GetBindings(profile, regionIndex))
+        {
+            if (binding.Part == part)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static int FindRegion(UnitHitRegionProfile profile, string id)
+    {
+        if (profile is UnitAnatomyProfile anatomy)
+            return anatomy.FindRegion(id);
+
+        return profile.FindRegion(id);
+    }
+
+    private static bool TryFindPart(
+        UnitHitRegionProfile profile,
+        UnitHealthPartId part,
+        out int regionIndex,
+        out int bindingIndex)
+    {
+        if (profile is UnitAnatomyProfile anatomy)
+            return anatomy.TryFindPart(part, out regionIndex, out bindingIndex);
+
+        return profile.TryFindPart(part, out regionIndex, out bindingIndex);
+    }
+
     private static UnitHitRegionProfile GetProfile(
         UnitStore units,
         int unitIndex,
@@ -643,6 +712,30 @@ public sealed class UnitHitSystem
     {
         return hitRegions?.GetProfile(unitIndex) ??
             UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unitIndex]).BodyType);
+    }
+
+    private static void GetWorldGeometry(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        UnitHitRegionProfile profile,
+        out Vector3 center,
+        out float radius,
+        out float halfHeight,
+        UnitHitRegionStore? hitRegions = null,
+        UnitBodyStore? bodies = null)
+    {
+        if (TryGetBodyShape(
+                units, unitIndex, profile, regionIndex, bodies,
+                out _, out center, out Vector3 scale, out _, out _, out halfHeight))
+        {
+            radius = MathF.Max(MathF.Abs(scale.X), MathF.Abs(scale.Y));
+            return;
+        }
+
+        GetWorldGeometry(
+            units, unitIndex, profile.Regions[regionIndex],
+            out center, out radius, out halfHeight, hitRegions, bodies);
     }
 
     private static void GetWorldGeometry(
@@ -656,7 +749,7 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null)
     {
         UnitHitRegionProfile assignedProfile = GetProfile(units, unitIndex, hitRegions);
-        int assignedRegionIndex = assignedProfile.FindRegion(region.Id);
+        int assignedRegionIndex = FindRegion(assignedProfile, region.Id);
         if (TryGetBodyShape(
                 units, unitIndex, assignedProfile, assignedRegionIndex, bodies,
                 out _, out center, out Vector3 sharedScale, out _, out _, out halfHeight))
@@ -685,7 +778,7 @@ public sealed class UnitHitSystem
         if (!string.IsNullOrWhiteSpace(region.ParentId))
         {
             UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-            int parentIndex = profile.FindRegion(region.ParentId);
+            int parentIndex = FindRegion(profile, region.ParentId);
 
             if (parentIndex >= 0 && parentIndex < profile.RegionCount)
             {

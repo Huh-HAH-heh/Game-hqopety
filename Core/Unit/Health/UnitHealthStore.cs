@@ -165,7 +165,7 @@ public sealed class UnitHealthStore
         // segments share legacy Part=WholeBody or another compatibility enum.
         for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
         {
-            ReadOnlySpan<HitRegionPartBinding> bindings = regions[regionIndex].Parts;
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetProfileBindings(profile, regionIndex);
 
             for (int bindingIndex = 0; bindingIndex < bindings.Length; bindingIndex++)
             {
@@ -188,7 +188,7 @@ public sealed class UnitHealthStore
         // remain supported for existing human profiles.
         for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
         {
-            ReadOnlySpan<HitRegionPartBinding> bindings = regions[regionIndex].Parts;
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetProfileBindings(profile, regionIndex);
 
             for (int bindingIndex = 0; bindingIndex < bindings.Length; bindingIndex++)
             {
@@ -197,7 +197,7 @@ public sealed class UnitHealthStore
                 int parentIndex = -1;
 
                 if (!string.IsNullOrWhiteSpace(binding.ParentId) &&
-                    profile.TryFindPart(binding.ParentId, out int parentRegion, out int parentBinding))
+                    TryFindProfilePart(profile, binding.ParentId, out int parentRegion, out int parentBinding))
                 {
                     parentIndex = FindRegionPartIndex(unitIndex, parentRegion, parentBinding);
                 }
@@ -223,6 +223,26 @@ public sealed class UnitHealthStore
                     _parent[childIndex] = parentIndex;
             }
         }
+    }
+
+
+    private static ReadOnlySpan<HitRegionPartBinding> GetProfileBindings(
+        UnitHitRegionProfile profile,
+        int regionIndex) =>
+        profile is UnitAnatomyProfile anatomy
+            ? anatomy.GetTissues(regionIndex)
+            : profile.Regions[regionIndex].Parts;
+
+    private static bool TryFindProfilePart(
+        UnitHitRegionProfile profile,
+        string id,
+        out int regionIndex,
+        out int bindingIndex)
+    {
+        if (profile is UnitAnatomyProfile anatomy)
+            return anatomy.TryFindPart(id, out regionIndex, out bindingIndex);
+
+        return profile.TryFindPart(id, out regionIndex, out bindingIndex);
     }
 
     public void ClearHitRegionParts(int unitIndex)
