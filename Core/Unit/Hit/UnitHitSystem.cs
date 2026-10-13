@@ -524,6 +524,125 @@ public sealed class UnitHitSystem
         return true;
     }
 
+    public static bool TryFindNextAnatomyVolumeHit(
+        UnitStore units,
+        int unitIndex,
+        int parentRegionIndex,
+        string entryBindingId,
+        Vector3 origin,
+        Vector3 direction,
+        float minimumDistance,
+        int previousVolumeIndex,
+        float padding,
+        out UnitAnatomyVolumeHit result,
+        UnitBodyStore? bodies = null,
+        UnitHitRegionStore? hitRegions = null)
+    {
+        result = default;
+        if (string.IsNullOrWhiteSpace(entryBindingId))
+            return false;
+
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if (profile is not UnitAnatomyProfile anatomy ||
+            (uint)parentRegionIndex >= (uint)anatomy.NodeCount ||
+            anatomy.VolumeCount == 0)
+            return false;
+
+        float directionLengthSquared = direction.LengthSquared();
+        if (directionLengthSquared < 0.000001f)
+            return false;
+        direction /= MathF.Sqrt(directionLengthSquared);
+
+        Vector3 parentCenter;
+        Vector3 parentScale;
+        float parentRotation;
+        float parentHalfHeight;
+        if (!TryGetBodyShape(
+                units, unitIndex, profile, parentRegionIndex, bodies,
+                out _, out parentCenter, out parentScale,
+                out parentRotation, out _, out parentHalfHeight))
+        {
+            GetWorldGeometry(
+                units, unitIndex, parentRegionIndex, profile,
+                out parentCenter, out float radius, out parentHalfHeight,
+                hitRegions, bodies);
+            parentScale = new Vector3(radius, radius, parentHalfHeight);
+            parentRotation = 0f;
+        }
+
+        float maximumDistance =
+            2f * MathF.Sqrt(
+                parentScale.X * parentScale.X +
+                parentScale.Y * parentScale.Y +
+                parentHalfHeight * parentHalfHeight) +
+            MathF.Max(0f, padding) * 2f + 0.001f;
+        if (maximumDistance <= 0.001f)
+            return false;
+
+        Vector3 end = origin + direction * maximumDistance;
+        UnitAnatomyNode parentNode = anatomy.GetNode(parentRegionIndex);
+        float bestDistance = float.PositiveInfinity;
+        int bestVolumeIndex = -1;
+        int bestTargetRegion = -1;
+        int bestTargetBinding = -1;
+        Vector3 bestPosition = default;
+        UnitAnatomyVolume bestVolume = default;
+        const float tieTolerance = 0.0001f;
+
+        ReadOnlySpan<UnitAnatomyVolume> volumes = anatomy.Volumes;
+        for (int i = 0; i < volumes.Length; i++)
+        {
+            UnitAnatomyVolume volume = volumes[i];
+            if (!string.Equals(volume.ParentRegionId, parentNode.Id, StringComparison.Ordinal) ||
+                !string.Equals(volume.EntryBindingId, entryBindingId, StringComparison.Ordinal))
+                continue;
+
+            if (!anatomy.TryFindPart(volume.TargetBindingId,
+                    out int targetRegion, out int targetBinding))
+                continue;
+
+            float cos = MathF.Cos(parentRotation);
+            float sin = MathF.Sin(parentRotation);
+            Vector3 local = volume.LocalCenter;
+            Vector3 volumeCenter = parentCenter + new Vector3(
+                local.X * cos - local.Y * sin,
+                local.X * sin + local.Y * cos,
+                local.Z);
+            float volumeRotation = parentRotation + volume.LocalRotation;
+
+            if (!TryIntersectPrimitive(
+                    origin, end, volumeCenter, volume.HalfExtents,
+                    volumeRotation, volume.Primitive, volume.HalfExtents.Z,
+                    MathF.Max(0f, padding), out float t))
+                continue;
+
+            float distance = t * maximumDistance;
+            if (minimumDistance >= 0f &&
+                (distance < minimumDistance - tieTolerance ||
+                 (distance <= minimumDistance + tieTolerance && i <= previousVolumeIndex)))
+                continue;
+
+            if (distance > bestDistance + tieTolerance ||
+                (MathF.Abs(distance - bestDistance) <= tieTolerance && i > bestVolumeIndex))
+                continue;
+
+            bestDistance = distance;
+            bestVolumeIndex = i;
+            bestTargetRegion = targetRegion;
+            bestTargetBinding = targetBinding;
+            bestPosition = origin + direction * distance;
+            bestVolume = volume;
+        }
+
+        if (bestVolumeIndex < 0)
+            return false;
+
+        result = new UnitAnatomyVolumeHit(
+            bestVolume, bestVolumeIndex, bestTargetRegion,
+            bestTargetBinding, bestPosition, bestDistance);
+        return true;
+    }
+
     private static int FillRegionPoints(
         UnitStore units,
         int unitIndex,
@@ -560,10 +679,18 @@ public sealed class UnitHitSystem
         out UnitHealthPartId part)
     {
         ReadOnlySpan<HitRegionPartBinding> parts = GetBindings(profile, regionIndex);
-        float totalWeight = 0f;
-
+        bool hasSurfaceTissue = false;
         for (int i = 0; i < parts.Length; i++)
+            hasSurfaceTissue |= parts[i].Kind != UnitHealthPartKind.Organ;
+
+        bool excludeInternalTargets = !IsInternalNode(profile, regionIndex) && hasSurfaceTissue;
+        float totalWeight = 0f;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (excludeInternalTargets && parts[i].Kind == UnitHealthPartKind.Organ)
+                continue;
             totalWeight += parts[i].Weight;
+        }
 
         uint hash = unchecked((uint)(unitIndex + 1) * 2654435761u);
         hash ^= unchecked((uint)(regionIndex + 1) * 2246822519u);
@@ -578,6 +705,9 @@ public sealed class UnitHitSystem
 
         for (int i = 0; i < parts.Length; i++)
         {
+            if (excludeInternalTargets && parts[i].Kind == UnitHealthPartKind.Organ)
+                continue;
+
             selection -= parts[i].Weight;
             if (selection <= 0f)
             {
@@ -586,8 +716,17 @@ public sealed class UnitHitSystem
             }
         }
 
-        part = parts[^1].Part;
-        return parts.Length - 1;
+        for (int i = parts.Length - 1; i >= 0; i--)
+        {
+            if (!excludeInternalTargets || parts[i].Kind != UnitHealthPartKind.Organ)
+            {
+                part = parts[i].Part;
+                return i;
+            }
+        }
+
+        part = UnitHealthPartId.None;
+        return -1;
     }
 
     private static Vector3 GetMarkerWorldPosition(
