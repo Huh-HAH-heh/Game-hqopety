@@ -55,69 +55,56 @@ public static class UnitAnatomyCatalog
     private static readonly UnitArchetypeProfile Colonist = new(
         new UnitDefinition(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f),
         new UnitAnatomyProfile(
-            Node("torso", "", Part(V(0f, 0f, 0.875f), V(0.13f, 0.095f, 0.065f),
-                BodyPrimitive.Circle, role: BodyPartRole.Torso), 0.385f,
-                UnitHealthPartId.Torso, 60f, "torso.main", UnitHealthPartKind.BodyPart, "",
+            // These are the only three physical colonist nodes. Individual limbs and
+            // organs stay as health metadata attached to the appropriate layer.
+            Layer("body.lower",
+                Part(V(-0.055f, 0f, 0.30f), V(0.105f, 0.085f, 0.30f),
+                    BodyPrimitive.Circle, role: BodyPartRole.Thigh),
+                0.34f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.LeftLeg, 8f, 35f, "leg.left", parentId: "torso.main"),
+                    Tissue(UnitHealthPartId.LeftFoot, 2f, 14f, "foot.left", parentId: "leg.left"),
+                    Tissue(UnitHealthPartId.RightLeg, 8f, 35f, "leg.right", parentId: "torso.main"),
+                    Tissue(UnitHealthPartId.RightFoot, 2f, 14f, "foot.right", parentId: "leg.right")
+                },
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
-            Node("head", "torso", Part(V(0.155f, 0f, 1.47f), V(0.055f, 0.055f, 0.045f),
-                BodyPrimitive.Circle, parentIndex: 0, anchor: BodyPartAnchor.UnitHead, role: BodyPartRole.Head), 0.2275f,
-                UnitHealthPartId.Head, 40f, "head.main", UnitHealthPartKind.BodyPart, "torso.main",
+
+            Layer("body.middle",
+                Part(V(0f, 0f, 0.875f), V(0.13f, 0.105f, 0.34f),
+                    BodyPrimitive.Circle, role: BodyPartRole.Torso),
+                0.385f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.Torso, 14f, 60f, "torso.main"),
+                    Tissue(UnitHealthPartId.LeftArm, 2f, 30f, "arm.left", parentId: "torso.main"),
+                    Tissue(UnitHealthPartId.LeftHand, 0.5f, 12f, "hand.left", parentId: "arm.left"),
+                    Tissue(UnitHealthPartId.RightArm, 2f, 30f, "arm.right", parentId: "torso.main"),
+                    Tissue(UnitHealthPartId.RightHand, 0.5f, 12f, "hand.right", parentId: "arm.right"),
+                    Tissue(UnitHealthPartId.Heart, 0.3f, 15f, "heart.main", UnitHealthPartKind.Organ, "torso.main"),
+                    Tissue(UnitHealthPartId.LeftLung, 0.25f, 12f, "lung.left", UnitHealthPartKind.Organ, "torso.main"),
+                    Tissue(UnitHealthPartId.RightLung, 0.25f, 12f, "lung.right", UnitHealthPartKind.Organ, "torso.main"),
+                    Tissue(UnitHealthPartId.Stomach, 0.18f, 12f, "stomach.main", UnitHealthPartKind.Organ, "torso.main"),
+                    Tissue(UnitHealthPartId.Liver, 0.2f, 15f, "liver.main", UnitHealthPartKind.Organ, "torso.main"),
+                    Tissue(UnitHealthPartId.LeftKidney, 0.12f, 10f, "kidney.left", UnitHealthPartKind.Organ, "torso.main"),
+                    Tissue(UnitHealthPartId.RightKidney, 0.12f, 10f, "kidney.right", UnitHealthPartKind.Organ, "torso.main")
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
+                new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
+
+            Layer("body.upper",
+                Part(V(0.155f, 0f, 1.47f), V(0.055f, 0.055f, 0.22f),
+                    BodyPrimitive.Circle, anchor: BodyPartAnchor.UnitHead, role: BodyPartRole.Head),
+                0.2275f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.Head, 19f, 40f, "head.main", parentId: "torso.main"),
+                    Tissue(UnitHealthPartId.Brain, 1f, 10f, "brain.main", UnitHealthPartKind.Organ, "head.main")
+                },
                 new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye | UnitAnatomyMarkerRole.Vision, V(0f, 0f, 0.015f)),
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
-                new UnitAnatomyMarker("muzzle", UnitAnatomyMarkerRole.Muzzle, V(0.035f, 0f, 0.005f))),
-            Node("arm.left", "torso", Part(V(0f, 0.105f, -0.10f), V(0.085f, 0.03f, 0.032f),
-                BodyPrimitive.Circle, parentIndex: 0, localRotation: MathF.PI * 0.5f,
-                motion: BodyPartMotion.WalkCycleOpposite, role: BodyPartRole.UpperArm), 0.245f,
-                UnitHealthPartId.LeftArm, 30f, "arm.left", tissueParentId: "torso.main"),
-            Node("hand.left", "arm.left", Part(V(0.085f, 0f, -0.015f), V(0.025f, 0.025f, 0.025f),
-                BodyPrimitive.Circle, parentIndex: 2, role: BodyPartRole.Hand), 0.175f,
-                UnitHealthPartId.LeftHand, 12f, "hand.left", tissueParentId: "arm.left"),
-            Node("arm.right", "torso", Part(V(0f, -0.105f, -0.10f), V(0.085f, 0.03f, 0.032f),
-                BodyPrimitive.Circle, parentIndex: 0, localRotation: -MathF.PI * 0.5f,
-                motion: BodyPartMotion.WalkCycle, role: BodyPartRole.UpperArm), 0.245f,
-                UnitHealthPartId.RightArm, 30f, "arm.right", tissueParentId: "torso.main"),
-            Node("hand.right", "arm.right", Part(V(0.085f, 0f, -0.015f), V(0.025f, 0.025f, 0.025f),
-                BodyPrimitive.Circle, parentIndex: 4, role: BodyPartRole.Hand), 0.175f,
-                UnitHealthPartId.RightHand, 12f, "hand.right", tissueParentId: "arm.right"),
-            Node("leg.left", "torso", Part(V(-0.055f, 0.06f, -0.63f), V(0.085f, 0.03f, 0.032f),
-                BodyPrimitive.Circle, parentIndex: 0, localRotation: MathF.PI,
-                motion: BodyPartMotion.WalkCycle, role: BodyPartRole.Thigh), 0.2625f,
-                UnitHealthPartId.LeftLeg, 35f, "leg.left", tissueParentId: "torso.main"),
-            Node("foot.left", "leg.left", Part(V(0.085f, 0f, -0.02f), V(0.03f, 0.022f, 0.025f),
-                BodyPrimitive.Circle, parentIndex: 6, role: BodyPartRole.Foot), 0.14f,
-                UnitHealthPartId.LeftFoot, 14f, "foot.left", tissueParentId: "leg.left"),
-            Node("leg.right", "torso", Part(V(-0.055f, -0.06f, -0.63f), V(0.085f, 0.03f, 0.032f),
-                BodyPrimitive.Circle, parentIndex: 0, localRotation: -MathF.PI,
-                motion: BodyPartMotion.WalkCycleOpposite, role: BodyPartRole.Thigh), 0.2625f,
-                UnitHealthPartId.RightLeg, 35f, "leg.right", tissueParentId: "torso.main"),
-            Node("foot.right", "leg.right", Part(V(0.085f, 0f, -0.02f), V(0.03f, 0.022f, 0.025f),
-                BodyPrimitive.Circle, parentIndex: 8, role: BodyPartRole.Foot), 0.14f,
-                UnitHealthPartId.RightFoot, 14f, "foot.right", tissueParentId: "leg.right"),
-            Node("brain", "head", Part(V(0f, 0f, 0.015f), V(0.018f, 0.018f, 0.016f),
-                BodyPrimitive.Circle, parentIndex: 1, role: BodyPartRole.Internal), 0.065f,
-                UnitHealthPartId.Brain, 10f, "brain.main", UnitHealthPartKind.Organ, "head.main"),
-            Node("heart", "torso", Part(V(0.012f, 0.008f, 0.005f), V(0.020f, 0.016f, 0.012f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Internal), 0.07f,
-                UnitHealthPartId.Heart, 15f, "heart.main", UnitHealthPartKind.Organ, "torso.main"),
-            Node("lung.left", "torso", Part(V(0.005f, 0.030f, 0.005f), V(0.026f, 0.018f, 0.012f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Internal), 0.07f,
-                UnitHealthPartId.LeftLung, 12f, "lung.left", UnitHealthPartKind.Organ, "torso.main"),
-            Node("lung.right", "torso", Part(V(0.005f, -0.030f, 0.005f), V(0.026f, 0.018f, 0.012f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Internal), 0.07f,
-                UnitHealthPartId.RightLung, 12f, "lung.right", UnitHealthPartKind.Organ, "torso.main"),
-            Node("stomach", "torso", Part(V(-0.035f, 0.008f, -0.025f), V(0.022f, 0.018f, 0.012f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Internal), 0.07f,
-                UnitHealthPartId.Stomach, 12f, "stomach.main", UnitHealthPartKind.Organ, "torso.main"),
-            Node("liver", "torso", Part(V(-0.012f, -0.020f, -0.015f), V(0.023f, 0.018f, 0.012f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Internal), 0.07f,
-                UnitHealthPartId.Liver, 15f, "liver.main", UnitHealthPartKind.Organ, "torso.main"),
-            Node("kidney.left", "torso", Part(V(-0.045f, 0.032f, -0.035f), V(0.012f, 0.010f, 0.010f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Internal), 0.055f,
-                UnitHealthPartId.LeftKidney, 10f, "kidney.left", UnitHealthPartKind.Organ, "torso.main"),
-            Node("kidney.right", "torso", Part(V(-0.045f, -0.032f, -0.035f), V(0.012f, 0.010f, 0.010f),
-                BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Internal), 0.055f,
-                UnitHealthPartId.RightKidney, 10f, "kidney.right", UnitHealthPartKind.Organ, "torso.main")),
+                new UnitAnatomyMarker("muzzle", UnitAnatomyMarkerRole.Muzzle, V(0.035f, 0f, 0.005f)))),
         new[]
         {
             new UnitStartingEquipment(ApparelCatalog.WorkShirt, 55f),
@@ -236,6 +223,29 @@ public static class UnitAnatomyCatalog
         new(localPosition, scale, primitive, parentIndex, localRotation, motion, followDistance, anchor, role, pivot);
 
     private static Vector3 V(float x, float y, float z) => new(x, y, z);
+
+    private static UnitAnatomyNode Layer(
+        string id,
+        BodyPartDefinition shape,
+        float hitHalfHeight,
+        HitRegionPartBinding[] tissues,
+        params UnitAnatomyMarker[] markers) =>
+        UnitAnatomyNode.Part(id, string.Empty, shape, hitHalfHeight, tissues, markers);
+
+    private static HitRegionPartBinding Tissue(
+        UnitHealthPartId part,
+        float weight,
+        float maxHitPoints,
+        string id,
+        UnitHealthPartKind kind = UnitHealthPartKind.BodyPart,
+        string parentId = "") =>
+        new(
+            part,
+            weight,
+            kind,
+            maxHitPoints,
+            id: id,
+            parentId: string.IsNullOrWhiteSpace(parentId) ? null : parentId);
 
     private static UnitAnatomyNode Node(
         string id,
