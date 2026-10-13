@@ -1371,7 +1371,11 @@ public sealed class GameRenderer
                     (int)uiCoordinates.Y);
 
                 if (_unitCardOverlay?.HandleClick(uiPosition) == true)
+                {
+                    if (_unitCardOverlay.IsOpen == false)
+                        CloseUnitCard();
                     return;
+                }
 
                 if (_contextMenuOverlay?.IsOpen == true)
                 {
