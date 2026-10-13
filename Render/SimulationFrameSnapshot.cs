@@ -46,6 +46,8 @@ public readonly record struct RenderUnitState(
     bool HasPoweredArmor,
     RenderWeaponVisual PrimaryWeapon,
     RenderWeaponVisual SecondaryWeapon,
+    RenderWeaponVisual MeleeWeapon,
+    RenderWeaponVisual UtilityWeapon,
     int BodyPartStart,
     int BodyPartCount,
     UnitType Type,
@@ -284,6 +286,10 @@ public sealed class SimulationFrameSnapshot
                 inventoryStore, weaponStore, index, UnitWeaponSlot.Primary);
             RenderWeaponVisual secondaryWeapon = CaptureWeaponVisual(
                 inventoryStore, weaponStore, index, UnitWeaponSlot.Secondary);
+            RenderWeaponVisual meleeWeapon = CaptureWeaponVisual(
+                inventoryStore, weaponStore, index, UnitWeaponSlot.Melee);
+            RenderWeaponVisual utilityWeapon = CaptureWeaponVisual(
+                inventoryStore, weaponStore, index, UnitWeaponSlot.Utility);
 
             bool hasTarget = false;
             Vector3 targetPosition = Vector3.Zero;
@@ -365,6 +371,8 @@ public sealed class SimulationFrameSnapshot
                 hasPoweredArmor,
                 primaryWeapon,
                 secondaryWeapon,
+                meleeWeapon,
+                utilityWeapon,
                 renderBodyPartStart,
                 renderBodyPartWrite - renderBodyPartStart,
                 types[index],
