@@ -99,7 +99,7 @@ public static class UnitAnatomyCatalog
         new UnitAnatomyProfile(
             Node("body", "", Part(V(0f, 0f, 0.20f), V(0.18f, 0.105f, 0.15f),
                 BodyPrimitive.Circle, role: BodyPartRole.Torso), 0.15f,
-                UnitHealthPartId.WholeBody, 100f, "body.main",
+                UnitHealthPartId.WholeBody, 100f, "body.main", tissueParentId: "",
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
             Node("head", "body", Part(V(0.18f, 0f, 0.34f), V(0.052f, 0.050f, 0.052f),
