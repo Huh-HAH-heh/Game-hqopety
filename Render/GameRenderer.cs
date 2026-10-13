@@ -806,6 +806,64 @@ public sealed class GameRenderer
             _selectedUnits.Add(unit);
     }
 
+    private SimulationFrameSnapshot? GetInputSnapshot() =>
+        _simulationThread != null
+            ? Volatile.Read(ref _latestSnapshot)
+            : SimulationFrameSnapshot.Capture(_unitSimulation);
+
+    private static bool TryFindRenderUnit(
+        SimulationFrameSnapshot snapshot,
+        UnitId id,
+        out RenderUnitState unit)
+    {
+        for (int i = 0; i < snapshot.Units.Length; i++)
+        {
+            RenderUnitState candidate = snapshot.Units[i];
+            if (candidate.Index != id.Index ||
+                candidate.Generation != id.Generation)
+            {
+                continue;
+            }
+
+            unit = candidate;
+            return true;
+        }
+
+        unit = default;
+        return false;
+    }
+
+    private void OpenUnitCard(UnitId unit)
+    {
+        if (!unit.IsValid)
+            return;
+
+        _contextMenuOverlay?.Close();
+        _contextMenuUnit = default;
+        _unitCardUnit = unit;
+        _unitCardOverlay?.Open();
+
+        long requestKey =
+            ((long)unit.Generation << 32) |
+            ((uint)unit.Index + 1u);
+        Interlocked.Exchange(ref _unitCardRequestKey, requestKey);
+
+        if (_simulationThread == null)
+        {
+            Volatile.Write(
+                ref _latestUnitCardDetails,
+                UnitCardDetailsSnapshot.Capture(_unitSimulation, unit));
+        }
+    }
+
+    private void CloseUnitCard()
+    {
+        _unitCardOverlay?.Close();
+        _unitCardUnit = default;
+        Interlocked.Exchange(ref _unitCardRequestKey, 0L);
+        Volatile.Write(ref _latestUnitCardDetails, null);
+    }
+
     private void BeginWorldSelection(Vector2i mousePixel)
     {
         _isSelectingUnits = true;
@@ -1269,13 +1327,14 @@ public sealed class GameRenderer
                             _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
                         float hitPadding = 4f / MathF.Max(1f, pixelsPerUnit);
 
+                        RenderUnitState contextUnit = default;
                         bool hasUnit = inputSnapshot != null &&
                             TryPickWorldUnit(
                                 inputSnapshot,
                                 worldPosition.X / TerrainTilePixelSize,
                                 worldPosition.Y / TerrainTilePixelSize,
                                 hitPadding,
-                                out RenderUnitState contextUnit);
+                                out contextUnit);
 
                         _contextMenuUnit = hasUnit
                             ? new UnitId(contextUnit.Index, contextUnit.Generation)
