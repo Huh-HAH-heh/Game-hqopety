@@ -1,6 +1,7 @@
 # Аудит модели юнитов и план визуального редактора
 
 **Дата:** 2026-10-13  
+**Последующее изменение:** тип `ScavenRat` удалён из этой ветки вместе с его визуальным ригом, хит-профилем и специальной отрисовкой.  
 **Проверенная ветка:** `feature/unit-navigation-800-battle`  
 **Репозиторий:** [Huh-HAH-heh/Game-hqopety](https://github.com/Huh-HAH-heh/Game-hqopety)
 
@@ -37,7 +38,6 @@
 | Colonist | 2.8 | 0.35 | 0.60 | 1.75 | 20 | 110° |
 | Greenbob | 3.2 | 0.40 | 0.40 | 0.40 | 20 | 110° |
 | SegmentedMonster | 1.4 | 1.00 | 6.00 | 0.45 | 20 | 110° |
-| ScavenRat | 3.0 | 0.55 | 1.50 | 1.45 | 15 | 140° |
 
 Это мировые единицы проекта, а не пиксели. Отдельного человекочитаемого `DisplayName`/`Description` в `UnitDefinition` нет: типы заведены в enum и switch. Масса, общая история/описание, редакторские теги и превью также не входят в эту запись.
 
@@ -56,7 +56,7 @@
 
 Роли включают голову, туловище, руки, кисти, ноги, ступни, сегменты, морду, уши, глаза, усы и хвост. Режимы движения включают статичную часть, следование за родителем, циклы ходьбы, физический хвост и цепочку позвоночника.
 
-[UnitBodyCatalog.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Core/Unit/UnitBodyCatalog.cs) содержит жёстко заданные массивы частей для Colonist, SmallCreature, SegmentedCreature и ScavenRat. Например, крыса собрана из перекрывающихся кругов: череп, сужающаяся морда, туловище и хвост с уменьшающимися радиусами. [UnitBodyStore.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Core/Unit/UnitBodyStore.cs) хранит runtime-трансформы частей, а [UnitBodySystem.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Core/Unit/UnitBodySystem.cs) пересчитывает их положение и движение.
+[UnitBodyCatalog.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Core/Unit/UnitBodyCatalog.cs) содержит жёстко заданные массивы визуальных частей для Colonist, SmallCreature и SegmentedCreature. [UnitBodyStore.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Core/Unit/UnitBodyStore.cs) хранит runtime-трансформы частей, а [UnitBodySystem.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Core/Unit/UnitBodySystem.cs) пересчитывает их положение и движение.
 
 ### Анатомия и хит-зоны
 
@@ -78,7 +78,6 @@
 В [UnitHitRegionCatalog](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Core/Unit/Hit/UnitHitRegionProfile.cs) уже есть профили:
 - **Colonist:** зоны ног, туловища и головы; в туловище привязаны сердце, лёгкие, желудок, печень и почки; к голове — мозг.
 - **Greenbob / SmallCreature:** одна основная зона тела.
-- **ScavenRat:** тело и отдельная голова, связанная с телом.
 - **SegmentedMonster:** цепочка из десяти сегментов с родительскими связями.
 
 Профили проверяют уникальность ID, наличие частей в каждой зоне и валидность ссылок на родителя.
@@ -123,15 +122,14 @@
 
 - для `UnitType.Colonist` `UnitRenderSystem` рисует геометрию hit regions;
 - для остальных типов он рисует части из `UnitBodyStore`;
-- ScavenRat дополнительно использует особый режим отрисовки.
 
-Источники: [UnitRenderSystem.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Render/UnitRenderSystem.cs), [UnitHitRegionRenderGeometry.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Render/UnitHitRegionRenderGeometry.cs).
+После удаления ScavenRat все оставшиеся типы используют обычный путь рендера без отдельного контура крысы. Источники: [UnitRenderSystem.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Render/UnitRenderSystem.cs), [UnitHitRegionRenderGeometry.cs](https://github.com/Huh-HAH-heh/Game-hqopety/blob/feature/unit-navigation-800-battle/Render/UnitHitRegionRenderGeometry.cs).
 
 Это и есть главный долг перед редактором: изменение головы или конечности в визуальном риге не гарантирует, что хит-зона, видимость и здоровье изменятся вместе. У человека видимая геометрия частично строится по хит-зонам, а у других существ используется другой источник. И ещё: одна хит-зона может содержать несколько взвешиваемых частей тела и органов, не имеющих раздельной геометрии.
 
 ## 6. Как должен выглядеть редактор юнитов
 
-Рекомендую сделать **редактор данных, а не редактор C#**. Каждый тип — отдельный версионируемый asset, например `Assets/Units/scaven_rat.json`. Редактор сохраняет данные; загрузчик один раз валидирует их и создаёт неизменяемые runtime-профили. Симуляция продолжает использовать плотные массивы и индексы, не выделяя объекты на каждый шаг движения или попадания.
+Рекомендую сделать **редактор данных, а не редактор C#**. Каждый тип — отдельный версионируемый asset, например `Assets/Units/segmented_monster.json`. Редактор сохраняет данные; загрузчик один раз валидирует их и создаёт неизменяемые runtime-профили. Симуляция продолжает использовать плотные массивы и индексы, не выделяя объекты на каждый шаг движения или попадания.
 
 ### Одна запись архетипа
 
