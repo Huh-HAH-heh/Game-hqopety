@@ -123,49 +123,11 @@ public sealed class UnitHealthStore
             GetStart(
                 unitIndex);
 
-        Array.Clear(
-            _part,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _kind,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _maxHitPoints,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _hitPoints,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _bleedRate,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _present,
-            start,
-            MaxPartsPerUnit);
-
-        for (int i = 0; i < MaxPartsPerUnit; i++)
-        {
-            _parent[start + i] = -1;
-            _regionIndex[start + i] = -1;
-            _bindingIndex[start + i] = -1;
-        }
+        ClearPartRange(start, _partCount[unitIndex]);
 
         _partCount[unitIndex] = 0;
 
-        _overallMaxHitPoints[unitIndex] =
-            type == UnitType.Colonist
-                ? 100f
-                : 100f;
+        _overallMaxHitPoints[unitIndex] = 100f;
 
         _overallHitPoints[unitIndex] =
             _overallMaxHitPoints[unitIndex];
@@ -272,22 +234,9 @@ public sealed class UnitHealthStore
             legacyCount++;
         }
 
+        int usedCount = _partCount[unitIndex];
         int clearStart = start + legacyCount;
-        int clearCount = MaxPartsPerUnit - legacyCount;
-        Array.Clear(_part, clearStart, clearCount);
-        Array.Clear(_kind, clearStart, clearCount);
-        Array.Clear(_maxHitPoints, clearStart, clearCount);
-        Array.Clear(_hitPoints, clearStart, clearCount);
-        Array.Clear(_bleedRate, clearStart, clearCount);
-        Array.Clear(_present, clearStart, clearCount);
-
-        for (int i = legacyCount; i < MaxPartsPerUnit; i++)
-        {
-            _parent[start + i] = -1;
-            _regionIndex[start + i] = -1;
-            _bindingIndex[start + i] = -1;
-        }
-
+        ClearPartRange(clearStart, usedCount - legacyCount);
         _partCount[unitIndex] = checked((short)legacyCount);
     }
 
@@ -333,42 +282,7 @@ public sealed class UnitHealthStore
             GetStart(
                 unitIndex);
 
-        Array.Clear(
-            _part,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _kind,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _maxHitPoints,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _hitPoints,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _bleedRate,
-            start,
-            MaxPartsPerUnit);
-
-        Array.Clear(
-            _present,
-            start,
-            MaxPartsPerUnit);
-
-        for (int i = 0; i < MaxPartsPerUnit; i++)
-        {
-            _parent[start + i] = -1;
-            _regionIndex[start + i] = -1;
-            _bindingIndex[start + i] = -1;
-        }
+        ClearPartRange(start, _partCount[unitIndex]);
 
         _partCount[unitIndex] = 0;
         _overallMaxHitPoints[unitIndex] = 0f;
@@ -491,6 +405,22 @@ public sealed class UnitHealthStore
             newNodeCapacity - oldNodeCapacity);
         Array.Fill(_regionIndex, (short)-1, oldNodeCapacity, newNodeCapacity - oldNodeCapacity);
         Array.Fill(_bindingIndex, (short)-1, oldNodeCapacity, newNodeCapacity - oldNodeCapacity);
+    }
+
+    private void ClearPartRange(int start, int count)
+    {
+        if (count <= 0)
+            return;
+
+        Array.Clear(_part, start, count);
+        Array.Clear(_kind, start, count);
+        Array.Clear(_maxHitPoints, start, count);
+        Array.Clear(_hitPoints, start, count);
+        Array.Clear(_bleedRate, start, count);
+        Array.Clear(_present, start, count);
+        Array.Fill(_parent, -1, start, count);
+        Array.Fill(_regionIndex, (short)-1, start, count);
+        Array.Fill(_bindingIndex, (short)-1, start, count);
     }
 
     private void BuildColonist(
