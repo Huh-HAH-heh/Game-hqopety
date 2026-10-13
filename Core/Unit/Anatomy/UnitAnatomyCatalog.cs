@@ -55,6 +55,33 @@ public static class UnitAnatomyCatalog
     private static readonly UnitArchetypeProfile Colonist = new(
         new UnitDefinition(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f),
         new UnitAnatomyProfile(
+            new UnitAnatomyVolume[]
+            {
+                new("organ.heart", "body.middle", "torso.main", "heart.main",
+                    V(0.012f, 0.008f, 0.005f), V(0.020f, 0.016f, 0.012f),
+                    energyLoss: 26f, penetrationLoss: 2f, damageMultiplier: 0.85f, bleedMultiplier: 1.5f),
+                new("organ.lung.left", "body.middle", "torso.main", "lung.left",
+                    V(0.005f, 0.030f, 0.005f), V(0.026f, 0.018f, 0.012f),
+                    energyLoss: 18f, penetrationLoss: 1.5f, damageMultiplier: 0.65f, bleedMultiplier: 1.2f),
+                new("organ.lung.right", "body.middle", "torso.main", "lung.right",
+                    V(0.005f, -0.030f, 0.005f), V(0.026f, 0.018f, 0.012f),
+                    energyLoss: 18f, penetrationLoss: 1.5f, damageMultiplier: 0.65f, bleedMultiplier: 1.2f),
+                new("organ.stomach", "body.middle", "torso.main", "stomach.main",
+                    V(-0.035f, 0.008f, -0.025f), V(0.022f, 0.018f, 0.012f),
+                    energyLoss: 14f, penetrationLoss: 1f, damageMultiplier: 0.65f, bleedMultiplier: 0.8f),
+                new("organ.liver", "body.middle", "torso.main", "liver.main",
+                    V(-0.012f, -0.020f, -0.015f), V(0.023f, 0.018f, 0.012f),
+                    energyLoss: 22f, penetrationLoss: 1.5f, damageMultiplier: 0.8f, bleedMultiplier: 1.4f),
+                new("organ.kidney.left", "body.middle", "torso.main", "kidney.left",
+                    V(-0.045f, 0.032f, -0.035f), V(0.012f, 0.010f, 0.010f),
+                    energyLoss: 12f, penetrationLoss: 1f, damageMultiplier: 0.55f, bleedMultiplier: 0.8f),
+                new("organ.kidney.right", "body.middle", "torso.main", "kidney.right",
+                    V(-0.045f, -0.032f, -0.035f), V(0.012f, 0.010f, 0.010f),
+                    energyLoss: 12f, penetrationLoss: 1f, damageMultiplier: 0.55f, bleedMultiplier: 0.8f),
+                new("organ.brain", "body.upper", "head.main", "brain.main",
+                    V(0f, 0f, 0.015f), V(0.018f, 0.018f, 0.014f),
+                    energyLoss: 20f, penetrationLoss: 1.5f, damageMultiplier: 1.5f, bleedMultiplier: 1.8f)
+            },
             // These are the only three physical colonist nodes. Individual limbs and
             // organs stay as health metadata attached to the appropriate layer.
             Layer("body.lower",
@@ -63,10 +90,10 @@ public static class UnitAnatomyCatalog
                 0.34f,
                 new[]
                 {
-                    Tissue(UnitHealthPartId.LeftLeg, 8f, 35f, "leg.left", parentId: "torso.main"),
-                    Tissue(UnitHealthPartId.LeftFoot, 2f, 14f, "foot.left", parentId: "leg.left"),
-                    Tissue(UnitHealthPartId.RightLeg, 8f, 35f, "leg.right", parentId: "torso.main"),
-                    Tissue(UnitHealthPartId.RightFoot, 2f, 14f, "foot.right", parentId: "leg.right")
+                    Tissue(UnitHealthPartId.LeftLeg, 8f, 35f, "leg.left", parentId: "torso.main", projectileEnergyLoss: 105f, projectilePenetrationLoss: 7f),
+                    Tissue(UnitHealthPartId.LeftFoot, 2f, 14f, "foot.left", parentId: "leg.left", projectileEnergyLoss: 50f, projectilePenetrationLoss: 4f),
+                    Tissue(UnitHealthPartId.RightLeg, 8f, 35f, "leg.right", parentId: "torso.main", projectileEnergyLoss: 105f, projectilePenetrationLoss: 7f),
+                    Tissue(UnitHealthPartId.RightFoot, 2f, 14f, "foot.right", parentId: "leg.right", projectileEnergyLoss: 50f, projectilePenetrationLoss: 4f)
                 },
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
@@ -77,11 +104,11 @@ public static class UnitAnatomyCatalog
                 0.385f,
                 new[]
                 {
-                    Tissue(UnitHealthPartId.Torso, 14f, 60f, "torso.main"),
-                    Tissue(UnitHealthPartId.LeftArm, 2f, 30f, "arm.left", parentId: "torso.main"),
-                    Tissue(UnitHealthPartId.LeftHand, 0.5f, 12f, "hand.left", parentId: "arm.left"),
-                    Tissue(UnitHealthPartId.RightArm, 2f, 30f, "arm.right", parentId: "torso.main"),
-                    Tissue(UnitHealthPartId.RightHand, 0.5f, 12f, "hand.right", parentId: "arm.right"),
+                    Tissue(UnitHealthPartId.Torso, 14f, 60f, "torso.main", projectileEnergyLoss: 190f, projectilePenetrationLoss: 12f),
+                    Tissue(UnitHealthPartId.LeftArm, 2f, 30f, "arm.left", parentId: "torso.main", projectileEnergyLoss: 90f, projectilePenetrationLoss: 6f),
+                    Tissue(UnitHealthPartId.LeftHand, 0.5f, 12f, "hand.left", parentId: "arm.left", projectileEnergyLoss: 55f, projectilePenetrationLoss: 4f),
+                    Tissue(UnitHealthPartId.RightArm, 2f, 30f, "arm.right", parentId: "torso.main", projectileEnergyLoss: 90f, projectilePenetrationLoss: 6f),
+                    Tissue(UnitHealthPartId.RightHand, 0.5f, 12f, "hand.right", parentId: "arm.right", projectileEnergyLoss: 55f, projectilePenetrationLoss: 4f),
                     Tissue(UnitHealthPartId.Heart, 0.3f, 15f, "heart.main", UnitHealthPartKind.Organ, "torso.main"),
                     Tissue(UnitHealthPartId.LeftLung, 0.25f, 12f, "lung.left", UnitHealthPartKind.Organ, "torso.main"),
                     Tissue(UnitHealthPartId.RightLung, 0.25f, 12f, "lung.right", UnitHealthPartKind.Organ, "torso.main"),
@@ -99,7 +126,7 @@ public static class UnitAnatomyCatalog
                 0.2275f,
                 new[]
                 {
-                    Tissue(UnitHealthPartId.Head, 19f, 40f, "head.main", parentId: "torso.main"),
+                    Tissue(UnitHealthPartId.Head, 19f, 40f, "head.main", parentId: "torso.main", projectileEnergyLoss: 170f, projectilePenetrationLoss: 10f),
                     Tissue(UnitHealthPartId.Brain, 1f, 10f, "brain.main", UnitHealthPartKind.Organ, "head.main")
                 },
                 new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye | UnitAnatomyMarkerRole.Vision, V(0f, 0f, 0.015f)),
@@ -238,14 +265,18 @@ public static class UnitAnatomyCatalog
         float maxHitPoints,
         string id,
         UnitHealthPartKind kind = UnitHealthPartKind.BodyPart,
-        string parentId = "") =>
+        string parentId = "",
+        float projectileEnergyLoss = -1f,
+        float projectilePenetrationLoss = -1f) =>
         new(
             part,
             weight,
             kind,
             maxHitPoints,
             id: id,
-            parentId: string.IsNullOrWhiteSpace(parentId) ? null : parentId);
+            parentId: string.IsNullOrWhiteSpace(parentId) ? null : parentId,
+            projectileEnergyLoss: projectileEnergyLoss,
+            projectilePenetrationLoss: projectilePenetrationLoss);
 
     private static UnitAnatomyNode Node(
         string id,
