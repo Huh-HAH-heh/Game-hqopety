@@ -61,6 +61,8 @@ public readonly struct HitRegionPartBinding
     public float MaxHitPoints { get; }
     public UnitHealthPartId ParentPart { get; }
     public int ArmorZone { get; }
+    public float ProjectileEnergyLoss { get; }
+    public float ProjectilePenetrationLoss { get; }
 
     public HitRegionPartBinding(
         UnitHealthPartId part,
@@ -70,12 +72,18 @@ public readonly struct HitRegionPartBinding
         UnitHealthPartId parentPart = UnitHealthPartId.None,
         string? id = null,
         string? parentId = null,
-        int armorZone = -1)
+        int armorZone = -1,
+        float projectileEnergyLoss = -1f,
+        float projectilePenetrationLoss = -1f)
     {
         if (part == UnitHealthPartId.None && string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Generic anatomy parts require a stable ID.", nameof(id));
         if (armorZone < -1 || armorZone >= UnitInventoryStore.BodyZoneCount)
             throw new ArgumentOutOfRangeException(nameof(armorZone));
+        if (!float.IsFinite(projectileEnergyLoss) || projectileEnergyLoss < -1f)
+            throw new ArgumentOutOfRangeException(nameof(projectileEnergyLoss));
+        if (!float.IsFinite(projectilePenetrationLoss) || projectilePenetrationLoss < -1f)
+            throw new ArgumentOutOfRangeException(nameof(projectilePenetrationLoss));
         if (!float.IsFinite(weight) || weight <= 0f)
             throw new ArgumentOutOfRangeException(nameof(weight));
         if (!float.IsFinite(maxHitPoints) || maxHitPoints <= 0f)
@@ -90,6 +98,8 @@ public readonly struct HitRegionPartBinding
         MaxHitPoints = maxHitPoints;
         ParentPart = parentPart;
         ArmorZone = armorZone;
+        ProjectileEnergyLoss = projectileEnergyLoss;
+        ProjectilePenetrationLoss = projectilePenetrationLoss;
     }
 }
 
