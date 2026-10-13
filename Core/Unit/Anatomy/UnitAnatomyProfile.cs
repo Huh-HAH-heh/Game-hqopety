@@ -5,8 +5,8 @@ namespace Core.Unit;
 
 /// <summary>
 /// Authoring API for one independently addressable anatomical circle.
-/// Geometry is unit-relative; all tissue attachments keep their own health
-/// identity, even when they share the same legacy UnitHealthPartId.
+/// Geometry is unit-relative; tissue attachments retain separate health identities,
+/// even when they share the same legacy UnitHealthPartId.
 /// </summary>
 public readonly struct UnitAnatomyNode
 {
@@ -49,8 +49,14 @@ public readonly struct UnitAnatomyNode
         HitRegionPartBinding[] tissues,
         params UnitAnatomyMarker[] markers) =>
         RelativeCircle(
-            id, string.Empty, centerFactors, widthRadiusFactor,
-            lengthRadiusFactor, heightHalfExtentFactor, tissues, markers);
+            id,
+            string.Empty,
+            centerFactors,
+            widthRadiusFactor,
+            lengthRadiusFactor,
+            heightHalfExtentFactor,
+            tissues,
+            markers);
 
     public static UnitAnatomyNode RelativeCircle(
         string id,
@@ -62,16 +68,22 @@ public readonly struct UnitAnatomyNode
         HitRegionPartBinding[] tissues,
         params UnitAnatomyMarker[] markers) =>
         new(UnitCircleHitRegion.RelativeToUnit(
-            id, parentId, centerFactors, widthRadiusFactor,
-            lengthRadiusFactor, heightHalfExtentFactor, tissues, markers));
+            id,
+            parentId,
+            centerFactors,
+            widthRadiusFactor,
+            lengthRadiusFactor,
+            heightHalfExtentFactor,
+            tissues,
+            markers));
 
     public static implicit operator UnitCircleHitRegion(UnitAnatomyNode node) =>
         node._geometry;
 }
 
 /// <summary>
-/// Data-only anatomy profile. Add nodes and configure their markers/tissues;
-/// vision, aiming, collision, health and damage consume the same profile.
+/// Data-only anatomy profile. Vision, aiming, hit detection, health and damage
+/// consume the same immutable node profile.
 /// </summary>
 public sealed class UnitAnatomyProfile : UnitHitRegionProfile
 {
