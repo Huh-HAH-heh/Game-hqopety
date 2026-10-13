@@ -2621,7 +2621,7 @@ private static bool TestVisionDetectsRegionInsideRange()
                     rotation,
                     MathF.Abs(bodies.Scale[parent].X));
 
-                if (Vector3.Distance(position, endpoint) > 0.002f)
+                if (HorizontalDistance(position, endpoint) > 0.002f)
                     return false;
             }
             else if (role is BodyPartRole.Forearm or BodyPartRole.Shin)
@@ -2630,7 +2630,7 @@ private static bool TestVisionDetectsRegionInsideRange()
                     bodies.WorldRotation[part],
                     MathF.Abs(bodies.Scale[part].X));
 
-                if (Vector3.Distance(proximal, parentPosition) > 0.002f)
+                if (HorizontalDistance(proximal, parentPosition) > 0.002f)
                     return false;
             }
             else if (role == BodyPartRole.Hand &&
@@ -2641,7 +2641,7 @@ private static bool TestVisionDetectsRegionInsideRange()
                     rotation,
                     MathF.Abs(bodies.Scale[parent].X));
 
-                if (Vector3.Distance(position, endpoint) > 0.002f)
+                if (HorizontalDistance(position, endpoint) > 0.002f)
                     return false;
             }
             else if (role == BodyPartRole.Foot &&
@@ -2651,7 +2651,7 @@ private static bool TestVisionDetectsRegionInsideRange()
                     rotation,
                     MathF.Abs(bodies.Scale[parent].X));
 
-                if (Vector3.Distance(position, endpoint) > 0.002f)
+                if (HorizontalDistance(position, endpoint) > 0.002f)
                     return false;
             }
             else if (role == BodyPartRole.Foot &&
@@ -2670,6 +2670,13 @@ private static bool TestVisionDetectsRegionInsideRange()
         }
 
         return true;
+    }
+
+    private static float HorizontalDistance(Vector3 a, Vector3 b)
+    {
+        float dx = a.X - b.X;
+        float dy = a.Y - b.Y;
+        return MathF.Sqrt(dx * dx + dy * dy);
     }
 
     private static Vector3 Axis(float angle, float distance) =>
