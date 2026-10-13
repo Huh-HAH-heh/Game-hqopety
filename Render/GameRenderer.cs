@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using Core.Items;
@@ -34,6 +35,20 @@ public sealed class GameRenderer
     private readonly LongRangeCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
+    private readonly HashSet<UnitId> _selectedUnits = new();
+    private bool _isSelectingUnits;
+    private Vector2i _selectionDragStartPixel;
+    private Vector2i _selectionDragCurrentPixel;
+    private Vector2f _selectionDragStartWorld;
+    private Vector2f _selectionDragCurrentWorld;
+    private const int SelectionDragThreshold = 5;
+
+    private readonly RectangleShape _selectionBox = new(new Vector2f(0f, 0f))
+    {
+        FillColor = new Color(85, 155, 225, 38),
+        OutlineColor = new Color(125, 190, 255, 220),
+        OutlineThickness = 1f
+    };
 
     private RenderWindow _window = null!;
     private View? _uiView;
@@ -185,6 +200,7 @@ public sealed class GameRenderer
         _gameMenuOverlay?.Dispose();
         _combatStatusOverlay?.Dispose();
         _uiView?.Dispose();
+        _selectionBox.Dispose();
         _window.Close();
     }
 
@@ -421,7 +437,8 @@ public sealed class GameRenderer
                 _camera.View,
                 TerrainTilePixelSize,
                 _selectedUnit.IsValid ? _selectedUnit.Index : -1,
-                _showAiStateDebug && renderSnapshot.AiEnabled);
+                _showAiStateDebug && renderSnapshot.AiEnabled,
+                _selectedUnits);
 
             _projectileRenderer.DrawSnapshot(
                 _window,
@@ -440,7 +457,8 @@ public sealed class GameRenderer
                 _selectedUnit,
                 _showVisionDebug && !_massCombatMode,
                 _showAiStateDebug && _unitSimulation.AI.Enabled,
-                false);
+                false,
+                _selectedUnits);
 
             _projectileRenderer.Draw(
                 _window,
@@ -448,6 +466,9 @@ public sealed class GameRenderer
                 TerrainTilePixelSize,
                 _showCombatTracers);
         }
+
+        if (_isSelectingUnits && IsSelectionDrag())
+            _window.Draw(_selectionBox);
 
         _gameMenuOverlay?.DrawWorldMarkers(
             _window,
@@ -742,6 +763,110 @@ public sealed class GameRenderer
     private void SetSelectedUnit(UnitId unit)
     {
         _selectedUnit = unit;
+        _selectedUnits.Clear();
+        if (unit.IsValid)
+            _selectedUnits.Add(unit);
+    }
+
+    private void BeginWorldSelection(Vector2i mousePixel)
+    {
+        _isSelectingUnits = true;
+        _selectionDragStartPixel = mousePixel;
+        _selectionDragCurrentPixel = mousePixel;
+        _selectionDragStartWorld =
+            _window.MapPixelToCoords(mousePixel, _camera.View);
+        _selectionDragCurrentWorld = _selectionDragStartWorld;
+        UpdateSelectionBox();
+    }
+
+    private bool IsSelectionDrag()
+    {
+        int dx = _selectionDragCurrentPixel.X - _selectionDragStartPixel.X;
+        int dy = _selectionDragCurrentPixel.Y - _selectionDragStartPixel.Y;
+        return dx * dx + dy * dy >= SelectionDragThreshold * SelectionDragThreshold;
+    }
+
+    private void UpdateSelectionBox()
+    {
+        float left = MathF.Min(_selectionDragStartWorld.X, _selectionDragCurrentWorld.X);
+        float top = MathF.Min(_selectionDragStartWorld.Y, _selectionDragCurrentWorld.Y);
+        _selectionBox.Position = new Vector2f(left, top);
+        _selectionBox.Size = new Vector2f(
+            MathF.Abs(_selectionDragCurrentWorld.X - _selectionDragStartWorld.X),
+            MathF.Abs(_selectionDragCurrentWorld.Y - _selectionDragStartWorld.Y));
+    }
+
+    private void SelectWorldUnitsInRectangle(Vector2f startPixels, Vector2f endPixels)
+    {
+        SimulationFrameSnapshot? snapshot = _simulationThread != null
+            ? Volatile.Read(ref _latestSnapshot)
+            : SimulationFrameSnapshot.Capture(_unitSimulation);
+
+        _selectedUnits.Clear();
+        _selectedUnit = default;
+        if (snapshot == null)
+            return;
+
+        float minX = MathF.Min(startPixels.X, endPixels.X) / TerrainTilePixelSize;
+        float maxX = MathF.Max(startPixels.X, endPixels.X) / TerrainTilePixelSize;
+        float minY = MathF.Min(startPixels.Y, endPixels.Y) / TerrainTilePixelSize;
+        float maxY = MathF.Max(startPixels.Y, endPixels.Y) / TerrainTilePixelSize;
+        RenderBodyPart[] parts = snapshot.BodyParts;
+
+        for (int i = 0; i < snapshot.Units.Length; i++)
+        {
+            RenderUnitState unit = snapshot.Units[i];
+            if (unit.HitPoints <= 0f)
+                continue;
+
+            int start = Math.Clamp(unit.BodyPartStart, 0, parts.Length);
+            int count = Math.Clamp(unit.BodyPartCount, 0, parts.Length - start);
+            bool intersects = false;
+
+            for (int partIndex = start; partIndex < start + count; partIndex++)
+            {
+                if (!IntersectsSelectionRectangle(
+                        parts[partIndex], minX, minY, maxX, maxY))
+                    continue;
+
+                intersects = true;
+                break;
+            }
+
+            if (!intersects && count == 0)
+            {
+                Vector3 position = unit.Position;
+                intersects = position.X >= minX && position.X <= maxX &&
+                             position.Y >= minY && position.Y <= maxY;
+            }
+
+            if (!intersects)
+                continue;
+
+            UnitId id = new(unit.Index, unit.Generation);
+            _selectedUnits.Add(id);
+            _selectedUnit = id;
+        }
+    }
+
+    private static bool IntersectsSelectionRectangle(
+        in RenderBodyPart part,
+        float minX,
+        float minY,
+        float maxX,
+        float maxY)
+    {
+        float absCos = MathF.Abs(MathF.Cos(part.Rotation));
+        float absSin = MathF.Abs(MathF.Sin(part.Rotation));
+        float extentX = MathF.Abs(part.Scale.X) * absCos +
+                        MathF.Abs(part.Scale.Y) * absSin;
+        float extentY = MathF.Abs(part.Scale.X) * absSin +
+                        MathF.Abs(part.Scale.Y) * absCos;
+
+        return part.Position.X + extentX >= minX &&
+               part.Position.X - extentX <= maxX &&
+               part.Position.Y + extentY >= minY &&
+               part.Position.Y - extentY <= maxY;
     }
 
     private void SelectWorldUnit(Vector2i mousePixel)
@@ -1088,12 +1213,21 @@ public sealed class GameRenderer
                 }
 
                 if (_menuPage == GameMenuPage.Closed)
-                    SelectWorldUnit(e.Position);
+                    BeginWorldSelection(e.Position);
             };
 
         _window.MouseMoved +=
             (_, e) =>
             {
+                if (_isSelectingUnits)
+                {
+                    _selectionDragCurrentPixel = e.Position;
+                    _selectionDragCurrentWorld =
+                        _window.MapPixelToCoords(e.Position, _camera.View);
+                    UpdateSelectionBox();
+                    return;
+                }
+
                 if (!_draggingMenuSlider.HasValue ||
                     _menuPage != GameMenuPage.Settings ||
                     _gameMenuOverlay == null)
@@ -1116,8 +1250,35 @@ public sealed class GameRenderer
         _window.MouseButtonReleased +=
             (_, e) =>
             {
-                if (e.Button == Mouse.Button.Left)
+                if (e.Button != Mouse.Button.Left)
+                    return;
+
+                if (_draggingMenuSlider.HasValue)
+                {
                     _draggingMenuSlider = null;
+                    return;
+                }
+
+                if (!_isSelectingUnits)
+                    return;
+
+                _selectionDragCurrentPixel = e.Position;
+                _selectionDragCurrentWorld =
+                    _window.MapPixelToCoords(e.Position, _camera.View);
+                bool boxSelection = IsSelectionDrag();
+                _isSelectingUnits = false;
+                _selectionBox.Size = new Vector2f(0f, 0f);
+
+                if (boxSelection)
+                {
+                    SelectWorldUnitsInRectangle(
+                        _selectionDragStartWorld,
+                        _selectionDragCurrentWorld);
+                }
+                else
+                {
+                    SelectWorldUnit(e.Position);
+                }
             };
 
         _window.KeyPressed +=
