@@ -398,6 +398,7 @@ public sealed class DamageSystem
             stopped);
     }
 
+    // Compatibility defaults for bindings authored before resistance became anatomy data.
     private static float GetBodyEnergyLoss(
         UnitHealthPartId part)
     {
