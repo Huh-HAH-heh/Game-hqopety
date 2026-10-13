@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using System.Collections.Generic;
 using Core.Items;
+using Core.Combat;
 using Core.Unit;
 
 namespace RimClone.Render;
@@ -9,7 +10,19 @@ namespace RimClone.Render;
 public readonly record struct RenderWeaponVisual(
     WeaponConfig? Config,
     Vector3 AimPoint,
-    bool AimIndicatorActive);
+    bool AimIndicatorActive,
+    FireMode FireMode,
+    AimMode AimMode,
+    TargetMode TargetMode,
+    int Ammo,
+    int ReserveAmmo,
+    byte AmmoType,
+    bool Reloading,
+    float ReloadTimer,
+    float Cooldown,
+    float AimTimer,
+    byte BurstRemaining,
+    float Recoil);
 
 public readonly record struct RenderUnitState(
     int Index,
@@ -34,7 +47,17 @@ public readonly record struct RenderUnitState(
     RenderWeaponVisual PrimaryWeapon,
     RenderWeaponVisual SecondaryWeapon,
     int BodyPartStart,
-    int BodyPartCount);
+    int BodyPartCount,
+    UnitType Type,
+    UnitPosture Posture,
+    Vector3 Velocity,
+    float MoveSpeed,
+    float Height,
+    float Radius,
+    float ViewRange,
+    float FieldOfView,
+    float MaxHitPoints,
+    int LocationId);
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
@@ -136,7 +159,19 @@ public sealed class SimulationFrameSnapshot
         return new RenderWeaponVisual(
             config,
             weapons.AimPoint[stateIndex],
-            weapons.AimIndicatorActive[stateIndex]);
+            weapons.AimIndicatorActive[stateIndex],
+            weapons.CurrentFireMode[stateIndex],
+            weapons.CurrentAimMode[stateIndex],
+            weapons.CurrentTargetMode[stateIndex],
+            weapons.Ammo[stateIndex],
+            weapons.ReserveAmmo[stateIndex],
+            weapons.CurrentAmmoType[stateIndex],
+            weapons.Reloading[stateIndex],
+            weapons.ReloadTimer[stateIndex],
+            weapons.Cooldown[stateIndex],
+            weapons.AimTimer[stateIndex],
+            weapons.BurstRemaining[stateIndex],
+            weapons.Recoil[stateIndex]);
     }
 
     public static SimulationFrameSnapshot Capture(
@@ -196,6 +231,15 @@ public sealed class SimulationFrameSnapshot
         Vector3[] positions = units.Position;
         float[] widths = units.Width;
         float[] lengths = units.Length;
+        float[] heights = units.Height;
+        float[] radii = units.Radius;
+        float[] moveSpeeds = units.MoveSpeed;
+        float[] viewRanges = units.ViewRange;
+        float[] fieldOfViews = units.FieldOfView;
+        Vector3[] velocities = units.Velocity;
+        UnitType[] types = units.Type;
+        UnitPosture[] postures = units.Posture;
+        int[] locations = units.LocationId;
         Vector3[] bodyNormals = units.BodyNormal;
         Vector3[] headNormals = units.HeadNormal;
         UnitAiStore aiStore = simulation.AI.Store;
@@ -322,7 +366,17 @@ public sealed class SimulationFrameSnapshot
                 primaryWeapon,
                 secondaryWeapon,
                 renderBodyPartStart,
-                renderBodyPartWrite - renderBodyPartStart);
+                renderBodyPartWrite - renderBodyPartStart,
+                types[index],
+                postures[index],
+                velocities[index],
+                moveSpeeds[index],
+                heights[index],
+                radii[index],
+                viewRanges[index],
+                fieldOfViews[index],
+                maxHitPoints[index],
+                locations[index]);
 
             bool alive = hp > 0f;
             if (faction == 1)
