@@ -216,6 +216,7 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
     private readonly UnitAnatomyNode[] _nodes;
     private readonly BodyPartDefinition[] _bodyParts;
     private readonly int[] _visibleRegions;
+    private readonly UnitAnatomyVolume[] _volumes;
 
     public override int RegionCount => _nodes.Length;
     public int NodeCount => _nodes.Length;
@@ -223,9 +224,16 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
     public bool HasSharedShapes { get; }
     public ReadOnlySpan<BodyPartDefinition> BodyParts => _bodyParts;
     public ReadOnlySpan<UnitAnatomyNode> Nodes => _nodes;
+    public ReadOnlySpan<UnitAnatomyVolume> Volumes => _volumes;
+    public int VolumeCount => _volumes.Length;
 
     public UnitAnatomyProfile(params UnitAnatomyNode[] nodes)
-        : this(nodes, Convert(nodes))
+        : this(nodes, Convert(nodes), Array.Empty<UnitAnatomyVolume>())
+    {
+    }
+
+    public UnitAnatomyProfile(UnitAnatomyVolume[] volumes, params UnitAnatomyNode[] nodes)
+        : this(nodes, Convert(nodes), volumes)
     {
     }
 
@@ -356,10 +364,17 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         out UnitAnatomyMarker marker) =>
         GetNode(nodeIndex).TryGetMarker(markerId, out marker);
 
-    private UnitAnatomyProfile(UnitAnatomyNode[] nodes, UnitCircleHitRegion[] compatibilityRegions)
+    private UnitAnatomyProfile(
+        UnitAnatomyNode[] nodes,
+        UnitCircleHitRegion[] compatibilityRegions,
+        UnitAnatomyVolume[] volumes)
         : base(compatibilityRegions)
     {
+        if (volumes == null)
+            throw new ArgumentNullException(nameof(volumes));
+
         _nodes = (UnitAnatomyNode[])nodes.Clone();
+        _volumes = (UnitAnatomyVolume[])volumes.Clone();
 
         bool sharedShapes = nodes.Length > 0;
         for (int i = 0; i < nodes.Length; i++)
@@ -385,6 +400,8 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
                 _visibleRegions[visibleIndex++] = i;
         }
 
+        ValidateVolumes();
+
         if (!sharedShapes)
             return;
 
@@ -397,6 +414,29 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
                     nameof(nodes));
 
             _bodyParts[i] = shape;
+        }
+    }
+
+    private void ValidateVolumes()
+    {
+        for (int i = 0; i < _volumes.Length; i++)
+        {
+            UnitAnatomyVolume volume = _volumes[i];
+            int parentRegion = FindRegion(volume.ParentRegionId);
+            if (parentRegion < 0)
+                throw new ArgumentException($"Unknown parent region '{volume.ParentRegionId}' in anatomy volume '{volume.Id}'.", nameof(_volumes));
+
+            if (!TryFindPart(volume.EntryBindingId, out int entryRegion, out _) || entryRegion != parentRegion)
+                throw new ArgumentException($"Entry tissue '{volume.EntryBindingId}' must belong to region '{volume.ParentRegionId}'.", nameof(_volumes));
+
+            if (!TryFindPart(volume.TargetBindingId, out _, out _))
+                throw new ArgumentException($"Unknown target tissue '{volume.TargetBindingId}' in anatomy volume '{volume.Id}'.", nameof(_volumes));
+
+            for (int j = i + 1; j < _volumes.Length; j++)
+            {
+                if (string.Equals(volume.Id, _volumes[j].Id, StringComparison.Ordinal))
+                    throw new ArgumentException($"Duplicate anatomy volume ID '{volume.Id}'.", nameof(_volumes));
+            }
         }
     }
 
