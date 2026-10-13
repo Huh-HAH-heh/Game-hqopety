@@ -4,113 +4,49 @@ namespace Core.Unit;
 
 public sealed class UnitHealthSystem
 {
-    public void Update(
-        UnitStore units,
-        UnitHealthStore health,
-        float deltaTime)
+    public void Update(UnitStore units, UnitHealthStore health, float deltaTime)
     {
-        ReadOnlySpan<int> active =
-            units.ActiveIndices;
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        float[] overallMax = health.OverallMaxHitPoints;
+        float[] overall = health.OverallHitPoints;
+        float[] max = health.MaxHitPoints;
+        float[] hitPoints = health.HitPoints;
+        float[] bleedRate = health.BleedRate;
+        UnitHealthPartKind[] kinds = health.Kind;
+        short[] partCounts = health.PartCount;
+        int maxParts = health.MaxParts;
+        int capacity = health.Capacity;
 
-        float[] overallMax =
-            health.OverallMaxHitPoints;
-
-        float[] overall =
-            health.OverallHitPoints;
-
-        float[] max =
-            health.MaxHitPoints;
-
-        float[] hitPoints =
-            health.HitPoints;
-
-        float[] bleedRate =
-            health.BleedRate;
-
-        int maxParts =
-            health.MaxParts;
-
-        int capacity =
-            health.Capacity;
-
-        for (int i = 0;
-             i < active.Length;
-             i++)
+        for (int i = 0; i < active.Length; i++)
         {
-            int unit =
-                active[i];
-
-            if (unit >= capacity ||
-                overall[unit] <= 0f ||
-                overallMax[unit] <= 0f)
-            {
+            int unit = active[i];
+            if (unit >= capacity || overall[unit] <= 0f || overallMax[unit] <= 0f)
                 continue;
-            }
 
-            overall[unit] =
-                Math.Clamp(
-                    overall[unit],
-                    0f,
-                    overallMax[unit]);
+            overall[unit] = Math.Clamp(overall[unit], 0f, overallMax[unit]);
+            int start = unit * maxParts;
 
-            int start =
-                unit *
-                maxParts;
-
-            int count =
-                health.PartCount[unit];
-
-            for (int part = 0;
-                 part < count;
-                 part++)
+            for (int part = 0; part < partCounts[unit]; part++)
             {
-                int index =
-                    start + part;
+                int index = start + part;
 
                 if (bleedRate[index] > 0f && deltaTime > 0f)
                 {
-                    float bleedDamage =
-                        bleedRate[index] * deltaTime;
-
-                    float appliedToPart =
-                        MathF.Min(
-                            bleedDamage,
-                            hitPoints[index]);
-
+                    float bleedDamage = bleedRate[index] * deltaTime;
+                    float appliedToPart = MathF.Min(bleedDamage, hitPoints[index]);
                     hitPoints[index] -= appliedToPart;
 
                     // Internal organs keep bleeding after being destroyed.
                     // External wounds only consume the remaining local HP.
-                    if (health.Kind[index] ==
-                        UnitHealthPartKind.Organ)
-                    {
-                        overall[unit] =
-                            MathF.Max(
-                                0f,
-                                overall[unit] -
-                                bleedDamage);
-                    }
-                    else
-                    {
-                        overall[unit] =
-                            MathF.Max(
-                                0f,
-                                overall[unit] -
-                                appliedToPart);
-                    }
+                    float damageToUnit = kinds[index] == UnitHealthPartKind.Organ
+                        ? bleedDamage
+                        : appliedToPart;
 
-                    bleedRate[index] =
-                        MathF.Max(
-                            0f,
-                            bleedRate[index] -
-                            0.01f * deltaTime);
+                    overall[unit] = MathF.Max(0f, overall[unit] - damageToUnit);
+                    bleedRate[index] = MathF.Max(0f, bleedRate[index] - 0.01f * deltaTime);
                 }
 
-                hitPoints[index] =
-                    Math.Clamp(
-                        hitPoints[index],
-                        0f,
-                        max[index]);
+                hitPoints[index] = Math.Clamp(hitPoints[index], 0f, max[index]);
             }
         }
     }
@@ -127,10 +63,11 @@ public sealed class UnitHealthSystem
             !units.TryGetIndex(unitId, out int unitIndex) ||
             health.OverallHitPoints[unitIndex] <= 0f ||
             !health.TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out int partIndex))
+        {
             return;
+        }
 
-        health.BleedRate[partIndex] =
-            MathF.Min(10f, health.BleedRate[partIndex] + amountPerSecond);
+        health.BleedRate[partIndex] = MathF.Min(10f, health.BleedRate[partIndex] + amountPerSecond);
     }
 
     public bool ApplyRegionDamage(
@@ -145,7 +82,9 @@ public sealed class UnitHealthSystem
             !units.TryGetIndex(unitId, out int unitIndex) ||
             health.OverallHitPoints[unitIndex] <= 0f ||
             !health.TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out int partIndex))
+        {
             return false;
+        }
 
         return ApplyDamageAtIndex(health, unitIndex, partIndex, amount);
     }
@@ -164,10 +103,11 @@ public sealed class UnitHealthSystem
             !UnitHitSystem.TryFindBindingForPart(
                 units, unitIndex, partId,
                 out int regionIndex, out int bindingIndex, hitRegions))
+        {
             return;
+        }
 
-        AddRegionBleed(
-            units, health, unitId, regionIndex, bindingIndex, amountPerSecond);
+        AddRegionBleed(units, health, unitId, regionIndex, bindingIndex, amountPerSecond);
     }
 
     public bool ApplyDamage(
@@ -188,8 +128,7 @@ public sealed class UnitHealthSystem
             return false;
         }
 
-        return ApplyRegionDamage(
-            units, health, unitId, regionIndex, bindingIndex, amount);
+        return ApplyRegionDamage(units, health, unitId, regionIndex, bindingIndex, amount);
     }
 
     private static bool ApplyDamageAtIndex(
