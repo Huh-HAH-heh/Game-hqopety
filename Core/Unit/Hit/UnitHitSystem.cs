@@ -45,8 +45,9 @@ public readonly struct UnitHitResult
 
 /// <summary>
 /// Shared geometry queries for projectile collision, visibility, and aiming.
-/// Each configured circle is a vertical cylinder in world space: radius in XY,
-/// half-height in Z. All geometry comes from the unit's assigned data profile.
+/// Canonical anatomy nodes use their live body-store primitive and transform;
+/// legacy profiles fall back to vertical cylinders. All geometry comes from the
+/// unit's assigned data profile.
 /// </summary>
 public sealed class UnitHitSystem
 {
@@ -749,7 +750,7 @@ public sealed class UnitHitSystem
             profile is not UnitAnatomyProfile anatomy ||
             !anatomy.HasSharedShapes ||
             (uint)regionIndex >= (uint)anatomy.NodeCount ||
-            regionIndex >= units.BodyCount[unitIndex])
+            units.BodyCount[unitIndex] != anatomy.NodeCount)
             return false;
 
         bodyIndex = units.BodyStart[unitIndex] + regionIndex;

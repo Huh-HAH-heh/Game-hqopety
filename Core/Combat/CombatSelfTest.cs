@@ -45,6 +45,7 @@ public static class CombatSelfTest
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);
         RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
+        RunTest("Anatomy: organs own independent projectile hit volumes", TestAnatomyOrganVolumesReceiveHits, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1416,6 +1417,59 @@ public static class CombatSelfTest
 
         return damage.ArmorAbsorbed > 0f &&
             damage.FinalDamage < damage.RawDamage;
+    }
+
+    private static bool TestAnatomyOrganVolumesReceiveHits()
+    {
+        UnitSimulation simulation = new UnitSimulation(2, 32);
+        UnitId unit = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(8f, 8f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        UnitAnatomyProfile anatomy =
+            UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        int heartRegion = anatomy.FindRegion("heart");
+        int torsoRegion = anatomy.FindRegion("torso");
+        if (heartRegion < 0 || torsoRegion < 0 || heartRegion == torsoRegion)
+            return false;
+
+        UnitHitRegionGeometry heart = UnitHitSystem.GetRegionGeometry(
+            simulation.Units,
+            unit.Index,
+            heartRegion,
+            simulation.HitRegions,
+            simulation.Bodies);
+        UnitHitRegionGeometry torso = UnitHitSystem.GetRegionGeometry(
+            simulation.Units,
+            unit.Index,
+            torsoRegion,
+            simulation.HitRegions,
+            simulation.Bodies);
+
+        if (Vector3.Distance(heart.Center, torso.Center) < 0.001f ||
+            heart.Radius >= torso.Radius)
+            return false;
+
+        float offset = MathF.Max(0.06f, heart.Radius * 3f);
+        Vector3 start = heart.Center - new Vector3(offset, 0f, 0f);
+        Vector3 end = heart.Center + new Vector3(offset, 0f, 0f);
+
+        bool hit = new UnitHitSystem().TryHitUnit(
+            simulation.Units,
+            unit.Index,
+            start,
+            end,
+            0f,
+            UnitHealthPartId.None,
+            out UnitHitResult result,
+            simulation.Bodies,
+            simulation.HitRegions);
+
+        return hit &&
+            result.Part == UnitHealthPartId.Heart &&
+            result.RegionIndex == heartRegion;
     }
 
     private static bool TestColonistUsesAnatomyNodes()
