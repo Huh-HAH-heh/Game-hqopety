@@ -419,6 +419,35 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
 
     private void ValidateVolumes()
     {
+        // IDs are the stable references used by parents, hit volumes and health.
+        for (int i = 0; i < _nodes.Length; i++)
+        {
+            for (int prior = 0; prior < i; prior++)
+            {
+                if (string.Equals(_nodes[i].Id, _nodes[prior].Id, StringComparison.Ordinal))
+                    throw new ArgumentException($"Duplicate anatomy region ID '{_nodes[i].Id}'.", nameof(_nodes));
+            }
+
+            ReadOnlySpan<HitRegionPartBinding> bindings = _nodes[i].Tissues;
+            for (int b = 0; b < bindings.Length; b++)
+            {
+                string id = bindings[b].Id;
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+
+                for (int priorRegion = 0; priorRegion <= i; priorRegion++)
+                {
+                    ReadOnlySpan<HitRegionPartBinding> priorBindings = _nodes[priorRegion].Tissues;
+                    int limit = priorRegion == i ? b : priorBindings.Length;
+                    for (int priorBinding = 0; priorBinding < limit; priorBinding++)
+                    {
+                        if (string.Equals(id, priorBindings[priorBinding].Id, StringComparison.Ordinal))
+                            throw new ArgumentException($"Duplicate anatomy tissue ID '{id}'.", nameof(_nodes));
+                    }
+                }
+            }
+        }
+
         for (int i = 0; i < _volumes.Length; i++)
         {
             UnitAnatomyVolume volume = _volumes[i];
