@@ -229,6 +229,42 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
     {
     }
 
+    public static UnitAnatomyProfile FromBodyParts(ReadOnlySpan<BodyPartDefinition> bodyParts)
+    {
+        if (bodyParts.Length == 0)
+            throw new ArgumentException("A custom anatomy requires at least one body part.", nameof(bodyParts));
+
+        var nodes = new UnitAnatomyNode[bodyParts.Length];
+        for (int i = 0; i < bodyParts.Length; i++)
+        {
+            BodyPartDefinition shape = bodyParts[i];
+            string id = $"custom.part.{i}";
+            string parentId = shape.ParentIndex >= 0
+                ? $"custom.part.{shape.ParentIndex}"
+                : string.Empty;
+            string tissueId = $"{id}.tissue";
+            string parentTissueId = shape.ParentIndex >= 0
+                ? $"custom.part.{shape.ParentIndex}.tissue"
+                : string.Empty;
+
+            var tissue = new HitRegionPartBinding(
+                UnitHealthPartId.WholeBody,
+                kind: UnitHealthPartKind.BodyPart,
+                maxHitPoints: 100f,
+                id: tissueId,
+                parentId: string.IsNullOrWhiteSpace(parentTissueId) ? null : parentTissueId);
+
+            nodes[i] = UnitAnatomyNode.Part(
+                id,
+                parentId,
+                shape,
+                MathF.Max(0.001f, MathF.Abs(shape.Scale.Z)),
+                new[] { tissue });
+        }
+
+        return new UnitAnatomyProfile(nodes);
+    }
+
     public UnitAnatomyNode GetNode(int index) =>
         (uint)index < (uint)_nodes.Length
             ? _nodes[index]

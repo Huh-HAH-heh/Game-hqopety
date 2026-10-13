@@ -227,7 +227,7 @@ public sealed class UnitSimulation
             factionTag);
 
         UnitHitRegionProfile profile =
-            hitProfile ?? UnitHitRegionCatalog.Get(definition.BodyType);
+            hitProfile ?? UnitAnatomyProfile.FromBodyParts(bodyParts);
 
         return FinishSpawn(
             id,
