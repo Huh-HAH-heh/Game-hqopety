@@ -742,6 +742,120 @@ public sealed class GameRenderer
         _selectedUnit = unit;
     }
 
+    private void SelectWorldUnit(Vector2i mousePixel)
+    {
+        Vector2f worldPixels = _window.MapPixelToCoords(mousePixel, _camera.View);
+        float worldX = worldPixels.X / TerrainTilePixelSize;
+        float worldY = worldPixels.Y / TerrainTilePixelSize;
+
+        SimulationFrameSnapshot? snapshot = _simulationThread != null
+            ? Volatile.Read(ref _latestSnapshot)
+            : SimulationFrameSnapshot.Capture(_unitSimulation);
+
+        float pixelsPerUnit = TerrainTilePixelSize *
+            _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
+        float hitPadding = 4f / MathF.Max(1f, pixelsPerUnit);
+
+        if (snapshot != null &&
+            TryPickWorldUnit(snapshot, worldX, worldY, hitPadding, out RenderUnitState unit))
+        {
+            SetSelectedUnit(new UnitId(unit.Index, unit.Generation));
+            return;
+        }
+
+        SetSelectedUnit(default);
+    }
+
+    private static bool TryPickWorldUnit(
+        SimulationFrameSnapshot snapshot,
+        float worldX,
+        float worldY,
+        float padding,
+        out RenderUnitState selected)
+    {
+        selected = default;
+        bool found = false;
+        RenderBodyPart[] parts = snapshot.BodyParts;
+
+        // Units are painted in snapshot order, so the last intersected unit
+        // matches the object visually on top when silhouettes overlap.
+        for (int i = 0; i < snapshot.Units.Length; i++)
+        {
+            RenderUnitState unit = snapshot.Units[i];
+            if (unit.HitPoints <= 0f)
+                continue;
+
+            int start = Math.Clamp(unit.BodyPartStart, 0, parts.Length);
+            int count = Math.Clamp(unit.BodyPartCount, 0, parts.Length - start);
+            bool hit = false;
+
+            for (int part = start; part < start + count; part++)
+            {
+                if (!ContainsWorldPoint(parts[part], worldX, worldY, padding))
+                    continue;
+
+                hit = true;
+                break;
+            }
+
+            if (!hit && count == 0)
+            {
+                float radiusX = MathF.Max(0.18f, unit.Width * 0.5f) + padding;
+                float radiusY = MathF.Max(0.18f, unit.Length * 0.5f) + padding;
+                float dx = (worldX - unit.Position.X) / radiusX;
+                float dy = (worldY - unit.Position.Y) / radiusY;
+                hit = dx * dx + dy * dy <= 1f;
+            }
+
+            if (hit)
+            {
+                selected = unit;
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    private static bool ContainsWorldPoint(
+        in RenderBodyPart part,
+        float worldX,
+        float worldY,
+        float padding)
+    {
+        float dx = worldX - part.Position.X;
+        float dy = worldY - part.Position.Y;
+        float cos = MathF.Cos(part.Rotation);
+        float sin = MathF.Sin(part.Rotation);
+        float localX = dx * cos + dy * sin;
+        float localY = -dx * sin + dy * cos;
+        float halfX = MathF.Max(0.001f, MathF.Abs(part.Scale.X) + padding);
+        float halfY = MathF.Max(0.001f, MathF.Abs(part.Scale.Y) + padding);
+
+        switch (part.Primitive)
+        {
+            case BodyPrimitive.Box:
+                return MathF.Abs(localX) <= halfX &&
+                       MathF.Abs(localY) <= halfY;
+
+            case BodyPrimitive.Line:
+                halfY = MathF.Max(0.008f, halfY);
+                return MathF.Abs(localX) <= halfX &&
+                       MathF.Abs(localY) <= halfY;
+
+            case BodyPrimitive.Triangle:
+                float nx = localX / halfX;
+                float ny = localY / halfY;
+                return nx >= -1f && nx <= 1f &&
+                       MathF.Abs(ny) <= (1f - nx) * 0.5f;
+
+            default:
+                float circleX = localX / halfX;
+                float circleY = localY / halfY;
+                return circleX * circleX + circleY * circleY <= 1f;
+        }
+    }
+
     private void CycleMassCombatSelection()
     {
         SimulationFrameSnapshot? snapshot = Volatile.Read(ref _latestSnapshot);
@@ -930,11 +1044,8 @@ public sealed class GameRenderer
         _window.MouseButtonPressed +=
             (_, e) =>
             {
-                if (e.Button != Mouse.Button.Left ||
-                    _gameMenuOverlay == null)
-                {
+                if (e.Button != Mouse.Button.Left)
                     return;
-                }
 
                 Vector2f uiCoordinates =
                     _uiView != null
@@ -945,7 +1056,8 @@ public sealed class GameRenderer
                     (int)uiCoordinates.X,
                     (int)uiCoordinates.Y);
 
-                if (_gameMenuOverlay.IsSliderHit(
+                if (_gameMenuOverlay != null &&
+                    _gameMenuOverlay.IsSliderHit(
                         _menuPage,
                         uiPosition,
                         out GameMenuActionType sliderType))
@@ -962,13 +1074,19 @@ public sealed class GameRenderer
                 _draggingMenuSlider = null;
 
                 GameMenuAction? action =
-                    _gameMenuOverlay.HandleClick(
+                    _gameMenuOverlay?.HandleClick(
                         uiPosition,
                         _menuPage,
                         _worldMap.LayerCount);
 
                 if (action.HasValue)
+                {
                     ApplyGameMenuAction(action.Value);
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed)
+                    SelectWorldUnit(e.Position);
             };
 
         _window.MouseMoved +=
