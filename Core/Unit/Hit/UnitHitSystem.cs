@@ -671,20 +671,6 @@ public sealed class UnitHitSystem
                TryGetMarker(profile, regionIndex, third, out marker);
     }
 
-    private static bool RegionHasPart(
-        UnitHitRegionProfile profile,
-        int regionIndex,
-        UnitHealthPartId part)
-    {
-        foreach (HitRegionPartBinding binding in GetBindings(profile, regionIndex))
-        {
-            if (binding.Part == part)
-                return true;
-        }
-
-        return false;
-    }
-
     private static int FindRegion(UnitHitRegionProfile profile, string id)
     {
         if (profile is UnitAnatomyProfile anatomy)
