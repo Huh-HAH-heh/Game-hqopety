@@ -18,6 +18,7 @@ public sealed class UnitNavigationSystem
     private const float RouteReuseCostPerUnit = 0.35f;
     private const int MovingGoalTolerance = 4;
     private const float WaypointRadius = 0.12f;
+    private const int MaxWaypointShortcutCells = 16;
 
     private static readonly int[] DirectionX =
         { 1, -1, 0, 0, 1, 1, -1, -1 };
@@ -30,6 +31,9 @@ public sealed class UnitNavigationSystem
 
     private int[][] _paths = Array.Empty<int[]>();
     private int[] _pathCursor = Array.Empty<int>();
+    private int[][] _waypoints = Array.Empty<int[]>();
+    private int[][] _waypointPathIndices = Array.Empty<int[]>();
+    private int[] _waypointCursor = Array.Empty<int>();
     private int[] _routeGoalX = Array.Empty<int>();
     private int[] _routeGoalY = Array.Empty<int>();
     private int[] _routeFootprintX = Array.Empty<int>();
@@ -127,8 +131,15 @@ public sealed class UnitNavigationSystem
         bool footprintChanged = sameOwner &&
             (_routeFootprintX[unitIndex] != footprintX ||
              _routeFootprintY[unitIndex] != footprintY);
-        int length = sameOwner ? _paths[unitIndex]?.Length ?? 0 : 0;
+        int[] route = sameOwner ? _paths[unitIndex] ?? Array.Empty<int>() : Array.Empty<int>();
+        int[] waypoints = sameOwner ? _waypoints[unitIndex] ?? Array.Empty<int>() : Array.Empty<int>();
+        int[] waypointPathIndices = sameOwner
+            ? _waypointPathIndices[unitIndex] ?? Array.Empty<int>()
+            : Array.Empty<int>();
+        int length = route.Length;
         int cursor = sameOwner ? _pathCursor[unitIndex] : 0;
+        int waypointCursor = sameOwner ? _waypointCursor[unitIndex] : 0;
+
         bool targetFarMoved =
             sameOwner &&
             (Math.Abs(targetX - _routeGoalX[unitIndex]) > MovingGoalTolerance ||
@@ -142,18 +153,19 @@ public sealed class UnitNavigationSystem
         bool repositionedAwayFromFinishedRoute =
             routeFinished &&
             distanceToGoalX * distanceToGoalX + distanceToGoalY * distanceToGoalY > 2.25f;
+
         bool deviatedFromRoute = false;
-        if (sameOwner && length > 0 && cursor < length)
+        if (sameOwner && waypointCursor < waypoints.Length)
         {
-            int[] cachedPath = _paths[unitIndex] ?? Array.Empty<int>();
-            if (cursor < cachedPath.Length)
-            {
-                int nextCell = cachedPath[cursor];
-                float routeDx = position.X - (nextCell % _width + 0.5f);
-                float routeDy = position.Y - (nextCell / _width + 0.5f);
-                deviatedFromRoute = routeDx * routeDx + routeDy * routeDy > 9f;
-            }
+            deviatedFromRoute = !HasClearStraightRoute(
+                worldMap,
+                position.X,
+                position.Y,
+                waypoints[waypointCursor],
+                footprintX,
+                footprintY);
         }
+
         bool needsRoute =
             !sameOwner ||
             length == 0 ||
@@ -200,8 +212,19 @@ public sealed class UnitNavigationSystem
 
                 if (pathFound)
                 {
+                    BuildSmoothedPath(
+                        worldMap,
+                        path,
+                        footprintX,
+                        footprintY,
+                        out int[] smoothedWaypoints,
+                        out int[] waypointIndices);
+
                     _paths[unitIndex] = path;
                     _pathCursor[unitIndex] = 0;
+                    _waypoints[unitIndex] = smoothedWaypoints;
+                    _waypointPathIndices[unitIndex] = waypointIndices;
+                    _waypointCursor[unitIndex] = 0;
                     _routeGoalX[unitIndex] = targetX;
                     _routeGoalY[unitIndex] = targetY;
                     _routeFootprintX[unitIndex] = footprintX;
@@ -212,8 +235,13 @@ public sealed class UnitNavigationSystem
                     RoutesBuiltThisUpdate++;
                     _failedGoalX[unitIndex] = int.MinValue;
                     _failedGoalY[unitIndex] = int.MinValue;
-                    length = path.Length;
+
+                    route = path;
+                    waypoints = smoothedWaypoints;
+                    waypointPathIndices = waypointIndices;
+                    length = route.Length;
                     cursor = 0;
+                    waypointCursor = 0;
                     sameOwner = true;
                     RegisterRouteTraffic(unitIndex);
 
@@ -224,6 +252,9 @@ public sealed class UnitNavigationSystem
                 {
                     _paths[unitIndex] = Array.Empty<int>();
                     _pathCursor[unitIndex] = 0;
+                    _waypoints[unitIndex] = Array.Empty<int>();
+                    _waypointPathIndices[unitIndex] = Array.Empty<int>();
+                    _waypointCursor[unitIndex] = 0;
                     _routeGoalX[unitIndex] = targetX;
                     _routeGoalY[unitIndex] = targetY;
                     _routeFootprintX[unitIndex] = footprintX;
@@ -249,20 +280,18 @@ public sealed class UnitNavigationSystem
             }
         }
 
-        int[]? route = _paths[unitIndex];
-
-        if (route == null || route.Length == 0)
+        if (route.Length == 0 || waypoints.Length == 0 ||
+            waypointPathIndices.Length != waypoints.Length)
         {
             waypoint = default;
             return false;
         }
 
-        cursor = _pathCursor[unitIndex];
-
-        // Skip cells already reached, but retain the route's final cell.
-        while (cursor < route.Length)
+        // Each simplified waypoint maps back to the cell in the original A* route.
+        // Traffic still reserves the full route, and cells are released as segments are reached.
+        while (waypointCursor < waypoints.Length)
         {
-            int cell = route[cursor];
+            int cell = waypoints[waypointCursor];
             float cellX = cell % _width + 0.5f;
             float cellY = cell / _width + 0.5f;
             float dx = position.X - cellX;
@@ -271,20 +300,26 @@ public sealed class UnitNavigationSystem
             if (dx * dx + dy * dy > WaypointRadius * WaypointRadius)
                 break;
 
+            int reachedRouteIndex = waypointPathIndices[waypointCursor];
             if (_routeTrafficRegistered[unitIndex])
-                DecrementRouteTraffic(cell);
+            {
+                for (int i = cursor; i <= reachedRouteIndex && i < route.Length; i++)
+                    DecrementRouteTraffic(route[i]);
+            }
 
-            cursor++;
+            cursor = Math.Max(cursor, reachedRouteIndex + 1);
+            waypointCursor++;
         }
 
         _pathCursor[unitIndex] = cursor;
+        _waypointCursor[unitIndex] = waypointCursor;
 
-        if (cursor >= route.Length)
+        if (waypointCursor >= waypoints.Length)
             _routeTrafficRegistered[unitIndex] = false;
 
-        if (cursor < route.Length)
+        if (waypointCursor < waypoints.Length)
         {
-            int cell = route[cursor];
+            int cell = waypoints[waypointCursor];
             waypoint = new Vector2(
                 cell % _width + 0.5f,
                 cell / _width + 0.5f);
@@ -315,6 +350,9 @@ public sealed class UnitNavigationSystem
         RemoveRouteTraffic(unitIndex);
         _paths[unitIndex] = Array.Empty<int>();
         _pathCursor[unitIndex] = 0;
+        _waypoints[unitIndex] = Array.Empty<int>();
+        _waypointPathIndices[unitIndex] = Array.Empty<int>();
+        _waypointCursor[unitIndex] = 0;
         _routeOwner[unitIndex] = default;
         _failedGoalX[unitIndex] = int.MinValue;
         _failedGoalY[unitIndex] = int.MinValue;
@@ -437,6 +475,215 @@ public sealed class UnitNavigationSystem
         }
 
         return false;
+    }
+
+    private void BuildSmoothedPath(
+        WorldMap worldMap,
+        int[] path,
+        int footprintRadiusX,
+        int footprintRadiusY,
+        out int[] waypoints,
+        out int[] waypointPathIndices)
+    {
+        if (path.Length <= 1)
+        {
+            waypoints = path;
+            waypointPathIndices = path.Length == 0 ? Array.Empty<int>() : new[] { 0 };
+            return;
+        }
+
+        var cells = new int[path.Length];
+        var indices = new int[path.Length];
+        int count = 0;
+        int anchor = 0;
+        cells[count] = path[0];
+        indices[count++] = 0;
+
+        // Greedy string-pulling: choose the farthest cell up to a fixed lookahead
+        // that can be reached in a straight, fully traversable segment.
+        while (anchor < path.Length - 1)
+        {
+            int selected = anchor + 1;
+            int lastCandidate = Math.Min(
+                path.Length - 1,
+                anchor + MaxWaypointShortcutCells);
+
+            for (int candidate = lastCandidate; candidate > anchor + 1; candidate--)
+            {
+                if (!CanTravelBetweenCells(
+                        worldMap,
+                        path[anchor],
+                        path[candidate],
+                        footprintRadiusX,
+                        footprintRadiusY))
+                {
+                    continue;
+                }
+
+                selected = candidate;
+                break;
+            }
+
+            cells[count] = path[selected];
+            indices[count++] = selected;
+            anchor = selected;
+        }
+
+        Array.Resize(ref cells, count);
+        Array.Resize(ref indices, count);
+        waypoints = cells;
+        waypointPathIndices = indices;
+    }
+
+    private bool HasClearStraightRoute(
+        WorldMap worldMap,
+        float startX,
+        float startY,
+        int targetCell,
+        int footprintRadiusX,
+        int footprintRadiusY)
+    {
+        if ((uint)targetCell >= (uint)_cellCount)
+            return false;
+
+        int x = ClampCell((int)MathF.Floor(startX), _width);
+        int y = ClampCell((int)MathF.Floor(startY), _height);
+        int targetX = targetCell % _width;
+        int targetY = targetCell / _width;
+
+        return CanTravelStraight(
+            worldMap,
+            startX,
+            startY,
+            x,
+            y,
+            targetX,
+            targetY,
+            footprintRadiusX,
+            footprintRadiusY);
+    }
+
+    private bool CanTravelBetweenCells(
+        WorldMap worldMap,
+        int startCell,
+        int targetCell,
+        int footprintRadiusX,
+        int footprintRadiusY)
+    {
+        int startX = startCell % _width;
+        int startY = startCell / _width;
+        int targetX = targetCell % _width;
+        int targetY = targetCell / _width;
+
+        return CanTravelStraight(
+            worldMap,
+            startX + 0.5f,
+            startY + 0.5f,
+            startX,
+            startY,
+            targetX,
+            targetY,
+            footprintRadiusX,
+            footprintRadiusY);
+    }
+
+    private bool CanTravelStraight(
+        WorldMap worldMap,
+        float startX,
+        float startY,
+        int x,
+        int y,
+        int targetX,
+        int targetY,
+        int footprintRadiusX,
+        int footprintRadiusY)
+    {
+        if (!IsInside(x, y) ||
+            !IsInside(targetX, targetY) ||
+            !IsFootprintPassable(worldMap, x, y, footprintRadiusX, footprintRadiusY) ||
+            !IsFootprintPassable(worldMap, targetX, targetY, footprintRadiusX, footprintRadiusY))
+        {
+            return false;
+        }
+
+        float endX = targetX + 0.5f;
+        float endY = targetY + 0.5f;
+        float deltaX = endX - startX;
+        float deltaY = endY - startY;
+
+        int stepX = Math.Sign(deltaX);
+        int stepY = Math.Sign(deltaY);
+
+        if (x == targetX && y == targetY)
+            return true;
+
+        // If starting exactly on a boundary and travelling negative, the ray
+        // immediately enters the cell on the negative side.
+        if (stepX < 0 && MathF.Abs(startX - MathF.Round(startX)) < 0.00001f)
+            x--;
+        if (stepY < 0 && MathF.Abs(startY - MathF.Round(startY)) < 0.00001f)
+            y--;
+
+        if (!IsInside(x, y) ||
+            !IsFootprintPassable(worldMap, x, y, footprintRadiusX, footprintRadiusY))
+        {
+            return false;
+        }
+
+        float deltaStepX = stepX == 0 ? float.PositiveInfinity : MathF.Abs(1f / deltaX);
+        float deltaStepY = stepY == 0 ? float.PositiveInfinity : MathF.Abs(1f / deltaY);
+        float nextBoundaryX = stepX > 0 ? x + 1f : x;
+        float nextBoundaryY = stepY > 0 ? y + 1f : y;
+        float maxX = stepX == 0 ? float.PositiveInfinity : (nextBoundaryX - startX) / deltaX;
+        float maxY = stepY == 0 ? float.PositiveInfinity : (nextBoundaryY - startY) / deltaY;
+
+        int maxSteps = _width + _height + 4;
+        for (int step = 0; (x != targetX || y != targetY) && step < maxSteps; step++)
+        {
+            int moveX;
+            int moveY;
+            if (maxX < maxY - 0.000001f)
+            {
+                moveX = stepX;
+                moveY = 0;
+            }
+            else if (maxY < maxX - 0.000001f)
+            {
+                moveX = 0;
+                moveY = stepY;
+            }
+            else
+            {
+                moveX = stepX;
+                moveY = stepY;
+            }
+
+            if (moveX == 0 && moveY == 0)
+                return false;
+
+            int nextX = x + moveX;
+            int nextY = y + moveY;
+            if (!CanStep(
+                    worldMap,
+                    x,
+                    y,
+                    nextX,
+                    nextY,
+                    moveX,
+                    moveY,
+                    footprintRadiusX,
+                    footprintRadiusY))
+            {
+                return false;
+            }
+
+            x = nextX;
+            y = nextY;
+            if (moveX != 0) maxX += deltaStepX;
+            if (moveY != 0) maxY += deltaStepY;
+        }
+
+        return x == targetX && y == targetY;
     }
 
     private bool CanStep(
@@ -746,6 +993,9 @@ public sealed class UnitNavigationSystem
         int newCapacity = Math.Max(capacity, Math.Max(16, _paths.Length * 2));
         Array.Resize(ref _paths, newCapacity);
         Array.Resize(ref _pathCursor, newCapacity);
+        Array.Resize(ref _waypoints, newCapacity);
+        Array.Resize(ref _waypointPathIndices, newCapacity);
+        Array.Resize(ref _waypointCursor, newCapacity);
         Array.Resize(ref _routeGoalX, newCapacity);
         Array.Resize(ref _routeGoalY, newCapacity);
         Array.Resize(ref _routeFootprintX, newCapacity);
@@ -762,15 +1012,26 @@ public sealed class UnitNavigationSystem
 
         for (int i = 0; i < newCapacity; i++)
         {
-            if (i >= capacity || _paths[i] != null)
+            if (_paths[i] == null)
+                _paths[i] = Array.Empty<int>();
+            if (_waypoints[i] == null)
+                _waypoints[i] = Array.Empty<int>();
+            if (_waypointPathIndices[i] == null)
+                _waypointPathIndices[i] = Array.Empty<int>();
+
+            if (i >= capacity)
                 continue;
 
-            _paths[i] = Array.Empty<int>();
-            _failedGoalX[i] = int.MinValue;
-            _failedGoalY[i] = int.MinValue;
-            _failedStartCell[i] = -1;
-            _failedFootprintX[i] = int.MinValue;
-            _failedFootprintY[i] = int.MinValue;
+            if (_failedGoalX[i] == 0)
+                _failedGoalX[i] = int.MinValue;
+            if (_failedGoalY[i] == 0)
+                _failedGoalY[i] = int.MinValue;
+            if (_failedStartCell[i] == 0)
+                _failedStartCell[i] = -1;
+            if (_failedFootprintX[i] == 0)
+                _failedFootprintX[i] = int.MinValue;
+            if (_failedFootprintY[i] == 0)
+                _failedFootprintY[i] = int.MinValue;
         }
     }
 
@@ -804,6 +1065,9 @@ public sealed class UnitNavigationSystem
 
         Array.Clear(_paths);
         Array.Clear(_pathCursor);
+        Array.Clear(_waypoints);
+        Array.Clear(_waypointPathIndices);
+        Array.Clear(_waypointCursor);
         Array.Clear(_routeOwner);
         _searchStamp = 0;
     }
