@@ -5,7 +5,6 @@ public enum UnitType : ushort
     Colonist = 0,
     Greenbob = 1,
     SegmentedMonster = 2,
-    ScavenRat = 3
 }
 
 public enum UnitBodyType : byte
@@ -13,7 +12,6 @@ public enum UnitBodyType : byte
     Colonist = 0,
     SmallCreature = 1,
     SegmentedCreature = 2,
-    ScavenRat = 3
 }
 
 public enum BodyPrimitive : byte
@@ -51,11 +49,9 @@ public enum BodyPartRole : byte
     Neck = 10,
     Elbow = 11,
     Knee = 12,
-    RatBody = 13,
     Muzzle = 14,
     Ear = 15,
     Eye = 16,
-    Whisker = 17,
     Tail = 18
 }
 
