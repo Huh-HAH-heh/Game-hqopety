@@ -34,9 +34,6 @@ public readonly struct UnitAnatomyNode
     public ReadOnlySpan<HitRegionPartBinding> Tissues => _tissues;
     public ReadOnlySpan<UnitAnatomyMarker> Markers => _markers;
 
-    // Compatibility only. Runtime anatomy queries read the node fields above.
-    public UnitCircleHitRegion Geometry => ToCompatibilityRegion();
-
     private UnitAnatomyNode(
         string id,
         string parentId,
@@ -151,7 +148,7 @@ public readonly struct UnitAnatomyNode
     {
         for (int i = 0; i < _markers.Length; i++)
         {
-            if ((_markers[i].Roles & role) != 0)
+            if ((_markers[i].Roles & role) == role)
             {
                 marker = _markers[i];
                 return true;
@@ -220,6 +217,7 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
     private readonly BodyPartDefinition[] _bodyParts;
     private readonly int[] _visibleRegions;
 
+    public override int RegionCount => _nodes.Length;
     public int NodeCount => _nodes.Length;
     public int VisibleRegionCount => _visibleRegions.Length;
     public bool HasSharedShapes { get; }
@@ -254,7 +252,7 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         _nodes[index].HasShape &&
         _nodes[index].Shape.Role == BodyPartRole.Internal;
 
-    public new int FindRegion(string id)
+    public override int FindRegion(string id)
     {
         for (int i = 0; i < _nodes.Length; i++)
         {
@@ -265,7 +263,7 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         return -1;
     }
 
-    public new bool TryFindPart(
+    public override bool TryFindPart(
         UnitHealthPartId part,
         out int regionIndex,
         out int bindingIndex)
@@ -289,7 +287,7 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         return false;
     }
 
-    public new bool TryFindPart(string id, out int regionIndex, out int bindingIndex)
+    public override bool TryFindPart(string id, out int regionIndex, out int bindingIndex)
     {
         for (int i = 0; i < _nodes.Length; i++)
         {

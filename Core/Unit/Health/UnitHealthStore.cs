@@ -159,11 +159,11 @@ public sealed class UnitHealthStore
     {
         EnsureUnitCapacity(unitIndex + 1);
 
-        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
+        int regionCount = profile.RegionCount;
 
         // Every node/binding owns a separate health pool, even when several
         // segments share legacy Part=WholeBody or another compatibility enum.
-        for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
+        for (int regionIndex = 0; regionIndex < regionCount; regionIndex++)
         {
             ReadOnlySpan<HitRegionPartBinding> bindings = GetProfileBindings(profile, regionIndex);
 
@@ -186,7 +186,7 @@ public sealed class UnitHealthStore
 
         // Parent links use stable string IDs first. Legacy enum parent links
         // remain supported for existing human profiles.
-        for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
+        for (int regionIndex = 0; regionIndex < regionCount; regionIndex++)
         {
             ReadOnlySpan<HitRegionPartBinding> bindings = GetProfileBindings(profile, regionIndex);
 

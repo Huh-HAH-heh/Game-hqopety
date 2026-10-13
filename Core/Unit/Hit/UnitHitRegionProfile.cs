@@ -301,7 +301,7 @@ public class UnitHitRegionProfile
 {
     private readonly UnitCircleHitRegion[] _regions;
 
-    public int RegionCount => _regions.Length;
+    public virtual int RegionCount => _regions.Length;
     public ReadOnlySpan<UnitCircleHitRegion> Regions => _regions;
 
     public UnitHitRegionProfile(params UnitCircleHitRegion[] regions)
@@ -380,7 +380,7 @@ public class UnitHitRegionProfile
         }
     }
 
-    public int FindRegion(string id)
+    public virtual int FindRegion(string id)
     {
         for (int i = 0; i < _regions.Length; i++)
         {
@@ -391,7 +391,7 @@ public class UnitHitRegionProfile
         return -1;
     }
 
-    public bool TryFindPart(
+    public virtual bool TryFindPart(
         UnitHealthPartId part,
         out int regionIndex,
         out int bindingIndex)
@@ -418,7 +418,7 @@ public class UnitHitRegionProfile
         return false;
     }
 
-    public bool TryFindPart(string id, out int regionIndex, out int bindingIndex)
+    public virtual bool TryFindPart(string id, out int regionIndex, out int bindingIndex)
     {
         for (int i = 0; i < _regions.Length; i++)
         {

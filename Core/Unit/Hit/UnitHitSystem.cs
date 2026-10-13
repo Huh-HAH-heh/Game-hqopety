@@ -184,10 +184,11 @@ public sealed class UnitHitSystem
         UnitHealthPartId part,
         Vector3 point,
         float tolerance = 0f,
-        UnitHitRegionStore? hitRegions = null)
+        UnitHitRegionStore? hitRegions = null,
+        UnitBodyStore? bodies = null)
     {
         return IsPartInRegion(units, unitIndex, regionIndex, part, hitRegions) &&
-               IsPointInsideRegion(units, unitIndex, regionIndex, point, tolerance, hitRegions);
+               IsPointInsideRegion(units, unitIndex, regionIndex, point, tolerance, hitRegions, bodies);
     }
 
     public static bool IsPointInsideRegion(
@@ -196,18 +197,31 @@ public sealed class UnitHitSystem
         int regionIndex,
         Vector3 point,
         float tolerance = 0f,
-        UnitHitRegionStore? hitRegions = null)
+        UnitHitRegionStore? hitRegions = null,
+        UnitBodyStore? bodies = null)
     {
         if (!float.IsFinite(tolerance) || tolerance < 0f ||
             !float.IsFinite(point.X) ||
             !float.IsFinite(point.Y) ||
             !float.IsFinite(point.Z))
-        {
             return false;
+
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if ((uint)regionIndex >= (uint)profile.RegionCount)
+            return false;
+
+        if (TryGetBodyShape(
+                units, unitIndex, profile, regionIndex, bodies,
+                out _, out Vector3 center, out Vector3 scale,
+                out float rotation, out BodyPrimitive primitive, out float halfHeight))
+        {
+            return TryIntersectPrimitive(
+                point, point, center, scale, rotation, primitive,
+                halfHeight, tolerance, out _);
         }
 
         UnitHitRegionGeometry geometry = GetRegionGeometry(
-            units, unitIndex, regionIndex, hitRegions);
+            units, unitIndex, regionIndex, hitRegions, bodies);
 
         float dx = point.X - geometry.Center.X;
         float dy = point.Y - geometry.Center.Y;
@@ -336,7 +350,8 @@ public sealed class UnitHitSystem
         UnitHealthPartId part,
         Vector3 point,
         float tolerance = 0f,
-        UnitHitRegionStore? hitRegions = null)
+        UnitHitRegionStore? hitRegions = null,
+        UnitBodyStore? bodies = null)
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
 
@@ -349,7 +364,8 @@ public sealed class UnitHitSystem
                     part,
                     point,
                     tolerance,
-                    hitRegions))
+                    hitRegions,
+                    bodies))
             {
                 return i;
             }
@@ -363,13 +379,14 @@ public sealed class UnitHitSystem
         int unitIndex,
         Vector3 point,
         float tolerance = 0f,
-        UnitHitRegionStore? hitRegions = null)
+        UnitHitRegionStore? hitRegions = null,
+        UnitBodyStore? bodies = null)
     {
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         for (int i = 0; i < profile.RegionCount; i++)
         {
             if (IsPointInsideRegion(
-                    units, unitIndex, i, point, tolerance, hitRegions))
+                    units, unitIndex, i, point, tolerance, hitRegions, bodies))
                 return i;
         }
 
