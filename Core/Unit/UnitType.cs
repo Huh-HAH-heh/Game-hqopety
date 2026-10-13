@@ -52,7 +52,8 @@ public enum BodyPartRole : byte
     Muzzle = 14,
     Ear = 15,
     Eye = 16,
-    Tail = 18
+    Tail = 18,
+    Internal = 19
 }
 
 public enum UnitPosture : byte
