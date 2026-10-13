@@ -32,12 +32,12 @@ public static class UnitAnatomyCatalog
         new UnitAnatomyProfile(
             Node("torso", "", Part(V(0f, 0f, 0.875f), V(0.13f, 0.095f, 0.065f),
                 BodyPrimitive.Circle, role: BodyPartRole.Torso), 0.385f,
-                UnitHealthPartId.Torso, 60f, "torso.main", tissueParentId: "",
+                UnitHealthPartId.Torso, 60f, "torso.main", UnitHealthPartKind.BodyPart, "",
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
             Node("head", "torso", Part(V(0.155f, 0f, 1.47f), V(0.055f, 0.055f, 0.045f),
                 BodyPrimitive.Circle, parentIndex: 0, anchor: BodyPartAnchor.UnitHead, role: BodyPartRole.Head), 0.2275f,
-                UnitHealthPartId.Head, 40f, "head.main", tissueParentId: "torso.main",
+                UnitHealthPartId.Head, 40f, "head.main", UnitHealthPartKind.BodyPart, "torso.main",
                 new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye | UnitAnatomyMarkerRole.Vision, V(0f, 0f, 0.015f)),
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("muzzle", UnitAnatomyMarkerRole.Muzzle, V(0.035f, 0f, 0.005f))),
@@ -99,12 +99,12 @@ public static class UnitAnatomyCatalog
         new UnitAnatomyProfile(
             Node("body", "", Part(V(0f, 0f, 0.20f), V(0.18f, 0.105f, 0.15f),
                 BodyPrimitive.Circle, role: BodyPartRole.Torso), 0.15f,
-                UnitHealthPartId.WholeBody, 100f, "body.main", tissueParentId: "",
+                UnitHealthPartId.WholeBody, 100f, "body.main", UnitHealthPartKind.BodyPart, "",
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
             Node("head", "body", Part(V(0.18f, 0f, 0.34f), V(0.052f, 0.050f, 0.052f),
                 BodyPrimitive.Circle, parentIndex: 0, anchor: BodyPartAnchor.UnitHead, role: BodyPartRole.Head), 0.052f,
-                UnitHealthPartId.WholeBody, 100f, "head.tissue", tissueParentId: "body.main",
+                UnitHealthPartId.WholeBody, 100f, "head.tissue", UnitHealthPartKind.BodyPart, "body.main",
                 new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye | UnitAnatomyMarkerRole.Vision, V(0f, 0f, 0.015f)),
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision)),
             Node("leg.front.left", "body", Part(V(0.11f, 0.055f, -0.12f), V(0.030f, 0.012f, 0.028f),
@@ -179,7 +179,7 @@ public static class UnitAnatomyCatalog
             nodes[i] = Node(
                 id, parentId, shape, 0.225f,
                 UnitHealthPartId.WholeBody, 100f, tissueId,
-                tissueParentId: parentTissueId,
+                UnitHealthPartKind.BodyPart, parentTissueId,
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion));
         }

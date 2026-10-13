@@ -314,7 +314,7 @@ public sealed class UnitHitSystem
             if (!string.Equals(marker.Id, markerId, StringComparison.Ordinal))
                 continue;
 
-            point = GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions);
+            point = GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions, bodies);
             return true;
         }
 
