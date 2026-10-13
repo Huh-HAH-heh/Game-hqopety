@@ -420,7 +420,7 @@ public sealed class GameRenderer
                 renderSnapshot,
                 _camera.View,
                 TerrainTilePixelSize,
-                _selectedUnit.Index,
+                _selectedUnit.IsValid ? _selectedUnit.Index : -1,
                 _showAiStateDebug && renderSnapshot.AiEnabled);
 
             _projectileRenderer.DrawSnapshot(
@@ -520,7 +520,9 @@ public sealed class GameRenderer
 
         for (int i = 0; i < snapshot.Units.Length; i++)
         {
-            if (snapshot.Units[i].Index != _selectedUnit.Index)
+            if (!_selectedUnit.IsValid ||
+                snapshot.Units[i].Index != _selectedUnit.Index ||
+                snapshot.Units[i].Generation != _selectedUnit.Generation)
                 continue;
 
             selectedState = snapshot.Units[i].AiState.ToString();
