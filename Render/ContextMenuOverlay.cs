@@ -72,6 +72,10 @@ public sealed class ContextMenuOverlay : IDisposable
         _panel.Position = new Vector2f(x, y);
         _header.Position = new Vector2f(x + 1f, y + 1f);
         _accent.Position = new Vector2f(x + 1f, y + 1f);
+        if (_title != null)
+            _title.Position = new Vector2f(x + 10f, y + 5f);
+        if (_emptyLabel != null)
+            _emptyLabel.Position = new Vector2f(x + 10f, y + 32f);
         IsOpen = true;
     }
 
