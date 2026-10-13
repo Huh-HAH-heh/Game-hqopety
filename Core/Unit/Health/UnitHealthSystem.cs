@@ -25,8 +25,9 @@ public sealed class UnitHealthSystem
 
             overall[unit] = Math.Clamp(overall[unit], 0f, overallMax[unit]);
             int start = unit * maxParts;
+            int count = partCounts[unit];
 
-            for (int part = 0; part < partCounts[unit]; part++)
+            for (int part = 0; part < count; part++)
             {
                 int index = start + part;
 
