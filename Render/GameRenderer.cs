@@ -53,6 +53,7 @@ public sealed class GameRenderer
     private RenderWindow _window = null!;
     private View? _uiView;
     private GameMenuOverlay? _gameMenuOverlay;
+    private ContextMenuOverlay? _contextMenuOverlay;
     private GameMenuActionType? _draggingMenuSlider;
     private GameMenuPage _menuPage;
     private int _selectedResolutionIndex;
@@ -198,6 +199,7 @@ public sealed class GameRenderer
         _mapRenderer.Dispose();
         _projectileRenderer.Dispose();
         _gameMenuOverlay?.Dispose();
+        _contextMenuOverlay?.Dispose();
         _combatStatusOverlay?.Dispose();
         _uiView?.Dispose();
         _selectionBox.Dispose();
@@ -521,6 +523,11 @@ public sealed class GameRenderer
                 new Vector2i(
                     (int)uiMouseCoordinates.X,
                     (int)uiMouseCoordinates.Y));
+
+            _contextMenuOverlay?.Draw(
+                _window,
+                _window.Size.X,
+                _window.Size.Y);
         }
 
         if (_titleTimer >= 0.25f)
@@ -1124,6 +1131,7 @@ public sealed class GameRenderer
                 _window.Size.Y));
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
+        _contextMenuOverlay = new ContextMenuOverlay();
         _combatStatusOverlay = new CombatStatusOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
@@ -1171,8 +1179,43 @@ public sealed class GameRenderer
         _window.MouseButtonPressed +=
             (_, e) =>
             {
+                if (e.Button == Mouse.Button.Right)
+                {
+                    _isSelectingUnits = false;
+                    _selectionBox.Size = new Vector2f(0f, 0f);
+
+                    if (_menuPage == GameMenuPage.Closed &&
+                        _contextMenuOverlay != null)
+                    {
+                        Vector2f contextCoordinates =
+                            _uiView != null
+                                ? _window.MapPixelToCoords(e.Position, _uiView)
+                                : new Vector2f(e.Position.X, e.Position.Y);
+
+                        _contextMenuOverlay.ToggleAt(
+                            new Vector2i(
+                                (int)contextCoordinates.X,
+                                (int)contextCoordinates.Y),
+                            _window.Size.X,
+                            _window.Size.Y);
+                    }
+                    else
+                    {
+                        _contextMenuOverlay?.Close();
+                    }
+
+                    return;
+                }
+
                 if (e.Button != Mouse.Button.Left)
                     return;
+
+                // A click dismissing the empty popup must not also select a unit.
+                if (_contextMenuOverlay?.IsOpen == true)
+                {
+                    _contextMenuOverlay.Close();
+                    return;
+                }
 
                 Vector2f uiCoordinates =
                     _uiView != null
@@ -1322,6 +1365,7 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.F2)
         {
+            _contextMenuOverlay?.Close();
             _menuPage = _menuPage == GameMenuPage.Settings
                 ? GameMenuPage.Closed
                 : GameMenuPage.Settings;
@@ -1331,6 +1375,12 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.Escape)
         {
+            if (_contextMenuOverlay?.IsOpen == true)
+            {
+                _contextMenuOverlay.Close();
+                return;
+            }
+
             _menuPage = _menuPage switch
             {
                 GameMenuPage.Settings => GameMenuPage.Main,
