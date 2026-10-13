@@ -452,6 +452,7 @@ public sealed class UnitHitSystem
         ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
 
         bool found = false;
+        bool bestIsInternal = false;
         float bestT = 2f;
         UnitHealthPartId bestPart = UnitHealthPartId.None;
         int bestRegion = -1;
@@ -483,7 +484,10 @@ public sealed class UnitHitSystem
                     start, end, center, radius + padding, halfHeight + padding, out t);
             }
 
-            if (!intersects || t >= bestT)
+            bool isInternal = IsInternalNode(profile, i);
+            if (!intersects ||
+                (found && bestIsInternal && !isInternal) ||
+                (found && bestIsInternal == isInternal && t >= bestT))
                 continue;
 
             Vector3 hitPosition = start + (end - start) * t;
@@ -493,6 +497,7 @@ public sealed class UnitHitSystem
                 continue;
 
             bestT = t;
+            bestIsInternal = isInternal;
             bestPart = part;
             bestRegion = i;
             bestBinding = bindingIndex;
