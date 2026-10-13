@@ -52,6 +52,9 @@ public readonly struct UnitStartingEquipment
 /// </summary>
 public static class UnitAnatomyCatalog
 {
+    private const float DefaultProjectileEnergyLoss = 160f;
+    private const float DefaultProjectilePenetrationLoss = 8f;
+
     private static readonly UnitArchetypeProfile Colonist = new(
         new UnitDefinition(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f),
         new UnitAnatomyProfile(
@@ -296,7 +299,9 @@ public static class UnitAnatomyCatalog
             kind: kind,
             maxHitPoints: maxHitPoints,
             id: tissueId,
-            parentId: string.IsNullOrWhiteSpace(tissueParentId) ? null : tissueParentId);
+            parentId: string.IsNullOrWhiteSpace(tissueParentId) ? null : tissueParentId,
+            projectileEnergyLoss: DefaultProjectileEnergyLoss,
+            projectilePenetrationLoss: DefaultProjectilePenetrationLoss);
 
         return UnitAnatomyNode.Part(id, parentId, shape, hitHalfHeight, new[] { tissue }, markers);
     }
