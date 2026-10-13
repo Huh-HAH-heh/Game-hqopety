@@ -32,7 +32,6 @@ public sealed class LongRangeCombatTestScene
     private float _elapsed;
     private float _fireTimer;
     private long _hitsAtReset;
-    private UnitId _showcaseRat;
 
     public bool Initialized =>
         _initialized;
@@ -105,9 +104,6 @@ public sealed class LongRangeCombatTestScene
                 _side[i] = 0;
             }
 
-            if (simulation.Units.TryGetIndex(_showcaseRat, out _))
-                simulation.Destroy(_showcaseRat);
-            _showcaseRat = default;
         }
 
         simulation.Projectiles.Clear();
@@ -440,28 +436,6 @@ public sealed class LongRangeCombatTestScene
             }
         }
 
-        SpawnShowcaseRat(simulation, worldMap, centerX, centerY);
-    }
-
-    private void SpawnShowcaseRat(
-        UnitSimulation simulation,
-        WorldMap worldMap,
-        int centerX,
-        int centerY)
-    {
-        int tileX = Math.Clamp(centerX, 1, worldMap.MaxTileX - 1);
-        int tileY = Math.Clamp(centerY + 34, 1, worldMap.MaxTileY - 1);
-        Vector3 position = new(
-            tileX + 0.5f,
-            tileY + 0.5f,
-            worldMap.GetSurfaceHeight(tileX, tileY));
-
-        // Neutral showcase pawn: visible in the live map, but not part of either faction.
-        _showcaseRat = simulation.Spawn(
-            UnitType.ScavenRat,
-            position,
-            bodyAngle: 0f,
-            factionTag: 0);
     }
 
     private void SpawnUnit(
