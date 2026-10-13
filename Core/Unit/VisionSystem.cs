@@ -321,7 +321,8 @@ public sealed class VisionSystem
                         rangeSquared,
                         minFacingDot,
                         out Vector3 targetPoint,
-                        out float distanceSquared))
+                        out float distanceSquared,
+                        bodies))
                 {
                     continue;
                 }
@@ -634,7 +635,7 @@ public sealed class VisionSystem
         for (int i = 0; i < pointCount; i++)
         {
             float height = UnitHitSystem.GetRegionPoint(
-                units, targetIndex, i, observerEye, _hitRegions, pointRole).Z;
+                units, targetIndex, i, observerEye, _hitRegions, pointRole, bodies).Z;
             minTargetHeight = MathF.Min(minTargetHeight, height);
             maxTargetHeight = MathF.Max(maxTargetHeight, height);
         }
@@ -651,7 +652,8 @@ public sealed class VisionSystem
                 i,
                 observerEye,
                 _hitRegions,
-                pointRole);
+                pointRole,
+                bodies);
 
             float dx = point.X - observerEye.X;
             float dy = point.Y - observerEye.Y;
@@ -794,7 +796,8 @@ public sealed class VisionSystem
         float rangeSquared,
         float minFacingDot,
         out Vector3 targetPoint,
-        out float bestDistanceSquared)
+        out float bestDistanceSquared,
+        UnitBodyStore? bodies = null)
     {
         targetPoint = Vector3.Zero;
         bestDistanceSquared = float.PositiveInfinity;
@@ -811,7 +814,8 @@ public sealed class VisionSystem
                 i,
                 observerEye,
                 _hitRegions,
-                UnitAnatomyMarkerRole.Vision);
+                UnitAnatomyMarkerRole.Vision,
+                bodies);
 
             float dx = point.X - observerEye.X;
             float dy = point.Y - observerEye.Y;
