@@ -1448,10 +1448,13 @@ public static class CombatSelfTest
         Vector3 headCenter = UnitHitSystem.GetRegionGeometry(
             simulation.Units, unit.Index, head, simulation.HitRegions, simulation.Bodies).Center;
 
-        return MathF.Abs(legsCenter.X - torsoCenter.X) < 0.001f &&
-            MathF.Abs(torsoCenter.X - headCenter.X) < 0.001f &&
-            MathF.Abs(legsCenter.Y - torsoCenter.Y) < 0.001f &&
-            MathF.Abs(torsoCenter.Y - headCenter.Y) < 0.001f &&
+        int bodyStart = simulation.Units.BodyStart[unit.Index];
+        bool sharedGeometry =
+            Vector3.Distance(legsCenter, simulation.Bodies.WorldPosition[bodyStart + leftLeg]) < 0.001f &&
+            Vector3.Distance(torsoCenter, simulation.Bodies.WorldPosition[bodyStart + torso]) < 0.001f &&
+            Vector3.Distance(headCenter, simulation.Bodies.WorldPosition[bodyStart + head]) < 0.001f;
+
+        return sharedGeometry &&
             legsCenter.Z < torsoCenter.Z &&
             torsoCenter.Z < headCenter.Z &&
             UnitHitSystem.GetVisibilityPointCount(simulation.Units, unit.Index, simulation.HitRegions) == 10;
@@ -2376,6 +2379,7 @@ private static bool TestVisionDetectsRegionInsideRange()
             CountBodyRole(definitions, colonistBody, BodyPartRole.Knee) != 0 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Shin) != 0)
         {
+            Console.WriteLine($"[ANATOMY DEBUG] definition count={colonistBody.Count}, roles=head:{CountBodyRole(definitions, colonistBody, BodyPartRole.Head)} torso:{CountBodyRole(definitions, colonistBody, BodyPartRole.Torso)} arms:{CountBodyRole(definitions, colonistBody, BodyPartRole.UpperArm)} hands:{CountBodyRole(definitions, colonistBody, BodyPartRole.Hand)} thighs:{CountBodyRole(definitions, colonistBody, BodyPartRole.Thigh)} feet:{CountBodyRole(definitions, colonistBody, BodyPartRole.Foot)}");
             return false;
         }
 
@@ -2385,7 +2389,10 @@ private static bool TestVisionDetectsRegionInsideRange()
         {
             int parent = definitions.Parent[part];
             if (parent < -1 || parent >= part)
+            {
+                Console.WriteLine($"[ANATOMY DEBUG] invalid parent part={part} parent={parent}");
                 return false;
+            }
         }
 
         definitions.SetInitialWorldPosition(
@@ -2426,6 +2433,7 @@ private static bool TestVisionDetectsRegionInsideRange()
             MathF.Abs(rightFootPosition.X - leftFootPosition.X) > 0.001f ||
             MathF.Abs(rightFootPosition.Y + leftFootPosition.Y) > 0.001f)
         {
+            Console.WriteLine($"[ANATOMY DEBUG] initial pose head={headPosition} torso={torsoPosition} arms={rightArmPosition}/{leftArmPosition} hands={rightHandPosition}/{leftHandPosition} legs={rightLegPosition}/{leftLegPosition} feet={rightFootPosition}/{leftFootPosition}");
             return false;
         }
 
@@ -2459,6 +2467,7 @@ private static bool TestVisionDetectsRegionInsideRange()
             simulation.Units.BodyCount[segmented.Index] != 10 ||
             simulation.Units.BodyCount[custom.Index] != customParts.Length)
         {
+            Console.WriteLine($"[ANATOMY DEBUG] spawned body counts colonist={simulation.Units.BodyCount[colonist.Index]} greenbob={simulation.Units.BodyCount[greenbob.Index]} segmented={simulation.Units.BodyCount[segmented.Index]} custom={simulation.Units.BodyCount[custom.Index]} expectedCustom={customParts.Length}");
             return false;
         }
 
@@ -2496,7 +2505,10 @@ private static bool TestVisionDetectsRegionInsideRange()
                 (-MathF.PI - swing)) < 0.001f;
 
         if (!gaitCorrect)
+        {
+            Console.WriteLine($"[ANATOMY DEBUG] gait expected left={MathF.PI + swing} right={-MathF.PI - swing}; actual left={leftThigh} right={rightThigh}");
             return false;
+        }
 
         BodyHandle colonistHandle = new BodyHandle(start, count);
         BodyHandle greenbobHandle = new BodyHandle(
@@ -2506,6 +2518,7 @@ private static bool TestVisionDetectsRegionInsideRange()
         if (!BodyLinksConnected(simulation.Bodies, colonistHandle) ||
             !BodyLinksConnected(simulation.Bodies, greenbobHandle))
         {
+            Console.WriteLine($"[ANATOMY DEBUG] disconnected limbs colonist={BodyLinksConnected(simulation.Bodies, colonistHandle)} greenbob={BodyLinksConnected(simulation.Bodies, greenbobHandle)}");
             return false;
         }
 
@@ -2521,6 +2534,7 @@ private static bool TestVisionDetectsRegionInsideRange()
             MathF.Abs(aimedHeadPosition.Y - 10f) > 0.002f ||
             MathF.Abs(simulation.Bodies.WorldRotation[head] - MathF.PI * 0.5f) > 0.002f)
         {
+            Console.WriteLine($"[ANATOMY DEBUG] head aim expected=(10.155,10) rotation={MathF.PI * 0.5f}; actual={aimedHeadPosition} rotation={simulation.Bodies.WorldRotation[head]}");
             return false;
         }
 
@@ -2531,7 +2545,10 @@ private static bool TestVisionDetectsRegionInsideRange()
             BodyPartMotion.WalkCycle);
 
         if (walkingArm < 0)
+        {
+            Console.WriteLine("[ANATOMY DEBUG] no walking arm");
             return false;
+        }
 
         float standingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
@@ -2544,6 +2561,7 @@ private static bool TestVisionDetectsRegionInsideRange()
         if (MathF.Abs(crouchingArmRotation) >= MathF.Abs(standingArmRotation) - 0.12f ||
             !BodyLinksConnected(simulation.Bodies, colonistHandle))
         {
+            Console.WriteLine($"[ANATOMY DEBUG] crouch arm rotation standing={standingArmRotation} crouching={crouchingArmRotation}");
             return false;
         }
 
@@ -2555,6 +2573,7 @@ private static bool TestVisionDetectsRegionInsideRange()
         if (MathF.Abs(lyingArmRotation - standingArmRotation) > 0.03f ||
             !BodyLinksConnected(simulation.Bodies, colonistHandle))
         {
+            Console.WriteLine($"[ANATOMY DEBUG] lying arm rotation standing={standingArmRotation} lying={lyingArmRotation}");
             return false;
         }
 
@@ -2567,11 +2586,14 @@ private static bool TestVisionDetectsRegionInsideRange()
 
         Vector3 bodyNormal = simulation.Units.BodyNormal[colonist.Index];
         Vector3 movedHead = simulation.Bodies.WorldPosition[head];
-        return MathF.Abs(bodyNormal.X) < 0.001f &&
+        bool followsTravel = MathF.Abs(bodyNormal.X) < 0.001f &&
                MathF.Abs(bodyNormal.Y - 1f) < 0.001f &&
                MathF.Abs(movedHead.X - 10f) < 0.002f &&
                MathF.Abs(movedHead.Y - 10.155f) < 0.002f &&
                MathF.Abs(simulation.Bodies.WorldRotation[head]) < 0.002f;
+        if (!followsTravel)
+            Console.WriteLine($"[ANATOMY DEBUG] travel bodyNormal={bodyNormal} head={movedHead} headRotation={simulation.Bodies.WorldRotation[head]}");
+        return followsTravel;
     }
 
     private static bool BodyLinksConnected(
