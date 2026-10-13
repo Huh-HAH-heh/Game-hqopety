@@ -86,7 +86,8 @@ public sealed class DamageSystem
         UnitHealthStore health,
         UnitHealthSystem healthSystem,
         in DamageEvent damageEvent,
-        UnitHitRegionStore? hitRegions = null)
+        UnitHitRegionStore? hitRegions = null,
+        UnitBodyStore? bodies = null)
     {
         if (!units.TryGetIndex(
                 damageEvent.Target,
@@ -285,25 +286,22 @@ public sealed class DamageSystem
 
         if (!stopped)
         {
-            energy =
-                MathF.Max(
-                    0f,
-                    energy -
-                    GetBodyEnergyLoss(
-                        damageEvent.Part));
+            float energyLoss = anatomyBinding.ProjectileEnergyLoss >= 0f
+                ? anatomyBinding.ProjectileEnergyLoss
+                : GetBodyEnergyLoss(damageEvent.Part);
+            float penetrationLoss = anatomyBinding.ProjectilePenetrationLoss >= 0f
+                ? anatomyBinding.ProjectilePenetrationLoss
+                : GetBodyPenetrationLoss(damageEvent.Part);
 
-            penetration =
-                MathF.Max(
-                    0f,
-                    penetration -
-                    GetBodyPenetrationLoss(
-                        damageEvent.Part));
+            energy = MathF.Max(0f, energy - energyLoss);
+            penetration = MathF.Max(0f, penetration - penetrationLoss);
 
             stopped =
                 energy <= 1f ||
                 penetration <= 0.01f;
         }
 
+        float totalDamage = damage;
         if (hasAnatomyBinding)
         {
             healthSystem.ApplyRegionDamage(
@@ -343,8 +341,58 @@ public sealed class DamageSystem
             }
         }
 
+        if (!stopped &&
+            damageEvent.DamageType != DamageType.Blunt &&
+            hasAnatomyBinding &&
+            anatomyBinding.Kind != UnitHealthPartKind.Organ &&
+            energy > 1f && penetration > 0.01f &&
+            damageEvent.Direction.LengthSquared() > 0.000001f)
+        {
+            float lastDistance = -1f;
+            int lastVolumeIndex = -1;
+            while (UnitHitSystem.TryFindNextAnatomyVolumeHit(
+                       units, targetIndex, regionIndex, anatomyBinding.Id,
+                       damageEvent.ImpactPosition, damageEvent.Direction,
+                       lastDistance, lastVolumeIndex, damageEvent.HitRadius,
+                       out UnitAnatomyVolumeHit volumeHit, bodies, hitRegions))
+            {
+                UnitAnatomyVolume volume = volumeHit.Volume;
+                float remainingRatio = damageEvent.InitialEnergy > 0f
+                    ? Math.Clamp(energy / damageEvent.InitialEnergy, 0f, 1f)
+                    : 0f;
+                float internalDamage = damageEvent.BaseDamage *
+                    (0.35f + 0.65f * MathF.Sqrt(remainingRatio)) *
+                    volume.DamageMultiplier;
+
+                if (internalDamage > 0f)
+                {
+                    healthSystem.ApplyRegionDamage(
+                        units, health, damageEvent.Target,
+                        volumeHit.RegionIndex, volumeHit.BindingIndex, internalDamage);
+                    totalDamage += internalDamage;
+
+                    if (damageEvent.BleedChance > 0f)
+                    {
+                        float internalBleed = internalDamage * Math.Clamp(
+                            damageEvent.BleedChance * volume.BleedMultiplier, 0f, 1f) * 0.05f;
+                        healthSystem.AddRegionBleed(
+                            units, health, damageEvent.Target,
+                            volumeHit.RegionIndex, volumeHit.BindingIndex, internalBleed);
+                    }
+                }
+
+                energy = MathF.Max(0f, energy - volume.EnergyLoss);
+                penetration = MathF.Max(0f, penetration - volume.PenetrationLoss);
+                stopped = energy <= 1f || penetration <= 0.01f;
+                lastDistance = volumeHit.Distance;
+                lastVolumeIndex = volumeHit.VolumeIndex;
+                if (stopped)
+                    break;
+            }
+        }
+
         return new ProjectileDamageResult(
-            damage,
+            totalDamage,
             energy,
             penetration,
             stopped);
