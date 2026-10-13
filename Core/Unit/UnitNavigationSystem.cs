@@ -215,6 +215,8 @@ public sealed class UnitNavigationSystem
                     BuildSmoothedPath(
                         worldMap,
                         path,
+                        position.X,
+                        position.Y,
                         footprintX,
                         footprintY,
                         out int[] smoothedWaypoints,
@@ -480,6 +482,8 @@ public sealed class UnitNavigationSystem
     private void BuildSmoothedPath(
         WorldMap worldMap,
         int[] path,
+        float startX,
+        float startY,
         int footprintRadiusX,
         int footprintRadiusY,
         out int[] waypoints,
@@ -496,15 +500,38 @@ public sealed class UnitNavigationSystem
         var indices = new int[path.Length];
         int count = 0;
         int anchor = 0;
-        cells[count] = path[0];
-        indices[count++] = 0;
+
+        // Use the unit's real position for the first segment instead of pulling
+        // it to the center of its starting cell first.
+        int first = 0;
+        int lastCandidate = Math.Min(path.Length - 1, MaxWaypointShortcutCells);
+        for (int candidate = lastCandidate; candidate >= 1; candidate--)
+        {
+            if (!HasClearStraightRoute(
+                    worldMap,
+                    startX,
+                    startY,
+                    path[candidate],
+                    footprintRadiusX,
+                    footprintRadiusY))
+            {
+                continue;
+            }
+
+            first = candidate;
+            break;
+        }
+
+        cells[count] = path[first];
+        indices[count++] = first;
+        anchor = first;
 
         // Greedy string-pulling: choose the farthest cell up to a fixed lookahead
         // that can be reached in a straight, fully traversable segment.
         while (anchor < path.Length - 1)
         {
             int selected = anchor + 1;
-            int lastCandidate = Math.Min(
+            lastCandidate = Math.Min(
                 path.Length - 1,
                 anchor + MaxWaypointShortcutCells);
 
@@ -1013,25 +1040,19 @@ public sealed class UnitNavigationSystem
         for (int i = 0; i < newCapacity; i++)
         {
             if (_paths[i] == null)
+            {
                 _paths[i] = Array.Empty<int>();
+                _failedGoalX[i] = int.MinValue;
+                _failedGoalY[i] = int.MinValue;
+                _failedStartCell[i] = -1;
+                _failedFootprintX[i] = int.MinValue;
+                _failedFootprintY[i] = int.MinValue;
+            }
+
             if (_waypoints[i] == null)
                 _waypoints[i] = Array.Empty<int>();
             if (_waypointPathIndices[i] == null)
                 _waypointPathIndices[i] = Array.Empty<int>();
-
-            if (i >= capacity)
-                continue;
-
-            if (_failedGoalX[i] == 0)
-                _failedGoalX[i] = int.MinValue;
-            if (_failedGoalY[i] == 0)
-                _failedGoalY[i] = int.MinValue;
-            if (_failedStartCell[i] == 0)
-                _failedStartCell[i] = -1;
-            if (_failedFootprintX[i] == 0)
-                _failedFootprintX[i] = int.MinValue;
-            if (_failedFootprintY[i] == 0)
-                _failedFootprintY[i] = int.MinValue;
         }
     }
 
