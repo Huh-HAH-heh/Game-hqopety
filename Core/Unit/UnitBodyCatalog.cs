@@ -180,7 +180,6 @@ internal static class UnitBodyCatalog
     };
 
     private static readonly BodyPartDefinition[] SegmentedCreature = CreateSegmented();
-    private static readonly BodyPartDefinition[] ScavenRat = CreateScavenRat();
 
     public static ReadOnlySpan<BodyPartDefinition> Get(UnitBodyType bodyType) =>
         bodyType switch
@@ -188,77 +187,11 @@ internal static class UnitBodyCatalog
             UnitBodyType.Colonist => Colonist,
             UnitBodyType.SmallCreature => SmallCreature,
             UnitBodyType.SegmentedCreature => SegmentedCreature,
-            UnitBodyType.ScavenRat => ScavenRat,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(bodyType),
                 bodyType,
                 "Неизвестный тип тела.")
         };
-
-    private static BodyPartDefinition[] CreateScavenRat()
-    {
-        var parts = new System.Collections.Generic.List<BodyPartDefinition>(17);
-
-        void Add(
-            float x,
-            float y,
-            float radius,
-            int parent = -1,
-            BodyPartRole role = BodyPartRole.RatBody,
-            BodyPartMotion motion = BodyPartMotion.StaticRelative,
-            float followDistance = 0f,
-            BodyPartAnchor anchor = BodyPartAnchor.Parent)
-        {
-            parts.Add(new BodyPartDefinition(
-                new Vector3(x, y, 0f),
-                new Vector3(radius, radius, radius),
-                BodyPrimitive.Circle,
-                parentIndex: parent,
-                motion: motion,
-                followDistance: followDistance,
-                anchor: anchor,
-                role: role));
-        }
-
-        // Inspired by real rat silhouettes: a compact pointed head, broad middle
-        // of the trunk, narrower rump and a bare tail longer than the body.
-        // Keep the rig as a few overlapping circles instead of a bead-like torso.
-        Add(0.245f, 0f, 0.090f, -1, BodyPartRole.Head,
-            anchor: BodyPartAnchor.UnitHead);                         // 0 skull
-        Add(0.085f, 0f, 0.035f, 0, BodyPartRole.Muzzle);              // 1 muzzle base
-        Add(0.065f, 0f, 0.012f, 1, BodyPartRole.Muzzle);              // 2 nose tip
-
-        Add(-0.130f, 0f, 0.120f, 0, BodyPartRole.RatBody,
-            BodyPartMotion.SpinalChain, 0.130f);                      // 3 shoulders
-        Add(-0.145f, 0f, 0.145f, 3, BodyPartRole.RatBody,
-            BodyPartMotion.SpinalChain, 0.145f);                      // 4 broad trunk
-        Add(-0.140f, 0f, 0.108f, 4, BodyPartRole.RatBody,
-            BodyPartMotion.SpinalChain, 0.140f);                      // 5 narrowing rump
-
-        Add(-0.120f, 0f, 0.034f, 5, BodyPartRole.Tail,
-            BodyPartMotion.PhysicalTail, 0.120f);                     // 6 tail root
-
-        // Wider spacing gives the tail a long, light profile. The circles taper
-        // continuously towards the tip rather than forming a solid plastic tube.
-        float[] tailRadii =
-        {
-            0.034f, 0.030f, 0.026f, 0.022f, 0.018f,
-            0.014f, 0.011f, 0.008f, 0.005f
-        };
-        float[] tailDistances =
-        {
-            0.075f, 0.070f, 0.065f, 0.060f, 0.055f,
-            0.050f, 0.045f, 0.040f, 0.035f
-        };
-
-        for (int i = 0; i < tailRadii.Length; i++)
-        {
-            Add(-tailDistances[i], 0f, tailRadii[i], parts.Count - 1,
-                BodyPartRole.Tail, BodyPartMotion.PhysicalTail, tailDistances[i]);
-        }
-
-        return parts.ToArray();
-    }
 
     private static BodyPartDefinition[] CreateSegmented()
     {
