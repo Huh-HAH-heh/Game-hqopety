@@ -358,7 +358,7 @@ public class UnitHitRegionProfile
             UnitCircleHitRegion region = _regions[i];
             if (!string.IsNullOrWhiteSpace(region.ParentId))
             {
-                int parentIndex = FindRegion(region.ParentId);
+                int parentIndex = FindRegionInRegions(_regions, region.ParentId);
                 if (parentIndex < 0 || parentIndex >= i)
                 {
                     throw new ArgumentException(
@@ -370,7 +370,7 @@ public class UnitHitRegionProfile
             foreach (HitRegionPartBinding binding in region.Parts)
             {
                 if (!string.IsNullOrWhiteSpace(binding.ParentId) &&
-                    !TryFindPart(binding.ParentId, out _, out _))
+                    !TryFindPartInRegions(_regions, binding.ParentId, out _, out _))
                 {
                     throw new ArgumentException(
                         $"Anatomy tissue '{binding.Id}' references missing parent tissue '{binding.ParentId}'.",
@@ -378,6 +378,44 @@ public class UnitHitRegionProfile
                 }
             }
         }
+    }
+
+    // Never dispatch virtual members from this constructor: derived anatomy fields
+    // are not initialized until the base constructor returns.
+    private static int FindRegionInRegions(UnitCircleHitRegion[] regions, string id)
+    {
+        for (int i = 0; i < regions.Length; i++)
+        {
+            if (string.Equals(regions[i].Id, id, StringComparison.Ordinal))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static bool TryFindPartInRegions(
+        UnitCircleHitRegion[] regions,
+        string id,
+        out int regionIndex,
+        out int bindingIndex)
+    {
+        for (int i = 0; i < regions.Length; i++)
+        {
+            ReadOnlySpan<HitRegionPartBinding> bindings = regions[i].Parts;
+            for (int j = 0; j < bindings.Length; j++)
+            {
+                if (!string.Equals(bindings[j].Id, id, StringComparison.Ordinal))
+                    continue;
+
+                regionIndex = i;
+                bindingIndex = j;
+                return true;
+            }
+        }
+
+        regionIndex = -1;
+        bindingIndex = -1;
+        return false;
     }
 
     public virtual int FindRegion(string id)
