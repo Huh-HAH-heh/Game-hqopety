@@ -590,7 +590,8 @@ public sealed class ProjectileSystem
                     health,
                     healthSystem,
                     damageEvent,
-                    hitRegions);
+                    hitRegions,
+                    bodies);
 
             projectiles.Energy[
                 projectileIndex] =
