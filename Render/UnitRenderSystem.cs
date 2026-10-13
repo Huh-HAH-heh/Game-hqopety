@@ -606,8 +606,7 @@ public void DrawSnapshot(
                 factionTag,
                 isAlive,
                 tilePixelSize,
-                screenScale,
-                part.LineOnly);
+                screenScale);
         }
 
         return count;
@@ -671,8 +670,7 @@ public void DrawSnapshot(
         ushort factionTag,
         bool isAlive,
         float tilePixelSize,
-        float screenScale,
-        bool lineOnly = false)
+        float screenScale)
     {
         float radiusX = MathF.Abs(scale.X) * tilePixelSize;
         float radiusY = MathF.Abs(scale.Y) * tilePixelSize;
@@ -684,17 +682,12 @@ public void DrawSnapshot(
         float centerY = position.Y * tilePixelSize;
 
         Color fill = GetBodyPartColor(role, factionTag, isAlive);
-        Color outline = lineOnly
-            ? GetLineOnlyColor(role)
-            : new Color(20, 26, 32, 245);
+        Color outline = new Color(20, 26, 32, 245);
 
         if (primitive == BodyPrimitive.Line)
         {
             float dx = MathF.Cos(rotation) * radiusX;
             float dy = MathF.Sin(rotation) * radiusX;
-            Color lineColor = lineOnly
-                ? GetLineOnlyColor(role)
-                : GetBodyPartColor(role, factionTag, isAlive);
 
             AppendDebugLine(
                 outlines,
@@ -702,7 +695,7 @@ public void DrawSnapshot(
                 centerY - dy,
                 centerX + dx,
                 centerY + dy,
-                lineColor);
+                fill);
             return;
         }
 
@@ -710,46 +703,43 @@ public void DrawSnapshot(
             ? 16
             : 10;
 
-        if (!lineOnly)
+        if (primitive == BodyPrimitive.Box)
         {
-            if (primitive == BodyPrimitive.Box)
-            {
-                AppendOrientedRect(
-                    fills,
-                    centerX,
-                    centerY,
-                    radiusY,
-                    radiusX,
-                    rotation,
-                    fill);
-            }
-            else if (primitive == BodyPrimitive.Triangle)
-            {
-                AppendTriangleFill(
-                    fills,
-                    centerX,
-                    centerY,
-                    radiusX,
-                    radiusY,
-                    rotation,
-                    fill);
-            }
-            else
-            {
-                AppendEllipse(
-                    fills,
-                    centerX,
-                    centerY,
-                    radiusX,
-                    radiusY,
-                    rotation,
-                    fill,
-                    segments);
-            }
+            AppendOrientedRect(
+                fills,
+                centerX,
+                centerY,
+                radiusY,
+                radiusX,
+                rotation,
+                fill);
+        }
+        else if (primitive == BodyPrimitive.Triangle)
+        {
+            AppendTriangleFill(
+                fills,
+                centerX,
+                centerY,
+                radiusX,
+                radiusY,
+                rotation,
+                fill);
+        }
+        else
+        {
+            AppendEllipse(
+                fills,
+                centerX,
+                centerY,
+                radiusX,
+                radiusY,
+                rotation,
+                fill,
+                segments);
         }
 
-        // Terrain-like line art: no fill, just high-contrast geometry.
-        float outlinePad = lineOnly ? 0f : 0.45f / MathF.Max(0.001f, screenScale);
+        // Keep the outline slightly larger than the fill to preserve readability.
+        float outlinePad = 0.45f / MathF.Max(0.001f, screenScale);
         if (primitive == BodyPrimitive.Box)
         {
             AppendOrientedRectOutline(
@@ -832,14 +822,6 @@ public void DrawSnapshot(
             ? color
             : Blend(color, new Color(91, 96, 102, 255), 0.72f);
     }
-
-    private static Color GetLineOnlyColor(BodyPartRole role) =>
-        role switch
-        {
-            BodyPartRole.Eye or BodyPartRole.Muzzle => new Color(247, 249, 251, 245),
-            BodyPartRole.Tail => new Color(222, 230, 237, 235),
-            _ => new Color(235, 240, 245, 240)
-        };
 
     private static bool IsAnyBodyPartInView(
         UnitBodyStore bodies,
