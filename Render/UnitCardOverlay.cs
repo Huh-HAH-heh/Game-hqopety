@@ -252,6 +252,8 @@ public sealed class UnitCardOverlay : IDisposable
 
         AddWeapon(lines, "ОСНОВНОЕ ОРУЖИЕ", unit.PrimaryWeapon);
         AddWeapon(lines, "ВТОРОЕ ОРУЖИЕ", unit.SecondaryWeapon);
+        AddWeapon(lines, "РУЧНОЕ / БЛИЖНИЙ БОЙ", unit.MeleeWeapon);
+        AddWeapon(lines, "СЛОТ СНАРЯЖЕНИЯ", unit.UtilityWeapon);
 
         if (details != null &&
             details.Unit.Index == unit.Index &&
@@ -329,7 +331,7 @@ public sealed class UnitCardOverlay : IDisposable
         Value("Возможности", config.Capabilities.ToString());
         Value("Масса", $"{config.Weight:0.00} кг");
         Value("Урон", config.BaseDamage.ToString());
-        Value("Скорострельность", $"{config.FireRate:0.000} с");
+        Value("Интервал выстрела", $"{config.FireRate:0.000} с");
         Value("Магазин", $"{weapon.Ammo} / {config.MagazineSize}");
         Value("Запас патронов", weapon.ReserveAmmo.ToString());
         Value("Тип боеприпаса", weapon.AmmoType.ToString());
