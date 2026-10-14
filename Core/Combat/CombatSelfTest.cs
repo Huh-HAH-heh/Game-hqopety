@@ -49,6 +49,7 @@ public static class CombatSelfTest
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
         RunTest("Damage: projectile events outside hit regions are rejected", TestDamageRequiresHitRegion, ref passed, ref failed);
+        RunTest("Damage: penetrating torso shot damages intersected heart volume", TestProjectileDamagesHeart, ref passed, ref failed);
         RunTest("Vision: target sightings persist between rotating samples", TestVisionSampleMemory, ref passed, ref failed);
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
@@ -1839,6 +1840,70 @@ private static bool TestVisionDetectsRegionInsideRange()
                grid.GetCellHead(20, 20) >= 0 &&
                simulation.Units.IsAlive(dead) &&
                simulation.Units.IsAlive(living);
+    }
+
+    private static bool TestProjectileDamagesHeart()
+    {
+        UnitSimulation simulation = new UnitSimulation(2, 32);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10f, 10f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        UnitAnatomyProfile anatomy = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        int torsoRegion = anatomy.FindRegion("body.middle");
+        if (torsoRegion < 0)
+            return false;
+
+        int torsoBinding = UnitHitSystem.FindBindingInRegion(
+            simulation.Units, target.Index, torsoRegion,
+            UnitHealthPartId.Torso, simulation.HitRegions);
+        int heartBinding = UnitHitSystem.FindBindingInRegion(
+            simulation.Units, target.Index, torsoRegion,
+            UnitHealthPartId.Heart, simulation.HitRegions);
+
+        if (torsoBinding < 0 || heartBinding < 0 ||
+            !simulation.Health.TryFindRegionPart(
+                target.Index, torsoRegion, heartBinding, out int heartHealthIndex))
+            return false;
+
+        float heartHealthBefore = simulation.Health.HitPoints[heartHealthIndex];
+        UnitHitRegionGeometry torso = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, target.Index, torsoRegion,
+            simulation.HitRegions, simulation.Bodies);
+
+        // Enter the torso from its left side and align the ray with the heart's
+        // local center (x=0.012, y=0.008, z=0.005 relative to the torso node).
+        DamageEvent shot = new DamageEvent(
+            default,
+            target,
+            UnitHealthPartId.Torso,
+            torso.Center + new Vector3(-0.10f, 0.008f, 0.005f),
+            Vector3.UnitX,
+            60f,
+            15000f,
+            15000f,
+            400f,
+            100f,
+            DamageType.Ballistic,
+            0.5f,
+            regionIndex: torsoRegion,
+            hitRadius: 0.002f,
+            bindingIndex: torsoBinding);
+
+        ProjectileDamageResult result = new DamageSystem().ApplyProjectile(
+            simulation.Units,
+            simulation.Inventory,
+            simulation.Health,
+            new UnitHealthSystem(),
+            in shot,
+            simulation.HitRegions,
+            simulation.Bodies);
+
+        float heartHealthAfter = simulation.Health.HitPoints[heartHealthIndex];
+        return result.DamageApplied > 0f &&
+               heartHealthAfter < heartHealthBefore;
     }
 
     private static bool TestProjectileHitsUnit()
