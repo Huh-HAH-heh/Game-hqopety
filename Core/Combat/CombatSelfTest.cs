@@ -1451,6 +1451,8 @@ public static class CombatSelfTest
             heartRegion != torso ||
             !profile.TryFindPart("brain.main", out int brainRegion, out _) ||
             brainRegion != head ||
+            !profile.TryFindPart(UnitHealthPartId.Neck, out int neckBindingRegion, out _) ||
+            neckBindingRegion != neck ||
             profile.VolumeCount != 8)
             return false;
 
