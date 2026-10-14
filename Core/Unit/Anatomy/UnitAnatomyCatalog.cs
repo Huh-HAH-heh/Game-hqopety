@@ -413,6 +413,15 @@ public static class UnitAnatomyCatalog
         params UnitAnatomyMarker[] markers) =>
         UnitAnatomyNode.Part(id, string.Empty, shape, hitHalfHeight, tissues, markers);
 
+    private static UnitAnatomyNode ChildLayer(
+        string id,
+        string parentId,
+        BodyPartDefinition shape,
+        float hitHalfHeight,
+        HitRegionPartBinding[] tissues,
+        params UnitAnatomyMarker[] markers) =>
+        UnitAnatomyNode.Part(id, parentId, shape, hitHalfHeight, tissues, markers);
+
     private static HitRegionPartBinding Tissue(
         UnitHealthPartId part,
         float weight,
