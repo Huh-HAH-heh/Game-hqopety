@@ -10,6 +10,7 @@ public sealed class ContextMenuOverlay : IDisposable
     private const float Width = 196f;
     private const float EmptyHeight = 58f;
     private const float UnitHeight = 62f;
+    private const float GroupHeight = 94f;
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, EmptyHeight))
     {
@@ -33,12 +34,19 @@ public sealed class ContextMenuOverlay : IDisposable
         FillColor = new Color(28, 36, 47, 255)
     };
 
+    private readonly RectangleShape _selectedCardsButton = new(new Vector2f(Width - 12f, 26f))
+    {
+        FillColor = new Color(28, 36, 47, 255)
+    };
+
     private readonly Font? _font;
     private readonly Text? _title;
     private readonly Text? _emptyLabel;
     private readonly Text? _unitCardLabel;
+    private readonly Text? _selectedCardsLabel;
 
     private bool _hasUnitAction;
+    private bool _hasMultipleUnitsAction;
 
     public bool IsOpen { get; private set; }
 
@@ -63,13 +71,19 @@ public sealed class ContextMenuOverlay : IDisposable
         {
             FillColor = new Color(224, 233, 244)
         };
+
+        _selectedCardsLabel = new Text(_font, "Обзор выделенных", 11)
+        {
+            FillColor = new Color(224, 233, 244)
+        };
     }
 
     public void ToggleAt(
         Vector2i position,
         uint windowWidth,
         uint windowHeight,
-        bool hasUnit)
+        bool hasUnit,
+        bool hasMultipleUnits)
     {
         if (IsOpen && _panel.GetGlobalBounds().Contains(position))
         {
@@ -77,17 +91,19 @@ public sealed class ContextMenuOverlay : IDisposable
             return;
         }
 
-        OpenAt(position, windowWidth, windowHeight, hasUnit);
+        OpenAt(position, windowWidth, windowHeight, hasUnit, hasMultipleUnits);
     }
 
     public void OpenAt(
         Vector2i position,
         uint windowWidth,
         uint windowHeight,
-        bool hasUnit)
+        bool hasUnit,
+        bool hasMultipleUnits)
     {
         _hasUnitAction = hasUnit;
-        float height = hasUnit ? UnitHeight : EmptyHeight;
+        _hasMultipleUnitsAction = hasMultipleUnits;
+        float height = hasMultipleUnits ? GroupHeight : hasUnit ? UnitHeight : EmptyHeight;
         float x = Math.Clamp(position.X, 0f, Math.Max(0f, windowWidth - Width));
         float y = Math.Clamp(position.Y, 0f, Math.Max(0f, windowHeight - height));
 
@@ -97,6 +113,7 @@ public sealed class ContextMenuOverlay : IDisposable
         _accent.Position = new Vector2f(x + 1f, y + 1f);
         _accent.Size = new Vector2f(2f, height - 2f);
         _unitCardButton.Position = new Vector2f(x + 6f, y + 29f);
+        _selectedCardsButton.Position = new Vector2f(x + 6f, y + 60f);
 
         if (_title != null)
             _title.Position = new Vector2f(x + 10f, y + 5f);
@@ -104,13 +121,19 @@ public sealed class ContextMenuOverlay : IDisposable
             _emptyLabel.Position = new Vector2f(x + 10f, y + 32f);
         if (_unitCardLabel != null)
             _unitCardLabel.Position = new Vector2f(x + 13f, y + 35f);
+        if (_selectedCardsLabel != null)
+            _selectedCardsLabel.Position = new Vector2f(x + 13f, y + 64f);
 
         IsOpen = true;
     }
 
-    public bool HandleClick(Vector2i position, out bool openUnitCard)
+    public bool HandleClick(
+        Vector2i position,
+        out bool openUnitCard,
+        out bool openSelectionOverview)
     {
         openUnitCard = false;
+        openSelectionOverview = false;
         if (!IsOpen)
             return false;
 
@@ -118,6 +141,9 @@ public sealed class ContextMenuOverlay : IDisposable
         {
             if (_hasUnitAction && _unitCardButton.GetGlobalBounds().Contains(position))
                 openUnitCard = true;
+            else if (_hasMultipleUnitsAction &&
+                     _selectedCardsButton.GetGlobalBounds().Contains(position))
+                openSelectionOverview = true;
 
             Close();
             return true;
@@ -131,6 +157,7 @@ public sealed class ContextMenuOverlay : IDisposable
     {
         IsOpen = false;
         _hasUnitAction = false;
+        _hasMultipleUnitsAction = false;
     }
 
     public void Draw(RenderWindow window, uint windowWidth, uint windowHeight)
@@ -143,7 +170,8 @@ public sealed class ContextMenuOverlay : IDisposable
             new Vector2i((int)position.X, (int)position.Y),
             windowWidth,
             windowHeight,
-            _hasUnitAction);
+            _hasUnitAction,
+            _hasMultipleUnitsAction);
 
         window.Draw(_panel);
         window.Draw(_header);
@@ -151,16 +179,17 @@ public sealed class ContextMenuOverlay : IDisposable
 
         if (_hasUnitAction)
             window.Draw(_unitCardButton);
+        if (_hasMultipleUnitsAction)
+            window.Draw(_selectedCardsButton);
 
         if (_title != null)
             window.Draw(_title);
 
-        if (_hasUnitAction)
-        {
-            if (_unitCardLabel != null)
-                window.Draw(_unitCardLabel);
-        }
-        else if (_emptyLabel != null)
+        if (_hasUnitAction && _unitCardLabel != null)
+            window.Draw(_unitCardLabel);
+        if (_hasMultipleUnitsAction && _selectedCardsLabel != null)
+            window.Draw(_selectedCardsLabel);
+        if (!_hasUnitAction && !_hasMultipleUnitsAction && _emptyLabel != null)
         {
             window.Draw(_emptyLabel);
         }
@@ -195,10 +224,12 @@ public sealed class ContextMenuOverlay : IDisposable
         _title?.Dispose();
         _emptyLabel?.Dispose();
         _unitCardLabel?.Dispose();
+        _selectedCardsLabel?.Dispose();
         _font?.Dispose();
         _panel.Dispose();
         _header.Dispose();
         _accent.Dispose();
         _unitCardButton.Dispose();
+        _selectedCardsButton.Dispose();
     }
 }
