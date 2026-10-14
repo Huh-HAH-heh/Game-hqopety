@@ -72,7 +72,7 @@ public sealed class ContextMenuOverlay : IDisposable
             FillColor = new Color(224, 233, 244)
         };
 
-        _selectedCardsLabel = new Text(_font, "Карточки выделенных", 11)
+        _selectedCardsLabel = new Text(_font, "Обзор выделенных", 11)
         {
             FillColor = new Color(224, 233, 244)
         };
