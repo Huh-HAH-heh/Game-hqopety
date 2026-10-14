@@ -93,6 +93,8 @@ public sealed class UnitCardOverlay : IDisposable
     private float _dragOffsetY;
     private bool _hasPosition;
     private bool _dragging;
+    private int _selectedAnatomyEntry = -1;
+    private AnatomyCardEntry[] _latestAnatomyEntries = Array.Empty<AnatomyCardEntry>();
 
     public bool IsOpen { get; private set; }
 
@@ -159,6 +161,13 @@ public sealed class UnitCardOverlay : IDisposable
         _showOrgans = true;
     }
 
+    public void ShowAnatomyList()
+    {
+        _view = CardView.AnatomyList;
+        _selectedAnatomyEntry = -1;
+        _scrollOffset = 0;
+    }
+
     public void Close()
     {
         IsOpen = false;
@@ -178,7 +187,9 @@ public sealed class UnitCardOverlay : IDisposable
 
         if (_bodyTab.GetGlobalBounds().Contains(position))
         {
-            _view = CardView.Anatomy;
+            _view = _view == CardView.EntryDetails
+                ? CardView.AnatomyList
+                : CardView.Anatomy;
             _scrollOffset = 0;
             return true;
         }
@@ -195,6 +206,22 @@ public sealed class UnitCardOverlay : IDisposable
         {
             _showOrgans = !_showOrgans;
             return true;
+        }
+
+        if (_view == CardView.AnatomyList && _latestAnatomyEntries.Length > 0)
+        {
+            float listTop = _panel.Position.Y + 82f;
+            int row = (int)((position.Y - listTop) / RowHeight);
+            int entryIndex = _scrollOffset + row;
+            if (position.Y >= listTop &&
+                entryIndex >= _scrollOffset &&
+                entryIndex < Math.Min(_latestAnatomyEntries.Length, _scrollOffset + _visibleLines))
+            {
+                _selectedAnatomyEntry = entryIndex;
+                _view = CardView.EntryDetails;
+                _scrollOffset = 0;
+                return true;
+            }
         }
 
         if (_closeButton.GetGlobalBounds().Contains(position))
@@ -248,7 +275,7 @@ public sealed class UnitCardOverlay : IDisposable
         if (!IsOpen || !_panel.GetGlobalBounds().Contains(position))
             return false;
 
-        if (_view == CardView.Details)
+        if (_view is CardView.Details or CardView.EntryDetails or CardView.AnatomyList)
             _scrollOffset = Math.Max(0, _scrollOffset + (delta > 0f ? -3 : 3));
         return true;
     }
@@ -265,11 +292,21 @@ public sealed class UnitCardOverlay : IDisposable
             return;
 
         Layout(windowWidth, windowHeight);
-        List<CardLine>? lines = _view == CardView.Details
-            ? BuildLines(unit, details)
-            : null;
-        _lineCount = lines?.Count ?? 0;
-        _visibleLines = _view == CardView.Details
+        _latestAnatomyEntries = details?.AnatomyEntries ?? Array.Empty<AnatomyCardEntry>();
+        AnatomyCardEntry? selectedEntry =
+            (uint)_selectedAnatomyEntry < (uint)_latestAnatomyEntries.Length
+                ? _latestAnatomyEntries[_selectedAnatomyEntry]
+                : null;
+        List<CardLine>? lines = _view switch
+        {
+            CardView.Details => BuildLines(unit, details),
+            CardView.EntryDetails when selectedEntry != null => BuildEntryLines(selectedEntry),
+            _ => null
+        };
+        _lineCount = _view == CardView.AnatomyList
+            ? _latestAnatomyEntries.Length
+            : lines?.Count ?? 0;
+        _visibleLines = _view is CardView.Details or CardView.EntryDetails or CardView.AnatomyList
             ? Math.Min(MaxVisibleLines, Math.Max(1, (int)((_panel.Size.Y - 112f) / RowHeight)))
             : 0;
         _scrollOffset = Math.Clamp(
@@ -311,9 +348,18 @@ public sealed class UnitCardOverlay : IDisposable
 
         if (_title != null)
         {
-            _title.DisplayedString = $"ЮНИТ {unit.Index}:{unit.Generation}  •  {unit.Type}";
+            _title.DisplayedString = _view switch
+            {
+                CardView.AnatomyList => $"АНАТОМИЯ ЮНИТА {unit.Index}:{unit.Generation}",
+                CardView.EntryDetails when selectedEntry != null => selectedEntry.Name.ToUpperInvariant(),
+                CardView.Details => $"ХАРАКТЕРИСТИКИ {unit.Index}:{unit.Generation}",
+                _ => $"ЮНИТ {unit.Index}:{unit.Generation}  •  {unit.Type}"
+            };
             window.Draw(_title);
         }
+
+        if (_bodyTabLabel != null)
+            _bodyTabLabel.DisplayedString = _view == CardView.EntryDetails ? "← К СПИСКУ" : "ТЕЛО";
 
         if (_closeLabel != null)
             window.Draw(_closeLabel);
@@ -343,6 +389,35 @@ public sealed class UnitCardOverlay : IDisposable
                 _panel.Size.X - 10f,
                 _panel.Size.Y - 145f,
                 _showOrgans);
+        }
+        else if (_view == CardView.AnatomyList)
+        {
+            for (int i = 0; i < _lineTexts.Length; i++)
+            {
+                Text? text = _lineTexts[i];
+                if (text == null)
+                    continue;
+
+                int entryIndex = _scrollOffset + i;
+                if (i >= _visibleLines || entryIndex >= _latestAnatomyEntries.Length)
+                {
+                    text.DisplayedString = "";
+                    continue;
+                }
+
+                AnatomyCardEntry entry = _latestAnatomyEntries[entryIndex];
+                string label = $"{entry.Category}: {entry.Name}  {entry.HitPoints:0.0}/{entry.MaxHitPoints:0.0} HP";
+                if (label.Length > 64)
+                    label = label.Substring(0, 63) + "…";
+                text.DisplayedString = label;
+                text.FillColor = entry.Present
+                    ? HealthStatusColor(entry.HealthRatio)
+                    : new Color(139, 148, 159);
+                text.Position = new Vector2f(
+                    _panel.Position.X + 14f,
+                    _panel.Position.Y + 82f + i * RowHeight);
+                window.Draw(text);
+            }
         }
         else if (lines != null)
         {
@@ -383,11 +458,16 @@ public sealed class UnitCardOverlay : IDisposable
             _footer.Position = new Vector2f(
                 _panel.Position.X + 12f,
                 _panel.Position.Y + _panel.Size.Y - 22f);
-            _footer.DisplayedString = _view == CardView.Details && _lineCount > _visibleLines
+            _footer.DisplayedString = _view is CardView.Details or CardView.EntryDetails or CardView.AnatomyList
+                && _lineCount > _visibleLines
                 ? $"Строки {_scrollOffset + 1}–{Math.Min(_scrollOffset + _visibleLines, _lineCount)} из {_lineCount}   •   Колесо — прокрутка"
                 : _view == CardView.Anatomy
                     ? "Зелёный — норма   Жёлтый — урон   Оранжевый — тяжёлый   Красный — критично"
-                    : "Колесо — прокрутка подробных характеристик";
+                    : _view == CardView.AnatomyList
+                        ? "Нажми на орган или часть тела, чтобы открыть карточку"
+                        : _view == CardView.EntryDetails
+                            ? "← К СПИСКУ — выбрать другую анатомическую сущность"
+                            : "Колесо — прокрутка подробных характеристик";
             window.Draw(_footer);
         }
     }
@@ -439,6 +519,39 @@ public sealed class UnitCardOverlay : IDisposable
 
         if (_closeLabel != null)
             _closeLabel.Position = new Vector2f(x + Width - 27f, y + 4f);
+    }
+
+    private static List<CardLine> BuildEntryLines(AnatomyCardEntry entry)
+    {
+        List<CardLine> lines = new(12);
+        void Heading(string value) => lines.Add(new CardLine(value, true));
+        void Value(string label, string value) => lines.Add(new CardLine($"  {label}: {value}", false));
+
+        Heading(entry.Name);
+        Value("Тип", entry.Category);
+        Value("ID ткани", entry.Id);
+        Value("Область тела", entry.RegionId);
+        Value("Родитель", string.IsNullOrWhiteSpace(entry.ParentId) ? "Нет" : entry.ParentId);
+        Value("Состояние", entry.Present ? "Присутствует" : "Отсутствует / разрушена");
+        Value("Здоровье", $"{entry.HitPoints:0.0} / {entry.MaxHitPoints:0.0} HP ({entry.HealthRatio:P0})");
+        Value("Кровотечение", $"{entry.BleedRate:0.000}");
+        Value("Класс", entry.FunctionDescription);
+        Value("Геометрия", entry.GeometryDescription);
+
+        if (entry is OrganCardEntry organ)
+        {
+            ReadOnlySpan<Core.Unit.UnitAnatomyVolume> volumes = organ.Volumes;
+            for (int i = 0; i < volumes.Length; i++)
+            {
+                Core.Unit.UnitAnatomyVolume volume = volumes[i];
+                Value($"Объём {i + 1}", $"{volume.Id}; родитель {volume.ParentRegionId}");
+                Value("  Входная ткань", volume.EntryBindingId);
+                Value("  Центр / полуразмер", $"{volume.LocalCenter} / {volume.HalfExtents}");
+                Value("  Потери энергии / пробития", $"{volume.EnergyLoss:0.0} / {volume.PenetrationLoss:0.0}");
+            }
+        }
+
+        return lines;
     }
 
     private static List<CardLine> BuildLines(
@@ -677,6 +790,8 @@ public sealed class UnitCardOverlay : IDisposable
     private enum CardView : byte
     {
         Anatomy,
+        AnatomyList,
+        EntryDetails,
         Details
     }
 
