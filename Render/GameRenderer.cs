@@ -918,7 +918,7 @@ public sealed class GameRenderer
                 }
 
                 editor?.SetStatus(
-                    $"Сохранено и применено. Обновлено колонистов: {updatedCount}. Файл: {fullPath}");
+                    $"Сохранено и применено. Обновлено колонистов: {updatedCount}.");
             }
             catch (Exception exception)
             {
