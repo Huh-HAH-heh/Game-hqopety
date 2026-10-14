@@ -291,6 +291,39 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
 
     public float GetHitHalfHeight(int index) => GetNode(index).HitHalfHeight;
 
+    /// <summary>
+    /// Rebuilds this immutable anatomy profile with edited render shapes while
+    /// preserving stable region IDs, tissue bindings, hit volumes, and markers.
+    /// </summary>
+    public UnitAnatomyProfile WithBodyParts(ReadOnlySpan<BodyPartDefinition> bodyParts)
+    {
+        if (!HasSharedShapes || bodyParts.Length != NodeCount)
+            throw new ArgumentException(
+                "Edited body-part count must match the shared anatomy profile.",
+                nameof(bodyParts));
+
+        var nodes = new UnitAnatomyNode[NodeCount];
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            UnitAnatomyNode previous = _nodes[i];
+            BodyPartDefinition shape = bodyParts[i];
+            if (shape.ParentIndex != previous.Shape.ParentIndex)
+                throw new ArgumentException(
+                    $"Changing the parent of '{previous.Id}' is not supported by transform-only rig editing.",
+                    nameof(bodyParts));
+
+            nodes[i] = UnitAnatomyNode.Part(
+                previous.Id,
+                previous.ParentId,
+                shape,
+                MathF.Max(0.001f, MathF.Abs(shape.Scale.Z)),
+                previous.Tissues.ToArray(),
+                previous.Markers.ToArray());
+        }
+
+        return new UnitAnatomyProfile(nodes, Convert(nodes), _volumes);
+    }
+
     public bool IsInternalNode(int index) =>
         (uint)index < (uint)_nodes.Length &&
         _nodes[index].HasShape &&

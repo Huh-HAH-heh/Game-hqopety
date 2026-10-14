@@ -45,6 +45,7 @@ public static class CombatSelfTest
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);
         RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
+        RunTest("Anatomy: rig edits preserve tissue IDs and organ volumes", TestAnatomyRigEditsPreserveBindings, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1476,6 +1477,65 @@ public static class CombatSelfTest
             legsCenter.Z < torsoCenter.Z &&
             torsoCenter.Z < headCenter.Z &&
             UnitHitSystem.GetVisibilityPointCount(simulation.Units, unit.Index, simulation.HitRegions) == 13;
+    }
+
+    private static bool TestAnatomyRigEditsPreserveBindings()
+    {
+        UnitAnatomyProfile original = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        BodyPartDefinition[] parts = original.BodyParts.ToArray();
+        if (parts.Length != original.NodeCount || parts.Length < 3)
+            return false;
+
+        BodyPartDefinition unchanged = parts[2];
+        parts[2] = new BodyPartDefinition(
+            unchanged.LocalPosition + new Vector3(0f, 0.012f, 0f),
+            unchanged.Scale * 1.02f,
+            unchanged.Primitive,
+            parentIndex: unchanged.ParentIndex,
+            localRotation: unchanged.LocalRotation,
+            motion: unchanged.Motion,
+            followDistance: unchanged.FollowDistance,
+            anchor: unchanged.Anchor,
+            role: unchanged.Role,
+            pivot: unchanged.Pivot);
+
+        UnitAnatomyProfile edited = original.WithBodyParts(parts);
+        if (edited.NodeCount != original.NodeCount ||
+            edited.VolumeCount != original.VolumeCount ||
+            edited.GetNode(2).Shape.LocalPosition == unchanged.LocalPosition ||
+            original.GetNode(2).Shape.LocalPosition != unchanged.LocalPosition)
+            return false;
+
+        for (int i = 0; i < original.NodeCount; i++)
+        {
+            UnitAnatomyNode before = original.GetNode(i);
+            UnitAnatomyNode after = edited.GetNode(i);
+            if (before.Id != after.Id || before.ParentId != after.ParentId ||
+                before.Tissues.Length != after.Tissues.Length)
+                return false;
+
+            ReadOnlySpan<HitRegionPartBinding> oldTissues = before.Tissues;
+            ReadOnlySpan<HitRegionPartBinding> newTissues = after.Tissues;
+            for (int j = 0; j < oldTissues.Length; j++)
+            {
+                if (oldTissues[j].Id != newTissues[j].Id ||
+                    oldTissues[j].Part != newTissues[j].Part ||
+                    oldTissues[j].Kind != newTissues[j].Kind)
+                    return false;
+            }
+        }
+
+        ReadOnlySpan<UnitAnatomyVolume> oldVolumes = original.Volumes;
+        ReadOnlySpan<UnitAnatomyVolume> newVolumes = edited.Volumes;
+        for (int i = 0; i < oldVolumes.Length; i++)
+        {
+            if (oldVolumes[i].Id != newVolumes[i].Id ||
+                oldVolumes[i].TargetBindingId != newVolumes[i].TargetBindingId ||
+                oldVolumes[i].ParentRegionId != newVolumes[i].ParentRegionId)
+                return false;
+        }
+
+        return true;
     }
 
 private static bool TestVisionDetectsRegionInsideRange()

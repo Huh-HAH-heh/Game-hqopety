@@ -55,7 +55,7 @@ public static class UnitAnatomyCatalog
     private const float DefaultProjectileEnergyLoss = 160f;
     private const float DefaultProjectilePenetrationLoss = 8f;
 
-    private static readonly UnitArchetypeProfile Colonist = new(
+    private static UnitArchetypeProfile Colonist = new(
         new UnitDefinition(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f),
         new UnitAnatomyProfile(
             new UnitAnatomyVolume[]
@@ -339,6 +339,17 @@ public static class UnitAnatomyCatalog
 
     private static readonly UnitArchetypeProfile SegmentedMonster = CreateSegmentedMonster();
 
+    /// <summary>Updates the shared colonist archetype after a rig edit is saved.</summary>
+    public static void ApplyColonistBodyParts(ReadOnlySpan<BodyPartDefinition> bodyParts)
+    {
+        UnitArchetypeProfile current = Colonist;
+        UnitAnatomyProfile nextAnatomy = current.Anatomy.WithBodyParts(bodyParts);
+        Colonist = new UnitArchetypeProfile(
+            current.Definition,
+            nextAnatomy,
+            current.StartingEquipment.ToArray());
+    }
+
     public static UnitArchetypeProfile Get(UnitType type) =>
         type switch
         {
@@ -410,8 +421,11 @@ public static class UnitAnatomyCatalog
         BodyPartDefinition shape,
         float hitHalfHeight,
         HitRegionPartBinding[] tissues,
-        params UnitAnatomyMarker[] markers) =>
-        UnitAnatomyNode.Part(id, string.Empty, shape, hitHalfHeight, tissues, markers);
+        params UnitAnatomyMarker[] markers)
+    {
+        shape = UnitBodyRigSettingsStore.ApplySavedShape(id, shape);
+        return UnitAnatomyNode.Part(id, string.Empty, shape, hitHalfHeight, tissues, markers);
+    }
 
     private static UnitAnatomyNode ChildLayer(
         string id,
@@ -419,8 +433,11 @@ public static class UnitAnatomyCatalog
         BodyPartDefinition shape,
         float hitHalfHeight,
         HitRegionPartBinding[] tissues,
-        params UnitAnatomyMarker[] markers) =>
-        UnitAnatomyNode.Part(id, parentId, shape, hitHalfHeight, tissues, markers);
+        params UnitAnatomyMarker[] markers)
+    {
+        shape = UnitBodyRigSettingsStore.ApplySavedShape(id, shape);
+        return UnitAnatomyNode.Part(id, parentId, shape, hitHalfHeight, tissues, markers);
+    }
 
     private static HitRegionPartBinding Tissue(
         UnitHealthPartId part,

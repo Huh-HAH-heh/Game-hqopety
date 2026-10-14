@@ -154,6 +154,43 @@ public sealed class UnitBodyStore
         return new BodyHandle(start, parts.Length);
     }
 
+    /// <summary>Replaces an existing body's transform definitions without reallocating its storage.</summary>
+    public void ApplyBodyDefinition(
+        BodyHandle handle,
+        ReadOnlySpan<BodyPartDefinition> parts)
+    {
+        if (handle.Count != parts.Length ||
+            handle.Start < 0 ||
+            handle.Start + handle.Count > _count)
+        {
+            throw new ArgumentException("Body handle and definition count do not match.", nameof(parts));
+        }
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            int parent = parts[i].ParentIndex;
+            if (parent < -1 || parent >= i)
+                throw new ArgumentException("Parent must precede its child.", nameof(parts));
+        }
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            int index = handle.Start + i;
+            BodyPartDefinition part = parts[i];
+            _localPosition[index] = part.LocalPosition;
+            _scale[index] = part.Scale;
+            _localRotation[index] = part.LocalRotation;
+            _followDistance[index] = part.FollowDistance;
+            _parent[index] = part.ParentIndex < 0 ? -1 : handle.Start + part.ParentIndex;
+            _primitive[index] = part.Primitive;
+            _motion[index] = part.Motion;
+            _anchor[index] = part.Anchor;
+            _role[index] = part.Role;
+            _pivot[index] = part.Pivot;
+            _tailInitialized[index] = false;
+        }
+    }
+
     public void FreeBody(
         BodyHandle handle)
     {

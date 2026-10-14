@@ -69,6 +69,7 @@ public sealed class GameRenderer
     private GameMenuOverlay? _gameMenuOverlay;
     private ContextMenuOverlay? _contextMenuOverlay;
     private UnitGroupCardOverlay? _unitGroupCardOverlay;
+    private UnitBodyRigEditorOverlay? _bodyRigEditorOverlay;
     private readonly List<UnitCardEntry> _unitCards = new();
     private readonly ConcurrentDictionary<long, UnitCardEntry> _unitCardRequests = new();
     private UnitId _contextMenuUnit;
@@ -220,6 +221,7 @@ public sealed class GameRenderer
         _contextMenuOverlay?.Dispose();
         CloseUnitCards();
         _unitGroupCardOverlay?.Dispose();
+        _bodyRigEditorOverlay?.Dispose();
         _combatStatusOverlay?.Dispose();
         _uiView?.Dispose();
         _selectionBox.Dispose();
@@ -594,6 +596,8 @@ public sealed class GameRenderer
             }
         }
 
+        _bodyRigEditorOverlay?.Draw(_window, _window.Size.X, _window.Size.Y);
+
         if (_titleTimer >= 0.25f)
         {
             _titleTimer = 0f;
@@ -864,6 +868,64 @@ public sealed class GameRenderer
 
         unit = default;
         return false;
+    }
+
+    private void SaveColonistBodyRig(string[] regionIds, BodyPartDefinition[] parts)
+    {
+        if (!UnitBodyRigSettingsStore.Save(regionIds, parts, out string fullPath, out string error))
+        {
+            _bodyRigEditorOverlay?.SetStatus($"Ошибка сохранения: {error}");
+            Console.Error.WriteLine($"[Body rig] Save failed: {error}");
+            return;
+        }
+
+        _bodyRigEditorOverlay?.SetStatus("Файл сохранён. Применяю новую геометрию к текущим колонистам...");
+        Console.WriteLine($"[Body rig] Saved colonist rig: {fullPath}");
+
+        UnitBodyRigEditorOverlay? editor = _bodyRigEditorOverlay;
+        ExecuteSimulationCommand(() =>
+        {
+            try
+            {
+                UnitAnatomyProfile previousProfile =
+                    UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+                UnitAnatomyCatalog.ApplyColonistBodyParts(parts);
+                UnitAnatomyProfile updatedProfile =
+                    UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+
+                UnitStore units = _unitSimulation.Units;
+                ReadOnlySpan<int> active = units.ActiveIndices;
+                int[] bodyStarts = units.BodyStart;
+                short[] bodyCounts = units.BodyCount;
+                UnitType[] types = units.Type;
+
+                int updatedCount = 0;
+                for (int i = 0; i < active.Length; i++)
+                {
+                    int index = active[i];
+                    if (types[index] != UnitType.Colonist ||
+                        bodyCounts[index] != parts.Length ||
+                        !ReferenceEquals(_unitSimulation.HitRegions.GetProfile(index), previousProfile))
+                    {
+                        continue;
+                    }
+
+                    _unitSimulation.Bodies.ApplyBodyDefinition(
+                        new BodyHandle(bodyStarts[index], bodyCounts[index]),
+                        parts);
+                    _unitSimulation.HitRegions.SetProfile(index, updatedProfile);
+                    updatedCount++;
+                }
+
+                editor?.SetStatus(
+                    $"Сохранено и применено. Обновлено колонистов: {updatedCount}. Файл: {fullPath}");
+            }
+            catch (Exception exception)
+            {
+                editor?.SetStatus($"Файл сохранён, но применение не удалось: {exception.Message}");
+                Console.Error.WriteLine($"[Body rig] Apply failed: {exception}");
+            }
+        });
     }
 
     private void OpenUnitCard(UnitId unit)
@@ -1328,6 +1390,7 @@ public sealed class GameRenderer
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
         _unitGroupCardOverlay = new UnitGroupCardOverlay();
+        _bodyRigEditorOverlay = new UnitBodyRigEditorOverlay(SaveColonistBodyRig);
         _combatStatusOverlay = new CombatStatusOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
@@ -1355,6 +1418,9 @@ public sealed class GameRenderer
         _window.MouseWheelScrolled +=
             (_, e) =>
             {
+                if (_bodyRigEditorOverlay?.IsOpen == true)
+                    return;
+
                 if (_menuPage != GameMenuPage.Closed)
                     return;
 
@@ -1392,6 +1458,20 @@ public sealed class GameRenderer
         _window.MouseButtonPressed +=
             (_, e) =>
             {
+                if (_bodyRigEditorOverlay?.IsOpen == true)
+                {
+                    if (e.Button == Mouse.Button.Left)
+                    {
+                        Vector2f editorCoordinates = _uiView != null
+                            ? _window.MapPixelToCoords(e.Position, _uiView)
+                            : new Vector2f(e.Position.X, e.Position.Y);
+                        _bodyRigEditorOverlay.HandleMousePressed(
+                            new Vector2i((int)editorCoordinates.X, (int)editorCoordinates.Y));
+                    }
+
+                    return;
+                }
+
                 if (e.Button == Mouse.Button.Right)
                 {
                     _isSelectingUnits = false;
@@ -1585,6 +1665,12 @@ public sealed class GameRenderer
                     (int)dragUiCoordinates.X,
                     (int)dragUiCoordinates.Y);
 
+                if (_bodyRigEditorOverlay?.IsOpen == true)
+                {
+                    _bodyRigEditorOverlay.HandleMouseMoved(dragUiPosition);
+                    return;
+                }
+
                 if (_unitGroupCardOverlay?.HandleMouseMoved(
                         dragUiPosition,
                         _window.Size.X,
@@ -1635,6 +1721,13 @@ public sealed class GameRenderer
         _window.MouseButtonReleased +=
             (_, e) =>
             {
+                if (_bodyRigEditorOverlay?.IsOpen == true)
+                {
+                    if (e.Button == Mouse.Button.Left)
+                        _bodyRigEditorOverlay.HandleMouseReleased();
+                    return;
+                }
+
                 if (e.Button != Mouse.Button.Left)
                     return;
 
@@ -1683,6 +1776,34 @@ public sealed class GameRenderer
     private void HandleKey(
         Keyboard.Key key)
     {
+        if (key == Keyboard.Key.F10)
+        {
+            if (_bodyRigEditorOverlay?.IsOpen == true)
+            {
+                _bodyRigEditorOverlay.Close();
+            }
+            else
+            {
+                CloseUnitCards();
+                _unitGroupCardOverlay?.Close();
+                _contextMenuOverlay?.Close();
+                _contextMenuUnit = default;
+                _menuPage = GameMenuPage.Closed;
+                _bodyRigEditorOverlay?.Open();
+            }
+
+            return;
+        }
+
+        if (_bodyRigEditorOverlay?.IsOpen == true)
+        {
+            bool controlPressed =
+                Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
+                Keyboard.IsKeyPressed(Keyboard.Key.RControl);
+            _bodyRigEditorOverlay.HandleKey(key, controlPressed);
+            return;
+        }
+
         if (key == Keyboard.Key.PageUp)
         {
             int step =
