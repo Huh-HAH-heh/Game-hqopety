@@ -87,20 +87,6 @@ public static class UnitAnatomyCatalog
             },
             // Colonist exterior: three trunk segments, two segments per limb,
             // a neck, and a head. Existing torso/head/organs bindings remain stable.
-            Layer("body.lower",
-                Part(V(-0.015f, 0f, 0.48f), V(0.095f, 0.078f, 0.20f),
-                    BodyPrimitive.Circle, role: BodyPartRole.Torso),
-                0.22f,
-                new[]
-                {
-                    Tissue(UnitHealthPartId.None, 1f, 42f, "torso.lower",
-                        parentId: "torso.main",
-                        projectileEnergyLoss: 190f,
-                        projectilePenetrationLoss: 12f)
-                },
-                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim),
-                new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
-
             Layer("body.middle",
                 Part(V(0f, 0f, 0.875f), V(0.112f, 0.092f, 0.22f),
                     BodyPrimitive.Circle, role: BodyPartRole.Torso),
@@ -119,9 +105,23 @@ public static class UnitAnatomyCatalog
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
 
+            ChildLayer("body.lower", "body.middle",
+                Part(V(-0.015f, 0f, -0.395f), V(0.095f, 0.078f, 0.20f),
+                    BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Torso),
+                0.22f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.None, 1f, 42f, "torso.lower",
+                        parentId: "torso.main",
+                        projectileEnergyLoss: 190f,
+                        projectilePenetrationLoss: 12f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim),
+                new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
+
             ChildLayer("body.torso.upper", "body.middle",
                 Part(V(0.015f, 0f, 0.225f), V(0.102f, 0.082f, 0.17f),
-                    BodyPrimitive.Circle, parentIndex: 1, role: BodyPartRole.Torso),
+                    BodyPrimitive.Circle, parentIndex: 0, role: BodyPartRole.Torso),
                 0.19f,
                 new[]
                 {
@@ -198,7 +198,7 @@ public static class UnitAnatomyCatalog
 
             ChildLayer("body.leg.left.upper", "body.lower",
                 Part(V(-0.005f, 0.035f, -0.08f), V(0.070f, 0.036f, 0.14f),
-                    BodyPrimitive.Box, parentIndex: 0,
+                    BodyPrimitive.Box, parentIndex: 1,
                     localRotation: MathF.PI - 0.22f,
                     motion: BodyPartMotion.WalkCycle,
                     role: BodyPartRole.Thigh,
@@ -230,7 +230,7 @@ public static class UnitAnatomyCatalog
 
             ChildLayer("body.leg.right.upper", "body.lower",
                 Part(V(-0.005f, -0.035f, -0.08f), V(0.070f, 0.036f, 0.14f),
-                    BodyPrimitive.Box, parentIndex: 0,
+                    BodyPrimitive.Box, parentIndex: 1,
                     localRotation: -MathF.PI + 0.22f,
                     motion: BodyPartMotion.WalkCycleOpposite,
                     role: BodyPartRole.Thigh,
