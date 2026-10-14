@@ -102,7 +102,7 @@ public static class UnitAnatomyCatalog
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
 
             Layer("body.middle",
-                Part(V(0f, 0f, 0.82f), V(0.112f, 0.092f, 0.22f),
+                Part(V(0f, 0f, 0.875f), V(0.112f, 0.092f, 0.22f),
                     BodyPrimitive.Circle, role: BodyPartRole.Torso),
                 0.24f,
                 new[]
@@ -275,7 +275,7 @@ public static class UnitAnatomyCatalog
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
 
             Layer("body.upper",
-                Part(V(0.155f, 0f, 1.49f), V(0.055f, 0.055f, 0.14f),
+                Part(V(0.155f, 0f, 1.47f), V(0.055f, 0.055f, 0.14f),
                     BodyPrimitive.Circle, anchor: BodyPartAnchor.UnitHead, role: BodyPartRole.Head),
                 0.145f,
                 new[]
