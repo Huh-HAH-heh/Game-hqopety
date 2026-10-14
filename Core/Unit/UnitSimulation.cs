@@ -11,6 +11,7 @@ public sealed class UnitSimulation
     private readonly UnitMovementSystem _movementSystem;
     private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
+    private readonly UnitMetabolismSystem _metabolismSystem;
     private readonly UnitInventorySystem _inventorySystem;
     private readonly VisionSystem _visionSystem;
     private readonly UnitWeaponSystem _weaponSystem;
@@ -24,6 +25,7 @@ public sealed class UnitSimulation
     public UnitBodyStore Bodies { get; }
     public UnitHitRegionStore HitRegions { get; }
     public UnitHealthStore Health { get; }
+    public UnitMetabolismStore Metabolism { get; }
     public UnitInventoryStore Inventory { get; }
     public UnitWeaponStore Weapons { get; }
     public ProjectileStore Projectiles { get; }
@@ -98,6 +100,10 @@ public sealed class UnitSimulation
             new UnitHealthStore(
                 unitCapacity);
 
+        Metabolism =
+            new UnitMetabolismStore(
+                unitCapacity);
+
         Inventory =
             new UnitInventoryStore(
                 unitCapacity);
@@ -110,6 +116,9 @@ public sealed class UnitSimulation
 
         _healthSystem =
             new UnitHealthSystem();
+
+        _metabolismSystem =
+            new UnitMetabolismSystem();
 
         _inventorySystem =
             new UnitInventorySystem();
@@ -301,6 +310,7 @@ public sealed class UnitSimulation
             !anatomy.HasSharedShapes ||
             body.Count != anatomy.NodeCount;
         Health.InitializeUnit(id.Index, type, initializeLegacyHealth);
+        Metabolism.InitializeUnit(id.Index, type);
         HitRegions.SetProfile(id.Index, hitProfile);
         Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);
@@ -359,6 +369,8 @@ public sealed class UnitSimulation
         Health.ClearUnit(
             index);
 
+        Metabolism.ClearUnit(index);
+
         Inventory.ClearUnit(
             index);
 
@@ -372,6 +384,36 @@ public sealed class UnitSimulation
             index);
 
         return Units.Destroy(id);
+    }
+
+    public float ConsumeFood(
+        UnitId id,
+        float caloriesKcal,
+        float proteinGrams,
+        float carbohydrateGrams,
+        float fatGrams,
+        float micronutrientUnits = 12f)
+    {
+        if (!Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f)
+        {
+            return 0f;
+        }
+
+        return Metabolism.AddFood(
+            unitIndex, caloriesKcal, proteinGrams,
+            carbohydrateGrams, fatGrams, micronutrientUnits);
+    }
+
+    public float DrinkWater(UnitId id, float liters)
+    {
+        if (!Units.TryGetIndex(id, out int unitIndex) ||
+            Health.OverallHitPoints[unitIndex] <= 0f)
+        {
+            return 0f;
+        }
+
+        return Metabolism.AddWater(unitIndex, liters);
     }
 
     public int AddInventoryItem(
@@ -844,6 +886,7 @@ public sealed class UnitSimulation
         RefreshMovementSpeeds();
 
         _healthSystem.Update(Units, Health, deltaTime);
+        _metabolismSystem.Update(Units, Health, Suppression, Metabolism, deltaTime);
         LastHealthUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
@@ -891,7 +934,8 @@ public sealed class UnitSimulation
             }
         }
 
-        Units.MoveSpeed[unitIndex] = _baseMoveSpeed[unitIndex] * multiplier;
+        Units.MoveSpeed[unitIndex] =
+            _baseMoveSpeed[unitIndex] * multiplier * Metabolism.MovementMultiplier[unitIndex];
     }
 
     private void ProcessDeadUnits()
