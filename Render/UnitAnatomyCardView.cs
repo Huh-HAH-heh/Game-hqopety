@@ -37,7 +37,7 @@ public sealed class UnitAnatomyCardView : IDisposable
     {
         for (int i = 0; i < _panels.Length; i++)
         {
-            _panels[i] = new RectangleShape
+            _panels[i] = new RectangleShape(new Vector2f(0f, 0f))
             {
                 FillColor = PanelColor,
                 OutlineColor = PanelOutline,
@@ -460,10 +460,9 @@ public sealed class UnitAnatomyCardView : IDisposable
         if (_emptyLabel == null)
             return;
 
-        FloatRect bounds = _emptyLabel.GetLocalBounds();
         _emptyLabel.Position = new Vector2f(
-            x + MathF.Max(0f, (width - bounds.Width) * 0.5f),
-            y + MathF.Max(0f, (height - bounds.Height) * 0.5f));
+            x + MathF.Max(0f, width * 0.5f - 65f),
+            y + MathF.Max(0f, height * 0.5f - 8f));
         window.Draw(_emptyLabel);
     }
 
