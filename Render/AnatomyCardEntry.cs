@@ -59,7 +59,7 @@ public sealed class BodyPartCardEntry : AnatomyCardEntry
     public override string FunctionDescription => "Наружная ткань / часть тела";
 
     public override string GeometryDescription =>
-        $"Форма: {Shape.Primitive}; размер: {FormatVector(Shape.Scale)}; " +
+        $"Геометрия слоя {RegionId}: {Shape.Primitive}; размер: {FormatVector(Shape.Scale)}; " +
         $"локальная позиция: {FormatVector(Shape.LocalPosition)}; " +
         $"поворот: {Shape.LocalRotation * 180f / MathF.PI:0.0}°";
 
@@ -148,8 +148,8 @@ internal static class AnatomyCardEntryFactory
             for (int bindingIndex = 0; bindingIndex < tissues.Length; bindingIndex++)
             {
                 HitRegionPartBinding binding = tissues[bindingIndex];
-                if (!health.TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out int healthIndex) &&
-                    healthIndex < 0)
+                        health.TryFindRegionPart(unitIndex, regionIndex, bindingIndex, out int healthIndex);
+                if (healthIndex < 0)
                     continue;
 
                 bool present = health.Present[healthIndex];
