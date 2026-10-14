@@ -324,12 +324,12 @@ public static class UnitBodyRigSettingsStore
         public float ScaleY { get; set; } = 0.022f;
         public float ScaleZ { get; set; } = 0.06f;
         public float Rotation { get; set; }
-        public float FollowDistance { get; set; }
+        public float FollowDistance { get; set; } = float.NaN;
         public string Primitive { get; set; } = nameof(BodyPrimitive.Circle);
-        public string Motion { get; set; } = nameof(BodyPartMotion.StaticRelative);
-        public string Anchor { get; set; } = nameof(BodyPartAnchor.Parent);
-        public string Role { get; set; } = nameof(BodyPartRole.Generic);
-        public string Pivot { get; set; } = nameof(BodyPartPivot.Center);
+        public string Motion { get; set; } = string.Empty;
+        public string Anchor { get; set; } = string.Empty;
+        public string Role { get; set; } = string.Empty;
+        public string Pivot { get; set; } = string.Empty;
 
         public BodyRigPartSettings() { }
 
@@ -356,7 +356,7 @@ public static class UnitBodyRigSettingsStore
         {
             if (!float.IsFinite(X) || !float.IsFinite(Y) || !float.IsFinite(Z) ||
                 !float.IsFinite(ScaleX) || !float.IsFinite(ScaleY) || !float.IsFinite(ScaleZ) ||
-                !float.IsFinite(Rotation) || !float.IsFinite(FollowDistance) ||
+                !float.IsFinite(Rotation) ||
                 ScaleX <= 0f || ScaleY <= 0f || ScaleZ <= 0f)
                 return baseline;
 
@@ -378,7 +378,9 @@ public static class UnitBodyRigSettingsStore
                 parentIndex: parent,
                 localRotation: Math.Clamp(Rotation, -20f * MathF.PI, 20f * MathF.PI),
                 motion: motion,
-                followDistance: Math.Clamp(FollowDistance, 0f, 3f),
+                followDistance: float.IsFinite(FollowDistance)
+                    ? Math.Clamp(FollowDistance, 0f, 3f)
+                    : baseline.FollowDistance,
                 anchor: anchor,
                 role: role,
                 pivot: pivot);
