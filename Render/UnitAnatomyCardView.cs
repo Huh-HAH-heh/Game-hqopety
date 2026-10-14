@@ -257,7 +257,7 @@ public sealed class UnitAnatomyCardView : IDisposable
             _circle.Rotation = projection == 2 ? geometry.Rotation : 0f;
             _circle.FillColor = fill;
             _circle.OutlineColor = outline;
-            _circle.OutlineThickness = organ ? 1.2f : 0.9f;
+            _circle.OutlineThickness = MathF.Min(0.5f, 0.8f / MathF.Max(width, height));
             window.Draw(_circle);
         }
         else
@@ -267,7 +267,7 @@ public sealed class UnitAnatomyCardView : IDisposable
             _box.Rotation = projection == 2 ? geometry.Rotation : 0f;
             _box.FillColor = fill;
             _box.OutlineColor = outline;
-            _box.OutlineThickness = organ ? 1.2f : 0.9f;
+            _box.OutlineThickness = MathF.Min(0.5f, 0.8f / MathF.Max(width, height));
             window.Draw(_box);
         }
     }
