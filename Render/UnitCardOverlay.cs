@@ -11,7 +11,8 @@ namespace RimClone.Render;
 
 public sealed class UnitCardOverlay : IDisposable
 {
-    private const float Width = 430f;
+    public const float PanelWidth = 430f;
+    private const float Width = PanelWidth;
     private const float MaximumHeight = 760f;
     private const float RowHeight = 17f;
     private const int MaxVisibleLines = 42;
@@ -49,6 +50,12 @@ public sealed class UnitCardOverlay : IDisposable
     private int _scrollOffset;
     private int _visibleLines;
     private int _lineCount;
+    private float _positionX;
+    private float _positionY;
+    private float _dragOffsetX;
+    private float _dragOffsetY;
+    private bool _hasPosition;
+    private bool _dragging;
 
     public bool IsOpen { get; private set; }
 
@@ -70,7 +77,7 @@ public sealed class UnitCardOverlay : IDisposable
             FillColor = new Color(225, 232, 241)
         };
 
-        _footer = new Text(_font, "Колесо мыши — прокрутка   •   Esc — закрыть", 10)
+        _footer = new Text(_font, "Заголовок — перемещение   •   Колесо — прокрутка", 10)
         {
             FillColor = new Color(143, 155, 171)
         };
@@ -84,22 +91,76 @@ public sealed class UnitCardOverlay : IDisposable
         }
     }
 
-    public void Open()
+    public void Open(float x, float y)
     {
         IsOpen = true;
         _scrollOffset = 0;
+        _positionX = x;
+        _positionY = y;
+        _hasPosition = true;
+        _dragging = false;
     }
 
-    public void Close() => IsOpen = false;
-
-    public bool HandleClick(Vector2i position)
+    public void Close()
     {
-        if (!IsOpen || !_panel.GetGlobalBounds().Contains(position))
+        IsOpen = false;
+        _dragging = false;
+    }
+
+    public bool Contains(Vector2i position) =>
+        IsOpen && _panel.GetGlobalBounds().Contains(position);
+
+    public bool HandleMousePressed(
+        Vector2i position,
+        uint windowWidth,
+        uint windowHeight)
+    {
+        if (!Contains(position))
             return false;
 
         if (_closeButton.GetGlobalBounds().Contains(position))
+        {
             Close();
+            return true;
+        }
 
+        if (_header.GetGlobalBounds().Contains(position))
+        {
+            _dragging = true;
+            _dragOffsetX = position.X - _panel.Position.X;
+            _dragOffsetY = position.Y - _panel.Position.Y;
+        }
+
+        return true;
+    }
+
+    public bool HandleMouseMoved(
+        Vector2i position,
+        uint windowWidth,
+        uint windowHeight)
+    {
+        if (!_dragging)
+            return false;
+
+        float panelHeight = Math.Clamp(windowHeight - 24f, 300f, MaximumHeight);
+        _positionX = Math.Clamp(
+            position.X - _dragOffsetX,
+            8f,
+            Math.Max(8f, windowWidth - Width - 8f));
+        _positionY = Math.Clamp(
+            position.Y - _dragOffsetY,
+            8f,
+            Math.Max(8f, windowHeight - panelHeight - 8f));
+        Layout(windowWidth, windowHeight);
+        return true;
+    }
+
+    public bool HandleMouseReleased()
+    {
+        if (!_dragging)
+            return false;
+
+        _dragging = false;
         return true;
     }
 
@@ -185,7 +246,7 @@ public sealed class UnitCardOverlay : IDisposable
                 _panel.Position.Y + _panel.Size.Y - 22f);
             _footer.DisplayedString = _lineCount > _visibleLines
                 ? $"Строки {_scrollOffset + 1}–{Math.Min(_scrollOffset + _visibleLines, _lineCount)} из {_lineCount}   •   Колесо — прокрутка"
-                : "Колесо мыши — прокрутка   •   Esc — закрыть";
+                : "Заголовок — перемещение   •   Колесо — прокрутка";
             window.Draw(_footer);
         }
     }
@@ -193,8 +254,23 @@ public sealed class UnitCardOverlay : IDisposable
     private void Layout(uint windowWidth, uint windowHeight)
     {
         float height = Math.Clamp(windowHeight - 24f, 300f, MaximumHeight);
-        float x = Math.Max(8f, windowWidth - Width - 14f);
-        const float y = 12f;
+        if (!_hasPosition)
+        {
+            _positionX = Math.Max(8f, windowWidth - Width - 14f);
+            _positionY = 12f;
+            _hasPosition = true;
+        }
+
+        float x = Math.Clamp(
+            _positionX,
+            8f,
+            Math.Max(8f, windowWidth - Width - 8f));
+        float y = Math.Clamp(
+            _positionY,
+            8f,
+            Math.Max(8f, windowHeight - height - 8f));
+        _positionX = x;
+        _positionY = y;
 
         _panel.Position = new Vector2f(x, y);
         _panel.Size = new Vector2f(Width, height);
