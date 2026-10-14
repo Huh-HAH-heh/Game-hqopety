@@ -192,7 +192,10 @@ internal static class AnatomyCardEntryFactory
         return id switch
         {
             "body.main" => "Тело",
-            "torso.main" => "Торс",
+            "torso.main" => "Средняя часть туловища",
+            "torso.lower" => "Нижняя часть туловища",
+            "torso.upper" => "Верхняя часть туловища",
+            "neck.main" => "Шея",
             "head.main" => "Голова",
             "heart.main" => "Сердце",
             "lung.left" => "Левое лёгкое",
