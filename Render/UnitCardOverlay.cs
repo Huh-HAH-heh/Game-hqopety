@@ -329,7 +329,10 @@ public sealed class UnitCardOverlay : IDisposable
         window.Draw(_detailsTab);
 
         if (_bodyTabLabel != null)
+        {
+            _bodyTabLabel.DisplayedString = _view == CardView.EntryDetails ? "← К СПИСКУ" : "ТЕЛО";
             window.Draw(_bodyTabLabel);
+        }
         if (_detailsTabLabel != null)
             window.Draw(_detailsTabLabel);
 
@@ -357,9 +360,6 @@ public sealed class UnitCardOverlay : IDisposable
             };
             window.Draw(_title);
         }
-
-        if (_bodyTabLabel != null)
-            _bodyTabLabel.DisplayedString = _view == CardView.EntryDetails ? "← К СПИСКУ" : "ТЕЛО";
 
         if (_closeLabel != null)
             window.Draw(_closeLabel);
@@ -458,7 +458,7 @@ public sealed class UnitCardOverlay : IDisposable
             _footer.Position = new Vector2f(
                 _panel.Position.X + 12f,
                 _panel.Position.Y + _panel.Size.Y - 22f);
-            _footer.DisplayedString = _view is CardView.Details or CardView.EntryDetails or CardView.AnatomyList
+            _footer.DisplayedString = (_view is CardView.Details or CardView.EntryDetails or CardView.AnatomyList)
                 && _lineCount > _visibleLines
                 ? $"Строки {_scrollOffset + 1}–{Math.Min(_scrollOffset + _visibleLines, _lineCount)} из {_lineCount}   •   Колесо — прокрутка"
                 : _view == CardView.Anatomy
