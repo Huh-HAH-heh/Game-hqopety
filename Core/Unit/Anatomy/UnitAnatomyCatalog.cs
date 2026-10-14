@@ -111,7 +111,7 @@ public static class UnitAnatomyCatalog
                 0.22f,
                 new[]
                 {
-                    Tissue(UnitHealthPartId.None, 1f, 42f, "torso.lower",
+                    Tissue(UnitHealthPartId.Torso, 1f, 42f, "torso.lower",
                         parentId: "torso.main",
                         projectileEnergyLoss: 190f,
                         projectilePenetrationLoss: 12f)
@@ -125,7 +125,7 @@ public static class UnitAnatomyCatalog
                 0.19f,
                 new[]
                 {
-                    Tissue(UnitHealthPartId.None, 1f, 38f, "torso.upper",
+                    Tissue(UnitHealthPartId.Torso, 1f, 38f, "torso.upper",
                         parentId: "torso.main",
                         projectileEnergyLoss: 190f,
                         projectilePenetrationLoss: 12f)
@@ -267,7 +267,7 @@ public static class UnitAnatomyCatalog
                 0.105f,
                 new[]
                 {
-                    Tissue(UnitHealthPartId.None, 1f, 18f, "neck.main",
+                    Tissue(UnitHealthPartId.Neck, 1f, 18f, "neck.main",
                         parentId: "torso.upper",
                         projectileEnergyLoss: 100f,
                         projectilePenetrationLoss: 6f)
