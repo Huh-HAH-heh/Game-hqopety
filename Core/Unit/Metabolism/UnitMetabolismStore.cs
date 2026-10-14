@@ -173,10 +173,18 @@ public sealed class UnitMetabolismStore
                 break;
         }
 
-        _strength[index] = strength;
-        _constitution[index] = constitution;
-        _dexterity[index] = dexterity;
-        _intelligence[index] = intelligence;
+        // Stable per-slot variation gives colonists different baselines without RNG allocations.
+        uint seed = unchecked((uint)index * 747796405u + 2891336453u);
+        _strength[index] = (byte)Math.Clamp((int)strength + (int)(seed % 3u) - 1, 1, 8);
+        seed = unchecked(seed * 2246822519u + 3266489917u);
+        _constitution[index] = (byte)Math.Clamp((int)constitution + (int)(seed % 3u) - 1, 1, 8);
+        seed = unchecked(seed * 2246822519u + 3266489917u);
+        _dexterity[index] = (byte)Math.Clamp((int)dexterity + (int)(seed % 3u) - 1, 1, 8);
+        seed = unchecked(seed * 2246822519u + 3266489917u);
+        _intelligence[index] = (byte)Math.Clamp((int)intelligence + (int)(seed % 3u) - 1, 1, 8);
+        mass *= 0.96f + ((seed >> 8) % 9u) * 0.01f;
+        muscle *= 0.9f + ((seed >> 16) % 21u) * 0.01f;
+        fat *= 0.85f + ((seed >> 24) % 31u) * 0.01f;
         _bodyMassKg[index] = mass;
         _maxEnergyKcal[index] = energy * 1.55f;
         _energyKcal[index] = energy;
