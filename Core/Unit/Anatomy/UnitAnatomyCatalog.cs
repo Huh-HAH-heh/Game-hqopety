@@ -85,33 +85,29 @@ public static class UnitAnatomyCatalog
                     V(0f, 0f, 0.015f), V(0.018f, 0.018f, 0.014f),
                     energyLoss: 20f, penetrationLoss: 1.5f, damageMultiplier: 1.5f, bleedMultiplier: 1.8f)
             },
-            // These are the only three physical colonist nodes. Individual limbs and
-            // organs stay as health metadata attached to the appropriate layer.
+            // Colonist exterior: three trunk segments, two segments per limb,
+            // a neck, and a head. Existing torso/head/organs bindings remain stable.
             Layer("body.lower",
-                Part(V(-0.055f, 0f, 0.30f), V(0.105f, 0.085f, 0.30f),
-                    BodyPrimitive.Circle, role: BodyPartRole.Thigh),
-                0.34f,
+                Part(V(-0.015f, 0f, 0.48f), V(0.095f, 0.078f, 0.20f),
+                    BodyPrimitive.Circle, role: BodyPartRole.Torso),
+                0.22f,
                 new[]
                 {
-                    Tissue(UnitHealthPartId.LeftLeg, 8f, 35f, "leg.left", parentId: "torso.main", projectileEnergyLoss: 105f, projectilePenetrationLoss: 7f),
-                    Tissue(UnitHealthPartId.LeftFoot, 2f, 14f, "foot.left", parentId: "leg.left", projectileEnergyLoss: 50f, projectilePenetrationLoss: 4f),
-                    Tissue(UnitHealthPartId.RightLeg, 8f, 35f, "leg.right", parentId: "torso.main", projectileEnergyLoss: 105f, projectilePenetrationLoss: 7f),
-                    Tissue(UnitHealthPartId.RightFoot, 2f, 14f, "foot.right", parentId: "leg.right", projectileEnergyLoss: 50f, projectilePenetrationLoss: 4f)
+                    Tissue(UnitHealthPartId.None, 1f, 42f, "torso.lower",
+                        parentId: "torso.main",
+                        projectileEnergyLoss: 190f,
+                        projectilePenetrationLoss: 12f)
                 },
-                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
 
             Layer("body.middle",
-                Part(V(0f, 0f, 0.875f), V(0.13f, 0.105f, 0.34f),
+                Part(V(0f, 0f, 0.82f), V(0.112f, 0.092f, 0.22f),
                     BodyPrimitive.Circle, role: BodyPartRole.Torso),
-                0.385f,
+                0.24f,
                 new[]
                 {
                     Tissue(UnitHealthPartId.Torso, 14f, 60f, "torso.main", projectileEnergyLoss: 190f, projectilePenetrationLoss: 12f),
-                    Tissue(UnitHealthPartId.LeftArm, 2f, 30f, "arm.left", parentId: "torso.main", projectileEnergyLoss: 90f, projectilePenetrationLoss: 6f),
-                    Tissue(UnitHealthPartId.LeftHand, 0.5f, 12f, "hand.left", parentId: "arm.left", projectileEnergyLoss: 55f, projectilePenetrationLoss: 4f),
-                    Tissue(UnitHealthPartId.RightArm, 2f, 30f, "arm.right", parentId: "torso.main", projectileEnergyLoss: 90f, projectilePenetrationLoss: 6f),
-                    Tissue(UnitHealthPartId.RightHand, 0.5f, 12f, "hand.right", parentId: "arm.right", projectileEnergyLoss: 55f, projectilePenetrationLoss: 4f),
                     Tissue(UnitHealthPartId.Heart, 0.3f, 15f, "heart.main", UnitHealthPartKind.Organ, "torso.main"),
                     Tissue(UnitHealthPartId.LeftLung, 0.25f, 12f, "lung.left", UnitHealthPartKind.Organ, "torso.main"),
                     Tissue(UnitHealthPartId.RightLung, 0.25f, 12f, "lung.right", UnitHealthPartKind.Organ, "torso.main"),
@@ -123,10 +119,165 @@ public static class UnitAnatomyCatalog
                 new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision),
                 new UnitAnatomyMarker("locomotion", UnitAnatomyMarkerRole.Locomotion)),
 
+            ChildLayer("body.torso.upper", "body.middle",
+                Part(V(0.015f, 0f, 0.225f), V(0.102f, 0.082f, 0.17f),
+                    BodyPrimitive.Circle, parentIndex: 1, role: BodyPartRole.Torso),
+                0.19f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.None, 1f, 38f, "torso.upper",
+                        parentId: "torso.main",
+                        projectileEnergyLoss: 190f,
+                        projectilePenetrationLoss: 12f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision)),
+
+            ChildLayer("body.arm.left.upper", "body.torso.upper",
+                Part(V(0f, 0.072f, 0f), V(0.060f, 0.032f, 0.125f),
+                    BodyPrimitive.Box, parentIndex: 2,
+                    localRotation: MathF.PI / 2f,
+                    motion: BodyPartMotion.WalkCycle,
+                    role: BodyPartRole.UpperArm,
+                    pivot: BodyPartPivot.Start),
+                0.14f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.LeftArm, 2f, 30f, "arm.left",
+                        parentId: "torso.main",
+                        projectileEnergyLoss: 90f,
+                        projectilePenetrationLoss: 6f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
+            ChildLayer("body.arm.left.lower", "body.arm.left.upper",
+                Part(V(0.060f, 0f, -0.085f), V(0.050f, 0.028f, 0.105f),
+                    BodyPrimitive.Box, parentIndex: 3,
+                    role: BodyPartRole.Forearm,
+                    pivot: BodyPartPivot.Start),
+                0.115f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.LeftHand, 0.5f, 12f, "hand.left",
+                        parentId: "arm.left",
+                        projectileEnergyLoss: 55f,
+                        projectilePenetrationLoss: 4f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
+            ChildLayer("body.arm.right.upper", "body.torso.upper",
+                Part(V(0f, -0.072f, 0f), V(0.060f, 0.032f, 0.125f),
+                    BodyPrimitive.Box, parentIndex: 2,
+                    localRotation: -MathF.PI / 2f,
+                    motion: BodyPartMotion.WalkCycleOpposite,
+                    role: BodyPartRole.UpperArm,
+                    pivot: BodyPartPivot.Start),
+                0.14f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.RightArm, 2f, 30f, "arm.right",
+                        parentId: "torso.main",
+                        projectileEnergyLoss: 90f,
+                        projectilePenetrationLoss: 6f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
+            ChildLayer("body.arm.right.lower", "body.arm.right.upper",
+                Part(V(0.060f, 0f, -0.085f), V(0.050f, 0.028f, 0.105f),
+                    BodyPrimitive.Box, parentIndex: 5,
+                    role: BodyPartRole.Forearm,
+                    pivot: BodyPartPivot.Start),
+                0.115f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.RightHand, 0.5f, 12f, "hand.right",
+                        parentId: "arm.right",
+                        projectileEnergyLoss: 55f,
+                        projectilePenetrationLoss: 4f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
+            ChildLayer("body.leg.left.upper", "body.lower",
+                Part(V(-0.005f, 0.035f, -0.08f), V(0.070f, 0.036f, 0.14f),
+                    BodyPrimitive.Box, parentIndex: 0,
+                    localRotation: MathF.PI - 0.22f,
+                    motion: BodyPartMotion.WalkCycle,
+                    role: BodyPartRole.Thigh,
+                    pivot: BodyPartPivot.Start),
+                0.15f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.LeftLeg, 8f, 35f, "leg.left",
+                        parentId: "torso.main",
+                        projectileEnergyLoss: 105f,
+                        projectilePenetrationLoss: 7f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
+            ChildLayer("body.leg.left.lower", "body.leg.left.upper",
+                Part(V(0.070f, 0f, -0.21f), V(0.060f, 0.032f, 0.11f),
+                    BodyPrimitive.Box, parentIndex: 7,
+                    role: BodyPartRole.Shin,
+                    pivot: BodyPartPivot.Start),
+                0.12f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.LeftFoot, 2f, 14f, "foot.left",
+                        parentId: "leg.left",
+                        projectileEnergyLoss: 50f,
+                        projectilePenetrationLoss: 4f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
+            ChildLayer("body.leg.right.upper", "body.lower",
+                Part(V(-0.005f, -0.035f, -0.08f), V(0.070f, 0.036f, 0.14f),
+                    BodyPrimitive.Box, parentIndex: 0,
+                    localRotation: -MathF.PI + 0.22f,
+                    motion: BodyPartMotion.WalkCycleOpposite,
+                    role: BodyPartRole.Thigh,
+                    pivot: BodyPartPivot.Start),
+                0.15f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.RightLeg, 8f, 35f, "leg.right",
+                        parentId: "torso.main",
+                        projectileEnergyLoss: 105f,
+                        projectilePenetrationLoss: 7f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
+            ChildLayer("body.leg.right.lower", "body.leg.right.upper",
+                Part(V(0.070f, 0f, -0.21f), V(0.060f, 0.032f, 0.11f),
+                    BodyPrimitive.Box, parentIndex: 9,
+                    role: BodyPartRole.Shin,
+                    pivot: BodyPartPivot.Start),
+                0.12f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.RightFoot, 2f, 14f, "foot.right",
+                        parentId: "leg.right",
+                        projectileEnergyLoss: 50f,
+                        projectilePenetrationLoss: 4f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
+            ChildLayer("body.neck", "body.torso.upper",
+                Part(V(0.075f, 0f, 0.205f), V(0.038f, 0.035f, 0.10f),
+                    BodyPrimitive.Circle, parentIndex: 2,
+                    role: BodyPartRole.Neck),
+                0.105f,
+                new[]
+                {
+                    Tissue(UnitHealthPartId.None, 1f, 18f, "neck.main",
+                        parentId: "torso.upper",
+                        projectileEnergyLoss: 100f,
+                        projectilePenetrationLoss: 6f)
+                },
+                new UnitAnatomyMarker("target", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim)),
+
             Layer("body.upper",
-                Part(V(0.155f, 0f, 1.47f), V(0.055f, 0.055f, 0.22f),
+                Part(V(0.155f, 0f, 1.49f), V(0.055f, 0.055f, 0.14f),
                     BodyPrimitive.Circle, anchor: BodyPartAnchor.UnitHead, role: BodyPartRole.Head),
-                0.2275f,
+                0.145f,
                 new[]
                 {
                     Tissue(UnitHealthPartId.Head, 19f, 40f, "head.main", parentId: "torso.main", projectileEnergyLoss: 170f, projectilePenetrationLoss: 10f),
