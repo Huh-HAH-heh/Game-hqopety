@@ -915,6 +915,21 @@ public sealed class GameRenderer
         }
     }
 
+    private void OpenUnitAnatomyCard(UnitId unit)
+    {
+        OpenUnitCard(unit);
+
+        for (int i = _unitCards.Count - 1; i >= 0; i--)
+        {
+            UnitCardEntry card = _unitCards[i];
+            if (card.Unit.Index != unit.Index || card.Unit.Generation != unit.Generation)
+                continue;
+
+            card.Overlay.ShowAnatomyList();
+            return;
+        }
+    }
+
     private void OpenSelectionOverview()
     {
         _contextMenuOverlay?.Close();
@@ -1488,6 +1503,7 @@ public sealed class GameRenderer
                     bool menuHandled = _contextMenuOverlay.HandleClick(
                         uiPosition,
                         out bool openUnitCard,
+                        out bool openUnitAnatomy,
                         out bool openSelectionOverview,
                         out bool giveFood,
                         out bool giveWater);
@@ -1499,6 +1515,10 @@ public sealed class GameRenderer
                         if (openUnitCard && contextUnit.IsValid)
                         {
                             OpenUnitCard(contextUnit);
+                        }
+                        else if (openUnitAnatomy && contextUnit.IsValid)
+                        {
+                            OpenUnitAnatomyCard(contextUnit);
                         }
                         else if (openSelectionOverview)
                         {
