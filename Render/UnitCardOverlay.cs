@@ -350,6 +350,27 @@ public sealed class UnitCardOverlay : IDisposable
                 }
             }
 
+            RenderMetabolismState metabolism = details.Metabolism;
+            Heading("МЕТАБОЛИЗМ / СОСТОЯНИЕ ОРГАНИЗМА");
+            Value("Состояние", metabolism.Condition.ToString());
+            Value("Энергия", $"{metabolism.EnergyKcal:0}/{metabolism.MaxEnergyKcal:0} ккал " +
+                $"({(metabolism.MaxEnergyKcal > 0f ? metabolism.EnergyKcal / metabolism.MaxEnergyKcal : 0f):P0})");
+            Value("Вода", $"{metabolism.WaterLiters:0.00}/{metabolism.MaxWaterLiters:0.00} л");
+            Value("Резервы Б/У/Ж", $"{metabolism.ProteinReserveGrams:0}/" +
+                $"{metabolism.CarbohydrateReserveGrams:0}/{metabolism.FatReserveGrams:0} г");
+            Value("Витамины и минералы", $"{metabolism.MicronutrientReserve:0}%");
+            Value("Пищеварение, ккал", $"{metabolism.StomachKcal:0} в желудке / {metabolism.GutKcal:0} в кишечнике");
+            Value("Вода в пищеварении", $"{metabolism.StomachWaterLiters:0.00} / {metabolism.GutWaterLiters:0.00} л");
+            Value("Масса / мышцы / жир", $"{metabolism.BodyMassKg:0.0} / " +
+                $"{metabolism.MuscleMassKg:0.0} / {metabolism.BodyFatKg:0.0} кг");
+            Value("Кровь", $"{metabolism.BloodLiters:0.00}/{metabolism.MaxBloodLiters:0.00} л");
+            Value("Усталость / стресс", $"{metabolism.Fatigue:0}% / {metabolism.Stress:0}%");
+            Value("Сила", $"{metabolism.Strength} → {metabolism.EffectiveStrength:0.0}");
+            Value("Выносливость", $"{metabolism.Constitution} → {metabolism.EffectiveConstitution:0.0}");
+            Value("Ловкость", $"{metabolism.Dexterity} → {metabolism.EffectiveDexterity:0.0}");
+            Value("Интеллект", metabolism.Intelligence.ToString());
+            Value("Модификатор скорости", $"{metabolism.MovementMultiplier:P0}");
+
             Heading($"ИНВЕНТАРЬ ({details.Inventory.Length})");
             if (details.Inventory.Length == 0)
             {
