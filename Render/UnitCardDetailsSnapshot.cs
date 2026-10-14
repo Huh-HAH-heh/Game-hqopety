@@ -11,6 +11,36 @@ public readonly record struct RenderHealthPart(
     float MaxHitPoints,
     float BleedRate);
 
+public readonly record struct RenderMetabolismState(
+    byte Strength,
+    byte Constitution,
+    byte Dexterity,
+    byte Intelligence,
+    float EffectiveStrength,
+    float EffectiveConstitution,
+    float EffectiveDexterity,
+    float EnergyKcal,
+    float MaxEnergyKcal,
+    float WaterLiters,
+    float MaxWaterLiters,
+    float ProteinReserveGrams,
+    float CarbohydrateReserveGrams,
+    float FatReserveGrams,
+    float MicronutrientReserve,
+    float StomachKcal,
+    float GutKcal,
+    float StomachWaterLiters,
+    float GutWaterLiters,
+    float BodyMassKg,
+    float MuscleMassKg,
+    float BodyFatKg,
+    float BloodLiters,
+    float MaxBloodLiters,
+    float Fatigue,
+    float Stress,
+    float MovementMultiplier,
+    UnitMetabolicCondition Condition);
+
 public readonly record struct RenderInventoryItem(
     ItemConfig Config,
     float Durability,
@@ -22,6 +52,7 @@ public sealed class UnitCardDetailsSnapshot
     public UnitId Unit { get; init; }
     public RenderHealthPart[] HealthParts { get; init; } = Array.Empty<RenderHealthPart>();
     public RenderInventoryItem[] Inventory { get; init; } = Array.Empty<RenderInventoryItem>();
+    public RenderMetabolismState Metabolism { get; init; }
 
     public static UnitCardDetailsSnapshot Capture(UnitSimulation simulation, UnitId id)
     {
@@ -117,11 +148,43 @@ public sealed class UnitCardDetailsSnapshot
                 equipped);
         }
 
+        UnitMetabolismStore metabolism = simulation.Metabolism;
+        RenderMetabolismState metabolicState = new(
+            metabolism.Strength[unitIndex],
+            metabolism.Constitution[unitIndex],
+            metabolism.Dexterity[unitIndex],
+            metabolism.Intelligence[unitIndex],
+            metabolism.EffectiveStrength[unitIndex],
+            metabolism.EffectiveConstitution[unitIndex],
+            metabolism.EffectiveDexterity[unitIndex],
+            metabolism.EnergyKcal[unitIndex],
+            metabolism.MaxEnergyKcal[unitIndex],
+            metabolism.WaterLiters[unitIndex],
+            metabolism.MaxWaterLiters[unitIndex],
+            metabolism.ProteinReserveGrams[unitIndex],
+            metabolism.CarbohydrateReserveGrams[unitIndex],
+            metabolism.FatReserveGrams[unitIndex],
+            metabolism.MicronutrientReserve[unitIndex],
+            metabolism.StomachKcal[unitIndex],
+            metabolism.GutKcal[unitIndex],
+            metabolism.StomachWater[unitIndex],
+            metabolism.GutWater[unitIndex],
+            metabolism.BodyMassKg[unitIndex],
+            metabolism.MuscleMassKg[unitIndex],
+            metabolism.BodyFatKg[unitIndex],
+            metabolism.BloodLiters[unitIndex],
+            metabolism.MaxBloodLiters[unitIndex],
+            metabolism.Fatigue[unitIndex],
+            metabolism.Stress[unitIndex],
+            metabolism.MovementMultiplier[unitIndex],
+            metabolism.Condition[unitIndex]);
+
         return new UnitCardDetailsSnapshot
         {
             Unit = id,
             HealthParts = healthParts,
-            Inventory = inventoryItems
+            Inventory = inventoryItems,
+            Metabolism = metabolicState
         };
     }
 }
