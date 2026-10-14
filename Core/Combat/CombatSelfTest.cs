@@ -1421,21 +1421,37 @@ public static class CombatSelfTest
     private static bool TestColonistUsesAnatomyNodes()
     {
         UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
-        if (profile.RegionCount != 18 || profile.NodeCount != 18 || !profile.HasSharedShapes)
+        if (profile.RegionCount != 13 || profile.NodeCount != 13 || !profile.HasSharedShapes)
             return false;
 
-        int torso = profile.FindRegion("torso");
-        int leftLeg = profile.FindRegion("leg.left");
-        int head = profile.FindRegion("head");
-        int heart = profile.FindRegion("heart");
-        int brain = profile.FindRegion("brain");
+        int lowerTorso = profile.FindRegion("body.lower");
+        int torso = profile.FindRegion("body.middle");
+        int upperTorso = profile.FindRegion("body.torso.upper");
+        int leftArmUpper = profile.FindRegion("body.arm.left.upper");
+        int leftArmLower = profile.FindRegion("body.arm.left.lower");
+        int rightArmUpper = profile.FindRegion("body.arm.right.upper");
+        int rightArmLower = profile.FindRegion("body.arm.right.lower");
+        int leftLeg = profile.FindRegion("body.leg.left.upper");
+        int leftShin = profile.FindRegion("body.leg.left.lower");
+        int rightLeg = profile.FindRegion("body.leg.right.upper");
+        int rightShin = profile.FindRegion("body.leg.right.lower");
+        int neck = profile.FindRegion("body.neck");
+        int head = profile.FindRegion("body.upper");
 
-        if (torso < 0 || leftLeg < 0 || head < 0 || heart < 0 || brain < 0 ||
-            !profile.IsInternalNode(heart) || !profile.IsInternalNode(brain) ||
+        if (lowerTorso < 0 || torso < 0 || upperTorso < 0 ||
+            leftArmUpper < 0 || leftArmLower < 0 ||
+            rightArmUpper < 0 || rightArmLower < 0 ||
+            leftLeg < 0 || leftShin < 0 || rightLeg < 0 || rightShin < 0 ||
+            neck < 0 || head < 0 ||
             !profile.TryFindPart(UnitHealthPartId.Torso, out int torsoBindingRegion, out _) ||
             torsoBindingRegion != torso ||
             !profile.TryFindPart(UnitHealthPartId.LeftLeg, out int legBindingRegion, out _) ||
-            legBindingRegion != leftLeg)
+            legBindingRegion != leftLeg ||
+            !profile.TryFindPart("heart.main", out int heartRegion, out _) ||
+            heartRegion != torso ||
+            !profile.TryFindPart("brain.main", out int brainRegion, out _) ||
+            brainRegion != head ||
+            profile.VolumeCount != 8)
             return false;
 
         UnitSimulation simulation = new UnitSimulation(4, 32);
@@ -1457,7 +1473,7 @@ public static class CombatSelfTest
         return sharedGeometry &&
             legsCenter.Z < torsoCenter.Z &&
             torsoCenter.Z < headCenter.Z &&
-            UnitHitSystem.GetVisibilityPointCount(simulation.Units, unit.Index, simulation.HitRegions) == 10;
+            UnitHitSystem.GetVisibilityPointCount(simulation.Units, unit.Index, simulation.HitRegions) == 13;
     }
 
 private static bool TestVisionDetectsRegionInsideRange()
@@ -2366,18 +2382,18 @@ private static bool TestVisionDetectsRegionInsideRange()
         UnitBodyStore definitions = new UnitBodyStore(4);
         BodyHandle colonistBody = definitions.CreateBody(UnitBodyType.Colonist);
 
-        if (colonistBody.Count != 18 ||
+        if (colonistBody.Count != 13 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Head) != 1 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Torso) != 1 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Torso) != 3 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.UpperArm) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Hand) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Forearm) != 2 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Thigh) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Foot) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Neck) != 0 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Shin) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Neck) != 1 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Hand) != 0 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Foot) != 0 ||
             CountBodyRole(definitions, colonistBody, BodyPartRole.Elbow) != 0 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Forearm) != 0 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Knee) != 0 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Shin) != 0)
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Knee) != 0)
         {
             return false;
         }
@@ -2408,28 +2424,28 @@ private static bool TestVisionDetectsRegionInsideRange()
         Vector3[] initialPositions = definitions.WorldPosition;
         int bodyStartForPose = colonistBody.Start;
         Vector3 torsoPosition = initialPositions[bodyStartForPose];
-        Vector3 rightArmPosition = initialPositions[bodyStartForPose + 2];
-        Vector3 rightHandPosition = initialPositions[bodyStartForPose + 3];
-        Vector3 leftArmPosition = initialPositions[bodyStartForPose + 4];
-        Vector3 leftHandPosition = initialPositions[bodyStartForPose + 5];
-        Vector3 rightLegPosition = initialPositions[bodyStartForPose + 6];
-        Vector3 rightFootPosition = initialPositions[bodyStartForPose + 7];
-        Vector3 leftLegPosition = initialPositions[bodyStartForPose + 8];
-        Vector3 leftFootPosition = initialPositions[bodyStartForPose + 9];
+        Vector3 leftArmPosition = initialPositions[bodyStartForPose + 3];
+        Vector3 leftForearmPosition = initialPositions[bodyStartForPose + 4];
+        Vector3 rightArmPosition = initialPositions[bodyStartForPose + 5];
+        Vector3 rightForearmPosition = initialPositions[bodyStartForPose + 6];
+        Vector3 leftLegPosition = initialPositions[bodyStartForPose + 7];
+        Vector3 leftShinPosition = initialPositions[bodyStartForPose + 8];
+        Vector3 rightLegPosition = initialPositions[bodyStartForPose + 9];
+        Vector3 rightShinPosition = initialPositions[bodyStartForPose + 10];
 
-        // Root torso is exactly at the unit-marker center; each limb pair mirrors over Y=0.
+        // The middle torso is the root; left/right limb chains mirror over Y=0.
         if (MathF.Abs(torsoPosition.X) > 0.001f ||
             MathF.Abs(torsoPosition.Y) > 0.001f ||
             MathF.Abs(headPosition.X - 0.155f) > 0.001f ||
             MathF.Abs(headPosition.Y) > 0.001f ||
             MathF.Abs(rightArmPosition.X - leftArmPosition.X) > 0.001f ||
             MathF.Abs(rightArmPosition.Y + leftArmPosition.Y) > 0.001f ||
-            MathF.Abs(rightHandPosition.X - leftHandPosition.X) > 0.001f ||
-            MathF.Abs(rightHandPosition.Y + leftHandPosition.Y) > 0.001f ||
+            MathF.Abs(rightForearmPosition.X - leftForearmPosition.X) > 0.001f ||
+            MathF.Abs(rightForearmPosition.Y + leftForearmPosition.Y) > 0.001f ||
             MathF.Abs(rightLegPosition.X - leftLegPosition.X) > 0.001f ||
             MathF.Abs(rightLegPosition.Y + leftLegPosition.Y) > 0.001f ||
-            MathF.Abs(rightFootPosition.X - leftFootPosition.X) > 0.001f ||
-            MathF.Abs(rightFootPosition.Y + leftFootPosition.Y) > 0.001f)
+            MathF.Abs(rightShinPosition.X - leftShinPosition.X) > 0.001f ||
+            MathF.Abs(rightShinPosition.Y + leftShinPosition.Y) > 0.001f)
         {
             return false;
         }
@@ -2459,7 +2475,7 @@ private static bool TestVisionDetectsRegionInsideRange()
             new Vector3(16f, 10f, 0f),
             customParts);
 
-        if (simulation.Units.BodyCount[colonist.Index] != 18 ||
+        if (simulation.Units.BodyCount[colonist.Index] != 13 ||
             simulation.Units.BodyCount[greenbob.Index] != 10 ||
             simulation.Units.BodyCount[segmented.Index] != 10 ||
             simulation.Units.BodyCount[custom.Index] != customParts.Length)
@@ -2495,10 +2511,10 @@ private static bool TestVisionDetectsRegionInsideRange()
             rightThigh >= 0 &&
             MathF.Abs(
                 simulation.Bodies.WorldRotation[leftThigh] -
-                (MathF.PI + swing)) < 0.001f &&
+                (MathF.PI - 0.22f + swing)) < 0.001f &&
             MathF.Abs(
                 simulation.Bodies.WorldRotation[rightThigh] -
-                (-MathF.PI - swing)) < 0.001f;
+                (-MathF.PI + 0.22f - swing)) < 0.001f;
 
         if (!gaitCorrect)
         {
@@ -2616,8 +2632,11 @@ private static bool TestVisionDetectsRegionInsideRange()
                 Vector3 proximal = position - Axis(
                     bodies.WorldRotation[part],
                     MathF.Abs(bodies.Scale[part].X));
+                Vector3 parentEndpoint = parentPosition + Axis(
+                    bodies.WorldRotation[parent],
+                    MathF.Abs(bodies.Scale[parent].X));
 
-                if (HorizontalDistance(proximal, parentPosition) > 0.002f)
+                if (HorizontalDistance(proximal, parentEndpoint) > 0.002f)
                     return false;
             }
             else if (role == BodyPartRole.Hand &&
