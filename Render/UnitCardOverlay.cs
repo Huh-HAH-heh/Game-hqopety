@@ -44,8 +44,45 @@ public sealed class UnitCardOverlay : IDisposable
     private readonly Font? _font;
     private readonly Text? _title;
     private readonly Text? _closeLabel;
+    private readonly RectangleShape _bodyTab = new(new Vector2f(88f, 28f))
+    {
+        FillColor = new Color(39, 52, 67, 255),
+        OutlineColor = new Color(80, 103, 129, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _detailsTab = new(new Vector2f(140f, 28f))
+    {
+        FillColor = new Color(39, 52, 67, 255),
+        OutlineColor = new Color(80, 103, 129, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _organToggle = new(new Vector2f(112f, 28f))
+    {
+        FillColor = new Color(39, 52, 67, 255),
+        OutlineColor = new Color(80, 103, 129, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _healthBarBack = new(new Vector2f(170f, 8f))
+    {
+        FillColor = new Color(44, 54, 68, 255),
+        OutlineColor = new Color(75, 89, 107, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _healthBarFill = new(new Vector2f(170f, 8f))
+    {
+        FillColor = new Color(73, 157, 125, 255)
+    };
+
+    private readonly Text? _bodyTabLabel;
+    private readonly Text? _detailsTabLabel;
+    private readonly Text? _organToggleLabel;
+    private readonly Text? _overallHealthText;
     private readonly Text? _footer;
     private readonly Text?[] _lineTexts = new Text?[MaxVisibleLines];
+    private readonly UnitAnatomyCardView _anatomyView = new();
+
+    private CardView _view = CardView.Anatomy;
+    private bool _showOrgans = true;
 
     private int _scrollOffset;
     private int _visibleLines;
@@ -76,8 +113,27 @@ public sealed class UnitCardOverlay : IDisposable
         {
             FillColor = new Color(225, 232, 241)
         };
+        _bodyTabLabel = new Text(_font, "ТЕЛО", 11)
+        {
+            FillColor = new Color(239, 243, 249),
+            Style = Text.Styles.Bold
+        };
+        _detailsTabLabel = new Text(_font, "ХАРАКТЕРИСТИКИ", 10)
+        {
+            FillColor = new Color(181, 197, 215),
+            Style = Text.Styles.Bold
+        };
+        _organToggleLabel = new Text(_font, "ОРГАНЫ: ВКЛ", 10)
+        {
+            FillColor = new Color(181, 197, 215),
+            Style = Text.Styles.Bold
+        };
+        _overallHealthText = new Text(_font, "", 11)
+        {
+            FillColor = new Color(210, 221, 232)
+        };
 
-        _footer = new Text(_font, "Заголовок — перемещение   •   Колесо — прокрутка", 10)
+        _footer = new Text(_font, "Цвет показывает состояние тканей и органов", 10)
         {
             FillColor = new Color(143, 155, 171)
         };
@@ -99,6 +155,8 @@ public sealed class UnitCardOverlay : IDisposable
         _positionY = y;
         _hasPosition = true;
         _dragging = false;
+        _view = CardView.Anatomy;
+        _showOrgans = true;
     }
 
     public void Close()
@@ -117,6 +175,27 @@ public sealed class UnitCardOverlay : IDisposable
     {
         if (!Contains(position))
             return false;
+
+        if (_bodyTab.GetGlobalBounds().Contains(position))
+        {
+            _view = CardView.Anatomy;
+            _scrollOffset = 0;
+            return true;
+        }
+
+        if (_detailsTab.GetGlobalBounds().Contains(position))
+        {
+            _view = CardView.Details;
+            _scrollOffset = 0;
+            return true;
+        }
+
+        if (_view == CardView.Anatomy &&
+            _organToggle.GetGlobalBounds().Contains(position))
+        {
+            _showOrgans = !_showOrgans;
+            return true;
+        }
 
         if (_closeButton.GetGlobalBounds().Contains(position))
         {
@@ -169,13 +248,15 @@ public sealed class UnitCardOverlay : IDisposable
         if (!IsOpen || !_panel.GetGlobalBounds().Contains(position))
             return false;
 
-        _scrollOffset = Math.Max(0, _scrollOffset + (delta > 0f ? -3 : 3));
+        if (_view == CardView.Details)
+            _scrollOffset = Math.Max(0, _scrollOffset + (delta > 0f ? -3 : 3));
         return true;
     }
 
     public void Draw(
         RenderWindow window,
         RenderUnitState unit,
+        RenderBodyPart[] bodyParts,
         UnitCardDetailsSnapshot? details,
         uint windowWidth,
         uint windowHeight)
@@ -184,11 +265,13 @@ public sealed class UnitCardOverlay : IDisposable
             return;
 
         Layout(windowWidth, windowHeight);
-        List<CardLine> lines = BuildLines(unit, details);
-        _lineCount = lines.Count;
-        _visibleLines = Math.Min(
-            MaxVisibleLines,
-            Math.Max(1, (int)((_panel.Size.Y - 79f) / RowHeight)));
+        List<CardLine>? lines = _view == CardView.Details
+            ? BuildLines(unit, details)
+            : null;
+        _lineCount = lines?.Count ?? 0;
+        _visibleLines = _view == CardView.Details
+            ? Math.Min(MaxVisibleLines, Math.Max(1, (int)((_panel.Size.Y - 112f) / RowHeight)))
+            : 0;
         _scrollOffset = Math.Clamp(
             _scrollOffset,
             0,
@@ -198,6 +281,33 @@ public sealed class UnitCardOverlay : IDisposable
         window.Draw(_header);
         window.Draw(_accent);
         window.Draw(_closeButton);
+        window.Draw(_bodyTab);
+        window.Draw(_detailsTab);
+
+        _bodyTab.FillColor = _view == CardView.Anatomy
+            ? new Color(67, 91, 115, 255)
+            : new Color(30, 39, 51, 255);
+        _detailsTab.FillColor = _view == CardView.Details
+            ? new Color(67, 91, 115, 255)
+            : new Color(30, 39, 51, 255);
+
+        if (_bodyTabLabel != null)
+            window.Draw(_bodyTabLabel);
+        if (_detailsTabLabel != null)
+            window.Draw(_detailsTabLabel);
+
+        if (_view == CardView.Anatomy)
+        {
+            _organToggle.FillColor = _showOrgans
+                ? new Color(48, 72, 66, 255)
+                : new Color(30, 39, 51, 255);
+            window.Draw(_organToggle);
+            if (_organToggleLabel != null)
+            {
+                _organToggleLabel.DisplayedString = _showOrgans ? "ОРГАНЫ: ВКЛ" : "ОРГАНЫ: ВЫКЛ";
+                window.Draw(_organToggleLabel);
+            }
+        }
 
         if (_title != null)
         {
@@ -208,35 +318,64 @@ public sealed class UnitCardOverlay : IDisposable
         if (_closeLabel != null)
             window.Draw(_closeLabel);
 
-        for (int i = 0; i < _lineTexts.Length; i++)
+        if (_view == CardView.Anatomy)
         {
-            Text? text = _lineTexts[i];
-            if (text == null)
-                continue;
-
-            int lineIndex = _scrollOffset + i;
-            if (i >= _visibleLines || lineIndex >= lines.Count)
+            if (_overallHealthText != null)
             {
-                text.DisplayedString = "";
-                continue;
+                _overallHealthText.DisplayedString =
+                    $"ЗДОРОВЬЕ  {unit.HitPoints:0.0}/{unit.MaxHitPoints:0.0} HP ({unit.HealthRatio:P0})";
+                _overallHealthText.FillColor = HealthStatusColor(unit.HealthRatio);
+                window.Draw(_overallHealthText);
             }
 
-            CardLine line = lines[lineIndex];
-            string displayed = line.Text.Length > 64
-                ? line.Text.Substring(0, 63) + "…"
-                : line.Text;
+            _healthBarFill.Size = new Vector2f(170f * Math.Clamp(unit.HealthRatio, 0f, 1f), 8f);
+            _healthBarFill.FillColor = HealthStatusColor(unit.HealthRatio);
+            window.Draw(_healthBarBack);
+            window.Draw(_healthBarFill);
 
-            if (text.DisplayedString != displayed)
-                text.DisplayedString = displayed;
+            _anatomyView.Draw(
+                window,
+                unit,
+                bodyParts,
+                details,
+                _panel.Position.X + 5f,
+                _panel.Position.Y + 101f,
+                _panel.Size.X - 10f,
+                _panel.Size.Y - 145f,
+                _showOrgans);
+        }
+        else if (lines != null)
+        {
+            for (int i = 0; i < _lineTexts.Length; i++)
+            {
+                Text? text = _lineTexts[i];
+                if (text == null)
+                    continue;
 
-            text.FillColor = line.IsHeader
-                ? new Color(135, 183, 231)
-                : new Color(205, 214, 225);
+                int lineIndex = _scrollOffset + i;
+                if (i >= _visibleLines || lineIndex >= lines.Count)
+                {
+                    text.DisplayedString = "";
+                    continue;
+                }
 
-            text.Position = new Vector2f(
-                _panel.Position.X + 14f,
-                _panel.Position.Y + 48f + i * RowHeight);
-            window.Draw(text);
+                CardLine line = lines[lineIndex];
+                string displayed = line.Text.Length > 64
+                    ? line.Text.Substring(0, 63) + "…"
+                    : line.Text;
+
+                if (text.DisplayedString != displayed)
+                    text.DisplayedString = displayed;
+
+                text.FillColor = line.IsHeader
+                    ? new Color(135, 183, 231)
+                    : new Color(205, 214, 225);
+
+                text.Position = new Vector2f(
+                    _panel.Position.X + 14f,
+                    _panel.Position.Y + 82f + i * RowHeight);
+                window.Draw(text);
+            }
         }
 
         if (_footer != null)
@@ -244,9 +383,11 @@ public sealed class UnitCardOverlay : IDisposable
             _footer.Position = new Vector2f(
                 _panel.Position.X + 12f,
                 _panel.Position.Y + _panel.Size.Y - 22f);
-            _footer.DisplayedString = _lineCount > _visibleLines
+            _footer.DisplayedString = _view == CardView.Details && _lineCount > _visibleLines
                 ? $"Строки {_scrollOffset + 1}–{Math.Min(_scrollOffset + _visibleLines, _lineCount)} из {_lineCount}   •   Колесо — прокрутка"
-                : "Заголовок — перемещение   •   Колесо — прокрутка";
+                : _view == CardView.Anatomy
+                    ? "Зелёный — норма   Жёлтый — повреждение   Красный — критично"
+                    : "Колесо — прокрутка подробных характеристик";
             window.Draw(_footer);
         }
     }
@@ -278,6 +419,20 @@ public sealed class UnitCardOverlay : IDisposable
         _accent.Position = new Vector2f(x + 1f, y + 1f);
         _accent.Size = new Vector2f(3f, height - 2f);
         _closeButton.Position = new Vector2f(x + Width - 34f, y + 7f);
+        _bodyTab.Position = new Vector2f(x + 12f, y + 43f);
+        _detailsTab.Position = new Vector2f(x + 106f, y + 43f);
+        _organToggle.Position = new Vector2f(x + Width - 124f, y + 43f);
+        _healthBarBack.Position = new Vector2f(x + Width - 190f, y + 83f);
+        _healthBarFill.Position = new Vector2f(x + Width - 190f, y + 83f);
+
+        if (_bodyTabLabel != null)
+            _bodyTabLabel.Position = new Vector2f(x + 32f, y + 50f);
+        if (_detailsTabLabel != null)
+            _detailsTabLabel.Position = new Vector2f(x + 116f, y + 50f);
+        if (_organToggleLabel != null)
+            _organToggleLabel.Position = new Vector2f(x + Width - 117f, y + 50f);
+        if (_overallHealthText != null)
+            _overallHealthText.Position = new Vector2f(x + 12f, y + 79f);
 
         if (_title != null)
             _title.Position = new Vector2f(x + 12f, y + 10f);
@@ -493,12 +648,36 @@ public sealed class UnitCardOverlay : IDisposable
 
         _title?.Dispose();
         _closeLabel?.Dispose();
+        _bodyTabLabel?.Dispose();
+        _detailsTabLabel?.Dispose();
+        _organToggleLabel?.Dispose();
+        _overallHealthText?.Dispose();
         _footer?.Dispose();
         _font?.Dispose();
         _panel.Dispose();
         _header.Dispose();
         _accent.Dispose();
         _closeButton.Dispose();
+        _bodyTab.Dispose();
+        _detailsTab.Dispose();
+        _organToggle.Dispose();
+        _healthBarBack.Dispose();
+        _healthBarFill.Dispose();
+        _anatomyView.Dispose();
+    }
+
+    private static Color HealthStatusColor(float ratio) => ratio switch
+    {
+        <= 0.15f => new Color(200, 62, 67, 255),
+        <= 0.40f => new Color(215, 109, 58, 255),
+        <= 0.70f => new Color(211, 177, 64, 255),
+        _ => new Color(73, 157, 125, 255)
+    };
+
+    private enum CardView : byte
+    {
+        Anatomy,
+        Details
     }
 
     private readonly record struct CardLine(string Text, bool IsHeader);
