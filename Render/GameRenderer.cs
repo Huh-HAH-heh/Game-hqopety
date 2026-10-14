@@ -1487,16 +1487,34 @@ public sealed class GameRenderer
                     bool menuHandled = _contextMenuOverlay.HandleClick(
                         uiPosition,
                         out bool openUnitCard,
-                        out bool openSelectionOverview);
+                        out bool openSelectionOverview,
+                        out bool giveFood,
+                        out bool giveWater);
 
                     if (menuHandled)
                     {
                         UnitId contextUnit = _contextMenuUnit;
                         _contextMenuUnit = default;
                         if (openUnitCard && contextUnit.IsValid)
+                        {
                             OpenUnitCard(contextUnit);
+                        }
                         else if (openSelectionOverview)
+                        {
                             OpenSelectionOverview();
+                        }
+                        else if (giveFood && contextUnit.IsValid)
+                        {
+                            ExecuteSimulationCommand(() =>
+                                _unitSimulation.ConsumeFood(
+                                    contextUnit, 700f, 25f, 90f, 20f, 12f));
+                        }
+                        else if (giveWater && contextUnit.IsValid)
+                        {
+                            ExecuteSimulationCommand(() =>
+                                _unitSimulation.DrinkWater(contextUnit, 0.5f));
+                        }
+
                         return;
                     }
 
