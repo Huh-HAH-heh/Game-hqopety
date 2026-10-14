@@ -130,10 +130,10 @@ public sealed class ContextMenuOverlay : IDisposable
     public bool HandleClick(
         Vector2i position,
         out bool openUnitCard,
-        out bool openSelectedCards)
+        out bool openSelectionOverview)
     {
         openUnitCard = false;
-        openSelectedCards = false;
+        openSelectionOverview = false;
         if (!IsOpen)
             return false;
 
@@ -143,7 +143,7 @@ public sealed class ContextMenuOverlay : IDisposable
                 openUnitCard = true;
             else if (_hasMultipleUnitsAction &&
                      _selectedCardsButton.GetGlobalBounds().Contains(position))
-                openSelectedCards = true;
+                openSelectionOverview = true;
 
             Close();
             return true;
