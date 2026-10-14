@@ -10,8 +10,8 @@ public sealed class ContextMenuOverlay : IDisposable
     private const float Width = 196f;
     private const float EmptyHeight = 58f;
     private const float SelectionHeight = 94f;
-    private const float UnitHeight = 126f;
-    private const float GroupHeight = 158f;
+    private const float UnitHeight = 158f;
+    private const float GroupHeight = 190f;
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, EmptyHeight))
     {
@@ -40,6 +40,11 @@ public sealed class ContextMenuOverlay : IDisposable
         FillColor = new Color(28, 36, 47, 255)
     };
 
+    private readonly RectangleShape _anatomyButton = new(new Vector2f(Width - 12f, 26f))
+    {
+        FillColor = new Color(28, 36, 47, 255)
+    };
+
     private readonly RectangleShape _foodButton = new(new Vector2f(Width - 12f, 26f))
     {
         FillColor = new Color(28, 36, 47, 255)
@@ -54,6 +59,7 @@ public sealed class ContextMenuOverlay : IDisposable
     private readonly Text? _title;
     private readonly Text? _emptyLabel;
     private readonly Text? _unitCardLabel;
+    private readonly Text? _anatomyLabel;
     private readonly Text? _selectedCardsLabel;
     private readonly Text? _foodLabel;
     private readonly Text? _waterLabel;
@@ -81,6 +87,11 @@ public sealed class ContextMenuOverlay : IDisposable
         };
 
         _unitCardLabel = new Text(_font, "Карточка юнита", 11)
+        {
+            FillColor = new Color(224, 233, 244)
+        };
+
+        _anatomyLabel = new Text(_font, "Органы / части тела", 11)
         {
             FillColor = new Color(224, 233, 244)
         };
@@ -139,9 +150,10 @@ public sealed class ContextMenuOverlay : IDisposable
         _accent.Position = new Vector2f(x + 1f, y + 1f);
         _accent.Size = new Vector2f(2f, height - 2f);
         _unitCardButton.Position = new Vector2f(x + 6f, y + 29f);
-        _foodButton.Position = new Vector2f(x + 6f, y + 60f);
-        _waterButton.Position = new Vector2f(x + 6f, y + 91f);
-        _selectedCardsButton.Position = new Vector2f(x + 6f, y + (hasUnit ? 122f : 60f));
+        _anatomyButton.Position = new Vector2f(x + 6f, y + 60f);
+        _foodButton.Position = new Vector2f(x + 6f, y + 89f);
+        _waterButton.Position = new Vector2f(x + 6f, y + 118f);
+        _selectedCardsButton.Position = new Vector2f(x + 6f, y + (hasUnit ? 151f : 60f));
 
         if (_title != null)
             _title.Position = new Vector2f(x + 10f, y + 5f);
@@ -149,12 +161,14 @@ public sealed class ContextMenuOverlay : IDisposable
             _emptyLabel.Position = new Vector2f(x + 10f, y + 32f);
         if (_unitCardLabel != null)
             _unitCardLabel.Position = new Vector2f(x + 13f, y + 35f);
+        if (_anatomyLabel != null)
+            _anatomyLabel.Position = new Vector2f(x + 13f, y + 64f);
         if (_foodLabel != null)
-            _foodLabel.Position = new Vector2f(x + 13f, y + 64f);
+            _foodLabel.Position = new Vector2f(x + 13f, y + 93f);
         if (_waterLabel != null)
-            _waterLabel.Position = new Vector2f(x + 13f, y + 95f);
+            _waterLabel.Position = new Vector2f(x + 13f, y + 122f);
         if (_selectedCardsLabel != null)
-            _selectedCardsLabel.Position = new Vector2f(x + 13f, y + (hasUnit ? 126f : 64f));
+            _selectedCardsLabel.Position = new Vector2f(x + 13f, y + (hasUnit ? 155f : 64f));
 
         IsOpen = true;
     }
@@ -162,11 +176,13 @@ public sealed class ContextMenuOverlay : IDisposable
     public bool HandleClick(
         Vector2i position,
         out bool openUnitCard,
+        out bool openUnitAnatomy,
         out bool openSelectionOverview,
         out bool giveFood,
         out bool giveWater)
     {
         openUnitCard = false;
+        openUnitAnatomy = false;
         openSelectionOverview = false;
         giveFood = false;
         giveWater = false;
@@ -177,6 +193,8 @@ public sealed class ContextMenuOverlay : IDisposable
         {
             if (_hasUnitAction && _unitCardButton.GetGlobalBounds().Contains(position))
                 openUnitCard = true;
+            else if (_hasUnitAction && _anatomyButton.GetGlobalBounds().Contains(position))
+                openUnitAnatomy = true;
             else if (_hasUnitAction && _foodButton.GetGlobalBounds().Contains(position))
                 giveFood = true;
             else if (_hasUnitAction && _waterButton.GetGlobalBounds().Contains(position))
@@ -220,6 +238,7 @@ public sealed class ContextMenuOverlay : IDisposable
         if (_hasUnitAction)
         {
             window.Draw(_unitCardButton);
+            window.Draw(_anatomyButton);
             window.Draw(_foodButton);
             window.Draw(_waterButton);
         }
@@ -231,6 +250,8 @@ public sealed class ContextMenuOverlay : IDisposable
 
         if (_hasUnitAction && _unitCardLabel != null)
             window.Draw(_unitCardLabel);
+        if (_hasUnitAction && _anatomyLabel != null)
+            window.Draw(_anatomyLabel);
         if (_hasUnitAction && _foodLabel != null)
             window.Draw(_foodLabel);
         if (_hasUnitAction && _waterLabel != null)
@@ -272,6 +293,7 @@ public sealed class ContextMenuOverlay : IDisposable
         _title?.Dispose();
         _emptyLabel?.Dispose();
         _unitCardLabel?.Dispose();
+        _anatomyLabel?.Dispose();
         _selectedCardsLabel?.Dispose();
         _foodLabel?.Dispose();
         _waterLabel?.Dispose();
@@ -280,6 +302,7 @@ public sealed class ContextMenuOverlay : IDisposable
         _header.Dispose();
         _accent.Dispose();
         _unitCardButton.Dispose();
+        _anatomyButton.Dispose();
         _selectedCardsButton.Dispose();
         _foodButton.Dispose();
         _waterButton.Dispose();
