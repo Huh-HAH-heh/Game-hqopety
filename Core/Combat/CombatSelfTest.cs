@@ -2406,8 +2406,20 @@ private static bool TestVisionDetectsRegionInsideRange()
         {
             int parent = definitions.Parent[part];
             if (parent < -1 || parent >= part)
-            {
                 return false;
+
+            BodyPartRole role = definitions.Role[part];
+            if (role is BodyPartRole.UpperArm or BodyPartRole.Forearm or
+                BodyPartRole.Thigh or BodyPartRole.Shin)
+            {
+                Vector3 scale = definitions.Scale[part];
+                if (definitions.Primitive[part] != BodyPrimitive.Circle ||
+                    definitions.Pivot[part] != BodyPartPivot.Start ||
+                    scale.X > 0.051f ||
+                    scale.Y > 0.026f)
+                {
+                    return false;
+                }
             }
         }
 
