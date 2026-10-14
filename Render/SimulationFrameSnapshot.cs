@@ -314,7 +314,25 @@ public sealed class SimulationFrameSnapshot
 
             UnitHitRegionProfile? hitProfile = hitRegionStore.GetProfile(index);
 
-            if (unitTypes[index] == UnitType.Colonist && hitProfile != null)
+            if (unitTypes[index] == UnitType.Colonist &&
+                hitProfile is UnitAnatomyProfile anatomy &&
+                anatomy.HasSharedShapes &&
+                sourceBodyCount == anatomy.NodeCount)
+            {
+                // The anatomy rig is the rendering source of truth: preserve
+                // each live primitive, scale and rotation used by UnitBodyStore.
+                for (int part = 0; part < anatomy.NodeCount; part++)
+                {
+                    int sourceIndex = sourceBodyStart + part;
+                    renderBodyParts[renderBodyPartWrite++] = new RenderBodyPart(
+                        sourceBodyPositions[sourceIndex],
+                        sourceBodyScales[sourceIndex],
+                        sourceBodyRotations[sourceIndex],
+                        sourceBodyPrimitives[sourceIndex],
+                        sourceBodyRoles[sourceIndex]);
+                }
+            }
+            else if (unitTypes[index] == UnitType.Colonist && hitProfile != null)
             {
                 ReadOnlySpan<UnitCircleHitRegion> regions = hitProfile.Regions;
 
