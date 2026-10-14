@@ -46,6 +46,7 @@ public static class CombatSelfTest
         RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);
         RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
         RunTest("Anatomy: rig edits preserve tissue IDs and organ volumes", TestAnatomyRigEditsPreserveBindings, ref passed, ref failed);
+        RunTest("Anatomy: rig editor can add dependent regions", TestAnatomyRigCanAppendDependency, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1532,6 +1533,69 @@ public static class CombatSelfTest
             if (oldVolumes[i].Id != newVolumes[i].Id ||
                 oldVolumes[i].TargetBindingId != newVolumes[i].TargetBindingId ||
                 oldVolumes[i].ParentRegionId != newVolumes[i].ParentRegionId)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool TestAnatomyRigCanAppendDependency()
+    {
+        UnitAnatomyProfile original = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        ReadOnlySpan<UnitAnatomyNode> originalNodes = original.Nodes;
+        BodyPartDefinition[] currentParts = original.BodyParts.ToArray();
+        string[] ids = new string[original.NodeCount + 1];
+        BodyPartDefinition[] parts = new BodyPartDefinition[currentParts.Length + 1];
+
+        for (int i = 0; i < original.NodeCount; i++)
+        {
+            ids[i] = originalNodes[i].Id;
+            parts[i] = currentParts[i];
+        }
+
+        int neck = original.FindRegion("body.neck");
+        int head = original.FindRegion("body.upper");
+        if (neck < 0 || head < 0 || neck >= head)
+            return false;
+
+        BodyPartDefinition headPart = parts[head];
+        parts[head] = new BodyPartDefinition(
+            headPart.LocalPosition,
+            headPart.Scale,
+            headPart.Primitive,
+            parentIndex: neck,
+            localRotation: headPart.LocalRotation,
+            motion: headPart.Motion,
+            followDistance: headPart.FollowDistance,
+            anchor: BodyPartAnchor.Parent,
+            role: headPart.Role,
+            pivot: headPart.Pivot);
+
+        ids[^1] = "custom.test.segment";
+        parts[^1] = new BodyPartDefinition(
+            new Vector3(0f, 0f, -0.06f),
+            new Vector3(0.03f, 0.02f, 0.05f),
+            BodyPrimitive.Circle,
+            parentIndex: neck,
+            anchor: BodyPartAnchor.Parent,
+            role: BodyPartRole.Generic);
+
+        UnitAnatomyProfile edited = original.WithRig(ids, parts);
+        if (edited.NodeCount != original.NodeCount + 1 ||
+            edited.VolumeCount != original.VolumeCount ||
+            edited.GetNode(head).ParentId != "body.neck" ||
+            edited.GetNode(edited.NodeCount - 1).ParentId != "body.neck" ||
+            !edited.TryFindPart("custom.test.segment.tissue", out int customRegion, out _) ||
+            customRegion != edited.NodeCount - 1)
+            return false;
+
+        for (int i = 0; i < original.VolumeCount; i++)
+        {
+            UnitAnatomyVolume before = original.Volumes[i];
+            UnitAnatomyVolume after = edited.Volumes[i];
+            if (before.Id != after.Id ||
+                before.ParentRegionId != after.ParentRegionId ||
+                before.TargetBindingId != after.TargetBindingId)
                 return false;
         }
 

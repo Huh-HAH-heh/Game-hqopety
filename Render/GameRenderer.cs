@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Numerics;
 using System.Threading;
 using Core.Items;
 using Core.Combat;
@@ -879,17 +880,19 @@ public sealed class GameRenderer
             return;
         }
 
-        _bodyRigEditorOverlay?.SetStatus("Файл сохранён. Применяю новую геометрию к текущим колонистам...");
+        _bodyRigEditorOverlay?.SetStatus("Файл сохранён. Применяю риг к текущим колонистам...");
         Console.WriteLine($"[Body rig] Saved colonist rig: {fullPath}");
 
         UnitBodyRigEditorOverlay? editor = _bodyRigEditorOverlay;
+        string[] savedIds = (string[])regionIds.Clone();
+        BodyPartDefinition[] savedParts = (BodyPartDefinition[])parts.Clone();
         ExecuteSimulationCommand(() =>
         {
             try
             {
                 UnitAnatomyProfile previousProfile =
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
-                UnitAnatomyCatalog.ApplyColonistBodyParts(parts);
+                UnitAnatomyCatalog.ApplyColonistRig(savedIds, savedParts);
                 UnitAnatomyProfile updatedProfile =
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
 
@@ -898,27 +901,42 @@ public sealed class GameRenderer
                 int[] bodyStarts = units.BodyStart;
                 short[] bodyCounts = units.BodyCount;
                 UnitType[] types = units.Type;
+                Vector3[] positions = units.Position;
+                Vector3[] bodyNormals = units.BodyNormal;
+                Vector3[] headNormals = units.HeadNormal;
 
                 int updatedCount = 0;
                 for (int i = 0; i < active.Length; i++)
                 {
                     int index = active[i];
                     if (types[index] != UnitType.Colonist ||
-                        bodyCounts[index] != parts.Length ||
                         !ReferenceEquals(_unitSimulation.HitRegions.GetProfile(index), previousProfile))
-                    {
                         continue;
+
+                    var oldHandle = new BodyHandle(bodyStarts[index], bodyCounts[index]);
+                    BodyHandle newHandle;
+                    if (oldHandle.Count == savedParts.Length)
+                    {
+                        _unitSimulation.Bodies.ApplyBodyDefinition(oldHandle, savedParts);
+                        newHandle = oldHandle;
+                    }
+                    else
+                    {
+                        _unitSimulation.Bodies.FreeBody(oldHandle);
+                        newHandle = _unitSimulation.Bodies.CreateBody(savedParts);
+                        bodyStarts[index] = newHandle.Start;
+                        bodyCounts[index] = checked((short)newHandle.Count);
+                        float bodyRotation = MathF.Atan2(bodyNormals[index].Y, bodyNormals[index].X);
+                        float headRotation = MathF.Atan2(headNormals[index].Y, headNormals[index].X);
+                        _unitSimulation.Bodies.SetInitialWorldPosition(
+                            newHandle, positions[index], bodyRotation, headRotation);
                     }
 
-                    _unitSimulation.Bodies.ApplyBodyDefinition(
-                        new BodyHandle(bodyStarts[index], bodyCounts[index]),
-                        parts);
-                    _unitSimulation.HitRegions.SetProfile(index, updatedProfile);
+                    _unitSimulation.ApplyEditedAnatomyProfile(units.GetId(index), updatedProfile);
                     updatedCount++;
                 }
 
-                editor?.SetStatus(
-                    $"Сохранено и применено. Обновлено колонистов: {updatedCount}.");
+                editor?.SetStatus($"Сохранено и применено. Обновлено колонистов: {updatedCount}.");
             }
             catch (Exception exception)
             {
@@ -1419,7 +1437,16 @@ public sealed class GameRenderer
             (_, e) =>
             {
                 if (_bodyRigEditorOverlay?.IsOpen == true)
+                {
+                    Vector2i editorWheelPixels = Mouse.GetPosition(_window);
+                    Vector2f editorWheelCoordinates = _uiView != null
+                        ? _window.MapPixelToCoords(editorWheelPixels, _uiView)
+                        : new Vector2f(editorWheelPixels.X, editorWheelPixels.Y);
+                    _bodyRigEditorOverlay.HandleMouseWheel(
+                        new Vector2i((int)editorWheelCoordinates.X, (int)editorWheelCoordinates.Y),
+                        e.Delta);
                     return;
+                }
 
                 if (_menuPage != GameMenuPage.Closed)
                     return;

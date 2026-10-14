@@ -339,34 +339,94 @@ public static class UnitAnatomyCatalog
 
     private static readonly UnitArchetypeProfile SegmentedMonster = CreateSegmentedMonster();
 
-    /// <summary>Updates the shared colonist archetype after a rig edit is saved.</summary>
-    public static void ApplyColonistBodyParts(ReadOnlySpan<BodyPartDefinition> bodyParts)
+    private static bool _colonistRigLoaded;
+
+    /// <summary>Apply a complete rig including appended regions and parent dependencies.</summary>
+    public static void ApplyColonistRig(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> bodyParts)
     {
         UnitArchetypeProfile current = Colonist;
-        UnitAnatomyProfile nextAnatomy = current.Anatomy.WithBodyParts(bodyParts);
+        UnitAnatomyProfile nextAnatomy = current.Anatomy.WithRig(regionIds, bodyParts);
         Colonist = new UnitArchetypeProfile(
             current.Definition,
             nextAnatomy,
             current.StartingEquipment.ToArray());
+        _colonistRigLoaded = true;
     }
 
-    public static UnitArchetypeProfile Get(UnitType type) =>
-        type switch
+    public static void ApplyColonistBodyParts(ReadOnlySpan<BodyPartDefinition> bodyParts)
+    {
+        UnitAnatomyProfile anatomy = Get(UnitType.Colonist).Anatomy;
+        var ids = new string[anatomy.NodeCount];
+        ReadOnlySpan<UnitAnatomyNode> nodes = anatomy.Nodes;
+        for (int i = 0; i < ids.Length; i++)
+            ids[i] = nodes[i].Id;
+        ApplyColonistRig(ids, bodyParts);
+    }
+
+    private static void EnsureSavedColonistRigLoaded()
+    {
+        if (_colonistRigLoaded)
+            return;
+
+        _colonistRigLoaded = true;
+        UnitArchetypeProfile current = Colonist;
+        ReadOnlySpan<UnitAnatomyNode> nodes = current.Anatomy.Nodes;
+        var baseIds = new string[nodes.Length];
+        for (int i = 0; i < baseIds.Length; i++)
+            baseIds[i] = nodes[i].Id;
+
+        UnitBodyRigSettingsStore.MergeSavedRig(
+            baseIds,
+            current.BodyParts,
+            out string[] ids,
+            out BodyPartDefinition[] parts);
+        if (ids.Length != nodes.Length)
+        {
+            UnitAnatomyProfile next = current.Anatomy.WithRig(ids, parts);
+            Colonist = new UnitArchetypeProfile(
+                current.Definition,
+                next,
+                current.StartingEquipment.ToArray());
+        }
+        else if (parts.Length == current.BodyParts.Length)
+        {
+            UnitAnatomyProfile next = current.Anatomy.WithRig(ids, parts);
+            Colonist = new UnitArchetypeProfile(
+                current.Definition,
+                next,
+                current.StartingEquipment.ToArray());
+        }
+    }
+
+    public static UnitArchetypeProfile Get(UnitType type)
+    {
+        if (type == UnitType.Colonist)
+            EnsureSavedColonistRigLoaded();
+
+        return type switch
         {
             UnitType.Colonist => Colonist,
             UnitType.Greenbob => Greenbob,
             UnitType.SegmentedMonster => SegmentedMonster,
             _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown unit archetype.")
         };
+    }
 
-    public static UnitArchetypeProfile Get(UnitBodyType bodyType) =>
-        bodyType switch
+    public static UnitArchetypeProfile Get(UnitBodyType bodyType)
+    {
+        if (bodyType == UnitBodyType.Colonist)
+            EnsureSavedColonistRigLoaded();
+
+        return bodyType switch
         {
             UnitBodyType.Colonist => Colonist,
             UnitBodyType.SmallCreature => Greenbob,
             UnitBodyType.SegmentedCreature => SegmentedMonster,
             _ => throw new ArgumentOutOfRangeException(nameof(bodyType), bodyType, "Unknown unit body type.")
         };
+    }
 
     private static UnitArchetypeProfile CreateSegmentedMonster()
     {

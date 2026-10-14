@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Text;
 using Core.Unit;
 using SFML.Graphics;
 using SFML.System;
@@ -15,7 +17,7 @@ namespace RimClone.Render;
 /// </summary>
 public sealed class UnitBodyRigEditorOverlay : IDisposable
 {
-    private const int MaxParts = 32;
+    private const int MaxParts = 128;
     private const int PropertyCount = 7;
 
     private static readonly Color BackdropColor = new(5, 9, 14, 218);
@@ -57,6 +59,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private readonly Text?[] _partLabels = new Text?[MaxParts];
     private readonly RectangleShape[] _previewPanels = new RectangleShape[3];
     private readonly Text?[] _projectionLabels = new Text?[3];
+    private readonly RectangleShape[] _symmetryButtons = new RectangleShape[3];
+    private readonly Text?[] _symmetryLabels = new Text?[3];
+    private readonly bool[] _symmetryEnabled = new bool[3];
     private readonly RectangleShape[] _sliderTracks = new RectangleShape[PropertyCount];
     private readonly RectangleShape[] _sliderFills = new RectangleShape[PropertyCount];
     private readonly RectangleShape[] _sliderKnobs = new RectangleShape[PropertyCount];
@@ -67,6 +72,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         FillColor = new Color(47, 99, 77, 255),
         OutlineColor = new Color(93, 151, 117, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _loadButton = new(new Vector2f(104f, 30f))
+    {
+        FillColor = new Color(45, 65, 84, 255),
+        OutlineColor = new Color(82, 112, 139, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _exportButton = new(new Vector2f(104f, 30f))
+    {
+        FillColor = new Color(45, 55, 69, 255),
+        OutlineColor = new Color(79, 95, 115, 255),
         OutlineThickness = 1f
     };
     private readonly RectangleShape _defaultsButton = new(new Vector2f(124f, 30f))
@@ -93,11 +110,48 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(82, 104, 127, 255),
         OutlineThickness = 1f
     };
+    private readonly RectangleShape _parentButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(42, 57, 72, 255),
+        OutlineColor = new Color(82, 104, 127, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _allSymmetryButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(52, 74, 64, 255),
+        OutlineColor = new Color(90, 128, 105, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _addRegionButton = new(new Vector2f(1f, 25f))
+    {
+        FillColor = new Color(44, 81, 67, 255),
+        OutlineColor = new Color(77, 125, 101, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _addAllFormsButton = new(new Vector2f(1f, 25f))
+    {
+        FillColor = new Color(47, 65, 82, 255),
+        OutlineColor = new Color(79, 103, 127, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _removeRegionButton = new(new Vector2f(1f, 25f))
+    {
+        FillColor = new Color(76, 43, 47, 255),
+        OutlineColor = new Color(131, 76, 82, 255),
+        OutlineThickness = 1f
+    };
 
     private readonly Text? _title;
     private readonly Text? _saveLabel;
+    private readonly Text? _loadLabel;
+    private readonly Text? _exportLabel;
     private readonly Text? _defaultsLabel;
     private readonly Text? _reloadLabel;
+    private readonly Text? _parentLabel;
+    private readonly Text? _allSymmetryLabel;
+    private readonly Text? _addRegionLabel;
+    private readonly Text? _addAllFormsLabel;
+    private readonly Text? _removeRegionLabel;
     private readonly Text? _closeLabel;
     private readonly Text? _listTitle;
     private readonly Text? _propertiesTitle;
@@ -120,6 +174,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     };
 
     private string[] _regionIds = Array.Empty<string>();
+    private string[] _openedRegionIds = Array.Empty<string>();
     private BodyPartDefinition[] _parts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _defaultParts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _openedParts = Array.Empty<BodyPartDefinition>();
@@ -135,8 +190,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private bool _draggingPart;
     private int _lastMouseX;
     private int _lastMouseY;
-    private float _listRowHeight = 34f;
+    private float _listRowHeight = 28f;
     private float _propertyRowHeight = 46f;
+    private int _listScroll;
+    private int _listVisibleRows = 12;
     private string _status = "Изменения можно двигать мышью или менять ползунками.";
     private bool _disposed;
 
@@ -166,11 +223,22 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 OutlineColor = new Color(58, 75, 94, 255),
                 OutlineThickness = 1f
             };
+            _symmetryButtons[i] = new RectangleShape(new Vector2f(88f, 22f))
+            {
+                FillColor = new Color(39, 51, 65, 255),
+                OutlineColor = new Color(74, 92, 113, 255),
+                OutlineThickness = 1f
+            };
             if (_font != null)
             {
                 _projectionLabels[i] = new Text(_font, viewNames[i], 10)
                 {
                     FillColor = new Color(185, 201, 219, 255),
+                    Style = Text.Styles.Bold
+                };
+                _symmetryLabels[i] = new Text(_font, "СИМ: ВЫКЛ", 8)
+                {
+                    FillColor = MutedText,
                     Style = Text.Styles.Bold
                 };
             }
@@ -228,6 +296,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(240, 248, 242, 255),
                 Style = Text.Styles.Bold
             };
+            _loadLabel = new Text(_font, "ЗАГРУЗИТЬ", 10)
+            {
+                FillColor = new Color(224, 236, 245, 255),
+                Style = Text.Styles.Bold
+            };
+            _exportLabel = new Text(_font, "ЭКСПОРТ", 10)
+            {
+                FillColor = new Color(220, 229, 239, 255)
+            };
             _defaultsLabel = new Text(_font, "ПО УМОЛЧАНИЮ", 9)
             {
                 FillColor = new Color(220, 229, 239, 255)
@@ -263,8 +340,29 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 FillColor = new Color(232, 240, 248, 255)
             };
+            _parentLabel = new Text(_font, "", 9)
+            {
+                FillColor = new Color(232, 240, 248, 255)
+            };
+            _allSymmetryLabel = new Text(_font, "СИММЕТРИЯ: ВСЕ ВИДЫ", 9)
+            {
+                FillColor = new Color(232, 240, 248, 255)
+            };
+            _addRegionLabel = new Text(_font, "+ ДОБАВИТЬ РЕГИОН", 9)
+            {
+                FillColor = new Color(237, 246, 241, 255),
+                Style = Text.Styles.Bold
+            };
+            _addAllFormsLabel = new Text(_font, "+ ВСЕ ФОРМЫ", 9)
+            {
+                FillColor = new Color(224, 233, 242, 255)
+            };
+            _removeRegionLabel = new Text(_font, "УДАЛИТЬ СВОЙ РЕГИОН", 9)
+            {
+                FillColor = new Color(243, 225, 227, 255)
+            };
             _helpText = new Text(_font,
-                "Мышь: перетаскивай форму в проекции. Ползунки: позиция, размер и угол. Ctrl+S — сохранить.",
+                "Перетаскивай сегменты; родитель задаёт зависимость. Ctrl+S — применить и сохранить.",
                 9)
             {
                 FillColor = MutedText
@@ -286,17 +384,61 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         ReadOnlySpan<UnitAnatomyNode> nodes = anatomy.Nodes;
         if (!anatomy.HasSharedShapes || nodes.Length == 0 || nodes.Length > MaxParts)
         {
-            SetStatus("Невозможно открыть риг: профиль не содержит поддерживаемых форм.");
+            SetStatus($"Невозможно открыть риг: допустимо от 1 до {MaxParts} регионов.");
             return;
         }
 
-        _regionIds = new string[nodes.Length];
+        var ids = new string[nodes.Length];
         for (int i = 0; i < nodes.Length; i++)
-            _regionIds[i] = nodes[i].Id;
+            ids[i] = nodes[i].Id;
 
-        _parts = anatomy.BodyParts.ToArray();
-        _defaultParts = UnitBodyRigSettingsStore.GetDefaultBodyParts(_regionIds, _parts);
-        _openedParts = (BodyPartDefinition[])_parts.Clone();
+        SetRigData(ids, anatomy.BodyParts.ToArray(), setDefaults: true, setOpenedSnapshot: true);
+        _selectedProperty = 0;
+        _draggingProperty = -1;
+        _draggingProjection = -1;
+        _draggingPart = false;
+        _status = $"Загружено регионов: {_parts.Length}.";
+        IsOpen = true;
+    }
+
+    private bool SetRigData(
+        string[] regionIds,
+        BodyPartDefinition[] parts,
+        bool setDefaults,
+        bool setOpenedSnapshot)
+    {
+        if (regionIds.Length != parts.Length || parts.Length == 0 || parts.Length > MaxParts)
+        {
+            SetStatus($"Риг должен содержать от 1 до {MaxParts} регионов.");
+            return false;
+        }
+
+        var unique = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(regionIds[i]) || !unique.Add(regionIds[i]))
+            {
+                SetStatus($"Пустой или повторяющийся ID региона: {regionIds[i]}");
+                return false;
+            }
+
+            if (parts[i].ParentIndex < -1 || parts[i].ParentIndex >= i)
+            {
+                SetStatus($"У региона «{PartName(regionIds[i])}» родитель должен находиться выше в списке.");
+                return false;
+            }
+        }
+
+        _regionIds = (string[])regionIds.Clone();
+        _parts = (BodyPartDefinition[])parts.Clone();
+        if (setDefaults || _defaultParts.Length != _parts.Length)
+            _defaultParts = UnitBodyRigSettingsStore.GetDefaultBodyParts(_regionIds, _parts);
+        if (setOpenedSnapshot)
+        {
+            _openedRegionIds = (string[])_regionIds.Clone();
+            _openedParts = (BodyPartDefinition[])_parts.Clone();
+        }
+
         _worldPositions = new NumericsVector3[_parts.Length];
         _worldRotations = new float[_parts.Length];
         for (int view = 0; view < _projected.Length; view++)
@@ -314,12 +456,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
 
         _selectedPart = Math.Clamp(_selectedPart, 0, _parts.Length - 1);
-        _selectedProperty = 0;
-        _draggingProperty = -1;
-        _draggingProjection = -1;
-        _draggingPart = false;
-        _status = $"Загружено частей: {_parts.Length}. Сохранение применяется сразу и переживает перезапуск.";
-        IsOpen = true;
+        _listScroll = Math.Clamp(_listScroll, 0, Math.Max(0, _parts.Length - _listVisibleRows));
+        return true;
     }
 
     public void Close()
@@ -349,17 +487,73 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
+        if (_loadButton.GetGlobalBounds().Contains(position))
+        {
+            LoadRigFromDialog();
+            return true;
+        }
+
+        if (_exportButton.GetGlobalBounds().Contains(position))
+        {
+            ExportRigFromDialog();
+            return true;
+        }
+
         if (_defaultsButton.GetGlobalBounds().Contains(position))
         {
-            Array.Copy(_defaultParts, _parts, _parts.Length);
-            _status = "Показаны значения по умолчанию. Нажми «Сохранить», чтобы закрепить их.";
+            if (_defaultParts.Length == _parts.Length)
+                Array.Copy(_defaultParts, _parts, _parts.Length);
+            _status = "Восстановлены базовые формы. Нажми «Сохранить», чтобы применить.";
             return true;
         }
 
         if (_reloadButton.GetGlobalBounds().Contains(position))
         {
-            Array.Copy(_openedParts, _parts, _parts.Length);
+            SetRigData(_openedRegionIds, _openedParts, setDefaults: false, setOpenedSnapshot: false);
             _status = "Возвращена конфигурация, с которой редактор был открыт.";
+            return true;
+        }
+
+        if (_addRegionButton.GetGlobalBounds().Contains(position))
+        {
+            AddRegion();
+            return true;
+        }
+
+        if (_addAllFormsButton.GetGlobalBounds().Contains(position))
+        {
+            AddAllPrimitiveExamples();
+            return true;
+        }
+
+        if (_removeRegionButton.GetGlobalBounds().Contains(position))
+        {
+            RemoveSelectedCustomRegion();
+            return true;
+        }
+
+        if (_parentButton.GetGlobalBounds().Contains(position))
+        {
+            CycleParentDependency();
+            return true;
+        }
+
+        if (_allSymmetryButton.GetGlobalBounds().Contains(position))
+        {
+            bool enable = !_symmetryEnabled[0] || !_symmetryEnabled[1] || !_symmetryEnabled[2];
+            Array.Fill(_symmetryEnabled, enable);
+            _status = enable ? "Симметрия включена во всех проекциях." : "Симметрия выключена во всех проекциях.";
+            return true;
+        }
+
+        for (int projection = 0; projection < _symmetryButtons.Length; projection++)
+        {
+            if (!_symmetryButtons[projection].GetGlobalBounds().Contains(position))
+                continue;
+
+            _symmetryEnabled[projection] = !_symmetryEnabled[projection];
+            _status = $"Симметрия «{new[] { "спереди", "сбоку", "сверху" }[projection]}»: " +
+                (_symmetryEnabled[projection] ? "включена." : "выключена.");
             return true;
         }
 
@@ -373,20 +567,37 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _ => BodyPrimitive.Circle
             };
             _parts[_selectedPart] = Copy(part, primitive: primitive);
+            ApplyEnabledSymmetry();
             _status = $"Форма «{PartName(_regionIds[_selectedPart])}»: {primitive}.";
             return true;
         }
 
-        for (int i = 0; i < _parts.Length; i++)
+        for (int visibleRow = 0; visibleRow < _listVisibleRows; visibleRow++)
         {
-            if (!_partRows[i].GetGlobalBounds().Contains(position))
+            int itemIndex = _listScroll + visibleRow;
+            if (itemIndex >= _parts.Length ||
+                !_partRows[visibleRow].GetGlobalBounds().Contains(position))
                 continue;
 
-            _selectedPart = i;
+            bool shiftPressed =
+                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+            if (shiftPressed && itemIndex < _selectedPart)
+            {
+                BodyPartDefinition selectedPart = _parts[_selectedPart];
+                _parts[_selectedPart] = Copy(
+                    selectedPart,
+                    parentIndex: itemIndex,
+                    anchor: BodyPartAnchor.Parent);
+                _status = $"«{PartName(_regionIds[_selectedPart])}» теперь зависит от «{PartName(_regionIds[itemIndex])}». Нажми Ctrl+S.";
+                return true;
+            }
+
+            _selectedPart = itemIndex;
             _draggingProperty = -1;
             _draggingProjection = -1;
             _draggingPart = false;
-            _status = $"Выбрано: {PartName(_regionIds[i])}.";
+            _status = $"Выбрано: {PartName(_regionIds[itemIndex])}. Shift+щелчок по более раннему региону задаёт родителя.";
             return true;
         }
 
@@ -459,6 +670,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         return true;
     }
 
+    public bool HandleMouseWheel(Vector2i position, float delta)
+    {
+        if (!IsOpen)
+            return false;
+
+        if (_listPanel.GetGlobalBounds().Contains(position))
+        {
+            int step = delta > 0f ? -3 : 3;
+            _listScroll = Math.Clamp(_listScroll + step, 0, Math.Max(0, _parts.Length - _listVisibleRows));
+        }
+
+        return true;
+    }
+
     public bool HandleKey(Keyboard.Key key, bool controlPressed)
     {
         if (!IsOpen)
@@ -479,12 +704,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (key == Keyboard.Key.Up)
         {
             _selectedPart = (_selectedPart - 1 + _parts.Length) % _parts.Length;
+            EnsureSelectionVisible();
             return true;
         }
 
         if (key == Keyboard.Key.Down)
         {
             _selectedPart = (_selectedPart + 1) % _parts.Length;
+            EnsureSelectionVisible();
             return true;
         }
 
@@ -511,6 +738,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _ => BodyPrimitive.Circle
             };
             _parts[_selectedPart] = Copy(part, primitive: primitive);
+            ApplyEnabledSymmetry();
             return true;
         }
 
@@ -536,6 +764,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_title != null)
             window.Draw(_title);
         DrawButton(window, _saveButton, _saveLabel);
+        DrawButton(window, _loadButton, _loadLabel);
+        DrawButton(window, _exportButton, _exportLabel);
         DrawButton(window, _defaultsButton, _defaultsLabel);
         DrawButton(window, _reloadButton, _reloadLabel);
         DrawButton(window, _closeButton, _closeLabel);
@@ -545,25 +775,33 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_propertiesTitle != null)
             window.Draw(_propertiesTitle);
 
-        for (int i = 0; i < _parts.Length; i++)
+        for (int visibleRow = 0; visibleRow < _listVisibleRows; visibleRow++)
         {
-            _partRows[i].FillColor = i == _selectedPart
+            int itemIndex = _listScroll + visibleRow;
+            if (itemIndex >= _parts.Length)
+                break;
+
+            _partRows[visibleRow].FillColor = itemIndex == _selectedPart
                 ? new Color(68, 79, 88, 255)
                 : new Color(28, 38, 50, 255);
-            _partRows[i].OutlineColor = i == _selectedPart
+            _partRows[visibleRow].OutlineColor = itemIndex == _selectedPart
                 ? SelectedColor
                 : new Color(52, 67, 84, 255);
-            window.Draw(_partRows[i]);
+            window.Draw(_partRows[visibleRow]);
 
-            if (_partLabels[i] != null)
+            if (_partLabels[itemIndex] != null)
             {
-                _partLabels[i]!.DisplayedString = $"{i + 1:00}  {PartName(_regionIds[i])}";
-                _partLabels[i]!.Position = new Vector2f(
-                    _partRows[i].Position.X + 8f,
-                    _partRows[i].Position.Y + 7f);
-                window.Draw(_partLabels[i]!);
+                _partLabels[itemIndex]!.DisplayedString = $"{itemIndex + 1:00}  {PartName(_regionIds[itemIndex])}";
+                _partLabels[itemIndex]!.Position = new Vector2f(
+                    _partRows[visibleRow].Position.X + 8f,
+                    _partRows[visibleRow].Position.Y + 7f);
+                window.Draw(_partLabels[itemIndex]!);
             }
         }
+
+        DrawButton(window, _addRegionButton, _addRegionLabel);
+        DrawButton(window, _addAllFormsButton, _addAllFormsLabel);
+        DrawButton(window, _removeRegionButton, _removeRegionLabel);
 
         for (int projection = 0; projection < _previewPanels.Length; projection++)
             DrawProjection(window, projection);
@@ -596,6 +834,30 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _primitiveButton.Position.Y + 8f);
             window.Draw(_primitiveButton);
             window.Draw(_primitiveLabel);
+        }
+
+        if (_parentLabel != null)
+        {
+            int parent = _parts[_selectedPart].ParentIndex;
+            string parentName = parent >= 0 ? PartName(_regionIds[parent]) : "корень";
+            _parentLabel.DisplayedString = $"РОДИТЕЛЬ: {parentName}  [клик]";
+            _parentLabel.Position = new Vector2f(
+                _parentButton.Position.X + 8f,
+                _parentButton.Position.Y + 6f);
+            window.Draw(_parentButton);
+            window.Draw(_parentLabel);
+        }
+
+        if (_allSymmetryLabel != null)
+        {
+            _allSymmetryLabel.DisplayedString = _symmetryEnabled[0] && _symmetryEnabled[1] && _symmetryEnabled[2]
+                ? "СИММЕТРИЯ ВСЕХ: ВКЛ"
+                : "СИММЕТРИЯ ВСЕХ: ВЫКЛ";
+            _allSymmetryLabel.Position = new Vector2f(
+                _allSymmetryButton.Position.X + 8f,
+                _allSymmetryButton.Position.Y + 6f);
+            window.Draw(_allSymmetryButton);
+            window.Draw(_allSymmetryLabel);
         }
 
         if (_helpText != null)
@@ -631,6 +893,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         float buttonY = y + 7f;
         _saveButton.Position = new Vector2f(x + panelWidth - 390f, buttonY);
+        _exportButton.Position = new Vector2f(x + panelWidth - 502f, buttonY);
+        _loadButton.Position = new Vector2f(x + panelWidth - 614f, buttonY);
         _defaultsButton.Position = new Vector2f(x + panelWidth - 278f, buttonY);
         _reloadButton.Position = new Vector2f(x + panelWidth - 146f, buttonY);
         _closeButton.Position = new Vector2f(x + panelWidth - 38f, buttonY);
@@ -639,6 +903,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _title.Position = new Vector2f(x + 14f, y + 12f);
         if (_saveLabel != null)
             _saveLabel.Position = new Vector2f(_saveButton.Position.X + 14f, buttonY + 9f);
+        if (_loadLabel != null)
+            _loadLabel.Position = new Vector2f(_loadButton.Position.X + 12f, buttonY + 9f);
+        if (_exportLabel != null)
+            _exportLabel.Position = new Vector2f(_exportButton.Position.X + 16f, buttonY + 9f);
         if (_defaultsLabel != null)
             _defaultsLabel.Position = new Vector2f(_defaultsButton.Position.X + 10f, buttonY + 10f);
         if (_reloadLabel != null)
@@ -667,12 +935,33 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_propertiesTitle != null)
             _propertiesTitle.Position = new Vector2f(propertiesX + 10f, contentY + 9f);
 
-        _listRowHeight = MathF.Min(35f, MathF.Max(23f, (contentHeight - 42f) / Math.Max(1, _parts.Length)));
-        for (int i = 0; i < _parts.Length; i++)
+        _listRowHeight = 28f;
+        _listVisibleRows = Math.Clamp((int)((contentHeight - 135f) / _listRowHeight), 4, MaxParts);
+        _listScroll = Math.Clamp(_listScroll, 0, Math.Max(0, _parts.Length - _listVisibleRows));
+        if (_selectedPart < _listScroll)
+            _listScroll = _selectedPart;
+        else if (_selectedPart >= _listScroll + _listVisibleRows)
+            _listScroll = _selectedPart - _listVisibleRows + 1;
+
+        for (int i = 0; i < _partRows.Length; i++)
         {
             _partRows[i].Position = new Vector2f(listX + 5f, contentY + 33f + i * _listRowHeight);
             _partRows[i].Size = new Vector2f(listWidth - 10f, _listRowHeight - 3f);
         }
+
+        _addRegionButton.Position = new Vector2f(listX + 5f, contentY + contentHeight - 94f);
+        _addRegionButton.Size = new Vector2f(listWidth - 10f, 25f);
+        _addAllFormsButton.Position = new Vector2f(listX + 5f, contentY + contentHeight - 63f);
+        _addAllFormsButton.Size = new Vector2f(listWidth - 10f, 25f);
+        _removeRegionButton.Position = new Vector2f(listX + 5f, contentY + contentHeight - 32f);
+        _removeRegionButton.Size = new Vector2f(listWidth - 10f, 25f);
+
+        if (_addRegionLabel != null)
+            _addRegionLabel.Position = new Vector2f(_addRegionButton.Position.X + 8f, _addRegionButton.Position.Y + 6f);
+        if (_addAllFormsLabel != null)
+            _addAllFormsLabel.Position = new Vector2f(_addAllFormsButton.Position.X + 8f, _addAllFormsButton.Position.Y + 6f);
+        if (_removeRegionLabel != null)
+            _removeRegionLabel.Position = new Vector2f(_removeRegionButton.Position.X + 8f, _removeRegionButton.Position.Y + 6f);
 
         _propertyRowHeight = MathF.Min(47f, MathF.Max(39f, (contentHeight - 232f) / PropertyCount));
         if (_selectedName != null)
@@ -690,6 +979,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _primitiveButton.Position = new Vector2f(propertiesX + 10f, propertyTop + PropertyCount * _propertyRowHeight + 8f);
         _primitiveButton.Size = new Vector2f(propertiesWidth - 20f, 30f);
+        _parentButton.Position = new Vector2f(propertiesX + 10f, _primitiveButton.Position.Y + 35f);
+        _parentButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
+        _allSymmetryButton.Position = new Vector2f(propertiesX + 10f, _parentButton.Position.Y + 31f);
+        _allSymmetryButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
 
         if (_helpText != null)
             _helpText.Position = new Vector2f(listX + 2f, y + panelHeight - 42f);
@@ -705,6 +998,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _previewPanels[i].Size = new Vector2f(previewWidth, previewHeight);
             if (_projectionLabels[i] != null)
                 _projectionLabels[i]!.Position = new Vector2f(previewX + 8f, previewY + 8f);
+            _symmetryButtons[i].Position = new Vector2f(previewX + previewWidth - 96f, previewY + 4f);
+            if (_symmetryLabels[i] != null)
+                _symmetryLabels[i]!.Position = new Vector2f(_symmetryButtons[i].Position.X + 6f, previewY + 10f);
 
             _projectionLayouts[i] = new ProjectionLayout(
                 previewX + 8f,
@@ -720,6 +1016,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         window.Draw(panel);
         if (_projectionLabels[projection] != null)
             window.Draw(_projectionLabels[projection]!);
+
+        _symmetryButtons[projection].FillColor = _symmetryEnabled[projection]
+            ? new Color(52, 99, 74, 255)
+            : new Color(39, 51, 65, 255);
+        window.Draw(_symmetryButtons[projection]);
+        if (_symmetryLabels[projection] != null)
+        {
+            _symmetryLabels[projection]!.DisplayedString = _symmetryEnabled[projection] ? "СИМ: ВКЛ" : "СИМ: ВЫКЛ";
+            _symmetryLabels[projection]!.Position = new Vector2f(
+                _symmetryButtons[projection].Position.X + 6f,
+                _symmetryButtons[projection].Position.Y + 6f);
+            window.Draw(_symmetryLabels[projection]!);
+        }
 
         ProjectionLayout layout = _projectionLayouts[projection];
         float minX = float.PositiveInfinity;
@@ -906,7 +1215,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _parts[_selectedPart] = Copy(
             part,
             localPosition: part.LocalPosition + localDelta);
-        _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Не забудь сохранить (Ctrl+S).";
+        ApplyEnabledSymmetry(projection);
+        _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Нажми Ctrl+S для сохранения.";
     }
 
     private int HitTestPreview(int projection, int x, int y)
@@ -1003,32 +1313,382 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
 
         _parts[_selectedPart] = Copy(part, position, scale, rotation);
-        _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Не забудь сохранить (Ctrl+S).";
+        ApplyEnabledSymmetry();
+        _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Нажми Ctrl+S для сохранения.";
     }
 
     private void Save()
     {
+        _openedRegionIds = (string[])_regionIds.Clone();
         _openedParts = (BodyPartDefinition[])_parts.Clone();
         _saveRequested(
             (string[])_regionIds.Clone(),
             (BodyPartDefinition[])_parts.Clone());
     }
 
+    private void AddRegion()
+    {
+        if (_parts.Length >= MaxParts)
+        {
+            _status = $"Достигнут предел в {MaxParts} регионов.";
+            return;
+        }
+
+        int parent = _parts.Length == 0 ? -1 : Math.Clamp(_selectedPart, 0, _parts.Length - 1);
+        string id = CreateUniqueRegionId("custom.segment");
+        AppendRegions(
+            new[] { id },
+            new[]
+            {
+                new BodyPartDefinition(
+                    new NumericsVector3(0f, 0f, -0.065f),
+                    new NumericsVector3(0.035f, 0.022f, 0.06f),
+                    BodyPrimitive.Circle,
+                    parentIndex: parent,
+                    anchor: parent >= 0 ? BodyPartAnchor.Parent : BodyPartAnchor.Parent,
+                    role: BodyPartRole.Generic,
+                    pivot: BodyPartPivot.Center)
+            });
+    }
+
+    private void AddAllPrimitiveExamples()
+    {
+        if (_parts.Length + 3 > MaxParts)
+        {
+            _status = $"Для трёх примеров недостаточно места. Предел — {MaxParts} регионов.";
+            return;
+        }
+
+        int parent = Math.Clamp(_selectedPart, 0, _parts.Length - 1);
+        AppendRegions(
+            new[]
+            {
+                CreateUniqueRegionId("custom.circle"),
+                CreateUniqueRegionId("custom.box"),
+                CreateUniqueRegionId("custom.triangle")
+            },
+            new[]
+            {
+                new BodyPartDefinition(new NumericsVector3(0f, 0.045f, -0.07f),
+                    new NumericsVector3(0.032f, 0.022f, 0.055f), BodyPrimitive.Circle,
+                    parentIndex: parent, anchor: BodyPartAnchor.Parent, role: BodyPartRole.Generic),
+                new BodyPartDefinition(new NumericsVector3(0f, 0f, -0.07f),
+                    new NumericsVector3(0.032f, 0.022f, 0.055f), BodyPrimitive.Box,
+                    parentIndex: parent, anchor: BodyPartAnchor.Parent, role: BodyPartRole.Generic),
+                new BodyPartDefinition(new NumericsVector3(0f, -0.045f, -0.07f),
+                    new NumericsVector3(0.032f, 0.022f, 0.055f), BodyPrimitive.Triangle,
+                    parentIndex: parent, anchor: BodyPartAnchor.Parent, role: BodyPartRole.Generic)
+            });
+    }
+
+    private string CreateUniqueRegionId(string prefix)
+    {
+        for (int i = 1; i < 10000; i++)
+        {
+            string candidate = $"{prefix}.{i:000}";
+            bool found = false;
+            for (int j = 0; j < _regionIds.Length; j++)
+                found |= string.Equals(_regionIds[j], candidate, StringComparison.Ordinal);
+            if (!found)
+                return candidate;
+        }
+
+        return $"{prefix}.{Guid.NewGuid():N}";
+    }
+
+    private void AppendRegions(string[] ids, BodyPartDefinition[] definitions)
+    {
+        var nextIds = new string[_regionIds.Length + ids.Length];
+        var nextParts = new BodyPartDefinition[_parts.Length + definitions.Length];
+        Array.Copy(_regionIds, nextIds, _regionIds.Length);
+        Array.Copy(_parts, nextParts, _parts.Length);
+        Array.Copy(ids, 0, nextIds, _regionIds.Length, ids.Length);
+        Array.Copy(definitions, 0, nextParts, _parts.Length, definitions.Length);
+
+        if (!SetRigData(nextIds, nextParts, setDefaults: false, setOpenedSnapshot: false))
+            return;
+
+        _selectedPart = _parts.Length - 1;
+        EnsureSelectionVisible();
+        _status = $"Добавлено регионов: {ids.Length}. Задай родителя и нажми «Сохранить».";
+    }
+
+    private void RemoveSelectedCustomRegion()
+    {
+        if (_selectedPart < 0 || _selectedPart >= _parts.Length ||
+            !_regionIds[_selectedPart].StartsWith("custom.", StringComparison.Ordinal))
+        {
+            _status = "Удалять можно пользовательские регионы custom.*. Базовые части и органы защищены.";
+            return;
+        }
+
+        int removed = _selectedPart;
+        int fallbackParent = _parts[removed].ParentIndex;
+        var nextIds = new string[_regionIds.Length - 1];
+        var nextParts = new BodyPartDefinition[_parts.Length - 1];
+        int write = 0;
+
+        for (int i = 0; i < _parts.Length; i++)
+        {
+            if (i == removed)
+                continue;
+
+            BodyPartDefinition part = _parts[i];
+            int parent = part.ParentIndex;
+            if (parent == removed)
+                parent = fallbackParent;
+            if (parent > removed)
+                parent--;
+
+            if (parent >= write)
+            {
+                _status = $"Нельзя удалить регион: перепроверь зависимость «{PartName(_regionIds[i])}».";
+                return;
+            }
+
+            nextIds[write] = _regionIds[i];
+            nextParts[write] = Copy(
+                part,
+                parentIndex: parent,
+                anchor: parent >= 0 ? BodyPartAnchor.Parent : part.Anchor);
+            write++;
+        }
+
+        if (!SetRigData(nextIds, nextParts, setDefaults: false, setOpenedSnapshot: false))
+            return;
+
+        _selectedPart = Math.Clamp(removed, 0, _parts.Length - 1);
+        EnsureSelectionVisible();
+        _status = $"Удалён регион «{PartName(_regionIds[_selectedPart])}». Связанные дочерние части переподключены к его родителю.";
+    }
+
+    private void CycleParentDependency()
+    {
+        if (_selectedPart <= 0)
+        {
+            _status = "Первый регион не может иметь родителя: он является корнем рига.";
+            return;
+        }
+
+        BodyPartDefinition part = _parts[_selectedPart];
+        int nextParent = part.ParentIndex + 1;
+        if (nextParent >= _selectedPart)
+            nextParent = -1;
+
+        BodyPartAnchor anchor = nextParent >= 0
+            ? BodyPartAnchor.Parent
+            : string.Equals(_regionIds[_selectedPart], "body.upper", StringComparison.Ordinal)
+                ? BodyPartAnchor.UnitHead
+                : BodyPartAnchor.Parent;
+
+        _parts[_selectedPart] = Copy(part, parentIndex: nextParent, anchor: anchor);
+        _status = nextParent >= 0
+            ? $"«{PartName(_regionIds[_selectedPart])}» теперь зависит от «{PartName(_regionIds[nextParent])}». Нажми Ctrl+S."
+            : $"«{PartName(_regionIds[_selectedPart])}» теперь привязана к корню юнита. Нажми Ctrl+S.";
+    }
+
+    private void EnsureSelectionVisible()
+    {
+        if (_selectedPart < _listScroll)
+            _listScroll = _selectedPart;
+        else if (_selectedPart >= _listScroll + _listVisibleRows)
+            _listScroll = Math.Max(0, _selectedPart - _listVisibleRows + 1);
+        _listScroll = Math.Clamp(_listScroll, 0, Math.Max(0, _parts.Length - _listVisibleRows));
+    }
+
+    private void ApplyEnabledSymmetry(int activeProjection = -1)
+    {
+        if (_selectedPart < 0 || _selectedPart >= _regionIds.Length)
+            return;
+
+        string? counterpartId = GetCounterpartId(_regionIds[_selectedPart]);
+        if (counterpartId == null)
+            return;
+
+        int counterpartIndex = Array.IndexOf(_regionIds, counterpartId);
+        if (counterpartIndex < 0 || counterpartIndex == _selectedPart)
+            return;
+
+        BodyPartDefinition source = _parts[_selectedPart];
+        for (int projection = 0; projection < _symmetryEnabled.Length; projection++)
+        {
+            if (!_symmetryEnabled[projection] ||
+                (activeProjection >= 0 && activeProjection != projection))
+                continue;
+
+            BodyPartDefinition target = _parts[counterpartIndex];
+            NumericsVector3 mirroredPosition = projection switch
+            {
+                0 => new NumericsVector3(target.LocalPosition.X, -source.LocalPosition.Y, source.LocalPosition.Z),
+                1 => new NumericsVector3(-source.LocalPosition.X, target.LocalPosition.Y, source.LocalPosition.Z),
+                _ => new NumericsVector3(source.LocalPosition.X, -source.LocalPosition.Y, source.LocalPosition.Z)
+            };
+            _parts[counterpartIndex] = Copy(
+                target,
+                localPosition: mirroredPosition,
+                scale: source.Scale,
+                localRotation: -source.LocalRotation,
+                primitive: source.Primitive);
+        }
+    }
+
+    private static string? GetCounterpartId(string id)
+    {
+        string[] pairedIds =
+        {
+            "body.arm.left.upper", "body.arm.right.upper",
+            "body.arm.left.lower", "body.arm.right.lower",
+            "body.leg.left.upper", "body.leg.right.upper",
+            "body.leg.left.lower", "body.leg.right.lower"
+        };
+        for (int i = 0; i < pairedIds.Length; i += 2)
+        {
+            if (id == pairedIds[i]) return pairedIds[i + 1];
+            if (id == pairedIds[i + 1]) return pairedIds[i];
+        }
+
+        if (id.Contains(".left.", StringComparison.Ordinal))
+            return id.Replace(".left.", ".right.", StringComparison.Ordinal);
+        if (id.Contains(".right.", StringComparison.Ordinal))
+            return id.Replace(".right.", ".left.", StringComparison.Ordinal);
+        if (id.EndsWith(".left", StringComparison.Ordinal))
+            return id[..^5] + ".right";
+        if (id.EndsWith(".right", StringComparison.Ordinal))
+            return id[..^6] + ".left";
+
+        return null;
+    }
+
+    private void LoadRigFromDialog()
+    {
+        string? path = PickRigFile(save: false);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _status = OperatingSystem.IsWindows()
+                ? "Загрузка отменена."
+                : "Диалог выбора файлов доступен в Windows.";
+            return;
+        }
+
+        if (!UnitBodyRigSettingsStore.LoadFile(path, out string[] ids, out BodyPartDefinition[] parts, out string error))
+        {
+            _status = $"Ошибка загрузки рига: {error}";
+            return;
+        }
+
+        if (!SetRigData(ids, parts, setDefaults: true, setOpenedSnapshot: true))
+            return;
+
+        _status = $"Загружен файл «{Path.GetFileName(path)}». Применение к игре — кнопкой «Сохранить».";
+        Save();
+    }
+
+    private void ExportRigFromDialog()
+    {
+        string? path = PickRigFile(save: true);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _status = OperatingSystem.IsWindows() ? "Экспорт отменён." : "Диалог выбора файлов доступен в Windows.";
+            return;
+        }
+
+        if (UnitBodyRigSettingsStore.ExportFile(path, _regionIds, _parts, out string error))
+            _status = $"Риг экспортирован: {Path.GetFileName(path)}";
+        else
+            _status = $"Ошибка экспорта: {error}";
+    }
+
+    private static string? PickRigFile(bool save)
+    {
+        if (!OperatingSystem.IsWindows())
+            return null;
+
+        var buffer = new StringBuilder(1024);
+        var titleBuffer = new StringBuilder(256);
+        var dialog = new OpenFileName
+        {
+            lStructSize = Marshal.SizeOf<OpenFileName>(),
+            hwndOwner = IntPtr.Zero,
+            hInstance = IntPtr.Zero,
+            lpstrFilter = "RimClone rig (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0",
+            lpstrCustomFilter = IntPtr.Zero,
+            nMaxCustFilter = 0,
+            nFilterIndex = 1,
+            lpstrFile = buffer,
+            nMaxFile = buffer.Capacity,
+            lpstrFileTitle = titleBuffer,
+            nMaxFileTitle = titleBuffer.Capacity,
+            lpstrInitialDir = Path.GetDirectoryName(UnitBodyRigSettingsStore.FilePath),
+            lpstrTitle = save ? "Сохранить риг как..." : "Загрузить риг",
+            Flags = 0x00000800 | 0x00080000 | (save ? 0x00000002 : 0x00001000),
+            nFileOffset = 0,
+            nFileExtension = 0,
+            lpstrDefExt = "json",
+            lCustData = IntPtr.Zero,
+            lpfnHook = IntPtr.Zero,
+            lpTemplateName = null,
+            pvReserved = IntPtr.Zero,
+            dwReserved = 0,
+            FlagsEx = 0
+        };
+
+        bool accepted = save ? GetSaveFileNameW(ref dialog) : GetOpenFileNameW(ref dialog);
+        return accepted ? dialog.lpstrFile.ToString() : null;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct OpenFileName
+    {
+        public int lStructSize;
+        public IntPtr hwndOwner;
+        public IntPtr hInstance;
+        public string? lpstrFilter;
+        public IntPtr lpstrCustomFilter;
+        public int nMaxCustFilter;
+        public int nFilterIndex;
+        public StringBuilder lpstrFile;
+        public int nMaxFile;
+        public StringBuilder? lpstrFileTitle;
+        public int nMaxFileTitle;
+        public string? lpstrInitialDir;
+        public string? lpstrTitle;
+        public int Flags;
+        public short nFileOffset;
+        public short nFileExtension;
+        public string? lpstrDefExt;
+        public IntPtr lCustData;
+        public IntPtr lpfnHook;
+        public string? lpTemplateName;
+        public IntPtr pvReserved;
+        public uint dwReserved;
+        public uint FlagsEx;
+    }
+
+    [DllImport("comdlg32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetOpenFileNameW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetOpenFileNameW(ref OpenFileName dialog);
+
+    [DllImport("comdlg32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetSaveFileNameW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetSaveFileNameW(ref OpenFileName dialog);
+
     private static BodyPartDefinition Copy(
         BodyPartDefinition original,
         NumericsVector3? localPosition = null,
         NumericsVector3? scale = null,
         float? localRotation = null,
-        BodyPrimitive? primitive = null) =>
+        BodyPrimitive? primitive = null,
+        int? parentIndex = null,
+        BodyPartAnchor? anchor = null) =>
         new(
             localPosition ?? original.LocalPosition,
             scale ?? original.Scale,
             primitive ?? original.Primitive,
-            parentIndex: original.ParentIndex,
+            parentIndex: parentIndex ?? original.ParentIndex,
             localRotation: localRotation ?? original.LocalRotation,
             motion: original.Motion,
             followDistance: original.FollowDistance,
-            anchor: original.Anchor,
+            anchor: anchor ?? original.Anchor,
             role: original.Role,
             pivot: original.Pivot);
 
@@ -1155,6 +1815,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             shape.Dispose();
         foreach (Text? label in _projectionLabels)
             label?.Dispose();
+        foreach (RectangleShape shape in _symmetryButtons)
+            shape.Dispose();
+        foreach (Text? label in _symmetryLabels)
+            label?.Dispose();
         foreach (RectangleShape shape in _sliderTracks)
             shape.Dispose();
         foreach (RectangleShape shape in _sliderFills)
@@ -1168,8 +1832,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _title?.Dispose();
         _saveLabel?.Dispose();
+        _loadLabel?.Dispose();
+        _exportLabel?.Dispose();
         _defaultsLabel?.Dispose();
         _reloadLabel?.Dispose();
+        _parentLabel?.Dispose();
+        _allSymmetryLabel?.Dispose();
+        _addRegionLabel?.Dispose();
+        _addAllFormsLabel?.Dispose();
+        _removeRegionLabel?.Dispose();
         _closeLabel?.Dispose();
         _listTitle?.Dispose();
         _propertiesTitle?.Dispose();
@@ -1185,10 +1856,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _listPanel.Dispose();
         _propertiesPanel.Dispose();
         _saveButton.Dispose();
+        _loadButton.Dispose();
+        _exportButton.Dispose();
         _defaultsButton.Dispose();
         _reloadButton.Dispose();
         _closeButton.Dispose();
         _primitiveButton.Dispose();
+        _parentButton.Dispose();
+        _allSymmetryButton.Dispose();
+        _addRegionButton.Dispose();
+        _addAllFormsButton.Dispose();
+        _removeRegionButton.Dispose();
         _previewCircle.Dispose();
         _previewBox.Dispose();
         _previewTriangle.Dispose();

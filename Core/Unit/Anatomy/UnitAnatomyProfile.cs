@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 
 namespace Core.Unit;
@@ -291,34 +292,81 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
 
     public float GetHitHalfHeight(int index) => GetNode(index).HitHalfHeight;
 
-    /// <summary>
-    /// Rebuilds this immutable anatomy profile with edited render shapes while
-    /// preserving stable region IDs, tissue bindings, hit volumes, and markers.
-    /// </summary>
+    /// <summary>Edits transforms of the current topology while preserving stable IDs.</summary>
     public UnitAnatomyProfile WithBodyParts(ReadOnlySpan<BodyPartDefinition> bodyParts)
     {
-        if (!HasSharedShapes || bodyParts.Length != NodeCount)
-            throw new ArgumentException(
-                "Edited body-part count must match the shared anatomy profile.",
-                nameof(bodyParts));
+        if (bodyParts.Length != NodeCount)
+            throw new ArgumentException("Edited body-part count must match the anatomy profile.", nameof(bodyParts));
 
-        var nodes = new UnitAnatomyNode[NodeCount];
+        var ids = new string[NodeCount];
+        for (int i = 0; i < ids.Length; i++)
+            ids[i] = _nodes[i].Id;
+
+        return WithRig(ids, bodyParts);
+    }
+
+    /// <summary>
+    /// Rebuilds the editable rig. Existing region tissues/markers and organ volumes
+    /// survive unchanged; any new region receives its own stable damageable tissue.
+    /// Parent indices define dependencies and must precede the child.
+    /// </summary>
+    public UnitAnatomyProfile WithRig(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> bodyParts)
+    {
+        if (!HasSharedShapes || regionIds.Length != bodyParts.Length ||
+            regionIds.Length == 0 || regionIds.Length > 256)
+            throw new ArgumentException("The rig must contain 1–256 regions and matching shapes.");
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < regionIds.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(regionIds[i]) || !seen.Add(regionIds[i]))
+                throw new ArgumentException($"Empty or duplicate anatomy region ID '{regionIds[i]}'.");
+            if (bodyParts[i].ParentIndex < -1 || bodyParts[i].ParentIndex >= i)
+                throw new ArgumentException($"Parent of '{regionIds[i]}' must precede it in the list.");
+        }
+
+        var nodes = new UnitAnatomyNode[regionIds.Length];
         for (int i = 0; i < nodes.Length; i++)
         {
-            UnitAnatomyNode previous = _nodes[i];
             BodyPartDefinition shape = bodyParts[i];
-            if (shape.ParentIndex != previous.Shape.ParentIndex)
-                throw new ArgumentException(
-                    $"Changing the parent of '{previous.Id}' is not supported by transform-only rig editing.",
-                    nameof(bodyParts));
+            string parentId = shape.ParentIndex >= 0 ? regionIds[shape.ParentIndex] : string.Empty;
+            int oldIndex = FindRegion(regionIds[i]);
 
+            if (oldIndex >= 0)
+            {
+                UnitAnatomyNode previous = _nodes[oldIndex];
+                nodes[i] = UnitAnatomyNode.Part(
+                    regionIds[i],
+                    parentId,
+                    shape,
+                    MathF.Max(0.001f, MathF.Abs(shape.Scale.Z)),
+                    previous.Tissues.ToArray(),
+                    previous.Markers.ToArray());
+                continue;
+            }
+
+            string tissueId = $"{regionIds[i]}.tissue";
+            string parentTissueId = shape.ParentIndex >= 0
+                ? nodes[shape.ParentIndex].Tissues[0].Id
+                : string.Empty;
+            var tissue = new HitRegionPartBinding(
+                UnitHealthPartId.WholeBody,
+                weight: 1f,
+                kind: UnitHealthPartKind.BodyPart,
+                maxHitPoints: 30f,
+                id: tissueId,
+                parentId: string.IsNullOrWhiteSpace(parentTissueId) ? null : parentTissueId);
             nodes[i] = UnitAnatomyNode.Part(
-                previous.Id,
-                previous.ParentId,
+                regionIds[i],
+                parentId,
                 shape,
                 MathF.Max(0.001f, MathF.Abs(shape.Scale.Z)),
-                previous.Tissues.ToArray(),
-                previous.Markers.ToArray());
+                new[] { tissue },
+                new UnitAnatomyMarker(
+                    "target",
+                    UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision));
         }
 
         return new UnitAnatomyProfile(nodes, Convert(nodes), _volumes);

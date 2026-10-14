@@ -785,6 +785,63 @@ public sealed class UnitSimulation
         return SetHitRegionProfile(id, new UnitHitRegionProfile(nextNodes));
     }
 
+    /// <summary>
+    /// Replaces an edited anatomy profile while preserving health for all unchanged
+    /// region/tissue IDs. Appended editable regions receive fresh health slots.
+    /// </summary>
+    public bool ApplyEditedAnatomyProfile(UnitId id, UnitAnatomyProfile profile)
+    {
+        if (profile == null || !Units.TryGetIndex(id, out int index))
+            return false;
+
+        UnitHitRegionProfile? previous = HitRegions.GetProfile(index);
+        bool stablePrefix = previous is UnitAnatomyProfile old && profile.RegionCount >= old.RegionCount;
+        if (stablePrefix && previous is UnitAnatomyProfile oldProfile)
+        {
+            ReadOnlySpan<UnitCircleHitRegion> oldRegions = oldProfile.Regions;
+            ReadOnlySpan<UnitCircleHitRegion> newRegions = profile.Regions;
+            for (int i = 0; i < oldRegions.Length && stablePrefix; i++)
+            {
+                if (!string.Equals(oldRegions[i].Id, newRegions[i].Id, StringComparison.Ordinal))
+                {
+                    stablePrefix = false;
+                    break;
+                }
+
+                ReadOnlySpan<HitRegionPartBinding> oldParts = oldRegions[i].Parts;
+                ReadOnlySpan<HitRegionPartBinding> newParts = newRegions[i].Parts;
+                if (oldParts.Length != newParts.Length)
+                {
+                    stablePrefix = false;
+                    break;
+                }
+
+                for (int j = 0; j < oldParts.Length; j++)
+                {
+                    if (oldParts[j].Id != newParts[j].Id ||
+                        oldParts[j].Part != newParts[j].Part ||
+                        oldParts[j].Kind != newParts[j].Kind ||
+                        oldParts[j].MaxHitPoints != newParts[j].MaxHitPoints)
+                    {
+                        stablePrefix = false;
+                        break;
+                    }
+                }
+            }
+        }
+        else
+        {
+            stablePrefix = false;
+        }
+
+        if (!stablePrefix)
+            Health.ClearHitRegionParts(index);
+
+        HitRegions.SetProfile(index, profile);
+        Health.RegisterHitRegionParts(index, profile);
+        return true;
+    }
+
     public bool SetHitRegionProfile(
         UnitId id,
         UnitHitRegionProfile profile)
