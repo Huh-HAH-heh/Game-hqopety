@@ -101,6 +101,7 @@ public sealed class UnitMetabolismSystem
                 bleedRates, partCounts);
             UpdateComposition(metabolism, unit, deltaTime, massScale);
             UpdatePerformance(metabolism, unit);
+            ApplyCriticalConditionDamage(overallHp, metabolism, unit, deltaTime);
         }
     }
 
@@ -255,8 +256,10 @@ public sealed class UnitMetabolismSystem
         if (state.ProteinReserveGrams[unit] < 12f)
             nutritionFactor *= 0.85f;
 
+        float stressFactor = 1f - state.Stress[unit] * 0.0015f;
         state.MovementMultiplier[unit] = Math.Clamp(
-            energyFactor * waterFactor * bloodFactor * fatigueFactor * nutritionFactor,
+            energyFactor * waterFactor * bloodFactor * fatigueFactor *
+            nutritionFactor * stressFactor,
             0.2f,
             1f);
 
@@ -287,6 +290,43 @@ public sealed class UnitMetabolismSystem
             state.Condition[unit] = UnitMetabolicCondition.Exhausted;
         else
             state.Condition[unit] = UnitMetabolicCondition.Normal;
+    }
+
+    private static void ApplyCriticalConditionDamage(
+        float[] overallHitPoints,
+        UnitMetabolismStore state,
+        int unit,
+        float deltaTime)
+    {
+        float energyRatio = state.MaxEnergyKcal[unit] > 0f
+            ? state.EnergyKcal[unit] / state.MaxEnergyKcal[unit]
+            : 0f;
+        float waterRatio = state.MaxWaterLiters[unit] > 0f
+            ? state.WaterLiters[unit] / state.MaxWaterLiters[unit]
+            : 0f;
+        float bloodRatio = state.MaxBloodLiters[unit] > 0f
+            ? state.BloodLiters[unit] / state.MaxBloodLiters[unit]
+            : 0f;
+
+        float damagePerSecond = 0f;
+        if (waterRatio < 0.04f)
+            damagePerSecond += 0.025f;
+        if (energyRatio < 0.02f)
+            damagePerSecond += 0.012f;
+        if (bloodRatio < 0.08f)
+            damagePerSecond += 0.2f;
+        if (state.MicronutrientReserve[unit] < 3f &&
+            state.ProteinReserveGrams[unit] < 5f)
+        {
+            damagePerSecond += 0.005f;
+        }
+
+        if (damagePerSecond > 0f)
+        {
+            overallHitPoints[unit] = MathF.Max(
+                0f,
+                overallHitPoints[unit] - damagePerSecond * deltaTime);
+        }
     }
 
     private static void Transfer(ref float from, ref float to, float fraction)
