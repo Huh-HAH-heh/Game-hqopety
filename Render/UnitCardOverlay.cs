@@ -281,8 +281,6 @@ public sealed class UnitCardOverlay : IDisposable
         window.Draw(_header);
         window.Draw(_accent);
         window.Draw(_closeButton);
-        window.Draw(_bodyTab);
-        window.Draw(_detailsTab);
 
         _bodyTab.FillColor = _view == CardView.Anatomy
             ? new Color(67, 91, 115, 255)
@@ -290,6 +288,8 @@ public sealed class UnitCardOverlay : IDisposable
         _detailsTab.FillColor = _view == CardView.Details
             ? new Color(67, 91, 115, 255)
             : new Color(30, 39, 51, 255);
+        window.Draw(_bodyTab);
+        window.Draw(_detailsTab);
 
         if (_bodyTabLabel != null)
             window.Draw(_bodyTabLabel);
@@ -386,7 +386,7 @@ public sealed class UnitCardOverlay : IDisposable
             _footer.DisplayedString = _view == CardView.Details && _lineCount > _visibleLines
                 ? $"Строки {_scrollOffset + 1}–{Math.Min(_scrollOffset + _visibleLines, _lineCount)} из {_lineCount}   •   Колесо — прокрутка"
                 : _view == CardView.Anatomy
-                    ? "Зелёный — норма   Жёлтый — повреждение   Красный — критично"
+                    ? "Зелёный — норма   Жёлтый — урон   Оранжевый — тяжёлый   Красный — критично"
                     : "Колесо — прокрутка подробных характеристик";
             window.Draw(_footer);
         }
