@@ -17,6 +17,20 @@ namespace RimClone.Render;
 
 public sealed class GameRenderer
 {
+    private sealed class UnitCardEntry
+    {
+        public readonly UnitId Unit;
+        public readonly UnitCardOverlay Overlay;
+        public readonly long RequestKey;
+        public UnitCardDetailsSnapshot? LatestDetails;
+
+        public UnitCardEntry(UnitId unit, UnitCardOverlay overlay, long requestKey)
+        {
+            Unit = unit;
+            Overlay = overlay;
+            RequestKey = requestKey;
+        }
+    }
     private const float TileSize = 16f;
 
     private const float TerrainTilePixelSize =
@@ -54,11 +68,9 @@ public sealed class GameRenderer
     private View? _uiView;
     private GameMenuOverlay? _gameMenuOverlay;
     private ContextMenuOverlay? _contextMenuOverlay;
-    private UnitCardOverlay? _unitCardOverlay;
+    private readonly List<UnitCardEntry> _unitCards = new();
+    private readonly ConcurrentDictionary<long, UnitCardEntry> _unitCardRequests = new();
     private UnitId _contextMenuUnit;
-    private UnitId _unitCardUnit;
-    private UnitCardDetailsSnapshot? _latestUnitCardDetails;
-    private long _unitCardRequestKey;
     private GameMenuActionType? _draggingMenuSlider;
     private GameMenuPage _menuPage;
     private int _selectedResolutionIndex;
@@ -205,7 +217,7 @@ public sealed class GameRenderer
         _projectileRenderer.Dispose();
         _gameMenuOverlay?.Dispose();
         _contextMenuOverlay?.Dispose();
-        _unitCardOverlay?.Dispose();
+        CloseUnitCards();
         _combatStatusOverlay?.Dispose();
         _uiView?.Dispose();
         _selectionBox.Dispose();
@@ -535,28 +547,32 @@ public sealed class GameRenderer
                 _window.Size.X,
                 _window.Size.Y);
 
-            if (_unitCardOverlay?.IsOpen == true)
+            if (_unitCards.Count > 0)
             {
                 SimulationFrameSnapshot? cardSnapshot = renderSnapshot;
                 if (cardSnapshot == null)
                     cardSnapshot = SimulationFrameSnapshot.Capture(_unitSimulation);
 
-                if (TryFindRenderUnit(cardSnapshot, _unitCardUnit, out RenderUnitState cardUnit))
+                for (int i = 0; i < _unitCards.Count; i++)
                 {
-                    UnitCardDetailsSnapshot? details = _simulationThread != null
-                        ? Volatile.Read(ref _latestUnitCardDetails)
-                        : UnitCardDetailsSnapshot.Capture(_unitSimulation, _unitCardUnit);
+                    UnitCardEntry card = _unitCards[i];
+                    if (!TryFindRenderUnit(cardSnapshot, card.Unit, out RenderUnitState cardUnit))
+                    {
+                        CloseUnitCard(card);
+                        i--;
+                        continue;
+                    }
 
-                    _unitCardOverlay.Draw(
+                    UnitCardDetailsSnapshot? details = _simulationThread != null
+                        ? Volatile.Read(ref card.LatestDetails)
+                        : UnitCardDetailsSnapshot.Capture(_unitSimulation, card.Unit);
+
+                    card.Overlay.Draw(
                         _window,
                         cardUnit,
                         details,
                         _window.Size.X,
                         _window.Size.Y);
-                }
-                else
-                {
-                    CloseUnitCard();
                 }
             }
         }
@@ -840,28 +856,94 @@ public sealed class GameRenderer
 
         _contextMenuOverlay?.Close();
         _contextMenuUnit = default;
-        _unitCardUnit = unit;
-        _unitCardOverlay?.Open();
 
-        long requestKey =
-            ((long)unit.Generation << 32) |
-            ((uint)unit.Index + 1u);
-        Interlocked.Exchange(ref _unitCardRequestKey, requestKey);
+        for (int i = 0; i < _unitCards.Count; i++)
+        {
+            UnitCardEntry existing = _unitCards[i];
+            if (existing.Unit.Index != unit.Index ||
+                existing.Unit.Generation != unit.Generation)
+            {
+                continue;
+            }
+
+            _unitCards.RemoveAt(i);
+            _unitCards.Add(existing);
+            return;
+        }
+
+        long requestKey = ((long)unit.Generation << 32) | ((uint)unit.Index + 1u);
+        int cascade = _unitCards.Count % 6;
+        float x = Math.Max(
+            8f,
+            _window.Size.X - UnitCardOverlay.PanelWidth - 14f - cascade * 28f);
+        float y = 12f + cascade * 28f;
+        UnitCardOverlay overlay = new();
+        overlay.Open(x, y);
+        UnitCardEntry card = new(unit, overlay, requestKey);
+        _unitCards.Add(card);
+        _unitCardRequests[requestKey] = card;
 
         if (_simulationThread == null)
         {
-            Volatile.Write(
-                ref _latestUnitCardDetails,
-                UnitCardDetailsSnapshot.Capture(_unitSimulation, unit));
+            try
+            {
+                Volatile.Write(
+                    ref card.LatestDetails,
+                    UnitCardDetailsSnapshot.Capture(_unitSimulation, unit));
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"[Unit card snapshot] {exception}");
+            }
         }
     }
 
-    private void CloseUnitCard()
+    private void OpenSelectedUnitCards()
     {
-        _unitCardOverlay?.Close();
-        _unitCardUnit = default;
-        Interlocked.Exchange(ref _unitCardRequestKey, 0L);
-        Volatile.Write(ref _latestUnitCardDetails, null);
+        SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+        if (snapshot == null || _selectedUnits.Count == 0)
+            return;
+
+        List<UnitId> selected = new(_selectedUnits);
+        selected.Sort((left, right) => left.Index.CompareTo(right.Index));
+
+        List<UnitId> available = new(selected.Count);
+        for (int i = 0; i < selected.Count; i++)
+        {
+            if (TryFindRenderUnit(snapshot, selected[i], out _))
+                available.Add(selected[i]);
+        }
+
+        const int maximumCards = 6;
+        int count = Math.Min(maximumCards, available.Count);
+        for (int i = 0; i < count; i++)
+            OpenUnitCard(available[i]);
+
+        if (available.Count > maximumCards)
+        {
+            Console.WriteLine(
+                $"[Unit cards] Opened {maximumCards} of {available.Count} selected units. " +
+                "Select a smaller group to open all cards at once.");
+        }
+    }
+
+    private void CloseUnitCard(UnitCardEntry card)
+    {
+        _unitCards.Remove(card);
+        _unitCardRequests.TryRemove(card.RequestKey, out _);
+        card.Overlay.Dispose();
+    }
+
+    private void CloseTopUnitCard()
+    {
+        if (_unitCards.Count > 0)
+            CloseUnitCard(_unitCards[^1]);
+    }
+
+    private void CloseUnitCards()
+    {
+        while (_unitCards.Count > 0)
+            CloseUnitCard(_unitCards[^1]);
     }
 
     private void BeginWorldSelection(Vector2i mousePixel)
@@ -1189,27 +1271,18 @@ public sealed class GameRenderer
                 Console.WriteLine($"[Simulation snapshot] {exception}");
             }
 
-            long detailKey = Volatile.Read(ref _unitCardRequestKey);
-            if (detailKey != 0)
+            foreach (KeyValuePair<long, UnitCardEntry> request in _unitCardRequests)
             {
                 try
                 {
-                    uint encodedIndex = (uint)detailKey;
-                    int unitIndex = (int)encodedIndex - 1;
-                    uint generation = (uint)(detailKey >> 32);
-                    UnitId detailUnit = new UnitId(unitIndex, generation);
                     Volatile.Write(
-                        ref _latestUnitCardDetails,
-                        UnitCardDetailsSnapshot.Capture(_unitSimulation, detailUnit));
+                        ref request.Value.LatestDetails,
+                        UnitCardDetailsSnapshot.Capture(_unitSimulation, request.Value.Unit));
                 }
                 catch (Exception exception)
                 {
                     Console.WriteLine($"[Unit card snapshot] {exception}");
                 }
-            }
-            else
-            {
-                Volatile.Write(ref _latestUnitCardDetails, null);
             }
 
             nextFrame += frameTicks;
@@ -1244,7 +1317,6 @@ public sealed class GameRenderer
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
-        _unitCardOverlay = new UnitCardOverlay();
         _combatStatusOverlay = new CombatStatusOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
@@ -1280,11 +1352,13 @@ public sealed class GameRenderer
                     ? _window.MapPixelToCoords(wheelPixels, _uiView)
                     : new Vector2f(wheelPixels.X, wheelPixels.Y);
 
-                if (_unitCardOverlay?.HandleWheel(
-                        new Vector2i((int)wheelUiCoordinates.X, (int)wheelUiCoordinates.Y),
-                        e.Delta) == true)
+                Vector2i wheelPosition = new(
+                    (int)wheelUiCoordinates.X,
+                    (int)wheelUiCoordinates.Y);
+                for (int i = _unitCards.Count - 1; i >= 0; i--)
                 {
-                    return;
+                    if (_unitCards[i].Overlay.HandleWheel(wheelPosition, e.Delta))
+                        return;
                 }
 
                 bool shiftPressed =
@@ -1316,7 +1390,11 @@ public sealed class GameRenderer
                         (int)contextCoordinates.X,
                         (int)contextCoordinates.Y);
 
-                    CloseUnitCard();
+                    for (int i = _unitCards.Count - 1; i >= 0; i--)
+                    {
+                        if (_unitCards[i].Overlay.Contains(contextPosition))
+                            return;
+                    }
 
                     if (_menuPage == GameMenuPage.Closed &&
                         _contextMenuOverlay != null)
@@ -1344,7 +1422,8 @@ public sealed class GameRenderer
                             contextPosition,
                             _window.Size.X,
                             _window.Size.Y,
-                            hasUnit);
+                            hasUnit,
+                            _selectedUnits.Count > 1);
 
                         if (!_contextMenuOverlay.IsOpen)
                             _contextMenuUnit = default;
@@ -1370,10 +1449,27 @@ public sealed class GameRenderer
                     (int)uiCoordinates.X,
                     (int)uiCoordinates.Y);
 
-                if (_unitCardOverlay?.HandleClick(uiPosition) == true)
+                for (int i = _unitCards.Count - 1; i >= 0; i--)
                 {
-                    if (_unitCardOverlay.IsOpen == false)
-                        CloseUnitCard();
+                    UnitCardEntry card = _unitCards[i];
+                    if (!card.Overlay.HandleMousePressed(
+                            uiPosition,
+                            _window.Size.X,
+                            _window.Size.Y))
+                    {
+                        continue;
+                    }
+
+                    if (!card.Overlay.IsOpen)
+                    {
+                        CloseUnitCard(card);
+                    }
+                    else if (i != _unitCards.Count - 1)
+                    {
+                        _unitCards.RemoveAt(i);
+                        _unitCards.Add(card);
+                    }
+
                     return;
                 }
 
@@ -1381,7 +1477,8 @@ public sealed class GameRenderer
                 {
                     bool menuHandled = _contextMenuOverlay.HandleClick(
                         uiPosition,
-                        out bool openUnitCard);
+                        out bool openUnitCard,
+                        out bool openSelectedCards);
 
                     if (menuHandled)
                     {
@@ -1389,6 +1486,8 @@ public sealed class GameRenderer
                         _contextMenuUnit = default;
                         if (openUnitCard && contextUnit.IsValid)
                             OpenUnitCard(contextUnit);
+                        else if (openSelectedCards)
+                            OpenSelectedUnitCards();
                         return;
                     }
 
@@ -1431,6 +1530,24 @@ public sealed class GameRenderer
         _window.MouseMoved +=
             (_, e) =>
             {
+                Vector2f dragUiCoordinates = _uiView != null
+                    ? _window.MapPixelToCoords(e.Position, _uiView)
+                    : new Vector2f(e.Position.X, e.Position.Y);
+                Vector2i dragUiPosition = new(
+                    (int)dragUiCoordinates.X,
+                    (int)dragUiCoordinates.Y);
+
+                for (int i = _unitCards.Count - 1; i >= 0; i--)
+                {
+                    if (_unitCards[i].Overlay.HandleMouseMoved(
+                            dragUiPosition,
+                            _window.Size.X,
+                            _window.Size.Y))
+                    {
+                        return;
+                    }
+                }
+
                 if (_isSelectingUnits)
                 {
                     _selectionDragCurrentPixel = e.Position;
@@ -1464,6 +1581,12 @@ public sealed class GameRenderer
             {
                 if (e.Button != Mouse.Button.Left)
                     return;
+
+                for (int i = _unitCards.Count - 1; i >= 0; i--)
+                {
+                    if (_unitCards[i].Overlay.HandleMouseReleased())
+                        return;
+                }
 
                 if (_draggingMenuSlider.HasValue)
                 {
@@ -1534,7 +1657,7 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.F2)
         {
-            CloseUnitCard();
+            CloseUnitCards();
             _contextMenuOverlay?.Close();
             _contextMenuUnit = default;
             _menuPage = _menuPage == GameMenuPage.Settings
@@ -1546,9 +1669,9 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.Escape)
         {
-            if (_unitCardOverlay?.IsOpen == true)
+            if (_unitCards.Count > 0)
             {
-                CloseUnitCard();
+                CloseTopUnitCard();
                 return;
             }
 
