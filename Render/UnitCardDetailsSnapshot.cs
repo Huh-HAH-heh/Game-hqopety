@@ -51,6 +51,7 @@ public sealed class UnitCardDetailsSnapshot
 {
     public UnitId Unit { get; init; }
     public RenderHealthPart[] HealthParts { get; init; } = Array.Empty<RenderHealthPart>();
+    public AnatomyCardEntry[] AnatomyEntries { get; init; } = Array.Empty<AnatomyCardEntry>();
     public RenderInventoryItem[] Inventory { get; init; } = Array.Empty<RenderInventoryItem>();
     public RenderMetabolismState Metabolism { get; init; }
 
@@ -78,6 +79,9 @@ public sealed class UnitCardDetailsSnapshot
         }
 
         RenderHealthPart[] healthParts = new RenderHealthPart[visibleHealthCount];
+        AnatomyCardEntry[] anatomyEntries = simulation.HitRegions.GetProfile(unitIndex) is UnitAnatomyProfile anatomyProfile
+            ? AnatomyCardEntryFactory.Capture(anatomyProfile, health, unitIndex)
+            : Array.Empty<AnatomyCardEntry>();
         int healthWrite = 0;
         for (int i = 0; i < healthCount; i++)
         {
@@ -183,6 +187,7 @@ public sealed class UnitCardDetailsSnapshot
         {
             Unit = id,
             HealthParts = healthParts,
+            AnatomyEntries = anatomyEntries,
             Inventory = inventoryItems,
             Metabolism = metabolicState
         };
