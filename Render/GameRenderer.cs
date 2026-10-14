@@ -572,6 +572,7 @@ public sealed class GameRenderer
                     card.Overlay.Draw(
                         _window,
                         cardUnit,
+                        cardSnapshot.BodyParts,
                         details,
                         _window.Size.X,
                         _window.Size.Y);
