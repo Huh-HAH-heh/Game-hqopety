@@ -34,5 +34,7 @@ public enum UnitHealthPartId : ushort
     LeftFoot,
 
     RightLeg,
-    RightFoot
+    RightFoot,
+
+    Neck
 }
