@@ -464,6 +464,7 @@ public sealed class DamageSystem
             UnitHealthPartId.Brain => 0,
 
             UnitHealthPartId.Torso or
+            UnitHealthPartId.Neck or
             UnitHealthPartId.Heart or
             UnitHealthPartId.LeftLung or
             UnitHealthPartId.RightLung or
