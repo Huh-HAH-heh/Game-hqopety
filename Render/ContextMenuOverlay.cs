@@ -170,7 +170,8 @@ public sealed class ContextMenuOverlay : IDisposable
             new Vector2i((int)position.X, (int)position.Y),
             windowWidth,
             windowHeight,
-            _hasUnitAction);
+            _hasUnitAction,
+            _hasMultipleUnitsAction);
 
         window.Draw(_panel);
         window.Draw(_header);
