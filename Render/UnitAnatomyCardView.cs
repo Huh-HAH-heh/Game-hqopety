@@ -325,16 +325,7 @@ public sealed class UnitAnatomyCardView : IDisposable
         NumericsVector3 delta = center - unit.Position;
         float forward = MathF.Cos(bodyAngle) * delta.X + MathF.Sin(bodyAngle) * delta.Y;
         float lateral = -MathF.Sin(bodyAngle) * delta.X + MathF.Cos(bodyAngle) * delta.Y;
-        int bindingRatioRegion = -1;
-        int bindingRatioIndex = -1;
-        float ratio = unit.HealthRatio;
-        if (profile.TryFindPart(volume.TargetBindingId, out bindingRatioRegion, out bindingRatioIndex))
-        {
-            ReadOnlySpan<HitRegionPartBinding> targetTissues =
-                profile.GetNode(bindingRatioRegion).Tissues;
-            if ((uint)bindingRatioIndex < (uint)targetTissues.Length)
-                ratio = GetHealthRatio(targetTissues[bindingRatioIndex].Part, details, unit.HealthRatio);
-        }
+        float ratio = GetHealthRatio(volume.TargetBindingId, details, unit.HealthRatio);
 
         geometry = Project(
             projection,
@@ -404,17 +395,20 @@ public sealed class UnitAnatomyCardView : IDisposable
         UnitCardDetailsSnapshot? details,
         float fallback)
     {
-        ReadOnlySpan<HitRegionPartBinding> tissues = node.Tissues;
+        if (details == null)
+            return fallback;
+
+        AnatomyCardEntry[] entries = details.AnatomyEntries;
         float total = 0f;
         int count = 0;
 
-        for (int i = 0; i < tissues.Length; i++)
+        for (int i = 0; i < entries.Length; i++)
         {
-            HitRegionPartBinding tissue = tissues[i];
-            if (tissue.Kind != UnitHealthPartKind.BodyPart)
+            AnatomyCardEntry entry = entries[i];
+            if (entry is not BodyPartCardEntry || entry.RegionId != node.Id)
                 continue;
 
-            total += GetHealthRatio(tissue.Part, details, fallback);
+            total += entry.HealthRatio;
             count++;
         }
 
@@ -422,22 +416,18 @@ public sealed class UnitAnatomyCardView : IDisposable
     }
 
     private static float GetHealthRatio(
-        UnitHealthPartId part,
+        string tissueId,
         UnitCardDetailsSnapshot? details,
         float fallback)
     {
         if (details == null)
             return fallback;
 
-        RenderHealthPart[] healthParts = details.HealthParts;
-        for (int i = 0; i < healthParts.Length; i++)
+        AnatomyCardEntry[] entries = details.AnatomyEntries;
+        for (int i = 0; i < entries.Length; i++)
         {
-            if (healthParts[i].Part != part)
-                continue;
-
-            return healthParts[i].MaxHitPoints > 0f
-                ? Math.Clamp(healthParts[i].HitPoints / healthParts[i].MaxHitPoints, 0f, 1f)
-                : 0f;
+            if (entries[i].Id == tissueId)
+                return entries[i].HealthRatio;
         }
 
         return fallback;
