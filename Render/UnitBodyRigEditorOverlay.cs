@@ -134,7 +134,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(82, 104, 127, 255),
         OutlineThickness = 1f
     };
-    private readonly RectangleShape[] _gridLines = new RectangleShape[128];
+    private readonly RectangleShape[] _gridLines = new RectangleShape[192];
     private readonly RectangleShape _addRegionButton = new(new Vector2f(1f, 25f))
     {
         FillColor = new Color(44, 81, 67, 255),
@@ -200,6 +200,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private int _selectedPart;
     private int _selectedProperty;
+    private int _activeProjection = -1;
     private int _draggingProperty = -1;
     private int _draggingProjection = -1;
     private bool _draggingPart;
@@ -210,8 +211,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _listScroll;
     private int _listVisibleRows = 12;
     private bool _gridEnabled = true;
-    private readonly float[] _gridSteps = { 0.005f, 0.01f, 0.025f, 0.05f, 0.1f, 0.2f };
-    private int _gridStepIndex = 2;
+    private readonly float[] _gridSteps = { 0.0005f, 0.001f, 0.0025f, 0.005f, 0.01f, 0.025f, 0.05f, 0.1f, 0.2f };
+    private int _gridStepIndex = 3;
     private string _status = "Перетаскивание привязано к сетке. Настрой углы X/Y/Z в параметрах.";
     private bool _disposed;
 
@@ -502,6 +503,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingProperty = -1;
         _draggingProjection = -1;
         _draggingPart = false;
+        _activeProjection = -1;
     }
 
     public void SetStatus(string status) => _status = status ?? string.Empty;
@@ -646,6 +648,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             }
 
             _selectedPart = itemIndex;
+            _activeProjection = -1;
             _draggingProperty = -1;
             _draggingProjection = -1;
             _draggingPart = false;
@@ -659,6 +662,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 continue;
 
             _selectedProperty = i;
+            _activeProjection = -1;
             _draggingProperty = i;
             UpdatePropertyFromSlider(i, position.X);
             return true;
@@ -669,6 +673,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (!_previewPanels[projection].GetGlobalBounds().Contains(position))
                 continue;
 
+            _activeProjection = projection;
             int hitPart = HitTestPreview(projection, position.X, position.Y);
             if (hitPart >= 0)
             {
@@ -678,6 +683,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _lastMouseX = position.X;
                 _lastMouseY = position.Y;
                 _status = $"Перемещение: {PartName(_regionIds[hitPart])}. Отпусти мышь для завершения.";
+            }
+            else
+            {
+                _status = $"Активен вид: {ProjectionName(projection)}. Стрелки перемещают выбранную часть по сетке.";
             }
 
             return true;
@@ -750,6 +759,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (controlPressed && key == Keyboard.Key.S)
         {
             Save();
+            return true;
+        }
+
+        if (_activeProjection >= 0 &&
+            key is Keyboard.Key.Left or Keyboard.Key.Right or Keyboard.Key.Up or Keyboard.Key.Down)
+        {
+            int horizontal = key == Keyboard.Key.Left ? -1 : key == Keyboard.Key.Right ? 1 : 0;
+            int vertical = key == Keyboard.Key.Up ? 1 : key == Keyboard.Key.Down ? -1 : 0;
+            NudgeSelectedPart(_activeProjection, horizontal, vertical);
             return true;
         }
 
@@ -922,7 +940,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_gridStepLabel != null)
         {
-            _gridStepLabel.DisplayedString = $"ШАГ: {_gridSteps[_gridStepIndex]:0.000}";
+            _gridStepLabel.DisplayedString = $"ШАГ: {_gridSteps[_gridStepIndex]:0.####}";
             _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 6f, _gridStepButton.Position.Y + 6f);
             window.Draw(_gridStepButton);
             window.Draw(_gridStepLabel);
@@ -1085,6 +1103,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private void DrawProjection(RenderWindow window, int projection)
     {
         RectangleShape panel = _previewPanels[projection];
+        bool active = projection == _activeProjection;
+        panel.OutlineColor = active
+            ? new Color(119, 174, 226, 255)
+            : new Color(58, 75, 94, 255);
+        panel.OutlineThickness = active ? 2f : 1f;
         window.Draw(panel);
         if (_projectionLabels[projection] != null)
             window.Draw(_projectionLabels[projection]!);
@@ -1261,11 +1284,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void ApplyProjectionDrag(int projection, int deltaX, int deltaY)
     {
+        if (projection < 0 || projection >= _projectionLayouts.Length)
+            return;
         ProjectionLayout layout = _projectionLayouts[projection];
         if (layout.PixelsPerUnit <= 0f)
             return;
 
-        BodyPartDefinition part = _parts[_selectedPart];
         float dx = deltaX / layout.PixelsPerUnit;
         float dy = (projection == 2 ? deltaY : -deltaY) / layout.PixelsPerUnit;
         NumericsVector3 worldDelta = projection switch
@@ -1274,7 +1298,38 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             1 => new NumericsVector3(dx, 0f, dy),
             _ => new NumericsVector3(dx, dy, 0f)
         };
+        ApplyProjectionWorldDelta(projection, worldDelta);
+    }
 
+    private void NudgeSelectedPart(int projection, int horizontal, int vertical)
+    {
+        if (_selectedPart < 0 || _selectedPart >= _parts.Length)
+            return;
+
+        float step = _gridEnabled ? _gridSteps[_gridStepIndex] : 0.005f;
+        NumericsVector3 worldDelta = projection switch
+        {
+            0 => new NumericsVector3(0f, horizontal * step, vertical * step),
+            1 => new NumericsVector3(horizontal * step, 0f, vertical * step),
+            _ => new NumericsVector3(horizontal * step, -vertical * step, 0f)
+        };
+        ApplyProjectionWorldDelta(projection, worldDelta);
+    }
+
+    private string ProjectionName(int projection) => projection switch
+    {
+        0 => "спереди (Y/Z)",
+        1 => "сбоку (X/Z)",
+        _ => "сверху (X/Y)"
+    };
+
+    private void ApplyProjectionWorldDelta(int projection, NumericsVector3 worldDelta)
+    {
+        if (_selectedPart < 0 || _selectedPart >= _parts.Length ||
+            projection < 0 || projection >= _projectionLayouts.Length)
+            return;
+
+        BodyPartDefinition part = _parts[_selectedPart];
         NumericsVector3 currentCenter = _worldPositions[_selectedPart];
         NumericsVector3 targetCenter = currentCenter + worldDelta;
         if (_gridEnabled)
@@ -1309,7 +1364,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             localPosition: part.LocalPosition + localDelta);
         ApplyEnabledSymmetry(projection);
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. " +
-            $"Привязка: {(_gridEnabled ? _gridSteps[_gridStepIndex].ToString("0.000") : "выкл")}. Ctrl+S — сохранить.";
+            $"Привязка: {(_gridEnabled ? _gridSteps[_gridStepIndex].ToString("0.####") : "выкл")}. Ctrl+S — сохранить.";
     }
 
     private int HitTestPreview(int projection, int x, int y)
@@ -1847,7 +1902,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float step = _gridSteps[_gridStepIndex];
         // Keep the preview readable at far zoom: render every Nth line while snapping
         // still uses the exact configured step.
-        float minimumScreenSpacing = 7f;
+        float minimumScreenSpacing = 4f;
         int stride = Math.Max(1, (int)MathF.Ceiling(minimumScreenSpacing / (step * layout.PixelsPerUnit)));
         float spacing = step * stride;
         float leftWorld = layout.WorldCenterX - layout.Width / (2f * layout.PixelsPerUnit);
