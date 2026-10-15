@@ -54,6 +54,12 @@ public sealed class UnitCardDetailsSnapshot
     public AnatomyCardEntry[] AnatomyEntries { get; init; } = Array.Empty<AnatomyCardEntry>();
     public RenderInventoryItem[] Inventory { get; init; } = Array.Empty<RenderInventoryItem>();
     public RenderMetabolismState Metabolism { get; init; }
+    public bool HasAcquisitionTarget { get; init; }
+    public UnitId AcquisitionTarget { get; init; }
+    public float TargetAcquisitionSeconds { get; init; }
+    public float RequiredTargetAcquisitionSeconds { get; init; }
+    public float TargetDistance { get; init; }
+    public bool TargetAcquired { get; init; }
 
     public static UnitCardDetailsSnapshot Capture(UnitSimulation simulation, UnitId id)
     {
@@ -183,13 +189,38 @@ public sealed class UnitCardDetailsSnapshot
             metabolism.MovementMultiplier[unitIndex],
             metabolism.Condition[unitIndex]);
 
+        UnitAiStore ai = simulation.AI.Store;
+        UnitId acquisitionTarget = ai.AcquisitionTarget[unitIndex];
+        int targetIndex = -1;
+        bool hasAcquisitionTarget =
+            acquisitionTarget.Generation != 0 &&
+            units.TryGetIndex(acquisitionTarget, out targetIndex);
+        float targetDistance = 0f;
+        if (hasAcquisitionTarget)
+        {
+            System.Numerics.Vector3 delta =
+                units.Position[targetIndex] - units.Position[unitIndex];
+            targetDistance = MathF.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
+        }
+
+        float requiredAcquisition = hasAcquisitionTarget
+            ? UnitAiSystem.GetTargetAcquisitionDuration(targetDistance)
+            : 0f;
+        float acquisitionSeconds = ai.TargetAcquisitionTimer[unitIndex];
+
         return new UnitCardDetailsSnapshot
         {
             Unit = id,
             HealthParts = healthParts,
             AnatomyEntries = anatomyEntries,
             Inventory = inventoryItems,
-            Metabolism = metabolicState
+            Metabolism = metabolicState,
+            HasAcquisitionTarget = hasAcquisitionTarget,
+            AcquisitionTarget = acquisitionTarget,
+            TargetAcquisitionSeconds = acquisitionSeconds,
+            RequiredTargetAcquisitionSeconds = requiredAcquisition,
+            TargetDistance = targetDistance,
+            TargetAcquired = hasAcquisitionTarget && acquisitionSeconds >= requiredAcquisition
         };
     }
 }

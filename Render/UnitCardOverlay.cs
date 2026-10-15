@@ -564,7 +564,7 @@ public sealed class UnitCardOverlay : IDisposable
         void Value(string label, string value) => lines.Add(new CardLine($"  {label}: {value}", false));
 
         Heading("СОСТОЯНИЕ");
-        Value("Тип", unit.Type.ToString());
+        Value("Тип", UnitArchetypeDefinitionStore.GetDisplayName(unit.Type));
         Value("ID", $"{unit.Index}:{unit.Generation}");
         Value("Фракция", unit.FactionTag switch
         {
@@ -594,10 +594,26 @@ public sealed class UnitCardOverlay : IDisposable
         Value("Цель ИИ", unit.HasTarget ? FormatVector(unit.TargetPosition) : "Нет");
         Value("Точка движения", unit.HasGoal ? FormatVector(unit.Goal) : "Нет");
 
-        AddWeapon(lines, "ОСНОВНОЕ ОРУЖИЕ", unit.PrimaryWeapon);
-        AddWeapon(lines, "ВТОРОЕ ОРУЖИЕ", unit.SecondaryWeapon);
-        AddWeapon(lines, "РУЧНОЕ / БЛИЖНИЙ БОЙ", unit.MeleeWeapon);
-        AddWeapon(lines, "СЛОТ СНАРЯЖЕНИЯ", unit.UtilityWeapon);
+        bool hasCurrentDetails = details != null &&
+            details.Unit.Index == unit.Index &&
+            details.Unit.Generation == unit.Generation;
+        float targetDistance = hasCurrentDetails && details!.HasAcquisitionTarget
+            ? details.TargetDistance
+            : 0f;
+        if (hasCurrentDetails)
+        {
+            Value("Оценка цели", details!.HasAcquisitionTarget
+                ? $"{details.TargetAcquisitionSeconds:0.00}/{details.RequiredTargetAcquisitionSeconds:0.00} с — " +
+                  (details.TargetAcquired ? "готово" : "обнаружение/поворот")
+                : "Нет активной цели");
+            Value("Скорость поворота головы", "до 180°/с");
+            Value("Порядок атаки", "обнаружение → поворот → прицеливание → выстрел");
+        }
+
+        AddWeapon(lines, "ОСНОВНОЕ ОРУЖИЕ", unit.PrimaryWeapon, targetDistance);
+        AddWeapon(lines, "ВТОРОЕ ОРУЖИЕ", unit.SecondaryWeapon, targetDistance);
+        AddWeapon(lines, "РУЧНОЕ / БЛИЖНИЙ БОЙ", unit.MeleeWeapon, targetDistance);
+        AddWeapon(lines, "СЛОТ СНАРЯЖЕНИЯ", unit.UtilityWeapon, targetDistance);
 
         if (details != null &&
             details.Unit.Index == unit.Index &&
@@ -677,7 +693,8 @@ public sealed class UnitCardOverlay : IDisposable
     private static void AddWeapon(
         List<CardLine> lines,
         string heading,
-        RenderWeaponVisual weapon)
+        RenderWeaponVisual weapon,
+        float targetDistance)
     {
         lines.Add(new CardLine(heading, true));
 
@@ -715,7 +732,10 @@ public sealed class UnitCardOverlay : IDisposable
             Value("Эффективная дальность", $"{ranged.TotalEffectiveRange:0.0} клеток");
             Value("Базовая точность", $"{ranged.BaseAccuracy:0.000}");
             Value("Текущий разброс", $"{ranged.GetCurrentSpread():0.000}");
-            Value("Время прицеливания", $"{ranged.AimTime:0.00} с");
+            Value("Время прицеливания (база)", $"{ranged.AimTime:0.00} с");
+            Value("Подготовка выстрела сейчас",
+                $"{UnitWeaponSystem.GetAimDuration(ranged, weapon.AimMode, targetDistance):0.00} с " +
+                $"на дистанции {targetDistance:0.0} клеток");
             Value("Размер очереди", ranged.BurstCount.ToString());
             Value("Боеприпас по умолчанию", ranged.DefaultAmmunition?.Name ?? "Не задан");
             Value("Модификации", ranged.InstalledAttachments?.Count.ToString() ?? "0");

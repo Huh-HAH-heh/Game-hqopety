@@ -402,6 +402,9 @@ public static class UnitAnatomyCatalog
 
     public static UnitArchetypeProfile Get(UnitType type)
     {
+        if (UnitArchetypeDefinitionStore.TryGet(type, out UnitArchetypeProfile custom))
+            return custom;
+
         if (type == UnitType.Colonist)
             EnsureSavedColonistRigLoaded();
 

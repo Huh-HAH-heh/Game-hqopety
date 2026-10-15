@@ -17,6 +17,8 @@ public sealed class UnitAiStore
     private UnitAiState[] _state;
     private bool[] _hasTarget;
     private UnitId[] _target;
+    private UnitId[] _acquisitionTarget;
+    private float[] _acquisitionTimer;
     private Vector3[] _lastSeenPosition;
     private Vector3[] _lastSeenAimPoint;
     private float[] _targetMemory;
@@ -36,6 +38,12 @@ public sealed class UnitAiStore
 
     public UnitId[] Target =>
         _target;
+
+    public UnitId[] AcquisitionTarget =>
+        _acquisitionTarget;
+
+    public float[] TargetAcquisitionTimer =>
+        _acquisitionTimer;
 
     public Vector3[] LastSeenPosition =>
         _lastSeenPosition;
@@ -70,6 +78,8 @@ public sealed class UnitAiStore
         _state = new UnitAiState[initialUnitCapacity];
         _hasTarget = new bool[initialUnitCapacity];
         _target = new UnitId[initialUnitCapacity];
+        _acquisitionTarget = new UnitId[initialUnitCapacity];
+        _acquisitionTimer = new float[initialUnitCapacity];
         _lastSeenPosition = new Vector3[initialUnitCapacity];
         _lastSeenAimPoint = new Vector3[initialUnitCapacity];
         _targetMemory = new float[initialUnitCapacity];
@@ -87,6 +97,8 @@ public sealed class UnitAiStore
         _state[unitIndex] = UnitAiState.Idle;
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
+        _acquisitionTarget[unitIndex] = default;
+        _acquisitionTimer[unitIndex] = 0f;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
         _lastSeenAimPoint[unitIndex] = Vector3.Zero;
         _targetMemory[unitIndex] = 0f;
@@ -108,6 +120,8 @@ public sealed class UnitAiStore
         _state[unitIndex] = UnitAiState.Idle;
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
+        _acquisitionTarget[unitIndex] = default;
+        _acquisitionTimer[unitIndex] = 0f;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
         _lastSeenAimPoint[unitIndex] = Vector3.Zero;
         _targetMemory[unitIndex] = 0f;
@@ -124,12 +138,35 @@ public sealed class UnitAiStore
         float memorySeconds)
     {
         if (!_hasTarget[unitIndex] || !_target[unitIndex].Equals(target))
+        {
             _lastSeenAimPoint[unitIndex] = Vector3.Zero;
+            _acquisitionTarget[unitIndex] = target;
+            _acquisitionTimer[unitIndex] = 0f;
+        }
 
         _hasTarget[unitIndex] = true;
         _target[unitIndex] = target;
         _lastSeenPosition[unitIndex] = position;
         _targetMemory[unitIndex] = memorySeconds;
+    }
+
+    public bool AdvanceTargetAcquisition(
+        int unitIndex,
+        UnitId target,
+        float deltaTime,
+        float requiredTime)
+    {
+        if (_acquisitionTarget[unitIndex] != target)
+        {
+            _acquisitionTarget[unitIndex] = target;
+            _acquisitionTimer[unitIndex] = 0f;
+        }
+
+        requiredTime = MathF.Max(0f, requiredTime);
+        _acquisitionTimer[unitIndex] = MathF.Min(
+            requiredTime,
+            _acquisitionTimer[unitIndex] + Math.Clamp(deltaTime, 0f, 0.5f));
+        return _acquisitionTimer[unitIndex] >= requiredTime;
     }
 
     public void RememberAimPoint(int unitIndex, Vector3 point)
@@ -161,6 +198,8 @@ public sealed class UnitAiStore
     {
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
+        _acquisitionTarget[unitIndex] = default;
+        _acquisitionTimer[unitIndex] = 0f;
         _targetMemory[unitIndex] = 0f;
         _lastSeenAimPoint[unitIndex] = Vector3.Zero;
         _hasGoal[unitIndex] = false;
@@ -203,6 +242,9 @@ public sealed class UnitAiStore
         Array.Resize(
             ref _target,
             newCapacity);
+
+        Array.Resize(ref _acquisitionTarget, newCapacity);
+        Array.Resize(ref _acquisitionTimer, newCapacity);
 
         Array.Resize(
             ref _lastSeenPosition,

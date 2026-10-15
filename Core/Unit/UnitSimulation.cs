@@ -185,7 +185,8 @@ public sealed class UnitSimulation
     {
         UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(type);
         UnitDefinition definition = archetype.Definition;
-        BodyHandle body = Bodies.CreateBody(archetype.BodyParts);
+        UnitHitRegionProfile profile = hitProfile ?? archetype.Anatomy;
+        BodyHandle body = CreateBodyWithProfile(archetype.BodyParts, profile);
 
         UnitId id =
             Units.Create(
@@ -196,8 +197,6 @@ public sealed class UnitSimulation
                 body,
                 locationId,
                 factionTag);
-
-        UnitHitRegionProfile profile = hitProfile ?? archetype.Anatomy;
 
         return FinishSpawn(
             id,
@@ -219,7 +218,8 @@ public sealed class UnitSimulation
         UnitHitRegionProfile? hitProfile = null)
     {
         UnitDefinition definition = UnitCatalog.Get(type);
-        BodyHandle body = Bodies.CreateBody(bodyParts);
+        UnitHitRegionProfile profile = hitProfile ?? UnitAnatomyProfile.FromBodyParts(bodyParts);
+        BodyHandle body = CreateBodyWithProfile(bodyParts, profile);
 
         Vector3 bodyNormal = new Vector3(
             MathF.Cos(bodyAngle),
@@ -234,9 +234,6 @@ public sealed class UnitSimulation
             body,
             locationId,
             factionTag);
-
-        UnitHitRegionProfile profile =
-            hitProfile ?? UnitAnatomyProfile.FromBodyParts(bodyParts);
 
         return FinishSpawn(
             id,
@@ -260,7 +257,7 @@ public sealed class UnitSimulation
         if (hitProfile == null)
             throw new ArgumentNullException(nameof(hitProfile));
 
-        BodyHandle body = Bodies.CreateBody(bodyParts);
+        BodyHandle body = CreateBodyWithProfile(bodyParts, hitProfile);
 
         Vector3 bodyNormal = new Vector3(
             MathF.Cos(bodyAngle),
@@ -284,6 +281,29 @@ public sealed class UnitSimulation
             bodyNormal,
             body,
             hitProfile);
+    }
+
+    private BodyHandle CreateBodyWithProfile(
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        UnitHitRegionProfile profile)
+    {
+        if (profile is UnitAnatomyProfile anatomy &&
+            anatomy.NodeCount == bodyParts.Length)
+        {
+            string[] ids = GetRegionIds(anatomy);
+            return Bodies.CreateBody(ids, bodyParts);
+        }
+
+        return Bodies.CreateBody(bodyParts);
+    }
+
+    private static string[] GetRegionIds(UnitAnatomyProfile anatomy)
+    {
+        ReadOnlySpan<UnitAnatomyNode> nodes = anatomy.Nodes;
+        var ids = new string[nodes.Length];
+        for (int i = 0; i < nodes.Length; i++)
+            ids[i] = nodes[i].Id;
+        return ids;
     }
 
     private UnitId FinishSpawn(

@@ -27,6 +27,7 @@ public sealed class UnitBodyStore
     private BodyPartAnchor[] _anchor;
     private BodyPartRole[] _role;
     private BodyPartPivot[] _pivot;
+    private string[] _regionIds;
 
     private int _count;
 
@@ -81,6 +82,9 @@ public sealed class UnitBodyStore
     public BodyPartPivot[] Pivot =>
         _pivot;
 
+    public string[] RegionId =>
+        _regionIds;
+
 
     public UnitBodyStore(
         int initialCapacity = DefaultCapacity)
@@ -111,6 +115,8 @@ public sealed class UnitBodyStore
         _anchor = new BodyPartAnchor[initialCapacity];
         _role = new BodyPartRole[initialCapacity];
         _pivot = new BodyPartPivot[initialCapacity];
+        _regionIds = new string[initialCapacity];
+        Array.Fill(_regionIds, string.Empty);
     }
 
     public BodyHandle CreateBody(
@@ -148,6 +154,7 @@ public sealed class UnitBodyStore
         for (int i = 0; i < parts.Length; i++)
         {
             BodyPartDefinition part = parts[i];
+            _regionIds[start + i] = string.Empty;
             AddPart(
                 part.LocalPosition,
                 part.Scale,
@@ -164,6 +171,39 @@ public sealed class UnitBodyStore
         }
 
         return new BodyHandle(start, parts.Length);
+    }
+
+    public BodyHandle CreateBody(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> parts)
+    {
+        if (regionIds.Length != parts.Length)
+            throw new ArgumentException("Region IDs and body-part definitions must match.", nameof(regionIds));
+
+        for (int i = 0; i < regionIds.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(regionIds[i]))
+                throw new ArgumentException($"Region ID at index {i} is empty.", nameof(regionIds));
+        }
+
+        BodyHandle handle = CreateBody(parts);
+        SetRegionIds(handle, regionIds);
+        return handle;
+    }
+
+    public void SetRegionIds(BodyHandle handle, ReadOnlySpan<string> regionIds)
+    {
+        if (handle.Count != regionIds.Length ||
+            handle.Start < 0 ||
+            handle.Start + handle.Count > _count)
+            throw new ArgumentException("Body handle and region ID count do not match.", nameof(regionIds));
+
+        for (int i = 0; i < regionIds.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(regionIds[i]))
+                throw new ArgumentException($"Region ID at index {i} is empty.", nameof(regionIds));
+            _regionIds[handle.Start + i] = regionIds[i];
+        }
     }
 
     /// <summary>Replaces an existing body's transform definitions without reallocating its storage.</summary>
@@ -212,6 +252,9 @@ public sealed class UnitBodyStore
     {
         if (handle.Count <= 0)
             return;
+
+        if (handle.Start >= 0 && handle.Start + handle.Count <= _regionIds.Length)
+            Array.Fill(_regionIds, string.Empty, handle.Start, handle.Count);
 
         EnsureFreeRangeCapacity(
             _freeRangeCount + 1);
@@ -347,8 +390,8 @@ public sealed class UnitBodyStore
         if (required <= _localPosition.Length)
             return;
 
-        int newCapacity =
-            _localPosition.Length;
+        int oldCapacity = _localPosition.Length;
+        int newCapacity = oldCapacity;
 
         while (newCapacity < required)
         {
@@ -409,6 +452,9 @@ public sealed class UnitBodyStore
         Array.Resize(
             ref _pivot,
             newCapacity);
+
+        Array.Resize(ref _regionIds, newCapacity);
+        Array.Fill(_regionIds, string.Empty, oldCapacity, newCapacity - oldCapacity);
     }
 
     private int TakeFreeRange(

@@ -932,6 +932,7 @@ public sealed class GameRenderer
                             newHandle, positions[index], bodyRotation, headRotation);
                     }
 
+                    _unitSimulation.Bodies.SetRegionIds(newHandle, savedIds);
                     _unitSimulation.ApplyEditedAnatomyProfile(units.GetId(index), updatedProfile);
                     updatedCount++;
                 }
@@ -1793,6 +1794,13 @@ public sealed class GameRenderer
                 {
                     SelectWorldUnit(e.Position);
                 }
+            };
+
+        _window.TextEntered +=
+            (_, e) =>
+            {
+                if (_bodyRigEditorOverlay?.IsOpen == true)
+                    _bodyRigEditorOverlay.HandleTextEntered(e.Unicode);
             };
 
         _window.KeyPressed +=

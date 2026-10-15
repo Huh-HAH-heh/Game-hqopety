@@ -28,6 +28,7 @@ public static class CombatSelfTest
         RunTest("Weapon: aim warmup delays first shot", TestWeaponAimWarmup, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
+        RunTest("AI: target acquisition has a separate reaction delay", TestTargetAcquisitionDelay, ref passed, ref failed);
         RunTest("Weapon: automatic fire follows weapon cadence", TestAutomaticFireCadence, ref passed, ref failed);
         RunTest("Weapon: single fire requires a new aim", TestSingleFireReAims, ref passed, ref failed);
         RunTest("Weapon: burst mode completes the configured burst", TestBurstFireCadence, ref passed, ref failed);
@@ -411,17 +412,22 @@ public static class CombatSelfTest
             return false;
         }
 
-        for (int i = 0; i < 12; i++)
+        float expectedWarmup = UnitWeaponSystem.GetAimDuration(
+            WeaponCatalog.AssaultRifle, AimMode.AimedShot, 10f);
+        float elapsed = 0.30f;
+        for (int i = 0; i < 40; i++)
         {
             simulation.Update(worldMap, 0.05f);
+            elapsed += 0.05f;
 
             if (simulation.TotalShotsFired > 0)
                 break;
         }
 
-        // Automatic mode must emit the first round only after the CE-style
-        // range-scaled warmup, without needing another AI/target command.
+        // Automatic mode must emit the first round only after the range-scaled
+        // warmup, without needing another AI/target command.
         return simulation.TotalShotsFired == 1 &&
+               elapsed + 0.0001f >= expectedWarmup &&
                !simulation.Weapons.AimIndicatorActive[stateIndex];
     }
 
@@ -509,6 +515,40 @@ public static class CombatSelfTest
                snapshot < aimedNear &&
                aimedNear < aimedFar &&
                aimedFar >= 3.99f;
+    }
+
+    private static bool TestTargetAcquisitionDelay()
+    {
+        var store = new UnitAiStore(1);
+        UnitId firstTarget = new(4, 1);
+        UnitId secondTarget = new(5, 1);
+
+        float nearDuration = UnitAiSystem.GetTargetAcquisitionDuration(0f);
+        float farDuration = UnitAiSystem.GetTargetAcquisitionDuration(100f);
+        if (nearDuration < 0.349f || farDuration < 0.799f || farDuration <= nearDuration)
+            return false;
+
+        if (store.AdvanceTargetAcquisition(0, firstTarget, 0.15f, 0.45f) ||
+            store.AdvanceTargetAcquisition(0, firstTarget, 0.15f, 0.45f))
+        {
+            return false;
+        }
+
+        if (!store.AdvanceTargetAcquisition(0, firstTarget, 0.15f, 0.45f) ||
+            MathF.Abs(store.TargetAcquisitionTimer[0] - 0.45f) > 0.001f)
+        {
+            return false;
+        }
+
+        if (store.AdvanceTargetAcquisition(0, secondTarget, 0.15f, 0.45f) ||
+            MathF.Abs(store.TargetAcquisitionTimer[0] - 0.15f) > 0.001f)
+        {
+            return false;
+        }
+
+        store.ClearTarget(0);
+        return store.TargetAcquisitionTimer[0] == 0f &&
+               store.AcquisitionTarget[0].Generation == 0;
     }
 
     private static bool TestAutomaticFireCadence()
@@ -607,7 +647,8 @@ public static class CombatSelfTest
         if (simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target))
             return false;
 
-        simulation.Update(worldMap, 0.90f);
+        // The deliberate rifle warmup at ten cells is about 1.3 seconds.
+        simulation.Update(worldMap, 1.35f);
         worldMap.SetSolidHeight(10, 10, 30, 1);
         bool firstShot = simulation.FireWeaponAt(
             shooter,
@@ -2078,7 +2119,7 @@ private static bool TestVisionDetectsRegionInsideRange()
         if (!startedAiming || simulation.TotalShotsFired != 0)
             return false;
 
-        for (int i = 0; i < 15; i++)
+        for (int i = 0; i < 24; i++)
             simulation.Update(worldMap, 0.05f);
 
         if (simulation.TotalShotsFired != 0)
@@ -2746,11 +2787,23 @@ private static bool TestVisionDetectsRegionInsideRange()
             return false;
         }
 
+        // Freeze the gait while checking posture transitions so the test isolates pose blending.
+        simulation.Units.Velocity[colonist.Index] = Vector3.Zero;
+        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
         float standingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
         simulation.SetPosture(colonist, UnitPosture.Crouching);
         bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        float crouchTransitionStart =
+            simulation.Bodies.WorldRotation[walkingArm];
+
+        if (MathF.Abs(crouchTransitionStart - standingArmRotation) > 0.001f)
+            return false;
+
+        for (int frame = 0; frame < 30; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 1f / 60f);
+
         float crouchingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
@@ -2762,6 +2815,15 @@ private static bool TestVisionDetectsRegionInsideRange()
 
         simulation.SetPosture(colonist, UnitPosture.Lying);
         bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        float lyingTransitionStart =
+            simulation.Bodies.WorldRotation[walkingArm];
+
+        if (MathF.Abs(lyingTransitionStart - crouchingArmRotation) > 0.001f)
+            return false;
+
+        for (int frame = 0; frame < 45; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 1f / 60f);
+
         float lyingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
@@ -2776,7 +2838,8 @@ private static bool TestVisionDetectsRegionInsideRange()
         simulation.Units.Velocity[colonist.Index] =
             new Vector3(0f, 1f, 0f);
         simulation.SetPosture(colonist, UnitPosture.Standing);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        for (int frame = 0; frame < 45; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 1f / 60f);
 
         Vector3 bodyNormal = simulation.Units.BodyNormal[colonist.Index];
         Vector3 movedHead = simulation.Bodies.WorldPosition[head];
