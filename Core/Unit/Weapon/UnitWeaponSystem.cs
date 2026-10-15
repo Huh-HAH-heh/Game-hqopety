@@ -133,6 +133,9 @@ public sealed class UnitWeaponSystem
                         continue;
                     }
 
+                    if (!IsFacingAimPoint(units, unit, weapons.AimPoint[stateIndex]))
+                        continue;
+
                     TryFireAt(
                         units,
                         inventory,
@@ -175,6 +178,9 @@ public sealed class UnitWeaponSystem
                     continue;
                 }
 
+                if (!IsFacingAimPoint(units, unit, weapons.AimPoint[stateIndex]))
+                    continue;
+
                 TryFireAt(
                     units,
                     inventory,
@@ -186,6 +192,26 @@ public sealed class UnitWeaponSystem
                     aimPoint: weapons.AimPoint[stateIndex]);
             }
         }
+    }
+
+    private static bool IsFacingAimPoint(
+        UnitStore units,
+        int shooter,
+        Vector3 aimPoint)
+    {
+        Vector3 delta = aimPoint - units.Position[shooter];
+        delta.Z = 0f;
+        Vector3 heading = units.HeadNormal[shooter];
+        float deltaLengthSquared = delta.X * delta.X + delta.Y * delta.Y;
+        float headingLengthSquared = heading.X * heading.X + heading.Y * heading.Y;
+        if (deltaLengthSquared < 0.000001f)
+            return true;
+        if (headingLengthSquared < 0.000001f)
+            return false;
+
+        float dot = (delta.X * heading.X + delta.Y * heading.Y) /
+            MathF.Sqrt(deltaLengthSquared * headingLengthSquared);
+        return dot >= MathF.Cos(0.12f);
     }
 
     private static bool IsLivingTarget(
@@ -577,20 +603,22 @@ public sealed class UnitWeaponSystem
 
         return mode switch
         {
-            // CE uses 30-240 ticks (0.5-4 seconds), with warmup scaling by range.
+            // Deliberate CE-style fire requires a visible target, a turn, then
+            // a longer weapon warmup. Keep the range scaling in one place so the
+            // card can show the exact runtime duration.
             AimMode.AimedShot => MathF.Max(
                 configuredTime,
-                0.5f + 3.5f * Math.Clamp(MathF.Max(0f, distance) / 100f, 0f, 1f)),
+                1.0f + 3.0f * Math.Clamp(MathF.Max(0f, distance) / 100f, 0f, 1f)),
 
             AimMode.Snapshot => Math.Clamp(
-                configuredTime * 0.45f,
-                0.18f,
-                0.35f),
+                configuredTime * 0.60f,
+                0.40f,
+                0.65f),
 
             AimMode.SuppressFire => Math.Clamp(
-                configuredTime * 0.30f,
-                0.12f,
-                0.22f),
+                configuredTime * 0.50f,
+                0.25f,
+                0.45f),
 
             _ => configuredTime
         };

@@ -9,6 +9,7 @@ namespace Core.Unit;
 public sealed class UnitAiSystem
 {
     private const float ThinkInterval = 0.15f;
+    private const float HeadTurnRadiansPerSecond = MathF.PI;
     private const float TargetMemorySeconds = 3f;
     private const float LowHealthThreshold = 0.35f;
     private const float CoverSearchRadius = 8f;
@@ -356,7 +357,8 @@ public sealed class UnitAiSystem
                     FaceTarget(
                         units,
                         unit,
-                        target.Index);
+                        target.Index,
+                        thinkDelta);
 
                     Store.State[unit] =
                         UnitAiState.SeekCover;
@@ -369,10 +371,11 @@ public sealed class UnitAiSystem
 
             if (targetVisible)
             {
-                FaceTarget(
+                bool facingTarget = FaceTarget(
                     units,
                     unit,
-                    target.Index);
+                    target.Index,
+                    thinkDelta);
 
                 // Hold position while firing/aiming; do not continue walking
                 // toward the previous patrol waypoint through the firing lane.
@@ -413,6 +416,33 @@ public sealed class UnitAiSystem
                 // Retain the last observed anatomical point; suppressive fire must
                 // not reconstruct a target point from unit height after LOS is lost.
                 Store.RememberAimPoint(unit, shotCheck.VisibleTargetPoint);
+
+                Vector3 acquisitionDelta =
+                    units.Position[target.Index] - units.Position[unit];
+                float acquisitionDistance = MathF.Sqrt(
+                    acquisitionDelta.X * acquisitionDelta.X +
+                    acquisitionDelta.Y * acquisitionDelta.Y);
+                float acquisitionDuration = GetTargetAcquisitionDuration(acquisitionDistance);
+                bool targetAcquired = Store.AdvanceTargetAcquisition(
+                    unit, target, thinkDelta, acquisitionDuration);
+
+                // First identify and turn to the target, then start the weapon's own
+                // warmup. Acquisition, turning and weapon aiming are separate phases.
+                if (!facingTarget || !targetAcquired)
+                {
+                    // Do not let the weapon update loop continue firing at the
+                    // previous target while this pawn is acquiring a replacement.
+                    for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+                    {
+                        UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+                        int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
+                        if (weapons.AimTarget[stateIndex] != target)
+                            weapons.ClearAim(unit, weaponSlot);
+                    }
+
+                    Store.State[unit] = UnitAiState.Attack;
+                    continue;
+                }
 
                 // Aim independently for each weapon slot. TargetMode selects a
                 // visible vertical anatomy layer, so one shared point would make
@@ -1039,28 +1069,47 @@ public sealed class UnitAiSystem
         return false;
     }
 
-    private static void FaceTarget(
+    public static float GetTargetAcquisitionDuration(float distance)
+    {
+        // A visible target is not an instant command: the pawn needs time to
+        // register movement and classify the threat before deliberate aiming.
+        return 0.35f + 0.45f * Math.Clamp(MathF.Max(0f, distance) / 100f, 0f, 1f);
+    }
+
+    private static bool FaceTarget(
         UnitStore units,
         int unit,
-        int target)
+        int target,
+        float deltaTime)
     {
-        Vector3 delta =
-            units.Position[target] -
-            units.Position[unit];
-
+        Vector3 delta = units.Position[target] - units.Position[unit];
         delta.Z = 0f;
 
-        float lengthSquared =
-            delta.LengthSquared();
+        if (delta.X * delta.X + delta.Y * delta.Y < 0.000001f)
+            return true;
 
-        if (lengthSquared < 0.000001f)
-            return;
+        float targetAngle = MathF.Atan2(delta.Y, delta.X);
+        Vector3 currentNormal = units.HeadNormal[unit];
+        float currentAngle = currentNormal.X * currentNormal.X +
+            currentNormal.Y * currentNormal.Y < 0.000001f
+            ? targetAngle
+            : MathF.Atan2(currentNormal.Y, currentNormal.X);
 
-        units.HeadNormal[unit] =
-            delta /
-            MathF.Sqrt(
-                lengthSquared);
+        float difference = WrapAngle(targetAngle - currentAngle);
+        float maxTurn = HeadTurnRadiansPerSecond * Math.Clamp(deltaTime, 0f, 0.5f);
+        float appliedTurn = Math.Clamp(difference, -maxTurn, maxTurn);
+        float nextAngle = currentAngle + appliedTurn;
+
+        units.HeadNormal[unit] = new Vector3(
+            MathF.Cos(nextAngle),
+            MathF.Sin(nextAngle),
+            0f);
+
+        return MathF.Abs(WrapAngle(targetAngle - nextAngle)) <= 0.10f;
     }
+
+    private static float WrapAngle(float angle) =>
+        MathF.IEEERemainder(angle, MathF.Tau);
 
     private static bool TryFindSuppressionCover(
         UnitStore units,

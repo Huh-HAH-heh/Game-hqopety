@@ -28,6 +28,7 @@ public static class CombatSelfTest
         RunTest("Weapon: aim warmup delays first shot", TestWeaponAimWarmup, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
+        RunTest("AI: target acquisition has a separate reaction delay", TestTargetAcquisitionDelay, ref passed, ref failed);
         RunTest("Weapon: automatic fire follows weapon cadence", TestAutomaticFireCadence, ref passed, ref failed);
         RunTest("Weapon: single fire requires a new aim", TestSingleFireReAims, ref passed, ref failed);
         RunTest("Weapon: burst mode completes the configured burst", TestBurstFireCadence, ref passed, ref failed);
@@ -411,17 +412,22 @@ public static class CombatSelfTest
             return false;
         }
 
-        for (int i = 0; i < 12; i++)
+        float expectedWarmup = UnitWeaponSystem.GetAimDuration(
+            WeaponCatalog.AssaultRifle, AimMode.AimedShot, 10f);
+        float elapsed = 0.30f;
+        for (int i = 0; i < 40; i++)
         {
             simulation.Update(worldMap, 0.05f);
+            elapsed += 0.05f;
 
             if (simulation.TotalShotsFired > 0)
                 break;
         }
 
-        // Automatic mode must emit the first round only after the CE-style
-        // range-scaled warmup, without needing another AI/target command.
+        // Automatic mode must emit the first round only after the range-scaled
+        // warmup, without needing another AI/target command.
         return simulation.TotalShotsFired == 1 &&
+               elapsed + 0.0001f >= expectedWarmup &&
                !simulation.Weapons.AimIndicatorActive[stateIndex];
     }
 
@@ -509,6 +515,40 @@ public static class CombatSelfTest
                snapshot < aimedNear &&
                aimedNear < aimedFar &&
                aimedFar >= 3.99f;
+    }
+
+    private static bool TestTargetAcquisitionDelay()
+    {
+        var store = new UnitAiStore(1);
+        UnitId firstTarget = new(4, 1);
+        UnitId secondTarget = new(5, 1);
+
+        float nearDuration = UnitAiSystem.GetTargetAcquisitionDuration(0f);
+        float farDuration = UnitAiSystem.GetTargetAcquisitionDuration(100f);
+        if (nearDuration < 0.349f || farDuration < 0.799f || farDuration <= nearDuration)
+            return false;
+
+        if (store.AdvanceTargetAcquisition(0, firstTarget, 0.15f, 0.45f) ||
+            store.AdvanceTargetAcquisition(0, firstTarget, 0.15f, 0.45f))
+        {
+            return false;
+        }
+
+        if (!store.AdvanceTargetAcquisition(0, firstTarget, 0.15f, 0.45f) ||
+            MathF.Abs(store.TargetAcquisitionTimer[0] - 0.45f) > 0.001f)
+        {
+            return false;
+        }
+
+        if (store.AdvanceTargetAcquisition(0, secondTarget, 0.15f, 0.45f) ||
+            MathF.Abs(store.TargetAcquisitionTimer[0] - 0.15f) > 0.001f)
+        {
+            return false;
+        }
+
+        store.ClearTarget(0);
+        return store.TargetAcquisitionTimer[0] == 0f &&
+               store.AcquisitionTarget[0].Generation == 0;
     }
 
     private static bool TestAutomaticFireCadence()
