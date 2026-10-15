@@ -1563,6 +1563,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         out float normalX,
         out float normalY)
     {
+        radius = 0f;
+        normalX = 0f;
+        normalY = 0f;
+
         float halfWidth = MathF.Max(0.001f, shape.HalfWidth);
         float halfHeight = MathF.Max(0.001f, shape.HalfHeight);
         float angle = shape.ScreenRotation * MathF.PI / 180f;
