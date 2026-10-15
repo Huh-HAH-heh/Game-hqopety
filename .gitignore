@@ -23,6 +23,10 @@ nuget.config
 project.lock.json
 project.fragment.lock.json
 
+# Собранная портативная версия игры
+publish/
+artifacts/
+
 # Временные файлы ОС
 Thumbs.db
 Ehthumbs.db

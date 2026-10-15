@@ -1,0 +1,51 @@
+# RimClone
+
+Проект игры на C#, .NET 10 и SFML.Net.
+
+## Требования
+
+- Windows 10/11 x64.
+- Visual Studio 2026 (18.x) с рабочей нагрузкой «Разработка классических приложений .NET».
+- Интернет при первом открытии, чтобы восстановить пакеты NuGet.
+
+Все проекты используют net10.0. Для официальной поддержки .NET 10 нужен Visual Studio 2026 и SDK .NET 10. Visual Studio 2022 официально не поддерживает таргетинг .NET 10.
+
+Загрузки:
+- Visual Studio: https://visualstudio.microsoft.com/downloads/
+- .NET 10 SDK: https://dotnet.microsoft.com/download/dotnet/10.0
+
+## Запуск в Visual Studio
+
+1. Нажми Code → Download ZIP и распакуй весь репозиторий либо клонируй его через Git.
+2. Открой **RimClone.sln**. Не открывай отдельно папку App или один csproj.
+3. Дождись восстановления NuGet-пакетов. Если не началось автоматически: правый клик по решению → Restore NuGet Packages.
+4. В обозревателе решений нажми правой кнопкой на проект App → Set as Startup Project.
+5. Выбери Debug или Release и запусти через Ctrl+F5 (или F5).
+
+Не нужно вручную скачивать DLL для SFML: зависимости объявлены в проектах и восстанавливаются через NuGet.
+
+## Запуск через терминал
+
+Открой PowerShell в корне репозитория:
+
+    dotnet --list-sdks
+    dotnet restore .\RimClone.sln
+    dotnet build .\RimClone.sln --configuration Release --no-restore
+    dotnet run --project .\App\App.csproj --configuration Release
+
+В выводе dotnet --list-sdks должна быть версия SDK 10.x.
+
+## Сборка для другого Windows-ПК без Visual Studio
+
+На компьютере, где собирается игра, запусти в корне репозитория:
+
+    .\publish-windows.ps1
+
+Готовая папка появится в publish\win-x64. Скопируй всю папку целиком на второй Windows x64 ПК и запускай RimClone.exe. Не переноси только EXE: рядом находятся необходимые библиотеки. Self-contained сборка включает .NET runtime, поэтому на целевом ПК отдельно ставить .NET не требуется.
+
+## Если не запускается
+
+- Если не открывается slnx или требуется другой SDK, открой RimClone.sln и проверь наличие .NET 10 SDK.
+- При NU1301 или ошибках NuGet проверь интернет и повтори восстановление пакетов.
+- Если приложение собирается, но не запускается, запусти через Ctrl+F5, чтобы увидеть сообщение об ошибке.
+- Если не появляется окно игры, проверь, что запускается проект App, а не Core, Render, World или Test.
