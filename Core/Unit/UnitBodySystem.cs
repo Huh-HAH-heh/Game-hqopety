@@ -5,7 +5,20 @@ namespace Core.Unit;
 
 public sealed class UnitBodySystem
 {
+    private const float MinimumPostureTransitionDuration = 0.28f;
+
     private float _animationTime;
+    private UnitPosture[] _requestedPostures = Array.Empty<UnitPosture>();
+    private uint[] _postureGeneration = Array.Empty<uint>();
+    private bool[] _postureInitialized = Array.Empty<bool>();
+    private float[] _postureProgress = Array.Empty<float>();
+    private float[] _postureTransitionDuration = Array.Empty<float>();
+    private Vector3[] _transitionFromPositions = Array.Empty<Vector3>();
+    private float[] _transitionFromRotations = Array.Empty<float>();
+    private Vector3[] _effectivePosturePositions = Array.Empty<Vector3>();
+    private float[] _effectivePostureRotations = Array.Empty<float>();
+    private bool[] _partPoseInitialized = Array.Empty<bool>();
+    private int[] _partPoseOwner = Array.Empty<int>();
 
     public void Update(
         UnitStore units,
@@ -15,6 +28,7 @@ public sealed class UnitBodySystem
         if (units.ActiveCount == 0)
             return;
 
+        EnsureCapacity(units.Capacity, bodies.Count);
         _animationTime += Math.Clamp(deltaTime, 0f, 0.1f);
         float followAlpha = Math.Clamp(deltaTime * 14f, 0f, 1f);
         ReadOnlySpan<int> active = units.ActiveIndices;
@@ -25,6 +39,7 @@ public sealed class UnitBodySystem
         Vector3[] bodyNormals = units.BodyNormal;
         Vector3[] headNormals = units.HeadNormal;
         UnitPosture[] postures = units.Posture;
+        uint[] generations = units.Generation;
         int[] bodyStarts = units.BodyStart;
         short[] bodyCounts = units.BodyCount;
 
@@ -55,6 +70,40 @@ public sealed class UnitBodySystem
             if (count <= 0)
                 continue;
 
+            if (!_postureInitialized[unit] || _postureGeneration[unit] != generations[unit])
+            {
+                _postureGeneration[unit] = generations[unit];
+                _requestedPostures[unit] = UnitPosture.Standing;
+                _postureProgress[unit] = 1f;
+                _postureInitialized[unit] = true;
+
+                for (int part = start; part < start + count; part++)
+                {
+                    _partPoseOwner[part] = unit;
+                    _partPoseInitialized[part] = false;
+                }
+            }
+
+            UnitPosture previousPosture = _requestedPostures[unit];
+            UnitPosture posture = postures[unit];
+            if (posture != previousPosture)
+            {
+                CaptureTransitionStart(unit, start, count, previousPosture,
+                    localPositions, localRotations, roles, pivots);
+                _requestedPostures[unit] = posture;
+                _postureProgress[unit] = 0f;
+                _postureTransitionDuration[unit] = GetTransitionDuration(previousPosture, posture);
+            }
+
+            float postureProgress = _postureProgress[unit];
+            if (postureProgress < 1f)
+            {
+                postureProgress = MathF.Min(1f, postureProgress +
+                    Math.Clamp(deltaTime, 0f, 0.05f) /
+                    MathF.Max(0.01f, _postureTransitionDuration[unit]));
+                _postureProgress[unit] = postureProgress;
+            }
+
             UpdateBody(
                 unit,
                 start,
@@ -84,11 +133,12 @@ public sealed class UnitBodySystem
                 scales,
                 followDistances,
                 followAlpha,
-                Math.Clamp(deltaTime, 0f, 0.05f));
+                Math.Clamp(deltaTime, 0f, 0.05f),
+                postureProgress);
         }
     }
 
-    private static void UpdateBody(
+    private void UpdateBody(
         int unit,
         int start,
         int count,
@@ -117,7 +167,8 @@ public sealed class UnitBodySystem
         Vector3[] scales,
         float[] followDistances,
         float followAlpha,
-        float deltaTime)
+        float deltaTime,
+        float postureProgress)
     {
         Vector3 bodyNormal = NormalizeHorizontal(bodyNormals[unit]);
         Vector3 headNormal = NormalizeHorizontal(headNormals[unit]);
@@ -141,6 +192,7 @@ public sealed class UnitBodySystem
             0f,
             1f);
         float gaitPhase = animationTime * 11f + unit * 1.317f;
+        float postureBlend = EaseInOut(postureProgress);
         int end = start + count;
 
         // Definitions are parent-first, so every parent's transform has
@@ -148,13 +200,32 @@ public sealed class UnitBodySystem
         for (int part = start; part < end; part++)
         {
             int parent = parents[part];
+            if (_partPoseOwner[part] != unit)
+            {
+                _partPoseOwner[part] = unit;
+                _partPoseInitialized[part] = false;
+            }
+
             Vector3 localPosition = localPositions[part];
-            Vector3 localEuler = new(
-                localRotationsX[part],
-                localRotationsY[part],
-                localRotations[part]);
-            ApplyPosture(posture, roles[part], pivots[part],
-                ref localPosition, ref localEuler.Z);
+            Vector3 localEuler = new(localRotationsX[part], localRotationsY[part], localRotations[part]);
+            Vector3 targetPosition = localPosition;
+            float targetRotation = localEuler.Z;
+            ApplyPosture(posture, roles[part], pivots[part], ref targetPosition, ref targetRotation);
+
+            if (postureBlend < 1f)
+            {
+                localPosition = Vector3.Lerp(_transitionFromPositions[part], targetPosition, postureBlend);
+                localEuler.Z = LerpAngle(_transitionFromRotations[part], targetRotation, postureBlend);
+            }
+            else
+            {
+                localPosition = targetPosition;
+                localEuler.Z = targetRotation;
+            }
+
+            _effectivePosturePositions[part] = localPosition;
+            _effectivePostureRotations[part] = localEuler.Z;
+            _partPoseInitialized[part] = true;
 
             Vector3 origin = unitPositions[unit];
             Quaternion positionOrientation = bodyOrientation;
@@ -272,6 +343,82 @@ public sealed class UnitBodySystem
             worldScales[part] = BodyPartTransformMath.Project(
                 scales[part], worldOrientation, 0, 1).Scale;
             worldRotations[part] = worldRotation;
+        }
+    }
+
+    private void CaptureTransitionStart(
+        int unit,
+        int start,
+        int count,
+        UnitPosture fromPosture,
+        Vector3[] localPositions,
+        float[] localRotations,
+        BodyPartRole[] roles,
+        BodyPartPivot[] pivots)
+    {
+        int end = start + count;
+        for (int part = start; part < end; part++)
+        {
+            if (_partPoseOwner[part] != unit)
+            {
+                _partPoseOwner[part] = unit;
+                _partPoseInitialized[part] = false;
+            }
+
+            if (_partPoseInitialized[part])
+            {
+                _transitionFromPositions[part] = _effectivePosturePositions[part];
+                _transitionFromRotations[part] = _effectivePostureRotations[part];
+                continue;
+            }
+
+            Vector3 position = localPositions[part];
+            float rotation = localRotations[part];
+            ApplyPosture(fromPosture, roles[part], pivots[part], ref position, ref rotation);
+            _transitionFromPositions[part] = position;
+            _transitionFromRotations[part] = rotation;
+        }
+    }
+
+    private static float GetTransitionDuration(UnitPosture from, UnitPosture to)
+    {
+        if (from == UnitPosture.Lying || to == UnitPosture.Lying)
+            return 0.55f;
+        if (from == UnitPosture.Crouching || to == UnitPosture.Crouching)
+            return 0.36f;
+        return MinimumPostureTransitionDuration;
+    }
+
+    private static float EaseInOut(float amount)
+    {
+        amount = Math.Clamp(amount, 0f, 1f);
+        return amount * amount * (3f - 2f * amount);
+    }
+
+    private static float LerpAngle(float from, float to, float amount) =>
+        from + WrapAngle(to - from) * amount;
+
+    private void EnsureCapacity(int unitCapacity, int partCapacity)
+    {
+        if (_requestedPostures.Length < unitCapacity)
+        {
+            Array.Resize(ref _requestedPostures, unitCapacity);
+            Array.Resize(ref _postureGeneration, unitCapacity);
+            Array.Resize(ref _postureInitialized, unitCapacity);
+            Array.Resize(ref _postureProgress, unitCapacity);
+            Array.Resize(ref _postureTransitionDuration, unitCapacity);
+        }
+
+        if (_partPoseOwner.Length < partCapacity)
+        {
+            int oldLength = _partPoseOwner.Length;
+            Array.Resize(ref _partPoseOwner, partCapacity);
+            Array.Fill(_partPoseOwner, -1, oldLength, partCapacity - oldLength);
+            Array.Resize(ref _transitionFromPositions, partCapacity);
+            Array.Resize(ref _transitionFromRotations, partCapacity);
+            Array.Resize(ref _effectivePosturePositions, partCapacity);
+            Array.Resize(ref _effectivePostureRotations, partCapacity);
+            Array.Resize(ref _partPoseInitialized, partCapacity);
         }
     }
 

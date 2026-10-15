@@ -92,6 +92,9 @@ public sealed class UnitStore
     public UnitPosture[] Posture =>
         _posture;
 
+    public uint[] Generation =>
+        _generation;
+
     public int[] LocationId =>
         _locationId;
 
