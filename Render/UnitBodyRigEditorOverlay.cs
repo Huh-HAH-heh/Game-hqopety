@@ -214,6 +214,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private bool _draggingPart;
     private int _surfaceSnapTargetPart = -1;
     private int _surfaceSnapProjection = -1;
+    private float _surfaceSnapDirectionX = 1f;
+    private float _surfaceSnapDirectionY;
+    private bool _hasSurfaceSnapDirection;
     private int _lastMouseX;
     private int _lastMouseY;
     private float _listRowHeight = 28f;
@@ -453,6 +456,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingPart = false;
         _surfaceSnapTargetPart = -1;
         _surfaceSnapProjection = -1;
+        _hasSurfaceSnapDirection = false;
         _status = $"Загружено регионов: {_parts.Length}.";
         IsOpen = true;
     }
@@ -524,6 +528,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingPart = false;
         _surfaceSnapTargetPart = -1;
         _surfaceSnapProjection = -1;
+        _hasSurfaceSnapDirection = false;
         _activeProjection = -1;
     }
 
@@ -626,6 +631,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _surfaceSnapEnabled = !_surfaceSnapEnabled;
             _surfaceSnapTargetPart = -1;
             _surfaceSnapProjection = -1;
+            _hasSurfaceSnapDirection = false;
             _status = _surfaceSnapEnabled
                 ? "Автопривязка включена: близкие части стыкуются по нормали поверхности. N — переключить."
                 : "Автопривязка к поверхности отключена.";
@@ -682,6 +688,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _selectedPart = itemIndex;
             _surfaceSnapTargetPart = -1;
             _surfaceSnapProjection = -1;
+            _hasSurfaceSnapDirection = false;
             _activeProjection = -1;
             _draggingProperty = -1;
             _draggingProjection = -1;
@@ -714,6 +721,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _selectedPart = hitPart;
                 _surfaceSnapTargetPart = -1;
                 _surfaceSnapProjection = -1;
+                _hasSurfaceSnapDirection = false;
                 _draggingProjection = projection;
                 _draggingPart = true;
                 _lastMouseX = position.X;
@@ -766,6 +774,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingPart = false;
         _surfaceSnapTargetPart = -1;
         _surfaceSnapProjection = -1;
+        _hasSurfaceSnapDirection = false;
         return true;
     }
 
@@ -799,6 +808,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _surfaceSnapEnabled = !_surfaceSnapEnabled;
             _surfaceSnapTargetPart = -1;
             _surfaceSnapProjection = -1;
+            _hasSurfaceSnapDirection = false;
             _status = _surfaceSnapEnabled
                 ? "Автопривязка к нормали включена."
                 : "Автопривязка к нормали отключена.";
@@ -1566,32 +1576,47 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float candidateY = currentY + deltaY;
         float snapDistance = Math.Clamp(MathF.Max(selected.HalfWidth, selected.HalfHeight) * 0.3f, 0.015f, 0.04f);
 
-        // Keep the same neighboring surface while dragging. Without this small hysteresis,
-        // overlapping torso/limb shapes can alternate as the "nearest" target from event to event.
+        // Preserve one target and a smoothed radial direction during a drag. Near a part's
+        // center the radial direction is undefined, so keep the previous direction instead
+        // of letting tiny mouse movements flip the calculated normal.
         if (_draggingPart && _draggingProjection == projection &&
             _surfaceSnapProjection == projection &&
             _surfaceSnapTargetPart >= 0 &&
             _surfaceSnapTargetPart < _parts.Length &&
-            _surfaceSnapTargetPart != _selectedPart &&
-            TryGetSnapCandidate(projection, candidateX, candidateY, _surfaceSnapTargetPart,
-                out Vector2f lockedCenter, out Vector2f lockedNormal, out float lockedError) &&
-            lockedError <= snapDistance * 2.5f)
+            _surfaceSnapTargetPart != _selectedPart)
         {
-            snappedCenter = lockedCenter;
-            surfaceNormal = lockedNormal;
-            targetPart = _surfaceSnapTargetPart;
-            return true;
+            int lockedTarget = _surfaceSnapTargetPart;
+            Vector2f lockedDirection = GetSnapDirection(
+                projection, candidateX, candidateY, lockedTarget, smooth: true, useCachedDirection: true);
+            if (TryGetSnapCandidate(projection, candidateX, candidateY, lockedTarget,
+                    lockedDirection.X, lockedDirection.Y,
+                    out Vector2f lockedCenter, out Vector2f lockedNormal, out float lockedError) &&
+                lockedError <= snapDistance * 2.5f)
+            {
+                snappedCenter = lockedCenter;
+                surfaceNormal = lockedNormal;
+                targetPart = lockedTarget;
+                _surfaceSnapDirectionX = lockedDirection.X;
+                _surfaceSnapDirectionY = lockedDirection.Y;
+                _hasSurfaceSnapDirection = true;
+                return true;
+            }
         }
 
         _surfaceSnapTargetPart = -1;
         _surfaceSnapProjection = -1;
+        _hasSurfaceSnapDirection = false;
         float bestDistance = snapDistance;
+        Vector2f bestDirection = default;
         for (int i = 0; i < _parts.Length; i++)
         {
             if (i == _selectedPart)
                 continue;
 
+            Vector2f direction = GetSnapDirection(
+                projection, candidateX, candidateY, i, smooth: false, useCachedDirection: false);
             if (!TryGetSnapCandidate(projection, candidateX, candidateY, i,
+                    direction.X, direction.Y,
                     out Vector2f desiredCenter, out Vector2f normal, out float error) ||
                 error >= bestDistance)
                 continue;
@@ -1600,6 +1625,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             snappedCenter = desiredCenter;
             surfaceNormal = normal;
             targetPart = i;
+            bestDirection = direction;
         }
 
         if (targetPart < 0)
@@ -1609,9 +1635,60 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         {
             _surfaceSnapTargetPart = targetPart;
             _surfaceSnapProjection = projection;
+            _surfaceSnapDirectionX = bestDirection.X;
+            _surfaceSnapDirectionY = bestDirection.Y;
+            _hasSurfaceSnapDirection = true;
         }
 
         return true;
+    }
+
+    private Vector2f GetSnapDirection(
+        int projection,
+        float candidateX,
+        float candidateY,
+        int otherIndex,
+        bool smooth,
+        bool useCachedDirection)
+    {
+        ProjectedPart selected = _projected[projection][_selectedPart];
+        ProjectedPart other = _projected[projection][otherIndex];
+        float otherX = other.X;
+        float otherY = projection == 2 ? other.Y : -other.Y;
+        float directionX = candidateX - otherX;
+        float directionY = candidateY - otherY;
+        float distance = MathF.Sqrt(directionX * directionX + directionY * directionY);
+        float centerDeadZone = Math.Clamp(
+            MathF.Max(other.HalfWidth, other.HalfHeight) * 0.28f, 0.025f, 0.075f);
+
+        if (distance < centerDeadZone)
+        {
+            if (useCachedDirection && _hasSurfaceSnapDirection)
+                return new Vector2f(_surfaceSnapDirectionX, _surfaceSnapDirectionY);
+
+            // At a coincident center there is no geometrically unique normal. Choose a
+            // deterministic direction from the part's current axis rather than mouse noise.
+            float angle = selected.ScreenRotation * MathF.PI / 180f;
+            return new Vector2f(MathF.Cos(angle), MathF.Sin(angle));
+        }
+
+        directionX /= distance;
+        directionY /= distance;
+        if (smooth && useCachedDirection && _hasSurfaceSnapDirection)
+        {
+            const float response = 0.24f;
+            float blendedX = _surfaceSnapDirectionX * (1f - response) + directionX * response;
+            float blendedY = _surfaceSnapDirectionY * (1f - response) + directionY * response;
+            float blendedLength = MathF.Sqrt(blendedX * blendedX + blendedY * blendedY);
+            float dot = _surfaceSnapDirectionX * directionX + _surfaceSnapDirectionY * directionY;
+            if (blendedLength > 0.0001f && dot > -0.75f)
+            {
+                directionX = blendedX / blendedLength;
+                directionY = blendedY / blendedLength;
+            }
+        }
+
+        return new Vector2f(directionX, directionY);
     }
 
     private bool TryGetSnapCandidate(
@@ -1619,6 +1696,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float candidateX,
         float candidateY,
         int otherIndex,
+        float directionX,
+        float directionY,
         out Vector2f desiredCenter,
         out Vector2f surfaceNormal,
         out float error)
@@ -1631,21 +1710,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         ProjectedPart selected = _projected[projection][_selectedPart];
         ProjectedPart other = _projected[projection][otherIndex];
-        float otherX = other.X;
-        float otherY = projection == 2 ? other.Y : -other.Y;
-        float directionX = candidateX - otherX;
-        float directionY = candidateY - otherY;
-        float distance = MathF.Sqrt(directionX * directionX + directionY * directionY);
-        if (distance < 0.0001f)
-            return false;
-
-        directionX /= distance;
-        directionY /= distance;
         if (!TryGetSurfaceNormal(other, directionX, directionY,
                 out float radius, out float normalX, out float normalY))
             return false;
 
         float support = GetProjectedSupportRadius(selected, normalX, normalY);
+        float otherX = other.X;
+        float otherY = projection == 2 ? other.Y : -other.Y;
         float desiredX = otherX + directionX * radius + normalX * (support + 0.0015f);
         float desiredY = otherY + directionY * radius + normalY * (support + 0.0015f);
         float errorX = candidateX - desiredX;
