@@ -1623,20 +1623,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_editingOrgans && _organs.Length > 0)
         {
             UnitAnatomyVolume organ = _organs[_selectedOrgan];
-            float dx = deltaX / layout.PixelsPerUnit;
-            float dy = -deltaY / layout.PixelsPerUnit;
-            int parentIndex = Array.IndexOf(_regionIds, organ.ParentRegionId);
-            float parentRotation = parentIndex >= 0 ? _worldRotations[parentIndex] : 0f;
-            float cos = MathF.Cos(parentRotation);
-            float sin = MathF.Sin(parentRotation);
-            NumericsVector3 localDelta = projection switch
+            float organDx = deltaX / layout.PixelsPerUnit;
+            float organDy = -deltaY / layout.PixelsPerUnit;
+            int organParentIndex = Array.IndexOf(_regionIds, organ.ParentRegionId);
+            float organParentRotation = organParentIndex >= 0 ? _worldRotations[organParentIndex] : 0f;
+            float organCos = MathF.Cos(organParentRotation);
+            float organSin = MathF.Sin(organParentRotation);
+            NumericsVector3 organLocalDelta = projection switch
             {
-                0 => new NumericsVector3(sin * dx, cos * dx, dy),
-                1 => new NumericsVector3(cos * dx, -sin * dx, dy),
-                _ => new NumericsVector3(cos * dx + sin * dy, -sin * dx + cos * dy, 0f)
+                0 => new NumericsVector3(organSin * organDx, organCos * organDx, organDy),
+                1 => new NumericsVector3(organCos * organDx, -organSin * organDx, organDy),
+                _ => new NumericsVector3(organCos * organDx + organSin * organDy, -organSin * organDx + organCos * organDy, 0f)
             };
             _organs[_selectedOrgan] = ClampOrganToHost(
-                CopyOrgan(organ, center: Snap(organ.LocalCenter + localDelta)));
+                CopyOrgan(organ, center: Snap(organ.LocalCenter + organLocalDelta)));
             ApplyEnabledSymmetry(projection);
             _status = $"Перемещён орган «{OrganName(organ.Id)}». Нажми Ctrl+S.";
             return;
@@ -1756,7 +1756,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             UnitAnatomyVolume organ = _organs[_selectedOrgan];
             NumericsVector3 center = organ.LocalCenter;
             NumericsVector3 halfExtents = organ.HalfExtents;
-            float rotation = organ.LocalRotation;
+            float organRotation = organ.LocalRotation;
             Vector3 host = GetOrganHostScale(organ);
             switch (index)
             {
@@ -1766,12 +1766,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 case 3: halfExtents.X = Math.Clamp(value, 0.002f, MathF.Max(0.004f, host.X * 0.85f)); break;
                 case 4: halfExtents.Y = Math.Clamp(value, 0.002f, MathF.Max(0.004f, host.Y * 0.85f)); break;
                 case 5: halfExtents.Z = Math.Clamp(value, 0.002f, MathF.Max(0.004f, host.Z * 0.85f)); break;
-                default: rotation = Math.Clamp(value, -180f, 180f) * MathF.PI / 180f; break;
+                default: organRotation = Math.Clamp(value, -180f, 180f) * MathF.PI / 180f; break;
             }
 
             center = Snap(center);
             _organs[_selectedOrgan] = ClampOrganToHost(
-                CopyOrgan(organ, center: center, halfExtents: halfExtents, rotation: rotation));
+                CopyOrgan(organ, center: center, halfExtents: halfExtents, rotation: organRotation));
             ApplyEnabledSymmetry();
             _status = $"Изменён орган «{OrganName(organ.Id)}». Нажми Ctrl+S для сохранения.";
             return;
