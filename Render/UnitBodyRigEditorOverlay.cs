@@ -188,6 +188,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(131, 76, 82, 255),
         OutlineThickness = 1f
     };
+    private readonly RectangleShape _cycleTypeButton = new(new Vector2f(66f, 23f))
+    {
+        FillColor = new Color(45, 65, 84, 255),
+        OutlineColor = new Color(82, 112, 139, 255),
+        OutlineThickness = 1f
+    };
     private readonly RectangleShape _addOrganButton = new(new Vector2f(1f, 22f))
     {
         FillColor = new Color(94, 69, 42, 255),
@@ -200,6 +206,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private readonly Text? _renameTypeLabel;
     private readonly Text? _statsLabel;
     private readonly Text? _addOrganLabel;
+    private readonly Text? _cycleTypeLabel;
     private readonly Text? _saveLabel;
     private readonly Text? _loadLabel;
     private readonly Text? _exportLabel;
@@ -395,6 +402,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _addOrganLabel = new Text(_font, "+ ОРГАН", 9)
             {
                 FillColor = new Color(250, 236, 215, 255),
+                Style = Text.Styles.Bold
+            };
+            _cycleTypeLabel = new Text(_font, "ТИП →", 9)
+            {
+                FillColor = new Color(226, 236, 246, 255),
                 Style = Text.Styles.Bold
             };
             _saveLabel = new Text(_font, "СОХРАНИТЬ", 10)
@@ -698,6 +710,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
+        if (_cycleTypeButton.GetGlobalBounds().Contains(position))
+        {
+            CycleEditableType();
+            return true;
+        }
+
         if (_addOrganButton.GetGlobalBounds().Contains(position))
         {
             AddOrganToSelectedRegion();
@@ -923,24 +941,23 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         return true;
     }
 
-    public bool HandleTextEntered(uint unicode)
+    public bool HandleTextEntered(string text)
     {
         if (!IsOpen || !_renamingType)
             return false;
-        if (unicode < 32 || unicode == 127 || unicode > 0x10FFFF)
-            return true;
-        if (_renameBuffer.Length >= 64)
+        if (string.IsNullOrEmpty(text))
             return true;
 
-        try
+        foreach (char character in text)
         {
-            _renameBuffer += char.ConvertFromUtf32((int)unicode);
-            _status = $"Новое название: {_renameBuffer}";
+            if (char.IsControl(character) || character == '\u007f')
+                continue;
+            if (_renameBuffer.Length >= 64)
+                break;
+            _renameBuffer += character;
         }
-        catch (ArgumentOutOfRangeException)
-        {
-            // Ignore invalid Unicode input supplied by the window system.
-        }
+
+        _status = $"Новое название: {_renameBuffer}";
         return true;
     }
 
@@ -1101,6 +1118,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_listTitle != null)
             window.Draw(_listTitle);
+        DrawButton(window, _cycleTypeButton, _cycleTypeLabel);
         if (_propertiesTitle != null)
         {
             _propertiesTitle.DisplayedString = _editingStats
@@ -1299,6 +1317,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_listTitle != null)
             _listTitle.Position = new Vector2f(listX + 9f, contentY + 9f);
+        _cycleTypeButton.Position = new Vector2f(listX + listWidth - 72f, contentY + 5f);
+        if (_cycleTypeLabel != null)
+            _cycleTypeLabel.Position = new Vector2f(_cycleTypeButton.Position.X + 10f, _cycleTypeButton.Position.Y + 5f);
         if (_propertiesTitle != null)
             _propertiesTitle.Position = new Vector2f(propertiesX + 10f, contentY + 9f);
         _statsButton.Position = new Vector2f(propertiesX + propertiesWidth - 75f, contentY + 5f);
@@ -1763,7 +1784,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])} · {PostureName(_editingPosture)}. Нажми Ctrl+S.";
     }
 
-    private void Save()
+    private bool Save()
     {
         if (_activeUnitType != UnitType.Colonist)
         {
@@ -1781,7 +1802,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 out string archetypeError))
             {
                 _status = $"Тип не сохранён: {archetypeError}";
-                return;
+                return false;
             }
         }
         else
@@ -1800,7 +1821,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             out string poseError))
         {
             _status = $"Базовый риг передан на сохранение, но позы не сохранены: {poseError}";
-            return;
+            return false;
         }
 
         _openedRegionIds = (string[])_regionIds.Clone();
@@ -1809,12 +1830,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _status = _activeUnitType == UnitType.Colonist
             ? $"Риг и позы сохранены. Профиль поз: {posePath}"
             : $"Тип «{_customDisplayName}», геометрия, ткани и позы сохранены в Defs/Units. Файл поз: {posePath}";
+        return true;
     }
 
     private void CreateNewCustomType()
     {
-        if (_activeUnitType != UnitType.Colonist)
-            Save();
+        if (_activeUnitType != UnitType.Colonist && !Save())
+            return;
 
         UnitDefinition template = UnitAnatomyCatalog.Get(UnitType.Colonist).Definition;
         ushort nextId;
@@ -1863,6 +1885,92 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _selectedPart = 0;
         _selectedProperty = 0;
         _status = $"Создан «{name}» (ID {(ushort)type}). Добавляй регионы и органы; характеристики редактируются кнопкой «СТАТЫ».";
+    }
+
+    private void CycleEditableType()
+    {
+        if (_activeUnitType != UnitType.Colonist && !Save())
+            return;
+
+        UnitType[] customTypes = UnitArchetypeDefinitionStore.GetCustomTypes();
+        var selectable = new UnitType[customTypes.Length + 1];
+        selectable[0] = UnitType.Colonist;
+        Array.Copy(customTypes, 0, selectable, 1, customTypes.Length);
+
+        int current = Array.IndexOf(selectable, _activeUnitType);
+        UnitType next = selectable[(current + 1 + selectable.Length) % selectable.Length];
+        LoadEditableType(next);
+    }
+
+    private void LoadEditableType(UnitType type)
+    {
+        if (!UnitArchetypeCatalogTryGet(type, out UnitArchetypeProfile profile))
+        {
+            _status = $"Тип «{UnitArchetypeDefinitionStore.GetDisplayName(type)}» не удалось загрузить: {UnitArchetypeDefinitionStore.LastError}";
+            return;
+        }
+
+        _activeUnitType = type;
+        _customDisplayName = type == UnitType.Colonist
+            ? string.Empty
+            : UnitArchetypeDefinitionStore.GetDisplayName(type);
+
+        UnitDefinition definition = profile.Definition;
+        _customMoveSpeed = definition.MoveSpeed;
+        _customWidth = definition.Width;
+        _customLength = definition.Length;
+        _customHeight = definition.Height;
+        _customViewRange = definition.ViewRange;
+        _customFieldOfView = definition.FieldOfView;
+        _editingStats = false;
+        _renamingType = false;
+        _renameBuffer = string.Empty;
+        if (_statsLabel != null)
+            _statsLabel.DisplayedString = "СТАТЫ";
+
+        ReadOnlySpan<UnitAnatomyNode> nodes = profile.Anatomy.Nodes;
+        ReadOnlySpan<BodyPartDefinition> sourceParts = profile.BodyParts;
+        string[] ids = new string[nodes.Length];
+        BodyPartDefinition[] parts = new BodyPartDefinition[sourceParts.Length];
+        sourceParts.CopyTo(parts);
+        for (int i = 0; i < nodes.Length; i++)
+            ids[i] = nodes[i].Id;
+
+        _poseParts = new[]
+        {
+            Array.Empty<BodyPartDefinition>(),
+            Array.Empty<BodyPartDefinition>(),
+            Array.Empty<BodyPartDefinition>()
+        };
+        _defaultParts = Array.Empty<BodyPartDefinition>();
+        SetRigData(ids, parts, setDefaults: false, setOpenedSnapshot: true);
+        _selectedPart = Math.Clamp(_selectedPart, 0, Math.Max(0, _parts.Length - 1));
+        _selectedProperty = 0;
+        _listScroll = 0;
+        _status = type == UnitType.Colonist
+            ? "Загружен встроенный тип колониста."
+            : $"Загружен пользовательский тип «{_customDisplayName}». Можно редактировать и сохранять.";
+    }
+
+    private static bool UnitArchetypeCatalogTryGet(
+        UnitType type,
+        out UnitArchetypeProfile profile)
+    {
+        try
+        {
+            profile = UnitAnatomyCatalog.Get(type);
+            return true;
+        }
+        catch (KeyNotFoundException)
+        {
+            profile = null!;
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            profile = null!;
+            return false;
+        }
     }
 
     private void AddOrganToSelectedRegion()
@@ -2533,6 +2641,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _renameTypeLabel?.Dispose();
         _statsLabel?.Dispose();
         _addOrganLabel?.Dispose();
+        _cycleTypeLabel?.Dispose();
         _addRegionLabel?.Dispose();
         _addAllFormsLabel?.Dispose();
         _removeRegionLabel?.Dispose();
@@ -2566,6 +2675,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _renameTypeButton.Dispose();
         _statsButton.Dispose();
         _addOrganButton.Dispose();
+        _cycleTypeButton.Dispose();
         _addRegionButton.Dispose();
         _addAllFormsButton.Dispose();
         _removeRegionButton.Dispose();

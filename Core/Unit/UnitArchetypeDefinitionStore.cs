@@ -47,6 +47,13 @@ public static class UnitArchetypeDefinitionStore
         }
     }
 
+    public static UnitType[] GetCustomTypes()
+    {
+        EnsureLoaded();
+        lock (Sync)
+            return Entries.Keys.OrderBy(id => id).Select(id => (UnitType)id).ToArray();
+    }
+
     public static ushort GetNextTypeId()
     {
         EnsureLoaded();
