@@ -159,12 +159,14 @@ public sealed class UnitBodySystem
             Vector3 origin = unitPositions[unit];
             Quaternion positionOrientation = bodyOrientation;
             Quaternion partBaseOrientation = bodyOrientation;
+            float partBaseRotation = bodyRotation;
 
             if (anchors[part] == BodyPartAnchor.UnitHead)
             {
                 // Keep the head center anchored ahead of the torso even when
                 // its facing direction changes independently.
                 partBaseOrientation = headOrientation;
+                partBaseRotation = headRotation;
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start &&
@@ -208,6 +210,7 @@ public sealed class UnitBodySystem
                 origin = worldPositions[parent];
                 positionOrientation = worldOrientations[parent];
                 partBaseOrientation = worldOrientations[parent];
+                partBaseRotation = worldRotations[parent];
             }
 
             float gaitRotation = motions[part] switch
@@ -225,6 +228,17 @@ public sealed class UnitBodySystem
             Quaternion worldOrientation = BodyPartTransformMath.Compose(partBaseOrientation, localEuler);
             float worldRotation = BodyPartTransformMath.Project(
                 scales[part], worldOrientation, 0, 1).Rotation;
+
+            // Preserve unwrapped angular accumulation for a truly planar chain.
+            // Quaternion projection returns an equivalent angle in [-PI, PI], which
+            // is fine for rendering but causes discontinuities in gait/follower math.
+            if (MathF.Abs(localEuler.X) < 0.0001f &&
+                MathF.Abs(localEuler.Y) < 0.0001f &&
+                MathF.Abs(partBaseOrientation.X) < 0.0001f &&
+                MathF.Abs(partBaseOrientation.Y) < 0.0001f)
+            {
+                worldRotation = partBaseRotation + localEuler.Z;
+            }
 
             Vector3 joint =
                 origin + BodyPartTransformMath.TransformPosition(localPosition, positionOrientation);
