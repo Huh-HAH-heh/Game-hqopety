@@ -560,7 +560,7 @@ public sealed class UnitHitSystem
         BodyPrimitive parentPrimitive;
         if (!TryGetBodyShape(
                 units, unitIndex, profile, parentRegionIndex, bodies,
-                out _, out parentCenter, out parentScale,
+                out int parentBodyIndex, out parentCenter, out parentScale,
                 out parentRotation, out parentPrimitive, out parentHalfHeight))
         {
             GetWorldGeometry(
@@ -570,7 +570,12 @@ public sealed class UnitHitSystem
             parentScale = new Vector3(radius, radius, parentHalfHeight);
             parentRotation = 0f;
             parentPrimitive = BodyPrimitive.Circle;
+            parentBodyIndex = -1;
         }
+
+        Quaternion parentOrientation = BodyPartTransformMath.TopDownRotation(parentRotation);
+        if (bodies != null && parentBodyIndex >= 0 && parentBodyIndex < bodies.Count)
+            parentOrientation = bodies.WorldOrientation[parentBodyIndex];
 
         float rayLength =
             2f * MathF.Sqrt(
@@ -616,18 +621,16 @@ public sealed class UnitHitSystem
                     out int targetRegion, out int targetBinding))
                 continue;
 
-            float cos = MathF.Cos(parentRotation);
-            float sin = MathF.Sin(parentRotation);
-            Vector3 local = volume.LocalCenter;
-            Vector3 volumeCenter = parentCenter + new Vector3(
-                local.X * cos - local.Y * sin,
-                local.X * sin + local.Y * cos,
-                local.Z);
-            float volumeRotation = parentRotation + volume.LocalRotation;
+            Vector3 volumeCenter = parentCenter +
+                BodyPartTransformMath.TransformPosition(volume.LocalCenter, parentOrientation);
+            Quaternion volumeOrientation = BodyPartTransformMath.Compose(
+                parentOrientation, new Vector3(0f, 0f, volume.LocalRotation));
+            BodyPartTransformMath.ProjectedShape volumeShape =
+                BodyPartTransformMath.Project(volume.HalfExtents, volumeOrientation, 0, 1);
 
             if (!TryIntersectPrimitive(
-                    origin, end, volumeCenter, volume.HalfExtents,
-                    volumeRotation, volume.Primitive, volume.HalfExtents.Z,
+                    origin, end, volumeCenter, volumeShape.Scale,
+                    volumeShape.Rotation, volume.Primitive, volumeShape.Scale.Z,
                     MathF.Max(0f, padding), out float t))
                 continue;
 
@@ -1018,10 +1021,10 @@ public sealed class UnitHitSystem
             return false;
 
         center = bodies.WorldPosition[bodyIndex];
-        scale = bodies.Scale[bodyIndex];
+        scale = bodies.WorldScale[bodyIndex];
         rotation = bodies.WorldRotation[bodyIndex];
         primitive = bodies.Primitive[bodyIndex];
-        halfHeight = anatomy.GetHitHalfHeight(regionIndex);
+        halfHeight = MathF.Max(0.001f, bodies.WorldScale[bodyIndex].Z);
         return halfHeight > 0f;
     }
 

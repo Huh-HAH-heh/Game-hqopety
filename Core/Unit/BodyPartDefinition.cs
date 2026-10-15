@@ -27,7 +27,13 @@ public readonly struct BodyPartDefinition
 {
     public Vector3 LocalPosition { get; }
     public Vector3 Scale { get; }
+    /// <summary>Rotation around world/local X (pitch), in radians.</summary>
+    public float LocalRotationX { get; }
+    /// <summary>Rotation around world/local Y (tilt), in radians.</summary>
+    public float LocalRotationY { get; }
+    /// <summary>Rotation around world/local Z (top-down rotation), in radians.</summary>
     public float LocalRotation { get; }
+    public Vector3 LocalEulerRotation => new(LocalRotationX, LocalRotationY, LocalRotation);
     public float FollowDistance { get; }
     public int ParentIndex { get; }
     public BodyPrimitive Primitive { get; }
@@ -46,12 +52,16 @@ public readonly struct BodyPartDefinition
         float followDistance = 0f,
         BodyPartAnchor anchor = BodyPartAnchor.Parent,
         BodyPartRole role = BodyPartRole.Generic,
-        BodyPartPivot pivot = BodyPartPivot.Center)
+        BodyPartPivot pivot = BodyPartPivot.Center,
+        float localRotationX = 0f,
+        float localRotationY = 0f)
     {
         LocalPosition = localPosition;
         Scale = scale;
         Primitive = primitive;
         ParentIndex = parentIndex;
+        LocalRotationX = localRotationX;
+        LocalRotationY = localRotationY;
         LocalRotation = localRotation;
         Motion = motion;
         FollowDistance = followDistance;

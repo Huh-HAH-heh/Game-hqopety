@@ -552,7 +552,7 @@ public void DrawSnapshot(
 
         count = Math.Min(count, bodies.Count - start);
         Vector3[] positions = bodies.WorldPosition;
-        Vector3[] scales = bodies.Scale;
+        Vector3[] scales = bodies.WorldScale;
         float[] rotations = bodies.WorldRotation;
         BodyPrimitive[] primitives = bodies.Primitive;
         BodyPartRole[] roles = bodies.Role;
@@ -846,7 +846,7 @@ public void DrawSnapshot(
 
         count = Math.Min(count, bodies.Count - start);
         Vector3[] positions = bodies.WorldPosition;
-        Vector3[] scales = bodies.Scale;
+        Vector3[] scales = bodies.WorldScale;
         for (int i = start; i < start + count; i++)
         {
             Vector3 scale = scales[i];

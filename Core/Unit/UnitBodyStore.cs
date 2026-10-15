@@ -13,8 +13,12 @@ public sealed class UnitBodyStore
     private bool[] _tailInitialized;
     private Vector3[] _scale;
 
+    private float[] _localRotationX;
+    private float[] _localRotationY;
     private float[] _localRotation;
     private float[] _worldRotation;
+    private Quaternion[] _worldOrientation;
+    private Vector3[] _worldScale;
     private float[] _followDistance;
 
     private int[] _parent;
@@ -48,11 +52,13 @@ public sealed class UnitBodyStore
     public Vector3[] Scale =>
         _scale;
 
-    public float[] LocalRotation =>
-        _localRotation;
+    public float[] LocalRotationX => _localRotationX;
+    public float[] LocalRotationY => _localRotationY;
+    public float[] LocalRotation => _localRotation;
 
-    public float[] WorldRotation =>
-        _worldRotation;
+    public float[] WorldRotation => _worldRotation;
+    public Quaternion[] WorldOrientation => _worldOrientation;
+    public Vector3[] WorldScale => _worldScale;
 
     public float[] FollowDistance =>
         _followDistance;
@@ -91,8 +97,12 @@ public sealed class UnitBodyStore
         _tailInitialized = new bool[initialCapacity];
         _scale = new Vector3[initialCapacity];
 
+        _localRotationX = new float[initialCapacity];
+        _localRotationY = new float[initialCapacity];
         _localRotation = new float[initialCapacity];
         _worldRotation = new float[initialCapacity];
+        _worldOrientation = new Quaternion[initialCapacity];
+        _worldScale = new Vector3[initialCapacity];
         _followDistance = new float[initialCapacity];
 
         _parent = new int[initialCapacity];
@@ -141,6 +151,8 @@ public sealed class UnitBodyStore
             AddPart(
                 part.LocalPosition,
                 part.Scale,
+                part.LocalRotationX,
+                part.LocalRotationY,
                 part.LocalRotation,
                 part.FollowDistance,
                 part.ParentIndex < 0 ? -1 : start + part.ParentIndex,
@@ -179,6 +191,8 @@ public sealed class UnitBodyStore
             BodyPartDefinition part = parts[i];
             _localPosition[index] = part.LocalPosition;
             _scale[index] = part.Scale;
+            _localRotationX[index] = part.LocalRotationX;
+            _localRotationY[index] = part.LocalRotationY;
             _localRotation[index] = part.LocalRotation;
             _followDistance[index] = part.FollowDistance;
             _parent[index] = part.ParentIndex < 0 ? -1 : handle.Start + part.ParentIndex;
@@ -187,6 +201,8 @@ public sealed class UnitBodyStore
             _anchor[index] = part.Anchor;
             _role[index] = part.Role;
             _pivot[index] = part.Pivot;
+            _worldOrientation[index] = Quaternion.Identity;
+            _worldScale[index] = part.Scale;
             _tailInitialized[index] = false;
         }
     }
@@ -225,47 +241,47 @@ public sealed class UnitBodyStore
         float unitRotation,
         float headRotation)
     {
-        int end =
-            handle.Start +
-            handle.Count;
+        int end = handle.Start + handle.Count;
+        Quaternion bodyOrientation = BodyPartTransformMath.TopDownRotation(unitRotation);
+        Quaternion headOrientation = BodyPartTransformMath.TopDownRotation(headRotation);
 
         for (int i = handle.Start; i < end; i++)
         {
             int parent = _parent[i];
             Vector3 origin = unitPosition;
-            float positionRotation = unitRotation;
-            float partRotation = unitRotation;
+            Quaternion positionOrientation = bodyOrientation;
+            Quaternion partBaseOrientation = bodyOrientation;
 
             if (_anchor[i] == BodyPartAnchor.UnitHead)
             {
-                // The head may look independently, but its center stays at
-                // the front of the torso instead of orbiting around the unit.
-                partRotation = headRotation;
+                // The head may look independently, but its center stays attached to the body.
+                partBaseOrientation = headOrientation;
             }
-            else if (_anchor[i] == BodyPartAnchor.Parent &&
-                     parent >= handle.Start)
+            else if (_anchor[i] == BodyPartAnchor.Parent && parent >= handle.Start)
             {
                 origin = _worldPosition[parent];
-                positionRotation = _worldRotation[parent];
-                partRotation = _worldRotation[parent];
+                positionOrientation = _worldOrientation[parent];
+                partBaseOrientation = _worldOrientation[parent];
             }
 
-            Vector3 pivot =
-                origin + Rotate2D(_localPosition[i], positionRotation);
-
-            partRotation += _localRotation[i];
+            Vector3 localEuler = new(_localRotationX[i], _localRotationY[i], _localRotation[i]);
+            Quaternion orientation = BodyPartTransformMath.Compose(partBaseOrientation, localEuler);
+            Vector3 pivot = origin + BodyPartTransformMath.TransformPosition(_localPosition[i], positionOrientation);
 
             if (_pivot[i] == BodyPartPivot.Start)
             {
-                pivot += Rotate2D(
-                    new Vector3(MathF.Abs(_scale[i].X), 0f, 0f),
-                    partRotation);
+                pivot += BodyPartTransformMath.TransformPosition(
+                    new Vector3(MathF.Abs(_scale[i].X), 0f, 0f), orientation);
             }
 
+            BodyPartTransformMath.ProjectedShape projected =
+                BodyPartTransformMath.Project(_scale[i], orientation, 0, 1);
             _worldPosition[i] = pivot;
-            _tailAngle[i] = partRotation;
+            _worldOrientation[i] = orientation;
+            _worldScale[i] = projected.Scale;
+            _tailAngle[i] = projected.Rotation;
             _tailInitialized[i] = false;
-            _worldRotation[i] = partRotation;
+            _worldRotation[i] = projected.Rotation;
         }
     }
 
@@ -280,6 +296,8 @@ public sealed class UnitBodyStore
     private void AddPart(
         Vector3 localPosition,
         Vector3 scale,
+        float localRotationX,
+        float localRotationY,
         float localRotation,
         float followDistance,
         int parent,
@@ -301,9 +319,13 @@ public sealed class UnitBodyStore
         _tailAngle[index] = 0f;
         _tailInitialized[index] = false;
         _scale[index] = scale;
+        _worldScale[index] = scale;
 
+        _localRotationX[index] = localRotationX;
+        _localRotationY[index] = localRotationY;
         _localRotation[index] = localRotation;
         _worldRotation[index] = 0f;
+        _worldOrientation[index] = Quaternion.Identity;
         _followDistance[index] = followDistance;
 
         _parent[index] = parent;
@@ -353,13 +375,12 @@ public sealed class UnitBodyStore
             ref _scale,
             newCapacity);
 
-        Array.Resize(
-            ref _localRotation,
-            newCapacity);
-
-        Array.Resize(
-            ref _worldRotation,
-            newCapacity);
+        Array.Resize(ref _localRotationX, newCapacity);
+        Array.Resize(ref _localRotationY, newCapacity);
+        Array.Resize(ref _localRotation, newCapacity);
+        Array.Resize(ref _worldRotation, newCapacity);
+        Array.Resize(ref _worldOrientation, newCapacity);
+        Array.Resize(ref _worldScale, newCapacity);
 
         Array.Resize(
             ref _followDistance,

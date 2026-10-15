@@ -18,7 +18,7 @@ namespace RimClone.Render;
 public sealed class UnitBodyRigEditorOverlay : IDisposable
 {
     private const int MaxParts = 128;
-    private const int PropertyCount = 7;
+    private const int PropertyCount = 9;
 
     private static readonly Color BackdropColor = new(5, 9, 14, 218);
     private static readonly Color PanelColor = new(17, 24, 33, 255);
@@ -122,6 +122,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(90, 128, 105, 255),
         OutlineThickness = 1f
     };
+    private readonly RectangleShape _gridButton = new(new Vector2f(112f, 26f))
+    {
+        FillColor = new Color(42, 57, 72, 255),
+        OutlineColor = new Color(82, 104, 127, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _gridStepButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(42, 57, 72, 255),
+        OutlineColor = new Color(82, 104, 127, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape[] _gridLines = new RectangleShape[128];
     private readonly RectangleShape _addRegionButton = new(new Vector2f(1f, 25f))
     {
         FillColor = new Color(44, 81, 67, 255),
@@ -149,6 +162,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private readonly Text? _reloadLabel;
     private readonly Text? _parentLabel;
     private readonly Text? _allSymmetryLabel;
+    private readonly Text? _gridLabel;
+    private readonly Text? _gridStepLabel;
     private readonly Text? _addRegionLabel;
     private readonly Text? _addAllFormsLabel;
     private readonly Text? _removeRegionLabel;
@@ -179,7 +194,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private BodyPartDefinition[] _defaultParts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _openedParts = Array.Empty<BodyPartDefinition>();
     private NumericsVector3[] _worldPositions = Array.Empty<NumericsVector3>();
-    private float[] _worldRotations = Array.Empty<float>();
+    private Quaternion[] _worldOrientations = Array.Empty<Quaternion>();
     private ProjectedPart[][] _projected = new ProjectedPart[3][];
     private ProjectionLayout[] _projectionLayouts = new ProjectionLayout[3];
 
@@ -194,7 +209,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private float _propertyRowHeight = 46f;
     private int _listScroll;
     private int _listVisibleRows = 12;
-    private string _status = "Изменения можно двигать мышью или менять ползунками.";
+    private bool _gridEnabled = true;
+    private readonly float[] _gridSteps = { 0.005f, 0.01f, 0.025f, 0.05f, 0.1f, 0.2f };
+    private int _gridStepIndex = 2;
+    private string _status = "Перетаскивание привязано к сетке. Настрой углы X/Y/Z в параметрах.";
     private bool _disposed;
 
     public bool IsOpen { get; private set; }
@@ -211,6 +229,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(28, 38, 50, 255),
                 OutlineColor = new Color(52, 67, 84, 255),
                 OutlineThickness = 1f
+            };
+        }
+        for (int i = 0; i < _gridLines.Length; i++)
+        {
+            _gridLines[i] = new RectangleShape(new Vector2f(1f, 1f))
+            {
+                FillColor = new Color(76, 97, 119, 92)
             };
         }
 
@@ -252,7 +277,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             "РАЗМЕР X",
             "РАЗМЕР Y",
             "РАЗМЕР Z",
-            "ПОВОРОТ, ГРАДУСЫ"
+            "НАКЛОН X, ГРАДУСЫ",
+            "НАКЛОН Y, ГРАДУСЫ",
+            "ПОВОРОТ Z, ГРАДУСЫ"
         };
         for (int i = 0; i < PropertyCount; i++)
         {
@@ -348,6 +375,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 FillColor = new Color(232, 240, 248, 255)
             };
+            _gridLabel = new Text(_font, "СЕТКА: ВКЛ", 9)
+            {
+                FillColor = new Color(232, 240, 248, 255),
+                Style = Text.Styles.Bold
+            };
+            _gridStepLabel = new Text(_font, "ШАГ: 0.025", 9)
+            {
+                FillColor = new Color(232, 240, 248, 255)
+            };
             _addRegionLabel = new Text(_font, "+ ДОБАВИТЬ РЕГИОН", 9)
             {
                 FillColor = new Color(237, 246, 241, 255),
@@ -440,7 +476,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
 
         _worldPositions = new NumericsVector3[_parts.Length];
-        _worldRotations = new float[_parts.Length];
+        _worldOrientations = new Quaternion[_parts.Length];
         for (int view = 0; view < _projected.Length; view++)
             _projected[view] = new ProjectedPart[_parts.Length];
 
@@ -543,6 +579,22 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             bool enable = !_symmetryEnabled[0] || !_symmetryEnabled[1] || !_symmetryEnabled[2];
             Array.Fill(_symmetryEnabled, enable);
             _status = enable ? "Симметрия включена во всех проекциях." : "Симметрия выключена во всех проекциях.";
+            return true;
+        }
+
+        if (_gridButton.GetGlobalBounds().Contains(position))
+        {
+            _gridEnabled = !_gridEnabled;
+            _status = _gridEnabled
+                ? $"Сетка и привязка включены. Шаг: {_gridSteps[_gridStepIndex]:0.000}."
+                : "Сетка и привязка отключены.";
+            return true;
+        }
+
+        if (_gridStepButton.GetGlobalBounds().Contains(position))
+        {
+            _gridStepIndex = (_gridStepIndex + 1) % _gridSteps.Length;
+            _status = $"Шаг сетки: {_gridSteps[_gridStepIndex]:0.000}. Перемещение привязано к этому шагу.";
             return true;
         }
 
@@ -860,6 +912,22 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_allSymmetryLabel);
         }
 
+        if (_gridLabel != null)
+        {
+            _gridLabel.DisplayedString = _gridEnabled ? "СЕТКА: ВКЛ" : "СЕТКА: ВЫКЛ";
+            _gridLabel.Position = new Vector2f(_gridButton.Position.X + 8f, _gridButton.Position.Y + 6f);
+            window.Draw(_gridButton);
+            window.Draw(_gridLabel);
+        }
+
+        if (_gridStepLabel != null)
+        {
+            _gridStepLabel.DisplayedString = $"ШАГ: {_gridSteps[_gridStepIndex]:0.000}";
+            _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 6f, _gridStepButton.Position.Y + 6f);
+            window.Draw(_gridStepButton);
+            window.Draw(_gridStepLabel);
+        }
+
         if (_helpText != null)
             window.Draw(_helpText);
         if (_statusText != null)
@@ -963,7 +1031,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_removeRegionLabel != null)
             _removeRegionLabel.Position = new Vector2f(_removeRegionButton.Position.X + 8f, _removeRegionButton.Position.Y + 6f);
 
-        _propertyRowHeight = MathF.Min(47f, MathF.Max(39f, (contentHeight - 232f) / PropertyCount));
+        _propertyRowHeight = MathF.Min(37f, MathF.Max(27f, (contentHeight - 310f) / PropertyCount));
         if (_selectedName != null)
             _selectedName.Position = new Vector2f(propertiesX + 10f, contentY + 31f);
         if (_selectedInfo != null)
@@ -983,6 +1051,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _parentButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
         _allSymmetryButton.Position = new Vector2f(propertiesX + 10f, _parentButton.Position.Y + 31f);
         _allSymmetryButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
+        _gridButton.Position = new Vector2f(propertiesX + 10f, _allSymmetryButton.Position.Y + 31f);
+        _gridButton.Size = new Vector2f(104f, 26f);
+        _gridStepButton.Position = new Vector2f(_gridButton.Position.X + _gridButton.Size.X + 4f, _gridButton.Position.Y);
+        _gridStepButton.Size = new Vector2f(propertiesWidth - 24f - _gridButton.Size.X - 4f, 26f);
 
         if (_helpText != null)
             _helpText.Position = new Vector2f(listX + 2f, y + panelHeight - 42f);
@@ -1038,7 +1110,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         for (int i = 0; i < _parts.Length; i++)
         {
-            ProjectedPart geometry = Project(_parts[i], _worldPositions[i], _worldRotations[i], projection);
+            ProjectedPart geometry = Project(_parts[i], _worldPositions[i], _worldOrientations[i], projection);
             _projected[projection][i] = geometry;
             minX = MathF.Min(minX, geometry.X - geometry.HalfWidth);
             minY = MathF.Min(minY, geometry.Y - geometry.HalfHeight);
@@ -1057,12 +1129,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float screenCenterY = layout.Top + layout.Height * 0.5f;
         layout = layout.WithTransform(pixelsPerUnit, screenCenterX, screenCenterY, worldCenterX, worldCenterY);
         _projectionLayouts[projection] = layout;
+        DrawGrid(window, layout, projection);
 
         for (int i = 0; i < _parts.Length; i++)
         {
             ProjectedPart geometry = _projected[projection][i];
             float sx = screenCenterX + (geometry.X - worldCenterX) * pixelsPerUnit;
-            float sy = screenCenterY - (geometry.Y - worldCenterY) * pixelsPerUnit;
+            float sy = projection == 2
+                ? screenCenterY + (geometry.Y - worldCenterY) * pixelsPerUnit
+                : screenCenterY - (geometry.Y - worldCenterY) * pixelsPerUnit;
             float halfWidth = MathF.Max(1.5f, geometry.HalfWidth * pixelsPerUnit);
             float halfHeight = MathF.Max(1.5f, geometry.HalfHeight * pixelsPerUnit);
             bool selected = i == _selectedPart;
@@ -1079,7 +1154,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 _previewCircle.Position = new Vector2f(sx, sy);
                 _previewCircle.Scale = new Vector2f(halfWidth, halfHeight);
-                _previewCircle.Rotation = projection == 2 ? geometry.ScreenRotation : 0f;
+                _previewCircle.Rotation = geometry.ScreenRotation;
                 _previewCircle.FillColor = fill;
                 _previewCircle.OutlineColor = outline;
                 _previewCircle.OutlineThickness = thickness;
@@ -1089,7 +1164,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 _previewTriangle.Position = new Vector2f(sx, sy);
                 _previewTriangle.Scale = new Vector2f(halfWidth, halfHeight);
-                _previewTriangle.Rotation = projection == 2 ? geometry.ScreenRotation : 0f;
+                _previewTriangle.Rotation = geometry.ScreenRotation;
                 _previewTriangle.FillColor = fill;
                 _previewTriangle.OutlineColor = outline;
                 _previewTriangle.OutlineThickness = thickness;
@@ -1099,7 +1174,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 _previewBox.Position = new Vector2f(sx, sy);
                 _previewBox.Scale = new Vector2f(halfWidth, halfHeight);
-                _previewBox.Rotation = projection == 2 ? geometry.ScreenRotation : 0f;
+                _previewBox.Rotation = geometry.ScreenRotation;
                 _previewBox.FillColor = fill;
                 _previewBox.OutlineColor = outline;
                 _previewBox.OutlineThickness = thickness;
@@ -1151,33 +1226,36 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             BodyPartDefinition part = _parts[i];
             int parent = part.ParentIndex;
             NumericsVector3 origin = NumericsVector3.Zero;
-            float positionRotation = 0f;
-            float baseRotation = 0f;
+            Quaternion positionOrientation = Quaternion.Identity;
+            Quaternion baseOrientation = Quaternion.Identity;
 
             if (part.Anchor == BodyPartAnchor.Parent && parent >= 0)
             {
                 origin = _worldPositions[parent];
-                positionRotation = _worldRotations[parent];
-                baseRotation = _worldRotations[parent];
+                positionOrientation = _worldOrientations[parent];
+                baseOrientation = _worldOrientations[parent];
             }
             else if (part.Anchor == BodyPartAnchor.UnitHead)
             {
-                // Preview the head facing forward while keeping it anchored to the unit root.
-                positionRotation = 0f;
-                baseRotation = 0f;
+                // Keep the head's root attachment unrotated in the three-view editor.
+                positionOrientation = Quaternion.Identity;
+                baseOrientation = Quaternion.Identity;
             }
 
-            NumericsVector3 joint = origin + Rotate2D(part.LocalPosition, positionRotation);
-            float worldRotation = baseRotation + part.LocalRotation;
+            NumericsVector3 joint = origin +
+                BodyPartTransformMath.TransformPosition(part.LocalPosition, positionOrientation);
+            Quaternion worldOrientation = BodyPartTransformMath.Compose(
+                baseOrientation, part.LocalEulerRotation);
+
             if (part.Pivot == BodyPartPivot.Start)
             {
-                joint += Rotate2D(
+                joint += BodyPartTransformMath.TransformPosition(
                     new NumericsVector3(MathF.Abs(part.Scale.X), 0f, 0f),
-                    worldRotation);
+                    worldOrientation);
             }
 
             _worldPositions[i] = joint;
-            _worldRotations[i] = worldRotation;
+            _worldOrientations[i] = worldOrientation;
         }
     }
 
@@ -1189,34 +1267,49 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         BodyPartDefinition part = _parts[_selectedPart];
         float dx = deltaX / layout.PixelsPerUnit;
-        float dy = -deltaY / layout.PixelsPerUnit;
-        float parentRotation = part.ParentIndex >= 0
-            ? _worldRotations[part.ParentIndex]
-            : 0f;
-        float cos = MathF.Cos(parentRotation);
-        float sin = MathF.Sin(parentRotation);
-
-        NumericsVector3 localDelta = projection switch
+        float dy = (projection == 2 ? deltaY : -deltaY) / layout.PixelsPerUnit;
+        NumericsVector3 worldDelta = projection switch
         {
-            0 => new NumericsVector3(
-                sin * dx,
-                cos * dx,
-                dy),
-            1 => new NumericsVector3(
-                cos * dx,
-                -sin * dx,
-                dy),
-            _ => new NumericsVector3(
-                cos * dx + sin * dy,
-                -sin * dx + cos * dy,
-                0f)
+            0 => new NumericsVector3(0f, dx, dy),
+            1 => new NumericsVector3(dx, 0f, dy),
+            _ => new NumericsVector3(dx, dy, 0f)
         };
+
+        NumericsVector3 currentCenter = _worldPositions[_selectedPart];
+        NumericsVector3 targetCenter = currentCenter + worldDelta;
+        if (_gridEnabled)
+        {
+            switch (projection)
+            {
+                case 0:
+                    targetCenter.Y = Snap(targetCenter.Y);
+                    targetCenter.Z = Snap(targetCenter.Z);
+                    break;
+                case 1:
+                    targetCenter.X = Snap(targetCenter.X);
+                    targetCenter.Z = Snap(targetCenter.Z);
+                    break;
+                default:
+                    targetCenter.X = Snap(targetCenter.X);
+                    targetCenter.Y = Snap(targetCenter.Y);
+                    break;
+            }
+        }
+
+        worldDelta = targetCenter - currentCenter;
+        Quaternion parentOrientation =
+            part.Anchor == BodyPartAnchor.Parent && part.ParentIndex >= 0
+                ? _worldOrientations[part.ParentIndex]
+                : Quaternion.Identity;
+        NumericsVector3 localDelta = NumericsVector3.Transform(
+            worldDelta, Quaternion.Inverse(parentOrientation));
 
         _parts[_selectedPart] = Copy(
             part,
             localPosition: part.LocalPosition + localDelta);
         ApplyEnabledSymmetry(projection);
-        _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Нажми Ctrl+S для сохранения.";
+        _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. " +
+            $"Привязка: {(_gridEnabled ? _gridSteps[_gridStepIndex].ToString("0.000") : "выкл")}. Ctrl+S — сохранить.";
     }
 
     private int HitTestPreview(int projection, int x, int y)
@@ -1256,7 +1349,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         {
             0 or 1 or 2 => 0.01f,
             3 or 4 or 5 => 0.005f,
-            _ => 5f
+            _ => 2f
         };
         SetProperty(propertyIndex, info.Value + direction * step);
     }
@@ -1274,6 +1367,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             3 => new PropertyInfo(0.005f, 0.25f, part.Scale.X, $"{part.Scale.X:0.000}"),
             4 => new PropertyInfo(0.005f, 0.20f, part.Scale.Y, $"{part.Scale.Y:0.000}"),
             5 => new PropertyInfo(0.005f, 0.40f, part.Scale.Z, $"{part.Scale.Z:0.000}"),
+            6 => new PropertyInfo(-180f, 180f, part.LocalRotationX * 180f / MathF.PI, $"{part.LocalRotationX * 180f / MathF.PI:+0.0;-0.0;0.0}°"),
+            7 => new PropertyInfo(-180f, 180f, part.LocalRotationY * 180f / MathF.PI, $"{part.LocalRotationY * 180f / MathF.PI:+0.0;-0.0;0.0}°"),
             _ => new PropertyInfo(-180f, 180f, part.LocalRotation * 180f / MathF.PI, $"{part.LocalRotation * 180f / MathF.PI:+0.0;-0.0;0.0}°")
         };
     }
@@ -1283,6 +1378,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         BodyPartDefinition part = _parts[_selectedPart];
         NumericsVector3 position = part.LocalPosition;
         NumericsVector3 scale = part.Scale;
+        float rotationX = part.LocalRotationX;
+        float rotationY = part.LocalRotationY;
         float rotation = part.LocalRotation;
 
         switch (index)
@@ -1307,12 +1404,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             case 5:
                 scale.Z = Math.Clamp(value, 0.005f, 0.40f);
                 break;
+            case 6:
+                rotationX = Math.Clamp(value, -180f, 180f) * MathF.PI / 180f;
+                break;
+            case 7:
+                rotationY = Math.Clamp(value, -180f, 180f) * MathF.PI / 180f;
+                break;
             default:
                 rotation = Math.Clamp(value, -180f, 180f) * MathF.PI / 180f;
                 break;
         }
 
-        _parts[_selectedPart] = Copy(part, position, scale, rotation);
+        _parts[_selectedPart] = Copy(part, position, scale, rotation,
+            localRotationX: rotationX, localRotationY: rotationY);
         ApplyEnabledSymmetry();
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Нажми Ctrl+S для сохранения.";
     }
@@ -1501,6 +1605,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_selectedPart < 0 || _selectedPart >= _regionIds.Length)
             return;
 
+        bool symmetryActive = activeProjection >= 0
+            ? _symmetryEnabled[activeProjection]
+            : Array.Exists(_symmetryEnabled, enabled => enabled);
+        if (!symmetryActive)
+            return;
+
         string? counterpartId = GetCounterpartId(_regionIds[_selectedPart]);
         if (counterpartId == null)
             return;
@@ -1510,26 +1620,21 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
 
         BodyPartDefinition source = _parts[_selectedPart];
-        for (int projection = 0; projection < _symmetryEnabled.Length; projection++)
-        {
-            if (!_symmetryEnabled[projection] ||
-                (activeProjection >= 0 && activeProjection != projection))
-                continue;
-
-            BodyPartDefinition target = _parts[counterpartIndex];
-            NumericsVector3 mirroredPosition = projection switch
-            {
-                0 => new NumericsVector3(target.LocalPosition.X, -source.LocalPosition.Y, source.LocalPosition.Z),
-                1 => new NumericsVector3(-source.LocalPosition.X, target.LocalPosition.Y, source.LocalPosition.Z),
-                _ => new NumericsVector3(source.LocalPosition.X, -source.LocalPosition.Y, source.LocalPosition.Z)
-            };
-            _parts[counterpartIndex] = Copy(
-                target,
-                localPosition: mirroredPosition,
-                scale: source.Scale,
-                localRotation: -source.LocalRotation,
-                primitive: source.Primitive);
-        }
+        BodyPartDefinition target = _parts[counterpartIndex];
+        // Reflect the complete 3D transform across the unit's left/right (Y=0) plane.
+        // This works regardless of which projection initiated the edit.
+        NumericsVector3 mirroredPosition = new(
+            source.LocalPosition.X,
+            -source.LocalPosition.Y,
+            source.LocalPosition.Z);
+        _parts[counterpartIndex] = Copy(
+            target,
+            localPosition: mirroredPosition,
+            scale: source.Scale,
+            localRotation: -source.LocalRotation,
+            localRotationX: -source.LocalRotationX,
+            localRotationY: source.LocalRotationY,
+            primitive: source.Primitive);
     }
 
     private static string? GetCounterpartId(string id)
@@ -1679,7 +1784,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float? localRotation = null,
         BodyPrimitive? primitive = null,
         int? parentIndex = null,
-        BodyPartAnchor? anchor = null) =>
+        BodyPartAnchor? anchor = null,
+        float? localRotationX = null,
+        float? localRotationY = null) =>
         new(
             localPosition ?? original.LocalPosition,
             scale ?? original.Scale,
@@ -1690,53 +1797,94 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             followDistance: original.FollowDistance,
             anchor: anchor ?? original.Anchor,
             role: original.Role,
-            pivot: original.Pivot);
+            pivot: original.Pivot,
+            localRotationX: localRotationX ?? original.LocalRotationX,
+            localRotationY: localRotationY ?? original.LocalRotationY);
 
     private static ProjectedPart Project(
         BodyPartDefinition part,
         NumericsVector3 position,
-        float rotation,
+        Quaternion orientation,
         int projection)
     {
-        float absSin = MathF.Abs(MathF.Sin(rotation));
-        float absCos = MathF.Abs(MathF.Cos(rotation));
-        float halfWidth;
-        float halfHeight;
-        float x;
-        float y;
-        float screenRotation = -rotation * 180f / MathF.PI;
+        int horizontalAxis = projection switch { 0 => 1, 1 => 0, _ => 0 };
+        int verticalAxis = projection switch { 0 => 2, 1 => 2, _ => 1 };
+        BodyPartTransformMath.ProjectedShape shape =
+            BodyPartTransformMath.Project(part.Scale, orientation, horizontalAxis, verticalAxis);
 
-        switch (projection)
-        {
-            case 0:
-                x = position.Y;
-                y = position.Z;
-                halfWidth = absSin * MathF.Abs(part.Scale.X) + absCos * MathF.Abs(part.Scale.Y);
-                halfHeight = MathF.Abs(part.Scale.Z);
-                screenRotation = 0f;
-                break;
-            case 1:
-                x = position.X;
-                y = position.Z;
-                halfWidth = absCos * MathF.Abs(part.Scale.X) + absSin * MathF.Abs(part.Scale.Y);
-                halfHeight = MathF.Abs(part.Scale.Z);
-                screenRotation = 0f;
-                break;
-            default:
-                x = position.X;
-                y = position.Y;
-                halfWidth = absCos * MathF.Abs(part.Scale.X) + absSin * MathF.Abs(part.Scale.Y);
-                halfHeight = absSin * MathF.Abs(part.Scale.X) + absCos * MathF.Abs(part.Scale.Y);
-                break;
-        }
+        float x = Component(position, horizontalAxis);
+        float y = Component(position, verticalAxis);
+        // Top view follows the game's XY screen convention (positive Y points down).
+        // Front/side views show positive world Z upwards, so their in-plane angle is inverted.
+        float screenRotation = shape.Rotation * 180f / MathF.PI;
+        if (projection != 2)
+            screenRotation = -screenRotation;
 
         return new ProjectedPart(
             x,
             y,
-            MathF.Max(0.001f, halfWidth),
-            MathF.Max(0.001f, halfHeight),
+            MathF.Max(0.001f, shape.Scale.X),
+            MathF.Max(0.001f, shape.Scale.Y),
             screenRotation,
             part.Primitive);
+    }
+
+    private static float Component(NumericsVector3 value, int axis) => axis switch
+    {
+        0 => value.X,
+        1 => value.Y,
+        _ => value.Z
+    };
+
+    private float Snap(float value) =>
+        _gridEnabled ? MathF.Round(value / _gridSteps[_gridStepIndex]) * _gridSteps[_gridStepIndex] : value;
+
+    private void DrawGrid(RenderWindow window, ProjectionLayout layout, int projection)
+    {
+        if (!_gridEnabled || layout.PixelsPerUnit <= 0f)
+            return;
+
+        float step = _gridSteps[_gridStepIndex];
+        // Keep the preview readable at far zoom: render every Nth line while snapping
+        // still uses the exact configured step.
+        float minimumScreenSpacing = 7f;
+        int stride = Math.Max(1, (int)MathF.Ceiling(minimumScreenSpacing / (step * layout.PixelsPerUnit)));
+        float spacing = step * stride;
+        float leftWorld = layout.WorldCenterX - layout.Width / (2f * layout.PixelsPerUnit);
+        float rightWorld = layout.WorldCenterX + layout.Width / (2f * layout.PixelsPerUnit);
+        float lowVertical = layout.WorldCenterY - layout.Height / (2f * layout.PixelsPerUnit);
+        float highVertical = layout.WorldCenterY + layout.Height / (2f * layout.PixelsPerUnit);
+        int line = 0;
+
+        for (float worldX = MathF.Floor(leftWorld / spacing) * spacing;
+             worldX <= rightWorld && line < _gridLines.Length;
+             worldX += spacing)
+        {
+            float screenX = layout.ScreenCenterX + (worldX - layout.WorldCenterX) * layout.PixelsPerUnit;
+            RectangleShape gridLine = _gridLines[line++];
+            gridLine.Position = new Vector2f(screenX, layout.Top);
+            gridLine.Size = new Vector2f(1f, layout.Height);
+            gridLine.FillColor = MathF.Abs(worldX) < spacing * 0.001f
+                ? new Color(125, 153, 180, 145)
+                : new Color(76, 97, 119, 92);
+            window.Draw(gridLine);
+        }
+
+        for (float worldY = MathF.Floor(lowVertical / spacing) * spacing;
+             worldY <= highVertical && line < _gridLines.Length;
+             worldY += spacing)
+        {
+            float screenY = projection == 2
+                ? layout.ScreenCenterY + (worldY - layout.WorldCenterY) * layout.PixelsPerUnit
+                : layout.ScreenCenterY - (worldY - layout.WorldCenterY) * layout.PixelsPerUnit;
+            RectangleShape gridLine = _gridLines[line++];
+            gridLine.Position = new Vector2f(layout.Left, screenY);
+            gridLine.Size = new Vector2f(layout.Width, 1f);
+            gridLine.FillColor = MathF.Abs(worldY) < spacing * 0.001f
+                ? new Color(125, 153, 180, 145)
+                : new Color(76, 97, 119, 92);
+            window.Draw(gridLine);
+        }
     }
 
     private static NumericsVector3 Rotate2D(NumericsVector3 value, float angle)
@@ -1815,6 +1963,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             shape.Dispose();
         foreach (Text? label in _projectionLabels)
             label?.Dispose();
+        foreach (RectangleShape shape in _gridLines)
+            shape.Dispose();
         foreach (RectangleShape shape in _symmetryButtons)
             shape.Dispose();
         foreach (Text? label in _symmetryLabels)
@@ -1838,6 +1988,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _reloadLabel?.Dispose();
         _parentLabel?.Dispose();
         _allSymmetryLabel?.Dispose();
+        _gridLabel?.Dispose();
+        _gridStepLabel?.Dispose();
         _addRegionLabel?.Dispose();
         _addAllFormsLabel?.Dispose();
         _removeRegionLabel?.Dispose();
@@ -1864,6 +2016,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _primitiveButton.Dispose();
         _parentButton.Dispose();
         _allSymmetryButton.Dispose();
+        _gridButton.Dispose();
+        _gridStepButton.Dispose();
         _addRegionButton.Dispose();
         _addAllFormsButton.Dispose();
         _removeRegionButton.Dispose();

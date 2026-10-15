@@ -32,8 +32,12 @@ public sealed class UnitBodySystem
         Vector3[] worldPositions = bodies.WorldPosition;
         float[] tailAngles = bodies.TailAngle;
         bool[] tailInitialized = bodies.TailInitialized;
+        float[] localRotationsX = bodies.LocalRotationX;
+        float[] localRotationsY = bodies.LocalRotationY;
         float[] localRotations = bodies.LocalRotation;
         float[] worldRotations = bodies.WorldRotation;
+        Quaternion[] worldOrientations = bodies.WorldOrientation;
+        Vector3[] worldScales = bodies.WorldScale;
         float[] followDistances = bodies.FollowDistance;
         int[] parents = bodies.Parent;
         BodyPartMotion[] motions = bodies.Motion;
@@ -66,7 +70,11 @@ public sealed class UnitBodySystem
                 tailAngles,
                 tailInitialized,
                 worldRotations,
+                worldOrientations,
+                worldScales,
                 localPositions,
+                localRotationsX,
+                localRotationsY,
                 localRotations,
                 parents,
                 motions,
@@ -95,7 +103,11 @@ public sealed class UnitBodySystem
         float[] tailAngles,
         bool[] tailInitialized,
         float[] worldRotations,
+        Quaternion[] worldOrientations,
+        Vector3[] worldScales,
         Vector3[] localPositions,
+        float[] localRotationsX,
+        float[] localRotationsY,
         float[] localRotations,
         int[] parents,
         BodyPartMotion[] motions,
@@ -122,6 +134,8 @@ public sealed class UnitBodySystem
 
         float bodyRotation = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
         float headRotation = MathF.Atan2(headNormal.Y, headNormal.X);
+        Quaternion bodyOrientation = BodyPartTransformMath.TopDownRotation(bodyRotation);
+        Quaternion headOrientation = BodyPartTransformMath.TopDownRotation(headRotation);
         float gait = Math.Clamp(
             speed / MathF.Max(0.5f, moveSpeeds[unit] * 0.20f),
             0f,
@@ -135,19 +149,22 @@ public sealed class UnitBodySystem
         {
             int parent = parents[part];
             Vector3 localPosition = localPositions[part];
-            float localRotation = localRotations[part];
+            Vector3 localEuler = new(
+                localRotationsX[part],
+                localRotationsY[part],
+                localRotations[part]);
             ApplyPosture(posture, roles[part], pivots[part],
-                ref localPosition, ref localRotation);
+                ref localPosition, ref localEuler.Z);
 
             Vector3 origin = unitPositions[unit];
-            float positionRotation = bodyRotation;
-            float partBaseRotation = bodyRotation;
+            Quaternion positionOrientation = bodyOrientation;
+            Quaternion partBaseOrientation = bodyOrientation;
 
             if (anchors[part] == BodyPartAnchor.UnitHead)
             {
                 // Keep the head center anchored ahead of the torso even when
                 // its facing direction changes independently.
-                partBaseRotation = headRotation;
+                partBaseOrientation = headOrientation;
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start &&
@@ -164,6 +181,9 @@ public sealed class UnitBodySystem
                     followDistances,
                     bodyRotation,
                     deltaTime);
+                worldOrientations[part] = BodyPartTransformMath.TopDownRotation(worldRotations[part]);
+                worldScales[part] = BodyPartTransformMath.Project(
+                    scales[part], worldOrientations[part], 0, 1).Scale;
                 continue;
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
@@ -177,14 +197,17 @@ public sealed class UnitBodySystem
                     worldRotations,
                     followDistances,
                     followAlpha);
+                worldOrientations[part] = BodyPartTransformMath.TopDownRotation(worldRotations[part]);
+                worldScales[part] = BodyPartTransformMath.Project(
+                    scales[part], worldOrientations[part], 0, 1).Scale;
                 continue;
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start)
             {
                 origin = worldPositions[parent];
-                positionRotation = worldRotations[parent];
-                partBaseRotation = worldRotations[parent];
+                positionOrientation = worldOrientations[parent];
+                partBaseOrientation = worldOrientations[parent];
             }
 
             float gaitRotation = motions[part] switch
@@ -198,11 +221,13 @@ public sealed class UnitBodySystem
                 _ => 0f
             };
 
-            float worldRotation =
-                partBaseRotation + localRotation + gaitRotation;
+            localEuler.Z += gaitRotation;
+            Quaternion worldOrientation = BodyPartTransformMath.Compose(partBaseOrientation, localEuler);
+            float worldRotation = BodyPartTransformMath.Project(
+                scales[part], worldOrientation, 0, 1).Rotation;
 
             Vector3 joint =
-                origin + Rotate2D(localPosition, positionRotation);
+                origin + BodyPartTransformMath.TransformPosition(localPosition, positionOrientation);
 
             float profilePhase = motions[part] switch
             {
@@ -213,12 +238,9 @@ public sealed class UnitBodySystem
 
             if (profilePhase != 0f)
             {
-                joint += Rotate2D(
-                    new Vector3(
-                        profilePhase * 0.17f * gait,
-                        profilePhase * 0.025f * gait,
-                        0f),
-                    positionRotation);
+                joint += BodyPartTransformMath.TransformPosition(
+                    new Vector3(profilePhase * 0.17f * gait, profilePhase * 0.025f * gait, 0f),
+                    positionOrientation);
             }
 
             // Rotating a limb around its center makes the shoulder/hip drift
@@ -226,12 +248,15 @@ public sealed class UnitBodySystem
             // from their proximal joint, then offset to their visual center.
             if (pivots[part] == BodyPartPivot.Start)
             {
-                joint += Rotate2D(
+                joint += BodyPartTransformMath.TransformPosition(
                     new Vector3(MathF.Abs(scales[part].X), 0f, 0f),
-                    worldRotation);
+                    worldOrientation);
             }
 
             worldPositions[part] = joint;
+            worldOrientations[part] = worldOrientation;
+            worldScales[part] = BodyPartTransformMath.Project(
+                scales[part], worldOrientation, 0, 1).Scale;
             worldRotations[part] = worldRotation;
         }
     }

@@ -324,6 +324,8 @@ public static class UnitBodyRigSettingsStore
         public float ScaleY { get; set; } = 0.022f;
         public float ScaleZ { get; set; } = 0.06f;
         public float Rotation { get; set; }
+        public float RotationX { get; set; }
+        public float RotationY { get; set; }
         public float FollowDistance { get; set; } = float.NaN;
         public string Primitive { get; set; } = nameof(BodyPrimitive.Circle);
         public string Motion { get; set; } = string.Empty;
@@ -344,6 +346,8 @@ public static class UnitBodyRigSettingsStore
             ScaleY = part.Scale.Y,
             ScaleZ = part.Scale.Z,
             Rotation = part.LocalRotation,
+            RotationX = part.LocalRotationX,
+            RotationY = part.LocalRotationY,
             FollowDistance = part.FollowDistance,
             Primitive = part.Primitive.ToString(),
             Motion = part.Motion.ToString(),
@@ -356,7 +360,7 @@ public static class UnitBodyRigSettingsStore
         {
             if (!float.IsFinite(X) || !float.IsFinite(Y) || !float.IsFinite(Z) ||
                 !float.IsFinite(ScaleX) || !float.IsFinite(ScaleY) || !float.IsFinite(ScaleZ) ||
-                !float.IsFinite(Rotation) ||
+                !float.IsFinite(Rotation) || !float.IsFinite(RotationX) || !float.IsFinite(RotationY) ||
                 ScaleX <= 0f || ScaleY <= 0f || ScaleZ <= 0f)
                 return baseline;
 
@@ -383,7 +387,9 @@ public static class UnitBodyRigSettingsStore
                     : baseline.FollowDistance,
                 anchor: anchor,
                 role: role,
-                pivot: pivot);
+                pivot: pivot,
+                localRotationX: Math.Clamp(RotationX, -20f * MathF.PI, 20f * MathF.PI),
+                localRotationY: Math.Clamp(RotationY, -20f * MathF.PI, 20f * MathF.PI));
         }
 
         public BodyPartDefinition ToDefinition(int index, int fallbackParent = 0)
@@ -403,7 +409,9 @@ public static class UnitBodyRigSettingsStore
                     followDistance: part.FollowDistance,
                     anchor: part.Anchor,
                     role: part.Role,
-                    pivot: part.Pivot)
+                    pivot: part.Pivot,
+                    localRotationX: part.LocalRotationX,
+                    localRotationY: part.LocalRotationY)
                 : baseline;
         }
 

@@ -47,6 +47,7 @@ public static class CombatSelfTest
         RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
         RunTest("Anatomy: rig edits preserve tissue IDs and organ volumes", TestAnatomyRigEditsPreserveBindings, ref passed, ref failed);
         RunTest("Anatomy: rig editor can add dependent regions", TestAnatomyRigCanAppendDependency, ref passed, ref failed);
+        RunTest("Body rig: 3D rotation projects consistently in all views", TestBodyPartProjectionMath, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1596,6 +1597,55 @@ public static class CombatSelfTest
             if (before.Id != after.Id ||
                 before.ParentRegionId != after.ParentRegionId ||
                 before.TargetBindingId != after.TargetBindingId)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool TestBodyPartProjectionMath()
+    {
+        Vector3 scale = new(0.12f, 0.035f, 0.18f);
+        const float yaw = 0.37f;
+        Quaternion yawOnly = BodyPartTransformMath.FromEulerRadians(new Vector3(0f, 0f, yaw));
+        BodyPartTransformMath.ProjectedShape top =
+            BodyPartTransformMath.Project(scale, yawOnly, horizontalAxis: 0, verticalAxis: 1);
+
+        if (MathF.Abs(top.Scale.X - scale.X) > 0.001f ||
+            MathF.Abs(top.Scale.Y - scale.Y) > 0.001f ||
+            MathF.Abs(top.Rotation - yaw) > 0.001f)
+            return false;
+
+        const float pitch = 0.28f;
+        Quaternion pitchOnly = BodyPartTransformMath.FromEulerRadians(new Vector3(pitch, 0f, 0f));
+        BodyPartTransformMath.ProjectedShape front =
+            BodyPartTransformMath.Project(scale, pitchOnly, horizontalAxis: 1, verticalAxis: 2);
+        if (!float.IsFinite(front.Rotation) ||
+            MathF.Abs(front.Rotation - pitch) > 0.01f)
+            return false;
+
+        const float tilt = 0.22f;
+        Quaternion tiltOnly = BodyPartTransformMath.FromEulerRadians(new Vector3(0f, tilt, 0f));
+        BodyPartTransformMath.ProjectedShape side =
+            BodyPartTransformMath.Project(scale, tiltOnly, horizontalAxis: 0, verticalAxis: 2);
+        if (!float.IsFinite(side.Rotation) || MathF.Abs(side.Rotation) < 0.1f)
+            return false;
+
+        Quaternion combined = BodyPartTransformMath.Compose(
+            yawOnly, new Vector3(pitch, tilt, -0.16f));
+        for (int view = 0; view < 3; view++)
+        {
+            int horizontal = view switch { 0 => 1, 1 => 0, _ => 0 };
+            int vertical = view switch { 0 => 2, 1 => 2, _ => 1 };
+            BodyPartTransformMath.ProjectedShape projected =
+                BodyPartTransformMath.Project(scale, combined, horizontal, vertical);
+            if (!float.IsFinite(projected.Scale.X) ||
+                !float.IsFinite(projected.Scale.Y) ||
+                !float.IsFinite(projected.Scale.Z) ||
+                !float.IsFinite(projected.Rotation) ||
+                projected.Scale.X <= 0f ||
+                projected.Scale.Y <= 0f ||
+                projected.Scale.Z <= 0f)
                 return false;
         }
 
