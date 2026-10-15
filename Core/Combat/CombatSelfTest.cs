@@ -2824,7 +2824,10 @@ private static bool TestVisionDetectsRegionInsideRange()
             simulation.Bodies.WorldRotation[walkingArm];
 
         simulation.SetPosture(colonist, UnitPosture.Crouching);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        // Pose changes are intentionally interpolated; sample the transition instead
+        // of expecting an instantaneous transform update from a zero-time tick.
+        for (int frame = 0; frame < 30; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 0.05f);
         float crouchingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
@@ -2835,7 +2838,8 @@ private static bool TestVisionDetectsRegionInsideRange()
         }
 
         simulation.SetPosture(colonist, UnitPosture.Lying);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        for (int frame = 0; frame < 30; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 0.05f);
         float lyingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
@@ -2850,7 +2854,8 @@ private static bool TestVisionDetectsRegionInsideRange()
         simulation.Units.Velocity[colonist.Index] =
             new Vector3(0f, 1f, 0f);
         simulation.SetPosture(colonist, UnitPosture.Standing);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        for (int frame = 0; frame < 30; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 0.05f);
 
         Vector3 bodyNormal = simulation.Units.BodyNormal[colonist.Index];
         Vector3 movedHead = simulation.Bodies.WorldPosition[head];
