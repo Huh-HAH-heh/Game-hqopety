@@ -1837,20 +1837,23 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         Vector3 extents = Vector3.Min(Vector3.Max(organ.HalfExtents, new Vector3(0.002f)), limits);
         float cos = MathF.Abs(MathF.Cos(organ.LocalRotation));
         float sin = MathF.Abs(MathF.Sin(organ.LocalRotation));
-        float rotatedHalfX = cos * extents.X + sin * extents.Y;
-        float rotatedHalfY = sin * extents.X + cos * extents.Y;
-        float nx = (MathF.Abs(center.X) + rotatedHalfX) / scale.X;
-        float ny = (MathF.Abs(center.Y) + rotatedHalfY) / scale.Y;
-        float nz = (MathF.Abs(center.Z) + extents.Z) / scale.Z;
-        float radius = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
-        if (radius > 0.92f)
-        {
-            float factor = 0.92f / radius;
-            center *= factor;
-            extents *= factor;
-        }
-
         extents = Vector3.Max(extents, new Vector3(0.002f));
+
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            float rotatedHalfX = cos * extents.X + sin * extents.Y;
+            float rotatedHalfY = sin * extents.X + cos * extents.Y;
+            float nx = (MathF.Abs(center.X) + rotatedHalfX) / scale.X;
+            float ny = (MathF.Abs(center.Y) + rotatedHalfY) / scale.Y;
+            float nz = (MathF.Abs(center.Z) + extents.Z) / scale.Z;
+            float radius = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (radius <= 0.90f)
+                break;
+
+            float factor = 0.90f / radius;
+            center *= factor;
+            extents = Vector3.Max(extents * factor, new Vector3(0.002f));
+        }
         return CopyOrgan(organ, center: center, halfExtents: extents);
     }
 
