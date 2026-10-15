@@ -647,7 +647,8 @@ public static class CombatSelfTest
         if (simulation.FireWeaponAt(shooter, UnitWeaponSlot.Primary, target))
             return false;
 
-        simulation.Update(worldMap, 0.90f);
+        // The deliberate rifle warmup at ten cells is about 1.3 seconds.
+        simulation.Update(worldMap, 1.35f);
         worldMap.SetSolidHeight(10, 10, 30, 1);
         bool firstShot = simulation.FireWeaponAt(
             shooter,
@@ -2118,7 +2119,7 @@ private static bool TestVisionDetectsRegionInsideRange()
         if (!startedAiming || simulation.TotalShotsFired != 0)
             return false;
 
-        for (int i = 0; i < 15; i++)
+        for (int i = 0; i < 24; i++)
             simulation.Update(worldMap, 0.05f);
 
         if (simulation.TotalShotsFired != 0)
