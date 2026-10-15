@@ -12,6 +12,12 @@ public sealed class UnitBodyStore
     private float[] _tailAngle;
     private bool[] _tailInitialized;
     private Vector3[] _scale;
+    private Vector3[] _crouchingOffset;
+    private Vector3[] _sittingOffset;
+    private Vector3[] _lyingOffset;
+    private float[] _crouchingRotationOffset;
+    private float[] _sittingRotationOffset;
+    private float[] _lyingRotationOffset;
 
     private float[] _localRotation;
     private float[] _worldRotation;
@@ -47,6 +53,13 @@ public sealed class UnitBodyStore
 
     public Vector3[] Scale =>
         _scale;
+
+    public Vector3[] CrouchingOffset => _crouchingOffset;
+    public Vector3[] SittingOffset => _sittingOffset;
+    public Vector3[] LyingOffset => _lyingOffset;
+    public float[] CrouchingRotationOffset => _crouchingRotationOffset;
+    public float[] SittingRotationOffset => _sittingRotationOffset;
+    public float[] LyingRotationOffset => _lyingRotationOffset;
 
     public float[] LocalRotation =>
         _localRotation;
@@ -90,6 +103,12 @@ public sealed class UnitBodyStore
         _tailAngle = new float[initialCapacity];
         _tailInitialized = new bool[initialCapacity];
         _scale = new Vector3[initialCapacity];
+        _crouchingOffset = new Vector3[initialCapacity];
+        _sittingOffset = new Vector3[initialCapacity];
+        _lyingOffset = new Vector3[initialCapacity];
+        _crouchingRotationOffset = new float[initialCapacity];
+        _sittingRotationOffset = new float[initialCapacity];
+        _lyingRotationOffset = new float[initialCapacity];
 
         _localRotation = new float[initialCapacity];
         _worldRotation = new float[initialCapacity];
@@ -148,7 +167,13 @@ public sealed class UnitBodyStore
                 part.Motion,
                 part.Anchor,
                 part.Role,
-                part.Pivot);
+                part.Pivot,
+                part.CrouchingOffset,
+                part.SittingOffset,
+                part.LyingOffset,
+                part.CrouchingRotationOffset,
+                part.SittingRotationOffset,
+                part.LyingRotationOffset);
         }
 
         return new BodyHandle(start, parts.Length);
@@ -187,6 +212,12 @@ public sealed class UnitBodyStore
             _anchor[index] = part.Anchor;
             _role[index] = part.Role;
             _pivot[index] = part.Pivot;
+            _crouchingOffset[index] = part.CrouchingOffset;
+            _sittingOffset[index] = part.SittingOffset;
+            _lyingOffset[index] = part.LyingOffset;
+            _crouchingRotationOffset[index] = part.CrouchingRotationOffset;
+            _sittingRotationOffset[index] = part.SittingRotationOffset;
+            _lyingRotationOffset[index] = part.LyingRotationOffset;
             _tailInitialized[index] = false;
         }
     }
@@ -287,7 +318,13 @@ public sealed class UnitBodyStore
         BodyPartMotion motion,
         BodyPartAnchor anchor,
         BodyPartRole role,
-        BodyPartPivot pivot)
+        BodyPartPivot pivot,
+        Vector3 crouchingOffset,
+        Vector3 sittingOffset,
+        Vector3 lyingOffset,
+        float crouchingRotationOffset,
+        float sittingRotationOffset,
+        float lyingRotationOffset)
     {
         int index = _writeIndex++;
 
@@ -312,6 +349,12 @@ public sealed class UnitBodyStore
         _anchor[index] = anchor;
         _role[index] = role;
         _pivot[index] = pivot;
+        _crouchingOffset[index] = crouchingOffset;
+        _sittingOffset[index] = sittingOffset;
+        _lyingOffset[index] = lyingOffset;
+        _crouchingRotationOffset[index] = crouchingRotationOffset;
+        _sittingRotationOffset[index] = sittingRotationOffset;
+        _lyingRotationOffset[index] = lyingRotationOffset;
     }
 
     private void EnsureCapacityAt(
@@ -352,6 +395,12 @@ public sealed class UnitBodyStore
         Array.Resize(
             ref _scale,
             newCapacity);
+        Array.Resize(ref _crouchingOffset, newCapacity);
+        Array.Resize(ref _sittingOffset, newCapacity);
+        Array.Resize(ref _lyingOffset, newCapacity);
+        Array.Resize(ref _crouchingRotationOffset, newCapacity);
+        Array.Resize(ref _sittingRotationOffset, newCapacity);
+        Array.Resize(ref _lyingRotationOffset, newCapacity);
 
         Array.Resize(
             ref _localRotation,

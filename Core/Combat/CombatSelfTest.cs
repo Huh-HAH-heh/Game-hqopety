@@ -47,6 +47,9 @@ public static class CombatSelfTest
         RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
         RunTest("Anatomy: rig edits preserve tissue IDs and organ volumes", TestAnatomyRigEditsPreserveBindings, ref passed, ref failed);
         RunTest("Anatomy: rig editor can add dependent regions", TestAnatomyRigCanAppendDependency, ref passed, ref failed);
+        RunTest("Anatomy: new organs get damageable tissue and stay inside their host", TestAnatomyRigOrganVolumeAndHealth, ref passed, ref failed);
+        RunTest("Anatomy: pose adjustments survive profile and body-store rebuilds", TestAnatomyRigPoseOffsets, ref passed, ref failed);
+        RunTest("Unit types: custom anatomy profiles spawn with their own stats", TestCustomUnitTypeProfileSpawn, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1539,6 +1542,170 @@ public static class CombatSelfTest
         return true;
     }
 
+    private static bool TestCustomUnitTypeProfileSpawn()
+    {
+        const UnitType customType = (UnitType)60000;
+        UnitAnatomyProfile source = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        ReadOnlySpan<UnitAnatomyNode> nodes = source.Nodes;
+        string[] ids = new string[source.NodeCount];
+        for (int i = 0; i < ids.Length; i++)
+            ids[i] = nodes[i].Id;
+
+        BodyPartDefinition[] parts = source.BodyParts.ToArray();
+        UnitAnatomyVolume[] organs = source.Volumes.ToArray();
+        UnitAnatomyProfile anatomy = source.WithRig(ids, parts, organs);
+        var definition = new UnitDefinition(
+            customType, UnitBodyType.Colonist,
+            moveSpeed: 3.6f,
+            width: 0.44f,
+            length: 0.77f,
+            height: 1.92f,
+            viewRange: 31f,
+            fieldOfView: 147f);
+        UnitAnatomyCatalog.RegisterCustomType(new UnitArchetypeProfile(definition, anatomy));
+
+        UnitArchetypeProfile registered = UnitAnatomyCatalog.Get(customType);
+        if (registered.Definition.MoveSpeed != 3.6f ||
+            registered.Definition.Width != 0.44f ||
+            registered.Definition.Length != 0.77f ||
+            registered.Definition.Height != 1.92f ||
+            registered.Definition.ViewRange != 31f ||
+            registered.Definition.FieldOfView != 147f ||
+            registered.Anatomy.VolumeCount != source.VolumeCount)
+            return false;
+
+        var simulation = new UnitSimulation(4, 64);
+        UnitId unit = simulation.Spawn(customType, new Vector3(2f, 2f, 1f));
+        return simulation.Units.Type[unit.Index] == customType &&
+               MathF.Abs(simulation.Units.MoveSpeed[unit.Index] - 3.6f) < 0.001f &&
+               MathF.Abs(simulation.Units.ViewRange[unit.Index] - 31f) < 0.001f &&
+               MathF.Abs(simulation.Units.FieldOfView[unit.Index] - 147f) < 0.001f &&
+               simulation.Units.BodyCount[unit.Index] == source.NodeCount &&
+               simulation.HitRegions.GetProfile(unit.Index) is UnitAnatomyProfile;
+    }
+
+    private static bool TestAnatomyRigPoseOffsets()
+    {
+        UnitAnatomyProfile original = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        ReadOnlySpan<UnitAnatomyNode> nodes = original.Nodes;
+        string[] ids = new string[original.NodeCount];
+        BodyPartDefinition[] parts = original.BodyParts.ToArray();
+        int armIndex = original.FindRegion("body.arm.left.lower");
+        if (armIndex < 0)
+            return false;
+
+        for (int i = 0; i < ids.Length; i++)
+            ids[i] = nodes[i].Id;
+
+        BodyPartDefinition part = parts[armIndex];
+        Vector3 sittingOffset = new(-0.02f, 0.03f, 0.04f);
+        Vector3 lyingOffset = new(0.02f, -0.03f, 0.01f);
+        parts[armIndex] = new BodyPartDefinition(
+            part.LocalPosition,
+            part.Scale,
+            part.Primitive,
+            parentIndex: part.ParentIndex,
+            localRotation: part.LocalRotation,
+            motion: part.Motion,
+            followDistance: part.FollowDistance,
+            anchor: part.Anchor,
+            role: part.Role,
+            pivot: part.Pivot,
+            crouchingOffset: new Vector3(0.01f, 0.02f, -0.01f),
+            sittingOffset: sittingOffset,
+            lyingOffset: lyingOffset,
+            crouchingRotationOffset: 0.15f,
+            sittingRotationOffset: -0.3f,
+            lyingRotationOffset: 0.45f);
+
+        UnitAnatomyProfile edited = original.WithRig(ids, parts);
+        BodyPartDefinition result = edited.GetNode(armIndex).Shape;
+        if (result.SittingOffset != sittingOffset ||
+            result.LyingOffset != lyingOffset ||
+            MathF.Abs(result.SittingRotationOffset + 0.3f) > 0.0001f ||
+            MathF.Abs(result.CrouchingRotationOffset - 0.15f) > 0.0001f ||
+            edited.VolumeCount != original.VolumeCount)
+            return false;
+
+        var bodies = new UnitBodyStore(4);
+        BodyHandle handle = bodies.CreateBody(parts);
+        int storedIndex = handle.Start + armIndex;
+        return bodies.SittingOffset[storedIndex] == sittingOffset &&
+               bodies.LyingOffset[storedIndex] == lyingOffset &&
+               MathF.Abs(bodies.SittingRotationOffset[storedIndex] + 0.3f) < 0.0001f &&
+               MathF.Abs(bodies.LyingRotationOffset[storedIndex] - 0.45f) < 0.0001f;
+    }
+
+    private static bool TestAnatomyRigOrganVolumeAndHealth()
+    {
+        UnitAnatomyProfile original = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        ReadOnlySpan<UnitAnatomyNode> originalNodes = original.Nodes;
+        BodyPartDefinition[] originalParts = original.BodyParts.ToArray();
+        string[] ids = new string[original.NodeCount + 1];
+        BodyPartDefinition[] parts = new BodyPartDefinition[originalParts.Length + 1];
+        for (int i = 0; i < original.NodeCount; i++)
+        {
+            ids[i] = originalNodes[i].Id;
+            parts[i] = originalParts[i];
+        }
+
+        ids[^1] = "custom.organ.host";
+        parts[^1] = new BodyPartDefinition(
+            new Vector3(0f, 0f, -0.18f),
+            new Vector3(0.04f, 0.03f, 0.08f),
+            BodyPrimitive.Circle,
+            parentIndex: original.FindRegion("body.middle"),
+            anchor: BodyPartAnchor.Parent,
+            role: BodyPartRole.Generic);
+
+        ReadOnlySpan<UnitAnatomyVolume> oldVolumes = original.Volumes;
+        var volumes = new UnitAnatomyVolume[oldVolumes.Length + 1];
+        oldVolumes.CopyTo(volumes);
+        volumes[^1] = new UnitAnatomyVolume(
+            "organ.test",
+            "custom.organ.host",
+            "custom.organ.host.tissue",
+            "organ.test.tissue",
+            new Vector3(0.5f, -0.3f, 0.2f),
+            new Vector3(0.4f, 0.35f, 0.3f),
+            BodyPrimitive.Circle,
+            energyLoss: 22f,
+            penetrationLoss: 1.5f,
+            damageMultiplier: 1.25f,
+            bleedMultiplier: 1.4f);
+
+        UnitAnatomyProfile edited = original.WithRig(ids, parts, volumes);
+        int hostIndex = edited.FindRegion("custom.organ.host");
+        if (hostIndex < 0 || edited.VolumeCount != original.VolumeCount + 1)
+            return false;
+
+        ReadOnlySpan<HitRegionPartBinding> tissues = edited.GetTissues(hostIndex);
+        bool damageableOrganFound = false;
+        for (int i = 0; i < tissues.Length; i++)
+        {
+            if (tissues[i].Id != "organ.test.tissue")
+                continue;
+
+            damageableOrganFound =
+                tissues[i].Kind == UnitHealthPartKind.Organ &&
+                MathF.Abs(tissues[i].MaxHitPoints - 20f) < 0.001f;
+            break;
+        }
+        if (!damageableOrganFound)
+            return false;
+
+        UnitAnatomyVolume organ = edited.Volumes[^1];
+        Vector3 hostScale = Vector3.Abs(parts[^1].Scale);
+        float cos = MathF.Abs(MathF.Cos(organ.LocalRotation));
+        float sin = MathF.Abs(MathF.Sin(organ.LocalRotation));
+        float halfX = cos * organ.HalfExtents.X + sin * organ.HalfExtents.Y;
+        float halfY = sin * organ.HalfExtents.X + cos * organ.HalfExtents.Y;
+        float nx = (MathF.Abs(organ.LocalCenter.X) + halfX) / hostScale.X;
+        float ny = (MathF.Abs(organ.LocalCenter.Y) + halfY) / hostScale.Y;
+        float nz = (MathF.Abs(organ.LocalCenter.Z) + organ.HalfExtents.Z) / hostScale.Z;
+        return MathF.Sqrt(nx * nx + ny * ny + nz * nz) <= 0.93f;
+    }
+
     private static bool TestAnatomyRigCanAppendDependency()
     {
         UnitAnatomyProfile original = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
@@ -2700,7 +2867,10 @@ private static bool TestVisionDetectsRegionInsideRange()
             simulation.Bodies.WorldRotation[walkingArm];
 
         simulation.SetPosture(colonist, UnitPosture.Crouching);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        // Pose changes are intentionally interpolated; sample the transition instead
+        // of expecting an instantaneous transform update from a zero-time tick.
+        for (int frame = 0; frame < 30; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 0.05f);
         float crouchingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
@@ -2711,7 +2881,8 @@ private static bool TestVisionDetectsRegionInsideRange()
         }
 
         simulation.SetPosture(colonist, UnitPosture.Lying);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        for (int frame = 0; frame < 30; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 0.05f);
         float lyingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
@@ -2726,7 +2897,8 @@ private static bool TestVisionDetectsRegionInsideRange()
         simulation.Units.Velocity[colonist.Index] =
             new Vector3(0f, 1f, 0f);
         simulation.SetPosture(colonist, UnitPosture.Standing);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
+        for (int frame = 0; frame < 30; frame++)
+            bodySystem.Update(simulation.Units, simulation.Bodies, 0.05f);
 
         Vector3 bodyNormal = simulation.Units.BodyNormal[colonist.Index];
         Vector3 movedHead = simulation.Bodies.WorldPosition[head];

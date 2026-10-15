@@ -54,6 +54,7 @@ public static class UnitAnatomyCatalog
 {
     private const float DefaultProjectileEnergyLoss = 160f;
     private const float DefaultProjectilePenetrationLoss = 8f;
+    private static readonly System.Collections.Generic.Dictionary<UnitType, UnitArchetypeProfile> CustomProfiles = new();
 
     private static UnitArchetypeProfile Colonist = new(
         new UnitDefinition(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f),
@@ -344,10 +345,16 @@ public static class UnitAnatomyCatalog
     /// <summary>Apply a complete rig including appended regions and parent dependencies.</summary>
     public static void ApplyColonistRig(
         ReadOnlySpan<string> regionIds,
-        ReadOnlySpan<BodyPartDefinition> bodyParts)
+        ReadOnlySpan<BodyPartDefinition> bodyParts) =>
+        ApplyColonistRig(regionIds, bodyParts, Colonist.Anatomy.Volumes);
+
+    public static void ApplyColonistRig(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        ReadOnlySpan<UnitAnatomyVolume> organs)
     {
         UnitArchetypeProfile current = Colonist;
-        UnitAnatomyProfile nextAnatomy = current.Anatomy.WithRig(regionIds, bodyParts);
+        UnitAnatomyProfile nextAnatomy = current.Anatomy.WithRig(regionIds, bodyParts, organs);
         Colonist = new UnitArchetypeProfile(
             current.Definition,
             nextAnatomy,
@@ -380,24 +387,42 @@ public static class UnitAnatomyCatalog
         UnitBodyRigSettingsStore.MergeSavedRig(
             baseIds,
             current.BodyParts,
+            current.Anatomy.Volumes,
             out string[] ids,
-            out BodyPartDefinition[] parts);
-        if (ids.Length != nodes.Length)
+            out BodyPartDefinition[] parts,
+            out UnitAnatomyVolume[] organs);
+
+        UnitAnatomyProfile next = current.Anatomy.WithRig(ids, parts, organs);
+        Colonist = new UnitArchetypeProfile(
+            current.Definition,
+            next,
+            current.StartingEquipment.ToArray());
+    }
+
+    public static void RegisterCustomType(UnitArchetypeProfile profile)
+    {
+        if ((ushort)profile.Definition.Type < 1000)
+            throw new ArgumentOutOfRangeException(nameof(profile), "Custom unit types must use IDs >= 1000.");
+
+        CustomProfiles[profile.Definition.Type] = profile;
+    }
+
+    public static bool TryGetCustomType(UnitType type, out UnitArchetypeProfile profile)
+    {
+        if (CustomProfiles.TryGetValue(type, out UnitArchetypeProfile? found))
         {
-            UnitAnatomyProfile next = current.Anatomy.WithRig(ids, parts);
-            Colonist = new UnitArchetypeProfile(
-                current.Definition,
-                next,
-                current.StartingEquipment.ToArray());
+            profile = found;
+            return true;
         }
-        else if (parts.Length == current.BodyParts.Length)
+
+        if (CustomUnitTypeCatalog.TryGetProfile(type, out profile))
         {
-            UnitAnatomyProfile next = current.Anatomy.WithRig(ids, parts);
-            Colonist = new UnitArchetypeProfile(
-                current.Definition,
-                next,
-                current.StartingEquipment.ToArray());
+            CustomProfiles[type] = profile;
+            return true;
         }
+
+        profile = null!;
+        return false;
     }
 
     public static UnitArchetypeProfile Get(UnitType type)
@@ -410,7 +435,9 @@ public static class UnitAnatomyCatalog
             UnitType.Colonist => Colonist,
             UnitType.Greenbob => Greenbob,
             UnitType.SegmentedMonster => SegmentedMonster,
-            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown unit archetype.")
+            _ => TryGetCustomType(type, out UnitArchetypeProfile custom)
+                ? custom
+                : throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown unit archetype.")
         };
     }
 

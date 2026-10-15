@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -26,7 +27,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private static readonly Color MutedText = new(149, 166, 184, 255);
     private static readonly Color SelectedColor = new(230, 179, 85, 255);
 
-    private readonly Action<string[], BodyPartDefinition[]> _saveRequested;
+    private readonly Action<string[], BodyPartDefinition[], UnitAnatomyVolume[]> _saveRequested;
     private readonly Font? _font;
     private readonly RectangleShape _backdrop = new(new Vector2f(1f, 1f))
     {
@@ -72,6 +73,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         FillColor = new Color(47, 99, 77, 255),
         OutlineColor = new Color(93, 151, 117, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _newTypeButton = new(new Vector2f(104f, 30f))
+    {
+        FillColor = new Color(46, 64, 81, 255),
+        OutlineColor = new Color(86, 112, 137, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _saveTypeButton = new(new Vector2f(104f, 30f))
+    {
+        FillColor = new Color(48, 85, 68, 255),
+        OutlineColor = new Color(86, 133, 103, 255),
         OutlineThickness = 1f
     };
     private readonly RectangleShape _loadButton = new(new Vector2f(104f, 30f))
@@ -122,6 +135,25 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(90, 128, 105, 255),
         OutlineThickness = 1f
     };
+    private readonly RectangleShape _gridButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(42, 57, 72, 255),
+        OutlineColor = new Color(82, 104, 127, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _gridStepButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(42, 57, 72, 255),
+        OutlineColor = new Color(82, 104, 127, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _modeButton = new(new Vector2f(100f, 23f))
+    {
+        FillColor = new Color(42, 57, 72, 255),
+        OutlineColor = new Color(82, 104, 127, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape[] _gridLines = new RectangleShape[128];
     private readonly RectangleShape _addRegionButton = new(new Vector2f(1f, 25f))
     {
         FillColor = new Color(44, 81, 67, 255),
@@ -143,12 +175,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private readonly Text? _title;
     private readonly Text? _saveLabel;
+    private readonly Text? _newTypeLabel;
+    private readonly Text? _saveTypeLabel;
     private readonly Text? _loadLabel;
     private readonly Text? _exportLabel;
     private readonly Text? _defaultsLabel;
     private readonly Text? _reloadLabel;
     private readonly Text? _parentLabel;
     private readonly Text? _allSymmetryLabel;
+    private readonly Text? _gridLabel;
+    private readonly Text? _gridStepLabel;
+    private readonly Text? _modeLabel;
     private readonly Text? _addRegionLabel;
     private readonly Text? _addAllFormsLabel;
     private readonly Text? _removeRegionLabel;
@@ -178,13 +215,28 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private BodyPartDefinition[] _parts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _defaultParts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _openedParts = Array.Empty<BodyPartDefinition>();
+    private UnitAnatomyVolume[] _organs = Array.Empty<UnitAnatomyVolume>();
+    private UnitAnatomyVolume[] _openedOrgans = Array.Empty<UnitAnatomyVolume>();
     private NumericsVector3[] _worldPositions = Array.Empty<NumericsVector3>();
     private float[] _worldRotations = Array.Empty<float>();
     private ProjectedPart[][] _projected = new ProjectedPart[3][];
+    private ProjectedPart[][] _projectedOrgans = new ProjectedPart[3][];
     private ProjectionLayout[] _projectionLayouts = new ProjectionLayout[3];
 
     private int _selectedPart;
+    private int _selectedOrgan;
     private int _selectedProperty;
+    private bool _editingOrgans;
+    private bool _editingPose;
+    private bool _editingUnitStats;
+    private bool _creatingNewUnitType;
+    private UnitPosture _selectedPose = UnitPosture.Sitting;
+    private float _unitMoveSpeed = 2.8f;
+    private float _unitWidth = 0.35f;
+    private float _unitLength = 0.60f;
+    private float _unitHeight = 1.75f;
+    private float _unitViewRange = 20f;
+    private float _unitFieldOfView = 110f;
     private int _draggingProperty = -1;
     private int _draggingProjection = -1;
     private bool _draggingPart;
@@ -194,12 +246,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private float _propertyRowHeight = 46f;
     private int _listScroll;
     private int _listVisibleRows = 12;
+    private bool _gridEnabled = true;
+    private readonly float[] _gridSteps = { 0.005f, 0.01f, 0.025f, 0.05f, 0.1f };
+    private int _gridStepIndex = 2;
     private string _status = "Изменения можно двигать мышью или менять ползунками.";
     private bool _disposed;
 
     public bool IsOpen { get; private set; }
 
-    public UnitBodyRigEditorOverlay(Action<string[], BodyPartDefinition[]> saveRequested)
+    public UnitBodyRigEditorOverlay(Action<string[], BodyPartDefinition[], UnitAnatomyVolume[]> saveRequested)
     {
         _saveRequested = saveRequested ?? throw new ArgumentNullException(nameof(saveRequested));
         _font = LoadFont();
@@ -211,6 +266,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(28, 38, 50, 255),
                 OutlineColor = new Color(52, 67, 84, 255),
                 OutlineThickness = 1f
+            };
+        }
+        for (int i = 0; i < _gridLines.Length; i++)
+        {
+            _gridLines[i] = new RectangleShape(new Vector2f(1f, 1f))
+            {
+                FillColor = new Color(76, 97, 119, 85)
             };
         }
 
@@ -296,6 +358,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(240, 248, 242, 255),
                 Style = Text.Styles.Bold
             };
+            _newTypeLabel = new Text(_font, "НОВЫЙ ТИП", 10)
+            {
+                FillColor = new Color(224, 233, 242, 255),
+                Style = Text.Styles.Bold
+            };
+            _saveTypeLabel = new Text(_font, "СОХР. ТИП", 10)
+            {
+                FillColor = new Color(234, 245, 238, 255),
+                Style = Text.Styles.Bold
+            };
             _loadLabel = new Text(_font, "ЗАГРУЗИТЬ", 10)
             {
                 FillColor = new Color(224, 236, 245, 255),
@@ -348,6 +420,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 FillColor = new Color(232, 240, 248, 255)
             };
+            _gridLabel = new Text(_font, "СЕТКА: ВКЛ", 9)
+            {
+                FillColor = new Color(232, 240, 248, 255)
+            };
+            _gridStepLabel = new Text(_font, "ШАГ: 0.025", 9)
+            {
+                FillColor = new Color(232, 240, 248, 255)
+            };
+            _modeLabel = new Text(_font, "ОРГАНЫ", 9)
+            {
+                FillColor = new Color(232, 240, 248, 255),
+                Style = Text.Styles.Bold
+            };
             _addRegionLabel = new Text(_font, "+ ДОБАВИТЬ РЕГИОН", 9)
             {
                 FillColor = new Color(237, 246, 241, 255),
@@ -392,7 +477,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         for (int i = 0; i < nodes.Length; i++)
             ids[i] = nodes[i].Id;
 
-        SetRigData(ids, anatomy.BodyParts.ToArray(), setDefaults: true, setOpenedSnapshot: true);
+        _editingPose = false;
+        _editingOrgans = false;
+        _editingUnitStats = false;
+        _creatingNewUnitType = false;
+        _unitMoveSpeed = anatomy.Definition.MoveSpeed;
+        _unitWidth = anatomy.Definition.Width;
+        _unitLength = anatomy.Definition.Length;
+        _unitHeight = anatomy.Definition.Height;
+        _unitViewRange = anatomy.Definition.ViewRange;
+        _unitFieldOfView = anatomy.Definition.FieldOfView;
+        _organs = anatomy.Volumes.ToArray();
+        SetRigData(ids, anatomy.BodyParts.ToArray(), _organs,
+            setDefaults: true, setOpenedSnapshot: true);
         _selectedProperty = 0;
         _draggingProperty = -1;
         _draggingProjection = -1;
@@ -404,10 +501,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private bool SetRigData(
         string[] regionIds,
         BodyPartDefinition[] parts,
+        UnitAnatomyVolume[] organs,
         bool setDefaults,
         bool setOpenedSnapshot)
     {
-        if (regionIds.Length != parts.Length || parts.Length == 0 || parts.Length > MaxParts)
+        if (regionIds.Length != parts.Length || parts.Length == 0 || parts.Length > MaxParts ||
+            organs.Length > 256)
         {
             SetStatus($"Риг должен содержать от 1 до {MaxParts} регионов.");
             return false;
@@ -429,20 +528,44 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             }
         }
 
+        var organIds = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+        var targetIds = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < organs.Length; i++)
+        {
+            UnitAnatomyVolume organ = organs[i];
+            if (string.IsNullOrWhiteSpace(organ.Id) || !organIds.Add(organ.Id) ||
+                !targetIds.Add(organ.TargetBindingId))
+            {
+                SetStatus($"Повторяется ID органа или его ткани: {organ.Id}");
+                return false;
+            }
+
+            if (Array.IndexOf(regionIds, organ.ParentRegionId) < 0)
+            {
+                SetStatus($"Орган «{organ.Id}» ссылается на отсутствующий регион «{organ.ParentRegionId}».");
+                return false;
+            }
+        }
+
         _regionIds = (string[])regionIds.Clone();
         _parts = (BodyPartDefinition[])parts.Clone();
+        _organs = (UnitAnatomyVolume[])organs.Clone();
         if (setDefaults || _defaultParts.Length != _parts.Length)
             _defaultParts = UnitBodyRigSettingsStore.GetDefaultBodyParts(_regionIds, _parts);
         if (setOpenedSnapshot)
         {
             _openedRegionIds = (string[])_regionIds.Clone();
             _openedParts = (BodyPartDefinition[])_parts.Clone();
+            _openedOrgans = (UnitAnatomyVolume[])_organs.Clone();
         }
 
         _worldPositions = new NumericsVector3[_parts.Length];
         _worldRotations = new float[_parts.Length];
         for (int view = 0; view < _projected.Length; view++)
+        {
             _projected[view] = new ProjectedPart[_parts.Length];
+            _projectedOrgans[view] = new ProjectedPart[_organs.Length];
+        }
 
         for (int i = 0; i < _partLabels.Length; i++)
         {
@@ -481,6 +604,30 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
+        if (_newTypeButton.GetGlobalBounds().Contains(position))
+        {
+            CreateNewUnitTypeDraft();
+            return true;
+        }
+
+        if (_saveTypeButton.GetGlobalBounds().Contains(position))
+        {
+            SaveUnitTypeFromDialog();
+            return true;
+        }
+
+        if (_newTypeButton.GetGlobalBounds().Contains(position))
+        {
+            CreateNewUnitTypeDraft();
+            return true;
+        }
+
+        if (_saveTypeButton.GetGlobalBounds().Contains(position))
+        {
+            SaveUnitTypeFromDialog();
+            return true;
+        }
+
         if (_saveButton.GetGlobalBounds().Contains(position))
         {
             Save();
@@ -509,32 +656,89 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_reloadButton.GetGlobalBounds().Contains(position))
         {
-            SetRigData(_openedRegionIds, _openedParts, setDefaults: false, setOpenedSnapshot: false);
+            SetRigData(_openedRegionIds, _openedParts, _openedOrgans,
+                setDefaults: false, setOpenedSnapshot: false);
             _status = "Возвращена конфигурация, с которой редактор был открыт.";
             return true;
         }
 
-        if (_addRegionButton.GetGlobalBounds().Contains(position))
+        if (_modeButton.GetGlobalBounds().Contains(position))
         {
-            AddRegion();
+            if (_editingPose)
+            {
+                _editingPose = false;
+                _editingUnitStats = false;
+                _editingOrgans = false;
+                _status = "Режим частей тела.";
+            }
+            else if (_editingUnitStats)
+            {
+                _editingUnitStats = false;
+                _editingPose = true;
+                _editingOrgans = false;
+                _status = "Режим поз: выбери сегмент, меняй смещение и угол.";
+            }
+            else if (_editingOrgans)
+            {
+                if (!_creatingNewUnitType)
+                {
+                    _status = "Создай новый тип или загрузи файл из Units, чтобы менять характеристики независимо от колонистов.";
+                    return true;
+                }
+                _editingOrgans = false;
+                _editingUnitStats = true;
+                _editingPose = false;
+                _status = "Характеристики типа: скорость, габариты, дальность и FOV.";
+            }
+            else
+            {
+                _editingOrgans = true;
+                _editingPose = false;
+                _editingUnitStats = false;
+                _status = "Режим органов: выбирай, добавляй и настраивай внутренние объёмы.";
+            }
+            _selectedProperty = 0;
+            _listScroll = 0;
             return true;
         }
 
-        if (_addAllFormsButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && _addRegionButton.GetGlobalBounds().Contains(position))
         {
-            AddAllPrimitiveExamples();
+            if (_editingOrgans) AddOrgan();
+            else AddRegion();
             return true;
         }
 
-        if (_removeRegionButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && _addAllFormsButton.GetGlobalBounds().Contains(position))
         {
-            RemoveSelectedCustomRegion();
+            if (_editingOrgans) DuplicateSelectedOrgan();
+            else AddAllPrimitiveExamples();
             return true;
         }
 
-        if (_parentButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && _removeRegionButton.GetGlobalBounds().Contains(position))
         {
-            CycleParentDependency();
+            if (_editingOrgans) RemoveSelectedOrgan();
+            else RemoveSelectedCustomRegion();
+            return true;
+        }
+
+        if (!_editingUnitStats && _parentButton.GetGlobalBounds().Contains(position))
+        {
+            if (_editingPose)
+            {
+                CycleSelectedPose();
+                return true;
+            }
+
+            if (_editingOrgans && _organs.Length == 0)
+            {
+                _status = "Сначала добавь орган.";
+                return true;
+            }
+
+            if (_editingOrgans) CycleOrganHost();
+            else CycleParentDependency();
             return true;
         }
 
@@ -543,6 +747,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             bool enable = !_symmetryEnabled[0] || !_symmetryEnabled[1] || !_symmetryEnabled[2];
             Array.Fill(_symmetryEnabled, enable);
             _status = enable ? "Симметрия включена во всех проекциях." : "Симметрия выключена во всех проекциях.";
+            return true;
+        }
+
+        if (_gridButton.GetGlobalBounds().Contains(position))
+        {
+            _gridEnabled = !_gridEnabled;
+            _status = _gridEnabled ? "Сетка включена; перемещения привязываются к шагу." : "Сетка выключена.";
+            return true;
+        }
+
+        if (_gridStepButton.GetGlobalBounds().Contains(position))
+        {
+            _gridStepIndex = (_gridStepIndex + 1) % _gridSteps.Length;
+            _status = $"Шаг сетки: {_gridSteps[_gridStepIndex]:0.000}.";
             return true;
         }
 
@@ -557,27 +775,46 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (_primitiveButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && _primitiveButton.GetGlobalBounds().Contains(position))
         {
-            BodyPartDefinition part = _parts[_selectedPart];
-            BodyPrimitive primitive = part.Primitive switch
+            if (_editingOrgans && _organs.Length == 0)
+            {
+                _status = "Сначала добавь орган.";
+                return true;
+            }
+
+            BodyPrimitive currentPrimitive = _editingOrgans
+                ? _organs[_selectedOrgan].Primitive
+                : _parts[_selectedPart].Primitive;
+            BodyPrimitive primitive = currentPrimitive switch
             {
                 BodyPrimitive.Circle => BodyPrimitive.Box,
                 BodyPrimitive.Box => BodyPrimitive.Triangle,
                 _ => BodyPrimitive.Circle
             };
-            _parts[_selectedPart] = Copy(part, primitive: primitive);
+            if (_editingOrgans)
+                _organs[_selectedOrgan] = CopyOrgan(_organs[_selectedOrgan], primitive: primitive);
+            else
+                _parts[_selectedPart] = Copy(_parts[_selectedPart], primitive: primitive);
             ApplyEnabledSymmetry();
-            _status = $"Форма «{PartName(_regionIds[_selectedPart])}»: {primitive}.";
+            _status = $"Форма: {primitive}.";
             return true;
         }
 
         for (int visibleRow = 0; visibleRow < _listVisibleRows; visibleRow++)
         {
             int itemIndex = _listScroll + visibleRow;
-            if (itemIndex >= _parts.Length ||
+            int itemCount = _editingOrgans ? _organs.Length : _parts.Length;
+            if (itemIndex >= itemCount ||
                 !_partRows[visibleRow].GetGlobalBounds().Contains(position))
                 continue;
+
+            if (_editingOrgans)
+            {
+                _selectedOrgan = itemIndex;
+                _status = $"Выбран орган: {OrganName(_organs[itemIndex].Id)}.";
+                return true;
+            }
 
             bool shiftPressed =
                 Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
@@ -601,7 +838,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        for (int i = 0; i < PropertyCount; i++)
+        for (int i = 0; i < (_editingUnitStats ? 6 : _editingPose ? 4 : PropertyCount); i++)
         {
             if (!_sliderTracks[i].GetGlobalBounds().Contains(position))
                 continue;
@@ -617,15 +854,31 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (!_previewPanels[projection].GetGlobalBounds().Contains(position))
                 continue;
 
-            int hitPart = HitTestPreview(projection, position.X, position.Y);
-            if (hitPart >= 0)
+            if (_editingOrgans)
             {
-                _selectedPart = hitPart;
-                _draggingProjection = projection;
-                _draggingPart = true;
-                _lastMouseX = position.X;
-                _lastMouseY = position.Y;
-                _status = $"Перемещение: {PartName(_regionIds[hitPart])}. Отпусти мышь для завершения.";
+                int hitOrgan = HitTestOrganPreview(projection, position.X, position.Y);
+                if (hitOrgan >= 0)
+                {
+                    _selectedOrgan = hitOrgan;
+                    _draggingProjection = projection;
+                    _draggingPart = true;
+                    _lastMouseX = position.X;
+                    _lastMouseY = position.Y;
+                    _status = $"Перемещение органа «{OrganName(_organs[hitOrgan].Id)}».";
+                }
+            }
+            else
+            {
+                int hitPart = HitTestPreview(projection, position.X, position.Y);
+                if (hitPart >= 0)
+                {
+                    _selectedPart = hitPart;
+                    _draggingProjection = projection;
+                    _draggingPart = true;
+                    _lastMouseX = position.X;
+                    _lastMouseY = position.Y;
+                    _status = $"Перемещение: {PartName(_regionIds[hitPart])}. Отпусти мышь для завершения.";
+                }
             }
 
             return true;
@@ -678,7 +931,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_listPanel.GetGlobalBounds().Contains(position))
         {
             int step = delta > 0f ? -3 : 3;
-            _listScroll = Math.Clamp(_listScroll + step, 0, Math.Max(0, _parts.Length - _listVisibleRows));
+            int count = _editingOrgans ? _organs.Length : _parts.Length;
+            _listScroll = Math.Clamp(_listScroll + step, 0, Math.Max(0, count - _listVisibleRows));
         }
 
         return true;
@@ -703,21 +957,27 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (key == Keyboard.Key.Up)
         {
-            _selectedPart = (_selectedPart - 1 + _parts.Length) % _parts.Length;
+            if (_editingOrgans && _organs.Length > 0)
+                _selectedOrgan = (_selectedOrgan - 1 + _organs.Length) % _organs.Length;
+            else
+                _selectedPart = (_selectedPart - 1 + _parts.Length) % _parts.Length;
             EnsureSelectionVisible();
             return true;
         }
 
         if (key == Keyboard.Key.Down)
         {
-            _selectedPart = (_selectedPart + 1) % _parts.Length;
+            if (_editingOrgans && _organs.Length > 0)
+                _selectedOrgan = (_selectedOrgan + 1) % _organs.Length;
+            else
+                _selectedPart = (_selectedPart + 1) % _parts.Length;
             EnsureSelectionVisible();
             return true;
         }
 
         if (key == Keyboard.Key.Tab)
         {
-            _selectedProperty = (_selectedProperty + 1) % PropertyCount;
+            _selectedProperty = (_selectedProperty + 1) % (_editingUnitStats ? 6 : _editingPose ? 4 : PropertyCount);
             return true;
         }
 
@@ -728,16 +988,30 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (key == Keyboard.Key.P)
+        if (key == Keyboard.Key.P && !_editingPose)
         {
-            BodyPartDefinition part = _parts[_selectedPart];
-            BodyPrimitive primitive = part.Primitive switch
+            if (_editingOrgans && _organs.Length > 0)
             {
-                BodyPrimitive.Circle => BodyPrimitive.Box,
-                BodyPrimitive.Box => BodyPrimitive.Triangle,
-                _ => BodyPrimitive.Circle
-            };
-            _parts[_selectedPart] = Copy(part, primitive: primitive);
+                UnitAnatomyVolume organ = _organs[_selectedOrgan];
+                BodyPrimitive organPrimitive = organ.Primitive switch
+                {
+                    BodyPrimitive.Circle => BodyPrimitive.Box,
+                    BodyPrimitive.Box => BodyPrimitive.Triangle,
+                    _ => BodyPrimitive.Circle
+                };
+                _organs[_selectedOrgan] = CopyOrgan(organ, primitive: organPrimitive);
+            }
+            else
+            {
+                BodyPartDefinition part = _parts[_selectedPart];
+                BodyPrimitive primitive = part.Primitive switch
+                {
+                    BodyPrimitive.Circle => BodyPrimitive.Box,
+                    BodyPrimitive.Box => BodyPrimitive.Triangle,
+                    _ => BodyPrimitive.Circle
+                };
+                _parts[_selectedPart] = Copy(part, primitive: primitive);
+            }
             ApplyEnabledSymmetry();
             return true;
         }
@@ -762,8 +1036,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         window.Draw(_propertiesPanel);
 
         if (_title != null)
+        {
+            _title.DisplayedString = _creatingNewUnitType ? "КОНСТРУКТОР НОВОГО ТИПА ЮНИТА" : "КОНСТРУКТОР ТЕЛА КОЛОНИСТА";
             window.Draw(_title);
+        }
+        if (_saveLabel != null)
+            _saveLabel.DisplayedString = _creatingNewUnitType ? "СОХР. ТИП" : "СОХРАНИТЬ";
         DrawButton(window, _saveButton, _saveLabel);
+        DrawButton(window, _newTypeButton, _newTypeLabel);
+        DrawButton(window, _saveTypeButton, _saveTypeLabel);
         DrawButton(window, _loadButton, _loadLabel);
         DrawButton(window, _exportButton, _exportLabel);
         DrawButton(window, _defaultsButton, _defaultsLabel);
@@ -775,23 +1056,43 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_propertiesTitle != null)
             window.Draw(_propertiesTitle);
 
+        int displayedItemCount = _editingUnitStats ? 0 : _editingOrgans ? _organs.Length : _parts.Length;
+        int selectedListItem = _editingOrgans ? _selectedOrgan : _selectedPart;
+        if (_listTitle != null)
+        {
+            _listTitle.DisplayedString = _editingUnitStats
+                ? "ХАРАКТЕРИСТИКИ ТИПА"
+                : _editingPose ? "ПОЗА / ЧАСТИ ТЕЛА"
+                : _editingOrgans ? "ОРГАНЫ / ВНУТРЕННИЕ ОБЪЁМЫ" : "ЧАСТИ ТЕЛА";
+            window.Draw(_listTitle);
+        }
+
+        _modeLabel!.DisplayedString = _editingPose ? "К ТЕЛУ"
+            : _editingUnitStats ? "ПОЗЫ"
+            : _editingOrgans ? "ХАР-КИ" : "ОРГАНЫ";
+        _modeLabel.Position = new Vector2f(_modeButton.Position.X + 8f, _modeButton.Position.Y + 5f);
+        window.Draw(_modeButton);
+        window.Draw(_modeLabel);
+
         for (int visibleRow = 0; visibleRow < _listVisibleRows; visibleRow++)
         {
             int itemIndex = _listScroll + visibleRow;
-            if (itemIndex >= _parts.Length)
+            if (itemIndex >= displayedItemCount)
                 break;
 
-            _partRows[visibleRow].FillColor = itemIndex == _selectedPart
+            _partRows[visibleRow].FillColor = itemIndex == selectedListItem
                 ? new Color(68, 79, 88, 255)
                 : new Color(28, 38, 50, 255);
-            _partRows[visibleRow].OutlineColor = itemIndex == _selectedPart
+            _partRows[visibleRow].OutlineColor = itemIndex == selectedListItem
                 ? SelectedColor
                 : new Color(52, 67, 84, 255);
             window.Draw(_partRows[visibleRow]);
 
             if (_partLabels[itemIndex] != null)
             {
-                _partLabels[itemIndex]!.DisplayedString = $"{itemIndex + 1:00}  {PartName(_regionIds[itemIndex])}";
+                _partLabels[itemIndex]!.DisplayedString = _editingOrgans
+                    ? $"{itemIndex + 1:00}  {OrganName(_organs[itemIndex].Id)}"
+                    : $"{itemIndex + 1:00}  {PartName(_regionIds[itemIndex])}";
                 _partLabels[itemIndex]!.Position = new Vector2f(
                     _partRows[visibleRow].Position.X + 8f,
                     _partRows[visibleRow].Position.Y + 7f);
@@ -799,36 +1100,86 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             }
         }
 
-        DrawButton(window, _addRegionButton, _addRegionLabel);
-        DrawButton(window, _addAllFormsButton, _addAllFormsLabel);
-        DrawButton(window, _removeRegionButton, _removeRegionLabel);
+        _addRegionLabel!.DisplayedString = _editingOrgans ? "+ ДОБАВИТЬ ОРГАН" : "+ ДОБАВИТЬ РЕГИОН";
+        _addAllFormsLabel!.DisplayedString = _editingOrgans ? "+ КОПИЯ ОРГАНА" : "+ ВСЕ ФОРМЫ";
+        _removeRegionLabel!.DisplayedString = _editingOrgans ? "УДАЛИТЬ ОРГАН" : "УДАЛИТЬ СВОЙ РЕГИОН";
+        if (!_editingPose && !_editingUnitStats)
+        {
+            DrawButton(window, _addRegionButton, _addRegionLabel);
+            DrawButton(window, _addAllFormsButton, _addAllFormsLabel);
+            DrawButton(window, _removeRegionButton, _removeRegionLabel);
+        }
 
         for (int projection = 0; projection < _previewPanels.Length; projection++)
             DrawProjection(window, projection);
 
         if (_selectedName != null)
         {
-            _selectedName.DisplayedString = PartName(_regionIds[_selectedPart]);
+            _selectedName.DisplayedString = _editingUnitStats
+                ? (_creatingNewUnitType ? "НОВЫЙ ТИП ЮНИТА" : "ХАРАКТЕРИСТИКИ ТИПА")
+                : _editingOrgans
+                    ? (_organs.Length > 0 ? OrganName(_organs[_selectedOrgan].Id) : "ОРГАНОВ НЕТ")
+                    : PartName(_regionIds[_selectedPart]);
             window.Draw(_selectedName);
         }
 
         if (_selectedInfo != null)
         {
-            BodyPartDefinition part = _parts[_selectedPart];
-            string parent = part.ParentIndex >= 0 ? PartName(_regionIds[part.ParentIndex]) : "Корень";
-            _selectedInfo.DisplayedString =
-                $"Родитель: {parent}\nPivot: {part.Pivot}   Motion: {part.Motion}\nRole: {part.Role}   Anchor: {part.Anchor}";
+            if (_editingUnitStats)
+            {
+                _selectedInfo.DisplayedString = _creatingNewUnitType
+                    ? "Создаётся новый тип. Настрой тело и органы, затем сохрани профиль в папку игры."
+                    : "Изменения сохраняются в профиль типа. Существующие юниты не меняют параметры автоматически.";
+            }
+            else if (_editingPose)
+            {
+                BodyPartDefinition posePart = _parts[_selectedPart];
+                Vector3 poseOffset = GetPoseOffset(posePart, _selectedPose);
+                float poseRotation = GetPoseRotationOffset(posePart, _selectedPose) * 180f / MathF.PI;
+                _selectedInfo.DisplayedString =
+                    $"Поза: {PoseName(_selectedPose)}\nΔ позиции: {poseOffset.X:0.000}, {poseOffset.Y:0.000}, {poseOffset.Z:0.000}\nΔ поворота: {poseRotation:0.0}°";
+            }
+            else if (_editingOrgans && _organs.Length == 0)
+            {
+                _selectedInfo.DisplayedString = "Нажми «+ ДОБАВИТЬ ОРГАН», чтобы создать внутренний объём.";
+            }
+            else if (_editingOrgans)
+            {
+                UnitAnatomyVolume organ = _organs[_selectedOrgan];
+                _selectedInfo.DisplayedString =
+                    $"Область: {PartName(organ.ParentRegionId)}\nВход: {organ.EntryBindingId}\nТкань: {organ.TargetBindingId}\nПотери пробития: {organ.PenetrationLoss:0.00}";
+            }
+            else
+            {
+                BodyPartDefinition part = _parts[_selectedPart];
+                string parent = part.ParentIndex >= 0 ? PartName(_regionIds[part.ParentIndex]) : "Корень";
+                _selectedInfo.DisplayedString =
+                    $"Родитель: {parent}\nPivot: {part.Pivot}   Motion: {part.Motion}\nRole: {part.Role}   Anchor: {part.Anchor}";
+            }
             window.Draw(_selectedInfo);
         }
 
-        for (int i = 0; i < PropertyCount; i++)
+        if (_editingUnitStats)
         {
-            DrawProperty(window, i);
+            for (int i = 0; i < 6; i++)
+                DrawProperty(window, i);
+        }
+        else if (_editingPose)
+        {
+            for (int i = 0; i < 4; i++)
+                DrawProperty(window, i);
+        }
+        else if (!_editingOrgans || _organs.Length > 0)
+        {
+            for (int i = 0; i < PropertyCount; i++)
+                DrawProperty(window, i);
         }
 
-        if (_primitiveLabel != null)
+        if (_primitiveLabel != null && !_editingPose && !_editingUnitStats)
         {
-            _primitiveLabel.DisplayedString = $"ФОРМА: {_parts[_selectedPart].Primitive}   [P]";
+            _primitiveLabel.DisplayedString = _editingOrgans
+                ? (_organs.Length > 0 ? $"ФОРМА ОРГАНА: {_organs[_selectedOrgan].Primitive}   [P]" : "ФОРМА ОРГАНА: —")
+                : $"ФОРМА: {_parts[_selectedPart].Primitive}   [P]";
             _primitiveLabel.Position = new Vector2f(
                 _primitiveButton.Position.X + 8f,
                 _primitiveButton.Position.Y + 8f);
@@ -836,11 +1187,26 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_primitiveLabel);
         }
 
-        if (_parentLabel != null)
+        if (_parentLabel != null && !_editingUnitStats)
         {
-            int parent = _parts[_selectedPart].ParentIndex;
-            string parentName = parent >= 0 ? PartName(_regionIds[parent]) : "корень";
-            _parentLabel.DisplayedString = $"РОДИТЕЛЬ: {parentName}  [клик]";
+            if (_editingPose)
+            {
+                _parentLabel.DisplayedString = $"ПОЗА: {PoseName(_selectedPose)}  [клик]";
+            }
+            else if (_editingOrgans && _organs.Length == 0)
+            {
+                _parentLabel.DisplayedString = "ОБЛАСТЬ: —";
+            }
+            else if (_editingOrgans)
+            {
+                _parentLabel.DisplayedString = $"ОБЛАСТЬ: {PartName(_organs[_selectedOrgan].ParentRegionId)}  [клик]";
+            }
+            else
+            {
+                int parent = _parts[_selectedPart].ParentIndex;
+                string parentName = parent >= 0 ? PartName(_regionIds[parent]) : "корень";
+                _parentLabel.DisplayedString = $"РОДИТЕЛЬ: {parentName}  [клик]";
+            }
             _parentLabel.Position = new Vector2f(
                 _parentButton.Position.X + 8f,
                 _parentButton.Position.Y + 6f);
@@ -848,7 +1214,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_parentLabel);
         }
 
-        if (_allSymmetryLabel != null)
+        if (_allSymmetryLabel != null && !_editingUnitStats)
         {
             _allSymmetryLabel.DisplayedString = _symmetryEnabled[0] && _symmetryEnabled[1] && _symmetryEnabled[2]
                 ? "СИММЕТРИЯ ВСЕХ: ВКЛ"
@@ -858,6 +1224,22 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _allSymmetryButton.Position.Y + 6f);
             window.Draw(_allSymmetryButton);
             window.Draw(_allSymmetryLabel);
+        }
+
+        if (_gridLabel != null && !_editingUnitStats)
+        {
+            _gridLabel.DisplayedString = _gridEnabled ? "СЕТКА: ВКЛ" : "СЕТКА: ВЫКЛ";
+            _gridLabel.Position = new Vector2f(_gridButton.Position.X + 8f, _gridButton.Position.Y + 6f);
+            window.Draw(_gridButton);
+            window.Draw(_gridLabel);
+        }
+
+        if (_gridStepLabel != null && !_editingUnitStats)
+        {
+            _gridStepLabel.DisplayedString = $"ШАГ: {_gridSteps[_gridStepIndex]:0.000}";
+            _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 8f, _gridStepButton.Position.Y + 6f);
+            window.Draw(_gridStepButton);
+            window.Draw(_gridStepLabel);
         }
 
         if (_helpText != null)
@@ -893,6 +1275,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         float buttonY = y + 7f;
         _saveButton.Position = new Vector2f(x + panelWidth - 390f, buttonY);
+        _saveTypeButton.Position = new Vector2f(x + panelWidth - 726f, buttonY);
+        _newTypeButton.Position = new Vector2f(x + panelWidth - 838f, buttonY);
         _exportButton.Position = new Vector2f(x + panelWidth - 502f, buttonY);
         _loadButton.Position = new Vector2f(x + panelWidth - 614f, buttonY);
         _defaultsButton.Position = new Vector2f(x + panelWidth - 278f, buttonY);
@@ -903,6 +1287,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _title.Position = new Vector2f(x + 14f, y + 12f);
         if (_saveLabel != null)
             _saveLabel.Position = new Vector2f(_saveButton.Position.X + 14f, buttonY + 9f);
+        if (_newTypeLabel != null)
+            _newTypeLabel.Position = new Vector2f(_newTypeButton.Position.X + 10f, buttonY + 9f);
+        if (_saveTypeLabel != null)
+            _saveTypeLabel.Position = new Vector2f(_saveTypeButton.Position.X + 12f, buttonY + 9f);
         if (_loadLabel != null)
             _loadLabel.Position = new Vector2f(_loadButton.Position.X + 12f, buttonY + 9f);
         if (_exportLabel != null)
@@ -932,6 +1320,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_listTitle != null)
             _listTitle.Position = new Vector2f(listX + 9f, contentY + 9f);
+        _modeButton.Position = new Vector2f(listX + listWidth - 101f, contentY + 4f);
+        _modeButton.Size = new Vector2f(94f, 23f);
         if (_propertiesTitle != null)
             _propertiesTitle.Position = new Vector2f(propertiesX + 10f, contentY + 9f);
 
@@ -983,6 +1373,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _parentButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
         _allSymmetryButton.Position = new Vector2f(propertiesX + 10f, _parentButton.Position.Y + 31f);
         _allSymmetryButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
+        _gridButton.Position = new Vector2f(propertiesX + 10f, _allSymmetryButton.Position.Y + 31f);
+        _gridButton.Size = new Vector2f((propertiesWidth - 24f) * 0.55f, 26f);
+        _gridStepButton.Position = new Vector2f(_gridButton.Position.X + _gridButton.Size.X + 4f, _gridButton.Position.Y);
+        _gridStepButton.Size = new Vector2f(propertiesWidth - 24f - _gridButton.Size.X - 4f, 26f);
 
         if (_helpText != null)
             _helpText.Position = new Vector2f(listX + 2f, y + panelHeight - 42f);
@@ -1046,6 +1440,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             maxY = MathF.Max(maxY, geometry.Y + geometry.HalfHeight);
         }
 
+        for (int i = 0; i < _organs.Length; i++)
+        {
+            ProjectedPart geometry = ProjectOrgan(_organs[i], projection);
+            _projectedOrgans[projection][i] = geometry;
+            minX = MathF.Min(minX, geometry.X - geometry.HalfWidth);
+            minY = MathF.Min(minY, geometry.Y - geometry.HalfHeight);
+            maxX = MathF.Max(maxX, geometry.X + geometry.HalfWidth);
+            maxY = MathF.Max(maxY, geometry.Y + geometry.HalfHeight);
+        }
+
         float spanX = MathF.Max(0.01f, maxX - minX);
         float spanY = MathF.Max(0.01f, maxY - minY);
         float pixelsPerUnit = MathF.Max(1f, MathF.Min(
@@ -1057,6 +1461,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float screenCenterY = layout.Top + layout.Height * 0.5f;
         layout = layout.WithTransform(pixelsPerUnit, screenCenterX, screenCenterY, worldCenterX, worldCenterY);
         _projectionLayouts[projection] = layout;
+        DrawGrid(window, layout);
 
         for (int i = 0; i < _parts.Length; i++)
         {
@@ -1112,11 +1517,101 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             geometry.ScreenHalfHeight = halfHeight;
             _projected[projection][i] = geometry;
         }
+
+        for (int i = 0; i < _organs.Length; i++)
+        {
+            ProjectedPart geometry = _projectedOrgans[projection][i];
+            float sx = screenCenterX + (geometry.X - worldCenterX) * pixelsPerUnit;
+            float sy = screenCenterY - (geometry.Y - worldCenterY) * pixelsPerUnit;
+            float halfWidth = MathF.Max(1.5f, geometry.HalfWidth * pixelsPerUnit);
+            float halfHeight = MathF.Max(1.5f, geometry.HalfHeight * pixelsPerUnit);
+            bool selected = _editingOrgans && i == _selectedOrgan;
+            Color fill = selected
+                ? new Color(230, 174, 83, 235)
+                : new Color(193, 118, 105, 190);
+            Color outline = selected
+                ? new Color(255, 225, 156, 255)
+                : new Color(240, 212, 193, 240);
+
+            DrawPreviewPrimitive(
+                window, geometry, sx, sy, halfWidth, halfHeight,
+                fill, outline, selected ? 1.6f : 0.8f, projection);
+
+            geometry.ScreenX = sx;
+            geometry.ScreenY = sy;
+            geometry.ScreenHalfWidth = halfWidth;
+            geometry.ScreenHalfHeight = halfHeight;
+            _projectedOrgans[projection][i] = geometry;
+        }
+    }
+
+    private void DrawPreviewPrimitive(
+        RenderWindow window,
+        ProjectedPart geometry,
+        float sx,
+        float sy,
+        float halfWidth,
+        float halfHeight,
+        Color fill,
+        Color outline,
+        float thickness,
+        int projection)
+    {
+        if (geometry.Primitive == BodyPrimitive.Circle)
+        {
+            _previewCircle.Position = new Vector2f(sx, sy);
+            _previewCircle.Scale = new Vector2f(halfWidth, halfHeight);
+            _previewCircle.Rotation = projection == 2 ? geometry.ScreenRotation : 0f;
+            _previewCircle.FillColor = fill;
+            _previewCircle.OutlineColor = outline;
+            _previewCircle.OutlineThickness = thickness;
+            window.Draw(_previewCircle);
+        }
+        else if (geometry.Primitive == BodyPrimitive.Triangle)
+        {
+            _previewTriangle.Position = new Vector2f(sx, sy);
+            _previewTriangle.Scale = new Vector2f(halfWidth, halfHeight);
+            _previewTriangle.Rotation = projection == 2 ? geometry.ScreenRotation : 0f;
+            _previewTriangle.FillColor = fill;
+            _previewTriangle.OutlineColor = outline;
+            _previewTriangle.OutlineThickness = thickness;
+            window.Draw(_previewTriangle);
+        }
+        else
+        {
+            _previewBox.Position = new Vector2f(sx, sy);
+            _previewBox.Scale = new Vector2f(halfWidth, halfHeight);
+            _previewBox.Rotation = projection == 2 ? geometry.ScreenRotation : 0f;
+            _previewBox.FillColor = fill;
+            _previewBox.OutlineColor = outline;
+            _previewBox.OutlineThickness = thickness;
+            window.Draw(_previewBox);
+        }
     }
 
     private void DrawProperty(RenderWindow window, int index)
     {
         PropertyInfo info = GetProperty(index);
+        if (_editingUnitStats)
+        {
+            string[] names = { "СКОРОСТЬ", "ШИРИНА", "ДЛИНА", "ВЫСОТА", "ДАЛЬНОСТЬ ОБЗОРА", "УГОЛ ОБЗОРА" };
+            _sliderLabels[index]!.DisplayedString = names[index];
+        }
+        else if (_editingPose)
+        {
+            string[] names = { "СМЕЩЕНИЕ X", "СМЕЩЕНИЕ Y", "СМЕЩЕНИЕ Z", "ПОВОРОТ ПОЗЫ, ГРАДУСЫ" };
+            _sliderLabels[index]!.DisplayedString = names[index];
+        }
+        else if (_editingOrgans)
+        {
+            string[] names =
+            {
+                "ЦЕНТР X", "ЦЕНТР Y", "ЦЕНТР Z",
+                "ПОЛУРАЗМЕР X", "ПОЛУРАЗМЕР Y", "ПОЛУРАЗМЕР Z",
+                "ПОВОРОТ, ГРАДУСЫ"
+            };
+            _sliderLabels[index]!.DisplayedString = names[index];
+        }
         RectangleShape track = _sliderTracks[index];
         float ratio = Math.Clamp((info.Value - info.Minimum) / (info.Maximum - info.Minimum), 0f, 1f);
         _sliderFills[index].Position = track.Position;
@@ -1149,6 +1644,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         for (int i = 0; i < _parts.Length; i++)
         {
             BodyPartDefinition part = _parts[i];
+            NumericsVector3 localPosition = part.LocalPosition;
+            float localRotation = part.LocalRotation;
+            if (_editingPose)
+                ApplyPreviewPose(part, ref localPosition, ref localRotation);
+
             int parent = part.ParentIndex;
             NumericsVector3 origin = NumericsVector3.Zero;
             float positionRotation = 0f;
@@ -1167,8 +1667,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 baseRotation = 0f;
             }
 
-            NumericsVector3 joint = origin + Rotate2D(part.LocalPosition, positionRotation);
-            float worldRotation = baseRotation + part.LocalRotation;
+            NumericsVector3 joint = origin + Rotate2D(localPosition, positionRotation);
+            float worldRotation = baseRotation + localRotation;
             if (part.Pivot == BodyPartPivot.Start)
             {
                 joint += Rotate2D(
@@ -1181,11 +1681,239 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
     }
 
+    private void CycleSelectedPose()
+    {
+        _selectedPose = _selectedPose switch
+        {
+            UnitPosture.Sitting => UnitPosture.Crouching,
+            UnitPosture.Crouching => UnitPosture.Lying,
+            _ => UnitPosture.Sitting
+        };
+        _status = $"Редактируется поза «{PoseName(_selectedPose)}». Смещения сегментов независимы для каждой позы.";
+    }
+
+    private static string PoseName(UnitPosture pose) => pose switch
+    {
+        UnitPosture.Sitting => "Сидя",
+        UnitPosture.Crouching => "Присев",
+        UnitPosture.Lying => "Лёжа",
+        _ => "Стоя"
+    };
+
+    private static Vector3 GetPoseOffset(BodyPartDefinition part, UnitPosture pose) => pose switch
+    {
+        UnitPosture.Sitting => part.SittingOffset,
+        UnitPosture.Crouching => part.CrouchingOffset,
+        UnitPosture.Lying => part.LyingOffset,
+        _ => Vector3.Zero
+    };
+
+    private static float GetPoseRotationOffset(BodyPartDefinition part, UnitPosture pose) => pose switch
+    {
+        UnitPosture.Sitting => part.SittingRotationOffset,
+        UnitPosture.Crouching => part.CrouchingRotationOffset,
+        UnitPosture.Lying => part.LyingRotationOffset,
+        _ => 0f
+    };
+
+    private static BodyPartDefinition WithPoseOffset(
+        BodyPartDefinition part, UnitPosture pose, Vector3 offset, float rotationOffset) => pose switch
+    {
+        UnitPosture.Sitting => Copy(part, sittingOffset: offset, sittingRotationOffset: rotationOffset),
+        UnitPosture.Crouching => Copy(part, crouchingOffset: offset, crouchingRotationOffset: rotationOffset),
+        UnitPosture.Lying => Copy(part, lyingOffset: offset, lyingRotationOffset: rotationOffset),
+        _ => part
+    };
+
+    private void ApplyPreviewPose(BodyPartDefinition part, ref NumericsVector3 position, ref float rotation)
+    {
+        switch (_selectedPose)
+        {
+            case UnitPosture.Crouching:
+                switch (part.Role)
+                {
+                    case BodyPartRole.UpperArm: position.Y *= 0.82f; rotation *= 0.84f; break;
+                    case BodyPartRole.Forearm: rotation = MathF.CopySign(2.20f, rotation); break;
+                    case BodyPartRole.Thigh: position.X *= 1.05f; position.Y *= 0.82f; rotation -= MathF.Sign(rotation) * 0.12f; break;
+                    case BodyPartRole.Shin: rotation = MathF.CopySign(0.45f, rotation); break;
+                }
+                break;
+            case UnitPosture.Sitting:
+                switch (part.Role)
+                {
+                    case BodyPartRole.UpperArm: position.Y *= 0.72f; position.Z *= 0.92f; rotation *= 0.72f; break;
+                    case BodyPartRole.Forearm: rotation = MathF.CopySign(2.45f, rotation); break;
+                    case BodyPartRole.Thigh: position.X *= 0.48f; position.Y *= 1.22f; rotation = MathF.CopySign(1.05f, rotation); break;
+                    case BodyPartRole.Shin: rotation = MathF.CopySign(0.95f, rotation); break;
+                }
+                break;
+            case UnitPosture.Lying:
+                switch (part.Role)
+                {
+                    case BodyPartRole.UpperArm: position.Y *= 1.12f; rotation = MathF.CopySign(MathF.Max(MathF.Abs(rotation), 1.55f), rotation); break;
+                    case BodyPartRole.Forearm: rotation = MathF.CopySign(1.80f, rotation); break;
+                    case BodyPartRole.Thigh: position.X *= 1.08f; position.Y *= 1.18f; rotation = MathF.CopySign(MathF.PI - 0.12f, rotation); break;
+                    case BodyPartRole.Shin: rotation *= 0.5f; break;
+                }
+                break;
+        }
+
+        position += GetPoseOffset(part, _selectedPose);
+        rotation += GetPoseRotationOffset(part, _selectedPose);
+    }
+
+    private ProjectedPart ProjectOrgan(UnitAnatomyVolume organ, int projection)
+    {
+        int parent = Array.IndexOf(_regionIds, organ.ParentRegionId);
+        if (parent < 0 || parent >= _worldPositions.Length)
+            return new ProjectedPart(0f, 0f, 0.001f, 0.001f, 0f, organ.Primitive);
+
+        NumericsVector3 center = _worldPositions[parent] +
+            Rotate2D(organ.LocalCenter, _worldRotations[parent]);
+        float rotation = _worldRotations[parent] + organ.LocalRotation;
+        float sin = MathF.Abs(MathF.Sin(rotation));
+        float cos = MathF.Abs(MathF.Cos(rotation));
+
+        float x;
+        float y;
+        float halfWidth;
+        float halfHeight;
+        float screenRotation = -rotation * 180f / MathF.PI;
+        switch (projection)
+        {
+            case 0:
+                x = center.Y;
+                y = center.Z;
+                halfWidth = sin * organ.HalfExtents.X + cos * organ.HalfExtents.Y;
+                halfHeight = organ.HalfExtents.Z;
+                screenRotation = 0f;
+                break;
+            case 1:
+                x = center.X;
+                y = center.Z;
+                halfWidth = cos * organ.HalfExtents.X + sin * organ.HalfExtents.Y;
+                halfHeight = organ.HalfExtents.Z;
+                screenRotation = 0f;
+                break;
+            default:
+                x = center.X;
+                y = center.Y;
+                halfWidth = cos * organ.HalfExtents.X + sin * organ.HalfExtents.Y;
+                halfHeight = sin * organ.HalfExtents.X + cos * organ.HalfExtents.Y;
+                break;
+        }
+
+        return new ProjectedPart(
+            x, y, MathF.Max(0.001f, halfWidth),
+            MathF.Max(0.001f, halfHeight), screenRotation, organ.Primitive);
+    }
+
+    private void DrawGrid(RenderWindow window, ProjectionLayout layout)
+    {
+        if (!_gridEnabled || layout.PixelsPerUnit <= 0f)
+            return;
+
+        float step = _gridSteps[_gridStepIndex];
+        int line = 0;
+        float leftWorld = layout.WorldCenterX - layout.Width / (2f * layout.PixelsPerUnit);
+        float rightWorld = layout.WorldCenterX + layout.Width / (2f * layout.PixelsPerUnit);
+        float bottomWorld = layout.WorldCenterY - layout.Height / (2f * layout.PixelsPerUnit);
+        float topWorld = layout.WorldCenterY + layout.Height / (2f * layout.PixelsPerUnit);
+
+        float firstX = MathF.Floor(leftWorld / step) * step;
+        for (float worldX = firstX; worldX <= rightWorld && line < _gridLines.Length; worldX += step)
+        {
+            float screenX = layout.ScreenCenterX + (worldX - layout.WorldCenterX) * layout.PixelsPerUnit;
+            RectangleShape gridLine = _gridLines[line++];
+            gridLine.Position = new Vector2f(screenX, layout.Top);
+            gridLine.Size = new Vector2f(1f, layout.Height);
+            window.Draw(gridLine);
+        }
+
+        float firstY = MathF.Floor(bottomWorld / step) * step;
+        for (float worldY = firstY; worldY <= topWorld && line < _gridLines.Length; worldY += step)
+        {
+            float screenY = layout.ScreenCenterY + (layout.WorldCenterY - worldY) * layout.PixelsPerUnit;
+            RectangleShape gridLine = _gridLines[line++];
+            gridLine.Position = new Vector2f(layout.Left, screenY);
+            gridLine.Size = new Vector2f(layout.Width, 1f);
+            window.Draw(gridLine);
+        }
+    }
+
+    private float Snap(float value) =>
+        _gridEnabled
+            ? MathF.Round(value / _gridSteps[_gridStepIndex]) * _gridSteps[_gridStepIndex]
+            : value;
+
+    private NumericsVector3 Snap(NumericsVector3 value) =>
+        _gridEnabled
+            ? new NumericsVector3(Snap(value.X), Snap(value.Y), Snap(value.Z))
+            : value;
+
+    private int HitTestOrganPreview(int projection, int x, int y)
+    {
+        ProjectedPart[] geometry = _projectedOrgans[projection];
+        for (int i = geometry.Length - 1; i >= 0; i--)
+        {
+            ProjectedPart part = geometry[i];
+            if (part.ScreenHalfWidth <= 0f || part.ScreenHalfHeight <= 0f)
+                continue;
+
+            if (MathF.Abs(x - part.ScreenX) <= part.ScreenHalfWidth + 4f &&
+                MathF.Abs(y - part.ScreenY) <= part.ScreenHalfHeight + 4f)
+                return i;
+        }
+
+        return -1;
+    }
+
     private void ApplyProjectionDrag(int projection, int deltaX, int deltaY)
     {
         ProjectionLayout layout = _projectionLayouts[projection];
         if (layout.PixelsPerUnit <= 0f)
             return;
+
+        if (_editingOrgans && _organs.Length > 0)
+        {
+            UnitAnatomyVolume organ = _organs[_selectedOrgan];
+            float organDx = deltaX / layout.PixelsPerUnit;
+            float organDy = -deltaY / layout.PixelsPerUnit;
+            int organParentIndex = Array.IndexOf(_regionIds, organ.ParentRegionId);
+            float organParentRotation = organParentIndex >= 0 ? _worldRotations[organParentIndex] : 0f;
+            float organCos = MathF.Cos(organParentRotation);
+            float organSin = MathF.Sin(organParentRotation);
+            NumericsVector3 organLocalDelta = projection switch
+            {
+                0 => new NumericsVector3(organSin * organDx, organCos * organDx, organDy),
+                1 => new NumericsVector3(organCos * organDx, -organSin * organDx, organDy),
+                _ => new NumericsVector3(organCos * organDx + organSin * organDy, -organSin * organDx + organCos * organDy, 0f)
+            };
+            _organs[_selectedOrgan] = ClampOrganToHost(
+                CopyOrgan(organ, center: Snap(organ.LocalCenter + organLocalDelta)));
+            ApplyEnabledSymmetry(projection);
+            _status = $"Перемещён орган «{OrganName(organ.Id)}». Нажми Ctrl+S.";
+            return;
+        }
+
+        if (_editingPose)
+        {
+            BodyPartDefinition posePart = _parts[_selectedPart];
+            Vector3 offset = GetPoseOffset(posePart, _selectedPose);
+            float poseDx = deltaX / layout.PixelsPerUnit;
+            float poseDy = -deltaY / layout.PixelsPerUnit;
+            switch (projection)
+            {
+                case 0: offset.Y += poseDx; offset.Z += poseDy; break;
+                case 1: offset.X += poseDx; offset.Z += poseDy; break;
+                default: offset.X += poseDx; offset.Y += poseDy; break;
+            }
+            _parts[_selectedPart] = WithPoseOffset(posePart, _selectedPose, Snap(offset),
+                GetPoseRotationOffset(posePart, _selectedPose));
+            ApplyEnabledSymmetry(projection);
+            _status = $"Поза «{PoseName(_selectedPose)}»: перемещён сегмент «{PartName(_regionIds[_selectedPart])}».";
+            return;
+        }
 
         BodyPartDefinition part = _parts[_selectedPart];
         float dx = deltaX / layout.PixelsPerUnit;
@@ -1214,7 +1942,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _parts[_selectedPart] = Copy(
             part,
-            localPosition: part.LocalPosition + localDelta);
+            localPosition: Snap(part.LocalPosition + localDelta));
         ApplyEnabledSymmetry(projection);
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Нажми Ctrl+S для сохранения.";
     }
@@ -1252,17 +1980,70 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private void AdjustProperty(int propertyIndex, float direction)
     {
         PropertyInfo info = GetProperty(propertyIndex);
-        float step = propertyIndex switch
-        {
-            0 or 1 or 2 => 0.01f,
-            3 or 4 or 5 => 0.005f,
-            _ => 5f
-        };
+        float step = _editingUnitStats
+            ? propertyIndex switch
+            {
+                0 => 0.1f,
+                1 or 2 or 3 => 0.01f,
+                4 => 1f,
+                _ => 5f
+            }
+            : _editingPose
+                ? propertyIndex == 3 ? 5f : 0.01f
+                : propertyIndex switch
+                {
+                    0 or 1 or 2 => 0.01f,
+                    3 or 4 or 5 => 0.005f,
+                    _ => 5f
+                };
         SetProperty(propertyIndex, info.Value + direction * step);
     }
 
     private PropertyInfo GetProperty(int index)
     {
+        if (_editingUnitStats)
+        {
+            return index switch
+            {
+                0 => new PropertyInfo(0.1f, 10f, _unitMoveSpeed, $"{_unitMoveSpeed:0.00}"),
+                1 => new PropertyInfo(0.05f, 2f, _unitWidth, $"{_unitWidth:0.000}"),
+                2 => new PropertyInfo(0.05f, 2f, _unitLength, $"{_unitLength:0.000}"),
+                3 => new PropertyInfo(0.05f, 4f, _unitHeight, $"{_unitHeight:0.000}"),
+                4 => new PropertyInfo(1f, 100f, _unitViewRange, $"{_unitViewRange:0.0}"),
+                _ => new PropertyInfo(10f, 360f, _unitFieldOfView, $"{_unitFieldOfView:0.0}°")
+            };
+        }
+
+        if (_editingPose)
+        {
+            BodyPartDefinition posePart = _parts[_selectedPart];
+            Vector3 offset = GetPoseOffset(posePart, _selectedPose);
+            float angle = GetPoseRotationOffset(posePart, _selectedPose) * 180f / MathF.PI;
+            return index switch
+            {
+                0 => new PropertyInfo(-0.4f, 0.4f, offset.X, $"{offset.X:+0.000;-0.000;0.000}"),
+                1 => new PropertyInfo(-0.4f, 0.4f, offset.Y, $"{offset.Y:+0.000;-0.000;0.000}"),
+                2 => new PropertyInfo(-0.4f, 0.4f, offset.Z, $"{offset.Z:+0.000;-0.000;0.000}"),
+                _ => new PropertyInfo(-180f, 180f, angle, $"{angle:+0.0;-0.0;0.0}°")
+            };
+        }
+
+        if (_editingOrgans && _organs.Length > 0)
+        {
+            UnitAnatomyVolume organ = _organs[_selectedOrgan];
+            Vector3 hostScale = GetOrganHostScale(organ);
+            return index switch
+            {
+                0 => new PropertyInfo(-hostScale.X * 0.8f, hostScale.X * 0.8f, organ.LocalCenter.X, $"{organ.LocalCenter.X:+0.000;-0.000;0.000}"),
+                1 => new PropertyInfo(-hostScale.Y * 0.8f, hostScale.Y * 0.8f, organ.LocalCenter.Y, $"{organ.LocalCenter.Y:+0.000;-0.000;0.000}"),
+                2 => new PropertyInfo(-hostScale.Z * 0.8f, hostScale.Z * 0.8f, organ.LocalCenter.Z, $"{organ.LocalCenter.Z:+0.000;-0.000;0.000}"),
+                3 => new PropertyInfo(0.002f, MathF.Max(0.004f, hostScale.X * 0.85f), organ.HalfExtents.X, $"{organ.HalfExtents.X:0.000}"),
+                4 => new PropertyInfo(0.002f, MathF.Max(0.004f, hostScale.Y * 0.85f), organ.HalfExtents.Y, $"{organ.HalfExtents.Y:0.000}"),
+                5 => new PropertyInfo(0.002f, MathF.Max(0.004f, hostScale.Z * 0.85f), organ.HalfExtents.Z, $"{organ.HalfExtents.Z:0.000}"),
+                _ => new PropertyInfo(-180f, 180f, organ.LocalRotation * 180f / MathF.PI, $"{organ.LocalRotation * 180f / MathF.PI:+0.0;-0.0;0.0}°")
+            };
+        }
+
         BodyPartDefinition part = _parts[_selectedPart];
         return index switch
         {
@@ -1280,6 +2061,67 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void SetProperty(int index, float value)
     {
+        if (_editingUnitStats)
+        {
+            switch (index)
+            {
+                case 0: _unitMoveSpeed = Math.Clamp(value, 0.1f, 10f); break;
+                case 1: _unitWidth = Math.Clamp(value, 0.05f, 2f); break;
+                case 2: _unitLength = Math.Clamp(value, 0.05f, 2f); break;
+                case 3: _unitHeight = Math.Clamp(value, 0.05f, 4f); break;
+                case 4: _unitViewRange = Math.Clamp(value, 1f, 100f); break;
+                default: _unitFieldOfView = Math.Clamp(value, 10f, 360f); break;
+            }
+            _status = "Характеристики изменены. Сохрани тип через «СОХР. ТИП».";
+            return;
+        }
+
+        if (_editingPose)
+        {
+            BodyPartDefinition poseDefinition = _parts[_selectedPart];
+            Vector3 offset = GetPoseOffset(poseDefinition, _selectedPose);
+            float rotationOffset = GetPoseRotationOffset(poseDefinition, _selectedPose);
+            switch (index)
+            {
+                case 0: offset.X = Math.Clamp(value, -0.4f, 0.4f); break;
+                case 1: offset.Y = Math.Clamp(value, -0.4f, 0.4f); break;
+                case 2: offset.Z = Math.Clamp(value, -0.4f, 0.4f); break;
+                default: rotationOffset = Math.Clamp(value, -180f, 180f) * MathF.PI / 180f; break;
+            }
+
+            offset = Snap(offset);
+            _parts[_selectedPart] = WithPoseOffset(poseDefinition, _selectedPose, offset, rotationOffset);
+            ApplyEnabledSymmetry();
+            _status = $"Изменена поза «{PoseName(_selectedPose)}» для «{PartName(_regionIds[_selectedPart])}». Нажми Ctrl+S.";
+            return;
+        }
+
+        if (_editingOrgans && _organs.Length > 0)
+        {
+            UnitAnatomyVolume organ = _organs[_selectedOrgan];
+            NumericsVector3 center = organ.LocalCenter;
+            NumericsVector3 halfExtents = organ.HalfExtents;
+            float organRotation = organ.LocalRotation;
+            Vector3 host = GetOrganHostScale(organ);
+            switch (index)
+            {
+                case 0: center.X = Math.Clamp(value, -host.X * 0.8f, host.X * 0.8f); break;
+                case 1: center.Y = Math.Clamp(value, -host.Y * 0.8f, host.Y * 0.8f); break;
+                case 2: center.Z = Math.Clamp(value, -host.Z * 0.8f, host.Z * 0.8f); break;
+                case 3: halfExtents.X = Math.Clamp(value, 0.002f, MathF.Max(0.004f, host.X * 0.85f)); break;
+                case 4: halfExtents.Y = Math.Clamp(value, 0.002f, MathF.Max(0.004f, host.Y * 0.85f)); break;
+                case 5: halfExtents.Z = Math.Clamp(value, 0.002f, MathF.Max(0.004f, host.Z * 0.85f)); break;
+                default: organRotation = Math.Clamp(value, -180f, 180f) * MathF.PI / 180f; break;
+            }
+
+            center = Snap(center);
+            _organs[_selectedOrgan] = ClampOrganToHost(
+                CopyOrgan(organ, center: center, halfExtents: halfExtents, rotation: organRotation));
+            ApplyEnabledSymmetry();
+            _status = $"Изменён орган «{OrganName(organ.Id)}». Нажми Ctrl+S для сохранения.";
+            return;
+        }
+
         BodyPartDefinition part = _parts[_selectedPart];
         NumericsVector3 position = part.LocalPosition;
         NumericsVector3 scale = part.Scale;
@@ -1312,18 +2154,248 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 break;
         }
 
+        if (index <= 2)
+            position = Snap(position);
         _parts[_selectedPart] = Copy(part, position, scale, rotation);
         ApplyEnabledSymmetry();
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Нажми Ctrl+S для сохранения.";
     }
 
+    private Vector3 GetOrganHostScale(UnitAnatomyVolume organ)
+    {
+        int host = Array.IndexOf(_regionIds, organ.ParentRegionId);
+        return host >= 0
+            ? Vector3.Max(Vector3.Abs(_parts[host].Scale), new Vector3(0.006f))
+            : new Vector3(0.05f);
+    }
+
+    private UnitAnatomyVolume ClampOrganToHost(UnitAnatomyVolume organ)
+    {
+        int host = Array.IndexOf(_regionIds, organ.ParentRegionId);
+        BodyPartDefinition hostPart = host >= 0 ? _parts[host] : default;
+        Vector3 scale = GetOrganHostScale(organ);
+        Vector3 center = organ.LocalCenter;
+        Vector3 limits = scale * 0.85f;
+        if (host >= 0 && hostPart.Primitive == BodyPrimitive.Triangle)
+            limits = new Vector3(scale.X * 0.25f, scale.Y * 0.25f, scale.Z * 0.85f);
+
+        Vector3 extents = Vector3.Min(Vector3.Max(organ.HalfExtents, new Vector3(0.002f)), limits);
+        float cos = MathF.Abs(MathF.Cos(organ.LocalRotation));
+        float sin = MathF.Abs(MathF.Sin(organ.LocalRotation));
+        extents = Vector3.Max(extents, new Vector3(0.002f));
+
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            float rotatedHalfX = cos * extents.X + sin * extents.Y;
+            float rotatedHalfY = sin * extents.X + cos * extents.Y;
+            float nx = (MathF.Abs(center.X) + rotatedHalfX) / scale.X;
+            float ny = (MathF.Abs(center.Y) + rotatedHalfY) / scale.Y;
+            float nz = (MathF.Abs(center.Z) + extents.Z) / scale.Z;
+            float radius = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (radius <= 0.90f)
+                break;
+
+            float factor = 0.90f / radius;
+            center *= factor;
+            extents = Vector3.Max(extents * factor, new Vector3(0.002f));
+        }
+
+        return CopyOrgan(organ, center: center, halfExtents: extents);
+    }
+
     private void Save()
     {
+        if (_creatingNewUnitType)
+        {
+            SaveUnitTypeFromDialog();
+            return;
+        }
+
         _openedRegionIds = (string[])_regionIds.Clone();
+        _openedOrgans = (UnitAnatomyVolume[])_organs.Clone();
         _openedParts = (BodyPartDefinition[])_parts.Clone();
         _saveRequested(
             (string[])_regionIds.Clone(),
-            (BodyPartDefinition[])_parts.Clone());
+            (BodyPartDefinition[])_parts.Clone(),
+            (UnitAnatomyVolume[])_organs.Clone());
+    }
+
+    private void CreateNewUnitTypeDraft()
+    {
+        string[] ids = { "custom.root.001" };
+        BodyPartDefinition[] parts =
+        {
+            new BodyPartDefinition(
+                Vector3.Zero,
+                new Vector3(0.10f, 0.075f, 0.18f),
+                BodyPrimitive.Circle,
+                parentIndex: -1,
+                role: BodyPartRole.Torso,
+                pivot: BodyPartPivot.Center)
+        };
+
+        _organs = Array.Empty<UnitAnatomyVolume>();
+        _unitMoveSpeed = 2.8f;
+        _unitWidth = 0.35f;
+        _unitLength = 0.60f;
+        _unitHeight = 1.75f;
+        _unitViewRange = 20f;
+        _unitFieldOfView = 110f;
+        _creatingNewUnitType = true;
+        _editingOrgans = false;
+        _editingPose = false;
+        _editingUnitStats = false;
+        _selectedPart = 0;
+        _selectedOrgan = 0;
+        _listScroll = 0;
+        SetRigData(ids, parts, _organs, setDefaults: true, setOpenedSnapshot: true);
+        _status = "Создана новая заготовка типа. Добавь регионы и органы, настрой позы/характеристики и сохрани профиль.";
+    }
+
+    private void SaveUnitTypeFromDialog()
+    {
+        string? path = PickRigFile(save: true, unitType: true);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _status = OperatingSystem.IsWindows()
+                ? "Сохранение нового типа отменено."
+                : "Сохранение типов доступно в Windows.";
+            return;
+        }
+
+        string id = Path.GetFileNameWithoutExtension(path);
+        string displayName = id.Replace('.', ' ').Replace('_', ' ').Replace('-', ' ').Trim();
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = "Новый юнит";
+
+        if (CustomUnitTypeCatalog.SaveType(
+                path, id, displayName,
+                _unitMoveSpeed, _unitWidth, _unitLength, _unitHeight,
+                _unitViewRange, _unitFieldOfView,
+                _regionIds, _parts, _organs,
+                out UnitType savedType, out string savedPath, out string error))
+        {
+            _creatingNewUnitType = true;
+            _status = $"Тип «{displayName}» сохранён. ID: {(ushort)savedType}.\n{savedPath}";
+            Console.WriteLine($"[Custom unit] Saved {savedType}: {savedPath}");
+        }
+        else
+        {
+            _status = $"Ошибка сохранения типа: {error}";
+        }
+    }
+
+    private void AddOrgan()
+    {
+        if (_organs.Length >= 256)
+        {
+            _status = "Достигнут лимит в 256 органов.";
+            return;
+        }
+
+        int hostIndex = Math.Clamp(_selectedPart, 0, _regionIds.Length - 1);
+        BodyPartDefinition host = _parts[hostIndex];
+        string hostId = _regionIds[hostIndex];
+        string entryId = GetPrimaryTissueId(hostId);
+        string organId = CreateUniqueRegionId("organ.custom");
+        Vector3 halfExtents = Vector3.Max(Vector3.Abs(host.Scale) * 0.18f, new Vector3(0.004f));
+        var organ = new UnitAnatomyVolume(
+            organId,
+            hostId,
+            entryId,
+            organId + ".tissue",
+            Vector3.Zero,
+            halfExtents,
+            BodyPrimitive.Circle,
+            energyLoss: 18f,
+            penetrationLoss: 1f,
+            damageMultiplier: 0.75f,
+            bleedMultiplier: 1f);
+
+        var next = new UnitAnatomyVolume[_organs.Length + 1];
+        Array.Copy(_organs, next, _organs.Length);
+        next[^1] = organ;
+        _organs = next;
+        _selectedOrgan = next.Length - 1;
+        _editingOrgans = true;
+        _listScroll = Math.Max(0, _organs.Length - _listVisibleRows);
+        _status = $"Добавлен орган «{OrganName(organId)}» в регион «{PartName(hostId)}». Настрой размер и сохрани.";
+    }
+
+    private void DuplicateSelectedOrgan()
+    {
+        if (_organs.Length == 0 || _organs.Length >= 256)
+        {
+            _status = "Нет выбранного органа или достигнут лимит в 256 органов.";
+            return;
+        }
+
+        UnitAnatomyVolume original = _organs[Math.Clamp(_selectedOrgan, 0, _organs.Length - 1)];
+        string duplicateId = CreateUniqueRegionId(original.Id + ".copy");
+        UnitAnatomyVolume duplicate = CopyOrgan(
+            original,
+            id: duplicateId,
+            targetBindingId: duplicateId + ".tissue",
+            center: original.LocalCenter + new Vector3(original.HalfExtents.X * 1.5f, 0f, 0f));
+        var next = new UnitAnatomyVolume[_organs.Length + 1];
+        Array.Copy(_organs, next, _organs.Length);
+        next[^1] = duplicate;
+        _organs = next;
+        _selectedOrgan = next.Length - 1;
+        _status = $"Создана копия органа «{OrganName(duplicateId)}».";
+    }
+
+    private void RemoveSelectedOrgan()
+    {
+        if (_selectedOrgan < 0 || _selectedOrgan >= _organs.Length)
+        {
+            _status = "Нет выбранного органа.";
+            return;
+        }
+
+        string removedId = _organs[_selectedOrgan].Id;
+        var next = new UnitAnatomyVolume[_organs.Length - 1];
+        if (_selectedOrgan > 0)
+            Array.Copy(_organs, 0, next, 0, _selectedOrgan);
+        if (_selectedOrgan < _organs.Length - 1)
+            Array.Copy(_organs, _selectedOrgan + 1, next, _selectedOrgan, _organs.Length - _selectedOrgan - 1);
+
+        _organs = next;
+        _selectedOrgan = Math.Clamp(_selectedOrgan, 0, Math.Max(0, _organs.Length - 1));
+        _status = $"Удалён орган «{OrganName(removedId)}». Изменения закрепятся после сохранения.";
+    }
+
+    private void CycleOrganHost()
+    {
+        if (_organs.Length == 0)
+            return;
+
+        UnitAnatomyVolume organ = _organs[_selectedOrgan];
+        int host = Array.IndexOf(_regionIds, organ.ParentRegionId);
+        int nextHost = (host + 1 + _regionIds.Length) % _regionIds.Length;
+        string hostId = _regionIds[nextHost];
+        string entryId = GetPrimaryTissueId(hostId);
+        _organs[_selectedOrgan] = CopyOrgan(
+            organ,
+            parentRegionId: hostId,
+            entryBindingId: entryId,
+            center: Vector3.Zero,
+            halfExtents: Vector3.Max(Vector3.Abs(_parts[nextHost].Scale) * 0.18f, new Vector3(0.004f)));
+        _status = $"Орган «{OrganName(organ.Id)}» помещён в «{PartName(hostId)}».";
+    }
+
+    private string GetPrimaryTissueId(string regionId)
+    {
+        UnitAnatomyProfile anatomy = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        int index = anatomy.FindRegion(regionId);
+        if (index >= 0)
+        {
+            ReadOnlySpan<HitRegionPartBinding> bindings = anatomy.GetTissues(index);
+            if (!bindings.IsEmpty)
+                return bindings[0].Id;
+        }
+
+        return regionId + ".tissue";
     }
 
     private void AddRegion()
@@ -1405,7 +2477,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         Array.Copy(ids, 0, nextIds, _regionIds.Length, ids.Length);
         Array.Copy(definitions, 0, nextParts, _parts.Length, definitions.Length);
 
-        if (!SetRigData(nextIds, nextParts, setDefaults: false, setOpenedSnapshot: false))
+        if (!SetRigData(nextIds, nextParts, _organs, setDefaults: false, setOpenedSnapshot: false))
             return;
 
         _selectedPart = _parts.Length - 1;
@@ -1454,7 +2526,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             write++;
         }
 
-        if (!SetRigData(nextIds, nextParts, setDefaults: false, setOpenedSnapshot: false))
+        if (!SetRigData(nextIds, nextParts, _organs, setDefaults: false, setOpenedSnapshot: false))
             return;
 
         _selectedPart = Math.Clamp(removed, 0, _parts.Length - 1);
@@ -1498,6 +2570,40 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void ApplyEnabledSymmetry(int activeProjection = -1)
     {
+        if (_editingOrgans)
+        {
+            if (_selectedOrgan < 0 || _selectedOrgan >= _organs.Length)
+                return;
+            string? pairId = GetCounterpartId(_organs[_selectedOrgan].Id);
+            if (pairId == null)
+                return;
+            int pairIndex = Array.FindIndex(_organs, organ => organ.Id == pairId);
+            if (pairIndex < 0 || pairIndex == _selectedOrgan)
+                return;
+
+            UnitAnatomyVolume sourceOrgan = _organs[_selectedOrgan];
+            UnitAnatomyVolume targetOrgan = _organs[pairIndex];
+            for (int projection = 0; projection < _symmetryEnabled.Length; projection++)
+            {
+                if (!_symmetryEnabled[projection] ||
+                    (activeProjection >= 0 && activeProjection != projection))
+                    continue;
+
+                NumericsVector3 center = projection switch
+                {
+                    0 or 2 => new NumericsVector3(sourceOrgan.LocalCenter.X, -sourceOrgan.LocalCenter.Y, sourceOrgan.LocalCenter.Z),
+                    _ => new NumericsVector3(sourceOrgan.LocalCenter.X, targetOrgan.LocalCenter.Y, sourceOrgan.LocalCenter.Z)
+                };
+                _organs[pairIndex] = CopyOrgan(
+                    targetOrgan,
+                    center: center,
+                    halfExtents: sourceOrgan.HalfExtents,
+                    rotation: -sourceOrgan.LocalRotation,
+                    primitive: sourceOrgan.Primitive);
+            }
+            return;
+        }
+
         if (_selectedPart < 0 || _selectedPart >= _regionIds.Length)
             return;
 
@@ -1517,20 +2623,43 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 continue;
 
             BodyPartDefinition target = _parts[counterpartIndex];
+            if (_editingPose)
+            {
+                _parts[counterpartIndex] = Copy(
+                    target,
+                    crouchingOffset: MirrorPoseOffset(source.CrouchingOffset, target.CrouchingOffset, projection),
+                    sittingOffset: MirrorPoseOffset(source.SittingOffset, target.SittingOffset, projection),
+                    lyingOffset: MirrorPoseOffset(source.LyingOffset, target.LyingOffset, projection),
+                    crouchingRotationOffset: -source.CrouchingRotationOffset,
+                    sittingRotationOffset: -source.SittingRotationOffset,
+                    lyingRotationOffset: -source.LyingRotationOffset);
+                continue;
+            }
+
             NumericsVector3 mirroredPosition = projection switch
             {
-                0 => new NumericsVector3(target.LocalPosition.X, -source.LocalPosition.Y, source.LocalPosition.Z),
-                1 => new NumericsVector3(-source.LocalPosition.X, target.LocalPosition.Y, source.LocalPosition.Z),
-                _ => new NumericsVector3(source.LocalPosition.X, -source.LocalPosition.Y, source.LocalPosition.Z)
+                0 or 2 => new NumericsVector3(source.LocalPosition.X, -source.LocalPosition.Y, source.LocalPosition.Z),
+                _ => new NumericsVector3(source.LocalPosition.X, target.LocalPosition.Y, source.LocalPosition.Z)
             };
             _parts[counterpartIndex] = Copy(
                 target,
                 localPosition: mirroredPosition,
                 scale: source.Scale,
                 localRotation: -source.LocalRotation,
-                primitive: source.Primitive);
+                primitive: source.Primitive,
+                crouchingOffset: MirrorPoseOffset(source.CrouchingOffset, target.CrouchingOffset, projection),
+                sittingOffset: MirrorPoseOffset(source.SittingOffset, target.SittingOffset, projection),
+                lyingOffset: MirrorPoseOffset(source.LyingOffset, target.LyingOffset, projection),
+                crouchingRotationOffset: -source.CrouchingRotationOffset,
+                sittingRotationOffset: -source.SittingRotationOffset,
+                lyingRotationOffset: -source.LyingRotationOffset);
         }
     }
+
+    private static Vector3 MirrorPoseOffset(Vector3 source, Vector3 counterpart, int projection) =>
+        projection == 1
+            ? new Vector3(source.X, counterpart.Y, source.Z)
+            : new Vector3(source.X, -source.Y, source.Z);
 
     private static string? GetCounterpartId(string id)
     {
@@ -1570,13 +2699,49 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
         }
 
-        if (!UnitBodyRigSettingsStore.LoadFile(path, out string[] ids, out BodyPartDefinition[] parts, out string error))
+        if (CustomUnitTypeCatalog.TryReadTypeFile(
+                path, out CustomUnitTypeCatalog.TypeDocument typeDocument, out _))
+        {
+            string[] typeIds = new string[typeDocument.Parts.Count];
+            BodyPartDefinition[] typeParts = new BodyPartDefinition[typeDocument.Parts.Count];
+            for (int i = 0; i < typeParts.Length; i++)
+            {
+                typeIds[i] = typeDocument.Parts[i].Id;
+                typeParts[i] = typeDocument.Parts[i].ToDefinition(i);
+            }
+
+            UnitAnatomyVolume[] typeOrgans = typeDocument.Organs?
+                .Select(item => item.ToVolume())
+                .ToArray() ?? Array.Empty<UnitAnatomyVolume>();
+            if (!SetRigData(typeIds, typeParts, typeOrgans, setDefaults: true, setOpenedSnapshot: true))
+                return;
+
+            _unitMoveSpeed = typeDocument.MoveSpeed;
+            _unitWidth = typeDocument.Width;
+            _unitLength = typeDocument.Length;
+            _unitHeight = typeDocument.Height;
+            _unitViewRange = typeDocument.ViewRange;
+            _unitFieldOfView = typeDocument.FieldOfView;
+            _creatingNewUnitType = true;
+            _editingOrgans = false;
+            _editingPose = false;
+            _editingUnitStats = false;
+            _status = $"Загружен тип «{typeDocument.DisplayName}». Его можно редактировать и сохранить повторно.";
+            return;
+        }
+
+        if (!UnitBodyRigSettingsStore.LoadFile(path, out string[] ids, out BodyPartDefinition[] parts,
+                out UnitAnatomyVolume[] organs, out string error))
         {
             _status = $"Ошибка загрузки рига: {error}";
             return;
         }
 
-        if (!SetRigData(ids, parts, setDefaults: true, setOpenedSnapshot: true))
+        if (organs.Length == 0 && _organs.Length > 0 &&
+            ids.Length > 0 && ids[0] == _regionIds[0])
+            organs = (UnitAnatomyVolume[])_organs.Clone();
+
+        if (!SetRigData(ids, parts, organs, setDefaults: true, setOpenedSnapshot: true))
             return;
 
         _status = $"Загружен файл «{Path.GetFileName(path)}». Применение к игре — кнопкой «Сохранить».";
@@ -1592,16 +2757,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
         }
 
-        if (UnitBodyRigSettingsStore.ExportFile(path, _regionIds, _parts, out string error))
+        if (UnitBodyRigSettingsStore.ExportFile(path, _regionIds, _parts, _organs, out string error))
             _status = $"Риг экспортирован: {Path.GetFileName(path)}";
         else
             _status = $"Ошибка экспорта: {error}";
     }
 
-    private static string? PickRigFile(bool save)
+    private static string? PickRigFile(bool save, bool unitType = false)
     {
         if (!OperatingSystem.IsWindows())
             return null;
+
+        if (unitType)
+            Directory.CreateDirectory(CustomUnitTypeCatalog.DirectoryPath);
 
         var buffer = new StringBuilder(1024);
         var titleBuffer = new StringBuilder(256);
@@ -1610,7 +2778,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             lStructSize = Marshal.SizeOf<OpenFileName>(),
             hwndOwner = IntPtr.Zero,
             hInstance = IntPtr.Zero,
-            lpstrFilter = "RimClone rig (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0",
+            lpstrFilter = unitType
+                ? "RimClone unit (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0"
+                : "RimClone rig (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0",
             lpstrCustomFilter = IntPtr.Zero,
             nMaxCustFilter = 0,
             nFilterIndex = 1,
@@ -1618,8 +2788,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             nMaxFile = buffer.Capacity,
             lpstrFileTitle = titleBuffer,
             nMaxFileTitle = titleBuffer.Capacity,
-            lpstrInitialDir = Path.GetDirectoryName(UnitBodyRigSettingsStore.FilePath),
-            lpstrTitle = save ? "Сохранить риг как..." : "Загрузить риг",
+            lpstrInitialDir = unitType
+                ? CustomUnitTypeCatalog.DirectoryPath
+                : Path.GetDirectoryName(UnitBodyRigSettingsStore.FilePath),
+            lpstrTitle = unitType
+                ? "Сохранить тип юнита в папку игры"
+                : save ? "Сохранить риг как..." : "Загрузить риг",
             Flags = 0x00000800 | 0x00080000 | (save ? 0x00000002 : 0x00001000),
             nFileOffset = 0,
             nFileExtension = 0,
@@ -1679,7 +2853,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float? localRotation = null,
         BodyPrimitive? primitive = null,
         int? parentIndex = null,
-        BodyPartAnchor? anchor = null) =>
+        BodyPartAnchor? anchor = null,
+        Vector3? crouchingOffset = null,
+        Vector3? sittingOffset = null,
+        Vector3? lyingOffset = null,
+        float? crouchingRotationOffset = null,
+        float? sittingRotationOffset = null,
+        float? lyingRotationOffset = null) =>
         new(
             localPosition ?? original.LocalPosition,
             scale ?? original.Scale,
@@ -1690,7 +2870,37 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             followDistance: original.FollowDistance,
             anchor: anchor ?? original.Anchor,
             role: original.Role,
-            pivot: original.Pivot);
+            pivot: original.Pivot,
+            crouchingOffset: crouchingOffset ?? original.CrouchingOffset,
+            sittingOffset: sittingOffset ?? original.SittingOffset,
+            lyingOffset: lyingOffset ?? original.LyingOffset,
+            crouchingRotationOffset: crouchingRotationOffset ?? original.CrouchingRotationOffset,
+            sittingRotationOffset: sittingRotationOffset ?? original.SittingRotationOffset,
+            lyingRotationOffset: lyingRotationOffset ?? original.LyingRotationOffset);
+
+    private static UnitAnatomyVolume CopyOrgan(
+        UnitAnatomyVolume original,
+        string? id = null,
+        string? targetBindingId = null,
+        string? parentRegionId = null,
+        string? entryBindingId = null,
+        Vector3? center = null,
+        Vector3? halfExtents = null,
+        float? rotation = null,
+        BodyPrimitive? primitive = null) =>
+        new(
+            id ?? original.Id,
+            parentRegionId ?? original.ParentRegionId,
+            entryBindingId ?? original.EntryBindingId,
+            targetBindingId ?? original.TargetBindingId,
+            center ?? original.LocalCenter,
+            halfExtents ?? original.HalfExtents,
+            primitive ?? original.Primitive,
+            rotation ?? original.LocalRotation,
+            original.EnergyLoss,
+            original.PenetrationLoss,
+            original.DamageMultiplier,
+            original.BleedMultiplier);
 
     private static ProjectedPart Project(
         BodyPartDefinition part,
@@ -1759,6 +2969,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _ => new Color(85, 139, 120, 255)
     };
 
+    private static string OrganName(string id) => id switch
+    {
+        "organ.heart" => "Сердце",
+        "organ.lung.left" => "Левое лёгкое",
+        "organ.lung.right" => "Правое лёгкое",
+        "organ.stomach" => "Желудок",
+        "organ.liver" => "Печень",
+        "organ.kidney.left" => "Левая почка",
+        "organ.kidney.right" => "Правая почка",
+        "organ.brain" => "Мозг",
+        _ when id.StartsWith("organ.custom.", StringComparison.Ordinal) => $"Новый орган {id["organ.custom.".Length..]}",
+        _ => id
+    };
+
     private static string PartName(string id) => id switch
     {
         "body.middle" => "Туловище · середина",
@@ -1815,6 +3039,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             shape.Dispose();
         foreach (Text? label in _projectionLabels)
             label?.Dispose();
+        foreach (RectangleShape shape in _gridLines)
+            shape.Dispose();
         foreach (RectangleShape shape in _symmetryButtons)
             shape.Dispose();
         foreach (Text? label in _symmetryLabels)
@@ -1832,12 +3058,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _title?.Dispose();
         _saveLabel?.Dispose();
+        _newTypeLabel?.Dispose();
+        _saveTypeLabel?.Dispose();
         _loadLabel?.Dispose();
         _exportLabel?.Dispose();
         _defaultsLabel?.Dispose();
         _reloadLabel?.Dispose();
         _parentLabel?.Dispose();
         _allSymmetryLabel?.Dispose();
+        _gridLabel?.Dispose();
+        _gridStepLabel?.Dispose();
         _addRegionLabel?.Dispose();
         _addAllFormsLabel?.Dispose();
         _removeRegionLabel?.Dispose();
@@ -1856,6 +3086,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _listPanel.Dispose();
         _propertiesPanel.Dispose();
         _saveButton.Dispose();
+        _newTypeButton.Dispose();
+        _saveTypeButton.Dispose();
         _loadButton.Dispose();
         _exportButton.Dispose();
         _defaultsButton.Dispose();
@@ -1864,6 +3096,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _primitiveButton.Dispose();
         _parentButton.Dispose();
         _allSymmetryButton.Dispose();
+        _gridButton.Dispose();
+        _gridStepButton.Dispose();
         _addRegionButton.Dispose();
         _addAllFormsButton.Dispose();
         _removeRegionButton.Dispose();

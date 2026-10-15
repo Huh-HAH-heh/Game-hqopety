@@ -17,6 +17,8 @@ public static class UnitBodyRigSettingsStore
     private static readonly Dictionary<string, BodyPartDefinition> Defaults = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, BodyRigPartSettings> Saved = new(StringComparer.Ordinal);
     private static readonly List<BodyRigPartSettings> SavedInFileOrder = new();
+    private static readonly List<OrganSettings> SavedOrgans = new();
+    private static bool _hasSavedOrgans;
     private static bool _loaded;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -79,7 +81,17 @@ public static class UnitBodyRigSettingsStore
         ReadOnlySpan<string> baseIds,
         ReadOnlySpan<BodyPartDefinition> baseParts,
         out string[] regionIds,
-        out BodyPartDefinition[] parts)
+        out BodyPartDefinition[] parts) =>
+        MergeSavedRig(baseIds, baseParts, ReadOnlySpan<UnitAnatomyVolume>.Empty,
+            out regionIds, out parts, out _);
+
+    public static void MergeSavedRig(
+        ReadOnlySpan<string> baseIds,
+        ReadOnlySpan<BodyPartDefinition> baseParts,
+        ReadOnlySpan<UnitAnatomyVolume> baseOrgans,
+        out string[] regionIds,
+        out BodyPartDefinition[] parts,
+        out UnitAnatomyVolume[] organs)
     {
         if (baseIds.Length != baseParts.Length)
             throw new ArgumentException("Количество ID и форм должно совпадать.");
@@ -114,6 +126,9 @@ public static class UnitBodyRigSettingsStore
 
             regionIds = ids.ToArray();
             parts = definitions.ToArray();
+            organs = _hasSavedOrgans
+                ? SavedOrgans.Select(item => item.ToVolume()).ToArray()
+                : baseOrgans.ToArray();
         }
     }
 
@@ -123,8 +138,21 @@ public static class UnitBodyRigSettingsStore
         out string fullPath,
         out string error)
     {
+        UnitAnatomyVolume[] organs;
+        lock (Sync)
+            organs = SavedOrgans.Select(item => item.ToVolume()).ToArray();
+        return Save(regionIds, parts, organs, out fullPath, out error);
+    }
+
+    public static bool Save(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> parts,
+        ReadOnlySpan<UnitAnatomyVolume> organs,
+        out string fullPath,
+        out string error)
+    {
         fullPath = FilePath;
-        if (!SaveFile(fullPath, regionIds, parts, out error))
+        if (!SaveFile(fullPath, regionIds, parts, organs, out error))
             return false;
 
         lock (Sync)
@@ -138,6 +166,10 @@ public static class UnitBodyRigSettingsStore
                 SavedInFileOrder.Add(item);
             }
 
+            SavedOrgans.Clear();
+            for (int i = 0; i < organs.Length; i++)
+                SavedOrgans.Add(OrganSettings.From(organs[i]));
+            _hasSavedOrgans = true;
             _loaded = true;
         }
 
@@ -149,7 +181,15 @@ public static class UnitBodyRigSettingsStore
         ReadOnlySpan<string> regionIds,
         ReadOnlySpan<BodyPartDefinition> parts,
         out string error) =>
-        SaveFile(path, regionIds, parts, out error);
+        SaveFile(path, regionIds, parts, ReadOnlySpan<UnitAnatomyVolume>.Empty, out error);
+
+    public static bool ExportFile(
+        string path,
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> parts,
+        ReadOnlySpan<UnitAnatomyVolume> organs,
+        out string error) =>
+        SaveFile(path, regionIds, parts, organs, out error);
 
     public static bool LoadFile(
         string path,
@@ -157,8 +197,20 @@ public static class UnitBodyRigSettingsStore
         out BodyPartDefinition[] parts,
         out string error)
     {
+        bool loaded = LoadFile(path, out regionIds, out parts, out _, out error);
+        return loaded;
+    }
+
+    public static bool LoadFile(
+        string path,
+        out string[] regionIds,
+        out BodyPartDefinition[] parts,
+        out UnitAnatomyVolume[] organs,
+        out string error)
+    {
         regionIds = Array.Empty<string>();
         parts = Array.Empty<BodyPartDefinition>();
+        organs = Array.Empty<UnitAnatomyVolume>();
         error = string.Empty;
 
         try
@@ -202,6 +254,9 @@ public static class UnitBodyRigSettingsStore
 
             regionIds = ids;
             parts = definitions;
+            organs = document.Organs == null
+                ? Array.Empty<UnitAnatomyVolume>()
+                : document.Organs.Select(item => item.ToVolume()).ToArray();
             return true;
         }
         catch (Exception exception)
@@ -215,6 +270,7 @@ public static class UnitBodyRigSettingsStore
         string path,
         ReadOnlySpan<string> regionIds,
         ReadOnlySpan<BodyPartDefinition> parts,
+        ReadOnlySpan<UnitAnatomyVolume> organs,
         out string error)
     {
         error = string.Empty;
@@ -224,7 +280,25 @@ public static class UnitBodyRigSettingsStore
             return false;
         }
 
-        var document = new RigSettingsDocument { Version = 2 };
+        if (organs.Length > 256)
+        {
+            error = "Риг может содержать не более 256 органов.";
+            return false;
+        }
+
+        var document = new RigSettingsDocument { Version = 2, Organs = new List<OrganSettings>() };
+        var organIds = new HashSet<string>(StringComparer.Ordinal);
+        var targets = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < organs.Length; i++)
+        {
+            if (!organIds.Add(organs[i].Id) || !targets.Add(organs[i].TargetBindingId))
+            {
+                error = $"Повторяется ID органа или его ткани: {organs[i].Id}";
+                return false;
+            }
+            document.Organs.Add(OrganSettings.From(organs[i]));
+        }
+
         var seen = new HashSet<string>(StringComparer.Ordinal);
         for (int i = 0; i < parts.Length; i++)
         {
@@ -290,6 +364,10 @@ public static class UnitBodyRigSettingsStore
                 Saved[part.Id] = part;
                 SavedInFileOrder.Add(part);
             }
+
+            _hasSavedOrgans = document.Organs != null;
+            if (document.Organs != null)
+                SavedOrgans.AddRange(document.Organs);
         }
         catch (Exception exception)
         {
@@ -310,7 +388,64 @@ public static class UnitBodyRigSettingsStore
     {
         public int Version { get; set; } = 2;
         public List<BodyRigPartSettings> Parts { get; set; } = new();
+        public List<OrganSettings>? Organs { get; set; }
         public RigSettingsDocument() { }
+    }
+
+    public sealed class OrganSettings
+    {
+        public string Id { get; set; } = string.Empty;
+        public string ParentRegionId { get; set; } = string.Empty;
+        public string EntryBindingId { get; set; } = string.Empty;
+        public string TargetBindingId { get; set; } = string.Empty;
+        public float X { get; set; }
+        public float Y { get; set; }
+        public float Z { get; set; }
+        public float HalfX { get; set; } = 0.01f;
+        public float HalfY { get; set; } = 0.01f;
+        public float HalfZ { get; set; } = 0.01f;
+        public float Rotation { get; set; }
+        public string Primitive { get; set; } = nameof(BodyPrimitive.Circle);
+        public float EnergyLoss { get; set; } = 18f;
+        public float PenetrationLoss { get; set; } = 1f;
+        public float DamageMultiplier { get; set; } = 0.75f;
+        public float BleedMultiplier { get; set; } = 1f;
+
+        public OrganSettings() { }
+
+        public static OrganSettings From(UnitAnatomyVolume organ) => new()
+        {
+            Id = organ.Id,
+            ParentRegionId = organ.ParentRegionId,
+            EntryBindingId = organ.EntryBindingId,
+            TargetBindingId = organ.TargetBindingId,
+            X = organ.LocalCenter.X,
+            Y = organ.LocalCenter.Y,
+            Z = organ.LocalCenter.Z,
+            HalfX = organ.HalfExtents.X,
+            HalfY = organ.HalfExtents.Y,
+            HalfZ = organ.HalfExtents.Z,
+            Rotation = organ.LocalRotation,
+            Primitive = organ.Primitive.ToString(),
+            EnergyLoss = organ.EnergyLoss,
+            PenetrationLoss = organ.PenetrationLoss,
+            DamageMultiplier = organ.DamageMultiplier,
+            BleedMultiplier = organ.BleedMultiplier
+        };
+
+        public UnitAnatomyVolume ToVolume() => new(
+            Id,
+            ParentRegionId,
+            EntryBindingId,
+            TargetBindingId,
+            new Vector3(X, Y, Z),
+            new Vector3(HalfX, HalfY, HalfZ),
+            Enum.TryParse(Primitive, true, out BodyPrimitive primitive) ? primitive : BodyPrimitive.Circle,
+            Rotation,
+            EnergyLoss,
+            PenetrationLoss,
+            DamageMultiplier,
+            BleedMultiplier);
     }
 
     public sealed class BodyRigPartSettings
@@ -330,6 +465,18 @@ public static class UnitBodyRigSettingsStore
         public string Anchor { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
         public string Pivot { get; set; } = string.Empty;
+        public float CrouchX { get; set; }
+        public float CrouchY { get; set; }
+        public float CrouchZ { get; set; }
+        public float CrouchRotation { get; set; }
+        public float SittingX { get; set; }
+        public float SittingY { get; set; }
+        public float SittingZ { get; set; }
+        public float SittingRotation { get; set; }
+        public float LyingX { get; set; }
+        public float LyingY { get; set; }
+        public float LyingZ { get; set; }
+        public float LyingRotation { get; set; }
 
         public BodyRigPartSettings() { }
 
@@ -349,7 +496,19 @@ public static class UnitBodyRigSettingsStore
             Motion = part.Motion.ToString(),
             Anchor = part.Anchor.ToString(),
             Role = part.Role.ToString(),
-            Pivot = part.Pivot.ToString()
+            Pivot = part.Pivot.ToString(),
+            CrouchX = part.CrouchingOffset.X,
+            CrouchY = part.CrouchingOffset.Y,
+            CrouchZ = part.CrouchingOffset.Z,
+            CrouchRotation = part.CrouchingRotationOffset,
+            SittingX = part.SittingOffset.X,
+            SittingY = part.SittingOffset.Y,
+            SittingZ = part.SittingOffset.Z,
+            SittingRotation = part.SittingRotationOffset,
+            LyingX = part.LyingOffset.X,
+            LyingY = part.LyingOffset.Y,
+            LyingZ = part.LyingOffset.Z,
+            LyingRotation = part.LyingRotationOffset
         };
 
         public BodyPartDefinition Apply(BodyPartDefinition baseline, int index)
@@ -357,6 +516,12 @@ public static class UnitBodyRigSettingsStore
             if (!float.IsFinite(X) || !float.IsFinite(Y) || !float.IsFinite(Z) ||
                 !float.IsFinite(ScaleX) || !float.IsFinite(ScaleY) || !float.IsFinite(ScaleZ) ||
                 !float.IsFinite(Rotation) ||
+                !float.IsFinite(CrouchX) || !float.IsFinite(CrouchY) || !float.IsFinite(CrouchZ) ||
+                !float.IsFinite(CrouchRotation) ||
+                !float.IsFinite(SittingX) || !float.IsFinite(SittingY) || !float.IsFinite(SittingZ) ||
+                !float.IsFinite(SittingRotation) ||
+                !float.IsFinite(LyingX) || !float.IsFinite(LyingY) || !float.IsFinite(LyingZ) ||
+                !float.IsFinite(LyingRotation) ||
                 ScaleX <= 0f || ScaleY <= 0f || ScaleZ <= 0f)
                 return baseline;
 
@@ -383,7 +548,13 @@ public static class UnitBodyRigSettingsStore
                     : baseline.FollowDistance,
                 anchor: anchor,
                 role: role,
-                pivot: pivot);
+                pivot: pivot,
+                crouchingOffset: new Vector3(CrouchX, CrouchY, CrouchZ),
+                sittingOffset: new Vector3(SittingX, SittingY, SittingZ),
+                lyingOffset: new Vector3(LyingX, LyingY, LyingZ),
+                crouchingRotationOffset: CrouchRotation,
+                sittingRotationOffset: SittingRotation,
+                lyingRotationOffset: LyingRotation);
         }
 
         public BodyPartDefinition ToDefinition(int index, int fallbackParent = 0)
@@ -403,7 +574,13 @@ public static class UnitBodyRigSettingsStore
                     followDistance: part.FollowDistance,
                     anchor: part.Anchor,
                     role: part.Role,
-                    pivot: part.Pivot)
+                    pivot: part.Pivot,
+                    crouchingOffset: part.CrouchingOffset,
+                    sittingOffset: part.SittingOffset,
+                    lyingOffset: part.LyingOffset,
+                    crouchingRotationOffset: part.CrouchingRotationOffset,
+                    sittingRotationOffset: part.SittingRotationOffset,
+                    lyingRotationOffset: part.LyingRotationOffset)
                 : baseline;
         }
 

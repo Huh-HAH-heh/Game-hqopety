@@ -302,21 +302,27 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         for (int i = 0; i < ids.Length; i++)
             ids[i] = _nodes[i].Id;
 
-        return WithRig(ids, bodyParts);
+        return WithRig(ids, bodyParts, _volumes);
     }
 
+    public UnitAnatomyProfile WithRig(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> bodyParts) =>
+        WithRig(regionIds, bodyParts, _volumes);
+
     /// <summary>
-    /// Rebuilds the editable rig. Existing region tissues/markers and organ volumes
-    /// survive unchanged; any new region receives its own stable damageable tissue.
-    /// Parent indices define dependencies and must precede the child.
+    /// Rebuilds a rig with editable organs. Every organ's full bounding volume is
+    /// constrained to the ellipsoid of its host region. Organs create their own
+    /// damageable tissue bindings while preserving all existing stable tissue IDs.
     /// </summary>
     public UnitAnatomyProfile WithRig(
         ReadOnlySpan<string> regionIds,
-        ReadOnlySpan<BodyPartDefinition> bodyParts)
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        ReadOnlySpan<UnitAnatomyVolume> volumes)
     {
         if (!HasSharedShapes || regionIds.Length != bodyParts.Length ||
-            regionIds.Length == 0 || regionIds.Length > 256)
-            throw new ArgumentException("The rig must contain 1–256 regions and matching shapes.");
+            regionIds.Length == 0 || regionIds.Length > 128 || volumes.Length > 256)
+            throw new ArgumentException("The rig must have 1–128 regions and at most 256 organs.");
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
         for (int i = 0; i < regionIds.Length; i++)
@@ -327,49 +333,194 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
                 throw new ArgumentException($"Parent of '{regionIds[i]}' must precede it in the list.");
         }
 
+        var nextVolumes = new UnitAnatomyVolume[volumes.Length];
+        var volumeIds = new HashSet<string>(StringComparer.Ordinal);
+        var bindingIds = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < volumes.Length; i++)
+        {
+            UnitAnatomyVolume volume = volumes[i];
+            if (!volumeIds.Add(volume.Id))
+                throw new ArgumentException($"Duplicate organ ID '{volume.Id}'.");
+            if (!bindingIds.Add(volume.TargetBindingId))
+                throw new ArgumentException($"Duplicate organ tissue ID '{volume.TargetBindingId}'.");
+
+            int parentIndex = IndexOf(regionIds, volume.ParentRegionId);
+            if (parentIndex < 0)
+                throw new ArgumentException($"Organ '{volume.Id}' references missing host region '{volume.ParentRegionId}'.");
+            if (!ContainsBinding(regionIds, volume.EntryBindingId))
+                throw new ArgumentException($"Organ '{volume.Id}' references missing entry tissue '{volume.EntryBindingId}'.");
+            nextVolumes[i] = FitVolume(volume, bodyParts[parentIndex]);
+        }
+
         var nodes = new UnitAnatomyNode[regionIds.Length];
         for (int i = 0; i < nodes.Length; i++)
         {
             BodyPartDefinition shape = bodyParts[i];
             string parentId = shape.ParentIndex >= 0 ? regionIds[shape.ParentIndex] : string.Empty;
             int oldIndex = FindRegion(regionIds[i]);
+            HitRegionPartBinding[] tissues;
+            UnitAnatomyMarker[] markers;
 
             if (oldIndex >= 0)
             {
                 UnitAnatomyNode previous = _nodes[oldIndex];
-                nodes[i] = UnitAnatomyNode.Part(
-                    regionIds[i],
-                    parentId,
-                    shape,
-                    MathF.Max(0.001f, MathF.Abs(shape.Scale.Z)),
-                    previous.Tissues.ToArray(),
-                    previous.Markers.ToArray());
-                continue;
+                tissues = previous.Tissues.ToArray();
+                markers = previous.Markers.ToArray();
+            }
+            else
+            {
+                string tissueId = $"{regionIds[i]}.tissue";
+                string parentTissueId = shape.ParentIndex >= 0
+                    ? nodes[shape.ParentIndex].Tissues[0].Id
+                    : string.Empty;
+                tissues = new[]
+                {
+                    new HitRegionPartBinding(
+                        UnitHealthPartId.WholeBody,
+                        kind: UnitHealthPartKind.BodyPart,
+                        maxHitPoints: 30f,
+                        id: tissueId,
+                        parentId: string.IsNullOrWhiteSpace(parentTissueId) ? null : parentTissueId)
+                };
+                markers = new[]
+                {
+                    new UnitAnatomyMarker(
+                        "target",
+                        UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision)
+                };
             }
 
-            string tissueId = $"{regionIds[i]}.tissue";
-            string parentTissueId = shape.ParentIndex >= 0
-                ? nodes[shape.ParentIndex].Tissues[0].Id
-                : string.Empty;
-            var tissue = new HitRegionPartBinding(
-                UnitHealthPartId.WholeBody,
-                weight: 1f,
-                kind: UnitHealthPartKind.BodyPart,
-                maxHitPoints: 30f,
-                id: tissueId,
-                parentId: string.IsNullOrWhiteSpace(parentTissueId) ? null : parentTissueId);
+            var filtered = new List<HitRegionPartBinding>(tissues.Length + 2);
+            for (int tissueIndex = 0; tissueIndex < tissues.Length; tissueIndex++)
+            {
+                HitRegionPartBinding tissue = tissues[tissueIndex];
+                bool wasVolumeTissue = ContainsTarget(_volumes, tissue.Id);
+                bool stillUsed = ContainsTarget(nextVolumes, tissue.Id);
+                if (wasVolumeTissue && !stillUsed && tissue.Kind == UnitHealthPartKind.Organ)
+                    continue;
+                filtered.Add(tissue);
+            }
+            tissues = filtered.ToArray();
+
+            for (int volumeIndex = 0; volumeIndex < nextVolumes.Length; volumeIndex++)
+            {
+                UnitAnatomyVolume volume = nextVolumes[volumeIndex];
+                if (volume.ParentRegionId != regionIds[i] ||
+                    ContainsBinding(tissues, volume.TargetBindingId))
+                    continue;
+
+                filtered = new List<HitRegionPartBinding>(tissues)
+                {
+                    new HitRegionPartBinding(
+                        UnitHealthPartId.WholeBody,
+                        weight: 1f,
+                        kind: UnitHealthPartKind.Organ,
+                        maxHitPoints: 20f,
+                        id: volume.TargetBindingId,
+                        parentId: volume.EntryBindingId)
+                };
+                tissues = filtered.ToArray();
+            }
+
             nodes[i] = UnitAnatomyNode.Part(
                 regionIds[i],
                 parentId,
                 shape,
                 MathF.Max(0.001f, MathF.Abs(shape.Scale.Z)),
-                new[] { tissue },
-                new UnitAnatomyMarker(
-                    "target",
-                    UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision));
+                tissues,
+                markers);
         }
 
-        return new UnitAnatomyProfile(nodes, Convert(nodes), _volumes);
+        return new UnitAnatomyProfile(nodes, Convert(nodes), nextVolumes);
+    }
+
+    private bool ContainsBinding(ReadOnlySpan<string> regionIds, string bindingId)
+    {
+        for (int i = 0; i < regionIds.Length; i++)
+        {
+            int oldIndex = FindRegion(regionIds[i]);
+            if (string.Equals(bindingId, $"{regionIds[i]}.tissue", StringComparison.Ordinal))
+                return true;
+            if (oldIndex < 0)
+                continue;
+            ReadOnlySpan<HitRegionPartBinding> tissues = _nodes[oldIndex].Tissues;
+            for (int j = 0; j < tissues.Length; j++)
+                if (tissues[j].Id == bindingId)
+                    return true;
+        }
+        return false;
+    }
+
+    private static bool ContainsBinding(ReadOnlySpan<HitRegionPartBinding> tissues, string bindingId)
+    {
+        for (int i = 0; i < tissues.Length; i++)
+            if (tissues[i].Id == bindingId)
+                return true;
+        return false;
+    }
+
+    private static bool ContainsTarget(ReadOnlySpan<UnitAnatomyVolume> volumes, string bindingId)
+    {
+        for (int i = 0; i < volumes.Length; i++)
+            if (volumes[i].TargetBindingId == bindingId)
+                return true;
+        return false;
+    }
+
+    private static int IndexOf(ReadOnlySpan<string> ids, string id)
+    {
+        for (int i = 0; i < ids.Length; i++)
+            if (string.Equals(ids[i], id, StringComparison.Ordinal))
+                return i;
+        return -1;
+    }
+
+    private static UnitAnatomyVolume FitVolume(UnitAnatomyVolume volume, BodyPartDefinition host)
+    {
+        Vector3 scale = Vector3.Max(Vector3.Abs(host.Scale), new Vector3(0.006f));
+        Vector3 center = volume.LocalCenter;
+        Vector3 limits = scale * 0.85f;
+
+        // A triangle's bounding box is larger than its actual silhouette. Keep
+        // organs within the inscribed centre instead of allowing them into corners.
+        if (host.Primitive == BodyPrimitive.Triangle)
+            limits = new Vector3(scale.X * 0.25f, scale.Y * 0.25f, scale.Z * 0.85f);
+
+        Vector3 extents = Vector3.Min(Vector3.Max(volume.HalfExtents, new Vector3(0.002f)), limits);
+        float cos = MathF.Abs(MathF.Cos(volume.LocalRotation));
+        float sin = MathF.Abs(MathF.Sin(volume.LocalRotation));
+        extents = Vector3.Max(extents, new Vector3(0.002f));
+
+        // Enforce containment after the minimum organ size is applied as well.
+        // The minimum extents must not undo the previous containment correction.
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            float rotatedHalfX = cos * extents.X + sin * extents.Y;
+            float rotatedHalfY = sin * extents.X + cos * extents.Y;
+            float nx = (MathF.Abs(center.X) + rotatedHalfX) / scale.X;
+            float ny = (MathF.Abs(center.Y) + rotatedHalfY) / scale.Y;
+            float nz = (MathF.Abs(center.Z) + extents.Z) / scale.Z;
+            float radius = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (radius <= 0.90f)
+                break;
+
+            float factor = 0.90f / radius;
+            center *= factor;
+            extents = Vector3.Max(extents * factor, new Vector3(0.002f));
+        }
+        return new UnitAnatomyVolume(
+            volume.Id,
+            volume.ParentRegionId,
+            volume.EntryBindingId,
+            volume.TargetBindingId,
+            center,
+            extents,
+            volume.Primitive,
+            volume.LocalRotation,
+            volume.EnergyLoss,
+            volume.PenetrationLoss,
+            volume.DamageMultiplier,
+            volume.BleedMultiplier);
     }
 
     public bool IsInternalNode(int index) =>

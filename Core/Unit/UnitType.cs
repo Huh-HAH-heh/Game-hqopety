@@ -60,5 +60,6 @@ public enum UnitPosture : byte
 {
     Standing = 0,
     Lying = 1,
-    Crouching = 2
+    Crouching = 2,
+    Sitting = 3
 }

@@ -810,7 +810,9 @@ public sealed class UnitSimulation
 
                 ReadOnlySpan<HitRegionPartBinding> oldParts = oldRegions[i].Parts;
                 ReadOnlySpan<HitRegionPartBinding> newParts = newRegions[i].Parts;
-                if (oldParts.Length != newParts.Length)
+                // New organs append tissues to an existing host. Preserve the old health
+                // slots when every previous binding remains at the same index.
+                if (oldParts.Length > newParts.Length)
                 {
                     stablePrefix = false;
                     break;
