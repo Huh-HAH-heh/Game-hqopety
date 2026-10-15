@@ -2746,6 +2746,9 @@ private static bool TestVisionDetectsRegionInsideRange()
             return false;
         }
 
+        // Freeze the gait while checking posture transitions so the test isolates pose blending.
+        simulation.Units.Velocity[colonist.Index] = Vector3.Zero;
+        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
         float standingArmRotation =
             simulation.Bodies.WorldRotation[walkingArm];
 
