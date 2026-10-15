@@ -465,6 +465,18 @@ public static class UnitBodyRigSettingsStore
         public string Anchor { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
         public string Pivot { get; set; } = string.Empty;
+        public float CrouchX { get; set; }
+        public float CrouchY { get; set; }
+        public float CrouchZ { get; set; }
+        public float CrouchRotation { get; set; }
+        public float SittingX { get; set; }
+        public float SittingY { get; set; }
+        public float SittingZ { get; set; }
+        public float SittingRotation { get; set; }
+        public float LyingX { get; set; }
+        public float LyingY { get; set; }
+        public float LyingZ { get; set; }
+        public float LyingRotation { get; set; }
 
         public BodyRigPartSettings() { }
 
@@ -484,7 +496,19 @@ public static class UnitBodyRigSettingsStore
             Motion = part.Motion.ToString(),
             Anchor = part.Anchor.ToString(),
             Role = part.Role.ToString(),
-            Pivot = part.Pivot.ToString()
+            Pivot = part.Pivot.ToString(),
+            CrouchX = part.CrouchingOffset.X,
+            CrouchY = part.CrouchingOffset.Y,
+            CrouchZ = part.CrouchingOffset.Z,
+            CrouchRotation = part.CrouchingRotationOffset,
+            SittingX = part.SittingOffset.X,
+            SittingY = part.SittingOffset.Y,
+            SittingZ = part.SittingOffset.Z,
+            SittingRotation = part.SittingRotationOffset,
+            LyingX = part.LyingOffset.X,
+            LyingY = part.LyingOffset.Y,
+            LyingZ = part.LyingOffset.Z,
+            LyingRotation = part.LyingRotationOffset
         };
 
         public BodyPartDefinition Apply(BodyPartDefinition baseline, int index)
@@ -492,6 +516,12 @@ public static class UnitBodyRigSettingsStore
             if (!float.IsFinite(X) || !float.IsFinite(Y) || !float.IsFinite(Z) ||
                 !float.IsFinite(ScaleX) || !float.IsFinite(ScaleY) || !float.IsFinite(ScaleZ) ||
                 !float.IsFinite(Rotation) ||
+                !float.IsFinite(CrouchX) || !float.IsFinite(CrouchY) || !float.IsFinite(CrouchZ) ||
+                !float.IsFinite(CrouchRotation) ||
+                !float.IsFinite(SittingX) || !float.IsFinite(SittingY) || !float.IsFinite(SittingZ) ||
+                !float.IsFinite(SittingRotation) ||
+                !float.IsFinite(LyingX) || !float.IsFinite(LyingY) || !float.IsFinite(LyingZ) ||
+                !float.IsFinite(LyingRotation) ||
                 ScaleX <= 0f || ScaleY <= 0f || ScaleZ <= 0f)
                 return baseline;
 
@@ -518,7 +548,13 @@ public static class UnitBodyRigSettingsStore
                     : baseline.FollowDistance,
                 anchor: anchor,
                 role: role,
-                pivot: pivot);
+                pivot: pivot,
+                crouchingOffset: new Vector3(CrouchX, CrouchY, CrouchZ),
+                sittingOffset: new Vector3(SittingX, SittingY, SittingZ),
+                lyingOffset: new Vector3(LyingX, LyingY, LyingZ),
+                crouchingRotationOffset: CrouchRotation,
+                sittingRotationOffset: SittingRotation,
+                lyingRotationOffset: LyingRotation);
         }
 
         public BodyPartDefinition ToDefinition(int index, int fallbackParent = 0)
@@ -538,7 +574,13 @@ public static class UnitBodyRigSettingsStore
                     followDistance: part.FollowDistance,
                     anchor: part.Anchor,
                     role: part.Role,
-                    pivot: part.Pivot)
+                    pivot: part.Pivot,
+                    crouchingOffset: part.CrouchingOffset,
+                    sittingOffset: part.SittingOffset,
+                    lyingOffset: part.LyingOffset,
+                    crouchingRotationOffset: part.CrouchingRotationOffset,
+                    sittingRotationOffset: part.SittingRotationOffset,
+                    lyingRotationOffset: part.LyingRotationOffset)
                 : baseline;
         }
 

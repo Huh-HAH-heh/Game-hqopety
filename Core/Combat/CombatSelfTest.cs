@@ -48,6 +48,7 @@ public static class CombatSelfTest
         RunTest("Anatomy: rig edits preserve tissue IDs and organ volumes", TestAnatomyRigEditsPreserveBindings, ref passed, ref failed);
         RunTest("Anatomy: rig editor can add dependent regions", TestAnatomyRigCanAppendDependency, ref passed, ref failed);
         RunTest("Anatomy: new organs get damageable tissue and stay inside their host", TestAnatomyRigOrganVolumeAndHealth, ref passed, ref failed);
+        RunTest("Anatomy: pose adjustments survive profile and body-store rebuilds", TestAnatomyRigPoseOffsets, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1538,6 +1539,58 @@ public static class CombatSelfTest
         }
 
         return true;
+    }
+
+    private static bool TestAnatomyRigPoseOffsets()
+    {
+        UnitAnatomyProfile original = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        ReadOnlySpan<UnitAnatomyNode> nodes = original.Nodes;
+        string[] ids = new string[original.NodeCount];
+        BodyPartDefinition[] parts = original.BodyParts.ToArray();
+        int armIndex = original.FindRegion("body.arm.left.lower");
+        if (armIndex < 0)
+            return false;
+
+        for (int i = 0; i < ids.Length; i++)
+            ids[i] = nodes[i].Id;
+
+        BodyPartDefinition part = parts[armIndex];
+        Vector3 sittingOffset = new(-0.02f, 0.03f, 0.04f);
+        Vector3 lyingOffset = new(0.02f, -0.03f, 0.01f);
+        parts[armIndex] = new BodyPartDefinition(
+            part.LocalPosition,
+            part.Scale,
+            part.Primitive,
+            parentIndex: part.ParentIndex,
+            localRotation: part.LocalRotation,
+            motion: part.Motion,
+            followDistance: part.FollowDistance,
+            anchor: part.Anchor,
+            role: part.Role,
+            pivot: part.Pivot,
+            crouchingOffset: new Vector3(0.01f, 0.02f, -0.01f),
+            sittingOffset: sittingOffset,
+            lyingOffset: lyingOffset,
+            crouchingRotationOffset: 0.15f,
+            sittingRotationOffset: -0.3f,
+            lyingRotationOffset: 0.45f);
+
+        UnitAnatomyProfile edited = original.WithRig(ids, parts);
+        BodyPartDefinition result = edited.GetNode(armIndex).Shape;
+        if (result.SittingOffset != sittingOffset ||
+            result.LyingOffset != lyingOffset ||
+            MathF.Abs(result.SittingRotationOffset + 0.3f) > 0.0001f ||
+            MathF.Abs(result.CrouchingRotationOffset - 0.15f) > 0.0001f ||
+            edited.VolumeCount != original.VolumeCount)
+            return false;
+
+        var bodies = new UnitBodyStore(4);
+        BodyHandle handle = bodies.CreateBody(parts);
+        int storedIndex = handle.Start + armIndex;
+        return bodies.SittingOffset[storedIndex] == sittingOffset &&
+               bodies.LyingOffset[storedIndex] == lyingOffset &&
+               MathF.Abs(bodies.SittingRotationOffset[storedIndex] + 0.3f) < 0.0001f &&
+               MathF.Abs(bodies.LyingRotationOffset[storedIndex] - 0.45f) < 0.0001f;
     }
 
     private static bool TestAnatomyRigOrganVolumeAndHealth()

@@ -35,6 +35,12 @@ public readonly struct BodyPartDefinition
     public BodyPartAnchor Anchor { get; }
     public BodyPartRole Role { get; }
     public BodyPartPivot Pivot { get; }
+    public Vector3 CrouchingOffset { get; }
+    public Vector3 SittingOffset { get; }
+    public Vector3 LyingOffset { get; }
+    public float CrouchingRotationOffset { get; }
+    public float SittingRotationOffset { get; }
+    public float LyingRotationOffset { get; }
 
     public BodyPartDefinition(
         Vector3 localPosition,
@@ -46,7 +52,13 @@ public readonly struct BodyPartDefinition
         float followDistance = 0f,
         BodyPartAnchor anchor = BodyPartAnchor.Parent,
         BodyPartRole role = BodyPartRole.Generic,
-        BodyPartPivot pivot = BodyPartPivot.Center)
+        BodyPartPivot pivot = BodyPartPivot.Center,
+        Vector3 crouchingOffset = default,
+        Vector3 sittingOffset = default,
+        Vector3 lyingOffset = default,
+        float crouchingRotationOffset = 0f,
+        float sittingRotationOffset = 0f,
+        float lyingRotationOffset = 0f)
     {
         LocalPosition = localPosition;
         Scale = scale;
@@ -58,5 +70,11 @@ public readonly struct BodyPartDefinition
         Anchor = anchor;
         Role = role;
         Pivot = pivot;
+        CrouchingOffset = crouchingOffset;
+        SittingOffset = sittingOffset;
+        LyingOffset = lyingOffset;
+        CrouchingRotationOffset = crouchingRotationOffset;
+        SittingRotationOffset = sittingRotationOffset;
+        LyingRotationOffset = lyingRotationOffset;
     }
 }

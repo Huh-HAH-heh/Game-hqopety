@@ -212,6 +212,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _selectedOrgan;
     private int _selectedProperty;
     private bool _editingOrgans;
+    private bool _editingPose;
+    private UnitPosture _selectedPose = UnitPosture.Sitting;
     private int _draggingProperty = -1;
     private int _draggingProjection = -1;
     private bool _draggingPart;
@@ -442,6 +444,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         for (int i = 0; i < nodes.Length; i++)
             ids[i] = nodes[i].Id;
 
+        _editingPose = false;
+        _editingOrgans = false;
         _organs = anatomy.Volumes.ToArray();
         SetRigData(ids, anatomy.BodyParts.ToArray(), _organs,
             setDefaults: true, setOpenedSnapshot: true);
@@ -595,27 +599,43 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_modeButton.GetGlobalBounds().Contains(position))
         {
-            _editingOrgans = !_editingOrgans;
+            if (_editingPose)
+            {
+                _editingPose = false;
+                _editingOrgans = false;
+                _status = "Режим частей тела.";
+            }
+            else if (_editingOrgans)
+            {
+                _editingOrgans = false;
+                _editingPose = true;
+                _status = "Режим поз: выбери сегмент, меняй его смещение и угол для выбранной позы.";
+            }
+            else
+            {
+                _editingOrgans = true;
+                _editingPose = false;
+                _status = "Режим органов: выбирай, добавляй и настраивай внутренние объёмы.";
+            }
             _listScroll = 0;
-            _status = _editingOrgans ? "Режим органов: выбирай, добавляй и настраивай внутренние объёмы." : "Режим регионов тела.";
             return true;
         }
 
-        if (_addRegionButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && _addRegionButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) AddOrgan();
             else AddRegion();
             return true;
         }
 
-        if (_addAllFormsButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && _addAllFormsButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) DuplicateSelectedOrgan();
             else AddAllPrimitiveExamples();
             return true;
         }
 
-        if (_removeRegionButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && _removeRegionButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) RemoveSelectedOrgan();
             else RemoveSelectedCustomRegion();
@@ -624,6 +644,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_parentButton.GetGlobalBounds().Contains(position))
         {
+            if (_editingPose)
+            {
+                CycleSelectedPose();
+                return true;
+            }
+
             if (_editingOrgans && _organs.Length == 0)
             {
                 _status = "Сначала добавь орган.";
@@ -870,7 +896,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (key == Keyboard.Key.Tab)
         {
-            _selectedProperty = (_selectedProperty + 1) % PropertyCount;
+            _selectedProperty = (_selectedProperty + 1) % (_editingPose ? 4 : PropertyCount);
             return true;
         }
 
@@ -881,7 +907,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (key == Keyboard.Key.P)
+        if (key == Keyboard.Key.P && !_editingPose)
         {
             if (_editingOrgans && _organs.Length > 0)
             {
@@ -946,11 +972,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         int selectedListItem = _editingOrgans ? _selectedOrgan : _selectedPart;
         if (_listTitle != null)
         {
-            _listTitle.DisplayedString = _editingOrgans ? "ОРГАНЫ / ВНУТРЕННИЕ ОБЪЁМЫ" : "ЧАСТИ ТЕЛА";
+            _listTitle.DisplayedString = _editingPose
+                ? "ПОЗА / ЧАСТИ ТЕЛА"
+                : _editingOrgans ? "ОРГАНЫ / ВНУТРЕННИЕ ОБЪЁМЫ" : "ЧАСТИ ТЕЛА";
             window.Draw(_listTitle);
         }
 
-        _modeLabel!.DisplayedString = _editingOrgans ? "К ТЕЛУ" : "ОРГАНЫ";
+        _modeLabel!.DisplayedString = _editingPose ? "К ТЕЛУ" : _editingOrgans ? "ПОЗЫ" : "ОРГАНЫ";
         _modeLabel.Position = new Vector2f(_modeButton.Position.X + 8f, _modeButton.Position.Y + 5f);
         window.Draw(_modeButton);
         window.Draw(_modeLabel);
@@ -984,9 +1012,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _addRegionLabel!.DisplayedString = _editingOrgans ? "+ ДОБАВИТЬ ОРГАН" : "+ ДОБАВИТЬ РЕГИОН";
         _addAllFormsLabel!.DisplayedString = _editingOrgans ? "+ КОПИЯ ОРГАНА" : "+ ВСЕ ФОРМЫ";
         _removeRegionLabel!.DisplayedString = _editingOrgans ? "УДАЛИТЬ ОРГАН" : "УДАЛИТЬ СВОЙ РЕГИОН";
-        DrawButton(window, _addRegionButton, _addRegionLabel);
-        DrawButton(window, _addAllFormsButton, _addAllFormsLabel);
-        DrawButton(window, _removeRegionButton, _removeRegionLabel);
+        if (!_editingPose)
+        {
+            DrawButton(window, _addRegionButton, _addRegionLabel);
+            DrawButton(window, _addAllFormsButton, _addAllFormsLabel);
+            DrawButton(window, _removeRegionButton, _removeRegionLabel);
+        }
 
         for (int projection = 0; projection < _previewPanels.Length; projection++)
             DrawProjection(window, projection);
@@ -1001,7 +1032,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_selectedInfo != null)
         {
-            if (_editingOrgans && _organs.Length == 0)
+            if (_editingPose)
+            {
+                BodyPartDefinition posePart = _parts[_selectedPart];
+                Vector3 poseOffset = GetPoseOffset(posePart, _selectedPose);
+                float poseRotation = GetPoseRotationOffset(posePart, _selectedPose) * 180f / MathF.PI;
+                _selectedInfo.DisplayedString =
+                    $"Поза: {PoseName(_selectedPose)}\nΔ позиции: {poseOffset.X:0.000}, {poseOffset.Y:0.000}, {poseOffset.Z:0.000}\nΔ поворота: {poseRotation:0.0}°";
+            }
+            else if (_editingOrgans && _organs.Length == 0)
             {
                 _selectedInfo.DisplayedString = "Нажми «+ ДОБАВИТЬ ОРГАН», чтобы создать внутренний объём.";
             }
@@ -1021,13 +1060,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_selectedInfo);
         }
 
-        if (!_editingOrgans || _organs.Length > 0)
+        if (_editingPose)
+        {
+            for (int i = 0; i < 4; i++)
+                DrawProperty(window, i);
+        }
+        else if (!_editingOrgans || _organs.Length > 0)
         {
             for (int i = 0; i < PropertyCount; i++)
                 DrawProperty(window, i);
         }
 
-        if (_primitiveLabel != null)
+        if (_primitiveLabel != null && !_editingPose)
         {
             _primitiveLabel.DisplayedString = _editingOrgans
                 ? (_organs.Length > 0 ? $"ФОРМА ОРГАНА: {_organs[_selectedOrgan].Primitive}   [P]" : "ФОРМА ОРГАНА: —")
@@ -1041,7 +1085,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_parentLabel != null)
         {
-            if (_editingOrgans && _organs.Length == 0)
+            if (_editingPose)
+            {
+                _parentLabel.DisplayedString = $"ПОЗА: {PoseName(_selectedPose)}  [клик]";
+            }
+            else if (_editingOrgans && _organs.Length == 0)
             {
                 _parentLabel.DisplayedString = "ОБЛАСТЬ: —";
             }
@@ -1434,7 +1482,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private void DrawProperty(RenderWindow window, int index)
     {
         PropertyInfo info = GetProperty(index);
-        if (_editingOrgans)
+        if (_editingPose)
+        {
+            string[] names = { "СМЕЩЕНИЕ X", "СМЕЩЕНИЕ Y", "СМЕЩЕНИЕ Z", "ПОВОРОТ ПОЗЫ, ГРАДУСЫ" };
+            _sliderLabels[index]!.DisplayedString = names[index];
+        }
+        else if (_editingOrgans)
         {
             string[] names =
             {
@@ -1476,6 +1529,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         for (int i = 0; i < _parts.Length; i++)
         {
             BodyPartDefinition part = _parts[i];
+            NumericsVector3 localPosition = part.LocalPosition;
+            float localRotation = part.LocalRotation;
+            if (_editingPose)
+                ApplyPreviewPose(part, ref localPosition, ref localRotation);
+
             int parent = part.ParentIndex;
             NumericsVector3 origin = NumericsVector3.Zero;
             float positionRotation = 0f;
@@ -1494,8 +1552,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 baseRotation = 0f;
             }
 
-            NumericsVector3 joint = origin + Rotate2D(part.LocalPosition, positionRotation);
-            float worldRotation = baseRotation + part.LocalRotation;
+            NumericsVector3 joint = origin + Rotate2D(localPosition, positionRotation);
+            float worldRotation = baseRotation + localRotation;
             if (part.Pivot == BodyPartPivot.Start)
             {
                 joint += Rotate2D(
@@ -1506,6 +1564,87 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _worldPositions[i] = joint;
             _worldRotations[i] = worldRotation;
         }
+    }
+
+    private void CycleSelectedPose()
+    {
+        _selectedPose = _selectedPose switch
+        {
+            UnitPosture.Sitting => UnitPosture.Crouching,
+            UnitPosture.Crouching => UnitPosture.Lying,
+            _ => UnitPosture.Sitting
+        };
+        _status = $"Редактируется поза «{PoseName(_selectedPose)}». Смещения сегментов независимы для каждой позы.";
+    }
+
+    private static string PoseName(UnitPosture pose) => pose switch
+    {
+        UnitPosture.Sitting => "Сидя",
+        UnitPosture.Crouching => "Присев",
+        UnitPosture.Lying => "Лёжа",
+        _ => "Стоя"
+    };
+
+    private static Vector3 GetPoseOffset(BodyPartDefinition part, UnitPosture pose) => pose switch
+    {
+        UnitPosture.Sitting => part.SittingOffset,
+        UnitPosture.Crouching => part.CrouchingOffset,
+        UnitPosture.Lying => part.LyingOffset,
+        _ => Vector3.Zero
+    };
+
+    private static float GetPoseRotationOffset(BodyPartDefinition part, UnitPosture pose) => pose switch
+    {
+        UnitPosture.Sitting => part.SittingRotationOffset,
+        UnitPosture.Crouching => part.CrouchingRotationOffset,
+        UnitPosture.Lying => part.LyingRotationOffset,
+        _ => 0f
+    };
+
+    private static BodyPartDefinition WithPoseOffset(
+        BodyPartDefinition part, UnitPosture pose, Vector3 offset, float rotationOffset) => pose switch
+    {
+        UnitPosture.Sitting => Copy(part, sittingOffset: offset, sittingRotationOffset: rotationOffset),
+        UnitPosture.Crouching => Copy(part, crouchingOffset: offset, crouchingRotationOffset: rotationOffset),
+        UnitPosture.Lying => Copy(part, lyingOffset: offset, lyingRotationOffset: rotationOffset),
+        _ => part
+    };
+
+    private void ApplyPreviewPose(BodyPartDefinition part, ref NumericsVector3 position, ref float rotation)
+    {
+        switch (_selectedPose)
+        {
+            case UnitPosture.Crouching:
+                switch (part.Role)
+                {
+                    case BodyPartRole.UpperArm: position.Y *= 0.82f; rotation *= 0.84f; break;
+                    case BodyPartRole.Forearm: rotation = MathF.CopySign(2.20f, rotation); break;
+                    case BodyPartRole.Thigh: position.X *= 1.05f; position.Y *= 0.82f; rotation -= MathF.Sign(rotation) * 0.12f; break;
+                    case BodyPartRole.Shin: rotation = MathF.CopySign(0.45f, rotation); break;
+                }
+                break;
+            case UnitPosture.Sitting:
+                switch (part.Role)
+                {
+                    case BodyPartRole.UpperArm: position.Y *= 0.72f; position.Z *= 0.92f; rotation *= 0.72f; break;
+                    case BodyPartRole.Forearm: rotation = MathF.CopySign(2.45f, rotation); break;
+                    case BodyPartRole.Thigh: position.X *= 0.48f; position.Y *= 1.22f; rotation = MathF.CopySign(1.05f, rotation); break;
+                    case BodyPartRole.Shin: rotation = MathF.CopySign(0.95f, rotation); break;
+                }
+                break;
+            case UnitPosture.Lying:
+                switch (part.Role)
+                {
+                    case BodyPartRole.UpperArm: position.Y *= 1.12f; rotation = MathF.CopySign(MathF.Max(MathF.Abs(rotation), 1.55f), rotation); break;
+                    case BodyPartRole.Forearm: rotation = MathF.CopySign(1.80f, rotation); break;
+                    case BodyPartRole.Thigh: position.X *= 1.08f; position.Y *= 1.18f; rotation = MathF.CopySign(MathF.PI - 0.12f, rotation); break;
+                    case BodyPartRole.Shin: rotation *= 0.5f; break;
+                }
+                break;
+        }
+
+        position += GetPoseOffset(part, _selectedPose);
+        rotation += GetPoseRotationOffset(part, _selectedPose);
     }
 
     private ProjectedPart ProjectOrgan(UnitAnatomyVolume organ, int projection)
@@ -1642,6 +1781,25 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
         }
 
+        if (_editingPose)
+        {
+            BodyPartDefinition posePart = _parts[_selectedPart];
+            Vector3 offset = GetPoseOffset(posePart, _selectedPose);
+            float poseDx = deltaX / layout.PixelsPerUnit;
+            float poseDy = -deltaY / layout.PixelsPerUnit;
+            switch (projection)
+            {
+                case 0: offset.Y += poseDx; offset.Z += poseDy; break;
+                case 1: offset.X += poseDx; offset.Z += poseDy; break;
+                default: offset.X += poseDx; offset.Y += poseDy; break;
+            }
+            _parts[_selectedPart] = WithPoseOffset(posePart, _selectedPose, Snap(offset),
+                GetPoseRotationOffset(posePart, _selectedPose));
+            ApplyEnabledSymmetry(projection);
+            _status = $"Поза «{PoseName(_selectedPose)}»: перемещён сегмент «{PartName(_regionIds[_selectedPart])}».";
+            return;
+        }
+
         BodyPartDefinition part = _parts[_selectedPart];
         float dx = deltaX / layout.PixelsPerUnit;
         float dy = -deltaY / layout.PixelsPerUnit;
@@ -1707,17 +1865,33 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private void AdjustProperty(int propertyIndex, float direction)
     {
         PropertyInfo info = GetProperty(propertyIndex);
-        float step = propertyIndex switch
-        {
-            0 or 1 or 2 => 0.01f,
-            3 or 4 or 5 => 0.005f,
-            _ => 5f
-        };
+        float step = _editingPose
+            ? propertyIndex == 3 ? 5f : 0.01f
+            : propertyIndex switch
+            {
+                0 or 1 or 2 => 0.01f,
+                3 or 4 or 5 => 0.005f,
+                _ => 5f
+            };
         SetProperty(propertyIndex, info.Value + direction * step);
     }
 
     private PropertyInfo GetProperty(int index)
     {
+        if (_editingPose)
+        {
+            BodyPartDefinition posePart = _parts[_selectedPart];
+            Vector3 offset = GetPoseOffset(posePart, _selectedPose);
+            float angle = GetPoseRotationOffset(posePart, _selectedPose) * 180f / MathF.PI;
+            return index switch
+            {
+                0 => new PropertyInfo(-0.4f, 0.4f, offset.X, $"{offset.X:+0.000;-0.000;0.000}"),
+                1 => new PropertyInfo(-0.4f, 0.4f, offset.Y, $"{offset.Y:+0.000;-0.000;0.000}"),
+                2 => new PropertyInfo(-0.4f, 0.4f, offset.Z, $"{offset.Z:+0.000;-0.000;0.000}"),
+                _ => new PropertyInfo(-180f, 180f, angle, $"{angle:+0.0;-0.0;0.0}°")
+            };
+        }
+
         if (_editingOrgans && _organs.Length > 0)
         {
             UnitAnatomyVolume organ = _organs[_selectedOrgan];
@@ -1751,6 +1925,26 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void SetProperty(int index, float value)
     {
+        if (_editingPose)
+        {
+            BodyPartDefinition part = _parts[_selectedPart];
+            Vector3 offset = GetPoseOffset(part, _selectedPose);
+            float rotationOffset = GetPoseRotationOffset(part, _selectedPose);
+            switch (index)
+            {
+                case 0: offset.X = Math.Clamp(value, -0.4f, 0.4f); break;
+                case 1: offset.Y = Math.Clamp(value, -0.4f, 0.4f); break;
+                case 2: offset.Z = Math.Clamp(value, -0.4f, 0.4f); break;
+                default: rotationOffset = Math.Clamp(value, -180f, 180f) * MathF.PI / 180f; break;
+            }
+
+            offset = Snap(offset);
+            _parts[_selectedPart] = WithPoseOffset(part, _selectedPose, offset, rotationOffset);
+            ApplyEnabledSymmetry();
+            _status = $"Изменена поза «{PoseName(_selectedPose)}» для «{PartName(_regionIds[_selectedPart])}». Нажми Ctrl+S.";
+            return;
+        }
+
         if (_editingOrgans && _organs.Length > 0)
         {
             UnitAnatomyVolume organ = _organs[_selectedOrgan];
@@ -1854,6 +2048,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             center *= factor;
             extents = Vector3.Max(extents * factor, new Vector3(0.002f));
         }
+
         return CopyOrgan(organ, center: center, halfExtents: extents);
     }
 
@@ -2205,6 +2400,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 continue;
 
             BodyPartDefinition target = _parts[counterpartIndex];
+            if (_editingPose)
+            {
+                _parts[counterpartIndex] = Copy(
+                    target,
+                    crouchingOffset: MirrorPoseOffset(source.CrouchingOffset, target.CrouchingOffset, projection),
+                    sittingOffset: MirrorPoseOffset(source.SittingOffset, target.SittingOffset, projection),
+                    lyingOffset: MirrorPoseOffset(source.LyingOffset, target.LyingOffset, projection),
+                    crouchingRotationOffset: -source.CrouchingRotationOffset,
+                    sittingRotationOffset: -source.SittingRotationOffset,
+                    lyingRotationOffset: -source.LyingRotationOffset);
+                continue;
+            }
+
             NumericsVector3 mirroredPosition = projection switch
             {
                 0 or 2 => new NumericsVector3(source.LocalPosition.X, -source.LocalPosition.Y, source.LocalPosition.Z),
@@ -2215,9 +2423,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 localPosition: mirroredPosition,
                 scale: source.Scale,
                 localRotation: -source.LocalRotation,
-                primitive: source.Primitive);
+                primitive: source.Primitive,
+                crouchingOffset: MirrorPoseOffset(source.CrouchingOffset, target.CrouchingOffset, projection),
+                sittingOffset: MirrorPoseOffset(source.SittingOffset, target.SittingOffset, projection),
+                lyingOffset: MirrorPoseOffset(source.LyingOffset, target.LyingOffset, projection),
+                crouchingRotationOffset: -source.CrouchingRotationOffset,
+                sittingRotationOffset: -source.SittingRotationOffset,
+                lyingRotationOffset: -source.LyingRotationOffset);
         }
     }
+
+    private static Vector3 MirrorPoseOffset(Vector3 source, Vector3 counterpart, int projection) =>
+        projection == 1
+            ? new Vector3(source.X, counterpart.Y, source.Z)
+            : new Vector3(source.X, -source.Y, source.Z);
 
     private static string? GetCounterpartId(string id)
     {
@@ -2371,7 +2590,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float? localRotation = null,
         BodyPrimitive? primitive = null,
         int? parentIndex = null,
-        BodyPartAnchor? anchor = null) =>
+        BodyPartAnchor? anchor = null,
+        Vector3? crouchingOffset = null,
+        Vector3? sittingOffset = null,
+        Vector3? lyingOffset = null,
+        float? crouchingRotationOffset = null,
+        float? sittingRotationOffset = null,
+        float? lyingRotationOffset = null) =>
         new(
             localPosition ?? original.LocalPosition,
             scale ?? original.Scale,
@@ -2382,7 +2607,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             followDistance: original.FollowDistance,
             anchor: anchor ?? original.Anchor,
             role: original.Role,
-            pivot: original.Pivot);
+            pivot: original.Pivot,
+            crouchingOffset: crouchingOffset ?? original.CrouchingOffset,
+            sittingOffset: sittingOffset ?? original.SittingOffset,
+            lyingOffset: lyingOffset ?? original.LyingOffset,
+            crouchingRotationOffset: crouchingRotationOffset ?? original.CrouchingRotationOffset,
+            sittingRotationOffset: sittingRotationOffset ?? original.SittingRotationOffset,
+            lyingRotationOffset: lyingRotationOffset ?? original.LyingRotationOffset);
 
     private static UnitAnatomyVolume CopyOrgan(
         UnitAnatomyVolume original,

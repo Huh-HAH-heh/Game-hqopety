@@ -5,7 +5,12 @@ namespace Core.Unit;
 
 public sealed class UnitBodySystem
 {
+    private const int PostureCount = 4;
+    private const float PostureTransitionSpeed = 2.8f;
     private float _animationTime;
+    private float[] _postureWeights = new float[1024 * PostureCount];
+    private bool[] _postureInitialized = new bool[1024];
+    private uint[] _postureGeneration = new uint[1024];
 
     public void Update(
         UnitStore units,
@@ -16,6 +21,7 @@ public sealed class UnitBodySystem
             return;
 
         _animationTime += Math.Clamp(deltaTime, 0f, 0.1f);
+        EnsurePostureCapacity(units.Type.Length);
         float followAlpha = Math.Clamp(deltaTime * 14f, 0f, 1f);
         ReadOnlySpan<int> active = units.ActiveIndices;
 
@@ -41,6 +47,12 @@ public sealed class UnitBodySystem
         BodyPartRole[] roles = bodies.Role;
         BodyPartPivot[] pivots = bodies.Pivot;
         Vector3[] scales = bodies.Scale;
+        Vector3[] crouchingOffsets = bodies.CrouchingOffset;
+        Vector3[] sittingOffsets = bodies.SittingOffset;
+        Vector3[] lyingOffsets = bodies.LyingOffset;
+        float[] crouchingRotationOffsets = bodies.CrouchingRotationOffset;
+        float[] sittingRotationOffsets = bodies.SittingRotationOffset;
+        float[] lyingRotationOffsets = bodies.LyingRotationOffset;
 
         for (int i = 0; i < active.Length; i++)
         {
@@ -51,6 +63,7 @@ public sealed class UnitBodySystem
             if (count <= 0)
                 continue;
 
+            UpdatePostureWeights(unit, postures[unit], units.Generation[unit], deltaTime);
             UpdateBody(
                 unit,
                 start,
@@ -74,13 +87,19 @@ public sealed class UnitBodySystem
                 roles,
                 pivots,
                 scales,
+                crouchingOffsets,
+                sittingOffsets,
+                lyingOffsets,
+                crouchingRotationOffsets,
+                sittingRotationOffsets,
+                lyingRotationOffsets,
                 followDistances,
                 followAlpha,
                 Math.Clamp(deltaTime, 0f, 0.05f));
         }
     }
 
-    private static void UpdateBody(
+    private void UpdateBody(
         int unit,
         int start,
         int count,
@@ -103,6 +122,12 @@ public sealed class UnitBodySystem
         BodyPartRole[] roles,
         BodyPartPivot[] pivots,
         Vector3[] scales,
+        Vector3[] crouchingOffsets,
+        Vector3[] sittingOffsets,
+        Vector3[] lyingOffsets,
+        float[] crouchingRotationOffsets,
+        float[] sittingRotationOffsets,
+        float[] lyingRotationOffsets,
         float[] followDistances,
         float followAlpha,
         float deltaTime)
@@ -136,8 +161,17 @@ public sealed class UnitBodySystem
             int parent = parents[part];
             Vector3 localPosition = localPositions[part];
             float localRotation = localRotations[part];
-            ApplyPosture(posture, roles[part], pivots[part],
+            ReadOnlySpan<float> poseWeights = _postureWeights.AsSpan(unit * PostureCount, PostureCount);
+            ApplyPosture(
+                poseWeights,
+                roles[part], pivots[part],
                 ref localPosition, ref localRotation);
+            localPosition += crouchingOffsets[part] * poseWeights[(int)UnitPosture.Crouching] +
+                             sittingOffsets[part] * poseWeights[(int)UnitPosture.Sitting] +
+                             lyingOffsets[part] * poseWeights[(int)UnitPosture.Lying];
+            localRotation += crouchingRotationOffsets[part] * poseWeights[(int)UnitPosture.Crouching] +
+                             sittingRotationOffsets[part] * poseWeights[(int)UnitPosture.Sitting] +
+                             lyingRotationOffsets[part] * poseWeights[(int)UnitPosture.Lying];
 
             Vector3 origin = unitPositions[unit];
             float positionRotation = bodyRotation;
@@ -236,19 +270,95 @@ public sealed class UnitBodySystem
         }
     }
 
+    private void EnsurePostureCapacity(int requiredUnits)
+    {
+        if (requiredUnits <= _postureInitialized.Length)
+            return;
+
+        int capacity = _postureInitialized.Length;
+        while (capacity < requiredUnits)
+            capacity *= 2;
+
+        Array.Resize(ref _postureGeneration, capacity);
+        Array.Resize(ref _postureInitialized, capacity);
+        Array.Resize(ref _postureWeights, capacity * PostureCount);
+    }
+
+    private void UpdatePostureWeights(int unit, UnitPosture target, uint generation, float deltaTime)
+    {
+        int offset = unit * PostureCount;
+        int targetIndex = Math.Clamp((int)target, 0, PostureCount - 1);
+
+        if (!_postureInitialized[unit] || _postureGeneration[unit] != generation)
+        {
+            Array.Clear(_postureWeights, offset, PostureCount);
+            _postureWeights[offset + targetIndex] = 1f;
+            _postureGeneration[unit] = generation;
+            _postureInitialized[unit] = true;
+            return;
+        }
+        float alpha = 1f - MathF.Exp(-PostureTransitionSpeed * Math.Clamp(deltaTime, 0f, 0.1f));
+        float sum = 0f;
+        for (int pose = 0; pose < PostureCount; pose++)
+        {
+            int index = offset + pose;
+            float desired = pose == targetIndex ? 1f : 0f;
+            _postureWeights[index] += (desired - _postureWeights[index]) * alpha;
+            _postureWeights[index] = Math.Clamp(_postureWeights[index], 0f, 1f);
+            sum += _postureWeights[index];
+        }
+
+        if (sum <= 0.0001f)
+        {
+            Array.Clear(_postureWeights, offset, PostureCount);
+            _postureWeights[offset + targetIndex] = 1f;
+            return;
+        }
+
+        for (int pose = 0; pose < PostureCount; pose++)
+            _postureWeights[offset + pose] /= sum;
+    }
+
     private static void ApplyPosture(
-        UnitPosture posture,
+        ReadOnlySpan<float> postureWeights,
         BodyPartRole role,
         BodyPartPivot pivot,
+        ref Vector3 localPosition,
+        ref float localRotation)
+    {
+        Vector3 basePosition = localPosition;
+        float baseRotation = localRotation;
+        Vector3 positionDelta = Vector3.Zero;
+        float rotationDelta = 0f;
+
+        for (int poseIndex = 1; poseIndex < PostureCount; poseIndex++)
+        {
+            float weight = postureWeights[poseIndex];
+            if (weight <= 0.0001f)
+                continue;
+
+            Vector3 posePosition = basePosition;
+            float poseRotation = baseRotation;
+            ApplyPostureShape((UnitPosture)poseIndex, role, ref posePosition, ref poseRotation);
+            positionDelta += (posePosition - basePosition) * weight;
+            rotationDelta += (poseRotation - baseRotation) * weight;
+        }
+
+        // Blend relative to the base pose; parent/child joint pivots remain linked.
+        localPosition = basePosition + positionDelta;
+        localRotation = baseRotation + rotationDelta;
+    }
+
+    private static void ApplyPostureShape(
+        UnitPosture posture,
+        BodyPartRole role,
         ref Vector3 localPosition,
         ref float localRotation)
     {
         if (posture == UnitPosture.Standing)
             return;
 
-        // Joint offsets remain untouched: children must stay on the exact
-        // endpoint of their parent. Only root attachment points and angles
-        // are adjusted for the pose.
+        // Only relative transforms change; parent and child joints stay linked.
         if (posture == UnitPosture.Crouching)
         {
             switch (role)
@@ -257,46 +367,60 @@ public sealed class UnitBodySystem
                     localPosition.Y *= 0.82f;
                     localRotation *= 0.84f;
                     break;
-
                 case BodyPartRole.Forearm:
                     localRotation = MathF.CopySign(2.20f, localRotation);
                     break;
-
                 case BodyPartRole.Thigh:
                     localPosition.X *= 1.05f;
                     localPosition.Y *= 0.82f;
                     localRotation -= MathF.Sign(localRotation) * 0.12f;
                     break;
-
                 case BodyPartRole.Shin:
                     localRotation = MathF.CopySign(0.45f, localRotation);
                     break;
             }
-
             return;
         }
 
-        // Prone is still an overhead silhouette: arms open out and the legs
-        // extend back. It never rotates the pawn into a side-on presentation.
+        if (posture == UnitPosture.Sitting)
+        {
+            switch (role)
+            {
+                case BodyPartRole.UpperArm:
+                    localPosition.Y *= 0.72f;
+                    localPosition.Z *= 0.92f;
+                    localRotation *= 0.72f;
+                    break;
+                case BodyPartRole.Forearm:
+                    localRotation = MathF.CopySign(2.45f, localRotation);
+                    break;
+                case BodyPartRole.Thigh:
+                    localPosition.X *= 0.48f;
+                    localPosition.Y *= 1.22f;
+                    localRotation = MathF.CopySign(1.05f, localRotation);
+                    break;
+                case BodyPartRole.Shin:
+                    localRotation = MathF.CopySign(0.95f, localRotation);
+                    break;
+            }
+            return;
+        }
+
+        // Prone pose keeps the colonist's top-down orientation.
         switch (role)
         {
             case BodyPartRole.UpperArm:
                 localPosition.Y *= 1.12f;
-                localRotation = MathF.CopySign(
-                    MathF.Max(MathF.Abs(localRotation), 1.55f),
-                    localRotation);
+                localRotation = MathF.CopySign(MathF.Max(MathF.Abs(localRotation), 1.55f), localRotation);
                 break;
-
             case BodyPartRole.Forearm:
                 localRotation = MathF.CopySign(1.80f, localRotation);
                 break;
-
             case BodyPartRole.Thigh:
                 localPosition.X *= 1.08f;
                 localPosition.Y *= 1.18f;
                 localRotation = MathF.CopySign(MathF.PI - 0.12f, localRotation);
                 break;
-
             case BodyPartRole.Shin:
                 localRotation *= 0.5f;
                 break;

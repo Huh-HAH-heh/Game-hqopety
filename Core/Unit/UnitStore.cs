@@ -89,6 +89,9 @@ public sealed class UnitStore
     public ushort[] FactionTag =>
         _factionTag;
 
+    public uint[] Generation =>
+        _generation;
+
     public UnitPosture[] Posture =>
         _posture;
 
