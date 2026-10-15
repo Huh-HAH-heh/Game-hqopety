@@ -1927,9 +1927,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         if (_editingPose)
         {
-            BodyPartDefinition part = _parts[_selectedPart];
-            Vector3 offset = GetPoseOffset(part, _selectedPose);
-            float rotationOffset = GetPoseRotationOffset(part, _selectedPose);
+            BodyPartDefinition poseDefinition = _parts[_selectedPart];
+            Vector3 offset = GetPoseOffset(poseDefinition, _selectedPose);
+            float rotationOffset = GetPoseRotationOffset(poseDefinition, _selectedPose);
             switch (index)
             {
                 case 0: offset.X = Math.Clamp(value, -0.4f, 0.4f); break;
@@ -1939,7 +1939,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             }
 
             offset = Snap(offset);
-            _parts[_selectedPart] = WithPoseOffset(part, _selectedPose, offset, rotationOffset);
+            _parts[_selectedPart] = WithPoseOffset(poseDefinition, _selectedPose, offset, rotationOffset);
             ApplyEnabledSymmetry();
             _status = $"Изменена поза «{PoseName(_selectedPose)}» для «{PartName(_regionIds[_selectedPart])}». Нажми Ctrl+S.";
             return;
