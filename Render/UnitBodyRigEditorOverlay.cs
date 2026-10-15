@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -72,6 +73,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         FillColor = new Color(47, 99, 77, 255),
         OutlineColor = new Color(93, 151, 117, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _newTypeButton = new(new Vector2f(104f, 30f))
+    {
+        FillColor = new Color(46, 64, 81, 255),
+        OutlineColor = new Color(86, 112, 137, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _saveTypeButton = new(new Vector2f(104f, 30f))
+    {
+        FillColor = new Color(48, 85, 68, 255),
+        OutlineColor = new Color(86, 133, 103, 255),
         OutlineThickness = 1f
     };
     private readonly RectangleShape _loadButton = new(new Vector2f(104f, 30f))
@@ -162,6 +175,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private readonly Text? _title;
     private readonly Text? _saveLabel;
+    private readonly Text? _newTypeLabel;
+    private readonly Text? _saveTypeLabel;
     private readonly Text? _loadLabel;
     private readonly Text? _exportLabel;
     private readonly Text? _defaultsLabel;
@@ -213,7 +228,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _selectedProperty;
     private bool _editingOrgans;
     private bool _editingPose;
+    private bool _editingUnitStats;
+    private bool _creatingNewUnitType;
     private UnitPosture _selectedPose = UnitPosture.Sitting;
+    private float _unitMoveSpeed = 2.8f;
+    private float _unitWidth = 0.35f;
+    private float _unitLength = 0.60f;
+    private float _unitHeight = 1.75f;
+    private float _unitViewRange = 20f;
+    private float _unitFieldOfView = 110f;
     private int _draggingProperty = -1;
     private int _draggingProjection = -1;
     private bool _draggingPart;
@@ -335,6 +358,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(240, 248, 242, 255),
                 Style = Text.Styles.Bold
             };
+            _newTypeLabel = new Text(_font, "НОВЫЙ ТИП", 10)
+            {
+                FillColor = new Color(224, 233, 242, 255),
+                Style = Text.Styles.Bold
+            };
+            _saveTypeLabel = new Text(_font, "СОХР. ТИП", 10)
+            {
+                FillColor = new Color(234, 245, 238, 255),
+                Style = Text.Styles.Bold
+            };
             _loadLabel = new Text(_font, "ЗАГРУЗИТЬ", 10)
             {
                 FillColor = new Color(224, 236, 245, 255),
@@ -446,6 +479,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _editingPose = false;
         _editingOrgans = false;
+        _editingUnitStats = false;
+        _creatingNewUnitType = false;
+        _unitMoveSpeed = anatomy.Definition.MoveSpeed;
+        _unitWidth = anatomy.Definition.Width;
+        _unitLength = anatomy.Definition.Length;
+        _unitHeight = anatomy.Definition.Height;
+        _unitViewRange = anatomy.Definition.ViewRange;
+        _unitFieldOfView = anatomy.Definition.FieldOfView;
         _organs = anatomy.Volumes.ToArray();
         SetRigData(ids, anatomy.BodyParts.ToArray(), _organs,
             setDefaults: true, setOpenedSnapshot: true);
@@ -563,6 +604,30 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
+        if (_newTypeButton.GetGlobalBounds().Contains(position))
+        {
+            CreateNewUnitTypeDraft();
+            return true;
+        }
+
+        if (_saveTypeButton.GetGlobalBounds().Contains(position))
+        {
+            SaveUnitTypeFromDialog();
+            return true;
+        }
+
+        if (_newTypeButton.GetGlobalBounds().Contains(position))
+        {
+            CreateNewUnitTypeDraft();
+            return true;
+        }
+
+        if (_saveTypeButton.GetGlobalBounds().Contains(position))
+        {
+            SaveUnitTypeFromDialog();
+            return true;
+        }
+
         if (_saveButton.GetGlobalBounds().Contains(position))
         {
             Save();
@@ -602,47 +667,63 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (_editingPose)
             {
                 _editingPose = false;
+                _editingUnitStats = false;
                 _editingOrgans = false;
                 _status = "Режим частей тела.";
             }
+            else if (_editingUnitStats)
+            {
+                _editingUnitStats = false;
+                _editingPose = true;
+                _editingOrgans = false;
+                _status = "Режим поз: выбери сегмент, меняй смещение и угол.";
+            }
             else if (_editingOrgans)
             {
+                if (!_creatingNewUnitType)
+                {
+                    _status = "Создай новый тип или загрузи файл из Units, чтобы менять характеристики независимо от колонистов.";
+                    return true;
+                }
                 _editingOrgans = false;
-                _editingPose = true;
-                _status = "Режим поз: выбери сегмент, меняй его смещение и угол для выбранной позы.";
+                _editingUnitStats = true;
+                _editingPose = false;
+                _status = "Характеристики типа: скорость, габариты, дальность и FOV.";
             }
             else
             {
                 _editingOrgans = true;
                 _editingPose = false;
+                _editingUnitStats = false;
                 _status = "Режим органов: выбирай, добавляй и настраивай внутренние объёмы.";
             }
+            _selectedProperty = 0;
             _listScroll = 0;
             return true;
         }
 
-        if (!_editingPose && _addRegionButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && _addRegionButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) AddOrgan();
             else AddRegion();
             return true;
         }
 
-        if (!_editingPose && _addAllFormsButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && _addAllFormsButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) DuplicateSelectedOrgan();
             else AddAllPrimitiveExamples();
             return true;
         }
 
-        if (!_editingPose && _removeRegionButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && _removeRegionButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) RemoveSelectedOrgan();
             else RemoveSelectedCustomRegion();
             return true;
         }
 
-        if (_parentButton.GetGlobalBounds().Contains(position))
+        if (!_editingUnitStats && _parentButton.GetGlobalBounds().Contains(position))
         {
             if (_editingPose)
             {
@@ -694,7 +775,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (_primitiveButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && _primitiveButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans && _organs.Length == 0)
             {
@@ -757,7 +838,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        for (int i = 0; i < PropertyCount; i++)
+        for (int i = 0; i < (_editingUnitStats ? 6 : _editingPose ? 4 : PropertyCount); i++)
         {
             if (!_sliderTracks[i].GetGlobalBounds().Contains(position))
                 continue;
@@ -896,7 +977,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (key == Keyboard.Key.Tab)
         {
-            _selectedProperty = (_selectedProperty + 1) % (_editingPose ? 4 : PropertyCount);
+            _selectedProperty = (_selectedProperty + 1) % (_editingUnitStats ? 6 : _editingPose ? 4 : PropertyCount);
             return true;
         }
 
@@ -955,8 +1036,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         window.Draw(_propertiesPanel);
 
         if (_title != null)
+        {
+            _title.DisplayedString = _creatingNewUnitType ? "КОНСТРУКТОР НОВОГО ТИПА ЮНИТА" : "КОНСТРУКТОР ТЕЛА КОЛОНИСТА";
             window.Draw(_title);
+        }
+        if (_saveLabel != null)
+            _saveLabel.DisplayedString = _creatingNewUnitType ? "СОХР. ТИП" : "СОХРАНИТЬ";
         DrawButton(window, _saveButton, _saveLabel);
+        DrawButton(window, _newTypeButton, _newTypeLabel);
+        DrawButton(window, _saveTypeButton, _saveTypeLabel);
         DrawButton(window, _loadButton, _loadLabel);
         DrawButton(window, _exportButton, _exportLabel);
         DrawButton(window, _defaultsButton, _defaultsLabel);
@@ -968,17 +1056,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_propertiesTitle != null)
             window.Draw(_propertiesTitle);
 
-        int displayedItemCount = _editingOrgans ? _organs.Length : _parts.Length;
+        int displayedItemCount = _editingUnitStats ? 0 : _editingOrgans ? _organs.Length : _parts.Length;
         int selectedListItem = _editingOrgans ? _selectedOrgan : _selectedPart;
         if (_listTitle != null)
         {
-            _listTitle.DisplayedString = _editingPose
-                ? "ПОЗА / ЧАСТИ ТЕЛА"
+            _listTitle.DisplayedString = _editingUnitStats
+                ? "ХАРАКТЕРИСТИКИ ТИПА"
+                : _editingPose ? "ПОЗА / ЧАСТИ ТЕЛА"
                 : _editingOrgans ? "ОРГАНЫ / ВНУТРЕННИЕ ОБЪЁМЫ" : "ЧАСТИ ТЕЛА";
             window.Draw(_listTitle);
         }
 
-        _modeLabel!.DisplayedString = _editingPose ? "К ТЕЛУ" : _editingOrgans ? "ПОЗЫ" : "ОРГАНЫ";
+        _modeLabel!.DisplayedString = _editingPose ? "К ТЕЛУ"
+            : _editingUnitStats ? "ПОЗЫ"
+            : _editingOrgans ? "ХАР-КИ" : "ОРГАНЫ";
         _modeLabel.Position = new Vector2f(_modeButton.Position.X + 8f, _modeButton.Position.Y + 5f);
         window.Draw(_modeButton);
         window.Draw(_modeLabel);
@@ -1012,7 +1103,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _addRegionLabel!.DisplayedString = _editingOrgans ? "+ ДОБАВИТЬ ОРГАН" : "+ ДОБАВИТЬ РЕГИОН";
         _addAllFormsLabel!.DisplayedString = _editingOrgans ? "+ КОПИЯ ОРГАНА" : "+ ВСЕ ФОРМЫ";
         _removeRegionLabel!.DisplayedString = _editingOrgans ? "УДАЛИТЬ ОРГАН" : "УДАЛИТЬ СВОЙ РЕГИОН";
-        if (!_editingPose)
+        if (!_editingPose && !_editingUnitStats)
         {
             DrawButton(window, _addRegionButton, _addRegionLabel);
             DrawButton(window, _addAllFormsButton, _addAllFormsLabel);
@@ -1024,15 +1115,23 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_selectedName != null)
         {
-            _selectedName.DisplayedString = _editingOrgans
-                ? (_organs.Length > 0 ? OrganName(_organs[_selectedOrgan].Id) : "ОРГАНОВ НЕТ")
-                : PartName(_regionIds[_selectedPart]);
+            _selectedName.DisplayedString = _editingUnitStats
+                ? (_creatingNewUnitType ? "НОВЫЙ ТИП ЮНИТА" : "ХАРАКТЕРИСТИКИ ТИПА")
+                : _editingOrgans
+                    ? (_organs.Length > 0 ? OrganName(_organs[_selectedOrgan].Id) : "ОРГАНОВ НЕТ")
+                    : PartName(_regionIds[_selectedPart]);
             window.Draw(_selectedName);
         }
 
         if (_selectedInfo != null)
         {
-            if (_editingPose)
+            if (_editingUnitStats)
+            {
+                _selectedInfo.DisplayedString = _creatingNewUnitType
+                    ? "Создаётся новый тип. Настрой тело и органы, затем сохрани профиль в папку игры."
+                    : "Изменения сохраняются в профиль типа. Существующие юниты не меняют параметры автоматически.";
+            }
+            else if (_editingPose)
             {
                 BodyPartDefinition posePart = _parts[_selectedPart];
                 Vector3 poseOffset = GetPoseOffset(posePart, _selectedPose);
@@ -1060,7 +1159,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_selectedInfo);
         }
 
-        if (_editingPose)
+        if (_editingUnitStats)
+        {
+            for (int i = 0; i < 6; i++)
+                DrawProperty(window, i);
+        }
+        else if (_editingPose)
         {
             for (int i = 0; i < 4; i++)
                 DrawProperty(window, i);
@@ -1071,7 +1175,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 DrawProperty(window, i);
         }
 
-        if (_primitiveLabel != null && !_editingPose)
+        if (_primitiveLabel != null && !_editingPose && !_editingUnitStats)
         {
             _primitiveLabel.DisplayedString = _editingOrgans
                 ? (_organs.Length > 0 ? $"ФОРМА ОРГАНА: {_organs[_selectedOrgan].Primitive}   [P]" : "ФОРМА ОРГАНА: —")
@@ -1083,7 +1187,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_primitiveLabel);
         }
 
-        if (_parentLabel != null)
+        if (_parentLabel != null && !_editingUnitStats)
         {
             if (_editingPose)
             {
@@ -1110,7 +1214,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_parentLabel);
         }
 
-        if (_allSymmetryLabel != null)
+        if (_allSymmetryLabel != null && !_editingUnitStats)
         {
             _allSymmetryLabel.DisplayedString = _symmetryEnabled[0] && _symmetryEnabled[1] && _symmetryEnabled[2]
                 ? "СИММЕТРИЯ ВСЕХ: ВКЛ"
@@ -1122,7 +1226,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_allSymmetryLabel);
         }
 
-        if (_gridLabel != null)
+        if (_gridLabel != null && !_editingUnitStats)
         {
             _gridLabel.DisplayedString = _gridEnabled ? "СЕТКА: ВКЛ" : "СЕТКА: ВЫКЛ";
             _gridLabel.Position = new Vector2f(_gridButton.Position.X + 8f, _gridButton.Position.Y + 6f);
@@ -1130,7 +1234,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(_gridLabel);
         }
 
-        if (_gridStepLabel != null)
+        if (_gridStepLabel != null && !_editingUnitStats)
         {
             _gridStepLabel.DisplayedString = $"ШАГ: {_gridSteps[_gridStepIndex]:0.000}";
             _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 8f, _gridStepButton.Position.Y + 6f);
@@ -1171,6 +1275,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         float buttonY = y + 7f;
         _saveButton.Position = new Vector2f(x + panelWidth - 390f, buttonY);
+        _saveTypeButton.Position = new Vector2f(x + panelWidth - 726f, buttonY);
+        _newTypeButton.Position = new Vector2f(x + panelWidth - 838f, buttonY);
         _exportButton.Position = new Vector2f(x + panelWidth - 502f, buttonY);
         _loadButton.Position = new Vector2f(x + panelWidth - 614f, buttonY);
         _defaultsButton.Position = new Vector2f(x + panelWidth - 278f, buttonY);
@@ -1181,6 +1287,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _title.Position = new Vector2f(x + 14f, y + 12f);
         if (_saveLabel != null)
             _saveLabel.Position = new Vector2f(_saveButton.Position.X + 14f, buttonY + 9f);
+        if (_newTypeLabel != null)
+            _newTypeLabel.Position = new Vector2f(_newTypeButton.Position.X + 10f, buttonY + 9f);
+        if (_saveTypeLabel != null)
+            _saveTypeLabel.Position = new Vector2f(_saveTypeButton.Position.X + 12f, buttonY + 9f);
         if (_loadLabel != null)
             _loadLabel.Position = new Vector2f(_loadButton.Position.X + 12f, buttonY + 9f);
         if (_exportLabel != null)
@@ -1482,7 +1592,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private void DrawProperty(RenderWindow window, int index)
     {
         PropertyInfo info = GetProperty(index);
-        if (_editingPose)
+        if (_editingUnitStats)
+        {
+            string[] names = { "СКОРОСТЬ", "ШИРИНА", "ДЛИНА", "ВЫСОТА", "ДАЛЬНОСТЬ ОБЗОРА", "УГОЛ ОБЗОРА" };
+            _sliderLabels[index]!.DisplayedString = names[index];
+        }
+        else if (_editingPose)
         {
             string[] names = { "СМЕЩЕНИЕ X", "СМЕЩЕНИЕ Y", "СМЕЩЕНИЕ Z", "ПОВОРОТ ПОЗЫ, ГРАДУСЫ" };
             _sliderLabels[index]!.DisplayedString = names[index];
@@ -1865,19 +1980,40 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private void AdjustProperty(int propertyIndex, float direction)
     {
         PropertyInfo info = GetProperty(propertyIndex);
-        float step = _editingPose
-            ? propertyIndex == 3 ? 5f : 0.01f
-            : propertyIndex switch
+        float step = _editingUnitStats
+            ? propertyIndex switch
             {
-                0 or 1 or 2 => 0.01f,
-                3 or 4 or 5 => 0.005f,
+                0 => 0.1f,
+                1 or 2 or 3 => 0.01f,
+                4 => 1f,
                 _ => 5f
-            };
+            }
+            : _editingPose
+                ? propertyIndex == 3 ? 5f : 0.01f
+                : propertyIndex switch
+                {
+                    0 or 1 or 2 => 0.01f,
+                    3 or 4 or 5 => 0.005f,
+                    _ => 5f
+                };
         SetProperty(propertyIndex, info.Value + direction * step);
     }
 
     private PropertyInfo GetProperty(int index)
     {
+        if (_editingUnitStats)
+        {
+            return index switch
+            {
+                0 => new PropertyInfo(0.1f, 10f, _unitMoveSpeed, $"{_unitMoveSpeed:0.00}"),
+                1 => new PropertyInfo(0.05f, 2f, _unitWidth, $"{_unitWidth:0.000}"),
+                2 => new PropertyInfo(0.05f, 2f, _unitLength, $"{_unitLength:0.000}"),
+                3 => new PropertyInfo(0.05f, 4f, _unitHeight, $"{_unitHeight:0.000}"),
+                4 => new PropertyInfo(1f, 100f, _unitViewRange, $"{_unitViewRange:0.0}"),
+                _ => new PropertyInfo(10f, 360f, _unitFieldOfView, $"{_unitFieldOfView:0.0}°")
+            };
+        }
+
         if (_editingPose)
         {
             BodyPartDefinition posePart = _parts[_selectedPart];
@@ -1925,6 +2061,21 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void SetProperty(int index, float value)
     {
+        if (_editingUnitStats)
+        {
+            switch (index)
+            {
+                case 0: _unitMoveSpeed = Math.Clamp(value, 0.1f, 10f); break;
+                case 1: _unitWidth = Math.Clamp(value, 0.05f, 2f); break;
+                case 2: _unitLength = Math.Clamp(value, 0.05f, 2f); break;
+                case 3: _unitHeight = Math.Clamp(value, 0.05f, 4f); break;
+                case 4: _unitViewRange = Math.Clamp(value, 1f, 100f); break;
+                default: _unitFieldOfView = Math.Clamp(value, 10f, 360f); break;
+            }
+            _status = "Характеристики изменены. Сохрани тип через «СОХР. ТИП».";
+            return;
+        }
+
         if (_editingPose)
         {
             BodyPartDefinition poseDefinition = _parts[_selectedPart];
@@ -2054,12 +2205,84 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void Save()
     {
+        if (_creatingNewUnitType)
+        {
+            SaveUnitTypeFromDialog();
+            return;
+        }
+
         _openedRegionIds = (string[])_regionIds.Clone();
+        _openedOrgans = (UnitAnatomyVolume[])_organs.Clone();
         _openedParts = (BodyPartDefinition[])_parts.Clone();
         _saveRequested(
             (string[])_regionIds.Clone(),
             (BodyPartDefinition[])_parts.Clone(),
             (UnitAnatomyVolume[])_organs.Clone());
+    }
+
+    private void CreateNewUnitTypeDraft()
+    {
+        string[] ids = { "custom.root.001" };
+        BodyPartDefinition[] parts =
+        {
+            new BodyPartDefinition(
+                Vector3.Zero,
+                new Vector3(0.10f, 0.075f, 0.18f),
+                BodyPrimitive.Circle,
+                parentIndex: -1,
+                role: BodyPartRole.Torso,
+                pivot: BodyPartPivot.Center)
+        };
+
+        _organs = Array.Empty<UnitAnatomyVolume>();
+        _unitMoveSpeed = 2.8f;
+        _unitWidth = 0.35f;
+        _unitLength = 0.60f;
+        _unitHeight = 1.75f;
+        _unitViewRange = 20f;
+        _unitFieldOfView = 110f;
+        _creatingNewUnitType = true;
+        _editingOrgans = false;
+        _editingPose = false;
+        _editingUnitStats = false;
+        _selectedPart = 0;
+        _selectedOrgan = 0;
+        _listScroll = 0;
+        SetRigData(ids, parts, _organs, setDefaults: true, setOpenedSnapshot: true);
+        _status = "Создана новая заготовка типа. Добавь регионы и органы, настрой позы/характеристики и сохрани профиль.";
+    }
+
+    private void SaveUnitTypeFromDialog()
+    {
+        string? path = PickRigFile(save: true, unitType: true);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _status = OperatingSystem.IsWindows()
+                ? "Сохранение нового типа отменено."
+                : "Сохранение типов доступно в Windows.";
+            return;
+        }
+
+        string id = Path.GetFileNameWithoutExtension(path);
+        string displayName = id.Replace('.', ' ').Replace('_', ' ').Replace('-', ' ').Trim();
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = "Новый юнит";
+
+        if (CustomUnitTypeCatalog.SaveType(
+                path, id, displayName,
+                _unitMoveSpeed, _unitWidth, _unitLength, _unitHeight,
+                _unitViewRange, _unitFieldOfView,
+                _regionIds, _parts, _organs,
+                out UnitType savedType, out string savedPath, out string error))
+        {
+            _creatingNewUnitType = true;
+            _status = $"Тип «{displayName}» сохранён. ID: {(ushort)savedType}.\n{savedPath}";
+            Console.WriteLine($"[Custom unit] Saved {savedType}: {savedPath}");
+        }
+        else
+        {
+            _status = $"Ошибка сохранения типа: {error}";
+        }
     }
 
     private void AddOrgan()
@@ -2476,6 +2699,37 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
         }
 
+        if (CustomUnitTypeCatalog.TryReadTypeFile(
+                path, out CustomUnitTypeCatalog.TypeDocument typeDocument, out _))
+        {
+            string[] typeIds = new string[typeDocument.Parts.Count];
+            BodyPartDefinition[] typeParts = new BodyPartDefinition[typeDocument.Parts.Count];
+            for (int i = 0; i < typeParts.Length; i++)
+            {
+                typeIds[i] = typeDocument.Parts[i].Id;
+                typeParts[i] = typeDocument.Parts[i].ToDefinition(i);
+            }
+
+            UnitAnatomyVolume[] typeOrgans = typeDocument.Organs?
+                .Select(item => item.ToVolume())
+                .ToArray() ?? Array.Empty<UnitAnatomyVolume>();
+            if (!SetRigData(typeIds, typeParts, typeOrgans, setDefaults: true, setOpenedSnapshot: true))
+                return;
+
+            _unitMoveSpeed = typeDocument.MoveSpeed;
+            _unitWidth = typeDocument.Width;
+            _unitLength = typeDocument.Length;
+            _unitHeight = typeDocument.Height;
+            _unitViewRange = typeDocument.ViewRange;
+            _unitFieldOfView = typeDocument.FieldOfView;
+            _creatingNewUnitType = true;
+            _editingOrgans = false;
+            _editingPose = false;
+            _editingUnitStats = false;
+            _status = $"Загружен тип «{typeDocument.DisplayName}». Его можно редактировать и сохранить повторно.";
+            return;
+        }
+
         if (!UnitBodyRigSettingsStore.LoadFile(path, out string[] ids, out BodyPartDefinition[] parts,
                 out UnitAnatomyVolume[] organs, out string error))
         {
@@ -2509,10 +2763,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _status = $"Ошибка экспорта: {error}";
     }
 
-    private static string? PickRigFile(bool save)
+    private static string? PickRigFile(bool save, bool unitType = false)
     {
         if (!OperatingSystem.IsWindows())
             return null;
+
+        if (unitType)
+            Directory.CreateDirectory(CustomUnitTypeCatalog.DirectoryPath);
 
         var buffer = new StringBuilder(1024);
         var titleBuffer = new StringBuilder(256);
@@ -2521,7 +2778,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             lStructSize = Marshal.SizeOf<OpenFileName>(),
             hwndOwner = IntPtr.Zero,
             hInstance = IntPtr.Zero,
-            lpstrFilter = "RimClone rig (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0",
+            lpstrFilter = unitType
+                ? "RimClone unit (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0"
+                : "RimClone rig (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0",
             lpstrCustomFilter = IntPtr.Zero,
             nMaxCustFilter = 0,
             nFilterIndex = 1,
@@ -2529,8 +2788,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             nMaxFile = buffer.Capacity,
             lpstrFileTitle = titleBuffer,
             nMaxFileTitle = titleBuffer.Capacity,
-            lpstrInitialDir = Path.GetDirectoryName(UnitBodyRigSettingsStore.FilePath),
-            lpstrTitle = save ? "Сохранить риг как..." : "Загрузить риг",
+            lpstrInitialDir = unitType
+                ? CustomUnitTypeCatalog.DirectoryPath
+                : Path.GetDirectoryName(UnitBodyRigSettingsStore.FilePath),
+            lpstrTitle = unitType
+                ? "Сохранить тип юнита в папку игры"
+                : save ? "Сохранить риг как..." : "Загрузить риг",
             Flags = 0x00000800 | 0x00080000 | (save ? 0x00000002 : 0x00001000),
             nFileOffset = 0,
             nFileExtension = 0,
@@ -2795,6 +3058,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _title?.Dispose();
         _saveLabel?.Dispose();
+        _newTypeLabel?.Dispose();
+        _saveTypeLabel?.Dispose();
         _loadLabel?.Dispose();
         _exportLabel?.Dispose();
         _defaultsLabel?.Dispose();
@@ -2821,6 +3086,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _listPanel.Dispose();
         _propertiesPanel.Dispose();
         _saveButton.Dispose();
+        _newTypeButton.Dispose();
+        _saveTypeButton.Dispose();
         _loadButton.Dispose();
         _exportButton.Dispose();
         _defaultsButton.Dispose();

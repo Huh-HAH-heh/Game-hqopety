@@ -49,6 +49,7 @@ public static class CombatSelfTest
         RunTest("Anatomy: rig editor can add dependent regions", TestAnatomyRigCanAppendDependency, ref passed, ref failed);
         RunTest("Anatomy: new organs get damageable tissue and stay inside their host", TestAnatomyRigOrganVolumeAndHealth, ref passed, ref failed);
         RunTest("Anatomy: pose adjustments survive profile and body-store rebuilds", TestAnatomyRigPoseOffsets, ref passed, ref failed);
+        RunTest("Unit types: custom anatomy profiles spawn with their own stats", TestCustomUnitTypeProfileSpawn, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1539,6 +1540,48 @@ public static class CombatSelfTest
         }
 
         return true;
+    }
+
+    private static bool TestCustomUnitTypeProfileSpawn()
+    {
+        const UnitType customType = (UnitType)60000;
+        UnitAnatomyProfile source = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        ReadOnlySpan<UnitAnatomyNode> nodes = source.Nodes;
+        string[] ids = new string[source.NodeCount];
+        for (int i = 0; i < ids.Length; i++)
+            ids[i] = nodes[i].Id;
+
+        BodyPartDefinition[] parts = source.BodyParts.ToArray();
+        UnitAnatomyVolume[] organs = source.Volumes.ToArray();
+        UnitAnatomyProfile anatomy = source.WithRig(ids, parts, organs);
+        var definition = new UnitDefinition(
+            customType, UnitBodyType.Colonist,
+            moveSpeed: 3.6f,
+            width: 0.44f,
+            length: 0.77f,
+            height: 1.92f,
+            viewRange: 31f,
+            fieldOfView: 147f);
+        UnitAnatomyCatalog.RegisterCustomType(new UnitArchetypeProfile(definition, anatomy));
+
+        UnitArchetypeProfile registered = UnitAnatomyCatalog.Get(customType);
+        if (registered.Definition.MoveSpeed != 3.6f ||
+            registered.Definition.Width != 0.44f ||
+            registered.Definition.Length != 0.77f ||
+            registered.Definition.Height != 1.92f ||
+            registered.Definition.ViewRange != 31f ||
+            registered.Definition.FieldOfView != 147f ||
+            registered.Anatomy.VolumeCount != source.VolumeCount)
+            return false;
+
+        var simulation = new UnitSimulation(4, 64);
+        UnitId unit = simulation.Spawn(customType, new Vector3(2f, 2f, 1f));
+        return simulation.Units.Type[unit.Index] == customType &&
+               MathF.Abs(simulation.Units.MoveSpeed[unit.Index] - 3.6f) < 0.001f &&
+               MathF.Abs(simulation.Units.ViewRange[unit.Index] - 31f) < 0.001f &&
+               MathF.Abs(simulation.Units.FieldOfView[unit.Index] - 147f) < 0.001f &&
+               simulation.Units.BodyCount[unit.Index] == source.NodeCount &&
+               simulation.HitRegions.GetProfile(unit.Index) is UnitAnatomyProfile;
     }
 
     private static bool TestAnatomyRigPoseOffsets()

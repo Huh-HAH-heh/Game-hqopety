@@ -54,6 +54,7 @@ public static class UnitAnatomyCatalog
 {
     private const float DefaultProjectileEnergyLoss = 160f;
     private const float DefaultProjectilePenetrationLoss = 8f;
+    private static readonly System.Collections.Generic.Dictionary<UnitType, UnitArchetypeProfile> CustomProfiles = new();
 
     private static UnitArchetypeProfile Colonist = new(
         new UnitDefinition(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f),
@@ -398,6 +399,32 @@ public static class UnitAnatomyCatalog
             current.StartingEquipment.ToArray());
     }
 
+    public static void RegisterCustomType(UnitArchetypeProfile profile)
+    {
+        if ((ushort)profile.Definition.Type < 1000)
+            throw new ArgumentOutOfRangeException(nameof(profile), "Custom unit types must use IDs >= 1000.");
+
+        CustomProfiles[profile.Definition.Type] = profile;
+    }
+
+    public static bool TryGetCustomType(UnitType type, out UnitArchetypeProfile profile)
+    {
+        if (CustomProfiles.TryGetValue(type, out UnitArchetypeProfile? found))
+        {
+            profile = found;
+            return true;
+        }
+
+        if (CustomUnitTypeCatalog.TryGetProfile(type, out profile))
+        {
+            CustomProfiles[type] = profile;
+            return true;
+        }
+
+        profile = null!;
+        return false;
+    }
+
     public static UnitArchetypeProfile Get(UnitType type)
     {
         if (type == UnitType.Colonist)
@@ -408,7 +435,9 @@ public static class UnitAnatomyCatalog
             UnitType.Colonist => Colonist,
             UnitType.Greenbob => Greenbob,
             UnitType.SegmentedMonster => SegmentedMonster,
-            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown unit archetype.")
+            _ => TryGetCustomType(type, out UnitArchetypeProfile custom)
+                ? custom
+                : throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown unit archetype.")
         };
     }
 
