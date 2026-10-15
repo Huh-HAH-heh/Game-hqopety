@@ -134,7 +134,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(82, 104, 127, 255),
         OutlineThickness = 1f
     };
-    private readonly RectangleShape[] _gridLines = new RectangleShape[192];
+    private readonly RectangleShape[] _gridLines = new RectangleShape[2];
     private readonly RectangleShape _addRegionButton = new(new Vector2f(1f, 25f))
     {
         FillColor = new Color(44, 81, 67, 255),
@@ -201,6 +201,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _selectedPart;
     private int _selectedProperty;
     private int _activeProjection = -1;
+    private float _headerScale = 1f;
     private int _draggingProperty = -1;
     private int _draggingProjection = -1;
     private bool _draggingPart;
@@ -831,8 +832,24 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         window.Draw(_listPanel);
         window.Draw(_propertiesPanel);
 
+        if (_headerScale < 0.9f)
+        {
+            if (_saveLabel != null) _saveLabel.DisplayedString = "СОХР.";
+            if (_loadLabel != null) _loadLabel.DisplayedString = "ЗАГР.";
+            if (_exportLabel != null) _exportLabel.DisplayedString = "ЭКСП.";
+            if (_defaultsLabel != null) _defaultsLabel.DisplayedString = "СБРОС";
+            if (_reloadLabel != null) _reloadLabel.DisplayedString = "ОТКАТ";
+        }
+        else
+        {
+            if (_saveLabel != null) _saveLabel.DisplayedString = "СОХРАНИТЬ";
+            if (_loadLabel != null) _loadLabel.DisplayedString = "ЗАГРУЗИТЬ";
+            if (_exportLabel != null) _exportLabel.DisplayedString = "ЭКСПОРТ";
+            if (_defaultsLabel != null) _defaultsLabel.DisplayedString = "ПО УМОЛЧАНИЮ";
+            if (_reloadLabel != null) _reloadLabel.DisplayedString = "ОТКАТИТЬ";
+        }
         if (_title != null)
-            window.Draw(_title);
+            DrawText(window, _title);
         DrawButton(window, _saveButton, _saveLabel);
         DrawButton(window, _loadButton, _loadLabel);
         DrawButton(window, _exportButton, _exportLabel);
@@ -841,9 +858,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         DrawButton(window, _closeButton, _closeLabel);
 
         if (_listTitle != null)
-            window.Draw(_listTitle);
+            DrawText(window, _listTitle);
         if (_propertiesTitle != null)
-            window.Draw(_propertiesTitle);
+            DrawText(window, _propertiesTitle);
 
         for (int visibleRow = 0; visibleRow < _listVisibleRows; visibleRow++)
         {
@@ -865,7 +882,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _partLabels[itemIndex]!.Position = new Vector2f(
                     _partRows[visibleRow].Position.X + 8f,
                     _partRows[visibleRow].Position.Y + 7f);
-                window.Draw(_partLabels[itemIndex]!);
+                DrawText(window, _partLabels[itemIndex]);
             }
         }
 
@@ -879,7 +896,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_selectedName != null)
         {
             _selectedName.DisplayedString = PartName(_regionIds[_selectedPart]);
-            window.Draw(_selectedName);
+            DrawText(window, _selectedName);
         }
 
         if (_selectedInfo != null)
@@ -888,7 +905,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             string parent = part.ParentIndex >= 0 ? PartName(_regionIds[part.ParentIndex]) : "Корень";
             _selectedInfo.DisplayedString =
                 $"Родитель: {parent}\nPivot: {part.Pivot}   Motion: {part.Motion}\nRole: {part.Role}   Anchor: {part.Anchor}";
-            window.Draw(_selectedInfo);
+            DrawText(window, _selectedInfo);
         }
 
         for (int i = 0; i < PropertyCount; i++)
@@ -903,7 +920,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _primitiveButton.Position.X + 8f,
                 _primitiveButton.Position.Y + 8f);
             window.Draw(_primitiveButton);
-            window.Draw(_primitiveLabel);
+            DrawText(window, _primitiveLabel);
         }
 
         if (_parentLabel != null)
@@ -915,7 +932,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _parentButton.Position.X + 8f,
                 _parentButton.Position.Y + 6f);
             window.Draw(_parentButton);
-            window.Draw(_parentLabel);
+            DrawText(window, _parentLabel);
         }
 
         if (_allSymmetryLabel != null)
@@ -927,7 +944,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _allSymmetryButton.Position.X + 8f,
                 _allSymmetryButton.Position.Y + 6f);
             window.Draw(_allSymmetryButton);
-            window.Draw(_allSymmetryLabel);
+            DrawText(window, _allSymmetryLabel);
         }
 
         if (_gridLabel != null)
@@ -935,7 +952,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _gridLabel.DisplayedString = _gridEnabled ? "СЕТКА: ВКЛ" : "СЕТКА: ВЫКЛ";
             _gridLabel.Position = new Vector2f(_gridButton.Position.X + 8f, _gridButton.Position.Y + 6f);
             window.Draw(_gridButton);
-            window.Draw(_gridLabel);
+            DrawText(window, _gridLabel);
         }
 
         if (_gridStepLabel != null)
@@ -943,15 +960,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _gridStepLabel.DisplayedString = $"ШАГ: {_gridSteps[_gridStepIndex]:0.####}";
             _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 6f, _gridStepButton.Position.Y + 6f);
             window.Draw(_gridStepButton);
-            window.Draw(_gridStepLabel);
+            DrawText(window, _gridStepLabel);
         }
 
         if (_helpText != null)
-            window.Draw(_helpText);
+            DrawText(window, _helpText);
         if (_statusText != null)
         {
             _statusText.DisplayedString = _status;
-            window.Draw(_statusText);
+            DrawText(window, _statusText);
         }
     }
 
@@ -977,34 +994,52 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _header.Position = new Vector2f(x + 1f, y + 1f);
         _header.Size = new Vector2f(panelWidth - 2f, 44f);
 
-        float buttonY = y + 7f;
-        _saveButton.Position = new Vector2f(x + panelWidth - 390f, buttonY);
-        _exportButton.Position = new Vector2f(x + panelWidth - 502f, buttonY);
-        _loadButton.Position = new Vector2f(x + panelWidth - 614f, buttonY);
-        _defaultsButton.Position = new Vector2f(x + panelWidth - 278f, buttonY);
-        _reloadButton.Position = new Vector2f(x + panelWidth - 146f, buttonY);
-        _closeButton.Position = new Vector2f(x + panelWidth - 38f, buttonY);
+        // Compact the header on small windows instead of stacking captions over one another.
+        _headerScale = Math.Clamp(panelWidth / 1180f, 0.65f, 1f);
+        float buttonGap = 8f * _headerScale;
+        float buttonHeight = 30f * _headerScale;
+        float buttonY = y + (44f - buttonHeight) * 0.5f;
+        float right = x + panelWidth - buttonGap;
+
+        _closeButton.Size = new Vector2f(30f * _headerScale, buttonHeight);
+        _closeButton.Position = new Vector2f(right - _closeButton.Size.X, buttonY);
+        right = _closeButton.Position.X - buttonGap;
+        _reloadButton.Size = new Vector2f(104f * _headerScale, buttonHeight);
+        _reloadButton.Position = new Vector2f(right - _reloadButton.Size.X, buttonY);
+        right = _reloadButton.Position.X - buttonGap;
+        _defaultsButton.Size = new Vector2f(124f * _headerScale, buttonHeight);
+        _defaultsButton.Position = new Vector2f(right - _defaultsButton.Size.X, buttonY);
+        right = _defaultsButton.Position.X - buttonGap;
+        _saveButton.Size = new Vector2f(104f * _headerScale, buttonHeight);
+        _saveButton.Position = new Vector2f(right - _saveButton.Size.X, buttonY);
+        right = _saveButton.Position.X - buttonGap;
+        _exportButton.Size = new Vector2f(104f * _headerScale, buttonHeight);
+        _exportButton.Position = new Vector2f(right - _exportButton.Size.X, buttonY);
+        right = _exportButton.Position.X - buttonGap;
+        _loadButton.Size = new Vector2f(104f * _headerScale, buttonHeight);
+        _loadButton.Position = new Vector2f(right - _loadButton.Size.X, buttonY);
 
         if (_title != null)
-            _title.Position = new Vector2f(x + 14f, y + 12f);
-        if (_saveLabel != null)
-            _saveLabel.Position = new Vector2f(_saveButton.Position.X + 14f, buttonY + 9f);
-        if (_loadLabel != null)
-            _loadLabel.Position = new Vector2f(_loadButton.Position.X + 12f, buttonY + 9f);
-        if (_exportLabel != null)
-            _exportLabel.Position = new Vector2f(_exportButton.Position.X + 16f, buttonY + 9f);
-        if (_defaultsLabel != null)
-            _defaultsLabel.Position = new Vector2f(_defaultsButton.Position.X + 10f, buttonY + 10f);
-        if (_reloadLabel != null)
-            _reloadLabel.Position = new Vector2f(_reloadButton.Position.X + 18f, buttonY + 9f);
+        {
+            _title.DisplayedString = _headerScale < 0.9f ? "КОНСТРУКТОР ТЕЛА" : "КОНСТРУКТОР ТЕЛА КОЛОНИСТА";
+            _title.Position = new Vector2f(MathF.Round(x + 14f), MathF.Round(y + 12f));
+        }
+        if (_saveLabel != null) _saveLabel.Position = new Vector2f(_saveButton.Position.X + 4f, buttonY + MathF.Max(1f, (buttonHeight - 10f) * 0.5f));
+        if (_loadLabel != null) _loadLabel.Position = new Vector2f(_loadButton.Position.X + 4f, buttonY + MathF.Max(1f, (buttonHeight - 10f) * 0.5f));
+        if (_exportLabel != null) _exportLabel.Position = new Vector2f(_exportButton.Position.X + 4f, buttonY + MathF.Max(1f, (buttonHeight - 10f) * 0.5f));
+        if (_defaultsLabel != null) _defaultsLabel.Position = new Vector2f(_defaultsButton.Position.X + 4f, buttonY + MathF.Max(1f, (buttonHeight - 9f) * 0.5f));
+        if (_reloadLabel != null) _reloadLabel.Position = new Vector2f(_reloadButton.Position.X + 4f, buttonY + MathF.Max(1f, (buttonHeight - 10f) * 0.5f));
         if (_closeLabel != null)
-            _closeLabel.Position = new Vector2f(_closeButton.Position.X + 8f, buttonY + 2f);
+        {
+            _closeLabel.CharacterSize = (uint)MathF.Max(12f, 18f * _headerScale);
+            _closeLabel.Position = new Vector2f(_closeButton.Position.X + (_closeButton.Size.X - _closeLabel.CharacterSize) * 0.5f, buttonY);
+        }
 
         float contentY = y + 54f;
         float contentHeight = panelHeight - 104f;
         float listX = x + 10f;
-        float listWidth = 188f;
-        float propertiesWidth = 244f;
+        float listWidth = Math.Clamp(panelWidth * 0.18f, 140f, 188f);
+        float propertiesWidth = Math.Clamp(panelWidth * 0.22f, 190f, 244f);
         float propertiesX = x + panelWidth - propertiesWidth - 10f;
         float previewsX = listX + listWidth + 12f;
         float previewsWidth = MathF.Max(180f, propertiesX - previewsX - 12f);
@@ -1049,13 +1084,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_removeRegionLabel != null)
             _removeRegionLabel.Position = new Vector2f(_removeRegionButton.Position.X + 8f, _removeRegionButton.Position.Y + 6f);
 
-        _propertyRowHeight = MathF.Min(37f, MathF.Max(27f, (contentHeight - 310f) / PropertyCount));
+        float propertyTopOffset = MathF.Min(110f, MathF.Max(64f, contentHeight * 0.22f));
+        _propertyRowHeight = Math.Clamp(
+            (contentHeight - propertyTopOffset - 131f) / PropertyCount,
+            16f,
+            37f);
         if (_selectedName != null)
             _selectedName.Position = new Vector2f(propertiesX + 10f, contentY + 31f);
         if (_selectedInfo != null)
             _selectedInfo.Position = new Vector2f(propertiesX + 10f, contentY + 52f);
 
-        float propertyTop = contentY + 110f;
+        float propertyTop = contentY + propertyTopOffset;
         for (int i = 0; i < PropertyCount; i++)
         {
             float rowY = propertyTop + i * _propertyRowHeight;
@@ -1087,8 +1126,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _previewPanels[i].Position = new Vector2f(previewX, previewY);
             _previewPanels[i].Size = new Vector2f(previewWidth, previewHeight);
             if (_projectionLabels[i] != null)
+            {
+                _projectionLabels[i]!.DisplayedString = panelWidth < 980f
+                    ? i switch { 0 => "СПЕРЕДИ", 1 => "СБОКУ", _ => "СВЕРХУ" }
+                    : i switch { 0 => "СПЕРЕДИ  ·  Y / Z", 1 => "СБОКУ  ·  X / Z", _ => "СВЕРХУ  ·  X / Y" };
                 _projectionLabels[i]!.Position = new Vector2f(previewX + 8f, previewY + 8f);
-            _symmetryButtons[i].Position = new Vector2f(previewX + previewWidth - 96f, previewY + 4f);
+            }
+            _symmetryButtons[i].Size = new Vector2f(MathF.Min(88f, MathF.Max(54f, previewWidth - 10f)), 22f);
+            _symmetryButtons[i].Position = new Vector2f(previewX + previewWidth - _symmetryButtons[i].Size.X - 4f, previewY + 4f);
             if (_symmetryLabels[i] != null)
                 _symmetryLabels[i]!.Position = new Vector2f(_symmetryButtons[i].Position.X + 6f, previewY + 10f);
 
@@ -1110,7 +1155,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         panel.OutlineThickness = active ? 2f : 1f;
         window.Draw(panel);
         if (_projectionLabels[projection] != null)
-            window.Draw(_projectionLabels[projection]!);
+            DrawText(window, _projectionLabels[projection]);
 
         _symmetryButtons[projection].FillColor = _symmetryEnabled[projection]
             ? new Color(52, 99, 74, 255)
@@ -1122,7 +1167,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _symmetryLabels[projection]!.Position = new Vector2f(
                 _symmetryButtons[projection].Position.X + 6f,
                 _symmetryButtons[projection].Position.Y + 6f);
-            window.Draw(_symmetryLabels[projection]!);
+            DrawText(window, _symmetryLabels[projection]);
         }
 
         ProjectionLayout layout = _projectionLayouts[projection];
@@ -1231,14 +1276,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_sliderLabels[index] != null)
         {
             _sliderLabels[index]!.Position = new Vector2f(track.Position.X, rowY);
-            window.Draw(_sliderLabels[index]!);
+            DrawText(window, _sliderLabels[index]);
         }
 
         if (_sliderValues[index] != null)
         {
             _sliderValues[index]!.DisplayedString = info.Format;
             _sliderValues[index]!.Position = new Vector2f(track.Position.X + track.Size.X - 78f, rowY - 1f);
-            window.Draw(_sliderValues[index]!);
+            DrawText(window, _sliderValues[index]);
         }
     }
 
@@ -1371,19 +1416,45 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         ProjectedPart[] geometry = _projected[projection];
         for (int i = geometry.Length - 1; i >= 0; i--)
-        {
-            ProjectedPart part = geometry[i];
-            if (part.ScreenHalfWidth <= 0f || part.ScreenHalfHeight <= 0f)
-                continue;
-
-            if (MathF.Abs(x - part.ScreenX) <= part.ScreenHalfWidth + 4f &&
-                MathF.Abs(y - part.ScreenY) <= part.ScreenHalfHeight + 4f)
-            {
+            if (ContainsProjectedPart(geometry[i], x, y))
                 return i;
-            }
+        return -1;
+    }
+
+    private static bool ContainsProjectedPart(ProjectedPart part, float x, float y)
+    {
+        float halfWidth = part.ScreenHalfWidth;
+        float halfHeight = part.ScreenHalfHeight;
+        if (halfWidth <= 0f || halfHeight <= 0f)
+            return false;
+
+        float radians = part.ScreenRotation * MathF.PI / 180f;
+        float cos = MathF.Cos(radians);
+        float sin = MathF.Sin(radians);
+        float dx = x - part.ScreenX;
+        float dy = y - part.ScreenY;
+        // Test against the actual rotated primitive, not its loose axis-aligned box.
+        float localX = dx * cos + dy * sin;
+        float localY = -dx * sin + dy * cos;
+        const float tolerance = 3f;
+
+        if (part.Primitive == BodyPrimitive.Circle)
+        {
+            float nx = localX / (halfWidth + tolerance);
+            float ny = localY / (halfHeight + tolerance);
+            return nx * nx + ny * ny <= 1f;
         }
 
-        return -1;
+        if (part.Primitive == BodyPrimitive.Box)
+            return MathF.Abs(localX) <= halfWidth + tolerance &&
+                   MathF.Abs(localY) <= halfHeight + tolerance;
+
+        float normalizedY = localY / halfHeight;
+        if (normalizedY < -1f - tolerance / halfHeight ||
+            normalizedY > 1f + tolerance / halfHeight)
+            return false;
+        float triangleHalfWidth = Math.Clamp((normalizedY + 1f) * 0.5f, 0f, 1f) * halfWidth;
+        return MathF.Abs(localX) <= triangleHalfWidth + tolerance;
     }
 
     private void UpdatePropertyFromSlider(int propertyIndex, int mouseX)
@@ -1909,14 +1980,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float rightWorld = layout.WorldCenterX + layout.Width / (2f * layout.PixelsPerUnit);
         float lowVertical = layout.WorldCenterY - layout.Height / (2f * layout.PixelsPerUnit);
         float highVertical = layout.WorldCenterY + layout.Height / (2f * layout.PixelsPerUnit);
-        int line = 0;
 
+        RectangleShape verticalLine = _gridLines[0];
         for (float worldX = MathF.Floor(leftWorld / spacing) * spacing;
-             worldX <= rightWorld && line < _gridLines.Length;
+             worldX <= rightWorld;
              worldX += spacing)
         {
             float screenX = layout.ScreenCenterX + (worldX - layout.WorldCenterX) * layout.PixelsPerUnit;
-            RectangleShape gridLine = _gridLines[line++];
+            RectangleShape gridLine = verticalLine;
             gridLine.Position = new Vector2f(screenX, layout.Top);
             gridLine.Size = new Vector2f(1f, layout.Height);
             gridLine.FillColor = MathF.Abs(worldX) < spacing * 0.001f
@@ -1925,14 +1996,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             window.Draw(gridLine);
         }
 
+        RectangleShape horizontalLine = _gridLines[1];
         for (float worldY = MathF.Floor(lowVertical / spacing) * spacing;
-             worldY <= highVertical && line < _gridLines.Length;
+             worldY <= highVertical;
              worldY += spacing)
         {
             float screenY = projection == 2
                 ? layout.ScreenCenterY + (worldY - layout.WorldCenterY) * layout.PixelsPerUnit
                 : layout.ScreenCenterY - (worldY - layout.WorldCenterY) * layout.PixelsPerUnit;
-            RectangleShape gridLine = _gridLines[line++];
+            RectangleShape gridLine = horizontalLine;
             gridLine.Position = new Vector2f(layout.Left, screenY);
             gridLine.Size = new Vector2f(layout.Width, 1f);
             gridLine.FillColor = MathF.Abs(worldY) < spacing * 0.001f
@@ -1984,7 +2056,22 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         window.Draw(button);
         if (label != null)
-            window.Draw(label);
+        {
+            var bounds = label.GetLocalBounds();
+            label.Position = new Vector2f(
+                MathF.Round(button.Position.X + (button.Size.X - bounds.Width) * 0.5f - bounds.Left),
+                MathF.Round(button.Position.Y + (button.Size.Y - bounds.Height) * 0.5f - bounds.Top));
+            DrawText(window, label);
+        }
+    }
+
+    private static void DrawText(RenderWindow window, Text? text)
+    {
+        if (text == null)
+            return;
+        Vector2f position = text.Position;
+        text.Position = new Vector2f(MathF.Round(position.X), MathF.Round(position.Y));
+        window.Draw(text);
     }
 
     private static Font? LoadFont()
