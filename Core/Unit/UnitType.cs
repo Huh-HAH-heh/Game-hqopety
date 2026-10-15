@@ -5,6 +5,7 @@ public enum UnitType : ushort
     Colonist = 0,
     Greenbob = 1,
     SegmentedMonster = 2,
+    Custom = 1000
 }
 
 public enum UnitBodyType : byte
@@ -12,6 +13,7 @@ public enum UnitBodyType : byte
     Colonist = 0,
     SmallCreature = 1,
     SegmentedCreature = 2,
+    Custom = 3
 }
 
 public enum BodyPrimitive : byte

@@ -564,7 +564,7 @@ public sealed class UnitCardOverlay : IDisposable
         void Value(string label, string value) => lines.Add(new CardLine($"  {label}: {value}", false));
 
         Heading("СОСТОЯНИЕ");
-        Value("Тип", unit.Type.ToString());
+        Value("Тип", UnitArchetypeDefinitionStore.GetDisplayName(unit.Type));
         Value("ID", $"{unit.Index}:{unit.Generation}");
         Value("Фракция", unit.FactionTag switch
         {
