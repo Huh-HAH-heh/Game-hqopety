@@ -212,6 +212,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _draggingProperty = -1;
     private int _draggingProjection = -1;
     private bool _draggingPart;
+    private int _surfaceSnapTargetPart = -1;
+    private int _surfaceSnapProjection = -1;
     private int _lastMouseX;
     private int _lastMouseY;
     private float _listRowHeight = 28f;
@@ -449,6 +451,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingProperty = -1;
         _draggingProjection = -1;
         _draggingPart = false;
+        _surfaceSnapTargetPart = -1;
+        _surfaceSnapProjection = -1;
         _status = $"Загружено регионов: {_parts.Length}.";
         IsOpen = true;
     }
@@ -518,6 +522,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingProperty = -1;
         _draggingProjection = -1;
         _draggingPart = false;
+        _surfaceSnapTargetPart = -1;
+        _surfaceSnapProjection = -1;
         _activeProjection = -1;
     }
 
@@ -618,6 +624,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_surfaceSnapButton.GetGlobalBounds().Contains(position))
         {
             _surfaceSnapEnabled = !_surfaceSnapEnabled;
+            _surfaceSnapTargetPart = -1;
+            _surfaceSnapProjection = -1;
             _status = _surfaceSnapEnabled
                 ? "Автопривязка включена: близкие части стыкуются по нормали поверхности. N — переключить."
                 : "Автопривязка к поверхности отключена.";
@@ -672,6 +680,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             }
 
             _selectedPart = itemIndex;
+            _surfaceSnapTargetPart = -1;
+            _surfaceSnapProjection = -1;
             _activeProjection = -1;
             _draggingProperty = -1;
             _draggingProjection = -1;
@@ -702,6 +712,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (hitPart >= 0)
             {
                 _selectedPart = hitPart;
+                _surfaceSnapTargetPart = -1;
+                _surfaceSnapProjection = -1;
                 _draggingProjection = projection;
                 _draggingPart = true;
                 _lastMouseX = position.X;
@@ -752,6 +764,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingProperty = -1;
         _draggingProjection = -1;
         _draggingPart = false;
+        _surfaceSnapTargetPart = -1;
+        _surfaceSnapProjection = -1;
         return true;
     }
 
@@ -783,6 +797,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (key == Keyboard.Key.N)
         {
             _surfaceSnapEnabled = !_surfaceSnapEnabled;
+            _surfaceSnapTargetPart = -1;
+            _surfaceSnapProjection = -1;
             _status = _surfaceSnapEnabled
                 ? "Автопривязка к нормали включена."
                 : "Автопривязка к нормали отключена.";
@@ -1372,6 +1388,35 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
     }
 
+    // Input events can arrive several times between rendered frames. Keep transforms and
+    // projected hit/snap geometry current so each drag step starts from the previous edit.
+    private void RefreshProjectedGeometry()
+    {
+        CalculateWorldTransforms();
+        for (int projection = 0; projection < _projected.Length; projection++)
+        {
+            ProjectionLayout layout = _projectionLayouts[projection];
+            for (int i = 0; i < _parts.Length; i++)
+            {
+                ProjectedPart geometry = Project(
+                    _parts[i], _worldPositions[i], _worldOrientations[i], projection);
+
+                if (layout.PixelsPerUnit > 0f)
+                {
+                    geometry.ScreenX = layout.ScreenCenterX +
+                        (geometry.X - layout.WorldCenterX) * layout.PixelsPerUnit;
+                    geometry.ScreenY = projection == 2
+                        ? layout.ScreenCenterY + (geometry.Y - layout.WorldCenterY) * layout.PixelsPerUnit
+                        : layout.ScreenCenterY - (geometry.Y - layout.WorldCenterY) * layout.PixelsPerUnit;
+                    geometry.ScreenHalfWidth = MathF.Max(1.5f, geometry.HalfWidth * layout.PixelsPerUnit);
+                    geometry.ScreenHalfHeight = MathF.Max(1.5f, geometry.HalfHeight * layout.PixelsPerUnit);
+                }
+
+                _projected[projection][i] = geometry;
+            }
+        }
+    }
+
     private void ApplyProjectionDrag(int projection, int deltaX, int deltaY)
     {
         if (projection < 0 || projection >= _projectionLayouts.Length)
@@ -1419,6 +1464,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             projection < 0 || projection >= _projectionLayouts.Length)
             return;
 
+        RefreshProjectedGeometry();
         BodyPartDefinition part = _parts[_selectedPart];
         NumericsVector3 currentCenter = _worldPositions[_selectedPart];
         NumericsVector3 targetCenter = currentCenter + worldDelta;
@@ -1444,8 +1490,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         worldDelta = targetCenter - currentCenter;
         Vector2f snappedCenter = default;
         Vector2f surfaceNormal = default;
+        int surfaceTargetPart = -1;
         bool alignToSurface = _surfaceSnapEnabled &&
-            TrySnapToSurface(projection, worldDelta, out snappedCenter, out surfaceNormal);
+            TrySnapToSurface(projection, worldDelta, out snappedCenter, out surfaceNormal, out surfaceTargetPart);
         if (alignToSurface)
         {
             ProjectedPart selectedGeometry = _projected[projection][_selectedPart];
@@ -1474,6 +1521,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (alignToSurface)
             AlignSelectedPartToSurfaceNormal(projection, surfaceNormal.X, surfaceNormal.Y);
         ApplyEnabledSymmetry(projection);
+        RefreshProjectedGeometry();
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. " +
             $"Привязка: {(_gridEnabled ? _gridSteps[_gridStepIndex].ToString("0.####") : "выкл")}. Ctrl+S — сохранить.";
     }
@@ -1498,10 +1546,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         int projection,
         NumericsVector3 worldDelta,
         out Vector2f snappedCenter,
-        out Vector2f surfaceNormal)
+        out Vector2f surfaceNormal,
+        out int targetPart)
     {
         snappedCenter = default;
         surfaceNormal = default;
+        targetPart = -1;
         if (_selectedPart < 0 || _selectedPart >= _parts.Length ||
             projection < 0 || projection >= _projected.Length ||
             _projected[projection].Length != _parts.Length)
@@ -1515,44 +1565,98 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float candidateX = currentX + deltaX;
         float candidateY = currentY + deltaY;
         float snapDistance = Math.Clamp(MathF.Max(selected.HalfWidth, selected.HalfHeight) * 0.3f, 0.015f, 0.04f);
-        float bestDistance = snapDistance;
-        bool found = false;
 
+        // Keep the same neighboring surface while dragging. Without this small hysteresis,
+        // overlapping torso/limb shapes can alternate as the "nearest" target from event to event.
+        if (_draggingPart && _draggingProjection == projection &&
+            _surfaceSnapProjection == projection &&
+            _surfaceSnapTargetPart >= 0 &&
+            _surfaceSnapTargetPart < _parts.Length &&
+            _surfaceSnapTargetPart != _selectedPart &&
+            TryGetSnapCandidate(projection, candidateX, candidateY, _surfaceSnapTargetPart,
+                out Vector2f lockedCenter, out Vector2f lockedNormal, out float lockedError) &&
+            lockedError <= snapDistance * 2.5f)
+        {
+            snappedCenter = lockedCenter;
+            surfaceNormal = lockedNormal;
+            targetPart = _surfaceSnapTargetPart;
+            return true;
+        }
+
+        _surfaceSnapTargetPart = -1;
+        _surfaceSnapProjection = -1;
+        float bestDistance = snapDistance;
         for (int i = 0; i < _parts.Length; i++)
         {
             if (i == _selectedPart)
                 continue;
 
-            ProjectedPart other = _projected[projection][i];
-            float otherX = other.X;
-            float otherY = projection == 2 ? other.Y : -other.Y;
-            float directionX = candidateX - otherX;
-            float directionY = candidateY - otherY;
-            float distance = MathF.Sqrt(directionX * directionX + directionY * directionY);
-            if (distance < 0.0001f)
-                continue;
-
-            directionX /= distance;
-            directionY /= distance;
-            if (!TryGetSurfaceNormal(other, directionX, directionY, out float radius, out float normalX, out float normalY))
-                continue;
-
-            float support = GetProjectedSupportRadius(selected, normalX, normalY);
-            float desiredX = otherX + directionX * radius + normalX * (support + 0.0015f);
-            float desiredY = otherY + directionY * radius + normalY * (support + 0.0015f);
-            float errorX = candidateX - desiredX;
-            float errorY = candidateY - desiredY;
-            float error = MathF.Sqrt(errorX * errorX + errorY * errorY);
-            if (error >= bestDistance)
+            if (!TryGetSnapCandidate(projection, candidateX, candidateY, i,
+                    out Vector2f desiredCenter, out Vector2f normal, out float error) ||
+                error >= bestDistance)
                 continue;
 
             bestDistance = error;
-            snappedCenter = new Vector2f(desiredX, desiredY);
-            surfaceNormal = new Vector2f(normalX, normalY);
-            found = true;
+            snappedCenter = desiredCenter;
+            surfaceNormal = normal;
+            targetPart = i;
         }
 
-        return found;
+        if (targetPart < 0)
+            return false;
+
+        if (_draggingPart && _draggingProjection == projection)
+        {
+            _surfaceSnapTargetPart = targetPart;
+            _surfaceSnapProjection = projection;
+        }
+
+        return true;
+    }
+
+    private bool TryGetSnapCandidate(
+        int projection,
+        float candidateX,
+        float candidateY,
+        int otherIndex,
+        out Vector2f desiredCenter,
+        out Vector2f surfaceNormal,
+        out float error)
+    {
+        desiredCenter = default;
+        surfaceNormal = default;
+        error = float.PositiveInfinity;
+        if (otherIndex < 0 || otherIndex >= _parts.Length || otherIndex == _selectedPart)
+            return false;
+
+        ProjectedPart selected = _projected[projection][_selectedPart];
+        ProjectedPart other = _projected[projection][otherIndex];
+        float otherX = other.X;
+        float otherY = projection == 2 ? other.Y : -other.Y;
+        float directionX = candidateX - otherX;
+        float directionY = candidateY - otherY;
+        float distance = MathF.Sqrt(directionX * directionX + directionY * directionY);
+        if (distance < 0.0001f)
+            return false;
+
+        directionX /= distance;
+        directionY /= distance;
+        if (!TryGetSurfaceNormal(other, directionX, directionY,
+                out float radius, out float normalX, out float normalY))
+            return false;
+
+        float support = GetProjectedSupportRadius(selected, normalX, normalY);
+        float desiredX = otherX + directionX * radius + normalX * (support + 0.0015f);
+        float desiredY = otherY + directionY * radius + normalY * (support + 0.0015f);
+        float errorX = candidateX - desiredX;
+        float errorY = candidateY - desiredY;
+        error = MathF.Sqrt(errorX * errorX + errorY * errorY);
+        if (!float.IsFinite(error))
+            return false;
+
+        desiredCenter = new Vector2f(desiredX, desiredY);
+        surfaceNormal = new Vector2f(normalX, normalY);
+        return true;
     }
 
     private static bool TryGetSurfaceNormal(
