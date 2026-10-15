@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text;
 using Core.Unit;
 using SFML.Graphics;
 using SFML.System;
@@ -20,7 +19,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private const int MaxParts = 128;
     private const int PropertyCount = 9;
 
-    private static readonly Color BackdropColor = new(5, 9, 14, 218);
+    private static readonly Color BackdropColor = new(5, 9, 14, 255);
     private static readonly Color PanelColor = new(17, 24, 33, 255);
     private static readonly Color PanelEdge = new(77, 96, 118, 255);
     private static readonly Color MutedText = new(149, 166, 184, 255);
@@ -2328,37 +2327,71 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (!OperatingSystem.IsWindows())
             return null;
 
-        var buffer = new StringBuilder(1024);
-        var titleBuffer = new StringBuilder(256);
-        var dialog = new OpenFileName
-        {
-            lStructSize = Marshal.SizeOf<OpenFileName>(),
-            hwndOwner = IntPtr.Zero,
-            hInstance = IntPtr.Zero,
-            lpstrFilter = "RimClone rig (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0",
-            lpstrCustomFilter = IntPtr.Zero,
-            nMaxCustFilter = 0,
-            nFilterIndex = 1,
-            lpstrFile = buffer,
-            nMaxFile = buffer.Capacity,
-            lpstrFileTitle = titleBuffer,
-            nMaxFileTitle = titleBuffer.Capacity,
-            lpstrInitialDir = Path.GetDirectoryName(UnitBodyRigSettingsStore.FilePath),
-            lpstrTitle = save ? "Сохранить риг как..." : "Загрузить риг",
-            Flags = 0x00000800 | 0x00080000 | (save ? 0x00000002 : 0x00001000),
-            nFileOffset = 0,
-            nFileExtension = 0,
-            lpstrDefExt = "json",
-            lCustData = IntPtr.Zero,
-            lpfnHook = IntPtr.Zero,
-            lpTemplateName = null,
-            pvReserved = IntPtr.Zero,
-            dwReserved = 0,
-            FlagsEx = 0
-        };
+        const int maxFile = 1024;
+        IntPtr filter = IntPtr.Zero;
+        IntPtr fileBuffer = IntPtr.Zero;
+        IntPtr initialDirectory = IntPtr.Zero;
+        IntPtr title = IntPtr.Zero;
+        IntPtr extension = IntPtr.Zero;
 
-        bool accepted = save ? GetSaveFileNameW(ref dialog) : GetOpenFileNameW(ref dialog);
-        return accepted ? dialog.lpstrFile.ToString() : null;
+        try
+        {
+            // OPENFILENAME contains native pointers, not managed StringBuilder fields.
+            // StringBuilder as a field makes Marshal.SizeOf<OpenFileName>() fail.
+            filter = Marshal.StringToHGlobalUni(
+                "RimClone rig (*.json)\0*.json\0Все файлы (*.*)\0*.*\0\0");
+            fileBuffer = Marshal.AllocHGlobal(maxFile * sizeof(char));
+            Marshal.Copy(new char[maxFile], 0, fileBuffer, maxFile);
+
+            string? initialDirectoryPath = Path.GetDirectoryName(UnitBodyRigSettingsStore.FilePath);
+            if (!string.IsNullOrWhiteSpace(initialDirectoryPath))
+                initialDirectory = Marshal.StringToHGlobalUni(initialDirectoryPath);
+
+            title = Marshal.StringToHGlobalUni(save ? "Сохранить риг как..." : "Загрузить риг");
+            extension = Marshal.StringToHGlobalUni("json");
+
+            var dialog = new OpenFileName
+            {
+                lStructSize = Marshal.SizeOf<OpenFileName>(),
+                hwndOwner = IntPtr.Zero,
+                hInstance = IntPtr.Zero,
+                lpstrFilter = filter,
+                lpstrCustomFilter = IntPtr.Zero,
+                nMaxCustFilter = 0,
+                nFilterIndex = 1,
+                lpstrFile = fileBuffer,
+                nMaxFile = maxFile,
+                lpstrFileTitle = IntPtr.Zero,
+                nMaxFileTitle = 0,
+                lpstrInitialDir = initialDirectory,
+                lpstrTitle = title,
+                Flags = 0x00000800 | 0x00080000 | (save ? 0x00000002 : 0x00001000),
+                nFileOffset = 0,
+                nFileExtension = 0,
+                lpstrDefExt = extension,
+                lCustData = IntPtr.Zero,
+                lpfnHook = IntPtr.Zero,
+                lpTemplateName = IntPtr.Zero,
+                pvReserved = IntPtr.Zero,
+                dwReserved = 0,
+                FlagsEx = 0
+            };
+
+            bool accepted = save ? GetSaveFileNameW(ref dialog) : GetOpenFileNameW(ref dialog);
+            if (!accepted)
+                return null;
+
+            string? selectedPath = Marshal.PtrToStringUni(fileBuffer);
+            return string.IsNullOrWhiteSpace(selectedPath) ? null : selectedPath;
+        }
+        finally
+        {
+            if (filter != IntPtr.Zero) Marshal.FreeHGlobal(filter);
+            if (fileBuffer != IntPtr.Zero) Marshal.FreeHGlobal(fileBuffer);
+            if (initialDirectory != IntPtr.Zero) Marshal.FreeHGlobal(initialDirectory);
+            if (title != IntPtr.Zero) Marshal.FreeHGlobal(title);
+            if (extension != IntPtr.Zero) Marshal.FreeHGlobal(extension);
+        }
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -2367,23 +2400,23 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         public int lStructSize;
         public IntPtr hwndOwner;
         public IntPtr hInstance;
-        public string? lpstrFilter;
+        public IntPtr lpstrFilter;
         public IntPtr lpstrCustomFilter;
         public int nMaxCustFilter;
         public int nFilterIndex;
-        public StringBuilder lpstrFile;
+        public IntPtr lpstrFile;
         public int nMaxFile;
-        public StringBuilder? lpstrFileTitle;
+        public IntPtr lpstrFileTitle;
         public int nMaxFileTitle;
-        public string? lpstrInitialDir;
-        public string? lpstrTitle;
+        public IntPtr lpstrInitialDir;
+        public IntPtr lpstrTitle;
         public int Flags;
         public short nFileOffset;
         public short nFileExtension;
-        public string? lpstrDefExt;
+        public IntPtr lpstrDefExt;
         public IntPtr lCustData;
         public IntPtr lpfnHook;
-        public string? lpTemplateName;
+        public IntPtr lpTemplateName;
         public IntPtr pvReserved;
         public uint dwReserved;
         public uint FlagsEx;
