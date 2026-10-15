@@ -224,7 +224,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _listScroll;
     private int _listVisibleRows = 12;
     private bool _gridEnabled = true;
-    private bool _surfaceSnapEnabled = true;
+    private bool _surfaceSnapEnabled = false;
     private readonly float[] _gridSteps = { 0.0005f, 0.001f, 0.0025f, 0.005f, 0.01f, 0.025f, 0.05f, 0.1f, 0.2f };
     private int _gridStepIndex = 3;
     private string _status = "Перетаскивание привязано к сетке. Настрой углы X/Y/Z в параметрах.";
