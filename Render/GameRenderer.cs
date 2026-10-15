@@ -932,6 +932,7 @@ public sealed class GameRenderer
                             newHandle, positions[index], bodyRotation, headRotation);
                     }
 
+                    _unitSimulation.Bodies.SetRegionIds(newHandle, savedIds);
                     _unitSimulation.ApplyEditedAnatomyProfile(units.GetId(index), updatedProfile);
                     updatedCount++;
                 }

@@ -14,9 +14,9 @@ public sealed class UnitBodySystem
     private float[] _postureProgress = Array.Empty<float>();
     private float[] _postureTransitionDuration = Array.Empty<float>();
     private Vector3[] _transitionFromPositions = Array.Empty<Vector3>();
-    private float[] _transitionFromRotations = Array.Empty<float>();
+    private Vector3[] _transitionFromRotations = Array.Empty<Vector3>();
     private Vector3[] _effectivePosturePositions = Array.Empty<Vector3>();
-    private float[] _effectivePostureRotations = Array.Empty<float>();
+    private Vector3[] _effectivePostureRotations = Array.Empty<Vector3>();
     private bool[] _partPoseInitialized = Array.Empty<bool>();
     private int[] _partPoseOwner = Array.Empty<int>();
 
@@ -39,6 +39,8 @@ public sealed class UnitBodySystem
         Vector3[] bodyNormals = units.BodyNormal;
         Vector3[] headNormals = units.HeadNormal;
         UnitPosture[] postures = units.Posture;
+        UnitType[] unitTypes = units.Type;
+        string[] regionIds = bodies.RegionId;
         uint[] generations = units.Generation;
         int[] bodyStarts = units.BodyStart;
         short[] bodyCounts = units.BodyCount;
@@ -88,8 +90,19 @@ public sealed class UnitBodySystem
             UnitPosture posture = postures[unit];
             if (posture != previousPosture)
             {
-                CaptureTransitionStart(unit, start, count, previousPosture,
-                    localPositions, localRotations, roles, pivots);
+                CaptureTransitionStart(
+                    unit,
+                    start,
+                    count,
+                    previousPosture,
+                    unitTypes[unit],
+                    regionIds,
+                    localPositions,
+                    localRotationsX,
+                    localRotationsY,
+                    localRotations,
+                    roles,
+                    pivots);
                 _requestedPostures[unit] = posture;
                 _postureProgress[unit] = 0f;
                 _postureTransitionDuration[unit] = GetTransitionDuration(previousPosture, posture);
@@ -114,6 +127,8 @@ public sealed class UnitBodySystem
                 velocities,
                 moveSpeeds,
                 postures[unit],
+                unitTypes[unit],
+                regionIds,
                 _animationTime,
                 worldPositions,
                 tailAngles,
@@ -148,6 +163,8 @@ public sealed class UnitBodySystem
         Vector3[] velocities,
         float[] moveSpeeds,
         UnitPosture posture,
+        UnitType unitType,
+        string[] regionIds,
         float animationTime,
         Vector3[] worldPositions,
         float[] tailAngles,
@@ -209,22 +226,29 @@ public sealed class UnitBodySystem
             Vector3 localPosition = localPositions[part];
             Vector3 localEuler = new(localRotationsX[part], localRotationsY[part], localRotations[part]);
             Vector3 targetPosition = localPosition;
-            float targetRotation = localEuler.Z;
-            ApplyPosture(posture, roles[part], pivots[part], ref targetPosition, ref targetRotation);
+            Vector3 targetEuler = localEuler;
+            ApplyPose(
+                unitType,
+                posture,
+                regionIds[part],
+                roles[part],
+                pivots[part],
+                ref targetPosition,
+                ref targetEuler);
 
             if (postureBlend < 1f)
             {
                 localPosition = Vector3.Lerp(_transitionFromPositions[part], targetPosition, postureBlend);
-                localEuler.Z = LerpAngle(_transitionFromRotations[part], targetRotation, postureBlend);
+                localEuler = LerpEuler(_transitionFromRotations[part], targetEuler, postureBlend);
             }
             else
             {
                 localPosition = targetPosition;
-                localEuler.Z = targetRotation;
+                localEuler = targetEuler;
             }
 
             _effectivePosturePositions[part] = localPosition;
-            _effectivePostureRotations[part] = localEuler.Z;
+            _effectivePostureRotations[part] = localEuler;
             _partPoseInitialized[part] = true;
 
             Vector3 origin = unitPositions[unit];
@@ -351,7 +375,11 @@ public sealed class UnitBodySystem
         int start,
         int count,
         UnitPosture fromPosture,
+        UnitType unitType,
+        string[] regionIds,
         Vector3[] localPositions,
+        float[] localRotationsX,
+        float[] localRotationsY,
         float[] localRotations,
         BodyPartRole[] roles,
         BodyPartPivot[] pivots)
@@ -373,8 +401,9 @@ public sealed class UnitBodySystem
             }
 
             Vector3 position = localPositions[part];
-            float rotation = localRotations[part];
-            ApplyPosture(fromPosture, roles[part], pivots[part], ref position, ref rotation);
+            Vector3 rotation = new(localRotationsX[part], localRotationsY[part], localRotations[part]);
+            ApplyPose(unitType, fromPosture, regionIds[part], roles[part], pivots[part],
+                ref position, ref rotation);
             _transitionFromPositions[part] = position;
             _transitionFromRotations[part] = rotation;
         }
@@ -398,6 +427,30 @@ public sealed class UnitBodySystem
     private static float LerpAngle(float from, float to, float amount) =>
         from + WrapAngle(to - from) * amount;
 
+    private static Vector3 LerpEuler(Vector3 from, Vector3 to, float amount) =>
+        new(
+            LerpAngle(from.X, to.X, amount),
+            LerpAngle(from.Y, to.Y, amount),
+            LerpAngle(from.Z, to.Z, amount));
+
+    private static void ApplyPose(
+        UnitType unitType,
+        UnitPosture posture,
+        string regionId,
+        BodyPartRole role,
+        BodyPartPivot pivot,
+        ref Vector3 localPosition,
+        ref Vector3 localEuler)
+    {
+        BodyPartPoseMath.ApplyDefaultPose(posture, role, pivot, ref localPosition, ref localEuler);
+        if (UnitPoseProfileStore.TryGetAdjustment(
+            unitType.ToString(), posture, regionId, out UnitPoseAdjustment adjustment))
+        {
+            localPosition += adjustment.PositionOffset;
+            localEuler += adjustment.RotationOffset;
+        }
+    }
+
     private void EnsureCapacity(int unitCapacity, int partCapacity)
     {
         if (_requestedPostures.Length < unitCapacity)
@@ -419,73 +472,6 @@ public sealed class UnitBodySystem
             Array.Resize(ref _effectivePosturePositions, partCapacity);
             Array.Resize(ref _effectivePostureRotations, partCapacity);
             Array.Resize(ref _partPoseInitialized, partCapacity);
-        }
-    }
-
-    private static void ApplyPosture(
-        UnitPosture posture,
-        BodyPartRole role,
-        BodyPartPivot pivot,
-        ref Vector3 localPosition,
-        ref float localRotation)
-    {
-        if (posture == UnitPosture.Standing)
-            return;
-
-        // Joint offsets remain untouched: children must stay on the exact
-        // endpoint of their parent. Only root attachment points and angles
-        // are adjusted for the pose.
-        if (posture == UnitPosture.Crouching)
-        {
-            switch (role)
-            {
-                case BodyPartRole.UpperArm:
-                    localPosition.Y *= 0.82f;
-                    localRotation *= 0.84f;
-                    break;
-
-                case BodyPartRole.Forearm:
-                    localRotation = MathF.CopySign(2.20f, localRotation);
-                    break;
-
-                case BodyPartRole.Thigh:
-                    localPosition.X *= 1.05f;
-                    localPosition.Y *= 0.82f;
-                    localRotation -= MathF.Sign(localRotation) * 0.12f;
-                    break;
-
-                case BodyPartRole.Shin:
-                    localRotation = MathF.CopySign(0.45f, localRotation);
-                    break;
-            }
-
-            return;
-        }
-
-        // Prone is still an overhead silhouette: arms open out and the legs
-        // extend back. It never rotates the pawn into a side-on presentation.
-        switch (role)
-        {
-            case BodyPartRole.UpperArm:
-                localPosition.Y *= 1.12f;
-                localRotation = MathF.CopySign(
-                    MathF.Max(MathF.Abs(localRotation), 1.55f),
-                    localRotation);
-                break;
-
-            case BodyPartRole.Forearm:
-                localRotation = MathF.CopySign(1.80f, localRotation);
-                break;
-
-            case BodyPartRole.Thigh:
-                localPosition.X *= 1.08f;
-                localPosition.Y *= 1.18f;
-                localRotation = MathF.CopySign(MathF.PI - 0.12f, localRotation);
-                break;
-
-            case BodyPartRole.Shin:
-                localRotation *= 0.5f;
-                break;
         }
     }
 
