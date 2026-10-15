@@ -871,28 +871,44 @@ public sealed class GameRenderer
         return false;
     }
 
-    private void SaveColonistBodyRig(string[] regionIds, BodyPartDefinition[] parts)
+    private void SaveColonistBodyRig(
+        string[] regionIds,
+        BodyPartDefinition[] parts,
+        UnitAnatomyVolume[] organs)
     {
-        if (!UnitBodyRigSettingsStore.Save(regionIds, parts, out string fullPath, out string error))
+        try
+        {
+            // Validate parent dependencies, organ binding IDs and organ containment before
+            // writing anything: an invalid profile must never poison the startup JSON.
+            _ = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy.WithRig(regionIds, parts, organs);
+        }
+        catch (Exception exception)
+        {
+            _bodyRigEditorOverlay?.SetStatus($"Ошибка рига: {exception.Message}");
+            return;
+        }
+
+        if (!UnitBodyRigSettingsStore.Save(regionIds, parts, organs, out string fullPath, out string error))
         {
             _bodyRigEditorOverlay?.SetStatus($"Ошибка сохранения: {error}");
             Console.Error.WriteLine($"[Body rig] Save failed: {error}");
             return;
         }
 
-        _bodyRigEditorOverlay?.SetStatus("Файл сохранён. Применяю риг к текущим колонистам...");
+        _bodyRigEditorOverlay?.SetStatus("Файл сохранён. Применяю геометрию и органы к текущим колонистам...");
         Console.WriteLine($"[Body rig] Saved colonist rig: {fullPath}");
 
         UnitBodyRigEditorOverlay? editor = _bodyRigEditorOverlay;
         string[] savedIds = (string[])regionIds.Clone();
         BodyPartDefinition[] savedParts = (BodyPartDefinition[])parts.Clone();
+        UnitAnatomyVolume[] savedOrgans = (UnitAnatomyVolume[])organs.Clone();
         ExecuteSimulationCommand(() =>
         {
             try
             {
                 UnitAnatomyProfile previousProfile =
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
-                UnitAnatomyCatalog.ApplyColonistRig(savedIds, savedParts);
+                UnitAnatomyCatalog.ApplyColonistRig(savedIds, savedParts, savedOrgans);
                 UnitAnatomyProfile updatedProfile =
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
 

@@ -47,6 +47,7 @@ public static class CombatSelfTest
         RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
         RunTest("Anatomy: rig edits preserve tissue IDs and organ volumes", TestAnatomyRigEditsPreserveBindings, ref passed, ref failed);
         RunTest("Anatomy: rig editor can add dependent regions", TestAnatomyRigCanAppendDependency, ref passed, ref failed);
+        RunTest("Anatomy: new organs get damageable tissue and stay inside their host", TestAnatomyRigOrganVolumeAndHealth, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1537,6 +1538,76 @@ public static class CombatSelfTest
         }
 
         return true;
+    }
+
+    private static bool TestAnatomyRigOrganVolumeAndHealth()
+    {
+        UnitAnatomyProfile original = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        ReadOnlySpan<UnitAnatomyNode> originalNodes = original.Nodes;
+        BodyPartDefinition[] originalParts = original.BodyParts.ToArray();
+        string[] ids = new string[original.NodeCount + 1];
+        BodyPartDefinition[] parts = new BodyPartDefinition[originalParts.Length + 1];
+        for (int i = 0; i < original.NodeCount; i++)
+        {
+            ids[i] = originalNodes[i].Id;
+            parts[i] = originalParts[i];
+        }
+
+        ids[^1] = "custom.organ.host";
+        parts[^1] = new BodyPartDefinition(
+            new Vector3(0f, 0f, -0.18f),
+            new Vector3(0.04f, 0.03f, 0.08f),
+            BodyPrimitive.Circle,
+            parentIndex: original.FindRegion("body.middle"),
+            anchor: BodyPartAnchor.Parent,
+            role: BodyPartRole.Generic);
+
+        ReadOnlySpan<UnitAnatomyVolume> oldVolumes = original.Volumes;
+        var volumes = new UnitAnatomyVolume[oldVolumes.Length + 1];
+        oldVolumes.CopyTo(volumes);
+        volumes[^1] = new UnitAnatomyVolume(
+            "organ.test",
+            "custom.organ.host",
+            "custom.organ.host.tissue",
+            "organ.test.tissue",
+            new Vector3(0.5f, -0.3f, 0.2f),
+            new Vector3(0.4f, 0.35f, 0.3f),
+            BodyPrimitive.Circle,
+            energyLoss: 22f,
+            penetrationLoss: 1.5f,
+            damageMultiplier: 1.25f,
+            bleedMultiplier: 1.4f);
+
+        UnitAnatomyProfile edited = original.WithRig(ids, parts, volumes);
+        int hostIndex = edited.FindRegion("custom.organ.host");
+        if (hostIndex < 0 || edited.VolumeCount != original.VolumeCount + 1)
+            return false;
+
+        ReadOnlySpan<HitRegionPartBinding> tissues = edited.GetTissues(hostIndex);
+        bool damageableOrganFound = false;
+        for (int i = 0; i < tissues.Length; i++)
+        {
+            if (tissues[i].Id != "organ.test.tissue")
+                continue;
+
+            damageableOrganFound =
+                tissues[i].Kind == UnitHealthPartKind.Organ &&
+                MathF.Abs(tissues[i].MaxHitPoints - 20f) < 0.001f;
+            break;
+        }
+        if (!damageableOrganFound)
+            return false;
+
+        UnitAnatomyVolume organ = edited.Volumes[^1];
+        Vector3 hostScale = Vector3.Abs(parts[^1].Scale);
+        float cos = MathF.Abs(MathF.Cos(organ.LocalRotation));
+        float sin = MathF.Abs(MathF.Sin(organ.LocalRotation));
+        float halfX = cos * organ.HalfExtents.X + sin * organ.HalfExtents.Y;
+        float halfY = sin * organ.HalfExtents.X + cos * organ.HalfExtents.Y;
+        float nx = (MathF.Abs(organ.LocalCenter.X) + halfX) / hostScale.X;
+        float ny = (MathF.Abs(organ.LocalCenter.Y) + halfY) / hostScale.Y;
+        float nz = (MathF.Abs(organ.LocalCenter.Z) + organ.HalfExtents.Z) / hostScale.Z;
+        return MathF.Sqrt(nx * nx + ny * ny + nz * nz) <= 0.93f;
     }
 
     private static bool TestAnatomyRigCanAppendDependency()

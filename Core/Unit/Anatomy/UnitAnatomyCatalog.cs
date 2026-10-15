@@ -344,10 +344,16 @@ public static class UnitAnatomyCatalog
     /// <summary>Apply a complete rig including appended regions and parent dependencies.</summary>
     public static void ApplyColonistRig(
         ReadOnlySpan<string> regionIds,
-        ReadOnlySpan<BodyPartDefinition> bodyParts)
+        ReadOnlySpan<BodyPartDefinition> bodyParts) =>
+        ApplyColonistRig(regionIds, bodyParts, Colonist.Anatomy.Volumes);
+
+    public static void ApplyColonistRig(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        ReadOnlySpan<UnitAnatomyVolume> organs)
     {
         UnitArchetypeProfile current = Colonist;
-        UnitAnatomyProfile nextAnatomy = current.Anatomy.WithRig(regionIds, bodyParts);
+        UnitAnatomyProfile nextAnatomy = current.Anatomy.WithRig(regionIds, bodyParts, organs);
         Colonist = new UnitArchetypeProfile(
             current.Definition,
             nextAnatomy,
@@ -380,24 +386,16 @@ public static class UnitAnatomyCatalog
         UnitBodyRigSettingsStore.MergeSavedRig(
             baseIds,
             current.BodyParts,
+            current.Anatomy.Volumes,
             out string[] ids,
-            out BodyPartDefinition[] parts);
-        if (ids.Length != nodes.Length)
-        {
-            UnitAnatomyProfile next = current.Anatomy.WithRig(ids, parts);
-            Colonist = new UnitArchetypeProfile(
-                current.Definition,
-                next,
-                current.StartingEquipment.ToArray());
-        }
-        else if (parts.Length == current.BodyParts.Length)
-        {
-            UnitAnatomyProfile next = current.Anatomy.WithRig(ids, parts);
-            Colonist = new UnitArchetypeProfile(
-                current.Definition,
-                next,
-                current.StartingEquipment.ToArray());
-        }
+            out BodyPartDefinition[] parts,
+            out UnitAnatomyVolume[] organs);
+
+        UnitAnatomyProfile next = current.Anatomy.WithRig(ids, parts, organs);
+        Colonist = new UnitArchetypeProfile(
+            current.Definition,
+            next,
+            current.StartingEquipment.ToArray());
     }
 
     public static UnitArchetypeProfile Get(UnitType type)
