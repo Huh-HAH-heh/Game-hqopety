@@ -134,6 +134,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(82, 104, 127, 255),
         OutlineThickness = 1f
     };
+    private readonly RectangleShape _surfaceSnapButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(52, 99, 74, 255),
+        OutlineColor = new Color(90, 128, 105, 255),
+        OutlineThickness = 1f
+    };
     private readonly RectangleShape[] _gridLines = new RectangleShape[2];
     private readonly RectangleShape _addRegionButton = new(new Vector2f(1f, 25f))
     {
@@ -164,6 +170,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private readonly Text? _allSymmetryLabel;
     private readonly Text? _gridLabel;
     private readonly Text? _gridStepLabel;
+    private readonly Text? _surfaceSnapLabel;
     private readonly Text? _addRegionLabel;
     private readonly Text? _addAllFormsLabel;
     private readonly Text? _removeRegionLabel;
@@ -212,6 +219,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _listScroll;
     private int _listVisibleRows = 12;
     private bool _gridEnabled = true;
+    private bool _surfaceSnapEnabled = true;
     private readonly float[] _gridSteps = { 0.0005f, 0.001f, 0.0025f, 0.005f, 0.01f, 0.025f, 0.05f, 0.1f, 0.2f };
     private int _gridStepIndex = 3;
     private string _status = "Перетаскивание привязано к сетке. Настрой углы X/Y/Z в параметрах.";
@@ -382,9 +390,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(232, 240, 248, 255),
                 Style = Text.Styles.Bold
             };
-            _gridStepLabel = new Text(_font, "ШАГ: 0.025", 9)
+            _gridStepLabel = new Text(_font, "0.005", 9)
             {
-                FillColor = new Color(232, 240, 248, 255)
+                FillColor = new Color(232, 240, 248, 255),
+                Style = Text.Styles.Bold
+            };
+            _surfaceSnapLabel = new Text(_font, "НОРМ", 9)
+            {
+                FillColor = new Color(220, 239, 225, 255),
+                Style = Text.Styles.Bold
             };
             _addRegionLabel = new Text(_font, "+ ДОБАВИТЬ РЕГИОН", 9)
             {
@@ -597,7 +611,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_gridStepButton.GetGlobalBounds().Contains(position))
         {
             _gridStepIndex = (_gridStepIndex + 1) % _gridSteps.Length;
-            _status = $"Шаг сетки: {_gridSteps[_gridStepIndex]:0.000}. Перемещение привязано к этому шагу.";
+            _status = $"Шаг сетки: {_gridSteps[_gridStepIndex]:0.####}. Перемещение привязано к этому шагу.";
+            return true;
+        }
+
+        if (_surfaceSnapButton.GetGlobalBounds().Contains(position))
+        {
+            _surfaceSnapEnabled = !_surfaceSnapEnabled;
+            _status = _surfaceSnapEnabled
+                ? "Автопривязка включена: близкие части стыкуются по нормали поверхности. N — переключить."
+                : "Автопривязка к поверхности отключена.";
             return true;
         }
 
@@ -754,6 +777,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (key == Keyboard.Key.Escape)
         {
             Close();
+            return true;
+        }
+
+        if (key == Keyboard.Key.N)
+        {
+            _surfaceSnapEnabled = !_surfaceSnapEnabled;
+            _status = _surfaceSnapEnabled
+                ? "Автопривязка к нормали включена."
+                : "Автопривязка к нормали отключена.";
             return true;
         }
 
@@ -949,7 +981,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_gridLabel != null)
         {
-            _gridLabel.DisplayedString = _gridEnabled ? "СЕТКА: ВКЛ" : "СЕТКА: ВЫКЛ";
+            _gridLabel.DisplayedString = _gridEnabled ? "СЕТКА" : "СЕТКА·";
             _gridLabel.Position = new Vector2f(_gridButton.Position.X + 8f, _gridButton.Position.Y + 6f);
             window.Draw(_gridButton);
             DrawText(window, _gridLabel);
@@ -957,10 +989,21 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_gridStepLabel != null)
         {
-            _gridStepLabel.DisplayedString = $"ШАГ: {_gridSteps[_gridStepIndex]:0.####}";
-            _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 6f, _gridStepButton.Position.Y + 6f);
+            _gridStepLabel.DisplayedString = $"{_gridSteps[_gridStepIndex]:0.####}";
+            _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 3f, _gridStepButton.Position.Y + 6f);
             window.Draw(_gridStepButton);
             DrawText(window, _gridStepLabel);
+        }
+
+        if (_surfaceSnapLabel != null)
+        {
+            _surfaceSnapButton.FillColor = _surfaceSnapEnabled
+                ? new Color(52, 99, 74, 255)
+                : new Color(42, 57, 72, 255);
+            _surfaceSnapLabel.DisplayedString = _surfaceSnapEnabled ? "НОРМ" : "НОРМ·";
+            _surfaceSnapLabel.Position = new Vector2f(_surfaceSnapButton.Position.X + 6f, _surfaceSnapButton.Position.Y + 6f);
+            window.Draw(_surfaceSnapButton);
+            DrawText(window, _surfaceSnapLabel);
         }
 
         if (_helpText != null)
@@ -1109,9 +1152,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _allSymmetryButton.Position = new Vector2f(propertiesX + 10f, _parentButton.Position.Y + 31f);
         _allSymmetryButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
         _gridButton.Position = new Vector2f(propertiesX + 10f, _allSymmetryButton.Position.Y + 31f);
-        _gridButton.Size = new Vector2f(104f, 26f);
+        _gridButton.Size = new Vector2f(54f, 26f);
         _gridStepButton.Position = new Vector2f(_gridButton.Position.X + _gridButton.Size.X + 4f, _gridButton.Position.Y);
-        _gridStepButton.Size = new Vector2f(propertiesWidth - 24f - _gridButton.Size.X - 4f, 26f);
+        _gridStepButton.Size = new Vector2f(48f, 26f);
+        _surfaceSnapButton.Position = new Vector2f(_gridStepButton.Position.X + _gridStepButton.Size.X + 4f, _gridButton.Position.Y);
+        _surfaceSnapButton.Size = new Vector2f(MathF.Max(54f, propertiesX + propertiesWidth - 10f - _surfaceSnapButton.Position.X), 26f);
 
         if (_helpText != null)
             _helpText.Position = new Vector2f(listX + 2f, y + panelHeight - 42f);
@@ -1397,6 +1442,25 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
 
         worldDelta = targetCenter - currentCenter;
+        Vector2f snappedCenter = default;
+        Vector2f surfaceNormal = default;
+        bool alignToSurface = _surfaceSnapEnabled &&
+            TrySnapToSurface(projection, worldDelta, out snappedCenter, out surfaceNormal);
+        if (alignToSurface)
+        {
+            ProjectedPart selectedGeometry = _projected[projection][_selectedPart];
+            float currentProjectedX = selectedGeometry.X;
+            float currentProjectedY = projection == 2 ? selectedGeometry.Y : -selectedGeometry.Y;
+            float projectedDeltaX = snappedCenter.X - currentProjectedX;
+            float projectedDeltaY = snappedCenter.Y - currentProjectedY;
+            worldDelta = projection switch
+            {
+                0 => new NumericsVector3(0f, projectedDeltaX, -projectedDeltaY),
+                1 => new NumericsVector3(projectedDeltaX, 0f, -projectedDeltaY),
+                _ => new NumericsVector3(projectedDeltaX, projectedDeltaY, 0f)
+            };
+        }
+
         Quaternion parentOrientation =
             part.Anchor == BodyPartAnchor.Parent && part.ParentIndex >= 0
                 ? _worldOrientations[part.ParentIndex]
@@ -1407,9 +1471,258 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _parts[_selectedPart] = Copy(
             part,
             localPosition: part.LocalPosition + localDelta);
+        if (alignToSurface)
+            AlignSelectedPartToSurfaceNormal(projection, surfaceNormal.X, surfaceNormal.Y);
         ApplyEnabledSymmetry(projection);
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. " +
             $"Привязка: {(_gridEnabled ? _gridSteps[_gridStepIndex].ToString("0.####") : "выкл")}. Ctrl+S — сохранить.";
+    }
+
+    private void ApplySizeSymmetry()
+    {
+        if (_selectedPart < 0 || _selectedPart >= _regionIds.Length)
+            return;
+
+        string? counterpartId = GetCounterpartId(_regionIds[_selectedPart]);
+        if (counterpartId == null)
+            return;
+
+        int counterpartIndex = Array.IndexOf(_regionIds, counterpartId);
+        if (counterpartIndex < 0 || counterpartIndex == _selectedPart)
+            return;
+
+        _parts[counterpartIndex] = Copy(_parts[counterpartIndex], scale: _parts[_selectedPart].Scale);
+    }
+
+    private bool TrySnapToSurface(
+        int projection,
+        NumericsVector3 worldDelta,
+        out Vector2f snappedCenter,
+        out Vector2f surfaceNormal)
+    {
+        snappedCenter = default;
+        surfaceNormal = default;
+        if (_selectedPart < 0 || _selectedPart >= _parts.Length ||
+            projection < 0 || projection >= _projected.Length ||
+            _projected[projection].Length != _parts.Length)
+            return false;
+
+        ProjectedPart selected = _projected[projection][_selectedPart];
+        float currentX = selected.X;
+        float currentY = projection == 2 ? selected.Y : -selected.Y;
+        float deltaX = projection == 0 ? worldDelta.Y : worldDelta.X;
+        float deltaY = projection == 2 ? worldDelta.Y : -worldDelta.Z;
+        float candidateX = currentX + deltaX;
+        float candidateY = currentY + deltaY;
+        float snapDistance = Math.Clamp(MathF.Max(selected.HalfWidth, selected.HalfHeight) * 0.3f, 0.015f, 0.04f);
+        float bestDistance = snapDistance;
+        bool found = false;
+
+        for (int i = 0; i < _parts.Length; i++)
+        {
+            if (i == _selectedPart)
+                continue;
+
+            ProjectedPart other = _projected[projection][i];
+            float otherX = other.X;
+            float otherY = projection == 2 ? other.Y : -other.Y;
+            float directionX = candidateX - otherX;
+            float directionY = candidateY - otherY;
+            float distance = MathF.Sqrt(directionX * directionX + directionY * directionY);
+            if (distance < 0.0001f)
+                continue;
+
+            directionX /= distance;
+            directionY /= distance;
+            if (!TryGetSurfaceNormal(other, directionX, directionY, out float radius, out float normalX, out float normalY))
+                continue;
+
+            float support = GetProjectedSupportRadius(selected, normalX, normalY);
+            float desiredX = otherX + directionX * radius + normalX * (support + 0.0015f);
+            float desiredY = otherY + directionY * radius + normalY * (support + 0.0015f);
+            float errorX = candidateX - desiredX;
+            float errorY = candidateY - desiredY;
+            float error = MathF.Sqrt(errorX * errorX + errorY * errorY);
+            if (error >= bestDistance)
+                continue;
+
+            bestDistance = error;
+            snappedCenter = new Vector2f(desiredX, desiredY);
+            surfaceNormal = new Vector2f(normalX, normalY);
+            found = true;
+        }
+
+        return found;
+    }
+
+    private static bool TryGetSurfaceNormal(
+        ProjectedPart shape,
+        float directionX,
+        float directionY,
+        out float radius,
+        out float normalX,
+        out float normalY)
+    {
+        float halfWidth = MathF.Max(0.001f, shape.HalfWidth);
+        float halfHeight = MathF.Max(0.001f, shape.HalfHeight);
+        float angle = shape.ScreenRotation * MathF.PI / 180f;
+        float cos = MathF.Cos(angle);
+        float sin = MathF.Sin(angle);
+        float localX = directionX * cos + directionY * sin;
+        float localY = -directionX * sin + directionY * cos;
+        float nx;
+        float ny;
+
+        if (shape.Primitive == BodyPrimitive.Box)
+        {
+            float tx = MathF.Abs(localX) > 0.00001f ? halfWidth / MathF.Abs(localX) : float.PositiveInfinity;
+            float ty = MathF.Abs(localY) > 0.00001f ? halfHeight / MathF.Abs(localY) : float.PositiveInfinity;
+            radius = MathF.Min(tx, ty);
+            if (tx <= ty)
+            {
+                nx = MathF.Sign(localX);
+                ny = 0f;
+            }
+            else
+            {
+                nx = 0f;
+                ny = MathF.Sign(localY);
+            }
+        }
+        else if (shape.Primitive == BodyPrimitive.Triangle)
+        {
+            Span<Vector2f> vertices = stackalloc Vector2f[3]
+            {
+                new Vector2f(0f, -halfHeight),
+                new Vector2f(halfWidth, halfHeight),
+                new Vector2f(-halfWidth, halfHeight)
+            };
+            radius = float.PositiveInfinity;
+            nx = 0f;
+            ny = 0f;
+            for (int edgeIndex = 0; edgeIndex < 3; edgeIndex++)
+            {
+                Vector2f a = vertices[edgeIndex];
+                Vector2f b = vertices[(edgeIndex + 1) % 3];
+                float edgeX = b.X - a.X;
+                float edgeY = b.Y - a.Y;
+                float denominator = directionX * edgeY - directionY * edgeX;
+                if (MathF.Abs(denominator) < 0.00001f)
+                    continue;
+
+                float t = (a.X * edgeY - a.Y * edgeX) / denominator;
+                float u = (a.X * directionY - a.Y * directionX) / denominator;
+                if (t <= 0f || u < 0f || u > 1f || t >= radius)
+                    continue;
+
+                radius = t;
+                nx = edgeY;
+                ny = -edgeX;
+                if (nx * directionX + ny * directionY < 0f)
+                {
+                    nx = -nx;
+                    ny = -ny;
+                }
+            }
+
+            float normalLength = MathF.Sqrt(nx * nx + ny * ny);
+            if (!float.IsFinite(radius) || normalLength < 0.00001f)
+                return false;
+            nx /= normalLength;
+            ny /= normalLength;
+        }
+        else
+        {
+            float denominator = (localX * localX) / (halfWidth * halfWidth) +
+                (localY * localY) / (halfHeight * halfHeight);
+            if (denominator < 0.000001f)
+            {
+                radius = 0f;
+                normalX = 0f;
+                normalY = 0f;
+                return false;
+            }
+            radius = 1f / MathF.Sqrt(denominator);
+            nx = (localX * radius) / (halfWidth * halfWidth);
+            ny = (localY * radius) / (halfHeight * halfHeight);
+            float normalLength = MathF.Sqrt(nx * nx + ny * ny);
+            nx /= MathF.Max(0.000001f, normalLength);
+            ny /= MathF.Max(0.000001f, normalLength);
+        }
+
+        normalX = nx * cos - ny * sin;
+        normalY = nx * sin + ny * cos;
+        return float.IsFinite(radius) && float.IsFinite(normalX) && float.IsFinite(normalY);
+    }
+
+    private static float GetProjectedSupportRadius(ProjectedPart shape, float normalX, float normalY)
+    {
+        float angle = shape.ScreenRotation * MathF.PI / 180f;
+        float cos = MathF.Cos(angle);
+        float sin = MathF.Sin(angle);
+        float localX = normalX * cos + normalY * sin;
+        float localY = -normalX * sin + normalY * cos;
+        float halfWidth = MathF.Max(0.001f, shape.HalfWidth);
+        float halfHeight = MathF.Max(0.001f, shape.HalfHeight);
+        if (shape.Primitive == BodyPrimitive.Box)
+            return halfWidth * MathF.Abs(localX) + halfHeight * MathF.Abs(localY);
+        if (shape.Primitive == BodyPrimitive.Triangle)
+            return MathF.Max(-halfHeight * localY,
+                MathF.Max(halfWidth * localX + halfHeight * localY,
+                    -halfWidth * localX + halfHeight * localY));
+        return MathF.Sqrt(halfWidth * halfWidth * localX * localX + halfHeight * halfHeight * localY * localY);
+    }
+
+    private void AlignSelectedPartToSurfaceNormal(int projection, float normalX, float normalY)
+    {
+        if (_selectedPart < 0 || _selectedPart >= _parts.Length)
+            return;
+
+        ProjectedPart projected = _projected[projection][_selectedPart];
+        float targetAngle = MathF.Atan2(normalY, normalX);
+        float currentAngle = projected.ScreenRotation * MathF.PI / 180f;
+        float delta = WrapAngle(targetAngle - currentAngle);
+        if (MathF.Abs(delta) < 0.0001f)
+            return;
+
+        NumericsVector3 axis = projection switch
+        {
+            0 => NumericsVector3.UnitX,
+            1 => NumericsVector3.UnitY,
+            _ => NumericsVector3.UnitZ
+        };
+        float axisSign = projection == 0 ? -1f : 1f;
+        Quaternion alignRotation = Quaternion.CreateFromAxisAngle(axis, delta * axisSign);
+        Quaternion worldOrientation = Quaternion.Normalize(alignRotation * _worldOrientations[_selectedPart]);
+        BodyPartDefinition part = _parts[_selectedPart];
+        Quaternion parentOrientation = part.Anchor == BodyPartAnchor.Parent && part.ParentIndex >= 0
+            ? _worldOrientations[part.ParentIndex]
+            : Quaternion.Identity;
+        Quaternion localOrientation = Quaternion.Normalize(Quaternion.Inverse(parentOrientation) * worldOrientation);
+        NumericsVector3 euler = ToEulerRadians(localOrientation);
+        _parts[_selectedPart] = Copy(part,
+            localRotation: euler.Z,
+            localRotationX: euler.X,
+            localRotationY: euler.Y);
+    }
+
+    private static NumericsVector3 ToEulerRadians(Quaternion q)
+    {
+        float sinX = 2f * (q.W * q.X + q.Y * q.Z);
+        float cosX = 1f - 2f * (q.X * q.X + q.Y * q.Y);
+        float x = MathF.Atan2(sinX, cosX);
+        float sinY = 2f * (q.W * q.Y - q.Z * q.X);
+        float y = MathF.Abs(sinY) >= 1f ? MathF.CopySign(MathF.PI / 2f, sinY) : MathF.Asin(sinY);
+        float sinZ = 2f * (q.W * q.Z + q.X * q.Y);
+        float cosZ = 1f - 2f * (q.Y * q.Y + q.Z * q.Z);
+        return new NumericsVector3(x, y, MathF.Atan2(sinZ, cosZ));
+    }
+
+    private static float WrapAngle(float angle)
+    {
+        while (angle > MathF.PI) angle -= MathF.Tau;
+        while (angle < -MathF.PI) angle += MathF.Tau;
+        return angle;
     }
 
     private int HitTestPreview(int projection, int x, int y)
@@ -1543,6 +1856,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _parts[_selectedPart] = Copy(part, position, scale, rotation,
             localRotationX: rotationX, localRotationY: rotationY);
+        if (index is >= 3 and <= 5)
+            ApplySizeSymmetry();
         ApplyEnabledSymmetry();
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. Нажми Ctrl+S для сохранения.";
     }
@@ -2132,6 +2447,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _allSymmetryLabel?.Dispose();
         _gridLabel?.Dispose();
         _gridStepLabel?.Dispose();
+        _surfaceSnapLabel?.Dispose();
         _addRegionLabel?.Dispose();
         _addAllFormsLabel?.Dispose();
         _removeRegionLabel?.Dispose();
@@ -2160,6 +2476,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _allSymmetryButton.Dispose();
         _gridButton.Dispose();
         _gridStepButton.Dispose();
+        _surfaceSnapButton.Dispose();
         _addRegionButton.Dispose();
         _addAllFormsButton.Dispose();
         _removeRegionButton.Dispose();
