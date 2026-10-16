@@ -331,7 +331,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private bool _disposed;
     private ImGuiSfmlBackend? _imguiBackend;
     private readonly byte[] _imguiPartNameBuffer = new byte[256];
+    private readonly byte[] _imguiEquipmentNameBuffer = new byte[256];
     private int _imguiNamePartIndex = -1;
+    private int _imguiNameEquipmentIndex = -1;
 
     public bool IsOpen { get; private set; }
 
@@ -2115,15 +2117,176 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             0.01f, 10000f);
 
         ArmorConfig armor = equipment.Item;
-        ImguiNative.igSeparatorText("Сводка характеристик предмета");
-        TextImGui($"Масса: {armor.Weight:0.00}   Слой: {armor.Layer}   Покрытие: {armor.Coverage}");
-        TextImGui($"Поглощение урона: {armor.DamageAbsorption:0.00}   Armor rating: {armor.ArmorRating:0.0}");
-        TextImGui($"Sharp: {armor.SharpRating:0.0}   Blunt: {armor.BluntRating:0.0}   Heat: {armor.HeatRating:0.0}");
-        TextImGui($"Потеря энергии: {armor.EnergyLoss:0.0}   Сопротивление пробитию: {armor.PenetrationResistance:0.0}");
-        TextImGui($"Коэффициент повреждения брони: {armor.ArmorDamageCoefficient:0.00}   Скорость: ×{armor.MovementSpeedMultiplier:0.00}");
-        TextImGui("Прочность и состав экипировки сохраняются кнопкой «Сохранить».");
+        ImguiNative.igSeparatorText("Основные параметры предмета");
+        DrawImGuiArmorNameInput(armor);
+        DrawImGuiFloatInput("Масса", "##armorWeight", armor.Weight,
+            value => UpdateSelectedArmor(current => CopyArmor(current, weight: value)), 0f, 1000f);
+        DrawImGuiEnumCombo("Слой экипировки", armor.Layer,
+            value => UpdateSelectedArmor(current => CopyArmor(current, layer: value)));
+        DrawImGuiFloatInput("Legacy protected zone", "##armorProtectedZone", armor.ProtectedZone,
+            value => UpdateSelectedArmor(current => CopyArmor(current, protectedZone: (int)MathF.Round(value))), -1f, UnitInventoryStore.BodyZoneCount - 1);
+        DrawImGuiFloatInput("Поглощение урона", "##armorAbsorption", armor.DamageAbsorption,
+            value => UpdateSelectedArmor(current => CopyArmor(current, damageAbsorption: value)), 0f, 1f);
+        DrawImGuiFloatInput("Коэффициент повреждения брони", "##armorDamageCoefficient", armor.ArmorDamageCoefficient,
+            value => UpdateSelectedArmor(current => CopyArmor(current, armorDamageCoefficient: value)), 0f, 1f);
+        DrawImGuiFloatInput("Защита от кровотечения", "##armorBleedProtection", armor.BleedProtectionChance,
+            value => UpdateSelectedArmor(current => CopyArmor(current, bleedProtectionChance: value)), 0f, 1f);
+        DrawImGuiFloatInput("Потеря энергии снаряда", "##armorEnergyLoss", armor.EnergyLoss,
+            value => UpdateSelectedArmor(current => CopyArmor(current, energyLoss: value)), 0f, 10000f);
+        DrawImGuiFloatInput("Сопротивление пробитию", "##armorPenetration", armor.PenetrationResistance,
+            value => UpdateSelectedArmor(current => CopyArmor(current, penetrationResistance: value)), 0f, 10000f);
+        DrawImGuiFloatInput("Armor rating", "##armorRating", armor.ArmorRating,
+            value => UpdateSelectedArmor(current => CopyArmor(current, armorRating: value)), 0f, 10000f);
+        DrawImGuiFloatInput("Sharp rating", "##armorSharp", armor.SharpRating,
+            value => UpdateSelectedArmor(current => CopyArmor(current, sharpRating: value)), 0f, 10000f);
+        DrawImGuiFloatInput("Blunt rating", "##armorBlunt", armor.BluntRating,
+            value => UpdateSelectedArmor(current => CopyArmor(current, bluntRating: value)), 0f, 10000f);
+        DrawImGuiFloatInput("Heat rating", "##armorHeat", armor.HeatRating,
+            value => UpdateSelectedArmor(current => CopyArmor(current, heatRating: value)), 0f, 10000f);
+        DrawImGuiFloatInput("Hard armor damage factor", "##armorHardDamageFactor", armor.HardArmorDamageFactor,
+            value => UpdateSelectedArmor(current => CopyArmor(current, hardArmorDamageFactor: value)), 0f, 1f);
+        DrawImGuiFloatInput("Отступ отображения в мире", "##armorRenderPadding", armor.WorldRenderPadding,
+            value => UpdateSelectedArmor(current => CopyArmor(current, worldRenderPadding: value)), 0f, 2f);
+        DrawImGuiFloatInput("Множитель скорости движения", "##armorMovementSpeed", armor.MovementSpeedMultiplier,
+            value => UpdateSelectedArmor(current => CopyArmor(current, movementSpeedMultiplier: value)), 0f, 5f);
+
+        byte softArmor = (byte)(armor.SoftArmor ? 1 : 0);
+        if (ImguiNative.igCheckbox("Мягкая броня", &softArmor))
+            UpdateSelectedArmor(current => CopyArmor(current, softArmor: softArmor != 0));
+
+        ImguiNative.igSeparatorText("Покрытие тела");
+        DrawImGuiCoverageCheckbox("Голова", ArmorCoverage.Head);
+        ImguiNative.igSameLine(0f, 8f);
+        DrawImGuiCoverageCheckbox("Торс", ArmorCoverage.Torso);
+        DrawImGuiCoverageCheckbox("Левая рука", ArmorCoverage.LeftArm);
+        ImguiNative.igSameLine(0f, 8f);
+        DrawImGuiCoverageCheckbox("Правая рука", ArmorCoverage.RightArm);
+        DrawImGuiCoverageCheckbox("Левая кисть", ArmorCoverage.LeftHand);
+        ImguiNative.igSameLine(0f, 8f);
+        DrawImGuiCoverageCheckbox("Правая кисть", ArmorCoverage.RightHand);
+        DrawImGuiCoverageCheckbox("Левая нога", ArmorCoverage.LeftLeg);
+        ImguiNative.igSameLine(0f, 8f);
+        DrawImGuiCoverageCheckbox("Правая нога", ArmorCoverage.RightLeg);
+        DrawImGuiCoverageCheckbox("Левая стопа", ArmorCoverage.LeftFoot);
+        ImguiNative.igSameLine(0f, 8f);
+        DrawImGuiCoverageCheckbox("Правая стопа", ArmorCoverage.RightFoot);
+
+        ImguiNative.igSeparatorText("Цвет предмета");
+        DrawImGuiFloatInput("Красный", "##armorColorR", armor.WorldColorR,
+            value => UpdateSelectedArmor(current => CopyArmor(current, worldColorR: (byte)Math.Clamp((int)MathF.Round(value), 0, 255))), 0f, 255f);
+        DrawImGuiFloatInput("Зелёный", "##armorColorG", armor.WorldColorG,
+            value => UpdateSelectedArmor(current => CopyArmor(current, worldColorG: (byte)Math.Clamp((int)MathF.Round(value), 0, 255))), 0f, 255f);
+        DrawImGuiFloatInput("Синий", "##armorColorB", armor.WorldColorB,
+            value => UpdateSelectedArmor(current => CopyArmor(current, worldColorB: (byte)Math.Clamp((int)MathF.Round(value), 0, 255))), 0f, 255f);
+
+        TextImGui("Параметры брони, прочность, состав и цвет сохраняются кнопкой «Сохранить».");
         TextImGui(_status);
     }
+
+    private unsafe void DrawImGuiArmorNameInput(ArmorConfig armor)
+    {
+        if (_imguiNameEquipmentIndex != _selectedEquipment)
+        {
+            Array.Fill(_imguiEquipmentNameBuffer, (byte)0);
+            byte[] current = Encoding.UTF8.GetBytes(armor.Name ?? string.Empty);
+            Array.Copy(current, _imguiEquipmentNameBuffer,
+                Math.Min(current.Length, _imguiEquipmentNameBuffer.Length - 1));
+            _imguiNameEquipmentIndex = _selectedEquipment;
+        }
+
+        TextImGui("Название предмета");
+        fixed (byte* text = _imguiEquipmentNameBuffer)
+        {
+            ImguiNative.igSetNextItemWidth(MathF.Max(90f, _propertiesPanel.Size.X - 34f));
+            if (ImguiNative.igInputText(
+                "##EquipmentName", text, (uint)_imguiEquipmentNameBuffer.Length,
+                ImGuiInputTextFlags.None, null, null))
+            {
+                int end = Array.IndexOf(_imguiEquipmentNameBuffer, (byte)0);
+                if (end < 0) end = _imguiEquipmentNameBuffer.Length;
+                string name = Encoding.UTF8.GetString(_imguiEquipmentNameBuffer, 0, end).Trim();
+                UpdateSelectedArmor(current => CopyArmor(current, name: name));
+            }
+        }
+    }
+
+    private unsafe void DrawImGuiCoverageCheckbox(string label, ArmorCoverage coverage)
+    {
+        if (_startingEquipment.Length == 0)
+            return;
+
+        ArmorCoverage currentCoverage = _startingEquipment[_selectedEquipment].Item.Coverage;
+        byte enabled = (byte)((currentCoverage & coverage) != 0 ? 1 : 0);
+        if (ImguiNative.igCheckbox(label, &enabled))
+        {
+            ArmorCoverage next = enabled != 0
+                ? currentCoverage | coverage
+                : currentCoverage & ~coverage;
+            UpdateSelectedArmor(current => CopyArmor(current, coverage: next));
+        }
+    }
+
+    private void UpdateSelectedArmor(Func<ArmorConfig, ArmorConfig> update)
+    {
+        if (_startingEquipment.Length == 0 ||
+            _selectedEquipment < 0 ||
+            _selectedEquipment >= _startingEquipment.Length)
+            return;
+
+        UnitStartingEquipment current = _startingEquipment[_selectedEquipment];
+        ArmorConfig updated = update(current.Item);
+        _startingEquipment[_selectedEquipment] =
+            new UnitStartingEquipment(updated, current.Durability);
+        _imguiNameEquipmentIndex = -1;
+    }
+
+    private static ArmorConfig CopyArmor(
+        ArmorConfig original,
+        string? name = null,
+        float? weight = null,
+        byte? worldColorR = null,
+        byte? worldColorG = null,
+        byte? worldColorB = null,
+        int? protectedZone = null,
+        float? damageAbsorption = null,
+        float? armorDamageCoefficient = null,
+        float? bleedProtectionChance = null,
+        float? energyLoss = null,
+        float? penetrationResistance = null,
+        float? sharpRating = null,
+        float? bluntRating = null,
+        float? heatRating = null,
+        bool? softArmor = null,
+        float? hardArmorDamageFactor = null,
+        float? armorRating = null,
+        ArmorCoverage? coverage = null,
+        ArmorLayer? layer = null,
+        float? worldRenderPadding = null,
+        float? movementSpeedMultiplier = null) =>
+        new()
+        {
+            Name = name ?? original.Name,
+            Weight = weight ?? original.Weight,
+            WorldColorR = worldColorR ?? original.WorldColorR,
+            WorldColorG = worldColorG ?? original.WorldColorG,
+            WorldColorB = worldColorB ?? original.WorldColorB,
+            ProtectedZone = protectedZone ?? original.ProtectedZone,
+            DamageAbsorption = damageAbsorption ?? original.DamageAbsorption,
+            ArmorDamageCoefficient = armorDamageCoefficient ?? original.ArmorDamageCoefficient,
+            BleedProtectionChance = bleedProtectionChance ?? original.BleedProtectionChance,
+            EnergyLoss = energyLoss ?? original.EnergyLoss,
+            PenetrationResistance = penetrationResistance ?? original.PenetrationResistance,
+            SharpRating = sharpRating ?? original.SharpRating,
+            BluntRating = bluntRating ?? original.BluntRating,
+            HeatRating = heatRating ?? original.HeatRating,
+            SoftArmor = softArmor ?? original.SoftArmor,
+            HardArmorDamageFactor = hardArmorDamageFactor ?? original.HardArmorDamageFactor,
+            ArmorRating = armorRating ?? original.ArmorRating,
+            Coverage = coverage ?? original.Coverage,
+            Layer = layer ?? original.Layer,
+            WorldRenderPadding = worldRenderPadding ?? original.WorldRenderPadding,
+            MovementSpeedMultiplier = movementSpeedMultiplier ?? original.MovementSpeedMultiplier
+        };
 
     private static string GetApparelId(ArmorConfig item)
     {
