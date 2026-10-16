@@ -878,7 +878,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             BodyPrimitive currentPrimitive = _editingOrgans || _editingOrganStats
                 ? _organs[_selectedOrgan].Primitive
                 : _parts[_selectedPart].Primitive;
-            BodyPrimitive primitive = NextEnum(currentPrimitive);
+            BodyPrimitive primitive = currentPrimitive switch
+            {
+                BodyPrimitive.Circle => BodyPrimitive.Box,
+                BodyPrimitive.Box => BodyPrimitive.Triangle,
+                _ => BodyPrimitive.Circle
+            };
             if (_editingOrgans || _editingOrganStats)
                 _organs[_selectedOrgan] = CopyOrgan(_organs[_selectedOrgan], primitive: primitive);
             else
@@ -1081,11 +1086,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 _unitBodyType = NextEnum(_unitBodyType);
                 _status = $"Тип тела нового юнита: {_unitBodyType}.";
+                return true;
             }
             else if (_editingAdvancedPart)
             {
                 _parts[_selectedPart] = Copy(_parts[_selectedPart], motion: NextEnum(_parts[_selectedPart].Motion));
                 _status = $"Движение части: {_parts[_selectedPart].Motion}.";
+                return true;
             }
             else if ((_editingOrgans || _editingOrganStats) && _organs.Length > 0)
             {
@@ -2593,12 +2600,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
 
         UnitAnatomyVolume organ = _organs[_selectedOrgan];
-        string[] choices = _regionIds
-            .Select(GetPrimaryTissueId)
-            .Concat(target ? _organs.Select(item => item.TargetBindingId) : Array.Empty<string>())
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+        string[] choices = target
+            ? _regionIds
+                .SelectMany(GetTissueIdsForRegion)
+                .Where(id => !_organs.Where((_, index) => index != _selectedOrgan)
+                    .Any(other => string.Equals(other.TargetBindingId, id, StringComparison.Ordinal)))
+                .Append(organ.TargetBindingId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()
+            : GetTissueIdsForRegion(organ.ParentRegionId);
         if (choices.Length == 0)
             return;
 
@@ -2609,6 +2619,23 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             ? CopyOrgan(organ, targetBindingId: next)
             : CopyOrgan(organ, entryBindingId: next);
         _status = target ? $"Ткань-цель органа: {next}." : $"Входная ткань органа: {next}.";
+    }
+
+    private string[] GetTissueIdsForRegion(string regionId)
+    {
+        UnitAnatomyProfile anatomy = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        int index = anatomy.FindRegion(regionId);
+        IEnumerable<string> tissueIds = index >= 0
+            ? anatomy.GetTissues(index).ToArray().Select(tissue => tissue.Id)
+            : new[] { regionId + ".tissue" };
+
+        return tissueIds
+            .Concat(_organs
+                .Where(organ => string.Equals(organ.ParentRegionId, regionId, StringComparison.Ordinal))
+                .Select(organ => organ.TargetBindingId))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
     }
 
     private void CycleOrganHost()
