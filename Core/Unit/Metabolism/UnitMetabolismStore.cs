@@ -139,39 +139,23 @@ public sealed class UnitMetabolismStore
         _condition = new UnitMetabolicCondition[initialCapacity];
     }
 
-    public void InitializeUnit(int index, UnitType type)
+    public void InitializeUnit(int index, UnitType type) =>
+        InitializeUnit(index, UnitAnatomyCatalog.Get(type).Definition);
+
+    public void InitializeUnit(int index, in UnitDefinition definition)
     {
         EnsureCapacity(index + 1);
 
-        float mass;
-        float muscle;
-        float fat;
-        float blood;
-        float energy;
-        float water;
-        byte strength;
-        byte constitution;
-        byte dexterity;
-        byte intelligence;
-
-        switch (type)
-        {
-            case UnitType.Greenbob:
-                mass = 18f; muscle = 5.5f; fat = 2.2f; blood = 1.1f;
-                energy = 650f; water = 0.55f;
-                strength = 3; constitution = 5; dexterity = 5; intelligence = 2;
-                break;
-            case UnitType.SegmentedMonster:
-                mass = 120f; muscle = 42f; fat = 18f; blood = 7f;
-                energy = 2600f; water = 4.1f;
-                strength = 7; constitution = 6; dexterity = 2; intelligence = 1;
-                break;
-            default:
-                mass = 75f; muscle = 30f; fat = 13f; blood = 5f;
-                energy = 2200f; water = 2.5f;
-                strength = 4; constitution = 4; dexterity = 4; intelligence = 4;
-                break;
-        }
+        float mass = definition.BodyMassKg;
+        float muscle = definition.MuscleMassKg;
+        float fat = definition.BodyFatKg;
+        float blood = definition.BloodLiters;
+        float energy = definition.BaseEnergyKcal;
+        float water = definition.BaseWaterLiters;
+        byte strength = definition.Strength;
+        byte constitution = definition.Constitution;
+        byte dexterity = definition.Dexterity;
+        byte intelligence = definition.Intelligence;
 
         // Stable per-slot variation gives colonists different baselines without RNG allocations.
         uint seed = unchecked((uint)index * 747796405u + 2891336453u);
@@ -217,6 +201,7 @@ public sealed class UnitMetabolismStore
         _effectiveConstitution[index] = constitution;
         _effectiveDexterity[index] = dexterity;
         _condition[index] = UnitMetabolicCondition.Normal;
+
     }
 
     public void ClearUnit(int index)
