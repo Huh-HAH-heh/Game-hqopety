@@ -29,5 +29,23 @@ jobs:
       - name: Build
         run: dotnet build RimClone.sln --configuration Release --no-restore
 
+      - name: Publish portable Windows build
+        shell: pwsh
+        run: ./publish-windows.ps1
+
+      - name: Archive portable Windows build
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "publish/win-x64/*" -DestinationPath "RimClone-win-x64.zip" -Force
+
+      - name: Upload portable Windows build
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: RimClone-win-x64
+          path: RimClone-win-x64.zip
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Run simulation self-tests
         run: dotnet run --project App/App.csproj --configuration Release --no-build -- --self-test

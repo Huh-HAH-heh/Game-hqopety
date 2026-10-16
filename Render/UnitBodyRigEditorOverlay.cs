@@ -1884,11 +1884,22 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float screenCenterY = layout.Top + layout.Height * 0.5f + _projectionPanY[projection];
         layout = layout.WithTransform(pixelsPerUnit, screenCenterX, screenCenterY, worldCenterX, worldCenterY);
         _projectionLayouts[projection] = layout;
-        DrawGrid(window, layout, projection);
 
-        for (int i = 0; i < _parts.Length; i++)
+        View baseView = window.GetView();
+        View? clippedView = CreateClippedView(
+            window, baseView, layout.Left, layout.Top, layout.Width, layout.Height);
+        if (clippedView != null)
+            window.SetView(clippedView);
+
+        try
         {
-            ProjectedPart geometry = _projected[projection][i];
+            DrawGrid(window, layout, projection);
+            int[] drawOrder = GetProjectionDrawOrder(projection);
+
+            for (int drawIndex = 0; drawIndex < drawOrder.Length; drawIndex++)
+            {
+                int i = drawOrder[drawIndex];
+                ProjectedPart geometry = _projected[projection][i];
             float sx = screenCenterX + (geometry.X - worldCenterX) * pixelsPerUnit;
             float sy = projection == 2
                 ? screenCenterY + (geometry.Y - worldCenterY) * pixelsPerUnit
@@ -1940,7 +1951,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             geometry.ScreenY = sy;
             geometry.ScreenHalfWidth = halfWidth;
             geometry.ScreenHalfHeight = halfHeight;
-            _projected[projection][i] = geometry;
+                _projected[projection][i] = geometry;
+            }
+        }
+        finally
+        {
+            if (clippedView != null)
+            {
+                window.SetView(baseView);
+                clippedView.Dispose();
+            }
         }
     }
 
@@ -2583,12 +2603,35 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         return angle;
     }
 
+    private int[] GetProjectionDrawOrder(int projection)
+    {
+        int[] order = new int[_projected[projection].Length];
+        for (int i = 0; i < order.Length; i++)
+            order[i] = i;
+
+        Array.Sort(order, (left, right) =>
+        {
+            int depthOrder = _projected[projection][left].Depth.CompareTo(
+                _projected[projection][right].Depth);
+            return depthOrder != 0 ? depthOrder : left.CompareTo(right);
+        });
+
+        return order;
+    }
+
     private int HitTestPreview(int projection, int x, int y)
     {
         ProjectedPart[] geometry = _projected[projection];
-        for (int i = geometry.Length - 1; i >= 0; i--)
-            if (ContainsProjectedPart(geometry[i], x, y))
-                return i;
+        int[] drawOrder = GetProjectionDrawOrder(projection);
+
+        // Selection order is the reverse of drawing order: nearest/uppermost shape wins.
+        for (int orderIndex = drawOrder.Length - 1; orderIndex >= 0; orderIndex--)
+        {
+            int partIndex = drawOrder[orderIndex];
+            if (ContainsProjectedPart(geometry[partIndex], x, y))
+                return partIndex;
+        }
+
         return -1;
     }
 
@@ -3438,9 +3481,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (projection != 2)
             screenRotation = -screenRotation;
 
+        int depthAxis = projection switch { 0 => 0, 1 => 1, _ => 2 };
+        float depth = Component(position, depthAxis);
+
         return new ProjectedPart(
             x,
             y,
+            depth,
             MathF.Max(0.001f, shape.Scale.X),
             MathF.Max(0.001f, shape.Scale.Y),
             screenRotation,
@@ -3456,6 +3503,63 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private float Snap(float value) =>
         _gridEnabled ? MathF.Round(value / _gridSteps[_gridStepIndex]) * _gridSteps[_gridStepIndex] : value;
+
+    private static View? CreateClippedView(
+        RenderWindow window,
+        View baseView,
+        float left,
+        float top,
+        float width,
+        float height)
+    {
+        Vector2u windowSize = window.Size;
+        if (windowSize.X == 0 || windowSize.Y == 0 || width <= 0f || height <= 0f)
+            return null;
+
+        Vector2i topLeft = window.MapCoordsToPixel(new Vector2f(left, top), baseView);
+        Vector2i bottomRight = window.MapCoordsToPixel(
+            new Vector2f(left + width, top + height), baseView);
+
+        float clipLeft = Math.Clamp(MathF.Min(topLeft.X, bottomRight.X), 0f, windowSize.X);
+        float clipTop = Math.Clamp(MathF.Min(topLeft.Y, bottomRight.Y), 0f, windowSize.Y);
+        float clipRight = Math.Clamp(MathF.Max(topLeft.X, bottomRight.X), 0f, windowSize.X);
+        float clipBottom = Math.Clamp(MathF.Max(topLeft.Y, bottomRight.Y), 0f, windowSize.Y);
+        float clipWidth = clipRight - clipLeft;
+        float clipHeight = clipBottom - clipTop;
+        if (clipWidth < 1f || clipHeight < 1f)
+            return null;
+
+        FloatRect baseViewport = baseView.Viewport;
+        float viewportLeft = baseViewport.Left * windowSize.X;
+        float viewportTop = baseViewport.Top * windowSize.Y;
+        float viewportWidth = baseViewport.Width * windowSize.X;
+        float viewportHeight = baseViewport.Height * windowSize.Y;
+        if (viewportWidth < 1f || viewportHeight < 1f)
+            return null;
+
+        float centerPixelX = (clipLeft + clipRight) * 0.5f;
+        float centerPixelY = (clipTop + clipBottom) * 0.5f;
+        float baseCenterPixelX = viewportLeft + viewportWidth * 0.5f;
+        float baseCenterPixelY = viewportTop + viewportHeight * 0.5f;
+
+        float worldCenterX = baseView.Center.X +
+            (centerPixelX - baseCenterPixelX) / viewportWidth * baseView.Size.X;
+        float worldCenterY = baseView.Center.Y +
+            (centerPixelY - baseCenterPixelY) / viewportHeight * baseView.Size.Y;
+        float worldWidth = baseView.Size.X * clipWidth / viewportWidth;
+        float worldHeight = baseView.Size.Y * clipHeight / viewportHeight;
+
+        return new View(
+            new Vector2f(worldCenterX, worldCenterY),
+            new Vector2f(MathF.Max(0.01f, worldWidth), MathF.Max(0.01f, worldHeight)))
+        {
+            Viewport = new FloatRect(
+                clipLeft / windowSize.X,
+                clipTop / windowSize.Y,
+                clipWidth / windowSize.X,
+                clipHeight / windowSize.Y)
+        };
+    }
 
     private void DrawGrid(RenderWindow window, ProjectionLayout layout, int projection)
     {
@@ -3735,6 +3839,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         public float X;
         public float Y;
+        public float Depth;
         public float HalfWidth;
         public float HalfHeight;
         public float ScreenRotation;
@@ -3744,10 +3849,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         public float ScreenHalfWidth;
         public float ScreenHalfHeight;
 
-        public ProjectedPart(float x, float y, float halfWidth, float halfHeight, float screenRotation, BodyPrimitive primitive)
+        public ProjectedPart(float x, float y, float depth, float halfWidth, float halfHeight, float screenRotation, BodyPrimitive primitive)
         {
             X = x;
             Y = y;
+            Depth = depth;
             HalfWidth = halfWidth;
             HalfHeight = halfHeight;
             ScreenRotation = screenRotation;
