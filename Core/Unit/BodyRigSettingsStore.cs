@@ -53,6 +53,11 @@ public static class UnitBodyRigSettingsStore
              current != null;
              current = current.Parent)
         {
+            // A portable publish folder gets its own Data directory even when it
+            // still sits underneath the source repository on the build machine.
+            if (string.Equals(current.Name, "publish", StringComparison.OrdinalIgnoreCase))
+                return null;
+
             if (File.Exists(Path.Combine(current.FullName, "RimClone.sln")))
                 return current.FullName;
         }

@@ -31,7 +31,7 @@ $dataDirectory = Join-Path $root "Data"
 if (Test-Path -LiteralPath $dataDirectory) {
     $publishedData = Join-Path $output "Data"
     New-Item -ItemType Directory -Path $publishedData -Force | Out-Null
-    Copy-Item -Path (Join-Path $dataDirectory "*") -Destination $publishedData -Recurse -Force
+    Get-ChildItem -LiteralPath $dataDirectory -Force | Copy-Item -Destination $publishedData -Recurse -Force
     Write-Host "Сохранённые данные игры скопированы в Data."
 }
 
