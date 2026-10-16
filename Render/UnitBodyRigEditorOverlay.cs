@@ -3553,13 +3553,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             new Vector2f(worldCenterX, worldCenterY),
             new Vector2f(MathF.Max(0.01f, worldWidth), MathF.Max(0.01f, worldHeight)))
         {
-            Viewport = new FloatRect
-            {
-                Left = clipLeft / windowSize.X,
-                Top = clipTop / windowSize.Y,
-                Width = clipWidth / windowSize.X,
-                Height = clipHeight / windowSize.Y
-            }
+            Viewport = new FloatRect(
+                new Vector2f(clipLeft / windowSize.X, clipTop / windowSize.Y),
+                new Vector2f(clipWidth / windowSize.X, clipHeight / windowSize.Y))
         };
     }
 
