@@ -940,7 +940,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (!_previewPanels[projection].GetGlobalBounds().Contains(position))
                 continue;
 
-                if (_editingOrgans || _editingOrganStats)
+            if (_editingOrgans || _editingOrganStats)
             {
                 int hitOrgan = HitTestOrganPreview(projection, position.X, position.Y);
                 if (hitOrgan >= 0)
@@ -1043,7 +1043,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (key == Keyboard.Key.Up)
         {
-            if (_editingOrgans && _organs.Length > 0)
+            if ((_editingOrgans || _editingOrganStats) && _organs.Length > 0)
                 _selectedOrgan = (_selectedOrgan - 1 + _organs.Length) % _organs.Length;
             else
                 _selectedPart = (_selectedPart - 1 + _parts.Length) % _parts.Length;
@@ -1053,7 +1053,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (key == Keyboard.Key.Down)
         {
-            if (_editingOrgans && _organs.Length > 0)
+            if ((_editingOrgans || _editingOrganStats) && _organs.Length > 0)
                 _selectedOrgan = (_selectedOrgan + 1) % _organs.Length;
             else
                 _selectedPart = (_selectedPart + 1) % _parts.Length;
