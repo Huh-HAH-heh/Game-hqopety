@@ -1566,7 +1566,25 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (ButtonImGui("Сохранить")) Save();
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui(_showUnitSettings ? "К геометрии" : "Настройки юнита"))
+        {
             _showUnitSettings = !_showUnitSettings;
+            if (_showUnitSettings)
+                _showOrganSettings = _showTissueSettings = false;
+        }
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui(_showOrganSettings ? "К геометрии" : "Органы"))
+        {
+            _showOrganSettings = !_showOrganSettings;
+            if (_showOrganSettings)
+                _showUnitSettings = _showTissueSettings = false;
+        }
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui(_showTissueSettings ? "К геометрии" : "Ткани / маркеры"))
+        {
+            _showTissueSettings = !_showTissueSettings;
+            if (_showTissueSettings)
+                _showUnitSettings = _showOrganSettings = false;
+        }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui("По умолчанию"))
         {
@@ -1653,6 +1671,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_showUnitSettings)
         {
             DrawImGuiUnitSettings();
+            ImguiNative.igEnd();
+            return;
+        }
+        if (_showOrganSettings)
+        {
+            DrawImGuiOrganSettings();
+            ImguiNative.igEnd();
+            return;
+        }
+        if (_showTissueSettings)
+        {
+            DrawImGuiTissueSettings();
             ImguiNative.igEnd();
             return;
         }
@@ -1792,8 +1822,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         TextImGui("НАСТРОЙКИ ЮНИТА");
         ImguiNative.igSeparator();
         TextImGui($"Архетип: {_definition.Type}");
-        TextImGui($"Тип тела: {_definition.BodyType}");
-        TextImGui("Архетип и тип тела задают идентичность профиля.");
+        TextImGui("Архетип: колонист. Настройки ниже сохраняются в его профиле.");
+        DrawImGuiEnumCombo("Тип тела", _definition.BodyType,
+            value => UpdateDefinition(bodyType: value));
 
         DrawImGuiFloatInput("Скорость перемещения", "##unitMoveSpeed", _definition.MoveSpeed,
             value => UpdateDefinition(moveSpeed: value), 0.05f, 100f);
@@ -1853,12 +1884,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float? length = null,
         float? height = null,
         float? viewRange = null,
-        float? fieldOfView = null)
+        float? fieldOfView = null,
+        UnitBodyType? bodyType = null)
     {
         UnitDefinition current = _definition;
         _definition = new UnitDefinition(
             current.Type,
-            current.BodyType,
+            bodyType ?? current.BodyType,
             moveSpeed ?? current.MoveSpeed,
             width ?? current.Width,
             length ?? current.Length,
@@ -3214,7 +3246,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _saveRequested(
             (string[])_regionIds.Clone(),
             (BodyPartDefinition[])_parts.Clone(),
-            _definition);
+            _definition,
+            (float[])_hitHalfHeights.Clone(),
+            CloneRows(_tissuesByRegion),
+            CloneRows(_markersByRegion),
+            (UnitAnatomyVolume[])_organs.Clone());
     }
 
     private void CopySelectedPart()
