@@ -484,6 +484,43 @@ public static class UnitArchetypeFileStore
             regionIds.Length != tissues.Length || regionIds.Length != markers.Length)
             throw new InvalidDataException("regions, parts, hitHalfHeights, tissues и markers должны иметь одинаковый размер 1–256.");
 
+        var knownRegions = new HashSet<string>(StringComparer.Ordinal);
+        var knownTissues = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < regionIds.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(regionIds[i]) || !knownRegions.Add(regionIds[i]))
+                throw new InvalidDataException($"Пустой или повторяющийся ID региона '{regionIds[i]}'.");
+            if (bodyParts[i].ParentIndex < -1 || bodyParts[i].ParentIndex >= i)
+                throw new InvalidDataException($"Родитель региона '{regionIds[i]}' должен находиться выше него в списке.");
+            if (!float.IsFinite(hitHalfHeights[i]) || hitHalfHeights[i] <= 0f)
+                throw new InvalidDataException($"Некорректная hitHalfHeight у региона '{regionIds[i]}'.");
+            if (tissues[i] == null || tissues[i].Length == 0 || markers[i] == null)
+                throw new InvalidDataException($"У региона '{regionIds[i]}' должна быть хотя бы одна ткань и массив маркеров.");
+
+            foreach (HitRegionPartBinding tissue in tissues[i])
+                if (string.IsNullOrWhiteSpace(tissue.Id) || !knownTissues.Add(tissue.Id))
+                    throw new InvalidDataException($"Пустой или повторяющийся ID ткани '{tissue.Id}'.");
+
+            var markerIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (UnitAnatomyMarker marker in markers[i])
+                if (string.IsNullOrWhiteSpace(marker.Id) || !markerIds.Add(marker.Id))
+                    throw new InvalidDataException($"Пустой или повторяющийся ID маркера в регионе '{regionIds[i]}'.");
+        }
+
+        var knownOrgans = new HashSet<string>(StringComparer.Ordinal);
+        foreach (UnitAnatomyVolume organ in organs)
+        {
+            int parentIndex = Array.IndexOf(regionIds, organ.ParentRegionId);
+            if (!knownOrgans.Add(organ.Id) || parentIndex < 0 ||
+                !tissues[parentIndex].Any(tissue => tissue.Id == organ.EntryBindingId) ||
+                !knownTissues.Contains(organ.TargetBindingId))
+                throw new InvalidDataException($"Орган '{organ.Id}' содержит некорректную область или ссылку на ткань.");
+        }
+
+        foreach (UnitStartingEquipment item in equipment)
+            if (item.Item == null || !Positive(item.Durability))
+                throw new InvalidDataException("Некорректная стартовая экипировка.");
+
         // Building the asset constructs every immutable anatomy type and validates
         // the values using the exact runtime constructors the game will use.
         return new UnitArchetypeAsset(
