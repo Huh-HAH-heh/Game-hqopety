@@ -343,6 +343,26 @@ public static class UnitAnatomyCatalog
 
     private static bool _colonistRigLoaded;
 
+    /// <summary>Apply an editable rig while preserving anatomy metadata and organ volumes.</summary>
+    public static void ApplyColonistAuthoringData(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        ReadOnlySpan<float> hitHalfHeights,
+        HitRegionPartBinding[][] tissues,
+        UnitAnatomyMarker[][] markers,
+        ReadOnlySpan<UnitAnatomyVolume> volumes)
+    {
+        EnsureSavedColonistRigLoaded();
+        UnitArchetypeProfile current = Colonist;
+        UnitAnatomyProfile nextAnatomy = current.Anatomy.WithAuthoringData(
+            regionIds, bodyParts, hitHalfHeights, tissues, markers, volumes);
+        Colonist = new UnitArchetypeProfile(
+            current.Definition,
+            nextAnatomy,
+            current.StartingEquipment.ToArray());
+        _colonistRigLoaded = true;
+    }
+
     /// <summary>Apply a complete rig including appended regions and parent dependencies.</summary>
     public static void ApplyColonistRig(
         ReadOnlySpan<string> regionIds,
@@ -391,6 +411,7 @@ public static class UnitAnatomyCatalog
 
         var settings = new ColonistSettingsFile
         {
+            BodyType = definition.BodyType.ToString(),
             MoveSpeed = definition.MoveSpeed,
             Width = definition.Width,
             Length = definition.Length,
@@ -427,7 +448,7 @@ public static class UnitAnatomyCatalog
         UnitArchetypeProfile current = Colonist;
         var updated = new UnitDefinition(
             UnitType.Colonist,
-            current.Definition.BodyType,
+            definition.BodyType,
             definition.MoveSpeed,
             definition.Width,
             definition.Length,
@@ -445,6 +466,7 @@ public static class UnitAnatomyCatalog
 
     private sealed class ColonistSettingsFile
     {
+        public string BodyType { get; set; } = nameof(UnitBodyType.Colonist);
         public float MoveSpeed { get; set; } = 2.8f;
         public float Width { get; set; } = 0.35f;
         public float Length { get; set; } = 0.60f;
@@ -504,9 +526,14 @@ public static class UnitAnatomyCatalog
                     settings.FieldOfView <= 360f)
                 {
                     UnitArchetypeProfile saved = Colonist;
+                    UnitBodyType bodyType =
+                        Enum.TryParse(settings.BodyType, ignoreCase: true, out UnitBodyType savedBodyType) &&
+                        Enum.IsDefined(savedBodyType)
+                            ? savedBodyType
+                            : saved.Definition.BodyType;
                     var definition = new UnitDefinition(
                         UnitType.Colonist,
-                        saved.Definition.BodyType,
+                        bodyType,
                         settings.MoveSpeed,
                         settings.Width,
                         settings.Length,
@@ -523,6 +550,15 @@ public static class UnitAnatomyCatalog
         catch (Exception)
         {
             // Ignore an invalid settings file and continue with the built-in archetype.
+        }
+
+        UnitArchetypeProfile currentProfile = Colonist;
+        if (UnitAnatomySettingsStore.TryLoad(currentProfile.Anatomy, out UnitAnatomyProfile savedAnatomy))
+        {
+            Colonist = new UnitArchetypeProfile(
+                currentProfile.Definition,
+                savedAnatomy,
+                currentProfile.StartingEquipment.ToArray());
         }
     }
 
