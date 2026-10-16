@@ -2062,6 +2062,140 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         TextImGui(_status);
     }
 
+    private unsafe void DrawImGuiEquipmentSettings()
+    {
+        TextImGui("СТАРТОВОЕ СНАРЯЖЕНИЕ ЮНИТА");
+        ImguiNative.igSeparator();
+        TextImGui("Здесь задаются предметы экипировки архетипа и их начальная прочность.");
+
+        if (ButtonImGui("Добавить предмет"))
+            AddStartingEquipment();
+        ImguiNative.igSameLine(0f, 6f);
+        if (ButtonImGui("Удалить выбранный") && _startingEquipment.Length > 0)
+            RemoveStartingEquipment();
+
+        if (_startingEquipment.Length == 0)
+        {
+            TextImGui("Стартовое снаряжение отсутствует.");
+            TextImGui(_status);
+            return;
+        }
+
+        _selectedEquipment = Math.Clamp(_selectedEquipment, 0, _startingEquipment.Length - 1);
+        UnitStartingEquipment equipment = _startingEquipment[_selectedEquipment];
+        DrawImGuiStringCombo(
+            "Слот экипировки",
+            $"{GetApparelId(equipment.Item)} — {equipment.Item.Name}",
+            Array.ConvertAll(_startingEquipment, item => $"{GetApparelId(item.Item)} — {item.Item.Name}"),
+            key =>
+            {
+                int index = Array.FindIndex(_startingEquipment,
+                    item => string.Equals($"{GetApparelId(item.Item)} — {item.Item.Name}", key, StringComparison.Ordinal));
+                if (index >= 0)
+                    _selectedEquipment = index;
+            });
+
+        equipment = _startingEquipment[_selectedEquipment];
+        DrawImGuiStringCombo(
+            "Предмет",
+            GetApparelId(equipment.Item),
+            new[]
+            {
+                nameof(ApparelCatalog.WorkShirt),
+                nameof(ApparelCatalog.WorkTrousers),
+                nameof(ApparelCatalog.CombatVest),
+                nameof(ApparelCatalog.CombatHelmet),
+                nameof(ApparelCatalog.PoweredExoskeleton)
+            },
+            id => ChangeStartingEquipmentItem(GetApparel(id)));
+
+        equipment = _startingEquipment[_selectedEquipment];
+        DrawImGuiFloatInput("Начальная прочность", "##equipmentDurability", equipment.Durability,
+            value => UpdateStartingEquipment(current => new UnitStartingEquipment(current.Item, value)),
+            0.01f, 10000f);
+
+        ArmorConfig armor = equipment.Item;
+        ImguiNative.igSeparatorText("Сводка характеристик предмета");
+        TextImGui($"Масса: {armor.Weight:0.00}   Слой: {armor.Layer}   Покрытие: {armor.Coverage}");
+        TextImGui($"Поглощение урона: {armor.DamageAbsorption:0.00}   Armor rating: {armor.ArmorRating:0.0}");
+        TextImGui($"Sharp: {armor.SharpRating:0.0}   Blunt: {armor.BluntRating:0.0}   Heat: {armor.HeatRating:0.0}");
+        TextImGui($"Потеря энергии: {armor.EnergyLoss:0.0}   Сопротивление пробитию: {armor.PenetrationResistance:0.0}");
+        TextImGui($"Коэффициент повреждения брони: {armor.ArmorDamageCoefficient:0.00}   Скорость: ×{armor.MovementSpeedMultiplier:0.00}");
+        TextImGui("Прочность и состав экипировки сохраняются кнопкой «Сохранить».");
+        TextImGui(_status);
+    }
+
+    private static string GetApparelId(ArmorConfig item)
+    {
+        if (ReferenceEquals(item, ApparelCatalog.WorkShirt)) return nameof(ApparelCatalog.WorkShirt);
+        if (ReferenceEquals(item, ApparelCatalog.WorkTrousers)) return nameof(ApparelCatalog.WorkTrousers);
+        if (ReferenceEquals(item, ApparelCatalog.CombatVest)) return nameof(ApparelCatalog.CombatVest);
+        if (ReferenceEquals(item, ApparelCatalog.CombatHelmet)) return nameof(ApparelCatalog.CombatHelmet);
+        if (ReferenceEquals(item, ApparelCatalog.PoweredExoskeleton)) return nameof(ApparelCatalog.PoweredExoskeleton);
+        return item.Name;
+    }
+
+    private static ArmorConfig GetApparel(string id) => id switch
+    {
+        nameof(ApparelCatalog.WorkShirt) => ApparelCatalog.WorkShirt,
+        nameof(ApparelCatalog.WorkTrousers) => ApparelCatalog.WorkTrousers,
+        nameof(ApparelCatalog.CombatVest) => ApparelCatalog.CombatVest,
+        nameof(ApparelCatalog.CombatHelmet) => ApparelCatalog.CombatHelmet,
+        nameof(ApparelCatalog.PoweredExoskeleton) => ApparelCatalog.PoweredExoskeleton,
+        _ => ApparelCatalog.WorkShirt
+    };
+
+    private void AddStartingEquipment()
+    {
+        ArmorConfig[] options =
+        {
+            ApparelCatalog.WorkShirt,
+            ApparelCatalog.WorkTrousers,
+            ApparelCatalog.CombatVest,
+            ApparelCatalog.CombatHelmet,
+            ApparelCatalog.PoweredExoskeleton
+        };
+        ArmorConfig item = options.FirstOrDefault(candidate =>
+            !_startingEquipment.Any(existing => ReferenceEquals(existing.Item, candidate))) ?? ApparelCatalog.WorkShirt;
+        var next = new UnitStartingEquipment[_startingEquipment.Length + 1];
+        Array.Copy(_startingEquipment, next, _startingEquipment.Length);
+        next[^1] = new UnitStartingEquipment(item, 100f);
+        _startingEquipment = next;
+        _selectedEquipment = next.Length - 1;
+        _status = $"Добавлен предмет: {item.Name}.";
+    }
+
+    private void RemoveStartingEquipment()
+    {
+        if (_startingEquipment.Length == 0)
+            return;
+        string name = _startingEquipment[_selectedEquipment].Item.Name;
+        var next = new UnitStartingEquipment[_startingEquipment.Length - 1];
+        if (_selectedEquipment > 0)
+            Array.Copy(_startingEquipment, 0, next, 0, _selectedEquipment);
+        if (_selectedEquipment < next.Length)
+            Array.Copy(_startingEquipment, _selectedEquipment + 1, next, _selectedEquipment, next.Length - _selectedEquipment);
+        _startingEquipment = next;
+        _selectedEquipment = Math.Clamp(_selectedEquipment, 0, Math.Max(0, next.Length - 1));
+        _status = $"Удалён предмет: {name}.";
+    }
+
+    private void ChangeStartingEquipmentItem(ArmorConfig item)
+    {
+        if (_startingEquipment.Length == 0)
+            return;
+        UnitStartingEquipment current = _startingEquipment[_selectedEquipment];
+        _startingEquipment[_selectedEquipment] = new UnitStartingEquipment(item, current.Durability);
+        _status = $"Предмет изменён: {item.Name}.";
+    }
+
+    private void UpdateStartingEquipment(Func<UnitStartingEquipment, UnitStartingEquipment> update)
+    {
+        if (_startingEquipment.Length == 0 || _selectedEquipment < 0 || _selectedEquipment >= _startingEquipment.Length)
+            return;
+        _startingEquipment[_selectedEquipment] = update(_startingEquipment[_selectedEquipment]);
+    }
+
     private unsafe void DrawImGuiMarkerRoleCheckbox(string label, UnitAnatomyMarkerRole role)
     {
         if (_markersByRegion[_selectedPart].Length == 0)
