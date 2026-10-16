@@ -443,10 +443,9 @@ public static class UnitArchetypeFileStore
     {
         try
         {
-            string root = Path.GetFullPath(ProjectDirectory)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                + Path.DirectorySeparatorChar;
-            return Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase);
+            string fullPath = Path.GetFullPath(path);
+            return fullPath.EndsWith(".unit.json", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(Path.GetDirectoryName(fullPath), Path.GetFullPath(ProjectDirectory), StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception)
         {
