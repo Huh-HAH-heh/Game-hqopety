@@ -2799,6 +2799,37 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             onChanged(Math.Clamp(value, minimum, maximum));
     }
 
+    private unsafe string DrawImGuiTextInput(
+        string label,
+        string id,
+        string current,
+        byte[] buffer,
+        ref string bufferValue)
+    {
+        if (!string.Equals(bufferValue, current, StringComparison.Ordinal))
+        {
+            Array.Clear(buffer);
+            byte[] bytes = Encoding.UTF8.GetBytes(current ?? string.Empty);
+            Array.Copy(bytes, buffer, Math.Min(bytes.Length, buffer.Length - 1));
+            bufferValue = current ?? string.Empty;
+        }
+
+        TextImGui(label);
+        fixed (byte* text = buffer)
+        {
+            ImguiNative.igSetNextItemWidth(MathF.Max(90f, _propertiesPanel.Size.X - 34f));
+            if (ImguiNative.igInputText(
+                id, text, (uint)buffer.Length, ImGuiInputTextFlags.None, null, null))
+            {
+                int end = Array.IndexOf(buffer, (byte)0);
+                if (end < 0) end = buffer.Length;
+                bufferValue = Encoding.UTF8.GetString(buffer, 0, end).Trim();
+            }
+        }
+
+        return bufferValue;
+    }
+
     private unsafe void DrawImGuiEnumCombo<TEnum>(
         string label,
         TEnum current,
