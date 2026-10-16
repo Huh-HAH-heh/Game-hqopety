@@ -2183,8 +2183,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_editingAdvancedPart)
         {
-            BodyPartDefinition part = _parts[_selectedPart];
-            return new PropertyInfo(0f, 3f, part.FollowDistance, $"{part.FollowDistance:0.000}");
+            BodyPartDefinition advancedPart = _parts[_selectedPart];
+            return new PropertyInfo(0f, 3f, advancedPart.FollowDistance, $"{advancedPart.FollowDistance:0.000}");
         }
 
         if (_editingOrganStats && _organs.Length > 0)
@@ -2263,8 +2263,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_editingAdvancedPart)
         {
-            BodyPartDefinition part = _parts[_selectedPart];
-            _parts[_selectedPart] = Copy(part, followDistance: Math.Clamp(value, 0f, 3f));
+            BodyPartDefinition advancedPart = _parts[_selectedPart];
+            _parts[_selectedPart] = Copy(advancedPart, followDistance: Math.Clamp(value, 0f, 3f));
             _status = $"Дистанция следования: {_parts[_selectedPart].FollowDistance:0.000}. Нажми Ctrl+S.";
             return;
         }
