@@ -372,6 +372,48 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
         return new UnitAnatomyProfile(nodes, Convert(nodes), _volumes);
     }
 
+    /// <summary>Rebuilds the full editable anatomy while retaining editor-authored health bindings, markers and organs.</summary>
+    public UnitAnatomyProfile WithAuthoringData(
+        ReadOnlySpan<string> regionIds,
+        ReadOnlySpan<BodyPartDefinition> bodyParts,
+        ReadOnlySpan<float> hitHalfHeights,
+        HitRegionPartBinding[][] tissues,
+        UnitAnatomyMarker[][] markers,
+        ReadOnlySpan<UnitAnatomyVolume> volumes)
+    {
+        if (regionIds.Length == 0 ||
+            regionIds.Length != bodyParts.Length ||
+            regionIds.Length != hitHalfHeights.Length ||
+            regionIds.Length != tissues.Length ||
+            regionIds.Length != markers.Length ||
+            regionIds.Length > 256)
+            throw new ArgumentException("All anatomy editor arrays must have the same length (1–256 regions).");
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var nodes = new UnitAnatomyNode[regionIds.Length];
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            string id = regionIds[i];
+            BodyPartDefinition shape = bodyParts[i];
+            if (string.IsNullOrWhiteSpace(id) || !seen.Add(id))
+                throw new ArgumentException($"Empty or duplicate anatomy region ID '{id}'.");
+            if (shape.ParentIndex < -1 || shape.ParentIndex >= i)
+                throw new ArgumentException($"Parent of '{id}' must precede it in the list.");
+            if (!float.IsFinite(hitHalfHeights[i]) || hitHalfHeights[i] <= 0f)
+                throw new ArgumentOutOfRangeException(nameof(hitHalfHeights));
+            if (tissues[i] == null || tissues[i].Length == 0)
+                throw new ArgumentException($"Region '{id}' must contain at least one tissue.", nameof(tissues));
+            if (markers[i] == null)
+                throw new ArgumentException($"Region '{id}' has a null marker array.", nameof(markers));
+
+            string parentId = shape.ParentIndex >= 0 ? regionIds[shape.ParentIndex] : string.Empty;
+            nodes[i] = UnitAnatomyNode.Part(
+                id, parentId, shape, hitHalfHeights[i], tissues[i], markers[i]);
+        }
+
+        return new UnitAnatomyProfile(nodes, Convert(nodes), volumes.ToArray());
+    }
+
     public bool IsInternalNode(int index) =>
         (uint)index < (uint)_nodes.Length &&
         _nodes[index].HasShape &&
