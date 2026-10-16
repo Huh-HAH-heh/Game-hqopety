@@ -1959,6 +1959,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _selectedPart = Math.Clamp(_selectedPart, 0, _parts.Length - 1);
         TextImGui("ПОВРЕЖДАЕМАЯ АНАТОМИЯ И ФУНКЦИОНАЛЬНЫЕ МАРКЕРЫ");
         ImguiNative.igSeparator();
+        DrawImGuiStringCombo(
+            "Область тела",
+            _regionIds[_selectedPart],
+            _regionIds,
+            id =>
+            {
+                int index = Array.IndexOf(_regionIds, id);
+                if (index >= 0)
+                {
+                    _selectedPart = index;
+                    _selectedTissue = 0;
+                    _selectedMarker = 0;
+                }
+            });
         TextImGui($"Область: {PartName(_regionIds[_selectedPart])} ({_regionIds[_selectedPart]})");
         DrawImGuiFloatInput("Полутолщина области попадания", $"##hitHalfHeight{_selectedPart}",
             _hitHalfHeights[_selectedPart],
@@ -2085,14 +2099,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _selectedEquipment = Math.Clamp(_selectedEquipment, 0, _startingEquipment.Length - 1);
         UnitStartingEquipment equipment = _startingEquipment[_selectedEquipment];
+        string[] equipmentLabels = _startingEquipment
+            .Select((item, index) => $"{index + 1:00} — {GetApparelId(item.Item)} — {item.Item.Name}")
+            .ToArray();
         DrawImGuiStringCombo(
             "Слот экипировки",
-            $"{GetApparelId(equipment.Item)} — {equipment.Item.Name}",
-            Array.ConvertAll(_startingEquipment, item => $"{GetApparelId(item.Item)} — {item.Item.Name}"),
-            key =>
+            equipmentLabels[_selectedEquipment],
+            equipmentLabels,
+            label =>
             {
-                int index = Array.FindIndex(_startingEquipment,
-                    item => string.Equals($"{GetApparelId(item.Item)} — {item.Item.Name}", key, StringComparison.Ordinal));
+                int index = Array.IndexOf(equipmentLabels, label);
                 if (index >= 0)
                     _selectedEquipment = index;
             });
