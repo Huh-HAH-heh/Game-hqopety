@@ -871,7 +871,14 @@ public sealed class GameRenderer
         return false;
     }
 
-    private void SaveColonistBodyRig(string[] regionIds, BodyPartDefinition[] parts, UnitDefinition definition)
+    private void SaveColonistBodyRig(
+        string[] regionIds,
+        BodyPartDefinition[] parts,
+        UnitDefinition definition,
+        float[] hitHalfHeights,
+        HitRegionPartBinding[][] tissues,
+        UnitAnatomyMarker[][] markers,
+        UnitAnatomyVolume[] volumes)
     {
         if (!UnitBodyRigSettingsStore.Save(regionIds, parts, out string fullPath, out string error))
         {
@@ -887,19 +894,32 @@ public sealed class GameRenderer
             return;
         }
 
-        _bodyRigEditorOverlay?.SetStatus("Риг и параметры юнита сохранены. Применяю анатомию к текущим колонистам...");
+        if (!UnitAnatomySettingsStore.Save(
+            regionIds, parts, hitHalfHeights, tissues, markers, volumes, out string anatomyError))
+        {
+            _bodyRigEditorOverlay?.SetStatus($"Риг сохранён, но параметры анатомии не записаны: {anatomyError}");
+            Console.Error.WriteLine($"[Anatomy settings] Save failed: {anatomyError}");
+            return;
+        }
+
+        _bodyRigEditorOverlay?.SetStatus("Риг, характеристики, органы и ткани сохранены. Применяю профиль к юнитам...");
         Console.WriteLine($"[Body rig] Saved colonist rig: {fullPath}");
 
         UnitBodyRigEditorOverlay? editor = _bodyRigEditorOverlay;
         string[] savedIds = (string[])regionIds.Clone();
         BodyPartDefinition[] savedParts = (BodyPartDefinition[])parts.Clone();
+        float[] savedHitHalfHeights = (float[])hitHalfHeights.Clone();
+        HitRegionPartBinding[][] savedTissues = CloneAnatomyRows(tissues);
+        UnitAnatomyMarker[][] savedMarkers = CloneAnatomyRows(markers);
+        UnitAnatomyVolume[] savedVolumes = (UnitAnatomyVolume[])volumes.Clone();
         ExecuteSimulationCommand(() =>
         {
             try
             {
                 UnitAnatomyProfile previousProfile =
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
-                UnitAnatomyCatalog.ApplyColonistRig(savedIds, savedParts);
+                UnitAnatomyCatalog.ApplyColonistAuthoringData(
+                    savedIds, savedParts, savedHitHalfHeights, savedTissues, savedMarkers, savedVolumes);
                 UnitAnatomyProfile updatedProfile =
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
 
@@ -951,6 +971,14 @@ public sealed class GameRenderer
                 Console.Error.WriteLine($"[Body rig] Apply failed: {exception}");
             }
         });
+    }
+
+    private static T[][] CloneAnatomyRows<T>(T[][] source)
+    {
+        var result = new T[source.Length][];
+        for (int i = 0; i < source.Length; i++)
+            result[i] = (T[])source[i].Clone();
+        return result;
     }
 
     private void OpenUnitCard(UnitId unit)
