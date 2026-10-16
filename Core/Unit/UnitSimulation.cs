@@ -793,11 +793,18 @@ public sealed class UnitSimulation
     /// region/tissue IDs. Appended editable regions receive fresh health slots.
     /// </summary>
     /// <summary>Applies edited movement, size and vision settings to an existing instance.</summary>
-    public bool ApplyEditedUnitDefinition(UnitId id, in UnitDefinition definition)
+    public bool ApplyEditedUnitDefinition(UnitId id, in UnitDefinition definition) =>
+        ApplyEditedUnitDefinition(id, definition, definition);
+
+    public bool ApplyEditedUnitDefinition(
+        UnitId id,
+        in UnitDefinition previousDefinition,
+        in UnitDefinition definition)
     {
         if (!Units.TryGetIndex(id, out int index) || Units.Type[index] != definition.Type)
             return false;
 
+        Metabolism.ApplyEditedDefinition(index, previousDefinition, definition);
         _baseMoveSpeed[index] = definition.MoveSpeed;
         Units.MoveSpeed[index] = definition.MoveSpeed;
         Units.Width[index] = definition.Width;
