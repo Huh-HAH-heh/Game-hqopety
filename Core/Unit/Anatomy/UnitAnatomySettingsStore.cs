@@ -173,15 +173,94 @@ public static class UnitAnatomySettingsStore
 
         public string ItemId { get; set; } = string.Empty;
         public float Durability { get; set; } = 1f;
+        public ArmorDocument? Armor { get; set; }
 
         public static EquipmentDocument From(UnitStartingEquipment equipment) => new()
         {
             ItemId = GetApparelId(equipment.Item),
-            Durability = equipment.Durability
+            Durability = equipment.Durability,
+            Armor = ArmorDocument.From(equipment.Item)
         };
 
         public UnitStartingEquipment ToEquipment() =>
-            new(GetApparel(ItemId), Durability);
+            new(Armor?.ToArmor() ?? GetApparel(ItemId), Durability);
+    }
+
+    private sealed class ArmorDocument
+    {
+        public ArmorDocument() { }
+
+        public string Name { get; set; } = "Custom armor";
+        public float Weight { get; set; }
+        public byte WorldColorR { get; set; } = 155;
+        public byte WorldColorG { get; set; } = 160;
+        public byte WorldColorB { get; set; } = 165;
+        public int ProtectedZone { get; set; } = -1;
+        public float DamageAbsorption { get; set; }
+        public float ArmorDamageCoefficient { get; set; } = 0.25f;
+        public float BleedProtectionChance { get; set; }
+        public float EnergyLoss { get; set; }
+        public float PenetrationResistance { get; set; }
+        public float SharpRating { get; set; }
+        public float BluntRating { get; set; }
+        public float HeatRating { get; set; }
+        public bool SoftArmor { get; set; }
+        public float HardArmorDamageFactor { get; set; } = 0.5f;
+        public float ArmorRating { get; set; }
+        public ushort Coverage { get; set; }
+        public byte Layer { get; set; }
+        public float WorldRenderPadding { get; set; } = 0.075f;
+        public float MovementSpeedMultiplier { get; set; } = 1f;
+
+        public static ArmorDocument From(ArmorConfig item) => new()
+        {
+            Name = item.Name,
+            Weight = item.Weight,
+            WorldColorR = item.WorldColorR,
+            WorldColorG = item.WorldColorG,
+            WorldColorB = item.WorldColorB,
+            ProtectedZone = item.ProtectedZone,
+            DamageAbsorption = item.DamageAbsorption,
+            ArmorDamageCoefficient = item.ArmorDamageCoefficient,
+            BleedProtectionChance = item.BleedProtectionChance,
+            EnergyLoss = item.EnergyLoss,
+            PenetrationResistance = item.PenetrationResistance,
+            SharpRating = item.SharpRating,
+            BluntRating = item.BluntRating,
+            HeatRating = item.HeatRating,
+            SoftArmor = item.SoftArmor,
+            HardArmorDamageFactor = item.HardArmorDamageFactor,
+            ArmorRating = item.ArmorRating,
+            Coverage = (ushort)item.Coverage,
+            Layer = (byte)item.Layer,
+            WorldRenderPadding = item.WorldRenderPadding,
+            MovementSpeedMultiplier = item.MovementSpeedMultiplier
+        };
+
+        public ArmorConfig ToArmor() => new()
+        {
+            Name = Name,
+            Weight = Weight,
+            WorldColorR = WorldColorR,
+            WorldColorG = WorldColorG,
+            WorldColorB = WorldColorB,
+            ProtectedZone = ProtectedZone,
+            DamageAbsorption = DamageAbsorption,
+            ArmorDamageCoefficient = ArmorDamageCoefficient,
+            BleedProtectionChance = BleedProtectionChance,
+            EnergyLoss = EnergyLoss,
+            PenetrationResistance = PenetrationResistance,
+            SharpRating = SharpRating,
+            BluntRating = BluntRating,
+            HeatRating = HeatRating,
+            SoftArmor = SoftArmor,
+            HardArmorDamageFactor = HardArmorDamageFactor,
+            ArmorRating = ArmorRating,
+            Coverage = (ArmorCoverage)Coverage,
+            Layer = ParseEnum((ArmorLayer)Layer, ArmorLayer.Clothing),
+            WorldRenderPadding = WorldRenderPadding,
+            MovementSpeedMultiplier = MovementSpeedMultiplier
+        };
     }
 
     private static string GetApparelId(ArmorConfig item)
@@ -191,7 +270,7 @@ public static class UnitAnatomySettingsStore
         if (ReferenceEquals(item, ApparelCatalog.CombatVest)) return nameof(ApparelCatalog.CombatVest);
         if (ReferenceEquals(item, ApparelCatalog.CombatHelmet)) return nameof(ApparelCatalog.CombatHelmet);
         if (ReferenceEquals(item, ApparelCatalog.PoweredExoskeleton)) return nameof(ApparelCatalog.PoweredExoskeleton);
-        throw new InvalidDataException($"Неизвестный предмет стартового снаряжения: {item.Name}.");
+        return "custom";
     }
 
     private static ArmorConfig GetApparel(string id) => id switch
