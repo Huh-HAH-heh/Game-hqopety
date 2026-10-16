@@ -580,6 +580,10 @@
       "torsoLength",
       "headDrop"
     ],
-    "sourceRevisionNote": "The output uses the upstream canonical measurement block and hierarchy, not a pixel-for-pixel copy of the upstream bind pose. RimClone's top-down representation and requested segment counts require a coordinate conversion and reduced hierarchy."
+    "sourceRevisionNote": "The output uses the upstream canonical measurement block and hierarchy, not a pixel-for-pixel copy of the upstream bind pose. RimClone's top-down representation and requested segment counts require a coordinate conversion and reduced hierarchy.",
+    "armElbowBend": {
+      "sourceReference": "upperArmL rotation -4.78 degrees followed by lowerArmL rotation +13.2 degrees in maleV1",
+      "rimCloneAdaptation": "the neutral pose is mirrored and a small outward elbow offset is retained so upper arm and forearm do not form one straight line"
+    }
   }
 }
