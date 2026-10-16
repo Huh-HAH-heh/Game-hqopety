@@ -2402,7 +2402,7 @@ private static bool TestVisionDetectsRegionInsideRange()
         UnitHealthSystem healthSystem = new UnitHealthSystem();
         const float initialEnergy = 1729.8f;
 
-        int torsoRegion = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy.FindRegion("torso");
+        int torsoRegion = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy.FindRegion("body.middle");
         if (torsoRegion < 0)
             return false;
 
