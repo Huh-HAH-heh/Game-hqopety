@@ -871,7 +871,7 @@ public sealed class GameRenderer
         return false;
     }
 
-    private void SaveColonistBodyRig(string[] regionIds, BodyPartDefinition[] parts)
+    private void SaveColonistBodyRig(string[] regionIds, BodyPartDefinition[] parts, UnitDefinition definition)
     {
         if (!UnitBodyRigSettingsStore.Save(regionIds, parts, out string fullPath, out string error))
         {
@@ -880,7 +880,14 @@ public sealed class GameRenderer
             return;
         }
 
-        _bodyRigEditorOverlay?.SetStatus("Риг записан в Data/Units/colonist-body-rig.json. Применяю к текущим колонистам...");
+        if (!UnitAnatomyCatalog.SaveColonistDefinition(definition, out string definitionError))
+        {
+            _bodyRigEditorOverlay?.SetStatus($"Риг сохранён, но параметры юнита не записаны: {definitionError}");
+            Console.Error.WriteLine($"[Unit definition] Save failed: {definitionError}");
+            return;
+        }
+
+        _bodyRigEditorOverlay?.SetStatus("Риг и параметры юнита сохранены. Применяю анатомию к текущим колонистам...");
         Console.WriteLine($"[Body rig] Saved colonist rig: {fullPath}");
 
         UnitBodyRigEditorOverlay? editor = _bodyRigEditorOverlay;
