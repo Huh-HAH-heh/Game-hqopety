@@ -878,7 +878,8 @@ public sealed class GameRenderer
         float[] hitHalfHeights,
         HitRegionPartBinding[][] tissues,
         UnitAnatomyMarker[][] markers,
-        UnitAnatomyVolume[] volumes)
+        UnitAnatomyVolume[] volumes,
+        UnitStartingEquipment[] startingEquipment)
     {
         if (!UnitBodyRigSettingsStore.Save(regionIds, parts, out string fullPath, out string error))
         {
@@ -895,7 +896,7 @@ public sealed class GameRenderer
         }
 
         if (!UnitAnatomySettingsStore.Save(
-            regionIds, parts, hitHalfHeights, tissues, markers, volumes, out string anatomyError))
+            regionIds, parts, hitHalfHeights, tissues, markers, volumes, startingEquipment, out string anatomyError))
         {
             _bodyRigEditorOverlay?.SetStatus($"Риг сохранён, но параметры анатомии не записаны: {anatomyError}");
             Console.Error.WriteLine($"[Anatomy settings] Save failed: {anatomyError}");
@@ -912,6 +913,7 @@ public sealed class GameRenderer
         HitRegionPartBinding[][] savedTissues = CloneAnatomyRows(tissues);
         UnitAnatomyMarker[][] savedMarkers = CloneAnatomyRows(markers);
         UnitAnatomyVolume[] savedVolumes = (UnitAnatomyVolume[])volumes.Clone();
+        UnitStartingEquipment[] savedEquipment = (UnitStartingEquipment[])startingEquipment.Clone();
         ExecuteSimulationCommand(() =>
         {
             try
@@ -919,7 +921,7 @@ public sealed class GameRenderer
                 UnitAnatomyProfile previousProfile =
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
                 UnitAnatomyCatalog.ApplyColonistAuthoringData(
-                    savedIds, savedParts, savedHitHalfHeights, savedTissues, savedMarkers, savedVolumes);
+                    savedIds, savedParts, savedHitHalfHeights, savedTissues, savedMarkers, savedVolumes, savedEquipment);
                 UnitAnatomyProfile updatedProfile =
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
 
