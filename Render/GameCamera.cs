@@ -116,7 +116,7 @@ public sealed class GameCamera
         {
             // Match panning speed to the visible world area: zooming out
             // increases world-space speed, while zooming in makes movement finer.
-            float zoomSpeedScale = Math.Clamp(_zoomLevel, 0.25f, 12f);
+            float zoomSpeedScale = Math.Clamp(_zoomLevel, 0.05f, 12f);
             float moveSpeed = _moveSpeed * zoomSpeedScale;
 
             _targetPosition.X +=
