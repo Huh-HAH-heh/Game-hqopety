@@ -117,7 +117,7 @@ public sealed class GameCamera
             // ZoomLevel is the world-space distance represented by one screen-space unit.
             // Scale panning speed with it so the camera covers comparable screen distance
             // per second both close to the map and when zoomed far out.
-            float zoomSpeedMultiplier = Math.Clamp(_zoomLevel, 0.5f, 24f);
+            float zoomSpeedMultiplier = Math.Clamp(_zoomLevel, 0.05f, 24f);
             float zoomAdjustedSpeed = _moveSpeed * zoomSpeedMultiplier;
 
             _targetPosition.X +=
