@@ -2446,7 +2446,7 @@ private static bool TestVisionDetectsRegionInsideRange()
 
             if (result.DamageApplied <= 0f || result.DamageApplied >= 10f)
             {
-                Console.Error.WriteLine($"[Armor self-test] Rifle hit {i + 1}: applied={result.DamageApplied:0.000}, energy={result.EnergyRemaining:0.0}, penetration={result.PenetrationRemaining:0.0}.");
+                Console.Error.WriteLine($"[Armor self-test] Rifle hit {i + 1}: applied={result.DamageApplied:0.000}; expected 0 < damage < 10.");
                 return false;
             }
         }
