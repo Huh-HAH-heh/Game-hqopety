@@ -618,6 +618,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(UnitType.Colonist);
         _definition = archetype.Definition;
+        _editingProjectAsset = false;
+        _projectUnitPath = string.Empty;
+        _projectUnitId = string.Empty;
+        _projectUnitDisplayName = "Колонист";
+        _projectUnitDescription = string.Empty;
+        _projectRuntimeTypeId = 0;
+        _imguiAssetIdValue = string.Empty;
+        _imguiAssetNameValue = string.Empty;
+        _imguiAssetDescriptionValue = string.Empty;
         _showUnitSettings = false;
         _showOrganSettings = false;
         _showTissueSettings = false;
