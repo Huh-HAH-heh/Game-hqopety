@@ -183,7 +183,11 @@ public static class UnitAnatomySettingsStore
         };
 
         public UnitStartingEquipment ToEquipment() =>
-            new(Armor?.ToArmor() ?? GetApparel(ItemId), Durability);
+            new(
+                string.Equals(ItemId, "custom", StringComparison.Ordinal)
+                    ? Armor?.ToArmor() ?? throw new InvalidDataException("Для пользовательской брони отсутствуют параметры.")
+                    : GetApparel(ItemId),
+                Durability);
     }
 
     private sealed class ArmorDocument
