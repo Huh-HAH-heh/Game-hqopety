@@ -975,6 +975,70 @@ public sealed class GameRenderer
         });
     }
 
+    private void SaveProjectUnitAsset(UnitArchetypeAsset asset)
+    {
+        UnitBodyRigEditorOverlay? editor = _bodyRigEditorOverlay;
+        ExecuteSimulationCommand(() =>
+        {
+            try
+            {
+                UnitAnatomyCatalog.RegisterCustomAsset(asset);
+                UnitStore units = _unitSimulation.Units;
+                ReadOnlySpan<int> active = units.ActiveIndices;
+                int[] bodyStarts = units.BodyStart;
+                short[] bodyCounts = units.BodyCount;
+                UnitType[] types = units.Type;
+                Vector3[] positions = units.Position;
+                Vector3[] bodyNormals = units.BodyNormal;
+                Vector3[] headNormals = units.HeadNormal;
+                BodyPartDefinition[] bodyParts = asset.BodyParts;
+                int updatedCount = 0;
+
+                for (int i = 0; i < active.Length; i++)
+                {
+                    int index = active[i];
+                    if (types[index] != asset.Definition.Type)
+                        continue;
+
+                    var oldHandle = new BodyHandle(bodyStarts[index], bodyCounts[index]);
+                    BodyHandle newHandle;
+                    if (oldHandle.Count == bodyParts.Length)
+                    {
+                        _unitSimulation.Bodies.ApplyBodyDefinition(oldHandle, bodyParts);
+                        newHandle = oldHandle;
+                    }
+                    else
+                    {
+                        _unitSimulation.Bodies.FreeBody(oldHandle);
+                        newHandle = _unitSimulation.Bodies.CreateBody(bodyParts);
+                        bodyStarts[index] = newHandle.Start;
+                        bodyCounts[index] = checked((short)newHandle.Count);
+                        float bodyRotation = MathF.Atan2(bodyNormals[index].Y, bodyNormals[index].X);
+                        float headRotation = MathF.Atan2(headNormals[index].Y, headNormals[index].X);
+                        _unitSimulation.Bodies.SetInitialWorldPosition(
+                            newHandle, positions[index], bodyRotation, headRotation);
+                    }
+
+                    UnitId id = units.GetId(index);
+                    _unitSimulation.ApplyEditedUnitDefinition(id, asset.Definition);
+                    _unitSimulation.ApplyEditedAnatomyProfile(id, asset.Anatomy);
+                    updatedCount++;
+                }
+
+                editor?.SetStatus(
+                    $"Сохранён «{asset.DisplayName}» в Data/Units. " +
+                    $"runtimeTypeId={asset.RuntimeTypeId}; обновлено активных экземпляров: {updatedCount}.");
+                Console.WriteLine(
+                    $"[Unit asset] Registered '{asset.Id}' ({asset.RuntimeTypeId}) from {asset.FilePath}; updated {updatedCount} units.");
+            }
+            catch (Exception exception)
+            {
+                editor?.SetStatus($"Файл сохранён, но профиль не применён к симуляции: {exception.Message}");
+                Console.Error.WriteLine($"[Unit asset] Apply failed: {exception}");
+            }
+        });
+    }
+
     private static T[][] CloneAnatomyRows<T>(T[][] source)
     {
         var result = new T[source.Length][];
@@ -1445,7 +1509,9 @@ public sealed class GameRenderer
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
         _unitGroupCardOverlay = new UnitGroupCardOverlay();
-        _bodyRigEditorOverlay = new UnitBodyRigEditorOverlay(SaveColonistBodyRig);
+        _bodyRigEditorOverlay = new UnitBodyRigEditorOverlay(
+            SaveColonistBodyRig,
+            SaveProjectUnitAsset);
         _combatStatusOverlay = new CombatStatusOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
