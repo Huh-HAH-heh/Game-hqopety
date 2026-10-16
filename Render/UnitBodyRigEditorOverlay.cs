@@ -2349,6 +2349,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
         UnitStartingEquipment current = _startingEquipment[_selectedEquipment];
         _startingEquipment[_selectedEquipment] = new UnitStartingEquipment(item, current.Durability);
+        _imguiNameEquipmentIndex = -1;
         _status = $"Предмет изменён: {item.Name}.";
     }
 
