@@ -569,7 +569,9 @@ public static class UnitArchetypeFileStore
 
     private sealed class UnitAssetDocument
     {
-        public int SchemaVersion { get; set; } = SchemaVersion;
+        public UnitAssetDocument() { }
+
+        public int SchemaVersion { get; set; } = UnitArchetypeFileStore.SchemaVersion;
         public string Id { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
@@ -582,6 +584,8 @@ public static class UnitArchetypeFileStore
 
     private sealed class UnitAssetStats
     {
+        public UnitAssetStats() { }
+
         public string BodyType { get; set; } = nameof(UnitBodyType.Colonist);
         public float MoveSpeed { get; set; } = 2.8f;
         public float Width { get; set; } = 0.36f;
@@ -593,6 +597,8 @@ public static class UnitArchetypeFileStore
 
     private sealed class RegionDocument
     {
+        public RegionDocument() { }
+
         public string Id { get; set; } = string.Empty;
         public float HitHalfHeight { get; set; } = 0.1f;
         public UnitBodyRigSettingsStore.BodyRigPartSettings? Part { get; set; }
@@ -602,6 +608,8 @@ public static class UnitArchetypeFileStore
 
     private sealed class TissueDocument
     {
+        public TissueDocument() { }
+
         public string Id { get; set; } = string.Empty;
         public string ParentId { get; set; } = string.Empty;
         public string Part { get; set; } = nameof(UnitHealthPartId.WholeBody);
@@ -631,6 +639,8 @@ public static class UnitArchetypeFileStore
 
     private sealed class MarkerDocument
     {
+        public MarkerDocument() { }
+
         public string Id { get; set; } = "target";
         public string Roles { get; set; } = nameof(UnitAnatomyMarkerRole.Target);
         public float X { get; set; }
@@ -649,6 +659,8 @@ public static class UnitArchetypeFileStore
 
     private sealed class VolumeDocument
     {
+        public VolumeDocument() { }
+
         public string Id { get; set; } = string.Empty;
         public string ParentRegionId { get; set; } = string.Empty;
         public string EntryBindingId { get; set; } = string.Empty;
@@ -687,6 +699,8 @@ public static class UnitArchetypeFileStore
 
     private sealed class EquipmentDocument
     {
+        public EquipmentDocument() { }
+
         public string ItemId { get; set; } = "custom";
         public float Durability { get; set; } = 100f;
         public ArmorDocument? Armor { get; set; }
@@ -709,6 +723,8 @@ public static class UnitArchetypeFileStore
 
     private sealed class ArmorDocument
     {
+        public ArmorDocument() { }
+
         public string Name { get; set; } = "Custom armor";
         public float Weight { get; set; }
         public byte WorldColorR { get; set; } = 155;
