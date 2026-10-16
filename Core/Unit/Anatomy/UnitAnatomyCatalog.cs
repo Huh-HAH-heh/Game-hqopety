@@ -396,6 +396,7 @@ public static class UnitAnatomyCatalog
     public static bool SaveColonistDefinition(UnitDefinition definition, out string error)
     {
         if (definition.Type != UnitType.Colonist ||
+            !Enum.IsDefined(definition.BodyType) ||
             !IsValidPositive(definition.MoveSpeed) ||
             !IsValidPositive(definition.Width) ||
             !IsValidPositive(definition.Length) ||
