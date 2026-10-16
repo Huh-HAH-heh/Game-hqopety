@@ -39,6 +39,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         UnitAnatomyMarker[][],
         UnitAnatomyVolume[],
         UnitStartingEquipment[]> _saveRequested;
+    private readonly Action<UnitArchetypeAsset> _projectAssetSaved;
     private readonly Font? _font;
     private readonly RectangleShape _backdrop = new(new Vector2f(1f, 1f))
     {
@@ -269,6 +270,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private BodyPartDefinition[] _defaultParts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _openedParts = Array.Empty<BodyPartDefinition>();
     private UnitDefinition _definition = new(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f);
+    private bool _editingProjectAsset;
+    private string _projectUnitPath = string.Empty;
+    private string _projectUnitId = string.Empty;
+    private string _projectUnitDisplayName = "Новый юнит";
+    private string _projectUnitDescription = string.Empty;
+    private ushort _projectRuntimeTypeId;
     private float[] _hitHalfHeights = Array.Empty<float>();
     private HitRegionPartBinding[][] _tissuesByRegion = Array.Empty<HitRegionPartBinding[]>();
     private UnitAnatomyMarker[][] _markersByRegion = Array.Empty<UnitAnatomyMarker[]>();
@@ -332,6 +339,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private ImGuiSfmlBackend? _imguiBackend;
     private readonly byte[] _imguiPartNameBuffer = new byte[256];
     private readonly byte[] _imguiEquipmentNameBuffer = new byte[256];
+    private readonly byte[] _imguiAssetIdBuffer = new byte[96];
+    private readonly byte[] _imguiAssetNameBuffer = new byte[256];
+    private readonly byte[] _imguiAssetDescriptionBuffer = new byte[512];
+    private string _imguiAssetIdValue = string.Empty;
+    private string _imguiAssetNameValue = string.Empty;
+    private string _imguiAssetDescriptionValue = string.Empty;
     private int _imguiNamePartIndex = -1;
     private int _imguiNameEquipmentIndex = -1;
 
@@ -346,9 +359,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             HitRegionPartBinding[][],
             UnitAnatomyMarker[][],
             UnitAnatomyVolume[],
-            UnitStartingEquipment[]> saveRequested)
+            UnitStartingEquipment[]> saveRequested,
+        Action<UnitArchetypeAsset> projectAssetSaved)
     {
         _saveRequested = saveRequested ?? throw new ArgumentNullException(nameof(saveRequested));
+        _projectAssetSaved = projectAssetSaved ?? throw new ArgumentNullException(nameof(projectAssetSaved));
         _font = LoadFont();
 
         for (int i = 0; i < _partRows.Length; i++)
