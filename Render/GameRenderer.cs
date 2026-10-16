@@ -881,6 +881,7 @@ public sealed class GameRenderer
         UnitAnatomyVolume[] volumes,
         UnitStartingEquipment[] startingEquipment)
     {
+        UnitDefinition previousDefinition = UnitAnatomyCatalog.Get(UnitType.Colonist).Definition;
         if (!UnitBodyRigSettingsStore.Save(regionIds, parts, out string fullPath, out string error))
         {
             _bodyRigEditorOverlay?.SetStatus($"Ошибка сохранения: {error}");
@@ -962,8 +963,7 @@ public sealed class GameRenderer
                     }
 
                     UnitId unitId = units.GetId(index);
-                    _unitSimulation.ApplyEditedUnitDefinition(
-                        unitId, UnitAnatomyCatalog.Get(UnitType.Colonist).Definition);
+                    _unitSimulation.ApplyEditedUnitDefinition(unitId, previousDefinition, definition);
                     _unitSimulation.ApplyEditedAnatomyProfile(unitId, updatedProfile);
                     updatedCount++;
                 }
@@ -985,6 +985,11 @@ public sealed class GameRenderer
         {
             try
             {
+                UnitDefinition previousDefinition =
+                    UnitAnatomyCatalog.TryGetCustomAsset(asset.Definition.Type, out UnitArchetypeAsset? previousAsset) &&
+                    previousAsset != null
+                        ? previousAsset.Definition
+                        : asset.Definition;
                 UnitAnatomyCatalog.RegisterCustomAsset(asset);
                 UnitStore units = _unitSimulation.Units;
                 ReadOnlySpan<int> active = units.ActiveIndices;
@@ -1023,7 +1028,7 @@ public sealed class GameRenderer
                     }
 
                     UnitId id = units.GetId(index);
-                    _unitSimulation.ApplyEditedUnitDefinition(id, asset.Definition);
+                    _unitSimulation.ApplyEditedUnitDefinition(id, previousDefinition, asset.Definition);
                     _unitSimulation.ApplyEditedAnatomyProfile(id, asset.Anatomy);
                     updatedCount++;
                 }
