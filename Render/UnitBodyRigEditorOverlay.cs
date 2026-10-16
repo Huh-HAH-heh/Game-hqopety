@@ -625,13 +625,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (_parentButton.GetGlobalBounds().Contains(position))
+        if (IsPropertiesItemVisible(_parentButton.Position.Y, _parentButton.Size.Y) &&
+            _parentButton.GetGlobalBounds().Contains(position))
         {
             CycleParentDependency();
             return true;
         }
 
-        if (_allSymmetryButton.GetGlobalBounds().Contains(position))
+        if (IsPropertiesItemVisible(_allSymmetryButton.Position.Y, _allSymmetryButton.Size.Y) &&
+            _allSymmetryButton.GetGlobalBounds().Contains(position))
         {
             bool enable = !_symmetryEnabled[0] || !_symmetryEnabled[1] || !_symmetryEnabled[2];
             Array.Fill(_symmetryEnabled, enable);
@@ -639,7 +641,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (_gridButton.GetGlobalBounds().Contains(position))
+        if (IsPropertiesItemVisible(_gridButton.Position.Y, _gridButton.Size.Y) &&
+            _gridButton.GetGlobalBounds().Contains(position))
         {
             _gridEnabled = !_gridEnabled;
             _status = _gridEnabled
@@ -648,7 +651,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (_gridStepButton.GetGlobalBounds().Contains(position))
+        if (IsPropertiesItemVisible(_gridStepButton.Position.Y, _gridStepButton.Size.Y) &&
+            _gridStepButton.GetGlobalBounds().Contains(position))
         {
             _gridStepIndex = (_gridStepIndex + 1) % _gridSteps.Length;
             _status = $"Шаг сетки: {_gridSteps[_gridStepIndex]:0.####}. Перемещение привязано к этому шагу.";
@@ -687,7 +691,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         for (int projection = 0; projection < _symmetryButtons.Length; projection++)
         {
-            if (!_symmetryButtons[projection].GetGlobalBounds().Contains(position))
+            if (!IsPropertiesItemVisible(_symmetryButtons[projection].Position.Y, _symmetryButtons[projection].Size.Y) ||
+                !_symmetryButtons[projection].GetGlobalBounds().Contains(position))
                 continue;
 
             _symmetryEnabled[projection] = !_symmetryEnabled[projection];
@@ -696,7 +701,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (_primitiveButton.GetGlobalBounds().Contains(position))
+        if (IsPropertiesItemVisible(_primitiveButton.Position.Y, _primitiveButton.Size.Y) &&
+            _primitiveButton.GetGlobalBounds().Contains(position))
         {
             BodyPartDefinition part = _parts[_selectedPart];
             BodyPrimitive primitive = part.Primitive switch
