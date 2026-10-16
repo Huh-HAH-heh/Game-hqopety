@@ -1,0 +1,868 @@
+{
+  "schemaVersion": 1,
+  "id": "human-rig-v2",
+  "displayName": "Гуманоид — новый каркас",
+  "description": "Черновой каркас для проверки в редакторе. Корпус — 1 сегмент, каждая рука — 2 сегмента, каждая нога — 3 сегмента, голова — 1 сегмент. Без стартовой одежды и брони, чтобы геометрия была видна.",
+  "runtimeTypeId": 1024,
+  "stats": {
+    "bodyType": "Colonist",
+    "moveSpeed": 2.8,
+    "width": 0.35,
+    "length": 0.6,
+    "height": 1.75,
+    "viewRange": 20,
+    "fieldOfView": 110,
+    "bodyMassKg": 75,
+    "muscleMassKg": 30,
+    "bodyFatKg": 13,
+    "bloodLiters": 5,
+    "baseEnergyKcal": 2200,
+    "baseWaterLiters": 2.5,
+    "strength": 4,
+    "constitution": 4,
+    "dexterity": 4,
+    "intelligence": 4
+  },
+  "regions": [
+    {
+      "id": "body.torso",
+      "hitHalfHeight": 0.3,
+      "part": {
+        "id": "body.torso",
+        "parentIndex": -1,
+        "x": 0,
+        "y": 0,
+        "z": 1.04,
+        "scaleX": 0.112,
+        "scaleY": 0.092,
+        "scaleZ": 0.3,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": null,
+        "displayName": "Туловище"
+      },
+      "tissues": [
+        {
+          "id": "torso.main",
+          "parentId": "",
+          "part": "Torso",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 14,
+          "maxHitPoints": 60,
+          "armorZone": -1,
+          "projectileEnergyLoss": 190,
+          "projectilePenetrationLoss": 12
+        },
+        {
+          "id": "heart.main",
+          "parentId": "torso.main",
+          "part": "Heart",
+          "parentPart": "None",
+          "kind": "Organ",
+          "weight": 0.3,
+          "maxHitPoints": 15,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        },
+        {
+          "id": "lung.left",
+          "parentId": "torso.main",
+          "part": "LeftLung",
+          "parentPart": "None",
+          "kind": "Organ",
+          "weight": 0.25,
+          "maxHitPoints": 12,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        },
+        {
+          "id": "lung.right",
+          "parentId": "torso.main",
+          "part": "RightLung",
+          "parentPart": "None",
+          "kind": "Organ",
+          "weight": 0.25,
+          "maxHitPoints": 12,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        },
+        {
+          "id": "stomach.main",
+          "parentId": "torso.main",
+          "part": "Stomach",
+          "parentPart": "None",
+          "kind": "Organ",
+          "weight": 0.18,
+          "maxHitPoints": 12,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        },
+        {
+          "id": "liver.main",
+          "parentId": "torso.main",
+          "part": "Liver",
+          "parentPart": "None",
+          "kind": "Organ",
+          "weight": 0.2,
+          "maxHitPoints": 15,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        },
+        {
+          "id": "kidney.left",
+          "parentId": "torso.main",
+          "part": "LeftKidney",
+          "parentPart": "None",
+          "kind": "Organ",
+          "weight": 0.12,
+          "maxHitPoints": 10,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        },
+        {
+          "id": "kidney.right",
+          "parentId": "torso.main",
+          "part": "RightKidney",
+          "parentPart": "None",
+          "kind": "Organ",
+          "weight": 0.12,
+          "maxHitPoints": 10,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.torso.target",
+          "roles": "Target, Aim, Vision",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        {
+          "id": "marker.torso.locomotion",
+          "roles": "Locomotion",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.arm.left.upper",
+      "hitHalfHeight": 0.14,
+      "part": {
+        "id": "body.arm.left.upper",
+        "parentIndex": 0,
+        "x": 0.005,
+        "y": 0.072,
+        "z": -0.08,
+        "scaleX": 0.045,
+        "scaleY": 0.022,
+        "scaleZ": 0.105,
+        "rotation": 1.5707963267948966,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycle",
+        "anchor": "Parent",
+        "role": "UpperArm",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.arm.right.upper",
+        "displayName": "Левое плечо"
+      },
+      "tissues": [
+        {
+          "id": "arm.left",
+          "parentId": "torso.main",
+          "part": "LeftArm",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 2,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": 90,
+          "projectilePenetrationLoss": 6
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.arm.left.upper.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.arm.left.lower",
+      "hitHalfHeight": 0.115,
+      "part": {
+        "id": "body.arm.left.lower",
+        "parentIndex": 1,
+        "x": 0.045,
+        "y": 0,
+        "z": -0.005,
+        "scaleX": 0.04,
+        "scaleY": 0.02,
+        "scaleZ": 0.095,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycle",
+        "anchor": "Parent",
+        "role": "Forearm",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.arm.right.lower",
+        "displayName": "Левое предплечье"
+      },
+      "tissues": [
+        {
+          "id": "hand.left",
+          "parentId": "arm.left",
+          "part": "LeftHand",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 0.5,
+          "maxHitPoints": 12,
+          "armorZone": -1,
+          "projectileEnergyLoss": 55,
+          "projectilePenetrationLoss": 4
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.arm.left.lower.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.arm.right.upper",
+      "hitHalfHeight": 0.14,
+      "part": {
+        "id": "body.arm.right.upper",
+        "parentIndex": 0,
+        "x": 0.005,
+        "y": -0.072,
+        "z": -0.08,
+        "scaleX": 0.045,
+        "scaleY": 0.022,
+        "scaleZ": 0.105,
+        "rotation": -1.5707963267948966,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycleOpposite",
+        "anchor": "Parent",
+        "role": "UpperArm",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.arm.left.upper",
+        "displayName": "Правое плечо"
+      },
+      "tissues": [
+        {
+          "id": "arm.right",
+          "parentId": "torso.main",
+          "part": "RightArm",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 2,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": 90,
+          "projectilePenetrationLoss": 6
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.arm.right.upper.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.arm.right.lower",
+      "hitHalfHeight": 0.115,
+      "part": {
+        "id": "body.arm.right.lower",
+        "parentIndex": 3,
+        "x": 0.045,
+        "y": 0,
+        "z": -0.005,
+        "scaleX": 0.04,
+        "scaleY": 0.02,
+        "scaleZ": 0.095,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycleOpposite",
+        "anchor": "Parent",
+        "role": "Forearm",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.arm.left.lower",
+        "displayName": "Правое предплечье"
+      },
+      "tissues": [
+        {
+          "id": "hand.right",
+          "parentId": "arm.right",
+          "part": "RightHand",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 0.5,
+          "maxHitPoints": 12,
+          "armorZone": -1,
+          "projectileEnergyLoss": 55,
+          "projectilePenetrationLoss": 4
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.arm.right.lower.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.leg.left.upper",
+      "hitHalfHeight": 0.15,
+      "part": {
+        "id": "body.leg.left.upper",
+        "parentIndex": 0,
+        "x": -0.075,
+        "y": 0.035,
+        "z": -0.31,
+        "scaleX": 0.05,
+        "scaleY": 0.025,
+        "scaleZ": 0.13,
+        "rotation": 2.921592653589793,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycle",
+        "anchor": "Parent",
+        "role": "Thigh",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.leg.right.upper",
+        "displayName": "Левое бедро"
+      },
+      "tissues": [
+        {
+          "id": "leg.left",
+          "parentId": "torso.main",
+          "part": "LeftLeg",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 8,
+          "maxHitPoints": 35,
+          "armorZone": -1,
+          "projectileEnergyLoss": 105,
+          "projectilePenetrationLoss": 7
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.leg.left.upper.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.leg.left.lower",
+      "hitHalfHeight": 0.12,
+      "part": {
+        "id": "body.leg.left.lower",
+        "parentIndex": 5,
+        "x": 0.095,
+        "y": 0,
+        "z": -0.005,
+        "scaleX": 0.043,
+        "scaleY": 0.021,
+        "scaleZ": 0.105,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycle",
+        "anchor": "Parent",
+        "role": "Shin",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.leg.right.lower",
+        "displayName": "Левая голень"
+      },
+      "tissues": [
+        {
+          "id": "shin.left",
+          "parentId": "leg.left",
+          "part": "LeftLeg",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 4,
+          "maxHitPoints": 24,
+          "armorZone": -1,
+          "projectileEnergyLoss": 80,
+          "projectilePenetrationLoss": 5
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.leg.left.lower.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.leg.left.foot",
+      "hitHalfHeight": 0.075,
+      "part": {
+        "id": "body.leg.left.foot",
+        "parentIndex": 6,
+        "x": 0.082,
+        "y": 0,
+        "z": 0,
+        "scaleX": 0.032,
+        "scaleY": 0.022,
+        "scaleZ": 0.06,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycle",
+        "anchor": "Parent",
+        "role": "Foot",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.leg.right.foot",
+        "displayName": "Левая стопа"
+      },
+      "tissues": [
+        {
+          "id": "foot.left",
+          "parentId": "shin.left",
+          "part": "LeftFoot",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 2,
+          "maxHitPoints": 14,
+          "armorZone": -1,
+          "projectileEnergyLoss": 50,
+          "projectilePenetrationLoss": 4
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.leg.left.foot.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.leg.right.upper",
+      "hitHalfHeight": 0.15,
+      "part": {
+        "id": "body.leg.right.upper",
+        "parentIndex": 0,
+        "x": -0.075,
+        "y": -0.035,
+        "z": -0.31,
+        "scaleX": 0.05,
+        "scaleY": 0.025,
+        "scaleZ": 0.13,
+        "rotation": -2.921592653589793,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycleOpposite",
+        "anchor": "Parent",
+        "role": "Thigh",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.leg.left.upper",
+        "displayName": "Правое бедро"
+      },
+      "tissues": [
+        {
+          "id": "leg.right",
+          "parentId": "torso.main",
+          "part": "RightLeg",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 8,
+          "maxHitPoints": 35,
+          "armorZone": -1,
+          "projectileEnergyLoss": 105,
+          "projectilePenetrationLoss": 7
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.leg.right.upper.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.leg.right.lower",
+      "hitHalfHeight": 0.12,
+      "part": {
+        "id": "body.leg.right.lower",
+        "parentIndex": 8,
+        "x": 0.095,
+        "y": 0,
+        "z": -0.005,
+        "scaleX": 0.043,
+        "scaleY": 0.021,
+        "scaleZ": 0.105,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycleOpposite",
+        "anchor": "Parent",
+        "role": "Shin",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.leg.left.lower",
+        "displayName": "Правая голень"
+      },
+      "tissues": [
+        {
+          "id": "shin.right",
+          "parentId": "leg.right",
+          "part": "RightLeg",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 4,
+          "maxHitPoints": 24,
+          "armorZone": -1,
+          "projectileEnergyLoss": 80,
+          "projectilePenetrationLoss": 5
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.leg.right.lower.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.leg.right.foot",
+      "hitHalfHeight": 0.075,
+      "part": {
+        "id": "body.leg.right.foot",
+        "parentIndex": 9,
+        "x": 0.082,
+        "y": 0,
+        "z": 0,
+        "scaleX": 0.032,
+        "scaleY": 0.022,
+        "scaleZ": 0.06,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "WalkCycleOpposite",
+        "anchor": "Parent",
+        "role": "Foot",
+        "pivot": "Start",
+        "symmetryPartnerId": "body.leg.left.foot",
+        "displayName": "Правая стопа"
+      },
+      "tissues": [
+        {
+          "id": "foot.right",
+          "parentId": "shin.right",
+          "part": "RightFoot",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 2,
+          "maxHitPoints": 14,
+          "armorZone": -1,
+          "projectileEnergyLoss": 50,
+          "projectilePenetrationLoss": 4
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.body.leg.right.foot.target",
+          "roles": "Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "body.head",
+      "hitHalfHeight": 0.145,
+      "part": {
+        "id": "body.head",
+        "parentIndex": -1,
+        "x": 0.155,
+        "y": 0,
+        "z": 1.48,
+        "scaleX": 0.055,
+        "scaleY": 0.055,
+        "scaleZ": 0.14,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "UnitHead",
+        "role": "Head",
+        "pivot": "Center",
+        "symmetryPartnerId": null,
+        "displayName": "Голова"
+      },
+      "tissues": [
+        {
+          "id": "head.main",
+          "parentId": "torso.main",
+          "part": "Head",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 19,
+          "maxHitPoints": 40,
+          "armorZone": -1,
+          "projectileEnergyLoss": 170,
+          "projectilePenetrationLoss": 10
+        },
+        {
+          "id": "brain.main",
+          "parentId": "head.main",
+          "part": "Brain",
+          "parentPart": "None",
+          "kind": "Organ",
+          "weight": 1,
+          "maxHitPoints": 10,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "marker.head.eye",
+          "roles": "Eye, Vision",
+          "x": 0,
+          "y": 0,
+          "z": 0.015
+        },
+        {
+          "id": "marker.head.target",
+          "roles": "Target, Aim, Vision",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        {
+          "id": "marker.head.muzzle",
+          "roles": "Muzzle",
+          "x": 0.035,
+          "y": 0,
+          "z": 0.005
+        }
+      ]
+    }
+  ],
+  "organs": [
+    {
+      "id": "organ.heart",
+      "parentRegionId": "body.torso",
+      "entryBindingId": "torso.main",
+      "targetBindingId": "heart.main",
+      "primitive": "Circle",
+      "centerX": 0.012,
+      "centerY": 0.008,
+      "centerZ": 0.005,
+      "halfX": 0.02,
+      "halfY": 0.016,
+      "halfZ": 0.012,
+      "rotation": 0,
+      "energyLoss": 26,
+      "penetrationLoss": 2,
+      "damageMultiplier": 0.85,
+      "bleedMultiplier": 1.5
+    },
+    {
+      "id": "organ.lung.left",
+      "parentRegionId": "body.torso",
+      "entryBindingId": "torso.main",
+      "targetBindingId": "lung.left",
+      "primitive": "Circle",
+      "centerX": 0.005,
+      "centerY": 0.03,
+      "centerZ": 0.005,
+      "halfX": 0.026,
+      "halfY": 0.018,
+      "halfZ": 0.012,
+      "rotation": 0,
+      "energyLoss": 18,
+      "penetrationLoss": 1.5,
+      "damageMultiplier": 0.65,
+      "bleedMultiplier": 1.2
+    },
+    {
+      "id": "organ.lung.right",
+      "parentRegionId": "body.torso",
+      "entryBindingId": "torso.main",
+      "targetBindingId": "lung.right",
+      "primitive": "Circle",
+      "centerX": 0.005,
+      "centerY": -0.03,
+      "centerZ": 0.005,
+      "halfX": 0.026,
+      "halfY": 0.018,
+      "halfZ": 0.012,
+      "rotation": 0,
+      "energyLoss": 18,
+      "penetrationLoss": 1.5,
+      "damageMultiplier": 0.65,
+      "bleedMultiplier": 1.2
+    },
+    {
+      "id": "organ.stomach",
+      "parentRegionId": "body.torso",
+      "entryBindingId": "torso.main",
+      "targetBindingId": "stomach.main",
+      "primitive": "Circle",
+      "centerX": -0.035,
+      "centerY": 0.008,
+      "centerZ": -0.025,
+      "halfX": 0.022,
+      "halfY": 0.018,
+      "halfZ": 0.012,
+      "rotation": 0,
+      "energyLoss": 14,
+      "penetrationLoss": 1,
+      "damageMultiplier": 0.65,
+      "bleedMultiplier": 0.8
+    },
+    {
+      "id": "organ.liver",
+      "parentRegionId": "body.torso",
+      "entryBindingId": "torso.main",
+      "targetBindingId": "liver.main",
+      "primitive": "Circle",
+      "centerX": -0.012,
+      "centerY": -0.02,
+      "centerZ": -0.015,
+      "halfX": 0.023,
+      "halfY": 0.018,
+      "halfZ": 0.012,
+      "rotation": 0,
+      "energyLoss": 22,
+      "penetrationLoss": 1.5,
+      "damageMultiplier": 0.8,
+      "bleedMultiplier": 1.4
+    },
+    {
+      "id": "organ.kidney.left",
+      "parentRegionId": "body.torso",
+      "entryBindingId": "torso.main",
+      "targetBindingId": "kidney.left",
+      "primitive": "Circle",
+      "centerX": -0.045,
+      "centerY": 0.032,
+      "centerZ": -0.035,
+      "halfX": 0.012,
+      "halfY": 0.01,
+      "halfZ": 0.01,
+      "rotation": 0,
+      "energyLoss": 12,
+      "penetrationLoss": 1,
+      "damageMultiplier": 0.55,
+      "bleedMultiplier": 0.8
+    },
+    {
+      "id": "organ.kidney.right",
+      "parentRegionId": "body.torso",
+      "entryBindingId": "torso.main",
+      "targetBindingId": "kidney.right",
+      "primitive": "Circle",
+      "centerX": -0.045,
+      "centerY": -0.032,
+      "centerZ": -0.035,
+      "halfX": 0.012,
+      "halfY": 0.01,
+      "halfZ": 0.01,
+      "rotation": 0,
+      "energyLoss": 12,
+      "penetrationLoss": 1,
+      "damageMultiplier": 0.55,
+      "bleedMultiplier": 0.8
+    },
+    {
+      "id": "organ.brain",
+      "parentRegionId": "body.head",
+      "entryBindingId": "head.main",
+      "targetBindingId": "brain.main",
+      "primitive": "Circle",
+      "centerX": 0,
+      "centerY": 0,
+      "centerZ": 0.015,
+      "halfX": 0.018,
+      "halfY": 0.018,
+      "halfZ": 0.014,
+      "rotation": 0,
+      "energyLoss": 20,
+      "penetrationLoss": 1.5,
+      "damageMultiplier": 1.5,
+      "bleedMultiplier": 1.8
+    }
+  ],
+  "startingEquipment": []
+}
