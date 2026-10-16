@@ -468,7 +468,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     public void Open()
     {
-        UnitAnatomyProfile anatomy = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(UnitType.Colonist);
+        UnitAnatomyProfile anatomy = archetype.Anatomy;
         ReadOnlySpan<UnitAnatomyNode> nodes = anatomy.Nodes;
         if (!anatomy.HasSharedShapes || nodes.Length == 0 || nodes.Length > MaxParts)
         {
@@ -486,13 +487,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _editingAdvancedPart = false;
         _editingOrganStats = false;
         _creatingNewUnitType = false;
-        _unitBodyType = anatomy.Definition.BodyType;
-        _unitMoveSpeed = anatomy.Definition.MoveSpeed;
-        _unitWidth = anatomy.Definition.Width;
-        _unitLength = anatomy.Definition.Length;
-        _unitHeight = anatomy.Definition.Height;
-        _unitViewRange = anatomy.Definition.ViewRange;
-        _unitFieldOfView = anatomy.Definition.FieldOfView;
+        _unitBodyType = archetype.Definition.BodyType;
+        _unitMoveSpeed = archetype.Definition.MoveSpeed;
+        _unitWidth = archetype.Definition.Width;
+        _unitLength = archetype.Definition.Length;
+        _unitHeight = archetype.Definition.Height;
+        _unitViewRange = archetype.Definition.ViewRange;
+        _unitFieldOfView = archetype.Definition.FieldOfView;
         _organs = anatomy.Volumes.ToArray();
         SetRigData(ids, anatomy.BodyParts.ToArray(), _organs,
             setDefaults: true, setOpenedSnapshot: true);
