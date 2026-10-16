@@ -2879,7 +2879,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float? height = null,
         float? viewRange = null,
         float? fieldOfView = null,
-        UnitBodyType? bodyType = null)
+        UnitBodyType? bodyType = null,
+        float? bodyMassKg = null,
+        float? muscleMassKg = null,
+        float? bodyFatKg = null,
+        float? bloodLiters = null,
+        float? baseEnergyKcal = null,
+        float? baseWaterLiters = null,
+        byte? strength = null,
+        byte? constitution = null,
+        byte? dexterity = null,
+        byte? intelligence = null)
     {
         UnitDefinition current = _definition;
         _definition = new UnitDefinition(
@@ -2890,7 +2900,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             length ?? current.Length,
             height ?? current.Height,
             viewRange ?? current.ViewRange,
-            fieldOfView ?? current.FieldOfView);
+            fieldOfView ?? current.FieldOfView,
+            bodyMassKg ?? current.BodyMassKg,
+            muscleMassKg ?? current.MuscleMassKg,
+            bodyFatKg ?? current.BodyFatKg,
+            bloodLiters ?? current.BloodLiters,
+            baseEnergyKcal ?? current.BaseEnergyKcal,
+            baseWaterLiters ?? current.BaseWaterLiters,
+            strength ?? current.Strength,
+            constitution ?? current.Constitution,
+            dexterity ?? current.Dexterity,
+            intelligence ?? current.Intelligence);
     }
 
     private static UnitDefinition CreateDefaultColonistDefinition() =>
@@ -4338,7 +4358,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         new(
             (UnitType)runtimeTypeId, source.BodyType, source.MoveSpeed,
             source.Width, source.Length, source.Height,
-            source.ViewRange, source.FieldOfView);
+            source.ViewRange, source.FieldOfView,
+            source.BodyMassKg, source.MuscleMassKg, source.BodyFatKg,
+            source.BloodLiters, source.BaseEnergyKcal, source.BaseWaterLiters,
+            source.Strength, source.Constitution, source.Dexterity, source.Intelligence);
 
     private void SaveProjectUnitFile(bool saveAs)
     {
