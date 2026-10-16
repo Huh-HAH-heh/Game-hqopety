@@ -1843,6 +1843,539 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         TextImGui("Нажми «Сохранить», чтобы записать параметры и применить профиль.");
     }
 
+    private unsafe void DrawImGuiOrganSettings()
+    {
+        TextImGui("ОРГАНЫ И ВНУТРЕННИЕ ОБЪЁМЫ");
+        ImguiNative.igSeparator();
+        TextImGui("Геометрия и влияние внутреннего объёма на попадание, пробитие, урон и кровотечение.");
+
+        if (ButtonImGui("Добавить орган"))
+            AddOrganVolume();
+        ImguiNative.igSameLine(0f, 6f);
+        if (ButtonImGui("Удалить выбранный") && _organs.Length > 0)
+            RemoveOrganVolume();
+
+        if (_organs.Length == 0)
+        {
+            TextImGui("Органов нет. Добавь внутренний объём.");
+            TextImGui(_status);
+            return;
+        }
+
+        _selectedOrgan = Math.Clamp(_selectedOrgan, 0, _organs.Length - 1);
+        UnitAnatomyVolume organ = _organs[_selectedOrgan];
+        DrawImGuiStringCombo(
+            "Орган",
+            organ.Id,
+            Array.ConvertAll(_organs, item => item.Id),
+            id =>
+            {
+                int index = Array.FindIndex(_organs, item => string.Equals(item.Id, id, StringComparison.Ordinal));
+                if (index >= 0)
+                    _selectedOrgan = index;
+            });
+
+        DrawImGuiStringCombo(
+            "Область размещения",
+            organ.ParentRegionId,
+            _regionIds,
+            regionId => ChangeOrganParent(regionId));
+
+        organ = _organs[_selectedOrgan];
+        DrawImGuiStringCombo(
+            "Входная ткань",
+            organ.EntryBindingId,
+            GetTissueIdsForRegion(organ.ParentRegionId),
+            id => UpdateSelectedOrgan(value => CopyVolume(value, entryBindingId: id)));
+        DrawImGuiStringCombo(
+            "Ткань-цель",
+            organ.TargetBindingId,
+            GetAllTissueIds(),
+            id => UpdateSelectedOrgan(value => CopyVolume(value, targetBindingId: id)));
+
+        organ = _organs[_selectedOrgan];
+        DrawImGuiEnumCombo("Форма объёма", organ.Primitive,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, primitive: value)));
+        DrawImGuiFloatInput("Центр X", "##organCenterX", organ.LocalCenter.X,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, center: new NumericsVector3(value, current.LocalCenter.Y, current.LocalCenter.Z))), -3f, 3f);
+        DrawImGuiFloatInput("Центр Y", "##organCenterY", organ.LocalCenter.Y,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, center: new NumericsVector3(current.LocalCenter.X, value, current.LocalCenter.Z))), -3f, 3f);
+        DrawImGuiFloatInput("Центр Z", "##organCenterZ", organ.LocalCenter.Z,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, center: new NumericsVector3(current.LocalCenter.X, current.LocalCenter.Y, value))), -3f, 3f);
+        DrawImGuiFloatInput("Полуразмер X", "##organHalfX", organ.HalfExtents.X,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, halfExtents: new NumericsVector3(value, current.HalfExtents.Y, current.HalfExtents.Z))), 0.001f, 2f);
+        DrawImGuiFloatInput("Полуразмер Y", "##organHalfY", organ.HalfExtents.Y,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, halfExtents: new NumericsVector3(current.HalfExtents.X, value, current.HalfExtents.Z))), 0.001f, 2f);
+        DrawImGuiFloatInput("Полуразмер Z", "##organHalfZ", organ.HalfExtents.Z,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, halfExtents: new NumericsVector3(current.HalfExtents.X, current.HalfExtents.Y, value))), 0.001f, 2f);
+        DrawImGuiFloatInput("Поворот (градусы)", "##organRotation", organ.LocalRotation * 180f / MathF.PI,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, rotation: value * MathF.PI / 180f)), -180f, 180f);
+
+        ImguiNative.igSeparatorText("Воздействие на снаряд и урон");
+        DrawImGuiFloatInput("Потеря энергии", "##organEnergyLoss", organ.EnergyLoss,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, energyLoss: value)), 0f, 200f);
+        DrawImGuiFloatInput("Потеря пробития", "##organPenLoss", organ.PenetrationLoss,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, penetrationLoss: value)), 0f, 30f);
+        DrawImGuiFloatInput("Множитель урона", "##organDamageMultiplier", organ.DamageMultiplier,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, damageMultiplier: value)), 0f, 5f);
+        DrawImGuiFloatInput("Множитель кровотечения", "##organBleedMultiplier", organ.BleedMultiplier,
+            value => UpdateSelectedOrgan(current => CopyVolume(current, bleedMultiplier: value)), 0f, 5f);
+        TextImGui("Органы сохраняются вместе с профилем кнопкой «Сохранить».");
+        TextImGui(_status);
+    }
+
+    private unsafe void DrawImGuiTissueSettings()
+    {
+        if (_parts.Length == 0)
+        {
+            TextImGui("Нет областей тела.");
+            return;
+        }
+
+        _selectedPart = Math.Clamp(_selectedPart, 0, _parts.Length - 1);
+        TextImGui("ПОВРЕЖДАЕМАЯ АНАТОМИЯ И ФУНКЦИОНАЛЬНЫЕ МАРКЕРЫ");
+        ImguiNative.igSeparator();
+        TextImGui($"Область: {PartName(_regionIds[_selectedPart])} ({_regionIds[_selectedPart]})");
+        DrawImGuiFloatInput("Полутолщина области попадания", $"##hitHalfHeight{_selectedPart}",
+            _hitHalfHeights[_selectedPart],
+            value => _hitHalfHeights[_selectedPart] = value, 0.001f, 2f);
+
+        HitRegionPartBinding[] tissues = _tissuesByRegion[_selectedPart];
+        if (ButtonImGui("Добавить ткань"))
+            AddTissueBinding();
+        ImguiNative.igSameLine(0f, 6f);
+        if (ButtonImGui("Удалить ткань") && tissues.Length > 1)
+            RemoveTissueBinding();
+
+        tissues = _tissuesByRegion[_selectedPart];
+        if (tissues.Length == 0)
+        {
+            TextImGui("В области должна быть хотя бы одна ткань.");
+            return;
+        }
+
+        _selectedTissue = Math.Clamp(_selectedTissue, 0, tissues.Length - 1);
+        HitRegionPartBinding tissue = tissues[_selectedTissue];
+        DrawImGuiStringCombo(
+            "Ткань",
+            tissue.Id,
+            Array.ConvertAll(tissues, item => item.Id),
+            id =>
+            {
+                int index = Array.FindIndex(_tissuesByRegion[_selectedPart],
+                    item => string.Equals(item.Id, id, StringComparison.Ordinal));
+                if (index >= 0)
+                    _selectedTissue = index;
+            });
+
+        tissue = _tissuesByRegion[_selectedPart][_selectedTissue];
+        TextImGui($"ID: {tissue.Id}   Родительский ID: {tissue.ParentId}");
+        DrawImGuiEnumCombo("Игровая часть", tissue.Part,
+            value => UpdateSelectedTissue(current => CopyTissue(current, part: value)));
+        DrawImGuiEnumCombo("Тип ткани", tissue.Kind,
+            value => UpdateSelectedTissue(current => CopyTissue(current, kind: value)));
+        DrawImGuiEnumCombo("Родительская часть (legacy)", tissue.ParentPart,
+            value => UpdateSelectedTissue(current => CopyTissue(current, parentPart: value)));
+        DrawImGuiFloatInput("Вес распределения урона", "##tissueWeight", tissue.Weight,
+            value => UpdateSelectedTissue(current => CopyTissue(current, weight: value)), 0.001f, 1000f);
+        DrawImGuiFloatInput("Максимум здоровья (HP)", "##tissueHitPoints", tissue.MaxHitPoints,
+            value => UpdateSelectedTissue(current => CopyTissue(current, maxHitPoints: value)), 0.01f, 100000f);
+        DrawImGuiFloatInput("Бронезона (-1 = нет)", "##tissueArmorZone", tissue.ArmorZone,
+            value => UpdateSelectedTissue(current => CopyTissue(current, armorZone: (int)MathF.Round(value))),
+            -1f, UnitInventoryStore.BodyZoneCount - 1);
+        DrawImGuiFloatInput("Потеря энергии снаряда (-1 = наследовать)", "##tissueEnergyLoss",
+            tissue.ProjectileEnergyLoss,
+            value => UpdateSelectedTissue(current => CopyTissue(current, projectileEnergyLoss: value)), -1f, 10000f);
+        DrawImGuiFloatInput("Потеря пробития (-1 = наследовать)", "##tissuePenLoss",
+            tissue.ProjectilePenetrationLoss,
+            value => UpdateSelectedTissue(current => CopyTissue(current, projectilePenetrationLoss: value)), -1f, 1000f);
+
+        ImguiNative.igSeparatorText("Маркеры обнаружения, прицеливания и взаимодействия");
+        UnitAnatomyMarker[] markers = _markersByRegion[_selectedPart];
+        if (ButtonImGui("Добавить маркер"))
+            AddAnatomyMarker();
+        ImguiNative.igSameLine(0f, 6f);
+        if (ButtonImGui("Удалить маркер") && markers.Length > 0)
+            RemoveAnatomyMarker();
+
+        markers = _markersByRegion[_selectedPart];
+        if (markers.Length > 0)
+        {
+            _selectedMarker = Math.Clamp(_selectedMarker, 0, markers.Length - 1);
+            UnitAnatomyMarker anatomyMarker = markers[_selectedMarker];
+            DrawImGuiStringCombo(
+                "Маркер",
+                anatomyMarker.Id,
+                Array.ConvertAll(markers, item => item.Id),
+                id =>
+                {
+                    int index = Array.FindIndex(_markersByRegion[_selectedPart],
+                        item => string.Equals(item.Id, id, StringComparison.Ordinal));
+                    if (index >= 0)
+                        _selectedMarker = index;
+                });
+
+            anatomyMarker = _markersByRegion[_selectedPart][_selectedMarker];
+            DrawImGuiFloatInput("Смещение маркера X", "##markerX", anatomyMarker.LocalOffset.X,
+                value => UpdateSelectedMarker(current => CopyMarker(current,
+                    offset: new NumericsVector3(value, current.LocalOffset.Y, current.LocalOffset.Z))), -3f, 3f);
+            DrawImGuiFloatInput("Смещение маркера Y", "##markerY", anatomyMarker.LocalOffset.Y,
+                value => UpdateSelectedMarker(current => CopyMarker(current,
+                    offset: new NumericsVector3(current.LocalOffset.X, value, current.LocalOffset.Z))), -3f, 3f);
+            DrawImGuiFloatInput("Смещение маркера Z", "##markerZ", anatomyMarker.LocalOffset.Z,
+                value => UpdateSelectedMarker(current => CopyMarker(current,
+                    offset: new NumericsVector3(current.LocalOffset.X, current.LocalOffset.Y, value))), -3f, 3f);
+            DrawImGuiMarkerRoleCheckbox("Зрение", UnitAnatomyMarkerRole.Vision);
+            DrawImGuiMarkerRoleCheckbox("Цель для попаданий", UnitAnatomyMarkerRole.Target);
+            DrawImGuiMarkerRoleCheckbox("Прицеливание", UnitAnatomyMarkerRole.Aim);
+            DrawImGuiMarkerRoleCheckbox("Глаз", UnitAnatomyMarkerRole.Eye);
+            DrawImGuiMarkerRoleCheckbox("Жизненно важная точка", UnitAnatomyMarkerRole.Vital);
+            DrawImGuiMarkerRoleCheckbox("Взаимодействие", UnitAnatomyMarkerRole.Interaction);
+            DrawImGuiMarkerRoleCheckbox("Передвижение", UnitAnatomyMarkerRole.Locomotion);
+            DrawImGuiMarkerRoleCheckbox("Крепление оружия", UnitAnatomyMarkerRole.WeaponMount);
+            DrawImGuiMarkerRoleCheckbox("Дуло", UnitAnatomyMarkerRole.Muzzle);
+        }
+
+        TextImGui("Выбери область тела слева; здесь настраиваются попадания, прочность и функциональные точки.");
+        TextImGui(_status);
+    }
+
+    private unsafe void DrawImGuiMarkerRoleCheckbox(string label, UnitAnatomyMarkerRole role)
+    {
+        if (_markersByRegion[_selectedPart].Length == 0)
+            return;
+
+        UnitAnatomyMarker marker = _markersByRegion[_selectedPart][_selectedMarker];
+        byte enabled = (byte)((marker.Roles & role) != 0 ? 1 : 0);
+        if (ImguiNative.igCheckbox(label, &enabled))
+        {
+            UnitAnatomyMarkerRole roles = enabled != 0
+                ? marker.Roles | role
+                : marker.Roles & ~role;
+            UpdateSelectedMarker(current => CopyMarker(current, roles: roles));
+        }
+    }
+
+    private unsafe void DrawImGuiStringCombo(
+        string label,
+        string current,
+        IEnumerable<string> choices,
+        Action<string> onChanged)
+    {
+        if (!ImguiNative.igBeginCombo(label, current, ImGuiComboFlags.None))
+            return;
+
+        foreach (string choice in choices)
+        {
+            if (string.IsNullOrWhiteSpace(choice))
+                continue;
+            bool selected = string.Equals(choice, current, StringComparison.Ordinal);
+            if (ImguiNative.igSelectable_Bool(
+                $"{choice}##{label}", selected, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 0f)))
+                onChanged(choice);
+        }
+
+        ImguiNative.igEndCombo();
+    }
+
+    private void AddOrganVolume()
+    {
+        if (_regionIds.Length == 0 || _tissuesByRegion.Length == 0)
+            return;
+
+        int host = Math.Clamp(_selectedPart, 0, _regionIds.Length - 1);
+        HitRegionPartBinding[] hostTissues = _tissuesByRegion[host];
+        if (hostTissues.Length == 0)
+            return;
+
+        string id = CreateUniqueOrganId();
+        BodyPartDefinition part = _parts[host];
+        var extents = new NumericsVector3(
+            MathF.Max(0.005f, part.Scale.X * 0.22f),
+            MathF.Max(0.005f, part.Scale.Y * 0.22f),
+            MathF.Max(0.005f, part.Scale.Z * 0.22f));
+        var organ = new UnitAnatomyVolume(
+            id,
+            _regionIds[host],
+            hostTissues[0].Id,
+            hostTissues[0].Id,
+            NumericsVector3.Zero,
+            extents);
+        var next = new UnitAnatomyVolume[_organs.Length + 1];
+        Array.Copy(_organs, next, _organs.Length);
+        next[^1] = organ;
+        _organs = next;
+        _selectedOrgan = next.Length - 1;
+        _status = $"Добавлен объём {id}; настрой центр, размеры и связи тканей.";
+    }
+
+    private string CreateUniqueOrganId()
+    {
+        for (int i = 1; i < 10000; i++)
+        {
+            string id = $"organ.custom.{i:000}";
+            if (Array.FindIndex(_organs, item => string.Equals(item.Id, id, StringComparison.Ordinal)) < 0)
+                return id;
+        }
+        return $"organ.custom.{Guid.NewGuid():N}";
+    }
+
+    private void RemoveOrganVolume()
+    {
+        if (_organs.Length == 0)
+            return;
+
+        string id = _organs[_selectedOrgan].Id;
+        var next = new UnitAnatomyVolume[_organs.Length - 1];
+        if (_selectedOrgan > 0)
+            Array.Copy(_organs, 0, next, 0, _selectedOrgan);
+        if (_selectedOrgan < next.Length)
+            Array.Copy(_organs, _selectedOrgan + 1, next, _selectedOrgan, next.Length - _selectedOrgan);
+        _organs = next;
+        _selectedOrgan = Math.Clamp(_selectedOrgan, 0, Math.Max(0, _organs.Length - 1));
+        _status = $"Удалён орган {id}.";
+    }
+
+    private void ChangeOrganParent(string regionId)
+    {
+        int host = Array.IndexOf(_regionIds, regionId);
+        if (host < 0 || _tissuesByRegion[host].Length == 0)
+            return;
+
+        string entry = _tissuesByRegion[host][0].Id;
+        UpdateSelectedOrgan(current => CopyVolume(
+            current, parentRegionId: regionId, entryBindingId: entry));
+    }
+
+    private string[] GetAllTissueIds()
+    {
+        return _tissuesByRegion
+            .SelectMany(items => items)
+            .Select(item => item.Id)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private string[] GetTissueIdsForRegion(string regionId)
+    {
+        int regionIndex = Array.IndexOf(_regionIds, regionId);
+        return regionIndex >= 0
+            ? _tissuesByRegion[regionIndex].Select(item => item.Id).ToArray()
+            : Array.Empty<string>();
+    }
+
+    private void UpdateSelectedOrgan(Func<UnitAnatomyVolume, UnitAnatomyVolume> update)
+    {
+        if (_organs.Length == 0 || _selectedOrgan < 0 || _selectedOrgan >= _organs.Length)
+            return;
+        _organs[_selectedOrgan] = update(_organs[_selectedOrgan]);
+        PruneInvalidOrgans();
+    }
+
+    private void AddTissueBinding()
+    {
+        int index = Math.Clamp(_selectedPart, 0, _regionIds.Length - 1);
+        HitRegionPartBinding[] source = _tissuesByRegion[index];
+        string id = CreateUniqueTissueId(index);
+        string parentId = source.Length > 0 ? source[0].Id : string.Empty;
+        var next = new HitRegionPartBinding[source.Length + 1];
+        Array.Copy(source, next, source.Length);
+        next[^1] = new HitRegionPartBinding(
+            UnitHealthPartId.WholeBody,
+            weight: 1f,
+            kind: UnitHealthPartKind.BodyPart,
+            maxHitPoints: 20f,
+            id: id,
+            parentId: string.IsNullOrWhiteSpace(parentId) ? null : parentId);
+        _tissuesByRegion[index] = next;
+        _selectedTissue = next.Length - 1;
+        _status = $"Добавлена ткань {id}.";
+    }
+
+    private string CreateUniqueTissueId(int regionIndex)
+    {
+        for (int i = 1; i < 10000; i++)
+        {
+            string id = $"{_regionIds[regionIndex]}.tissue.custom.{i:000}";
+            if (!_tissuesByRegion.SelectMany(items => items)
+                .Any(item => string.Equals(item.Id, id, StringComparison.Ordinal)))
+                return id;
+        }
+        return $"{_regionIds[regionIndex]}.tissue.custom.{Guid.NewGuid():N}";
+    }
+
+    private void RemoveTissueBinding()
+    {
+        int region = _selectedPart;
+        HitRegionPartBinding[] current = _tissuesByRegion[region];
+        if (current.Length <= 1)
+            return;
+
+        string removedId = current[_selectedTissue].Id;
+        var next = new HitRegionPartBinding[current.Length - 1];
+        if (_selectedTissue > 0)
+            Array.Copy(current, 0, next, 0, _selectedTissue);
+        if (_selectedTissue < next.Length)
+            Array.Copy(current, _selectedTissue + 1, next, _selectedTissue, next.Length - _selectedTissue);
+        _tissuesByRegion[region] = next;
+        _selectedTissue = Math.Clamp(_selectedTissue, 0, next.Length - 1);
+        _organs = _organs
+            .Where(volume => !string.Equals(volume.EntryBindingId, removedId, StringComparison.Ordinal) &&
+                             !string.Equals(volume.TargetBindingId, removedId, StringComparison.Ordinal))
+            .ToArray();
+        _selectedOrgan = Math.Clamp(_selectedOrgan, 0, Math.Max(0, _organs.Length - 1));
+        _status = $"Удалена ткань {removedId}; органы, которые ссылались на неё, также удалены.";
+    }
+
+    private void UpdateSelectedTissue(Func<HitRegionPartBinding, HitRegionPartBinding> update)
+    {
+        HitRegionPartBinding[] current = _tissuesByRegion[_selectedPart];
+        if (current.Length == 0 || _selectedTissue < 0 || _selectedTissue >= current.Length)
+            return;
+        var next = (HitRegionPartBinding[])current.Clone();
+        next[_selectedTissue] = update(next[_selectedTissue]);
+        _tissuesByRegion[_selectedPart] = next;
+    }
+
+    private void AddAnatomyMarker()
+    {
+        int region = Math.Clamp(_selectedPart, 0, _regionIds.Length - 1);
+        UnitAnatomyMarker[] current = _markersByRegion[region];
+        string id = CreateUniqueMarkerId(region);
+        var next = new UnitAnatomyMarker[current.Length + 1];
+        Array.Copy(current, next, current.Length);
+        next[^1] = new UnitAnatomyMarker(id, UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim);
+        _markersByRegion[region] = next;
+        _selectedMarker = next.Length - 1;
+        _status = $"Добавлен маркер {id}.";
+    }
+
+    private string CreateUniqueMarkerId(int regionIndex)
+    {
+        for (int i = 1; i < 10000; i++)
+        {
+            string id = $"custom.marker.{i:000}";
+            if (!_markersByRegion.SelectMany(items => items)
+                .Any(item => string.Equals(item.Id, id, StringComparison.Ordinal)))
+                return id;
+        }
+        return $"custom.marker.{Guid.NewGuid():N}";
+    }
+
+    private void RemoveAnatomyMarker()
+    {
+        int region = _selectedPart;
+        UnitAnatomyMarker[] current = _markersByRegion[region];
+        if (current.Length == 0)
+            return;
+
+        string removedId = current[_selectedMarker].Id;
+        var next = new UnitAnatomyMarker[current.Length - 1];
+        if (_selectedMarker > 0)
+            Array.Copy(current, 0, next, 0, _selectedMarker);
+        if (_selectedMarker < next.Length)
+            Array.Copy(current, _selectedMarker + 1, next, _selectedMarker, next.Length - _selectedMarker);
+        _markersByRegion[region] = next;
+        _selectedMarker = Math.Clamp(_selectedMarker, 0, Math.Max(0, next.Length - 1));
+        _status = $"Удалён маркер {removedId}.";
+    }
+
+    private void UpdateSelectedMarker(Func<UnitAnatomyMarker, UnitAnatomyMarker> update)
+    {
+        UnitAnatomyMarker[] current = _markersByRegion[_selectedPart];
+        if (current.Length == 0 || _selectedMarker < 0 || _selectedMarker >= current.Length)
+            return;
+        var next = (UnitAnatomyMarker[])current.Clone();
+        next[_selectedMarker] = update(next[_selectedMarker]);
+        _markersByRegion[_selectedPart] = next;
+    }
+
+    private void PruneInvalidOrgans()
+    {
+        var knownRegions = new HashSet<string>(_regionIds, StringComparer.Ordinal);
+        var knownTissues = new HashSet<string>(
+            _tissuesByRegion.SelectMany(items => items).Select(item => item.Id),
+            StringComparer.Ordinal);
+        var filtered = new List<UnitAnatomyVolume>(_organs.Length);
+        var knownVolumeIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (UnitAnatomyVolume organ in _organs)
+        {
+            int parentIndex = Array.IndexOf(_regionIds, organ.ParentRegionId);
+            if (parentIndex < 0 ||
+                !_tissuesByRegion[parentIndex].Any(item => string.Equals(item.Id, organ.EntryBindingId, StringComparison.Ordinal)) ||
+                !knownTissues.Contains(organ.TargetBindingId) ||
+                !knownVolumeIds.Add(organ.Id))
+                continue;
+            filtered.Add(organ);
+        }
+        _organs = filtered.ToArray();
+        _selectedOrgan = Math.Clamp(_selectedOrgan, 0, Math.Max(0, _organs.Length - 1));
+    }
+
+    private static HitRegionPartBinding CopyTissue(
+        HitRegionPartBinding original,
+        UnitHealthPartId? part = null,
+        UnitHealthPartKind? kind = null,
+        float? weight = null,
+        float? maxHitPoints = null,
+        UnitHealthPartId? parentPart = null,
+        int? armorZone = null,
+        float? projectileEnergyLoss = null,
+        float? projectilePenetrationLoss = null) =>
+        new(
+            part ?? original.Part,
+            weight ?? original.Weight,
+            kind ?? original.Kind,
+            maxHitPoints ?? original.MaxHitPoints,
+            parentPart ?? original.ParentPart,
+            original.Id,
+            original.ParentId,
+            armorZone ?? original.ArmorZone,
+            projectileEnergyLoss ?? original.ProjectileEnergyLoss,
+            projectilePenetrationLoss ?? original.ProjectilePenetrationLoss);
+
+    private static UnitAnatomyMarker CopyMarker(
+        UnitAnatomyMarker original,
+        UnitAnatomyMarkerRole? roles = null,
+        NumericsVector3? offset = null) =>
+        new(original.Id, roles ?? original.Roles, offset ?? original.LocalOffset);
+
+    private static UnitAnatomyVolume CopyVolume(
+        UnitAnatomyVolume original,
+        string? parentRegionId = null,
+        string? entryBindingId = null,
+        string? targetBindingId = null,
+        NumericsVector3? center = null,
+        NumericsVector3? halfExtents = null,
+        BodyPrimitive? primitive = null,
+        float? rotation = null,
+        float? energyLoss = null,
+        float? penetrationLoss = null,
+        float? damageMultiplier = null,
+        float? bleedMultiplier = null) =>
+        new(
+            original.Id,
+            parentRegionId ?? original.ParentRegionId,
+            entryBindingId ?? original.EntryBindingId,
+            targetBindingId ?? original.TargetBindingId,
+            center ?? original.LocalCenter,
+            halfExtents ?? original.HalfExtents,
+            primitive ?? original.Primitive,
+            rotation ?? original.LocalRotation,
+            energyLoss ?? original.EnergyLoss,
+            penetrationLoss ?? original.PenetrationLoss,
+            damageMultiplier ?? original.DamageMultiplier,
+            bleedMultiplier ?? original.BleedMultiplier);
+
+    private static T[][] CloneRows<T>(T[][] rows)
+    {
+        var result = new T[rows.Length][];
+        for (int i = 0; i < rows.Length; i++)
+            result[i] = (T[])rows[i].Clone();
+        return result;
+    }
+
     private unsafe void DrawImGuiFloatInput(
         string label,
         string id,
