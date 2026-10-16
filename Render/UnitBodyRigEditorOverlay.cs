@@ -1177,23 +1177,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         return true;
     }
 
-    public bool HandleTextEntered(uint unicode)
+    public bool HandleTextEntered(string text)
     {
         if (!IsOpen || !_editingPartName)
             return false;
 
-        if (unicode < 32 || unicode == 127 || _partNameEditBuffer.Length >= 64)
+        if (string.IsNullOrEmpty(text))
             return true;
 
-        try
+        foreach (char character in text)
         {
-            string entered = char.ConvertFromUtf32((int)unicode);
-            if (_partNameEditBuffer.Length + entered.Length <= 64)
-                _partNameEditBuffer += entered;
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            // Ignore invalid text input from the native window.
+            if (char.IsControl(character) || _partNameEditBuffer.Length >= 64)
+                continue;
+
+            _partNameEditBuffer += character;
         }
 
         return true;
