@@ -1,0 +1,585 @@
+{
+  "format": "rimclone.imported-rig-reference",
+  "version": 1,
+  "source": {
+    "repository": "nickick/modular-character-studio",
+    "file": "project/scene.json",
+    "url": "https://github.com/nickick/modular-character-studio/blob/main/project/scene.json",
+    "sourceBlobSha": "23b4549ae5ea8d5186674300413aa981e9ea2803",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2026 Nick Hong",
+    "licenseFile": "https://github.com/nickick/modular-character-studio/blob/main/LICENSE"
+  },
+  "scope": "Extracted skeleton data and measurement metadata only. No source artwork is copied.",
+  "sourceProfile": "maleV1",
+  "units": "source coordinates and landmarks are pixels; lengths below are original measured values.",
+  "canonicalTargetPixels": {
+    "baseline": 1190,
+    "centerX": 600,
+    "headCenterY": 300,
+    "neckY": 450,
+    "chestY": 560,
+    "visualChestY": 430,
+    "chestTopY": 427,
+    "hipsY": 730,
+    "shoulderY": 530,
+    "shoulderHalfWidth": 155,
+    "hipJointY": 747,
+    "hipHalfWidth": 77,
+    "upperArmLength": 132.28,
+    "forearmLength": 83.95,
+    "thighLength": 197.65,
+    "shinLength": 156.46,
+    "ankleToGround": 90,
+    "chestThroughBelt": 303,
+    "torsoLength": 300,
+    "chestControlDrop": 130,
+    "shoulderRise": -100,
+    "collarRise": -20,
+    "headDrop": 150,
+    "maleHeadRenderedSourceScale": 1.03
+  },
+  "extractedBones": [
+    {
+      "id": "root",
+      "label": "root",
+      "parent": null,
+      "bindByProfile": {
+        "maleV1": {
+          "x": 600,
+          "y": 1190,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 600,
+          "y": 1190,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "hips",
+      "label": "pelvis",
+      "parent": "root",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 1.417,
+          "y": -448.654,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": -460,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "spine",
+      "label": "spine1",
+      "parent": "hips",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 0,
+          "y": -126,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": -6.106,
+          "y": -91.688,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "chest",
+      "label": "spine2",
+      "parent": "spine",
+      "bindByProfile": {
+        "maleV1": {
+          "x": -0.579,
+          "y": -111.973,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 8.814,
+          "y": -121.005,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "neck",
+      "label": "neck",
+      "parent": "chest",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 9.828,
+          "y": -45.245,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": -6.194,
+          "y": -38.103,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "head",
+      "label": "head",
+      "parent": "neck",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 10.3,
+          "y": -155.934,
+          "rotation": 0,
+          "scaleX": 0.75,
+          "scaleY": 0.75
+        },
+        "femaleV1": {
+          "x": 13.82,
+          "y": -144.124,
+          "rotation": 0,
+          "scaleX": 0.8,
+          "scaleY": 0.8
+        }
+      }
+    },
+    {
+      "id": "shoulderL",
+      "label": "shoulderL",
+      "parent": "chest",
+      "bindByProfile": {
+        "maleV1": {
+          "x": -105.787,
+          "y": -29.085,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": -101.236,
+          "y": -4.297,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "upperArmL",
+      "label": "armL1",
+      "parent": "shoulderL",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 0,
+          "y": 0,
+          "rotation": -4.78,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 0,
+          "rotation": -11.124,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "lowerArmL",
+      "label": "armL2",
+      "parent": "upperArmL",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 15,
+          "y": 140,
+          "rotation": 13.2,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 15,
+          "y": 130,
+          "rotation": 20.006,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "handL",
+      "label": "handL",
+      "parent": "lowerArmL",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 0,
+          "y": 140,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 140,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "shoulderR",
+      "label": "shoulderR",
+      "parent": "chest",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 130.03,
+          "y": -43.385,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 104.159,
+          "y": -11.24,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "upperArmR",
+      "label": "armR1",
+      "parent": "shoulderR",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 0,
+          "y": 0,
+          "rotation": -23.563,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 0,
+          "rotation": -21.383,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "lowerArmR",
+      "label": "armR2",
+      "parent": "upperArmR",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 0,
+          "y": 140,
+          "rotation": 0.009,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 150,
+          "rotation": 26.465,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "handR",
+      "label": "handR",
+      "parent": "lowerArmR",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 0,
+          "y": 160,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 160,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "upperLegL",
+      "label": "legL1",
+      "parent": "hips",
+      "bindByProfile": {
+        "maleV1": {
+          "x": -52.891,
+          "y": 14.658,
+          "rotation": 4.64,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": -66.073,
+          "y": 21.767,
+          "rotation": 4.64,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "lowerLegL",
+      "label": "legL2",
+      "parent": "upperLegL",
+      "bindByProfile": {
+        "maleV1": {
+          "x": -4.47,
+          "y": 217.293,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 197.65,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "footL",
+      "label": "footL",
+      "parent": "lowerLegL",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 0,
+          "y": 156.46,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 156.46,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "upperLegR",
+      "label": "legR1",
+      "parent": "hips",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 61.088,
+          "y": 12.488,
+          "rotation": -4.64,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 58.794,
+          "y": 15.053,
+          "rotation": -4.64,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "lowerLegR",
+      "label": "legR2",
+      "parent": "upperLegR",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 6.144,
+          "y": 214.465,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 197.65,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    },
+    {
+      "id": "footR",
+      "label": "footR",
+      "parent": "lowerLegR",
+      "bindByProfile": {
+        "maleV1": {
+          "x": 0,
+          "y": 156.46,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        },
+        "femaleV1": {
+          "x": 0,
+          "y": 156.46,
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1
+        }
+      }
+    }
+  ],
+  "mappingToRimClone": [
+    {
+      "targetRegion": "body.torso",
+      "sourceBones": [
+        "hips",
+        "spine",
+        "chest",
+        "neck"
+      ],
+      "rule": "collapsed into one torso as requested"
+    },
+    {
+      "targetRegion": "body.head",
+      "sourceBones": [
+        "head"
+      ],
+      "rule": "one head segment; neck folded into torso"
+    },
+    {
+      "targetRegion": "body.arm.left.upper",
+      "sourceBones": [
+        "shoulderL",
+        "upperArmL"
+      ],
+      "rule": "shoulder-to-elbow segment"
+    },
+    {
+      "targetRegion": "body.arm.left.lower",
+      "sourceBones": [
+        "lowerArmL",
+        "handL"
+      ],
+      "rule": "forearm plus hand anchor collapsed into one segment"
+    },
+    {
+      "targetRegion": "body.arm.right.upper",
+      "sourceBones": [
+        "shoulderR",
+        "upperArmR"
+      ],
+      "rule": "shoulder-to-elbow segment"
+    },
+    {
+      "targetRegion": "body.arm.right.lower",
+      "sourceBones": [
+        "lowerArmR",
+        "handR"
+      ],
+      "rule": "forearm plus hand anchor collapsed into one segment"
+    },
+    {
+      "targetRegion": "body.leg.left.upper",
+      "sourceBones": [
+        "upperLegL"
+      ],
+      "rule": "thigh"
+    },
+    {
+      "targetRegion": "body.leg.left.lower",
+      "sourceBones": [
+        "lowerLegL"
+      ],
+      "rule": "shin"
+    },
+    {
+      "targetRegion": "body.leg.left.foot",
+      "sourceBones": [
+        "footL"
+      ],
+      "rule": "foot"
+    },
+    {
+      "targetRegion": "body.leg.right.upper",
+      "sourceBones": [
+        "upperLegR"
+      ],
+      "rule": "thigh"
+    },
+    {
+      "targetRegion": "body.leg.right.lower",
+      "sourceBones": [
+        "lowerLegR"
+      ],
+      "rule": "shin"
+    },
+    {
+      "targetRegion": "body.leg.right.foot",
+      "sourceBones": [
+        "footR"
+      ],
+      "rule": "foot"
+    }
+  ],
+  "conversion": {
+    "coordinateMapping": {
+      "x": "(baseline - sourceY) * (RimClone length / baseline)",
+      "y": "(centerX - sourceX) * (RimClone width / (2 * shoulderHalfWidth))",
+      "z": "(baseline - sourceY) * (RimClone height / baseline)"
+    },
+    "symmetry": "left/right are mirrored around centerX for a stable neutral pose; source rig has asymmetric three-quarter bind poses.",
+    "metricValuesUsed": [
+      "baseline",
+      "centerX",
+      "headCenterY",
+      "neckY",
+      "visualChestY",
+      "hipsY",
+      "shoulderY",
+      "shoulderHalfWidth",
+      "hipJointY",
+      "hipHalfWidth",
+      "upperArmLength",
+      "forearmLength",
+      "thighLength",
+      "shinLength",
+      "ankleToGround",
+      "torsoLength",
+      "headDrop"
+    ],
+    "sourceRevisionNote": "The output uses the upstream canonical measurement block and hierarchy, not a pixel-for-pixel copy of the upstream bind pose. RimClone's top-down representation and requested segment counts require a coordinate conversion and reduced hierarchy."
+  }
+}
