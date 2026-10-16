@@ -1730,7 +1730,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             onChanged(Math.Clamp(value, minimum, maximum));
     }
 
-    private void DrawImGuiEnumCombo<TEnum>(
+    private unsafe void DrawImGuiEnumCombo<TEnum>(
         string label,
         TEnum current,
         Action<TEnum> onChanged)
