@@ -201,6 +201,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(131, 76, 82, 255),
         OutlineThickness = 1f
     };
+    private readonly RectangleShape _renamePartButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(47, 65, 82, 255),
+        OutlineColor = new Color(79, 103, 127, 255),
+        OutlineThickness = 1f
+    };
 
     private readonly Text? _title;
     private readonly Text? _saveLabel;
@@ -223,6 +229,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private readonly Text? _copyPartLabel;
     private readonly Text? _symmetryToolLabel;
     private readonly Text? _symmetryClearLabel;
+    private readonly Text? _renamePartLabel;
     private readonly Text? _closeLabel;
     private readonly Text? _listTitle;
     private readonly Text? _propertiesTitle;
@@ -261,6 +268,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _symmetrySourcePart = -1;
     private bool _parentSelectionActive;
     private int _parentSourcePart = -1;
+    private bool _editingPartName;
+    private string _partNameEditBuffer = string.Empty;
     private int _editingProperty = -1;
     private string _propertyEditBuffer = string.Empty;
 
@@ -518,6 +527,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(243, 225, 227, 255),
                 Style = Text.Styles.Bold
             };
+            _renamePartLabel = new Text(_font, "ПЕРЕИМЕНОВАТЬ ЧАСТЬ", 8)
+            {
+                FillColor = new Color(224, 233, 242, 255),
+                Style = Text.Styles.Bold
+            };
             _helpText = new Text(_font,
                 "Колесо — прокрутка вида; Ctrl+колесо — масштаб; средняя кнопка — таскать. Число — ручной ввод. Привязка справа: выбери родителя, затем часть в списке; для отвязки есть отдельные кнопки.",
                 9)
@@ -557,6 +571,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingProjection = -1;
         _draggingPart = false;
         _editingProperty = -1;
+        _editingPartName = false;
+        _partNameEditBuffer = string.Empty;
         _symmetryToolActive = false;
         _symmetrySourcePart = -1;
         _parentSelectionActive = false;
@@ -680,6 +696,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (button != Mouse.Button.Left)
             return true;
+
+        if (_editingPartName)
+        {
+            _editingPartName = false;
+            _status = "Переименование отменено.";
+        }
 
         _editingProperty = -1;
 
@@ -861,6 +883,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             ClearSymmetryPair(_selectedPart);
             RefreshProjectedGeometry();
             _status = $"Симметрия для «{PartName(_regionIds[_selectedPart])}» снята. Ctrl+S — сохранить.";
+            return true;
+        }
+
+        if (IsPropertiesItemVisible(_renamePartButton.Position.Y, _renamePartButton.Size.Y) &&
+            _renamePartButton.GetGlobalBounds().Contains(position))
+        {
+            _editingPartName = true;
+            _partNameEditBuffer = _parts[_selectedPart].DisplayName ?? string.Empty;
+            _status = "Введи новое имя, Enter — применить, Esc — отменить. Поддерживается русский текст; Ctrl+S — сохранить.";
             return true;
         }
 
@@ -1146,10 +1177,73 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         return true;
     }
 
+    public bool HandleTextEntered(uint unicode)
+    {
+        if (!IsOpen || !_editingPartName)
+            return false;
+
+        if (unicode < 32 || unicode == 127 || _partNameEditBuffer.Length >= 64)
+            return true;
+
+        try
+        {
+            string entered = char.ConvertFromUtf32((int)unicode);
+            if (_partNameEditBuffer.Length + entered.Length <= 64)
+                _partNameEditBuffer += entered;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // Ignore invalid text input from the native window.
+        }
+
+        return true;
+    }
+
+    private void CommitPartName()
+    {
+        string name = _partNameEditBuffer.Trim();
+        _editingPartName = false;
+        _partNameEditBuffer = string.Empty;
+        if (_selectedPart < 0 || _selectedPart >= _parts.Length)
+            return;
+
+        _parts[_selectedPart] = Copy(_parts[_selectedPart], displayName: name);
+        _status = name.Length > 0
+            ? $"Имя части изменено на «{name}». Ctrl+S — сохранить."
+            : $"Для «{_regionIds[_selectedPart]}» восстановлено имя по умолчанию. Ctrl+S — сохранить.";
+    }
+
     public bool HandleKey(Keyboard.Key key, bool controlPressed)
     {
         if (!IsOpen)
             return false;
+
+        if (_editingPartName)
+        {
+            if (key == Keyboard.Key.Enter)
+            {
+                CommitPartName();
+                return true;
+            }
+
+            if (key == Keyboard.Key.Escape)
+            {
+                _editingPartName = false;
+                _partNameEditBuffer = string.Empty;
+                _status = "Переименование отменено.";
+                return true;
+            }
+
+            if (key == Keyboard.Key.Backspace && _partNameEditBuffer.Length > 0)
+            {
+                int removeLength = _partNameEditBuffer.Length > 1 &&
+                    char.IsLowSurrogate(_partNameEditBuffer[^1]) &&
+                    char.IsHighSurrogate(_partNameEditBuffer[^2]) ? 2 : 1;
+                _partNameEditBuffer = _partNameEditBuffer[..^removeLength];
+            }
+
+            return true;
+        }
 
         if (_editingProperty >= 0)
         {
@@ -1369,7 +1463,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_selectedName != null)
         {
-            _selectedName.DisplayedString = PartName(_regionIds[_selectedPart]);
+            _selectedName.DisplayedString = _editingPartName
+                ? $"НОВОЕ ИМЯ: {_partNameEditBuffer}_"
+                : PartName(_regionIds[_selectedPart]);
             DrawText(window, _selectedName);
         }
 
@@ -1507,6 +1603,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _symmetryClearButton.Position.Y + 6f);
             window.Draw(_symmetryClearButton);
             DrawText(window, _symmetryClearLabel);
+        }
+
+        if (_renamePartLabel != null &&
+            IsPropertiesItemVisible(_renamePartButton.Position.Y, _renamePartButton.Size.Y))
+        {
+            _renamePartLabel.DisplayedString = _editingPartName
+                ? "ENTER — ПРИМЕНИТЬ ИМЯ"
+                : "ПЕРЕИМЕНОВАТЬ ЧАСТЬ";
+            _renamePartLabel.Position = new Vector2f(
+                _renamePartButton.Position.X + 6f,
+                _renamePartButton.Position.Y + 6f);
+            window.Draw(_renamePartButton);
+            DrawText(window, _renamePartLabel);
         }
 
         if (_helpText != null)
@@ -1657,7 +1766,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _propertiesViewportBottom = contentY + contentHeight - 8f;
 
         float basePrimitiveY = propertyTop + PropertyCount * _propertyRowHeight + 8f;
-        _propertiesMaxScroll = MathF.Max(0f, basePrimitiveY + 247f - _propertiesViewportBottom);
+        _propertiesMaxScroll = MathF.Max(0f, basePrimitiveY + 278f - _propertiesViewportBottom);
         _propertiesScrollOffset = Math.Clamp(_propertiesScrollOffset, 0f, _propertiesMaxScroll);
 
         for (int i = 0; i < PropertyCount; i++)
@@ -1689,6 +1798,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _symmetryClearButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
         if (_symmetryClearLabel != null)
             _symmetryClearLabel.Position = new Vector2f(_symmetryClearButton.Position.X + 6f, _symmetryClearButton.Position.Y + 6f);
+        _renamePartButton.Position = new Vector2f(propertiesX + 10f, _symmetryClearButton.Position.Y + 31f);
+        _renamePartButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
 
         if (_helpText != null)
             _helpText.Position = new Vector2f(listX + 2f, y + panelHeight - 42f);
@@ -3293,7 +3404,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         BodyPartAnchor? anchor = null,
         float? localRotationX = null,
         float? localRotationY = null,
-        string? symmetryPartnerId = null) =>
+        string? symmetryPartnerId = null,
+        string? displayName = null) =>
         new(
             localPosition ?? original.LocalPosition,
             scale ?? original.Scale,
@@ -3307,7 +3419,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             pivot: original.Pivot,
             localRotationX: localRotationX ?? original.LocalRotationX,
             localRotationY: localRotationY ?? original.LocalRotationY,
-            symmetryPartnerId: symmetryPartnerId ?? original.SymmetryPartnerId);
+            symmetryPartnerId: symmetryPartnerId ?? original.SymmetryPartnerId,
+            displayName: displayName ?? original.DisplayName);
 
     private static ProjectedPart Project(
         BodyPartDefinition part,
@@ -3416,23 +3529,33 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _ => new Color(85, 139, 120, 255)
     };
 
-    private static string PartName(string id) => id switch
+    private string PartName(string id)
     {
-        "body.middle" => "Туловище · середина",
-        "body.lower" => "Туловище · низ",
-        "body.torso.upper" => "Туловище · верх",
-        "body.arm.left.upper" => "Левая рука · верх",
-        "body.arm.left.lower" => "Левая рука · низ",
-        "body.arm.right.upper" => "Правая рука · верх",
-        "body.arm.right.lower" => "Правая рука · низ",
-        "body.leg.left.upper" => "Левая нога · верх",
-        "body.leg.left.lower" => "Левая нога · низ",
-        "body.leg.right.upper" => "Правая нога · верх",
-        "body.leg.right.lower" => "Правая нога · низ",
-        "body.neck" => "Шея",
-        "body.upper" => "Голова",
-        _ => id
-    };
+        for (int i = 0; i < _regionIds.Length && i < _parts.Length; i++)
+        {
+            if (string.Equals(_regionIds[i], id, StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(_parts[i].DisplayName))
+                return _parts[i].DisplayName!;
+        }
+
+        return id switch
+        {
+            "body.middle" => "Туловище · середина",
+            "body.lower" => "Туловище · низ",
+            "body.torso.upper" => "Туловище · верх",
+            "body.arm.left.upper" => "Левая рука · верх",
+            "body.arm.left.lower" => "Левая рука · низ",
+            "body.arm.right.upper" => "Правая рука · верх",
+            "body.arm.right.lower" => "Правая рука · низ",
+            "body.leg.left.upper" => "Левая нога · верх",
+            "body.leg.left.lower" => "Левая нога · низ",
+            "body.leg.right.upper" => "Правая нога · верх",
+            "body.leg.right.lower" => "Правая нога · низ",
+            "body.neck" => "Шея",
+            "body.upper" => "Голова",
+            _ => id
+        };
+    }
 
     private static void DrawButton(RenderWindow window, RectangleShape button, Text? label)
     {
@@ -3553,11 +3676,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _detachParentLabel?.Dispose();
         _detachAllParentsLabel?.Dispose();
         _symmetryClearButton.Dispose();
+        _renamePartButton.Dispose();
         _copyPartButton.Dispose();
         _symmetryToolButton.Dispose();
         _copyPartLabel?.Dispose();
         _symmetryToolLabel?.Dispose();
         _symmetryClearLabel?.Dispose();
+        _renamePartLabel?.Dispose();
         _addRegionButton.Dispose();
         _addAllFormsButton.Dispose();
         _removeRegionButton.Dispose();

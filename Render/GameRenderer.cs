@@ -1798,6 +1798,13 @@ public sealed class GameRenderer
         _window.KeyPressed +=
             (_, e) =>
                 HandleKey(e.Code);
+
+        _window.TextEntered +=
+            (_, e) =>
+            {
+                if (_bodyRigEditorOverlay?.IsOpen == true)
+                    _bodyRigEditorOverlay.HandleTextEntered(e.Unicode);
+            };
     }
 
     private void HandleKey(

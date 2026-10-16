@@ -380,6 +380,7 @@ public static class UnitBodyRigSettingsStore
         public string Role { get; set; } = string.Empty;
         public string Pivot { get; set; } = string.Empty;
         public string? SymmetryPartnerId { get; set; }
+        public string? DisplayName { get; set; }
 
         public BodyRigPartSettings() { }
 
@@ -402,7 +403,8 @@ public static class UnitBodyRigSettingsStore
             Anchor = part.Anchor.ToString(),
             Role = part.Role.ToString(),
             Pivot = part.Pivot.ToString(),
-            SymmetryPartnerId = part.SymmetryPartnerId
+            SymmetryPartnerId = part.SymmetryPartnerId,
+            DisplayName = part.DisplayName
         };
 
         public BodyPartDefinition Apply(BodyPartDefinition baseline, int index)
@@ -439,7 +441,8 @@ public static class UnitBodyRigSettingsStore
                 pivot: pivot,
                 localRotationX: Math.Clamp(RotationX, -20f * MathF.PI, 20f * MathF.PI),
                 localRotationY: Math.Clamp(RotationY, -20f * MathF.PI, 20f * MathF.PI),
-                symmetryPartnerId: SymmetryPartnerId ?? baseline.SymmetryPartnerId);
+                symmetryPartnerId: SymmetryPartnerId ?? baseline.SymmetryPartnerId,
+                displayName: DisplayName ?? baseline.DisplayName);
         }
 
         public BodyPartDefinition ToDefinition(int index, int fallbackParent = 0)
@@ -462,7 +465,8 @@ public static class UnitBodyRigSettingsStore
                     pivot: part.Pivot,
                     localRotationX: part.LocalRotationX,
                     localRotationY: part.LocalRotationY,
-                    symmetryPartnerId: part.SymmetryPartnerId)
+                    symmetryPartnerId: part.SymmetryPartnerId,
+                    displayName: part.DisplayName)
                 : baseline;
         }
 
