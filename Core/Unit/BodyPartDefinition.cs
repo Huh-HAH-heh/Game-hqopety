@@ -41,6 +41,7 @@ public readonly struct BodyPartDefinition
     public BodyPartAnchor Anchor { get; }
     public BodyPartRole Role { get; }
     public BodyPartPivot Pivot { get; }
+    public string? SymmetryPartnerId { get; }
 
     public BodyPartDefinition(
         Vector3 localPosition,
@@ -54,7 +55,8 @@ public readonly struct BodyPartDefinition
         BodyPartRole role = BodyPartRole.Generic,
         BodyPartPivot pivot = BodyPartPivot.Center,
         float localRotationX = 0f,
-        float localRotationY = 0f)
+        float localRotationY = 0f,
+        string? symmetryPartnerId = null)
     {
         LocalPosition = localPosition;
         Scale = scale;
@@ -68,5 +70,6 @@ public readonly struct BodyPartDefinition
         Anchor = anchor;
         Role = role;
         Pivot = pivot;
+        SymmetryPartnerId = symmetryPartnerId;
     }
 }
