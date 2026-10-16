@@ -1,4 +1,4 @@
-<escape>{
+{
   "schemaVersion": 1,
   "id": "my-creature",
   "displayName": "My Creature",
@@ -72,4 +72,4 @@
   ],
   "organs": [],
   "startingEquipment": []
-}</escape>
+}
