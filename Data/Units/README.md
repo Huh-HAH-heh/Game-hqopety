@@ -33,3 +33,10 @@ Coordinates, sizes and follow distances use game-world units. Rotations are radi
 When creating or extending a unit, keep it data-driven: use descriptive stable IDs such as `body.torso`, `body.head`, `limb.front.left` and `organ.heart`; keep every child after its parent; use left/right pairs consistently; align each hit region with the visible shape; add at least one valid tissue per region; and connect organs only to existing tissues. Do not regenerate unrelated IDs when polishing a figure, because stable IDs preserve references and make diffs easy to review.
 
 The blank template is at `Data/Units/Templates/blank.unit.json`. The JSON Schema for validation/autocomplete is `Data/Units/unit.schema.json`. Copy the template only as a starting point; assign a new unique `id` and let the editor allocate a fresh `runtimeTypeId` before adding it to `Data/Units`.
+
+
+## Reference rig and attribution
+
+`human-rig-v2.unit.json` is adapted from the bone hierarchy and measured proportions in [Modular Character Studio — project/scene.json](https://github.com/nickick/modular-character-studio/blob/main/project/scene.json). The extracted source measurements and bone mappings are preserved in `References/modular-character-studio-rig-reference.json`. The source project is MIT-licensed; its notice is included in `References/MODULAR_CHARACTER_STUDIO_LICENSE.txt`.
+
+The conversion uses the upstream `canonicalTargetPixels` metrics for torso, arm, leg and head proportions, remaps the source coordinates to RimClone's top-down representation, and mirrors the lateral coordinates for a neutral symmetric pose. The source torso/neck hierarchy is collapsed into one torso, each arm is reduced to two segments, each leg retains thigh/shin/foot, and the head is one segment. Upstream artwork is not copied into RimClone.
