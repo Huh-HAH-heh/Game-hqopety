@@ -201,12 +201,13 @@ public sealed class UnitSimulation
 
         return FinishSpawn(
             id,
-            type,
+            definition,
             position,
             bodyNormal,
             headNormal,
             body,
-            profile);
+            profile,
+            archetype.StartingEquipment);
     }
 
     public UnitId SpawnCustom(
@@ -218,7 +219,8 @@ public sealed class UnitSimulation
         ushort factionTag = 0,
         UnitHitRegionProfile? hitProfile = null)
     {
-        UnitDefinition definition = UnitCatalog.Get(type);
+        UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(type);
+        UnitDefinition definition = archetype.Definition;
         BodyHandle body = Bodies.CreateBody(bodyParts);
 
         Vector3 bodyNormal = new Vector3(
@@ -240,12 +242,13 @@ public sealed class UnitSimulation
 
         return FinishSpawn(
             id,
-            type,
+            definition,
             position,
             bodyNormal,
             bodyNormal,
             body,
-            profile);
+            profile,
+            archetype.StartingEquipment);
     }
 
     public UnitId SpawnCustom(
@@ -278,22 +281,24 @@ public sealed class UnitSimulation
 
         return FinishSpawn(
             id,
-            definition.Type,
+            definition,
             position,
             bodyNormal,
             bodyNormal,
             body,
-            hitProfile);
+            hitProfile,
+            ReadOnlySpan<UnitStartingEquipment>.Empty);
     }
 
     private UnitId FinishSpawn(
         UnitId id,
-        UnitType type,
+        in UnitDefinition definition,
         Vector3 position,
         Vector3 bodyNormal,
         Vector3 headNormal,
         BodyHandle body,
-        UnitHitRegionProfile hitProfile)
+        UnitHitRegionProfile hitProfile,
+        ReadOnlySpan<UnitStartingEquipment> startingEquipment)
     {
         Bodies.SetInitialWorldPosition(
             body,
@@ -309,8 +314,8 @@ public sealed class UnitSimulation
             hitProfile is not UnitAnatomyProfile anatomy ||
             !anatomy.HasSharedShapes ||
             body.Count != anatomy.NodeCount;
-        Health.InitializeUnit(id.Index, type, initializeLegacyHealth);
-        Metabolism.InitializeUnit(id.Index, type);
+        Health.InitializeUnit(id.Index, definition.Type, initializeLegacyHealth);
+        Metabolism.InitializeUnit(id.Index, definition);
         HitRegions.SetProfile(id.Index, hitProfile);
         Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);
@@ -318,8 +323,6 @@ public sealed class UnitSimulation
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
 
-        ReadOnlySpan<UnitStartingEquipment> startingEquipment =
-            UnitAnatomyCatalog.Get(type).StartingEquipment;
         for (int i = 0; i < startingEquipment.Length; i++)
         {
             UnitStartingEquipment item = startingEquipment[i];
