@@ -2391,7 +2391,10 @@ private static bool TestVisionDetectsRegionInsideRange()
 
         if (vestSlot < 0 ||
             simulation.Inventory.GetItem(target.Index, vestSlot) != ApparelCatalog.CombatVest)
+        {
+            Console.Error.WriteLine($"[Armor self-test] Vest wasn't equipped: slot={vestSlot}, item={simulation.Inventory.GetItem(target.Index, vestSlot)?.Name ?? "<none>"}.");
             return false;
+        }
 
         int durabilityIndex =
             target.Index * UnitInventoryStore.MaxInventorySlots + vestSlot;
@@ -2404,7 +2407,10 @@ private static bool TestVisionDetectsRegionInsideRange()
 
         int torsoRegion = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy.FindRegion("body.middle");
         if (torsoRegion < 0)
+        {
+            Console.Error.WriteLine("[Armor self-test] Canonical torso region 'body.middle' was not found.");
             return false;
+        }
 
         for (int i = 0; i < 5; i++)
         {
@@ -2439,7 +2445,10 @@ private static bool TestVisionDetectsRegionInsideRange()
                 simulation.HitRegions);
 
             if (result.DamageApplied <= 0f || result.DamageApplied >= 10f)
+            {
+                Console.Error.WriteLine($"[Armor self-test] Rifle hit {i + 1}: applied={result.DamageApplied:0.000}, energy={result.EnergyRemaining:0.0}, penetration={result.PenetrationRemaining:0.0}.");
                 return false;
+            }
         }
 
         float healthAfterRifleHits =
@@ -2452,6 +2461,7 @@ private static bool TestVisionDetectsRegionInsideRange()
             armorDurabilityAfter >= armorDurabilityBefore ||
             armorDurabilityAfter <= 0f)
         {
+            Console.Error.WriteLine($"[Armor self-test] Repeated hits: health {healthBefore:0.0}->{healthAfterRifleHits:0.0}, vest durability {armorDurabilityBefore:0.0}->{armorDurabilityAfter:0.0}.");
             return false;
         }
 
@@ -2460,9 +2470,12 @@ private static bool TestVisionDetectsRegionInsideRange()
             UnitHealthPartId.Torso,
             34f);
 
-        return genericHit.FinalDamage > 0f &&
-               genericHit.FinalDamage < 20f &&
-               simulation.Health.OverallHitPoints[target.Index] > 0f;
+        bool genericMitigated = genericHit.FinalDamage > 0f &&
+            genericHit.FinalDamage < 20f &&
+            simulation.Health.OverallHitPoints[target.Index] > 0f;
+        if (!genericMitigated)
+            Console.Error.WriteLine($"[Armor self-test] Generic hit applied {genericHit.FinalDamage:0.000}; remaining HP={simulation.Health.OverallHitPoints[target.Index]:0.0}.");
+        return genericMitigated;
     }
 
     private static bool TestHighTechWeaponProfiles()
