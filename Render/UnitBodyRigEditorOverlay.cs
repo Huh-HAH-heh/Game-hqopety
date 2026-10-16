@@ -738,21 +738,21 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (!_editingPose && !_editingUnitStats && _addRegionButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && !_editingOrganStats && _addRegionButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) AddOrgan();
             else AddRegion();
             return true;
         }
 
-        if (!_editingPose && !_editingUnitStats && _addAllFormsButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && !_editingOrganStats && _addAllFormsButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) DuplicateSelectedOrgan();
             else AddAllPrimitiveExamples();
             return true;
         }
 
-        if (!_editingPose && !_editingUnitStats && _removeRegionButton.GetGlobalBounds().Contains(position))
+        if (!_editingPose && !_editingUnitStats && !_editingOrganStats && _removeRegionButton.GetGlobalBounds().Contains(position))
         {
             if (_editingOrgans) RemoveSelectedOrgan();
             else RemoveSelectedCustomRegion();
@@ -761,6 +761,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (!_editingUnitStats && _parentButton.GetGlobalBounds().Contains(position))
         {
+            if (_editingOrganStats)
+            {
+                CycleOrganHost();
+                return true;
+            }
+
             if (_editingPose)
             {
                 CycleSelectedPose();
@@ -884,12 +890,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         for (int visibleRow = 0; visibleRow < _listVisibleRows; visibleRow++)
         {
             int itemIndex = _listScroll + visibleRow;
-            int itemCount = _editingOrgans ? _organs.Length : _parts.Length;
+            int itemCount = _editingOrgans || _editingOrganStats ? _organs.Length : _parts.Length;
             if (itemIndex >= itemCount ||
                 !_partRows[visibleRow].GetGlobalBounds().Contains(position))
                 continue;
 
-            if (_editingOrgans)
+            if (_editingOrgans || _editingOrganStats)
             {
                 _selectedOrgan = itemIndex;
                 _status = $"Выбран орган: {OrganName(_organs[itemIndex].Id)}.";
@@ -934,7 +940,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (!_previewPanels[projection].GetGlobalBounds().Contains(position))
                 continue;
 
-            if (_editingOrgans)
+                if (_editingOrgans || _editingOrganStats)
             {
                 int hitOrgan = HitTestOrganPreview(projection, position.X, position.Y);
                 if (hitOrgan >= 0)
@@ -1011,7 +1017,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_listPanel.GetGlobalBounds().Contains(position))
         {
             int step = delta > 0f ? -3 : 3;
-            int count = _editingOrgans ? _organs.Length : _parts.Length;
+            int count = _editingOrgans || _editingOrganStats ? _organs.Length : _parts.Length;
             _listScroll = Math.Clamp(_listScroll + step, 0, Math.Max(0, count - _listVisibleRows));
         }
 
@@ -1070,7 +1076,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (key == Keyboard.Key.P && !_editingPose)
         {
-            if (_editingOrgans && _organs.Length > 0)
+            if (_editingUnitStats)
+            {
+                _unitBodyType = NextEnum(_unitBodyType);
+                _status = $"Тип тела нового юнита: {_unitBodyType}.";
+            }
+            else if (_editingAdvancedPart)
+            {
+                _parts[_selectedPart] = Copy(_parts[_selectedPart], motion: NextEnum(_parts[_selectedPart].Motion));
+                _status = $"Движение части: {_parts[_selectedPart].Motion}.";
+            }
+            else if ((_editingOrgans || _editingOrganStats) && _organs.Length > 0)
             {
                 UnitAnatomyVolume organ = _organs[_selectedOrgan];
                 BodyPrimitive organPrimitive = organ.Primitive switch
@@ -1081,7 +1097,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 };
                 _organs[_selectedOrgan] = CopyOrgan(organ, primitive: organPrimitive);
             }
-            else
+            else if (!_editingUnitStats && !_editingAdvancedPart && !_editingOrganStats)
             {
                 BodyPartDefinition part = _parts[_selectedPart];
                 BodyPrimitive primitive = part.Primitive switch
@@ -1136,8 +1152,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_propertiesTitle != null)
             window.Draw(_propertiesTitle);
 
-        int displayedItemCount = _editingUnitStats ? 0 : _editingOrgans ? _organs.Length : _parts.Length;
-        int selectedListItem = _editingOrgans ? _selectedOrgan : _selectedPart;
+        int displayedItemCount = _editingUnitStats ? 0 : _editingOrgans || _editingOrganStats ? _organs.Length : _parts.Length;
+        int selectedListItem = _editingOrgans || _editingOrganStats ? _selectedOrgan : _selectedPart;
         if (_listTitle != null)
         {
             _listTitle.DisplayedString = _editingUnitStats
@@ -1174,7 +1190,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
             if (_partLabels[itemIndex] != null)
             {
-                _partLabels[itemIndex]!.DisplayedString = _editingOrgans
+                _partLabels[itemIndex]!.DisplayedString = _editingOrgans || _editingOrganStats
                     ? $"{itemIndex + 1:00}  {OrganName(_organs[itemIndex].Id)}"
                     : $"{itemIndex + 1:00}  {PartName(_regionIds[itemIndex])}";
                 _partLabels[itemIndex]!.Position = new Vector2f(
@@ -1187,7 +1203,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _addRegionLabel!.DisplayedString = _editingOrgans ? "+ ДОБАВИТЬ ОРГАН" : "+ ДОБАВИТЬ РЕГИОН";
         _addAllFormsLabel!.DisplayedString = _editingOrgans ? "+ КОПИЯ ОРГАНА" : "+ ВСЕ ФОРМЫ";
         _removeRegionLabel!.DisplayedString = _editingOrgans ? "УДАЛИТЬ ОРГАН" : "УДАЛИТЬ СВОЙ РЕГИОН";
-        if (!_editingPose && !_editingUnitStats)
+        if (!_editingPose && !_editingUnitStats && !_editingOrganStats)
         {
             DrawButton(window, _addRegionButton, _addRegionLabel);
             DrawButton(window, _addAllFormsButton, _addAllFormsLabel);
@@ -1304,11 +1320,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 _parentLabel.DisplayedString = $"ПОЗА: {PoseName(_selectedPose)}  [клик]";
             }
-            else if (_editingOrgans && _organs.Length == 0)
+            else if ((_editingOrgans || _editingOrganStats) && _organs.Length == 0)
             {
                 _parentLabel.DisplayedString = "ОБЛАСТЬ: —";
             }
-            else if (_editingOrgans)
+            else if (_editingOrgans || _editingOrganStats)
             {
                 _parentLabel.DisplayedString = $"ОБЛАСТЬ: {PartName(_organs[_selectedOrgan].ParentRegionId)}  [клик]";
             }
@@ -1448,11 +1464,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _listRowHeight = 28f;
         _listVisibleRows = Math.Clamp((int)((contentHeight - 135f) / _listRowHeight), 4, MaxParts);
-        _listScroll = Math.Clamp(_listScroll, 0, Math.Max(0, _parts.Length - _listVisibleRows));
-        if (_selectedPart < _listScroll)
-            _listScroll = _selectedPart;
-        else if (_selectedPart >= _listScroll + _listVisibleRows)
-            _listScroll = _selectedPart - _listVisibleRows + 1;
+        int visibleItemCount = _editingOrgans || _editingOrganStats ? _organs.Length : _parts.Length;
+        int selectedItemIndex = _editingOrgans || _editingOrganStats ? _selectedOrgan : _selectedPart;
+        _listScroll = Math.Clamp(_listScroll, 0, Math.Max(0, visibleItemCount - _listVisibleRows));
+        if (selectedItemIndex < _listScroll)
+            _listScroll = selectedItemIndex;
+        else if (selectedItemIndex >= _listScroll + _listVisibleRows)
+            _listScroll = selectedItemIndex - _listVisibleRows + 1;
 
         for (int i = 0; i < _partRows.Length; i++)
         {
@@ -2788,11 +2806,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void EnsureSelectionVisible()
     {
-        if (_selectedPart < _listScroll)
-            _listScroll = _selectedPart;
-        else if (_selectedPart >= _listScroll + _listVisibleRows)
-            _listScroll = Math.Max(0, _selectedPart - _listVisibleRows + 1);
-        _listScroll = Math.Clamp(_listScroll, 0, Math.Max(0, _parts.Length - _listVisibleRows));
+        int selectedItem = _editingOrgans || _editingOrganStats ? _selectedOrgan : _selectedPart;
+        int itemCount = _editingOrgans || _editingOrganStats ? _organs.Length : _parts.Length;
+        if (selectedItem < _listScroll)
+            _listScroll = selectedItem;
+        else if (selectedItem >= _listScroll + _listVisibleRows)
+            _listScroll = Math.Max(0, selectedItem - _listVisibleRows + 1);
+        _listScroll = Math.Clamp(_listScroll, 0, Math.Max(0, itemCount - _listVisibleRows));
     }
 
     private void ApplyEnabledSymmetry(int activeProjection = -1)
