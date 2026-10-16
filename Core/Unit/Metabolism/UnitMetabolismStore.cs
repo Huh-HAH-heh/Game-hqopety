@@ -204,6 +204,53 @@ public sealed class UnitMetabolismStore
 
     }
 
+    /// <summary>
+    /// Updates archetype baselines without wiping the unit's ongoing nutrition, fatigue or body-composition changes.
+    /// </summary>
+    public void ApplyEditedDefinition(
+        int index,
+        in UnitDefinition previous,
+        in UnitDefinition updated)
+    {
+        if ((uint)index >= (uint)Capacity)
+            return;
+
+        _bodyMassKg[index] *= updated.BodyMassKg / MathF.Max(0.001f, previous.BodyMassKg);
+        _muscleMassKg[index] *= updated.MuscleMassKg / MathF.Max(0.001f, previous.MuscleMassKg);
+        _bodyFatKg[index] *= updated.BodyFatKg / MathF.Max(0.001f, previous.BodyFatKg);
+
+        float energyRatio = _maxEnergyKcal[index] > 0f
+            ? Math.Clamp(_energyKcal[index] / _maxEnergyKcal[index], 0f, 1f)
+            : 1f;
+        _maxEnergyKcal[index] = updated.BaseEnergyKcal * 1.55f;
+        _energyKcal[index] = energyRatio * _maxEnergyKcal[index];
+
+        float waterRatio = _maxWaterLiters[index] > 0f
+            ? Math.Clamp(_waterLiters[index] / _maxWaterLiters[index], 0f, 1f)
+            : 1f;
+        _maxWaterLiters[index] = updated.BaseWaterLiters * 1.45f;
+        _waterLiters[index] = waterRatio * _maxWaterLiters[index];
+
+        float bloodRatio = _maxBloodLiters[index] > 0f
+            ? Math.Clamp(_bloodLiters[index] / _maxBloodLiters[index], 0f, 1f)
+            : 1f;
+        _maxBloodLiters[index] = updated.BloodLiters;
+        _bloodLiters[index] = bloodRatio * _maxBloodLiters[index];
+
+        int strengthDelta = updated.Strength - previous.Strength;
+        int constitutionDelta = updated.Constitution - previous.Constitution;
+        int dexterityDelta = updated.Dexterity - previous.Dexterity;
+        int intelligenceDelta = updated.Intelligence - previous.Intelligence;
+        _strength[index] = (byte)Math.Clamp(_strength[index] + strengthDelta, 1, 8);
+        _constitution[index] = (byte)Math.Clamp(_constitution[index] + constitutionDelta, 1, 8);
+        _dexterity[index] = (byte)Math.Clamp(_dexterity[index] + dexterityDelta, 1, 8);
+        _intelligence[index] = (byte)Math.Clamp(_intelligence[index] + intelligenceDelta, 1, 8);
+
+        _effectiveStrength[index] = Math.Clamp(_effectiveStrength[index] + strengthDelta, 0f, 8f);
+        _effectiveConstitution[index] = Math.Clamp(_effectiveConstitution[index] + constitutionDelta, 0f, 8f);
+        _effectiveDexterity[index] = Math.Clamp(_effectiveDexterity[index] + dexterityDelta, 0f, 8f);
+    }
+
     public void ClearUnit(int index)
     {
         if ((uint)index >= (uint)Capacity)
