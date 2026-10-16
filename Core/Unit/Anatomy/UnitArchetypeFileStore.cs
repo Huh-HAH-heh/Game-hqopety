@@ -308,7 +308,10 @@ public static class UnitArchetypeFileStore
                 ?? throw new InvalidDataException("В unit-файле отсутствует блок stats.");
             var definition = new UnitDefinition(
                 unitType, bodyType, stats.MoveSpeed, stats.Width, stats.Length,
-                stats.Height, stats.ViewRange, stats.FieldOfView);
+                stats.Height, stats.ViewRange, stats.FieldOfView,
+                stats.BodyMassKg, stats.MuscleMassKg, stats.BodyFatKg,
+                stats.BloodLiters, stats.BaseEnergyKcal, stats.BaseWaterLiters,
+                stats.Strength, stats.Constitution, stats.Dexterity, stats.Intelligence);
 
             int count = document.Regions.Count;
             if (count == 0 || count > 256)
@@ -477,7 +480,14 @@ public static class UnitArchetypeFileStore
         if (!Positive(definition.MoveSpeed) || !Positive(definition.Width) ||
             !Positive(definition.Length) || !Positive(definition.Height) ||
             !Positive(definition.ViewRange) || !float.IsFinite(definition.FieldOfView) ||
-            definition.FieldOfView < 1f || definition.FieldOfView > 360f)
+            definition.FieldOfView < 1f || definition.FieldOfView > 360f ||
+            !Positive(definition.BodyMassKg) || !Positive(definition.MuscleMassKg) ||
+            !Positive(definition.BodyFatKg) || !Positive(definition.BloodLiters) ||
+            !Positive(definition.BaseEnergyKcal) || !Positive(definition.BaseWaterLiters) ||
+            definition.Strength is < 1 or > 8 ||
+            definition.Constitution is < 1 or > 8 ||
+            definition.Dexterity is < 1 or > 8 ||
+            definition.Intelligence is < 1 or > 8)
             throw new InvalidDataException("Одна или несколько характеристик юнита выходят за допустимые пределы.");
         if (regionIds.Length == 0 || regionIds.Length > 256 ||
             regionIds.Length != bodyParts.Length || regionIds.Length != hitHalfHeights.Length ||
@@ -545,7 +555,17 @@ public static class UnitArchetypeFileStore
                 Length = asset.Definition.Length,
                 Height = asset.Definition.Height,
                 ViewRange = asset.Definition.ViewRange,
-                FieldOfView = asset.Definition.FieldOfView
+                FieldOfView = asset.Definition.FieldOfView,
+                BodyMassKg = asset.Definition.BodyMassKg,
+                MuscleMassKg = asset.Definition.MuscleMassKg,
+                BodyFatKg = asset.Definition.BodyFatKg,
+                BloodLiters = asset.Definition.BloodLiters,
+                BaseEnergyKcal = asset.Definition.BaseEnergyKcal,
+                BaseWaterLiters = asset.Definition.BaseWaterLiters,
+                Strength = asset.Definition.Strength,
+                Constitution = asset.Definition.Constitution,
+                Dexterity = asset.Definition.Dexterity,
+                Intelligence = asset.Definition.Intelligence
             }
         };
 
@@ -685,6 +705,16 @@ public static class UnitArchetypeFileStore
         public float Height { get; set; } = 1f;
         public float ViewRange { get; set; } = 20f;
         public float FieldOfView { get; set; } = 110f;
+        public float BodyMassKg { get; set; } = 75f;
+        public float MuscleMassKg { get; set; } = 30f;
+        public float BodyFatKg { get; set; } = 13f;
+        public float BloodLiters { get; set; } = 5f;
+        public float BaseEnergyKcal { get; set; } = 2200f;
+        public float BaseWaterLiters { get; set; } = 2.5f;
+        public byte Strength { get; set; } = 4;
+        public byte Constitution { get; set; } = 4;
+        public byte Dexterity { get; set; } = 4;
+        public byte Intelligence { get; set; } = 4;
     }
 
     private sealed class RegionDocument
