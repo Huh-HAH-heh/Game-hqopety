@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
+using Core.Items;
 using Core.Unit;
 using Evergine.Bindings.Imgui;
 using ImGuiVector2 = Evergine.Mathematics.Vector2;
@@ -36,7 +37,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float[],
         HitRegionPartBinding[][],
         UnitAnatomyMarker[][],
-        UnitAnatomyVolume[]> _saveRequested;
+        UnitAnatomyVolume[],
+        UnitStartingEquipment[]> _saveRequested;
     private readonly Font? _font;
     private readonly RectangleShape _backdrop = new(new Vector2f(1f, 1f))
     {
@@ -271,12 +273,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private HitRegionPartBinding[][] _tissuesByRegion = Array.Empty<HitRegionPartBinding[]>();
     private UnitAnatomyMarker[][] _markersByRegion = Array.Empty<UnitAnatomyMarker[]>();
     private UnitAnatomyVolume[] _organs = Array.Empty<UnitAnatomyVolume>();
+    private UnitStartingEquipment[] _startingEquipment = Array.Empty<UnitStartingEquipment>();
     private int _selectedOrgan;
+    private int _selectedEquipment;
     private int _selectedTissue;
     private int _selectedMarker;
     private bool _showUnitSettings;
     private bool _showOrganSettings;
     private bool _showTissueSettings;
+    private bool _showEquipmentSettings;
     private NumericsVector3[] _worldPositions = Array.Empty<NumericsVector3>();
     private Quaternion[] _worldOrientations = Array.Empty<Quaternion>();
     private ProjectedPart[][] _projected = new ProjectedPart[3][];
@@ -338,7 +343,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             float[],
             HitRegionPartBinding[][],
             UnitAnatomyMarker[][],
-            UnitAnatomyVolume[]> saveRequested)
+            UnitAnatomyVolume[],
+            UnitStartingEquipment[]> saveRequested)
     {
         _saveRequested = saveRequested ?? throw new ArgumentNullException(nameof(saveRequested));
         _font = LoadFont();
@@ -598,8 +604,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _showUnitSettings = false;
         _showOrganSettings = false;
         _showTissueSettings = false;
+        _showEquipmentSettings = false;
         UnitAnatomyProfile anatomy = archetype.Anatomy;
         _organs = anatomy.Volumes.ToArray();
+        _startingEquipment = archetype.StartingEquipment.ToArray();
+        _selectedEquipment = 0;
         _selectedOrgan = 0;
         _selectedTissue = 0;
         _selectedMarker = 0;
@@ -1569,21 +1578,28 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         {
             _showUnitSettings = !_showUnitSettings;
             if (_showUnitSettings)
-                _showOrganSettings = _showTissueSettings = false;
+                _showOrganSettings = _showTissueSettings = _showEquipmentSettings = false;
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui(_showOrganSettings ? "К геометрии" : "Органы"))
         {
             _showOrganSettings = !_showOrganSettings;
             if (_showOrganSettings)
-                _showUnitSettings = _showTissueSettings = false;
+                _showUnitSettings = _showTissueSettings = _showEquipmentSettings = false;
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui(_showTissueSettings ? "К геометрии" : "Ткани / маркеры"))
         {
             _showTissueSettings = !_showTissueSettings;
             if (_showTissueSettings)
-                _showUnitSettings = _showOrganSettings = false;
+                _showUnitSettings = _showOrganSettings = _showEquipmentSettings = false;
+        }
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui(_showEquipmentSettings ? "К геометрии" : "Снаряжение"))
+        {
+            _showEquipmentSettings = !_showEquipmentSettings;
+            if (_showEquipmentSettings)
+                _showUnitSettings = _showOrganSettings = _showTissueSettings = false;
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui("По умолчанию"))
@@ -1683,6 +1699,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (_showTissueSettings)
         {
             DrawImGuiTissueSettings();
+            ImguiNative.igEnd();
+            return;
+        }
+        if (_showEquipmentSettings)
+        {
+            DrawImGuiEquipmentSettings();
             ImguiNative.igEnd();
             return;
         }
@@ -3783,7 +3805,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             (float[])_hitHalfHeights.Clone(),
             CloneRows(_tissuesByRegion),
             CloneRows(_markersByRegion),
-            (UnitAnatomyVolume[])_organs.Clone());
+            (UnitAnatomyVolume[])_organs.Clone(),
+            (UnitStartingEquipment[])_startingEquipment.Clone());
     }
 
     private void CopySelectedPart()
