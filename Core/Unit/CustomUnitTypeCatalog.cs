@@ -30,6 +30,7 @@ public static class CustomUnitTypeCatalog
         float height,
         float viewRange,
         float fieldOfView,
+        UnitBodyType bodyType,
         ReadOnlySpan<string> regionIds,
         ReadOnlySpan<BodyPartDefinition> bodyParts,
         ReadOnlySpan<UnitAnatomyVolume> organs,
@@ -85,7 +86,7 @@ public static class CustomUnitTypeCatalog
             UnitAnatomyProfile anatomy = baseAnatomy.WithRig(regionIds, bodyParts, organs);
             var definition = new UnitDefinition(
                 assignedType,
-                UnitBodyType.Colonist,
+                bodyType,
                 moveSpeed,
                 width,
                 length,
@@ -106,6 +107,7 @@ public static class CustomUnitTypeCatalog
                 Height = height,
                 ViewRange = viewRange,
                 FieldOfView = fieldOfView,
+                BodyType = bodyType.ToString(),
                 Parts = new List<UnitBodyRigSettingsStore.BodyRigPartSettings>(bodyParts.Length),
                 Organs = new List<UnitBodyRigSettingsStore.OrganSettings>(organs.Length)
             };
@@ -232,7 +234,7 @@ public static class CustomUnitTypeCatalog
                     UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy.WithRig(ids, bodyParts, organs);
                 var definition = new UnitDefinition(
                     type,
-                    UnitBodyType.Colonist,
+                    ParseBodyType(document.BodyType),
                     document.MoveSpeed,
                     document.Width,
                     document.Length,
@@ -250,6 +252,12 @@ public static class CustomUnitTypeCatalog
             }
         }
     }
+
+    private static UnitBodyType ParseBodyType(string? value) =>
+        Enum.TryParse(value, ignoreCase: true, out UnitBodyType bodyType) &&
+        Enum.IsDefined(bodyType)
+            ? bodyType
+            : UnitBodyType.Colonist;
 
     private static UnitType FindFreeTypeValue()
     {
@@ -308,6 +316,7 @@ public static class CustomUnitTypeCatalog
         public float Height { get; set; } = 1.75f;
         public float ViewRange { get; set; } = 20f;
         public float FieldOfView { get; set; } = 110f;
+        public string BodyType { get; set; } = nameof(UnitBodyType.Colonist);
         public List<UnitBodyRigSettingsStore.BodyRigPartSettings> Parts { get; set; } = new();
         public List<UnitBodyRigSettingsStore.OrganSettings>? Organs { get; set; }
     }
