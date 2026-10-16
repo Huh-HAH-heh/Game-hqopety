@@ -32,4 +32,4 @@ Coordinates, sizes and follow distances use game-world units. Rotations are radi
 
 When creating or extending a unit, keep it data-driven: use descriptive stable IDs such as `body.torso`, `body.head`, `limb.front.left` and `organ.heart`; keep every child after its parent; use left/right pairs consistently; align each hit region with the visible shape; add at least one valid tissue per region; and connect organs only to existing tissues. Do not regenerate unrelated IDs when polishing a figure, because stable IDs preserve references and make diffs easy to review.
 
-The blank template is at `Data/Units/Templates/blank.unit.json`. Copy it only as a starting point; assign a new unique `id` and let the editor allocate a fresh `runtimeTypeId` before adding it to `Data/Units`.
+The blank template is at `Data/Units/Templates/blank.unit.json`. The JSON Schema for validation/autocomplete is `Data/Units/unit.schema.json`. Copy the template only as a starting point; assign a new unique `id` and let the editor allocate a fresh `runtimeTypeId` before adding it to `Data/Units`.
