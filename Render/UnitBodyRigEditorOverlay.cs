@@ -2168,7 +2168,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         byte softArmor = (byte)(armor.SoftArmor ? 1 : 0);
         if (ImguiNative.igCheckbox("Мягкая броня", &softArmor))
-            UpdateSelectedArmor(current => CopyArmor(current, softArmor: softArmor != 0));
+        {
+            bool softArmorEnabled = softArmor != 0;
+            UpdateSelectedArmor(current => CopyArmor(current, softArmor: softArmorEnabled));
+        }
 
         ImguiNative.igSeparatorText("Покрытие тела");
         DrawImGuiCoverageCheckbox("Голова", ArmorCoverage.Head);
