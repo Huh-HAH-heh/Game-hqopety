@@ -4211,8 +4211,302 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
     }
 
+    private void CreateNewProjectUnit()
+    {
+        try
+        {
+            ushort runtimeTypeId = UnitArchetypeFileStore.GetNextRuntimeTypeId();
+            string id = $"unit-{runtimeTypeId}";
+            UnitArchetypeAsset blank = UnitArchetypeFileStore.CreateBlank(
+                id, "Новый юнит", runtimeTypeId);
+            if (!LoadAssetIntoEditor(blank))
+                return;
+            _status = "Создан новый профиль с минимальной валидной фигурой. Добавляй части тела и сохраняй в Data/Units.";
+        }
+        catch (Exception exception)
+        {
+            _status = $"Не удалось создать юнита: {exception.Message}";
+        }
+    }
+
+    private void OpenProjectUnitFileDialog()
+    {
+        string? path = PickUnitFilePath(save: false, suggestedName: _projectUnitId);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _status = OperatingSystem.IsWindows()
+                ? "Открытие файла юнита отменено."
+                : "Диалог выбора файла доступен в Windows.";
+            return;
+        }
+
+        if (!UnitArchetypeFileStore.TryLoadFile(path, out UnitArchetypeAsset? asset, out string error) ||
+            asset == null)
+        {
+            _status = $"Не удалось загрузить юнита: {error}";
+            return;
+        }
+
+        if (!LoadAssetIntoEditor(asset))
+            return;
+
+        _status = $"Загружен «{asset.DisplayName}» из {Path.GetFileName(path)}. Изменения применятся после сохранения.";
+    }
+
+    private bool LoadAssetIntoEditor(UnitArchetypeAsset asset)
+    {
+        string[] ids = asset.RegionIds;
+        BodyPartDefinition[] parts = asset.BodyParts;
+        if (ids.Length == 0 || ids.Length > MaxParts ||
+            !SetRigData(ids, parts, setDefaults: true, setOpenedSnapshot: true))
+        {
+            _status = $"Невозможно загрузить профиль: редактор поддерживает 1–{MaxParts} регионов.";
+            return false;
+        }
+
+        _definition = asset.Definition;
+        _editingProjectAsset = true;
+        _projectUnitPath = UnitArchetypeFileStore.IsProjectFile(asset.FilePath)
+            ? Path.GetFullPath(asset.FilePath)
+            : string.Empty;
+        _projectUnitId = asset.Id;
+        _projectUnitDisplayName = asset.DisplayName;
+        _projectUnitDescription = asset.Description;
+        _projectRuntimeTypeId = asset.RuntimeTypeId;
+        _hitHalfHeights = asset.HitHalfHeights;
+        _tissuesByRegion = asset.Tissues;
+        _markersByRegion = asset.Markers;
+        _organs = asset.Organs;
+        _startingEquipment = asset.StartingEquipment;
+        _selectedPart = 0;
+        _selectedOrgan = 0;
+        _selectedEquipment = 0;
+        _selectedTissue = 0;
+        _selectedMarker = 0;
+        _listScroll = 0;
+        _selectedProperty = 0;
+        _imguiAssetIdValue = _projectUnitId;
+        _imguiAssetNameValue = _projectUnitDisplayName;
+        _imguiAssetDescriptionValue = _projectUnitDescription;
+        _showUnitSettings = false;
+        _showOrganSettings = false;
+        _showTissueSettings = false;
+        _showEquipmentSettings = false;
+        RefreshProjectedGeometry();
+        EnsureSelectionVisible();
+        return true;
+    }
+
+    private void BeginProjectCopyFromCurrent()
+    {
+        ushort runtimeTypeId = UnitArchetypeFileStore.GetNextRuntimeTypeId();
+        _editingProjectAsset = true;
+        _projectUnitPath = string.Empty;
+        _projectRuntimeTypeId = runtimeTypeId;
+        _projectUnitId = $"unit-{runtimeTypeId}";
+        _projectUnitDisplayName = $"Копия: {UnitAnatomyCatalog.GetDisplayName(_definition.Type)}";
+        _projectUnitDescription = "Копия профиля для независимого редактирования.";
+        _definition = RetypeDefinition(_definition, runtimeTypeId);
+        _imguiAssetIdValue = _projectUnitId;
+        _imguiAssetNameValue = _projectUnitDisplayName;
+        _imguiAssetDescriptionValue = _projectUnitDescription;
+    }
+
+    private static UnitDefinition RetypeDefinition(UnitDefinition source, ushort runtimeTypeId) =>
+        new(
+            (UnitType)runtimeTypeId, source.BodyType, source.MoveSpeed,
+            source.Width, source.Length, source.Height,
+            source.ViewRange, source.FieldOfView);
+
+    private void SaveProjectUnitFile(bool saveAs)
+    {
+        try
+        {
+            if (!_editingProjectAsset)
+                BeginProjectCopyFromCurrent();
+
+            string path = _projectUnitPath;
+            bool choosePath = saveAs || string.IsNullOrWhiteSpace(path);
+            if (choosePath)
+            {
+                string? selected = PickUnitFilePath(
+                    save: true,
+                    suggestedName: _projectUnitId);
+                if (string.IsNullOrWhiteSpace(selected))
+                {
+                    _status = "Сохранение файла юнита отменено.";
+                    return;
+                }
+
+                path = NormalizeUnitFileExtension(selected);
+                if (!UnitArchetypeFileStore.IsProjectFile(path))
+                {
+                    _status = $"Сохраняй архетип непосредственно в {UnitArchetypeFileStore.ProjectDirectory}.";
+                    return;
+                }
+
+                string newId = GetUnitIdFromPath(path);
+                if (!string.Equals(Path.GetFullPath(path), Path.GetFullPath(_projectUnitPath.Length > 0 ? _projectUnitPath : path),
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    _projectRuntimeTypeId = UnitArchetypeFileStore.GetNextRuntimeTypeId();
+                    _definition = RetypeDefinition(_definition, _projectRuntimeTypeId);
+                }
+
+                _projectUnitId = newId;
+            }
+
+            if (string.IsNullOrWhiteSpace(_projectUnitDisplayName))
+            {
+                _status = "Укажи отображаемое имя юнита.";
+                return;
+            }
+
+            if (!UnitArchetypeFileStore.SaveProjectFile(
+                path,
+                _projectUnitId,
+                _projectUnitDisplayName,
+                _projectUnitDescription,
+                _projectRuntimeTypeId,
+                _definition,
+                _regionIds,
+                _parts,
+                _hitHalfHeights,
+                CloneRows(_tissuesByRegion),
+                CloneRows(_markersByRegion),
+                _organs,
+                _startingEquipment,
+                out UnitArchetypeAsset? asset,
+                out string error) || asset == null)
+            {
+                _status = $"Ошибка сохранения unit-файла: {error}";
+                return;
+            }
+
+            if (!LoadAssetIntoEditor(asset))
+                return;
+
+            _projectAssetSaved(asset);
+            _status = $"Сохранён {asset.FilePath}. runtimeTypeId={asset.RuntimeTypeId}; профиль доступен игре и новым спавнам.";
+        }
+        catch (Exception exception)
+        {
+            _status = $"Ошибка сохранения unit-файла: {exception.Message}";
+        }
+    }
+
+    private static string NormalizeUnitFileExtension(string path)
+    {
+        if (path.EndsWith(".unit.json", StringComparison.OrdinalIgnoreCase))
+            return Path.GetFullPath(path);
+        if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            path = path[..^5] + ".unit.json";
+        else
+            path += ".unit.json";
+        return Path.GetFullPath(path);
+    }
+
+    private static string GetUnitIdFromPath(string path)
+    {
+        string fileName = Path.GetFileName(path);
+        const string extension = ".unit.json";
+        string id = fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+            ? fileName[..^extension.Length]
+            : Path.GetFileNameWithoutExtension(fileName);
+
+        var chars = id.Trim().ToLowerInvariant()
+            .Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '-')
+            .ToArray();
+        string slug = new string(chars).Trim('-', '_', '.');
+        if (slug.Length < 2)
+            slug = "unit-" + slug;
+        return slug.Length > 64 ? slug[..64] : slug;
+    }
+
+    private static string? PickUnitFilePath(bool save, string? suggestedName)
+    {
+        if (!OperatingSystem.IsWindows())
+            return null;
+
+        const int maxFile = 1024;
+        IntPtr filter = IntPtr.Zero;
+        IntPtr fileBuffer = IntPtr.Zero;
+        IntPtr initialDirectory = IntPtr.Zero;
+        IntPtr title = IntPtr.Zero;
+        IntPtr extension = IntPtr.Zero;
+
+        try
+        {
+            filter = Marshal.StringToHGlobalUni(
+                "RimClone unit profile (*.unit.json)\0*.unit.json\0JSON files (*.json)\0*.json\0\0");
+            fileBuffer = Marshal.AllocHGlobal(maxFile * sizeof(char));
+            Marshal.Copy(new char[maxFile], 0, fileBuffer, maxFile);
+
+            if (save && !string.IsNullOrWhiteSpace(suggestedName))
+            {
+                string initialName = NormalizeUnitFileExtension(suggestedName);
+                initialName = Path.GetFileName(initialName);
+                char[] chars = (initialName + '\0').ToCharArray();
+                if (chars.Length < maxFile)
+                    Marshal.Copy(chars, 0, fileBuffer, chars.Length);
+            }
+
+            initialDirectory = Marshal.StringToHGlobalUni(UnitArchetypeFileStore.ProjectDirectory);
+            title = Marshal.StringToHGlobalUni(save ? "Сохранить юнита в Data/Units" : "Открыть unit-файл");
+            extension = Marshal.StringToHGlobalUni("json");
+
+            var dialog = new OpenFileName
+            {
+                lStructSize = Marshal.SizeOf<OpenFileName>(),
+                hwndOwner = IntPtr.Zero,
+                hInstance = IntPtr.Zero,
+                lpstrFilter = filter,
+                lpstrCustomFilter = IntPtr.Zero,
+                nMaxCustFilter = 0,
+                nFilterIndex = 1,
+                lpstrFile = fileBuffer,
+                nMaxFile = maxFile,
+                lpstrFileTitle = IntPtr.Zero,
+                nMaxFileTitle = 0,
+                lpstrInitialDir = initialDirectory,
+                lpstrTitle = title,
+                Flags = 0x00000800 | 0x00080000 | (save ? 0x00000002 : 0x00001000),
+                nFileOffset = 0,
+                nFileExtension = 0,
+                lpstrDefExt = extension,
+                lCustData = IntPtr.Zero,
+                lpfnHook = IntPtr.Zero,
+                lpTemplateName = IntPtr.Zero,
+                pvReserved = IntPtr.Zero,
+                dwReserved = 0,
+                FlagsEx = 0
+            };
+
+            bool accepted = save ? GetSaveFileNameW(ref dialog) : GetOpenFileNameW(ref dialog);
+            if (!accepted)
+                return null;
+
+            string? selectedPath = Marshal.PtrToStringUni(fileBuffer);
+            return string.IsNullOrWhiteSpace(selectedPath) ? null : selectedPath;
+        }
+        finally
+        {
+            if (filter != IntPtr.Zero) Marshal.FreeHGlobal(filter);
+            if (fileBuffer != IntPtr.Zero) Marshal.FreeHGlobal(fileBuffer);
+            if (initialDirectory != IntPtr.Zero) Marshal.FreeHGlobal(initialDirectory);
+            if (title != IntPtr.Zero) Marshal.FreeHGlobal(title);
+            if (extension != IntPtr.Zero) Marshal.FreeHGlobal(extension);
+        }
+    }
+
     private void Save()
     {
+        if (_editingProjectAsset)
+        {
+            SaveProjectUnitFile(saveAs: false);
+            return;
+        }
+
         _openedRegionIds = (string[])_regionIds.Clone();
         _openedParts = (BodyPartDefinition[])_parts.Clone();
         _saveRequested(
