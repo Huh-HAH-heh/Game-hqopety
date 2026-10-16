@@ -139,6 +139,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         OutlineColor = new Color(90, 128, 105, 255),
         OutlineThickness = 1f
     };
+    private readonly RectangleShape _viewNormalizationButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(42, 57, 72, 255),
+        OutlineColor = new Color(82, 104, 127, 255),
+        OutlineThickness = 1f
+    };
+    private readonly RectangleShape _resetCenterButton = new(new Vector2f(1f, 26f))
+    {
+        FillColor = new Color(42, 57, 72, 255),
+        OutlineColor = new Color(82, 104, 127, 255),
+        OutlineThickness = 1f
+    };
     private readonly RectangleShape[] _gridLines = new RectangleShape[2];
     private readonly RectangleShape _addRegionButton = new(new Vector2f(1f, 25f))
     {
@@ -170,6 +182,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private readonly Text? _gridLabel;
     private readonly Text? _gridStepLabel;
     private readonly Text? _surfaceSnapLabel;
+    private readonly Text? _viewNormalizationLabel;
+    private readonly Text? _resetCenterLabel;
     private readonly Text? _addRegionLabel;
     private readonly Text? _addAllFormsLabel;
     private readonly Text? _removeRegionLabel;
@@ -224,6 +238,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _listVisibleRows = 12;
     private bool _gridEnabled = true;
     private bool _surfaceSnapEnabled = false;
+    private bool _normalizeViewsEnabled;
+    private float _normalizedPixelsPerUnit = 1f;
+    private float _propertiesScrollOffset;
+    private float _propertiesMaxScroll;
+    private float _propertiesViewportTop;
+    private float _propertiesViewportBottom;
     private readonly float[] _gridSteps = { 0.0005f, 0.001f, 0.0025f, 0.005f, 0.01f, 0.025f, 0.05f, 0.1f, 0.2f };
     private int _gridStepIndex = 3;
     private string _status = "Перетаскивание привязано к сетке. Настрой углы X/Y/Z в параметрах.";
@@ -404,6 +424,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(220, 239, 225, 255),
                 Style = Text.Styles.Bold
             };
+            _viewNormalizationLabel = new Text(_font, "ОБЩИЙ МАСШТАБ: ВЫКЛ", 8)
+            {
+                FillColor = new Color(232, 240, 248, 255),
+                Style = Text.Styles.Bold
+            };
+            _resetCenterLabel = new Text(_font, "К ЦЕНТРУ ТЕЛА (0,0,0)", 8)
+            {
+                FillColor = new Color(232, 240, 248, 255),
+                Style = Text.Styles.Bold
+            };
             _addRegionLabel = new Text(_font, "+ ДОБАВИТЬ РЕГИОН", 9)
             {
                 FillColor = new Color(237, 246, 241, 255),
@@ -418,7 +448,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(243, 225, 227, 255)
             };
             _helpText = new Text(_font,
-                "Перетаскивай сегменты; родитель задаёт зависимость. Ctrl+S — применить и сохранить.",
+                "Колесо / PgUp / PgDn — прокрутка параметров. Ctrl+S — применить и сохранить.",
                 9)
             {
                 FillColor = MutedText
@@ -625,7 +655,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (_surfaceSnapButton.GetGlobalBounds().Contains(position))
+        if (IsPropertiesItemVisible(_surfaceSnapButton.Position.Y, _surfaceSnapButton.Size.Y) &&
+            _surfaceSnapButton.GetGlobalBounds().Contains(position))
         {
             _surfaceSnapEnabled = !_surfaceSnapEnabled;
             _surfaceSnapTargetPart = -1;
@@ -634,6 +665,23 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _status = _surfaceSnapEnabled
                 ? "Автопривязка включена: близкие части стыкуются по нормали поверхности. N — переключить."
                 : "Автопривязка к поверхности отключена.";
+            return true;
+        }
+
+        if (IsPropertiesItemVisible(_viewNormalizationButton.Position.Y, _viewNormalizationButton.Size.Y) &&
+            _viewNormalizationButton.GetGlobalBounds().Contains(position))
+        {
+            _normalizeViewsEnabled = !_normalizeViewsEnabled;
+            _status = _normalizeViewsEnabled
+                ? "Общий масштаб включён: одна единица мира имеет одинаковый размер во всех проекциях."
+                : "Общий масштаб выключен: каждый вид подбирает масштаб отдельно.";
+            return true;
+        }
+
+        if (IsPropertiesItemVisible(_resetCenterButton.Position.Y, _resetCenterButton.Size.Y) &&
+            _resetCenterButton.GetGlobalBounds().Contains(position))
+        {
+            ResetSelectedPartToBodyCenter();
             return true;
         }
 
@@ -698,7 +746,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         for (int i = 0; i < PropertyCount; i++)
         {
-            if (!_sliderTracks[i].GetGlobalBounds().Contains(position))
+            RectangleShape track = _sliderTracks[i];
+            if (!IsPropertiesItemVisible(track.Position.Y - 23f, 42f) ||
+                !track.GetGlobalBounds().Contains(position))
                 continue;
 
             _selectedProperty = i;
@@ -786,6 +836,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         {
             int step = delta > 0f ? -3 : 3;
             _listScroll = Math.Clamp(_listScroll + step, 0, Math.Max(0, _parts.Length - _listVisibleRows));
+            return true;
+        }
+
+        if (_propertiesPanel.GetGlobalBounds().Contains(position) ||
+            Array.Exists(_previewPanels, panel => panel.GetGlobalBounds().Contains(position)))
+        {
+            float scrollStep = MathF.Max(36f, _propertyRowHeight * 1.5f);
+            _propertiesScrollOffset = Math.Clamp(
+                _propertiesScrollOffset + (delta > 0f ? -scrollStep : scrollStep),
+                0f,
+                _propertiesMaxScroll);
         }
 
         return true;
@@ -811,6 +872,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _status = _surfaceSnapEnabled
                 ? "Автопривязка к нормали включена."
                 : "Автопривязка к нормали отключена.";
+            return true;
+        }
+
+        if (key is Keyboard.Key.PageUp or Keyboard.Key.PageDown)
+        {
+            float pageStep = MathF.Max(80f, _propertiesViewportBottom - _propertiesViewportTop - 36f);
+            _propertiesScrollOffset = Math.Clamp(
+                _propertiesScrollOffset + (key == Keyboard.Key.PageDown ? pageStep : -pageStep),
+                0f,
+                _propertiesMaxScroll);
             return true;
         }
 
@@ -880,6 +951,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         Layout(width, height);
         CalculateWorldTransforms();
+        if (_normalizeViewsEnabled)
+            _normalizedPixelsPerUnit = CalculateNormalizedProjectionScale();
 
         _backdrop.Position = new Vector2f(0f, 0f);
         _backdrop.Size = new Vector2f(width, height);
@@ -970,7 +1043,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             DrawProperty(window, i);
         }
 
-        if (_primitiveLabel != null)
+        if (_primitiveLabel != null &&
+            IsPropertiesItemVisible(_primitiveButton.Position.Y, _primitiveButton.Size.Y))
         {
             _primitiveLabel.DisplayedString = $"ФОРМА: {_parts[_selectedPart].Primitive}   [P]";
             _primitiveLabel.Position = new Vector2f(
@@ -980,7 +1054,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             DrawText(window, _primitiveLabel);
         }
 
-        if (_parentLabel != null)
+        if (_parentLabel != null &&
+            IsPropertiesItemVisible(_parentButton.Position.Y, _parentButton.Size.Y))
         {
             int parent = _parts[_selectedPart].ParentIndex;
             string parentName = parent >= 0 ? PartName(_regionIds[parent]) : "корень";
@@ -992,7 +1067,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             DrawText(window, _parentLabel);
         }
 
-        if (_allSymmetryLabel != null)
+        if (_allSymmetryLabel != null &&
+            IsPropertiesItemVisible(_allSymmetryButton.Position.Y, _allSymmetryButton.Size.Y))
         {
             _allSymmetryLabel.DisplayedString = _symmetryEnabled[0] && _symmetryEnabled[1] && _symmetryEnabled[2]
                 ? "СИММЕТРИЯ ВСЕХ: ВКЛ"
@@ -1004,7 +1080,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             DrawText(window, _allSymmetryLabel);
         }
 
-        if (_gridLabel != null)
+        if (_gridLabel != null &&
+            IsPropertiesItemVisible(_gridButton.Position.Y, _gridButton.Size.Y))
         {
             _gridLabel.DisplayedString = _gridEnabled ? "СЕТКА" : "СЕТКА·";
             _gridLabel.Position = new Vector2f(_gridButton.Position.X + 8f, _gridButton.Position.Y + 6f);
@@ -1012,7 +1089,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             DrawText(window, _gridLabel);
         }
 
-        if (_gridStepLabel != null)
+        if (_gridStepLabel != null &&
+            IsPropertiesItemVisible(_gridStepButton.Position.Y, _gridStepButton.Size.Y))
         {
             _gridStepLabel.DisplayedString = $"{_gridSteps[_gridStepIndex]:0.####}";
             _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 3f, _gridStepButton.Position.Y + 6f);
@@ -1020,7 +1098,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             DrawText(window, _gridStepLabel);
         }
 
-        if (_surfaceSnapLabel != null)
+        if (_surfaceSnapLabel != null &&
+            IsPropertiesItemVisible(_surfaceSnapButton.Position.Y, _surfaceSnapButton.Size.Y))
         {
             _surfaceSnapButton.FillColor = _surfaceSnapEnabled
                 ? new Color(52, 99, 74, 255)
@@ -1029,6 +1108,32 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _surfaceSnapLabel.Position = new Vector2f(_surfaceSnapButton.Position.X + 6f, _surfaceSnapButton.Position.Y + 6f);
             window.Draw(_surfaceSnapButton);
             DrawText(window, _surfaceSnapLabel);
+        }
+
+        if (_viewNormalizationLabel != null &&
+            IsPropertiesItemVisible(_viewNormalizationButton.Position.Y, _viewNormalizationButton.Size.Y))
+        {
+            _viewNormalizationButton.FillColor = _normalizeViewsEnabled
+                ? new Color(52, 99, 74, 255)
+                : new Color(42, 57, 72, 255);
+            _viewNormalizationLabel.DisplayedString = _normalizeViewsEnabled
+                ? "ОБЩИЙ МАСШТАБ: ВКЛ"
+                : "ОБЩИЙ МАСШТАБ: ВЫКЛ";
+            _viewNormalizationLabel.Position = new Vector2f(
+                _viewNormalizationButton.Position.X + 6f,
+                _viewNormalizationButton.Position.Y + 6f);
+            window.Draw(_viewNormalizationButton);
+            DrawText(window, _viewNormalizationLabel);
+        }
+
+        if (_resetCenterLabel != null &&
+            IsPropertiesItemVisible(_resetCenterButton.Position.Y, _resetCenterButton.Size.Y))
+        {
+            _resetCenterLabel.Position = new Vector2f(
+                _resetCenterButton.Position.X + 6f,
+                _resetCenterButton.Position.Y + 6f);
+            window.Draw(_resetCenterButton);
+            DrawText(window, _resetCenterLabel);
         }
 
         if (_helpText != null)
@@ -1163,14 +1268,21 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _selectedInfo.Position = new Vector2f(propertiesX + 10f, contentY + 52f);
 
         float propertyTop = contentY + propertyTopOffset;
+        _propertiesViewportTop = contentY + MathF.Min(82f, propertyTopOffset - 2f);
+        _propertiesViewportBottom = contentY + contentHeight - 8f;
+
+        float basePrimitiveY = propertyTop + PropertyCount * _propertyRowHeight + 8f;
+        _propertiesMaxScroll = MathF.Max(0f, basePrimitiveY + 185f - _propertiesViewportBottom);
+        _propertiesScrollOffset = Math.Clamp(_propertiesScrollOffset, 0f, _propertiesMaxScroll);
+
         for (int i = 0; i < PropertyCount; i++)
         {
-            float rowY = propertyTop + i * _propertyRowHeight;
+            float rowY = propertyTop + i * _propertyRowHeight - _propertiesScrollOffset;
             _sliderTracks[i].Position = new Vector2f(propertiesX + 12f, rowY + 25f);
             _sliderTracks[i].Size = new Vector2f(propertiesWidth - 24f, 6f);
         }
 
-        _primitiveButton.Position = new Vector2f(propertiesX + 10f, propertyTop + PropertyCount * _propertyRowHeight + 8f);
+        _primitiveButton.Position = new Vector2f(propertiesX + 10f, basePrimitiveY - _propertiesScrollOffset);
         _primitiveButton.Size = new Vector2f(propertiesWidth - 20f, 30f);
         _parentButton.Position = new Vector2f(propertiesX + 10f, _primitiveButton.Position.Y + 35f);
         _parentButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
@@ -1182,6 +1294,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _gridStepButton.Size = new Vector2f(48f, 26f);
         _surfaceSnapButton.Position = new Vector2f(_gridStepButton.Position.X + _gridStepButton.Size.X + 4f, _gridButton.Position.Y);
         _surfaceSnapButton.Size = new Vector2f(MathF.Max(54f, propertiesX + propertiesWidth - 10f - _surfaceSnapButton.Position.X), 26f);
+        _viewNormalizationButton.Position = new Vector2f(propertiesX + 10f, _gridButton.Position.Y + 31f);
+        _viewNormalizationButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
+        _resetCenterButton.Position = new Vector2f(propertiesX + 10f, _viewNormalizationButton.Position.Y + 31f);
+        _resetCenterButton.Size = new Vector2f(propertiesWidth - 20f, 26f);
 
         if (_helpText != null)
             _helpText.Position = new Vector2f(listX + 2f, y + panelHeight - 42f);
@@ -1258,9 +1374,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         float spanX = MathF.Max(0.01f, maxX - minX);
         float spanY = MathF.Max(0.01f, maxY - minY);
-        float pixelsPerUnit = MathF.Max(1f, MathF.Min(
-            MathF.Max(1f, layout.Width - 12f) / spanX,
-            MathF.Max(1f, layout.Height - 12f) / spanY));
+        float pixelsPerUnit = _normalizeViewsEnabled
+            ? _normalizedPixelsPerUnit
+            : MathF.Max(1f, MathF.Min(
+                MathF.Max(1f, layout.Width - 12f) / spanX,
+                MathF.Max(1f, layout.Height - 12f) / spanY));
         float worldCenterX = (minX + maxX) * 0.5f;
         float worldCenterY = (minY + maxY) * 0.5f;
         float screenCenterX = layout.Left + layout.Width * 0.5f;
@@ -1329,8 +1447,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void DrawProperty(RenderWindow window, int index)
     {
-        PropertyInfo info = GetProperty(index);
         RectangleShape track = _sliderTracks[index];
+        if (!IsPropertiesItemVisible(track.Position.Y - 23f, 42f))
+            return;
+
+        PropertyInfo info = GetProperty(index);
         float ratio = Math.Clamp((info.Value - info.Minimum) / (info.Maximum - info.Minimum), 0f, 1f);
         _sliderFills[index].Position = track.Position;
         _sliderFills[index].Size = new Vector2f(MathF.Max(1f, track.Size.X * ratio), track.Size.Y);
@@ -1533,6 +1654,65 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         RefreshProjectedGeometry();
         _status = $"Изменено: {PartName(_regionIds[_selectedPart])}. " +
             $"Привязка: {(_gridEnabled ? _gridSteps[_gridStepIndex].ToString("0.####") : "выкл")}. Ctrl+S — сохранить.";
+    }
+
+    private bool IsPropertiesItemVisible(float itemY, float itemHeight) =>
+        itemY >= _propertiesViewportTop &&
+        itemY + itemHeight <= _propertiesViewportBottom;
+
+    private float CalculateNormalizedProjectionScale()
+    {
+        float commonScale = float.PositiveInfinity;
+        for (int projection = 0; projection < _projectionLayouts.Length; projection++)
+        {
+            ProjectionLayout layout = _projectionLayouts[projection];
+            float minX = float.PositiveInfinity;
+            float minY = float.PositiveInfinity;
+            float maxX = float.NegativeInfinity;
+            float maxY = float.NegativeInfinity;
+
+            for (int i = 0; i < _parts.Length; i++)
+            {
+                ProjectedPart geometry = Project(
+                    _parts[i], _worldPositions[i], _worldOrientations[i], projection);
+                minX = MathF.Min(minX, geometry.X - geometry.HalfWidth);
+                minY = MathF.Min(minY, geometry.Y - geometry.HalfHeight);
+                maxX = MathF.Max(maxX, geometry.X + geometry.HalfWidth);
+                maxY = MathF.Max(maxY, geometry.Y + geometry.HalfHeight);
+            }
+
+            float spanX = MathF.Max(0.01f, maxX - minX);
+            float spanY = MathF.Max(0.01f, maxY - minY);
+            float viewScale = MathF.Max(1f, MathF.Min(
+                MathF.Max(1f, layout.Width - 12f) / spanX,
+                MathF.Max(1f, layout.Height - 12f) / spanY));
+            commonScale = MathF.Min(commonScale, viewScale);
+        }
+
+        return float.IsFinite(commonScale) ? MathF.Max(1f, commonScale) : 1f;
+    }
+
+    private void ResetSelectedPartToBodyCenter()
+    {
+        if (_selectedPart < 0 || _selectedPart >= _parts.Length)
+            return;
+
+        CalculateWorldTransforms();
+        BodyPartDefinition part = _parts[_selectedPart];
+        Quaternion parentOrientation =
+            part.Anchor == BodyPartAnchor.Parent && part.ParentIndex >= 0
+                ? _worldOrientations[part.ParentIndex]
+                : Quaternion.Identity;
+        NumericsVector3 worldDelta = -_worldPositions[_selectedPart];
+        NumericsVector3 localDelta = NumericsVector3.Transform(
+            worldDelta, Quaternion.Inverse(parentOrientation));
+
+        _parts[_selectedPart] = Copy(
+            part,
+            localPosition: part.LocalPosition + localDelta);
+        ApplyEnabledSymmetry();
+        RefreshProjectedGeometry();
+        _status = $"«{PartName(_regionIds[_selectedPart])}» перемещена в центр тела (0, 0, 0). Нажми Ctrl+S.";
     }
 
     private void ApplySizeSymmetry()
@@ -2660,6 +2840,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _gridLabel?.Dispose();
         _gridStepLabel?.Dispose();
         _surfaceSnapLabel?.Dispose();
+        _viewNormalizationLabel?.Dispose();
+        _resetCenterLabel?.Dispose();
         _addRegionLabel?.Dispose();
         _addAllFormsLabel?.Dispose();
         _removeRegionLabel?.Dispose();
@@ -2689,6 +2871,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _gridButton.Dispose();
         _gridStepButton.Dispose();
         _surfaceSnapButton.Dispose();
+        _viewNormalizationButton.Dispose();
+        _resetCenterButton.Dispose();
         _addRegionButton.Dispose();
         _addAllFormsButton.Dispose();
         _removeRegionButton.Dispose();
