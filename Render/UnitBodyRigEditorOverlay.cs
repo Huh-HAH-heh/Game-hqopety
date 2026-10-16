@@ -1867,10 +1867,53 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private unsafe void DrawImGuiUnitSettings()
     {
-        TextImGui("НАСТРОЙКИ ЮНИТА");
+        TextImGui("НАСТРОЙКИ И ФАЙЛ ПРОФИЛЯ ЮНИТА");
         ImguiNative.igSeparator();
-        TextImGui($"Архетип: {_definition.Type}");
-        TextImGui("Архетип: колонист. Настройки ниже сохраняются в его профиле.");
+
+        if (ButtonImGui("Новый юнит"))
+            CreateNewProjectUnit();
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("Открыть файл"))
+            OpenProjectUnitFileDialog();
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("Сохранить файл"))
+            SaveProjectUnitFile(saveAs: false);
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("Сохранить как..."))
+            SaveProjectUnitFile(saveAs: true);
+
+        if (_editingProjectAsset)
+        {
+            TextImGui($"Пользовательский архетип · runtimeTypeId: {_projectRuntimeTypeId}");
+            if (string.IsNullOrWhiteSpace(_projectUnitPath))
+            {
+                _projectUnitId = DrawImGuiTextInput(
+                    "ID файла (стабильный)", "##projectUnitId", _projectUnitId,
+                    _imguiAssetIdBuffer, ref _imguiAssetIdValue);
+            }
+            else
+            {
+                TextImGui($"ID: {_projectUnitId}  ·  переименование через «Сохранить как...»");
+            }
+
+            _projectUnitDisplayName = DrawImGuiTextInput(
+                "Отображаемое имя", "##projectUnitName", _projectUnitDisplayName,
+                _imguiAssetNameBuffer, ref _imguiAssetNameValue);
+            _projectUnitDescription = DrawImGuiTextInput(
+                "Описание", "##projectUnitDescription", _projectUnitDescription,
+                _imguiAssetDescriptionBuffer, ref _imguiAssetDescriptionValue);
+
+            TextImGui(string.IsNullOrWhiteSpace(_projectUnitPath)
+                ? $"Новый файл будет сохранён в {UnitArchetypeFileStore.ProjectDirectory}"
+                : $"Файл: {_projectUnitPath}");
+        }
+        else
+        {
+            TextImGui("Сейчас открыт встроенный профиль «Колонист». «Новый юнит» создаёт отдельный файл, не перезаписывая колониста.");
+        }
+
+        ImguiNative.igSeparatorText("Характеристики");
+        TextImGui($"Активный профиль: {(_editingProjectAsset ? _projectUnitDisplayName : UnitAnatomyCatalog.GetDisplayName(_definition.Type))}");
         DrawImGuiEnumCombo("Тип тела", _definition.BodyType,
             value => UpdateDefinition(bodyType: value));
 
@@ -1888,7 +1931,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             value => UpdateDefinition(fieldOfView: value), 1f, 360f);
 
         ImguiNative.igSeparator();
-        TextImGui("Нажми «Сохранить», чтобы записать параметры и применить профиль.");
+        TextImGui(_editingProjectAsset
+            ? "Сохранение создаёт один .unit.json с геометрией, тканями, органами, маркерами и экипировкой."
+            : "«Сохранить» применяет изменения к встроенному профилю. Для отдельного существа нажми «Новый юнит».");
     }
 
     private unsafe void DrawImGuiOrganSettings()
