@@ -407,7 +407,17 @@ public static class UnitAnatomyCatalog
             !IsValidPositive(definition.ViewRange) ||
             !float.IsFinite(definition.FieldOfView) ||
             definition.FieldOfView < 1f ||
-            definition.FieldOfView > 360f)
+            definition.FieldOfView > 360f ||
+            !IsValidPositive(definition.BodyMassKg) ||
+            !IsValidPositive(definition.MuscleMassKg) ||
+            !IsValidPositive(definition.BodyFatKg) ||
+            !IsValidPositive(definition.BloodLiters) ||
+            !IsValidPositive(definition.BaseEnergyKcal) ||
+            !IsValidPositive(definition.BaseWaterLiters) ||
+            definition.Strength is < 1 or > 8 ||
+            definition.Constitution is < 1 or > 8 ||
+            definition.Dexterity is < 1 or > 8 ||
+            definition.Intelligence is < 1 or > 8)
         {
             error = "Параметры юнита выходят за допустимые пределы.";
             return false;
@@ -421,7 +431,17 @@ public static class UnitAnatomyCatalog
             Length = definition.Length,
             Height = definition.Height,
             ViewRange = definition.ViewRange,
-            FieldOfView = definition.FieldOfView
+            FieldOfView = definition.FieldOfView,
+            BodyMassKg = definition.BodyMassKg,
+            MuscleMassKg = definition.MuscleMassKg,
+            BodyFatKg = definition.BodyFatKg,
+            BloodLiters = definition.BloodLiters,
+            BaseEnergyKcal = definition.BaseEnergyKcal,
+            BaseWaterLiters = definition.BaseWaterLiters,
+            Strength = definition.Strength,
+            Constitution = definition.Constitution,
+            Dexterity = definition.Dexterity,
+            Intelligence = definition.Intelligence
         };
 
         try
@@ -458,7 +478,17 @@ public static class UnitAnatomyCatalog
             definition.Length,
             definition.Height,
             definition.ViewRange,
-            definition.FieldOfView);
+            definition.FieldOfView,
+            definition.BodyMassKg,
+            definition.MuscleMassKg,
+            definition.BodyFatKg,
+            definition.BloodLiters,
+            definition.BaseEnergyKcal,
+            definition.BaseWaterLiters,
+            definition.Strength,
+            definition.Constitution,
+            definition.Dexterity,
+            definition.Intelligence);
         Colonist = new UnitArchetypeProfile(
             updated,
             current.Anatomy,
@@ -477,6 +507,16 @@ public static class UnitAnatomyCatalog
         public float Height { get; set; } = 1.75f;
         public float ViewRange { get; set; } = 20f;
         public float FieldOfView { get; set; } = 110f;
+        public float BodyMassKg { get; set; } = 75f;
+        public float MuscleMassKg { get; set; } = 30f;
+        public float BodyFatKg { get; set; } = 13f;
+        public float BloodLiters { get; set; } = 5f;
+        public float BaseEnergyKcal { get; set; } = 2200f;
+        public float BaseWaterLiters { get; set; } = 2.5f;
+        public byte Strength { get; set; } = 4;
+        public byte Constitution { get; set; } = 4;
+        public byte Dexterity { get; set; } = 4;
+        public byte Intelligence { get; set; } = 4;
     }
 
     private static void EnsureSavedColonistRigLoaded()
@@ -527,7 +567,17 @@ public static class UnitAnatomyCatalog
                     IsValidPositive(settings.ViewRange) &&
                     float.IsFinite(settings.FieldOfView) &&
                     settings.FieldOfView >= 1f &&
-                    settings.FieldOfView <= 360f)
+                    settings.FieldOfView <= 360f &&
+                    IsValidPositive(settings.BodyMassKg) &&
+                    IsValidPositive(settings.MuscleMassKg) &&
+                    IsValidPositive(settings.BodyFatKg) &&
+                    IsValidPositive(settings.BloodLiters) &&
+                    IsValidPositive(settings.BaseEnergyKcal) &&
+                    IsValidPositive(settings.BaseWaterLiters) &&
+                    settings.Strength is >= 1 and <= 8 &&
+                    settings.Constitution is >= 1 and <= 8 &&
+                    settings.Dexterity is >= 1 and <= 8 &&
+                    settings.Intelligence is >= 1 and <= 8)
                 {
                     UnitArchetypeProfile saved = Colonist;
                     UnitBodyType bodyType =
@@ -543,7 +593,17 @@ public static class UnitAnatomyCatalog
                         settings.Length,
                         settings.Height,
                         settings.ViewRange,
-                        settings.FieldOfView);
+                        settings.FieldOfView,
+                        settings.BodyMassKg,
+                        settings.MuscleMassKg,
+                        settings.BodyFatKg,
+                        settings.BloodLiters,
+                        settings.BaseEnergyKcal,
+                        settings.BaseWaterLiters,
+                        settings.Strength,
+                        settings.Constitution,
+                        settings.Dexterity,
+                        settings.Intelligence);
                     Colonist = new UnitArchetypeProfile(
                         definition,
                         saved.Anatomy,
