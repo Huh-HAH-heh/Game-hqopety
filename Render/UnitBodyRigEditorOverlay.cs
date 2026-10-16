@@ -5020,6 +5020,24 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
         }
 
+        // The generic rig dialog also lists JSON files. A complete unit asset must
+        // be loaded through UnitArchetypeFileStore so its tissues, markers, organs,
+        // stats and equipment are not silently discarded.
+        if (path.EndsWith(".unit.json", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!UnitArchetypeFileStore.TryLoadFile(
+                    path, out UnitArchetypeAsset? asset, out string assetError) ||
+                asset == null)
+            {
+                _status = $"Ошибка загрузки юнита: {assetError}";
+                return;
+            }
+
+            if (LoadAssetIntoEditor(asset))
+                _status = $"Загружен юнит «{asset.DisplayName}» целиком: геометрия, ткани, маркеры, органы и характеристики.";
+            return;
+        }
+
         if (!UnitBodyRigSettingsStore.LoadFile(path, out string[] ids, out BodyPartDefinition[] parts, out string error))
         {
             _status = $"Ошибка загрузки рига: {error}";
