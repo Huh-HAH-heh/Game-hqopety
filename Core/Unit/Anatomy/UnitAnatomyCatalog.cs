@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Numerics;
+using System.Text.Json;
 using Core.Items;
 
 namespace Core.Unit;
@@ -365,6 +367,92 @@ public static class UnitAnatomyCatalog
         ApplyColonistRig(ids, bodyParts);
     }
 
+    private static string ColonistSettingsPath =>
+        Path.Combine(
+            Path.GetDirectoryName(UnitBodyRigSettingsStore.FilePath) ?? Environment.CurrentDirectory,
+            "colonist-unit-settings.json");
+
+    /// <summary>Applies and persists the editable movement, size and vision settings.</summary>
+    public static bool SaveColonistDefinition(UnitDefinition definition, out string error)
+    {
+        if (definition.Type != UnitType.Colonist ||
+            !IsValidPositive(definition.MoveSpeed) ||
+            !IsValidPositive(definition.Width) ||
+            !IsValidPositive(definition.Length) ||
+            !IsValidPositive(definition.Height) ||
+            !IsValidPositive(definition.ViewRange) ||
+            !float.IsFinite(definition.FieldOfView) ||
+            definition.FieldOfView < 1f ||
+            definition.FieldOfView > 360f)
+        {
+            error = "Параметры юнита выходят за допустимые пределы.";
+            return false;
+        }
+
+        var settings = new ColonistSettingsFile
+        {
+            MoveSpeed = definition.MoveSpeed,
+            Width = definition.Width,
+            Length = definition.Length,
+            Height = definition.Height,
+            ViewRange = definition.ViewRange,
+            FieldOfView = definition.FieldOfView
+        };
+
+        try
+        {
+            string directory = Path.GetDirectoryName(ColonistSettingsPath) ?? Environment.CurrentDirectory;
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(
+                ColonistSettingsPath,
+                JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+            return false;
+        }
+
+        ApplyColonistDefinition(definition);
+        error = string.Empty;
+        return true;
+    }
+
+    public static void ApplyColonistDefinition(UnitDefinition definition)
+    {
+        if (definition.Type != UnitType.Colonist)
+            throw new ArgumentException("Only the colonist definition can be edited in this constructor.", nameof(definition));
+
+        EnsureSavedColonistRigLoaded();
+        UnitArchetypeProfile current = Colonist;
+        var updated = new UnitDefinition(
+            UnitType.Colonist,
+            current.Definition.BodyType,
+            definition.MoveSpeed,
+            definition.Width,
+            definition.Length,
+            definition.Height,
+            definition.ViewRange,
+            definition.FieldOfView);
+        Colonist = new UnitArchetypeProfile(
+            updated,
+            current.Anatomy,
+            current.StartingEquipment.ToArray());
+    }
+
+    private static bool IsValidPositive(float value) =>
+        float.IsFinite(value) && value > 0f;
+
+    private sealed class ColonistSettingsFile
+    {
+        public float MoveSpeed { get; set; } = 2.8f;
+        public float Width { get; set; } = 0.35f;
+        public float Length { get; set; } = 0.60f;
+        public float Height { get; set; } = 1.75f;
+        public float ViewRange { get; set; } = 20f;
+        public float FieldOfView { get; set; } = 110f;
+    }
+
     private static void EnsureSavedColonistRigLoaded()
     {
         if (_colonistRigLoaded)
@@ -397,6 +485,44 @@ public static class UnitAnatomyCatalog
                 current.Definition,
                 next,
                 current.StartingEquipment.ToArray());
+        }
+
+        try
+        {
+            if (File.Exists(ColonistSettingsPath))
+            {
+                ColonistSettingsFile? settings =
+                    JsonSerializer.Deserialize<ColonistSettingsFile>(File.ReadAllText(ColonistSettingsPath));
+                if (settings != null &&
+                    IsValidPositive(settings.MoveSpeed) &&
+                    IsValidPositive(settings.Width) &&
+                    IsValidPositive(settings.Length) &&
+                    IsValidPositive(settings.Height) &&
+                    IsValidPositive(settings.ViewRange) &&
+                    float.IsFinite(settings.FieldOfView) &&
+                    settings.FieldOfView >= 1f &&
+                    settings.FieldOfView <= 360f)
+                {
+                    UnitArchetypeProfile saved = Colonist;
+                    var definition = new UnitDefinition(
+                        UnitType.Colonist,
+                        saved.Definition.BodyType,
+                        settings.MoveSpeed,
+                        settings.Width,
+                        settings.Length,
+                        settings.Height,
+                        settings.ViewRange,
+                        settings.FieldOfView);
+                    Colonist = new UnitArchetypeProfile(
+                        definition,
+                        saved.Anatomy,
+                        saved.StartingEquipment.ToArray());
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore an invalid settings file and continue with the built-in archetype.
         }
     }
 
