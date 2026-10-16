@@ -19,7 +19,7 @@ The game loads only `*.unit.json` files directly inside `Data/Units`. Starter fi
 - `id`: stable, lowercase project identifier; 2–64 Latin letters, digits, `.`, `_` and `-`.
 - `displayName` / `description`: designer-facing information.
 - `runtimeTypeId`: unique numeric ID for the custom archetype. Custom IDs start at `1024`; let the editor allocate one when creating a new profile.
-- `stats`: body classification, movement speed, width, length, height, vision range and field of view.
+- `stats`: body classification, movement speed, width, length, height, vision range, field of view, body/muscle/fat mass, blood, starting energy and water, and the four base attributes (strength, constitution, dexterity and intelligence; each is 1–8).
 - `regions`: the renderable and damageable skeleton. Each region includes its shape/transform (`part`), hit thickness, damageable tissues and functional markers. Region IDs must be unique and parents must come first.
 - `tissues`: independent health pools with weights, HP, optional armor zone and projectile energy/penetration loss. A value of `-1` means inherit the runtime default for projectile losses.
 - `markers`: functional points attached to a region. Available roles include `Vision`, `Target`, `Aim`, `Eye`, `Vital`, `Interaction`, `Locomotion`, `WeaponMount` and `Muzzle`. Combine roles as a comma-separated string.
