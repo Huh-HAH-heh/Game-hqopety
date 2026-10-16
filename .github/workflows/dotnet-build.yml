@@ -6,6 +6,7 @@ on:
       - main
       - experimental/unit-development-terrain-data-refactor
       - feature/unit-navigation-800-battle
+      - feature/anatomy-editor-foundation
   pull_request:
     branches:
       - main
