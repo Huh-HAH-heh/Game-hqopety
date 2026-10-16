@@ -105,6 +105,7 @@ public static class UnitArchetypeFileStore
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true
     };
 
@@ -128,7 +129,7 @@ public static class UnitArchetypeFileStore
             try
             {
                 using JsonDocument json = JsonDocument.Parse(File.ReadAllText(path));
-                if (json.RootElement.TryGetProperty("runtimeTypeId", out JsonElement id) &&
+                if (TryGetPropertyIgnoreCase(json.RootElement, "runtimeTypeId", out JsonElement id) &&
                     id.TryGetUInt16(out ushort value))
                     used.Add(value);
             }
@@ -580,7 +581,7 @@ public static class UnitArchetypeFileStore
             try
             {
                 using JsonDocument json = JsonDocument.Parse(File.ReadAllText(otherPath));
-                if (json.RootElement.TryGetProperty("runtimeTypeId", out JsonElement element) &&
+                if (TryGetPropertyIgnoreCase(json.RootElement, "runtimeTypeId", out JsonElement element) &&
                     element.TryGetUInt16(out ushort existing) && existing == runtimeTypeId)
                     throw new InvalidDataException($"runtimeTypeId={runtimeTypeId} уже занят файлом {Path.GetFileName(otherPath)}.");
             }
@@ -600,7 +601,7 @@ public static class UnitArchetypeFileStore
             try
             {
                 using JsonDocument json = JsonDocument.Parse(File.ReadAllText(otherPath));
-                if (json.RootElement.TryGetProperty("id", out JsonElement element) &&
+                if (TryGetPropertyIgnoreCase(json.RootElement, "id", out JsonElement element) &&
                     element.ValueKind == JsonValueKind.String &&
                     string.Equals(element.GetString(), id, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException($"ID '{id}' уже занят файлом {Path.GetFileName(otherPath)}.");
@@ -610,6 +611,27 @@ public static class UnitArchetypeFileStore
                 // Keep editing valid assets even if a different file in the folder is malformed.
             }
         }
+    }
+
+    private static bool TryGetPropertyIgnoreCase(
+        JsonElement element,
+        string name,
+        out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private static string NormalizeId(string? id)
