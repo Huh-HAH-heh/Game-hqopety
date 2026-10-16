@@ -880,7 +880,7 @@ public sealed class GameRenderer
             return;
         }
 
-        _bodyRigEditorOverlay?.SetStatus("Файл сохранён. Применяю риг к текущим колонистам...");
+        _bodyRigEditorOverlay?.SetStatus("Риг записан в Data/Units/colonist-body-rig.json. Применяю к текущим колонистам...");
         Console.WriteLine($"[Body rig] Saved colonist rig: {fullPath}");
 
         UnitBodyRigEditorOverlay? editor = _bodyRigEditorOverlay;
@@ -1487,13 +1487,14 @@ public sealed class GameRenderer
             {
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
-                    if (e.Button == Mouse.Button.Left)
+                    if (e.Button is Mouse.Button.Left or Mouse.Button.Middle)
                     {
                         Vector2f editorCoordinates = _uiView != null
                             ? _window.MapPixelToCoords(e.Position, _uiView)
                             : new Vector2f(e.Position.X, e.Position.Y);
                         _bodyRigEditorOverlay.HandleMousePressed(
-                            new Vector2i((int)editorCoordinates.X, (int)editorCoordinates.Y));
+                            new Vector2i((int)editorCoordinates.X, (int)editorCoordinates.Y),
+                            e.Button);
                     }
 
                     return;
@@ -1750,8 +1751,7 @@ public sealed class GameRenderer
             {
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
-                    if (e.Button == Mouse.Button.Left)
-                        _bodyRigEditorOverlay.HandleMouseReleased();
+                    _bodyRigEditorOverlay.HandleMouseReleased(e.Button);
                     return;
                 }
 

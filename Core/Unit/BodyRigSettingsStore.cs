@@ -29,12 +29,35 @@ public static class UnitBodyRigSettingsStore
     {
         get
         {
+            // Development builds save into the game's content directory in the repository.
+            // Published builds keep their writable data next to the executable.
+            string root = FindProjectRoot() ?? AppContext.BaseDirectory;
+            return Path.Combine(root, "Data", "Units", "colonist-body-rig.json");
+        }
+    }
+
+    private static string LegacyFilePath
+    {
+        get
+        {
             string root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (string.IsNullOrWhiteSpace(root))
                 root = AppContext.BaseDirectory;
-
             return Path.Combine(root, "RimClone", "colonist-body-rig.json");
         }
+    }
+
+    private static string? FindProjectRoot()
+    {
+        for (DirectoryInfo? current = new(AppContext.BaseDirectory);
+             current != null;
+             current = current.Parent)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "RimClone.sln")))
+                return current.FullName;
+        }
+
+        return null;
     }
 
     public static BodyPartDefinition ApplySavedShape(string regionId, BodyPartDefinition defaults)
@@ -272,12 +295,15 @@ public static class UnitBodyRigSettingsStore
         Saved.Clear();
         SavedInFileOrder.Clear();
 
+        string targetPath = FilePath;
+        string sourcePath = File.Exists(targetPath) ? targetPath : LegacyFilePath;
+
         try
         {
-            if (!File.Exists(FilePath))
+            if (!File.Exists(sourcePath))
                 return;
 
-            string json = File.ReadAllText(FilePath);
+            string json = File.ReadAllText(sourcePath);
             RigSettingsDocument? document = JsonSerializer.Deserialize<RigSettingsDocument>(json, JsonOptions);
             if (document?.Parts == null || document.Version is < 1 or > 2)
                 return;
@@ -290,10 +316,26 @@ public static class UnitBodyRigSettingsStore
                 Saved[part.Id] = part;
                 SavedInFileOrder.Add(part);
             }
+
+            if (!string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    string? directory = Path.GetDirectoryName(targetPath);
+                    if (!string.IsNullOrWhiteSpace(directory))
+                        Directory.CreateDirectory(directory);
+                    File.Copy(sourcePath, targetPath, overwrite: false);
+                    Console.WriteLine($"[Body rig] Migrated saved rig to game data: {targetPath}");
+                }
+                catch (Exception migrationError)
+                {
+                    Console.Error.WriteLine($"[Body rig] Could not migrate the old AppData rig: {migrationError.Message}");
+                }
+            }
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"[Body rig] Не удалось прочитать {FilePath}: {exception.Message}");
+            Console.Error.WriteLine($"[Body rig] Не удалось прочитать {sourcePath}: {exception.Message}");
         }
     }
 

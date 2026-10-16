@@ -217,6 +217,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private Quaternion[] _worldOrientations = Array.Empty<Quaternion>();
     private ProjectedPart[][] _projected = new ProjectedPart[3][];
     private ProjectionLayout[] _projectionLayouts = new ProjectionLayout[3];
+    private readonly float[] _projectionZoom = { 1f, 1f, 1f };
+    private readonly float[] _projectionPanX = new float[3];
+    private readonly float[] _projectionPanY = new float[3];
+    private int _panningProjection = -1;
 
     private int _selectedPart;
     private int _selectedProperty;
@@ -448,7 +452,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 FillColor = new Color(243, 225, 227, 255)
             };
             _helpText = new Text(_font,
-                "Колесо / PgUp / PgDn — прокрутка параметров. Ctrl+S — применить и сохранить.",
+                "Колесо — вид вверх/вниз · Shift+колесо — влево/вправо · Ctrl+колесо — масштаб · средняя кнопка — таскать · Home — сброс вида. PgUp/PgDn — параметры.",
                 9)
             {
                 FillColor = MutedText
@@ -555,6 +559,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _draggingProperty = -1;
         _draggingProjection = -1;
         _draggingPart = false;
+        _panningProjection = -1;
         _surfaceSnapTargetPart = -1;
         _surfaceSnapProjection = -1;
         _hasSurfaceSnapDirection = false;
@@ -563,10 +568,34 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     public void SetStatus(string status) => _status = status ?? string.Empty;
 
-    public bool HandleMousePressed(Vector2i position)
+    public bool HandleMousePressed(Vector2i position, Mouse.Button button = Mouse.Button.Left)
     {
         if (!IsOpen)
             return false;
+
+        if (button == Mouse.Button.Middle)
+        {
+            for (int projection = 0; projection < _previewPanels.Length; projection++)
+            {
+                if (!_previewPanels[projection].GetGlobalBounds().Contains(position))
+                    continue;
+
+                _activeProjection = projection;
+                _panningProjection = projection;
+                _draggingPart = false;
+                _draggingProjection = -1;
+                _draggingProperty = -1;
+                _lastMouseX = position.X;
+                _lastMouseY = position.Y;
+                _status = $"Перемещение вида «{ProjectionName(projection)}». Отпусти среднюю кнопку для завершения.";
+                return true;
+            }
+
+            return true;
+        }
+
+        if (button != Mouse.Button.Left)
+            return true;
 
         if (_closeButton.GetGlobalBounds().Contains(position))
         {
@@ -799,6 +828,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (!IsOpen)
             return false;
 
+        if (_panningProjection >= 0)
+        {
+            _projectionPanX[_panningProjection] += position.X - _lastMouseX;
+            _projectionPanY[_panningProjection] += position.Y - _lastMouseY;
+            _lastMouseX = position.X;
+            _lastMouseY = position.Y;
+            return true;
+        }
+
         if (_draggingProperty >= 0)
         {
             UpdatePropertyFromSlider(_draggingProperty, position.X);
@@ -819,10 +857,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         return true;
     }
 
-    public bool HandleMouseReleased()
+    public bool HandleMouseReleased(Mouse.Button button = Mouse.Button.Left)
     {
         if (!IsOpen)
             return false;
+
+        if (button == Mouse.Button.Middle)
+        {
+            _panningProjection = -1;
+            return true;
+        }
+
+        if (button != Mouse.Button.Left)
+            return true;
 
         _draggingProperty = -1;
         _draggingProjection = -1;
@@ -838,6 +885,39 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (!IsOpen)
             return false;
 
+        for (int projection = 0; projection < _previewPanels.Length; projection++)
+        {
+            if (!_previewPanels[projection].GetGlobalBounds().Contains(position))
+                continue;
+
+            _activeProjection = projection;
+            bool controlPressed =
+                Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
+                Keyboard.IsKeyPressed(Keyboard.Key.RControl);
+            bool shiftPressed =
+                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+
+            if (controlPressed)
+            {
+                float factor = delta > 0f ? 1.15f : 1f / 1.15f;
+                _projectionZoom[projection] = Math.Clamp(
+                    _projectionZoom[projection] * factor, 0.15f, 5f);
+                _status = $"Масштаб вида «{ProjectionName(projection)}»: {_projectionZoom[projection]:0.00}×. Home — сброс.";
+            }
+            else if (shiftPressed)
+            {
+                _projectionPanX[projection] += delta > 0f ? 48f : -48f;
+            }
+            else
+            {
+                // Like a web page: wheel down moves the image upward to reveal lower body parts.
+                _projectionPanY[projection] += delta > 0f ? 48f : -48f;
+            }
+
+            return true;
+        }
+
         if (_listPanel.GetGlobalBounds().Contains(position))
         {
             int step = delta > 0f ? -3 : 3;
@@ -845,8 +925,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return true;
         }
 
-        if (_propertiesPanel.GetGlobalBounds().Contains(position) ||
-            Array.Exists(_previewPanels, panel => panel.GetGlobalBounds().Contains(position)))
+        if (_propertiesPanel.GetGlobalBounds().Contains(position))
         {
             float scrollStep = MathF.Max(36f, _propertyRowHeight * 1.5f);
             _propertiesScrollOffset = Math.Clamp(
@@ -878,6 +957,25 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _status = _surfaceSnapEnabled
                 ? "Автопривязка к нормали включена."
                 : "Автопривязка к нормали отключена.";
+            return true;
+        }
+
+        if (key == Keyboard.Key.Home)
+        {
+            if (_activeProjection >= 0)
+            {
+                _projectionZoom[_activeProjection] = 1f;
+                _projectionPanX[_activeProjection] = 0f;
+                _projectionPanY[_activeProjection] = 0f;
+            }
+            else
+            {
+                Array.Fill(_projectionZoom, 1f);
+                Array.Clear(_projectionPanX);
+                Array.Clear(_projectionPanY);
+            }
+
+            _status = "Вид сброшен. Ctrl+колесо — масштаб, колесо — вертикальная прокрутка.";
             return true;
         }
 
@@ -1380,15 +1478,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         float spanX = MathF.Max(0.01f, maxX - minX);
         float spanY = MathF.Max(0.01f, maxY - minY);
-        float pixelsPerUnit = _normalizeViewsEnabled
+        float pixelsPerUnit = (_normalizeViewsEnabled
             ? _normalizedPixelsPerUnit
             : MathF.Max(1f, MathF.Min(
                 MathF.Max(1f, layout.Width - 12f) / spanX,
-                MathF.Max(1f, layout.Height - 12f) / spanY));
+                MathF.Max(1f, layout.Height - 12f) / spanY))) * _projectionZoom[projection];
         float worldCenterX = (minX + maxX) * 0.5f;
         float worldCenterY = (minY + maxY) * 0.5f;
-        float screenCenterX = layout.Left + layout.Width * 0.5f;
-        float screenCenterY = layout.Top + layout.Height * 0.5f;
+        float screenCenterX = layout.Left + layout.Width * 0.5f + _projectionPanX[projection];
+        float screenCenterY = layout.Top + layout.Height * 0.5f + _projectionPanY[projection];
         layout = layout.WithTransform(pixelsPerUnit, screenCenterX, screenCenterY, worldCenterX, worldCenterY);
         _projectionLayouts[projection] = layout;
         DrawGrid(window, layout, projection);
