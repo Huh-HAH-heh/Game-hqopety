@@ -261,7 +261,9 @@ public static class UnitAnatomySettingsStore
             HardArmorDamageFactor = HardArmorDamageFactor,
             ArmorRating = ArmorRating,
             Coverage = (ArmorCoverage)Coverage,
-            Layer = ParseEnum((ArmorLayer)Layer, ArmorLayer.Clothing),
+            Layer = Enum.IsDefined(typeof(ArmorLayer), (ArmorLayer)Layer)
+                ? (ArmorLayer)Layer
+                : ArmorLayer.Clothing,
             WorldRenderPadding = WorldRenderPadding,
             MovementSpeedMultiplier = MovementSpeedMultiplier
         };
