@@ -350,7 +350,8 @@ public static class UnitAnatomyCatalog
         ReadOnlySpan<float> hitHalfHeights,
         HitRegionPartBinding[][] tissues,
         UnitAnatomyMarker[][] markers,
-        ReadOnlySpan<UnitAnatomyVolume> volumes)
+        ReadOnlySpan<UnitAnatomyVolume> volumes,
+        UnitStartingEquipment[] startingEquipment)
     {
         EnsureSavedColonistRigLoaded();
         UnitArchetypeProfile current = Colonist;
@@ -359,7 +360,7 @@ public static class UnitAnatomyCatalog
         Colonist = new UnitArchetypeProfile(
             current.Definition,
             nextAnatomy,
-            current.StartingEquipment.ToArray());
+            startingEquipment);
         _colonistRigLoaded = true;
     }
 
@@ -554,12 +555,16 @@ public static class UnitAnatomyCatalog
         }
 
         UnitArchetypeProfile currentProfile = Colonist;
-        if (UnitAnatomySettingsStore.TryLoad(currentProfile.Anatomy, out UnitAnatomyProfile savedAnatomy))
+        if (UnitAnatomySettingsStore.TryLoad(
+            currentProfile.Anatomy,
+            out UnitAnatomyProfile savedAnatomy,
+            out UnitStartingEquipment[] savedEquipment,
+            out bool hasEquipment))
         {
             Colonist = new UnitArchetypeProfile(
                 currentProfile.Definition,
                 savedAnatomy,
-                currentProfile.StartingEquipment.ToArray());
+                hasEquipment ? savedEquipment : currentProfile.StartingEquipment.ToArray());
         }
     }
 
