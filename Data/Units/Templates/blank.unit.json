@@ -1,0 +1,75 @@
+<escape>{
+  "schemaVersion": 1,
+  "id": "my-creature",
+  "displayName": "My Creature",
+  "description": "A clean starting point for a custom unit.",
+  "runtimeTypeId": 1024,
+  "stats": {
+    "bodyType": "Colonist",
+    "moveSpeed": 2.8,
+    "width": 0.36,
+    "length": 0.5,
+    "height": 1.0,
+    "viewRange": 20.0,
+    "fieldOfView": 110.0
+  },
+  "regions": [
+    {
+      "id": "body.core",
+      "hitHalfHeight": 0.16,
+      "part": {
+        "id": "body.core",
+        "parentIndex": -1,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.82,
+        "scaleX": 0.18,
+        "scaleY": 0.12,
+        "scaleZ": 0.16,
+        "rotation": 0.0,
+        "rotationX": 0.0,
+        "rotationY": 0.0,
+        "followDistance": 0.0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "Core body"
+      },
+      "tissues": [
+        {
+          "id": "body.core.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1.0,
+          "maxHitPoints": 100.0,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1.0,
+          "projectilePenetrationLoss": -1.0
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Target, Aim, Vision",
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        {
+          "id": "locomotion",
+          "roles": "Locomotion",
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      ]
+    }
+  ],
+  "organs": [],
+  "startingEquipment": []
+}</escape>
