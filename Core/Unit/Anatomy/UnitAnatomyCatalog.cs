@@ -342,6 +342,8 @@ public static class UnitAnatomyCatalog
     private static readonly UnitArchetypeProfile SegmentedMonster = CreateSegmentedMonster();
 
     private static bool _colonistRigLoaded;
+    private static readonly Dictionary<UnitType, UnitArchetypeAsset> CustomAssets = new();
+    private static bool _customAssetsLoaded;
 
     /// <summary>Apply an editable rig while preserving anatomy metadata and organ volumes.</summary>
     public static void ApplyColonistAuthoringData(
@@ -573,6 +575,10 @@ public static class UnitAnatomyCatalog
         if (type == UnitType.Colonist)
             EnsureSavedColonistRigLoaded();
 
+        EnsureCustomAssetsLoaded();
+        if (CustomAssets.TryGetValue(type, out UnitArchetypeAsset? custom))
+            return custom.Profile;
+
         return type switch
         {
             UnitType.Colonist => Colonist,
@@ -580,6 +586,75 @@ public static class UnitAnatomyCatalog
             UnitType.SegmentedMonster => SegmentedMonster,
             _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown unit archetype.")
         };
+    }
+
+    /// <summary>Registers a user-authored profile so UnitSimulation.Spawn can use its runtime ID.</summary>
+    public static void RegisterCustomAsset(UnitArchetypeAsset asset)
+    {
+        if (asset == null)
+            throw new ArgumentNullException(nameof(asset));
+        ushort id = (ushort)asset.Definition.Type;
+        if (id < UnitArchetypeFileStore.FirstCustomRuntimeTypeId ||
+            id > UnitArchetypeFileStore.LastCustomRuntimeTypeId ||
+            id != asset.RuntimeTypeId)
+            throw new ArgumentException("Пользовательский юнит должен иметь зарезервированный runtimeTypeId.", nameof(asset));
+
+        EnsureCustomAssetsLoaded();
+        foreach (KeyValuePair<UnitType, UnitArchetypeAsset> pair in CustomAssets)
+        {
+            if (pair.Key != asset.Definition.Type &&
+                string.Equals(pair.Value.Id, asset.Id, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"ID юнита '{asset.Id}' уже занят.");
+        }
+
+        CustomAssets[asset.Definition.Type] = asset;
+    }
+
+    public static bool TryGetCustomAsset(UnitType type, out UnitArchetypeAsset? asset)
+    {
+        EnsureCustomAssetsLoaded();
+        return CustomAssets.TryGetValue(type, out asset);
+    }
+
+    public static IReadOnlyList<UnitArchetypeAsset> GetCustomAssets()
+    {
+        EnsureCustomAssetsLoaded();
+        return CustomAssets.Values
+            .OrderBy(asset => asset.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static void EnsureCustomAssetsLoaded()
+    {
+        if (_customAssetsLoaded)
+            return;
+
+        _customAssetsLoaded = true;
+        foreach (UnitArchetypeAsset asset in UnitArchetypeFileStore.LoadProjectFiles(
+                     message => Console.Error.WriteLine(message)))
+        {
+            if (asset.RuntimeTypeId < UnitArchetypeFileStore.FirstCustomRuntimeTypeId ||
+                asset.RuntimeTypeId > UnitArchetypeFileStore.LastCustomRuntimeTypeId)
+                continue;
+
+            UnitType type = asset.Definition.Type;
+            if (type == UnitType.Colonist ||
+                type == UnitType.Greenbob ||
+                type == UnitType.SegmentedMonster)
+                continue;
+
+            CustomAssets[type] = asset;
+        }
+    }
+
+    public static string GetDisplayName(UnitType type)
+    {
+        if (type == UnitType.Colonist) return "Колонист";
+        if (type == UnitType.Greenbob) return "Greenbob";
+        if (type == UnitType.SegmentedMonster) return "Сегментированный монстр";
+        return TryGetCustomAsset(type, out UnitArchetypeAsset? asset) && asset != null
+            ? asset.DisplayName
+            : type.ToString();
     }
 
     public static UnitArchetypeProfile Get(UnitBodyType bodyType)
