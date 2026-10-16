@@ -1930,6 +1930,28 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         DrawImGuiFloatInput("Поле зрения (градусы)", "##unitFieldOfView", _definition.FieldOfView,
             value => UpdateDefinition(fieldOfView: value), 1f, 360f);
 
+        ImguiNative.igSeparatorText("Физиология и базовые характеристики");
+        DrawImGuiFloatInput("Масса тела (кг)", "##unitBodyMass", _definition.BodyMassKg,
+            value => UpdateDefinition(bodyMassKg: value), 0.01f, 10000f);
+        DrawImGuiFloatInput("Мышечная масса (кг)", "##unitMuscleMass", _definition.MuscleMassKg,
+            value => UpdateDefinition(muscleMassKg: value), 0.01f, 10000f);
+        DrawImGuiFloatInput("Жировая масса (кг)", "##unitBodyFat", _definition.BodyFatKg,
+            value => UpdateDefinition(bodyFatKg: value), 0.01f, 10000f);
+        DrawImGuiFloatInput("Объём крови (л)", "##unitBlood", _definition.BloodLiters,
+            value => UpdateDefinition(bloodLiters: value), 0.01f, 1000f);
+        DrawImGuiFloatInput("Стартовая энергия (ккал)", "##unitEnergy", _definition.BaseEnergyKcal,
+            value => UpdateDefinition(baseEnergyKcal: value), 1f, 1000000f);
+        DrawImGuiFloatInput("Стартовая вода (л)", "##unitWater", _definition.BaseWaterLiters,
+            value => UpdateDefinition(baseWaterLiters: value), 0.01f, 10000f);
+        DrawImGuiFloatInput("Сила (1–8)", "##unitStrength", _definition.Strength,
+            value => UpdateDefinition(strength: (byte)Math.Clamp((int)MathF.Round(value), 1, 8)), 1f, 8f);
+        DrawImGuiFloatInput("Выносливость (1–8)", "##unitConstitution", _definition.Constitution,
+            value => UpdateDefinition(constitution: (byte)Math.Clamp((int)MathF.Round(value), 1, 8)), 1f, 8f);
+        DrawImGuiFloatInput("Ловкость (1–8)", "##unitDexterity", _definition.Dexterity,
+            value => UpdateDefinition(dexterity: (byte)Math.Clamp((int)MathF.Round(value), 1, 8)), 1f, 8f);
+        DrawImGuiFloatInput("Интеллект (1–8)", "##unitIntelligence", _definition.Intelligence,
+            value => UpdateDefinition(intelligence: (byte)Math.Clamp((int)MathF.Round(value), 1, 8)), 1f, 8f);
+
         ImguiNative.igSeparator();
         TextImGui(_editingProjectAsset
             ? "Сохранение создаёт один .unit.json с геометрией, тканями, органами, маркерами и экипировкой."
