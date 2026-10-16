@@ -29,7 +29,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private static readonly Color MutedText = new(149, 166, 184, 255);
     private static readonly Color SelectedColor = new(230, 179, 85, 255);
 
-    private readonly Action<string[], BodyPartDefinition[], UnitDefinition> _saveRequested;
+    private readonly Action<
+        string[],
+        BodyPartDefinition[],
+        UnitDefinition,
+        float[],
+        HitRegionPartBinding[][],
+        UnitAnatomyMarker[][],
+        UnitAnatomyVolume[]> _saveRequested;
     private readonly Font? _font;
     private readonly RectangleShape _backdrop = new(new Vector2f(1f, 1f))
     {
@@ -260,7 +267,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private BodyPartDefinition[] _defaultParts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _openedParts = Array.Empty<BodyPartDefinition>();
     private UnitDefinition _definition = new(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f);
+    private float[] _hitHalfHeights = Array.Empty<float>();
+    private HitRegionPartBinding[][] _tissuesByRegion = Array.Empty<HitRegionPartBinding[]>();
+    private UnitAnatomyMarker[][] _markersByRegion = Array.Empty<UnitAnatomyMarker[]>();
+    private UnitAnatomyVolume[] _organs = Array.Empty<UnitAnatomyVolume>();
+    private int _selectedOrgan;
+    private int _selectedTissue;
+    private int _selectedMarker;
     private bool _showUnitSettings;
+    private bool _showOrganSettings;
+    private bool _showTissueSettings;
     private NumericsVector3[] _worldPositions = Array.Empty<NumericsVector3>();
     private Quaternion[] _worldOrientations = Array.Empty<Quaternion>();
     private ProjectedPart[][] _projected = new ProjectedPart[3][];
@@ -314,7 +330,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     public bool IsOpen { get; private set; }
 
-    public UnitBodyRigEditorOverlay(Action<string[], BodyPartDefinition[], UnitDefinition> saveRequested)
+    public UnitBodyRigEditorOverlay(
+        Action<
+            string[],
+            BodyPartDefinition[],
+            UnitDefinition,
+            float[],
+            HitRegionPartBinding[][],
+            UnitAnatomyMarker[][],
+            UnitAnatomyVolume[]> saveRequested)
     {
         _saveRequested = saveRequested ?? throw new ArgumentNullException(nameof(saveRequested));
         _font = LoadFont();
@@ -572,7 +596,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(UnitType.Colonist);
         _definition = archetype.Definition;
         _showUnitSettings = false;
+        _showOrganSettings = false;
+        _showTissueSettings = false;
         UnitAnatomyProfile anatomy = archetype.Anatomy;
+        _organs = anatomy.Volumes.ToArray();
+        _selectedOrgan = 0;
+        _selectedTissue = 0;
+        _selectedMarker = 0;
+        // Open from the currently applied profile, not unsaved edits from a previous session.
+        _regionIds = Array.Empty<string>();
+        _parts = Array.Empty<BodyPartDefinition>();
+        _hitHalfHeights = Array.Empty<float>();
+        _tissuesByRegion = Array.Empty<HitRegionPartBinding[]>();
+        _markersByRegion = Array.Empty<UnitAnatomyMarker[]>();
         ReadOnlySpan<UnitAnatomyNode> nodes = anatomy.Nodes;
         if (!anatomy.HasSharedShapes || nodes.Length == 0 || nodes.Length > MaxParts)
         {
@@ -645,8 +681,69 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             }
         }
 
+        string[] previousIds = _regionIds;
+        HitRegionPartBinding[][] previousTissues = _tissuesByRegion;
+        UnitAnatomyMarker[][] previousMarkers = _markersByRegion;
+        float[] previousHalfHeights = _hitHalfHeights;
+        UnitAnatomyProfile sourceAnatomy = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+
         _regionIds = (string[])regionIds.Clone();
         _parts = (BodyPartDefinition[])parts.Clone();
+        _hitHalfHeights = new float[_regionIds.Length];
+        _tissuesByRegion = new HitRegionPartBinding[_regionIds.Length][];
+        _markersByRegion = new UnitAnatomyMarker[_regionIds.Length][];
+        for (int i = 0; i < _regionIds.Length; i++)
+        {
+            int previousIndex = Array.IndexOf(previousIds, _regionIds[i]);
+            if (previousIndex >= 0 &&
+                previousIndex < previousTissues.Length &&
+                previousIndex < previousMarkers.Length &&
+                previousIndex < previousHalfHeights.Length &&
+                previousTissues[previousIndex].Length > 0)
+            {
+                _tissuesByRegion[i] = (HitRegionPartBinding[])previousTissues[previousIndex].Clone();
+                _markersByRegion[i] = (UnitAnatomyMarker[])previousMarkers[previousIndex].Clone();
+                _hitHalfHeights[i] = previousHalfHeights[previousIndex];
+                continue;
+            }
+
+            int sourceIndex = sourceAnatomy.FindRegion(_regionIds[i]);
+            if (sourceIndex >= 0)
+            {
+                _tissuesByRegion[i] = sourceAnatomy.GetTissues(sourceIndex).ToArray();
+                _markersByRegion[i] = sourceAnatomy.GetMarkers(sourceIndex).ToArray();
+                _hitHalfHeights[i] = sourceAnatomy.GetHitHalfHeight(sourceIndex);
+                continue;
+            }
+
+            string tissueId = $"{_regionIds[i]}.tissue";
+            string parentTissueId = _parts[i].ParentIndex >= 0 &&
+                _parts[i].ParentIndex < i &&
+                _tissuesByRegion[_parts[i].ParentIndex] != null &&
+                _tissuesByRegion[_parts[i].ParentIndex].Length > 0
+                    ? _tissuesByRegion[_parts[i].ParentIndex][0].Id
+                    : string.Empty;
+            _tissuesByRegion[i] = new[]
+            {
+                new HitRegionPartBinding(
+                    UnitHealthPartId.WholeBody,
+                    kind: UnitHealthPartKind.BodyPart,
+                    maxHitPoints: 30f,
+                    id: tissueId,
+                    parentId: string.IsNullOrWhiteSpace(parentTissueId) ? null : parentTissueId)
+            };
+            _markersByRegion[i] = new[]
+            {
+                new UnitAnatomyMarker(
+                    "target",
+                    UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim | UnitAnatomyMarkerRole.Vision)
+            };
+            _hitHalfHeights[i] = MathF.Max(0.001f, MathF.Abs(_parts[i].Scale.Z));
+        }
+
+        PruneInvalidOrgans();
+        _selectedTissue = 0;
+        _selectedMarker = 0;
         if (setDefaults || _defaultParts.Length != _parts.Length)
             _defaultParts = UnitBodyRigSettingsStore.GetDefaultBodyParts(_regionIds, _parts);
         if (setOpenedSnapshot)
