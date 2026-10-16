@@ -789,6 +789,24 @@ public sealed class UnitSimulation
     /// Replaces an edited anatomy profile while preserving health for all unchanged
     /// region/tissue IDs. Appended editable regions receive fresh health slots.
     /// </summary>
+    /// <summary>Applies edited movement, size and vision settings to an existing instance.</summary>
+    public bool ApplyEditedUnitDefinition(UnitId id, in UnitDefinition definition)
+    {
+        if (!Units.TryGetIndex(id, out int index) || Units.Type[index] != definition.Type)
+            return false;
+
+        _baseMoveSpeed[index] = definition.MoveSpeed;
+        Units.MoveSpeed[index] = definition.MoveSpeed;
+        Units.Width[index] = definition.Width;
+        Units.Length[index] = definition.Length;
+        Units.Height[index] = definition.Height;
+        Units.Radius[index] = MathF.Max(definition.Width, definition.Length) * 0.5f;
+        Units.ViewRange[index] = definition.ViewRange;
+        Units.FieldOfView[index] = definition.FieldOfView;
+        RefreshMovementSpeed(index);
+        return true;
+    }
+
     public bool ApplyEditedAnatomyProfile(UnitId id, UnitAnatomyProfile profile)
     {
         if (profile == null || !Units.TryGetIndex(id, out int index))
