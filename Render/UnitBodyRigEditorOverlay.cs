@@ -29,7 +29,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private static readonly Color MutedText = new(149, 166, 184, 255);
     private static readonly Color SelectedColor = new(230, 179, 85, 255);
 
-    private readonly Action<string[], BodyPartDefinition[]> _saveRequested;
+    private readonly Action<string[], BodyPartDefinition[], UnitDefinition> _saveRequested;
     private readonly Font? _font;
     private readonly RectangleShape _backdrop = new(new Vector2f(1f, 1f))
     {
@@ -259,6 +259,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private BodyPartDefinition[] _parts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _defaultParts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _openedParts = Array.Empty<BodyPartDefinition>();
+    private UnitDefinition _definition = new(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f);
+    private bool _showUnitSettings;
     private NumericsVector3[] _worldPositions = Array.Empty<NumericsVector3>();
     private Quaternion[] _worldOrientations = Array.Empty<Quaternion>();
     private ProjectedPart[][] _projected = new ProjectedPart[3][];
@@ -312,7 +314,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     public bool IsOpen { get; private set; }
 
-    public UnitBodyRigEditorOverlay(Action<string[], BodyPartDefinition[]> saveRequested)
+    public UnitBodyRigEditorOverlay(Action<string[], BodyPartDefinition[], UnitDefinition> saveRequested)
     {
         _saveRequested = saveRequested ?? throw new ArgumentNullException(nameof(saveRequested));
         _font = LoadFont();
@@ -567,7 +569,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
         }
 
-        UnitAnatomyProfile anatomy = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(UnitType.Colonist);
+        _definition = archetype.Definition;
+        _showUnitSettings = false;
+        UnitAnatomyProfile anatomy = archetype.Anatomy;
         ReadOnlySpan<UnitAnatomyNode> nodes = anatomy.Nodes;
         if (!anatomy.HasSharedShapes || nodes.Length == 0 || nodes.Length > MaxParts)
         {
@@ -1463,10 +1468,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui("Сохранить")) Save();
         ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui(_showUnitSettings ? "К геометрии" : "Настройки юнита"))
+            _showUnitSettings = !_showUnitSettings;
+        ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui("По умолчанию"))
         {
             if (_defaultParts.Length == _parts.Length)
                 Array.Copy(_defaultParts, _parts, _parts.Length);
+            _definition = CreateDefaultColonistDefinition();
             RefreshProjectedGeometry();
             _status = "Восстановлены базовые формы. Нажми «Сохранить», чтобы применить.";
         }
@@ -1544,6 +1553,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             ImGuiWindowFlags.NoCollapse |
             ImGuiWindowFlags.NoSavedSettings;
         BeginImGuiWindow("##BodyRigProperties", _propertiesPanel.Position, _propertiesPanel.Size, flags);
+        if (_showUnitSettings)
+        {
+            DrawImGuiUnitSettings();
+            ImguiNative.igEnd();
+            return;
+        }
+
         BodyPartDefinition part = _parts[_selectedPart];
         TextImGui("ПАРАМЕТРЫ ЧАСТИ");
         ImguiNative.igSeparator();
@@ -1615,6 +1631,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             ImguiNative.igEndCombo();
         }
 
+        DrawImGuiEnumCombo("Режим движения", part.Motion, value =>
+            _parts[_selectedPart] = Copy(_parts[_selectedPart], motion: value));
+        DrawImGuiFloatInput("Дистанция следования", "##followDistance", part.FollowDistance,
+            value => _parts[_selectedPart] = Copy(_parts[_selectedPart], followDistance: value),
+            0f, 100f);
+        DrawImGuiEnumCombo("Точка привязки", part.Anchor, value =>
+            _parts[_selectedPart] = Copy(_parts[_selectedPart], anchor: value));
+        DrawImGuiEnumCombo("Роль части", part.Role, value =>
+            _parts[_selectedPart] = Copy(_parts[_selectedPart], role: value));
+        DrawImGuiEnumCombo("Pivot", part.Pivot, value =>
+            _parts[_selectedPart] = Copy(_parts[_selectedPart], pivot: value));
+
         ImguiNative.igSeparatorText("Симметрия и инструменты");
         if (ButtonImGui("Выбрать симметричную пару"))
         {
@@ -1661,6 +1689,89 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         TextImGui(_status);
         ImguiNative.igEnd();
     }
+
+    private unsafe void DrawImGuiUnitSettings()
+    {
+        TextImGui("НАСТРОЙКИ ЮНИТА");
+        ImguiNative.igSeparator();
+        TextImGui($"Архетип: {_definition.Type}");
+        TextImGui($"Тип тела: {_definition.BodyType}");
+        TextImGui("Архетип и тип тела задают идентичность профиля.");
+
+        DrawImGuiFloatInput("Скорость перемещения", "##unitMoveSpeed", _definition.MoveSpeed,
+            value => UpdateDefinition(moveSpeed: value), 0.05f, 100f);
+        DrawImGuiFloatInput("Ширина", "##unitWidth", _definition.Width,
+            value => UpdateDefinition(width: value), 0.01f, 100f);
+        DrawImGuiFloatInput("Длина", "##unitLength", _definition.Length,
+            value => UpdateDefinition(length: value), 0.01f, 100f);
+        DrawImGuiFloatInput("Высота", "##unitHeight", _definition.Height,
+            value => UpdateDefinition(height: value), 0.01f, 100f);
+        DrawImGuiFloatInput("Дальность обзора", "##unitViewRange", _definition.ViewRange,
+            value => UpdateDefinition(viewRange: value), 0.1f, 1000f);
+        DrawImGuiFloatInput("Поле зрения (градусы)", "##unitFieldOfView", _definition.FieldOfView,
+            value => UpdateDefinition(fieldOfView: value), 1f, 360f);
+
+        ImguiNative.igSeparator();
+        TextImGui("Нажми «Сохранить», чтобы записать параметры и применить профиль.");
+    }
+
+    private unsafe void DrawImGuiFloatInput(
+        string label,
+        string id,
+        float currentValue,
+        Action<float> onChanged,
+        float minimum,
+        float maximum)
+    {
+        TextImGui(label);
+        float value = currentValue;
+        ImguiNative.igSetNextItemWidth(MathF.Max(90f, _propertiesPanel.Size.X - 34f));
+        if (ImguiNative.igInputFloat(id, &value, 0f, 0f, "%.4f", ImGuiInputTextFlags.None))
+            onChanged(Math.Clamp(value, minimum, maximum));
+    }
+
+    private void DrawImGuiEnumCombo<TEnum>(
+        string label,
+        TEnum current,
+        Action<TEnum> onChanged)
+        where TEnum : struct, Enum
+    {
+        if (!ImguiNative.igBeginCombo(label, current.ToString(), ImGuiComboFlags.None))
+            return;
+
+        foreach (TEnum option in Enum.GetValues<TEnum>())
+        {
+            bool selected = EqualityComparer<TEnum>.Default.Equals(option, current);
+            if (ImguiNative.igSelectable_Bool(
+                option.ToString(), selected, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 0f)))
+                onChanged(option);
+        }
+
+        ImguiNative.igEndCombo();
+    }
+
+    private void UpdateDefinition(
+        float? moveSpeed = null,
+        float? width = null,
+        float? length = null,
+        float? height = null,
+        float? viewRange = null,
+        float? fieldOfView = null)
+    {
+        UnitDefinition current = _definition;
+        _definition = new UnitDefinition(
+            current.Type,
+            current.BodyType,
+            moveSpeed ?? current.MoveSpeed,
+            width ?? current.Width,
+            length ?? current.Length,
+            height ?? current.Height,
+            viewRange ?? current.ViewRange,
+            fieldOfView ?? current.FieldOfView);
+    }
+
+    private static UnitDefinition CreateDefaultColonistDefinition() =>
+        new(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f);
 
     private unsafe void DrawImGuiPartNameInput()
     {
@@ -3005,7 +3116,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _openedParts = (BodyPartDefinition[])_parts.Clone();
         _saveRequested(
             (string[])_regionIds.Clone(),
-            (BodyPartDefinition[])_parts.Clone());
+            (BodyPartDefinition[])_parts.Clone(),
+            _definition);
     }
 
     private void CopySelectedPart()
@@ -3610,18 +3722,23 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         float? localRotationX = null,
         float? localRotationY = null,
         string? symmetryPartnerId = null,
-        string? displayName = null) =>
+        string? displayName = null,
+        BodyPartMotion? motion = null,
+        float? followDistance = null,
+        BodyPartAnchor? anchorOverride = null,
+        BodyPartRole? role = null,
+        BodyPartPivot? pivot = null) =>
         new(
             localPosition ?? original.LocalPosition,
             scale ?? original.Scale,
             primitive ?? original.Primitive,
             parentIndex: parentIndex ?? original.ParentIndex,
             localRotation: localRotation ?? original.LocalRotation,
-            motion: original.Motion,
-            followDistance: original.FollowDistance,
-            anchor: anchor ?? original.Anchor,
-            role: original.Role,
-            pivot: original.Pivot,
+            motion: motion ?? original.Motion,
+            followDistance: followDistance ?? original.FollowDistance,
+            anchor: anchorOverride ?? anchor ?? original.Anchor,
+            role: role ?? original.Role,
+            pivot: pivot ?? original.Pivot,
             localRotationX: localRotationX ?? original.LocalRotationX,
             localRotationY: localRotationY ?? original.LocalRotationY,
             symmetryPartnerId: symmetryPartnerId ?? original.SymmetryPartnerId,
