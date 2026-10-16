@@ -2743,14 +2743,22 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private static NumericsVector3 ToEulerRadians(Quaternion q)
     {
-        float sinX = 2f * (q.W * q.X + q.Y * q.Z);
-        float cosX = 1f - 2f * (q.X * q.X + q.Y * q.Y);
-        float x = MathF.Atan2(sinX, cosX);
-        float sinY = 2f * (q.W * q.Y - q.Z * q.X);
-        float y = MathF.Abs(sinY) >= 1f ? MathF.CopySign(MathF.PI / 2f, sinY) : MathF.Asin(sinY);
-        float sinZ = 2f * (q.W * q.Z + q.X * q.Y);
-        float cosZ = 1f - 2f * (q.Y * q.Y + q.Z * q.Z);
-        return new NumericsVector3(x, y, MathF.Atan2(sinZ, cosZ));
+        // Inverse of BodyPartTransformMath.FromEulerRadians, which uses
+        // Quaternion.CreateFromYawPitchRoll(y, x, z). Previous extraction used
+        // XYZ-order formulas, so quaternion round-trips changed angles and shifted
+        // parts when detaching them from parents or aligning them to a surface.
+        q = Quaternion.Normalize(q);
+
+        float sinX = Math.Clamp(2f * (q.W * q.X - q.Y * q.Z), -1f, 1f);
+        float x = MathF.Asin(sinX);
+        float y = MathF.Atan2(
+            2f * (q.W * q.Y + q.X * q.Z),
+            1f - 2f * (q.X * q.X + q.Y * q.Y));
+        float z = MathF.Atan2(
+            2f * (q.W * q.Z + q.X * q.Y),
+            1f - 2f * (q.X * q.X + q.Z * q.Z));
+
+        return new NumericsVector3(x, y, z);
     }
 
     private static float WrapAngle(float angle)

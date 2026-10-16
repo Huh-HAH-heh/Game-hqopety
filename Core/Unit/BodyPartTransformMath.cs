@@ -77,11 +77,37 @@ public static class BodyPartTransformMath
             xy += variance * h * v;
         }
 
-        float discriminant = MathF.Sqrt(
-            MathF.Max(0f, (xx - yy) * (xx - yy) + 4f * xy * xy));
-        float major = MathF.Sqrt(MathF.Max(0.000001f, (xx + yy + discriminant) * 0.5f));
-        float minor = MathF.Sqrt(MathF.Max(0.000001f, (xx + yy - discriminant) * 0.5f));
-        float rotation = 0.5f * MathF.Atan2(2f * xy, xx - yy);
+        // Keep the projected shape aligned to the projection's horizontal local axis.
+        // Sorting by major/minor eigenvalues can rotate a part by 90 degrees when its
+        // width and height exchange order after a tiny tilt, causing a jump around 0°.
+        Vector3 projectedHorizontalAxis = basis[horizontalAxis];
+        float axisHorizontal = Component(projectedHorizontalAxis, horizontalAxis);
+        float axisVertical = Component(projectedHorizontalAxis, verticalAxis);
+        float projectedAxisLength = MathF.Sqrt(
+            axisHorizontal * axisHorizontal + axisVertical * axisVertical);
+
+        float rotation;
+        if (projectedAxisLength > 0.0001f)
+        {
+            rotation = MathF.Atan2(axisVertical, axisHorizontal);
+        }
+        else
+        {
+            Vector3 projectedVerticalAxis = basis[verticalAxis];
+            float verticalHorizontal = Component(projectedVerticalAxis, horizontalAxis);
+            float verticalVertical = Component(projectedVerticalAxis, verticalAxis);
+            rotation = MathF.Atan2(verticalVertical, verticalHorizontal) - MathF.PI * 0.5f;
+        }
+
+        float cos = MathF.Cos(rotation);
+        float sin = MathF.Sin(rotation);
+        float alongHorizontal = xx * cos * cos +
+            2f * xy * cos * sin +
+            yy * sin * sin;
+        float alongVertical = xx * sin * sin -
+            2f * xy * cos * sin +
+            yy * cos * cos;
+
         float normalVariance = 0f;
         for (int i = 0; i < 3; i++)
         {
@@ -90,7 +116,10 @@ public static class BodyPartTransformMath
         }
 
         return new ProjectedShape(
-            new Vector3(major, minor, MathF.Sqrt(MathF.Max(0.000001f, normalVariance))),
+            new Vector3(
+                MathF.Sqrt(MathF.Max(0.000001f, alongHorizontal)),
+                MathF.Sqrt(MathF.Max(0.000001f, alongVertical)),
+                MathF.Sqrt(MathF.Max(0.000001f, normalVariance))),
             rotation);
     }
 
