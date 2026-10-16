@@ -232,8 +232,9 @@ public static class UnitArchetypeFileStore
             if (!fullPath.StartsWith(projectDirectory, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException(
                     $"Файл юнита должен находиться в папке проекта: {ProjectDirectory}");
-            if (!fullPath.EndsWith(".unit.json", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("Файл архетипа должен иметь расширение .unit.json.");
+            if (!fullPath.EndsWith(".unit.json", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(Path.GetDirectoryName(fullPath), Path.GetFullPath(ProjectDirectory), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Файл архетипа должен иметь расширение .unit.json и находиться прямо в Data/Units.");
             if (string.IsNullOrWhiteSpace(displayName))
                 throw new InvalidDataException("Укажи отображаемое имя юнита.");
             ValidateRuntimeTypeId(runtimeTypeId);
@@ -245,6 +246,10 @@ public static class UnitArchetypeFileStore
                     definition.MoveSpeed, definition.Width, definition.Length,
                     definition.Height, definition.ViewRange, definition.FieldOfView);
 
+            string expectedFileName = id + ".unit.json";
+            if (!string.Equals(Path.GetFileName(fullPath), expectedFileName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Имя файла должно совпадать с ID: {expectedFileName}");
+
             UnitArchetypeAsset candidate = BuildAsset(
                 id, displayName.Trim(), description ?? string.Empty, fullPath,
                 runtimeTypeId, definition, regionIds.ToArray(), bodyParts.ToArray(),
@@ -252,6 +257,7 @@ public static class UnitArchetypeFileStore
                 startingEquipment.ToArray());
 
             EnsureRuntimeTypeAvailable(fullPath, runtimeTypeId);
+            EnsureIdAvailable(fullPath, id);
             UnitAssetDocument document = CreateDocument(candidate);
             string directory = Path.GetDirectoryName(fullPath)
                 ?? throw new IOException("Не удалось определить папку сохранения.");
@@ -535,10 +541,38 @@ public static class UnitArchetypeFileStore
         {
             if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(otherPath), StringComparison.OrdinalIgnoreCase))
                 continue;
-            using JsonDocument json = JsonDocument.Parse(File.ReadAllText(otherPath));
-            if (json.RootElement.TryGetProperty("runtimeTypeId", out JsonElement element) &&
-                element.TryGetUInt16(out ushort existing) && existing == runtimeTypeId)
-                throw new InvalidDataException($"runtimeTypeId={runtimeTypeId} уже занят файлом {Path.GetFileName(otherPath)}.");
+            try
+            {
+                using JsonDocument json = JsonDocument.Parse(File.ReadAllText(otherPath));
+                if (json.RootElement.TryGetProperty("runtimeTypeId", out JsonElement element) &&
+                    element.TryGetUInt16(out ushort existing) && existing == runtimeTypeId)
+                    throw new InvalidDataException($"runtimeTypeId={runtimeTypeId} уже занят файлом {Path.GetFileName(otherPath)}.");
+            }
+            catch (JsonException)
+            {
+                // Keep editing valid assets even if a different file in the folder is malformed.
+            }
+        }
+    }
+
+    private static void EnsureIdAvailable(string path, string id)
+    {
+        foreach (string otherPath in EnumerateProjectFiles())
+        {
+            if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(otherPath), StringComparison.OrdinalIgnoreCase))
+                continue;
+            try
+            {
+                using JsonDocument json = JsonDocument.Parse(File.ReadAllText(otherPath));
+                if (json.RootElement.TryGetProperty("id", out JsonElement element) &&
+                    element.ValueKind == JsonValueKind.String &&
+                    string.Equals(element.GetString(), id, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"ID '{id}' уже занят файлом {Path.GetFileName(otherPath)}.");
+            }
+            catch (JsonException)
+            {
+                // Keep editing valid assets even if a different file in the folder is malformed.
+            }
         }
     }
 
