@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using System.Text.Json;
+using Core.Items;
 
 namespace Core.Unit;
 
@@ -30,6 +31,7 @@ public static class UnitAnatomySettingsStore
         HitRegionPartBinding[][] tissues,
         UnitAnatomyMarker[][] markers,
         ReadOnlySpan<UnitAnatomyVolume> volumes,
+        ReadOnlySpan<UnitStartingEquipment> startingEquipment,
         out string error)
     {
         error = string.Empty;
@@ -58,6 +60,9 @@ public static class UnitAnatomySettingsStore
 
             for (int i = 0; i < volumes.Length; i++)
                 document.Volumes.Add(VolumeDocument.From(volumes[i]));
+            document.Equipment = new List<EquipmentDocument>(startingEquipment.Length);
+            for (int i = 0; i < startingEquipment.Length; i++)
+                document.Equipment.Add(EquipmentDocument.From(startingEquipment[i]));
 
             string path = FilePath;
             string directory = Path.GetDirectoryName(path) ?? Environment.CurrentDirectory;
@@ -77,9 +82,18 @@ public static class UnitAnatomySettingsStore
     /// <summary>Loads editor-authored metadata only when region IDs still match the saved rig.</summary>
     public static bool TryLoad(
         UnitAnatomyProfile fallback,
-        out UnitAnatomyProfile profile)
+        out UnitAnatomyProfile profile) =>
+        TryLoad(fallback, out profile, out _, out _);
+
+    public static bool TryLoad(
+        UnitAnatomyProfile fallback,
+        out UnitAnatomyProfile profile,
+        out UnitStartingEquipment[] startingEquipment,
+        out bool hasEquipment)
     {
         profile = fallback;
+        startingEquipment = Array.Empty<UnitStartingEquipment>();
+        hasEquipment = false;
         try
         {
             string path = FilePath;
@@ -124,6 +138,13 @@ public static class UnitAnatomySettingsStore
 
             profile = fallback.WithAuthoringData(
                 ids, parts, heights, tissues, markers, volumes);
+            if (document.Equipment != null)
+            {
+                startingEquipment = new UnitStartingEquipment[document.Equipment.Count];
+                for (int i = 0; i < startingEquipment.Length; i++)
+                    startingEquipment[i] = document.Equipment[i].ToEquipment();
+                hasEquipment = true;
+            }
             return true;
         }
         catch (Exception)
@@ -139,7 +160,43 @@ public static class UnitAnatomySettingsStore
         public int Version { get; set; } = 1;
         public List<RegionDocument> Regions { get; set; } = new();
         public List<VolumeDocument> Volumes { get; set; } = new();
+        public List<EquipmentDocument>? Equipment { get; set; }
     }
+
+    private sealed class EquipmentDocument
+    {
+        public string ItemId { get; set; } = string.Empty;
+        public float Durability { get; set; } = 1f;
+
+        public static EquipmentDocument From(UnitStartingEquipment equipment) => new()
+        {
+            ItemId = GetApparelId(equipment.Item),
+            Durability = equipment.Durability
+        };
+
+        public UnitStartingEquipment ToEquipment() =>
+            new(GetApparel(ItemId), Durability);
+    }
+
+    private static string GetApparelId(ArmorConfig item)
+    {
+        if (ReferenceEquals(item, ApparelCatalog.WorkShirt)) return nameof(ApparelCatalog.WorkShirt);
+        if (ReferenceEquals(item, ApparelCatalog.WorkTrousers)) return nameof(ApparelCatalog.WorkTrousers);
+        if (ReferenceEquals(item, ApparelCatalog.CombatVest)) return nameof(ApparelCatalog.CombatVest);
+        if (ReferenceEquals(item, ApparelCatalog.CombatHelmet)) return nameof(ApparelCatalog.CombatHelmet);
+        if (ReferenceEquals(item, ApparelCatalog.PoweredExoskeleton)) return nameof(ApparelCatalog.PoweredExoskeleton);
+        throw new InvalidDataException($"Неизвестный предмет стартового снаряжения: {item.Name}.");
+    }
+
+    private static ArmorConfig GetApparel(string id) => id switch
+    {
+        nameof(ApparelCatalog.WorkShirt) => ApparelCatalog.WorkShirt,
+        nameof(ApparelCatalog.WorkTrousers) => ApparelCatalog.WorkTrousers,
+        nameof(ApparelCatalog.CombatVest) => ApparelCatalog.CombatVest,
+        nameof(ApparelCatalog.CombatHelmet) => ApparelCatalog.CombatHelmet,
+        nameof(ApparelCatalog.PoweredExoskeleton) => ApparelCatalog.PoweredExoskeleton,
+        _ => throw new InvalidDataException($"Неизвестный ID стартового снаряжения: {id}.")
+    };
 
     private sealed class RegionDocument
     {
