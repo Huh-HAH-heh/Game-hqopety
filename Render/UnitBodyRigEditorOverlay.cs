@@ -641,6 +641,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (button != Mouse.Button.Left)
             return true;
 
+        _editingProperty = -1;
+
         if (_closeButton.GetGlobalBounds().Contains(position))
         {
             Close();
@@ -2508,7 +2510,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return;
         }
 
-        if (key == Keyboard.Key.BackSpace)
+        if (key == Keyboard.Key.Backspace)
         {
             if (_propertyEditBuffer.Length > 0)
                 _propertyEditBuffer = _propertyEditBuffer[..^1];
@@ -2528,7 +2530,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             Keyboard.Key.Num8 or Keyboard.Key.Numpad8 => '8',
             Keyboard.Key.Num9 or Keyboard.Key.Numpad9 => '9',
             Keyboard.Key.Period or Keyboard.Key.Comma => '.',
-            Keyboard.Key.Dash or Keyboard.Key.Subtract => '-',
+            Keyboard.Key.Hyphen or Keyboard.Key.Subtract => '-',
             _ => null
         };
 
@@ -2549,7 +2551,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     }
 
     private void Save()
-{
+    {
         _openedRegionIds = (string[])_regionIds.Clone();
         _openedParts = (BodyPartDefinition[])_parts.Clone();
         _saveRequested(
@@ -2577,7 +2579,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     }
 
     private void AddRegion()
-{
+    {
         if (_parts.Length >= MaxParts)
         {
             _status = $"Достигнут предел в {MaxParts} регионов.";
@@ -2823,6 +2825,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         ClearSymmetryPair(sourceIndex);
         ClearSymmetryPair(targetIndex);
+        Array.Fill(_symmetryEnabled, true);
         _parts[sourceIndex] = Copy(_parts[sourceIndex], symmetryPartnerId: _regionIds[targetIndex]);
         _parts[targetIndex] = Copy(_parts[targetIndex], symmetryPartnerId: _regionIds[sourceIndex]);
 
