@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/rimclone/unit.schema.json",
+  "title": "RimClone Unit Archetype",
+  "description": "Complete project-authored unit: gameplay stats, anatomy geometry, tissues, functional markers, internal organs and starting armor.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "displayName",
+    "description",
+    "runtimeTypeId",
+    "stats",
+    "regions",
+    "organs",
+    "startingEquipment"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "description": "Stable identifier. Filename must be <id>.unit.json."
+    },
+    "displayName": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "runtimeTypeId": { "type": "integer", "minimum": 1024, "maximum": 65534 },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bodyType", "moveSpeed", "width", "length", "height", "viewRange", "fieldOfView",
+        "bodyMassKg", "muscleMassKg", "bodyFatKg", "bloodLiters", "baseEnergyKcal",
+        "baseWaterLiters", "strength", "constitution", "dexterity", "intelligence"
+      ],
+      "properties": {
+        "bodyType": { "type": "string", "minLength": 1 },
+        "moveSpeed": { "type": "number", "exclusiveMinimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "length": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "viewRange": { "type": "number", "exclusiveMinimum": 0 },
+        "fieldOfView": { "type": "number", "minimum": 1, "maximum": 360 },
+        "bodyMassKg": { "type": "number", "exclusiveMinimum": 0 },
+        "muscleMassKg": { "type": "number", "exclusiveMinimum": 0 },
+        "bodyFatKg": { "type": "number", "exclusiveMinimum": 0 },
+        "bloodLiters": { "type": "number", "exclusiveMinimum": 0 },
+        "baseEnergyKcal": { "type": "number", "exclusiveMinimum": 0 },
+        "baseWaterLiters": { "type": "number", "exclusiveMinimum": 0 },
+        "strength": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "constitution": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "dexterity": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "intelligence": { "type": "integer", "minimum": 1, "maximum": 8 }
+      }
+    },
+    "regions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "description": "Renderable anatomy parts in parent-first order; each region ID is unique.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "hitHalfHeight", "part", "tissues", "markers"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "hitHalfHeight": { "type": "number", "exclusiveMinimum": 0 },
+          "part": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id", "parentIndex", "x", "y", "z", "scaleX", "scaleY", "scaleZ",
+              "rotation", "rotationX", "rotationY", "followDistance", "primitive",
+              "motion", "anchor", "role", "pivot"
+            ],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "parentIndex": { "type": "integer", "minimum": -1 },
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "z": { "type": "number" },
+              "scaleX": { "type": "number", "exclusiveMinimum": 0 },
+              "scaleY": { "type": "number", "exclusiveMinimum": 0 },
+              "scaleZ": { "type": "number", "exclusiveMinimum": 0 },
+              "rotation": { "type": "number", "description": "Radians around Z." },
+              "rotationX": { "type": "number", "description": "Radians around X." },
+              "rotationY": { "type": "number", "description": "Radians around Y." },
+              "followDistance": { "type": "number", "minimum": 0, "maximum": 3 },
+              "primitive": { "enum": ["Circle", "Box", "Triangle"] },
+              "motion": { "type": "string" },
+              "anchor": { "type": "string" },
+              "role": { "type": "string" },
+              "pivot": { "type": "string" },
+              "symmetryPartnerId": { "type": ["string", "null"] },
+              "displayName": { "type": ["string", "null"] }
+            }
+          },
+          "tissues": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id", "parentId", "part", "parentPart", "kind", "weight", "maxHitPoints",
+                "armorZone", "projectileEnergyLoss", "projectilePenetrationLoss"
+              ],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "parentId": { "type": "string" },
+                "part": { "type": "string" },
+                "parentPart": { "type": "string" },
+                "kind": { "enum": ["BodyPart", "Organ"] },
+                "weight": { "type": "number", "exclusiveMinimum": 0 },
+                "maxHitPoints": { "type": "number", "exclusiveMinimum": 0 },
+                "armorZone": { "type": "integer", "minimum": -1, "maximum": 9 },
+                "projectileEnergyLoss": { "type": "number", "minimum": -1 },
+                "projectilePenetrationLoss": { "type": "number", "minimum": -1 }
+              }
+            }
+          },
+          "markers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "roles", "x", "y", "z"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "roles": {
+                  "type": "string",
+                  "description": "Comma-separated roles: Vision, Target, Aim, Eye, Vital, Interaction, Locomotion, WeaponMount, Muzzle."
+                },
+                "x": { "type": "number" },
+                "y": { "type": "number" },
+                "z": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "organs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "parentRegionId", "entryBindingId", "targetBindingId", "primitive",
+          "centerX", "centerY", "centerZ", "halfX", "halfY", "halfZ", "rotation",
+          "energyLoss", "penetrationLoss", "damageMultiplier", "bleedMultiplier"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "parentRegionId": { "type": "string", "minLength": 1 },
+          "entryBindingId": { "type": "string", "minLength": 1 },
+          "targetBindingId": { "type": "string", "minLength": 1 },
+          "primitive": { "enum": ["Circle", "Box", "Triangle"] },
+          "centerX": { "type": "number" },
+          "centerY": { "type": "number" },
+          "centerZ": { "type": "number" },
+          "halfX": { "type": "number", "exclusiveMinimum": 0 },
+          "halfY": { "type": "number", "exclusiveMinimum": 0 },
+          "halfZ": { "type": "number", "exclusiveMinimum": 0 },
+          "rotation": { "type": "number" },
+          "energyLoss": { "type": "number", "minimum": 0 },
+          "penetrationLoss": { "type": "number", "minimum": 0 },
+          "damageMultiplier": { "type": "number", "minimum": 0 },
+          "bleedMultiplier": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "startingEquipment": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["itemId", "durability", "armor"],
+        "properties": {
+          "itemId": { "type": "string", "minLength": 1 },
+          "durability": { "type": "number", "exclusiveMinimum": 0 },
+          "armor": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name", "weight", "worldColorR", "worldColorG", "worldColorB", "protectedZone",
+              "damageAbsorption", "armorDamageCoefficient", "bleedProtectionChance", "energyLoss",
+              "penetrationResistance", "sharpRating", "bluntRating", "heatRating", "softArmor",
+              "hardArmorDamageFactor", "armorRating", "coverage", "layer",
+              "worldRenderPadding", "movementSpeedMultiplier"
+            ],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "weight": { "type": "number", "minimum": 0 },
+              "worldColorR": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "worldColorG": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "worldColorB": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "protectedZone": { "type": "integer", "minimum": -1 },
+              "damageAbsorption": { "type": "number", "minimum": 0, "maximum": 1 },
+              "armorDamageCoefficient": { "type": "number", "minimum": 0, "maximum": 1 },
+              "bleedProtectionChance": { "type": "number", "minimum": 0, "maximum": 1 },
+              "energyLoss": { "type": "number", "minimum": 0 },
+              "penetrationResistance": { "type": "number", "minimum": 0 },
+              "sharpRating": { "type": "number", "minimum": 0 },
+              "bluntRating": { "type": "number", "minimum": 0 },
+              "heatRating": { "type": "number", "minimum": 0 },
+              "softArmor": { "type": "boolean" },
+              "hardArmorDamageFactor": { "type": "number", "minimum": 0, "maximum": 1 },
+              "armorRating": { "type": "number", "minimum": 0 },
+              "coverage": { "type": "integer", "minimum": 0, "maximum": 1023 },
+              "layer": { "type": "integer", "minimum": 0, "maximum": 3 },
+              "worldRenderPadding": { "type": "number", "minimum": 0 },
+              "movementSpeedMultiplier": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
