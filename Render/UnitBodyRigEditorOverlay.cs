@@ -3725,7 +3725,6 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         string? displayName = null,
         BodyPartMotion? motion = null,
         float? followDistance = null,
-        BodyPartAnchor? anchorOverride = null,
         BodyPartRole? role = null,
         BodyPartPivot? pivot = null) =>
         new(
@@ -3736,7 +3735,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             localRotation: localRotation ?? original.LocalRotation,
             motion: motion ?? original.Motion,
             followDistance: followDistance ?? original.FollowDistance,
-            anchor: anchorOverride ?? anchor ?? original.Anchor,
+            anchor: anchor ?? original.Anchor,
             role: role ?? original.Role,
             pivot: pivot ?? original.Pivot,
             localRotationX: localRotationX ?? original.LocalRotationX,
