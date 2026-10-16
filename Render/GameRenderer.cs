@@ -961,7 +961,10 @@ public sealed class GameRenderer
                             newHandle, positions[index], bodyRotation, headRotation);
                     }
 
-                    _unitSimulation.ApplyEditedAnatomyProfile(units.GetId(index), updatedProfile);
+                    UnitId unitId = units.GetId(index);
+                    _unitSimulation.ApplyEditedUnitDefinition(
+                        unitId, UnitAnatomyCatalog.Get(UnitType.Colonist).Definition);
+                    _unitSimulation.ApplyEditedAnatomyProfile(unitId, updatedProfile);
                     updatedCount++;
                 }
 
