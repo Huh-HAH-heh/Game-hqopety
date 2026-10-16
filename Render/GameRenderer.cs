@@ -1799,6 +1799,13 @@ public sealed class GameRenderer
             (_, e) =>
                 HandleKey(e.Code);
 
+        _window.KeyReleased +=
+            (_, e) =>
+            {
+                if (_bodyRigEditorOverlay?.IsOpen == true)
+                    _bodyRigEditorOverlay.HandleKeyReleased(e.Code);
+            };
+
         _window.TextEntered +=
             (_, e) =>
             {

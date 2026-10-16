@@ -3,7 +3,10 @@ using System.IO;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Core.Unit;
+using Evergine.Bindings.Imgui;
+using ImGuiVector2 = Evergine.Mathematics.Vector2;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
@@ -303,6 +306,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private int _gridStepIndex = 3;
     private string _status = "Перетаскивание привязано к сетке. Настрой углы X/Y/Z в параметрах.";
     private bool _disposed;
+    private ImGuiSfmlBackend? _imguiBackend;
+    private readonly byte[] _imguiPartNameBuffer = new byte[256];
+    private int _imguiNamePartIndex = -1;
 
     public bool IsOpen { get; private set; }
 
@@ -551,6 +557,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     public void Open()
     {
+        try
+        {
+            _imguiBackend ??= new ImGuiSfmlBackend();
+        }
+        catch (Exception exception)
+        {
+            SetStatus($"Не удалось создать ImGui: {exception.Message}");
+            return;
+        }
+
         UnitAnatomyProfile anatomy = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
         ReadOnlySpan<UnitAnatomyNode> nodes = anatomy.Nodes;
         if (!anatomy.HasSharedShapes || nodes.Length == 0 || nodes.Length > MaxParts)
@@ -573,6 +589,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _editingProperty = -1;
         _editingPartName = false;
         _partNameEditBuffer = string.Empty;
+        _imguiNamePartIndex = -1;
+        Array.Fill(_imguiPartNameBuffer, (byte)0);
         _symmetryToolActive = false;
         _symmetrySourcePart = -1;
         _parentSelectionActive = false;
@@ -672,6 +690,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         if (!IsOpen)
             return false;
+
+        _imguiBackend?.MousePosition(position.X, position.Y);
+        _imguiBackend?.MouseButton(button, true);
+        if (IsImGuiUiPoint(position))
+            return true;
+        if (_imguiBackend?.WantCaptureMouse == true)
+            return true;
 
         if (button == Mouse.Button.Middle)
         {
@@ -1068,6 +1093,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (!IsOpen)
             return false;
 
+        _imguiBackend?.MousePosition(position.X, position.Y);
+        if (IsImGuiUiPoint(position) && _panningProjection < 0 && !_draggingPart)
+            return true;
+
         if (_panningProjection >= 0)
         {
             _projectionPanX[_panningProjection] += position.X - _lastMouseX;
@@ -1102,6 +1131,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (!IsOpen)
             return false;
 
+        _imguiBackend?.MouseButton(button, false);
         if (button == Mouse.Button.Middle)
         {
             _panningProjection = -1;
@@ -1124,6 +1154,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         if (!IsOpen)
             return false;
+
+        _imguiBackend?.MousePosition(position.X, position.Y);
+        _imguiBackend?.MouseWheel(0f, delta);
+        if (IsImGuiUiPoint(position))
+            return true;
 
         for (int projection = 0; projection < _previewPanels.Length; projection++)
         {
@@ -1179,7 +1214,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     public bool HandleTextEntered(string text)
     {
-        if (!IsOpen || !_editingPartName)
+        if (!IsOpen)
+            return false;
+
+        _imguiBackend?.TextEntered(text);
+        if (_imguiBackend?.WantCaptureKeyboard == true)
+            return true;
+        if (!_editingPartName)
             return false;
 
         if (string.IsNullOrEmpty(text))
@@ -1210,11 +1251,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             : $"Для «{_regionIds[_selectedPart]}» восстановлено имя по умолчанию. Ctrl+S — сохранить.";
     }
 
+    public void HandleKeyReleased(Keyboard.Key key)
+    {
+        if (IsOpen)
+            _imguiBackend?.KeyEvent(key, false);
+    }
+
     public bool HandleKey(Keyboard.Key key, bool controlPressed)
     {
         if (!IsOpen)
             return false;
 
+        _imguiBackend?.KeyEvent(key, true);
         if (_editingPartName)
         {
             if (key == Keyboard.Key.Enter)
@@ -1255,6 +1303,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _symmetryToolActive = false;
             _symmetrySourcePart = -1;
             _status = "Инструмент привязки/симметрии отменён.";
+            return true;
+        }
+
+        if (_imguiBackend?.WantCaptureKeyboard == true)
+        {
+            if (controlPressed && key == Keyboard.Key.S)
+                Save();
             return true;
         }
 
@@ -1369,6 +1424,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (!IsOpen)
             return;
 
+        _imguiBackend ??= new ImGuiSfmlBackend();
         Layout(width, height);
         CalculateWorldTransforms();
         if (_normalizeViewsEnabled)
@@ -1378,251 +1434,366 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _backdrop.Size = new Vector2f(width, height);
         window.Draw(_backdrop);
         window.Draw(_panel);
-        window.Draw(_header);
-        window.Draw(_listPanel);
-        window.Draw(_propertiesPanel);
-
-        if (_headerScale < 0.9f)
-        {
-            if (_saveLabel != null) _saveLabel.DisplayedString = "СОХР.";
-            if (_loadLabel != null) _loadLabel.DisplayedString = "ЗАГР.";
-            if (_exportLabel != null) _exportLabel.DisplayedString = "ЭКСП.";
-            if (_defaultsLabel != null) _defaultsLabel.DisplayedString = "СБРОС";
-            if (_reloadLabel != null) _reloadLabel.DisplayedString = "ОТКАТ";
-        }
-        else
-        {
-            if (_saveLabel != null) _saveLabel.DisplayedString = "СОХРАНИТЬ";
-            if (_loadLabel != null) _loadLabel.DisplayedString = "ЗАГРУЗИТЬ";
-            if (_exportLabel != null) _exportLabel.DisplayedString = "ЭКСПОРТ";
-            if (_defaultsLabel != null) _defaultsLabel.DisplayedString = "ПО УМОЛЧАНИЮ";
-            if (_reloadLabel != null) _reloadLabel.DisplayedString = "ОТКАТИТЬ";
-        }
-        if (_title != null)
-            DrawText(window, _title);
-        DrawButton(window, _saveButton, _saveLabel);
-        DrawButton(window, _loadButton, _loadLabel);
-        DrawButton(window, _exportButton, _exportLabel);
-        DrawButton(window, _defaultsButton, _defaultsLabel);
-        DrawButton(window, _reloadButton, _reloadLabel);
-        DrawButton(window, _closeButton, _closeLabel);
-
-        if (_listTitle != null)
-            DrawText(window, _listTitle);
-        if (_propertiesTitle != null)
-            DrawText(window, _propertiesTitle);
-
-        for (int visibleRow = 0; visibleRow < _listVisibleRows; visibleRow++)
-        {
-            int itemIndex = _listScroll + visibleRow;
-            if (itemIndex >= _parts.Length)
-                break;
-
-            _partRows[visibleRow].FillColor = itemIndex == _selectedPart
-                ? new Color(68, 79, 88, 255)
-                : new Color(28, 38, 50, 255);
-            _partRows[visibleRow].OutlineColor = itemIndex == _selectedPart
-                ? SelectedColor
-                : new Color(52, 67, 84, 255);
-            window.Draw(_partRows[visibleRow]);
-
-            if (_partLabels[itemIndex] != null)
-            {
-                string pairMarker = GetSymmetryCounterpartIndex(itemIndex) >= 0 ? "  <->" : string.Empty;
-                string symmetrySource = _symmetryToolActive && itemIndex == _symmetrySourcePart ? "  [A]" : string.Empty;
-                _partLabels[itemIndex]!.DisplayedString =
-                    $"{itemIndex + 1:00}  {PartName(_regionIds[itemIndex])}{pairMarker}{symmetrySource}";
-                _partLabels[itemIndex]!.Position = new Vector2f(
-                    _partRows[visibleRow].Position.X + 8f,
-                    _partRows[visibleRow].Position.Y + 7f);
-                DrawText(window, _partLabels[itemIndex]);
-            }
-        }
-
-        DrawButton(window, _addRegionButton, _addRegionLabel);
-        DrawButton(window, _addAllFormsButton, _addAllFormsLabel);
-        DrawButton(window, _removeRegionButton, _removeRegionLabel);
-        DrawButton(window, _copyPartButton, _copyPartLabel);
-        DrawButton(window, _detachAllParentsButton, _detachAllParentsLabel);
-        _symmetryToolButton.FillColor = _symmetryToolActive
-            ? new Color(80, 112, 89, 255)
-            : new Color(52, 74, 64, 255);
-        if (_symmetryToolLabel != null)
-        {
-            _symmetryToolLabel.DisplayedString = _symmetryToolActive
-                ? "ВЫБЕРИ ПАРНУЮ ЧАСТЬ"
-                : $"СИММЕТРИЯ: {CountSymmetryPairs()} ПАР";
-        }
-        DrawButton(window, _symmetryToolButton, _symmetryToolLabel);
-
         for (int projection = 0; projection < _previewPanels.Length; projection++)
             DrawProjection(window, projection);
 
-        if (_selectedName != null)
+        _imguiBackend.BeginFrame(width, height, 1f / 60f);
+        DrawImGuiToolbar();
+        DrawImGuiPartList();
+        DrawImGuiProperties();
+        DrawImGuiProjectionHeaders();
+        _imguiBackend.Render(window);
+    }
+
+    private unsafe void DrawImGuiToolbar()
+    {
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse;
+        BeginImGuiWindow("##BodyRigToolbar", _header.Position, _header.Size, flags);
+        TextImGui("КОНСТРУКТОР ТЕЛА КОЛОНИСТА");
+        ImguiNative.igSameLine(265f, 6f);
+        if (ButtonImGui("Загрузить")) LoadRigFromDialog();
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("Экспорт")) ExportRigFromDialog();
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("Сохранить")) Save();
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("По умолчанию"))
         {
-            _selectedName.DisplayedString = _editingPartName
-                ? $"НОВОЕ ИМЯ: {_partNameEditBuffer}_"
-                : PartName(_regionIds[_selectedPart]);
-            DrawText(window, _selectedName);
+            if (_defaultParts.Length == _parts.Length)
+                Array.Copy(_defaultParts, _parts, _parts.Length);
+            RefreshProjectedGeometry();
+            _status = "Восстановлены базовые формы. Нажми «Сохранить», чтобы применить.";
+        }
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("Откатить"))
+        {
+            SetRigData(_openedRegionIds, _openedParts, setDefaults: false, setOpenedSnapshot: false);
+            _status = "Возвращена конфигурация, с которой редактор был открыт.";
+        }
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("Закрыть")) Close();
+        ImguiNative.igEnd();
+    }
+
+    private unsafe void DrawImGuiPartList()
+    {
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings;
+        BeginImGuiWindow("##BodyRigPartList", _listPanel.Position, _listPanel.Size, flags);
+        TextImGui("ЧАСТИ ТЕЛА");
+        ImguiNative.igSeparator();
+        ImGuiVector2 childSize = new(0f, MathF.Max(80f, _listPanel.Size.Y - 210f));
+        if (ImguiNative.igBeginChild_Str("##BodyPartsScroll", childSize, default, ImGuiWindowFlags.None))
+        {
+            for (int i = 0; i < _parts.Length; i++)
+            {
+                string pairMark = GetSymmetryCounterpartIndex(i) >= 0 ? "   <->" : string.Empty;
+                string sourceMark = _symmetryToolActive && i == _symmetrySourcePart ? "   [A]" : string.Empty;
+                string childMark = _parentSelectionActive && i == _parentSourcePart ? "   [ДОЧЕРНЯЯ]" : string.Empty;
+                string label = $"{i + 1:00}  {PartName(_regionIds[i])}{pairMark}{sourceMark}{childMark}##part{i}";
+                if (ImguiNative.igSelectable_Bool(
+                    label, i == _selectedPart, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 24f)))
+                    SelectPartFromImGui(i);
+            }
+        }
+        ImguiNative.igEndChild();
+
+        if (ButtonImGui("Добавить часть", _listPanel.Size.X - 28f)) AddRegion();
+        if (ButtonImGui("Копировать часть", _listPanel.Size.X - 28f)) CopySelectedPart();
+        if (ButtonImGui("Добавить примеры форм", _listPanel.Size.X - 28f)) AddAllPrimitiveExamples();
+        if (ButtonImGui("Удалить свою часть", _listPanel.Size.X - 28f)) RemoveSelectedCustomRegion();
+        string symmetryLabel = _symmetryToolActive ? "Выбери парную часть…" : $"Симметрия: {CountSymmetryPairs()} пар";
+        if (ButtonImGui(symmetryLabel, _listPanel.Size.X - 28f))
+        {
+            _parentSelectionActive = false;
+            _parentSourcePart = -1;
+            _symmetryToolActive = !_symmetryToolActive;
+            _symmetrySourcePart = _symmetryToolActive ? _selectedPart : -1;
+            _status = _symmetryToolActive
+                ? $"Исходная часть: «{PartName(_regionIds[_symmetrySourcePart])}». Теперь выбери парную часть."
+                : "Инструмент симметрии закрыт.";
+        }
+        if (ButtonImGui("Отвязать все части", _listPanel.Size.X - 28f))
+        {
+            bool changed = DetachAllParentsPreservingLayout();
+            _defaultParts = (BodyPartDefinition[])_parts.Clone();
+            _openedRegionIds = (string[])_regionIds.Clone();
+            _openedParts = (BodyPartDefinition[])_parts.Clone();
+            if (changed) Save();
+            _status = changed
+                ? "Все родительские связи удалены, расположение частей сохранено."
+                : "Все части уже независимы.";
+        }
+        ImguiNative.igEnd();
+    }
+
+    private unsafe void DrawImGuiProperties()
+    {
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings;
+        BeginImGuiWindow("##BodyRigProperties", _propertiesPanel.Position, _propertiesPanel.Size, flags);
+        BodyPartDefinition part = _parts[_selectedPart];
+        TextImGui("ПАРАМЕТРЫ ЧАСТИ");
+        ImguiNative.igSeparator();
+        TextImGui(PartName(_regionIds[_selectedPart]));
+        TextImGui($"Внутренний ID: {_regionIds[_selectedPart]}");
+        string parent = part.ParentIndex >= 0 ? PartName(_regionIds[part.ParentIndex]) : "Корень юнита";
+        TextImGui($"Родитель: {parent}");
+
+        if (ButtonImGui(_parentSelectionActive ? "Выбери родителя слева…" : "Назначить родителя"))
+        {
+            _symmetryToolActive = false;
+            _symmetrySourcePart = -1;
+            _parentSelectionActive = !_parentSelectionActive;
+            _parentSourcePart = _parentSelectionActive ? _selectedPart : -1;
+            _status = _parentSelectionActive
+                ? $"Назначь родителя для «{PartName(_regionIds[_parentSourcePart])}»: выбери часть выше неё слева."
+                : "Выбор родителя отменён.";
+        }
+        ImguiNative.igSameLine(0f, 5f);
+        if (ButtonImGui("Отвязать"))
+        {
+            bool changed = DetachPartPreservingLayout(_selectedPart);
+            if (changed) Save();
+            _status = changed
+                ? $"«{PartName(_regionIds[_selectedPart])}» отвязана с сохранением положения."
+                : "Эта часть уже независима.";
+            RefreshProjectedGeometry();
         }
 
-        if (_selectedInfo != null)
+        TextImGui("Имя части (пусто = исходное)");
+        DrawImGuiPartNameInput();
+        ImguiNative.igSeparatorText("Положение, размер и углы");
+        string[] propertyNames =
         {
-            BodyPartDefinition part = _parts[_selectedPart];
-            string parent = part.ParentIndex >= 0 ? PartName(_regionIds[part.ParentIndex]) : "Корень";
-            int counterpart = GetSymmetryCounterpartIndex(_selectedPart);
-            string symmetry = counterpart >= 0
-                ? $"Симметрия: <-> {PartName(_regionIds[counterpart])}"
-                : "Симметрия: не задана";
-            _selectedInfo.DisplayedString =
-                $"Родитель: {parent}\nPivot: {part.Pivot}   Motion: {part.Motion}\nRole: {part.Role}   Anchor: {part.Anchor}\n{symmetry}";
-            DrawText(window, _selectedInfo);
-        }
-
+            "Локальный X", "Локальный Y", "Локальный Z",
+            "Размер X", "Размер Y", "Размер Z",
+            "Наклон X (°)", "Наклон Y (°)", "Поворот Z (°)"
+        };
         for (int i = 0; i < PropertyCount; i++)
         {
-            DrawProperty(window, i);
+            PropertyInfo property = GetProperty(i);
+            TextImGui(propertyNames[i]);
+            float sliderValue = property.Value;
+            ImguiNative.igSetNextItemWidth(116f);
+            if (ImguiNative.igSliderFloat(
+                $"##propSlider{i}", &sliderValue, property.Minimum, property.Maximum, "%.3f", ImGuiSliderFlags.None))
+                SetProperty(i, sliderValue);
+            ImguiNative.igSameLine(0f, 5f);
+            float inputValue = GetProperty(i).Value;
+            ImguiNative.igSetNextItemWidth(78f);
+            if (ImguiNative.igInputFloat(
+                $"##propInput{i}", &inputValue, 0f, 0f, "%.4f", ImGuiInputTextFlags.None))
+                SetProperty(i, inputValue);
         }
 
-        if (_primitiveLabel != null &&
-            IsPropertiesItemVisible(_primitiveButton.Position.Y, _primitiveButton.Size.Y))
+        if (ImguiNative.igBeginCombo("Форма", _parts[_selectedPart].Primitive.ToString(), ImGuiComboFlags.None))
         {
-            _primitiveLabel.DisplayedString = $"ФОРМА: {_parts[_selectedPart].Primitive}   [P]";
-            _primitiveLabel.Position = new Vector2f(
-                _primitiveButton.Position.X + 8f,
-                _primitiveButton.Position.Y + 8f);
-            window.Draw(_primitiveButton);
-            DrawText(window, _primitiveLabel);
+            foreach (BodyPrimitive primitive in Enum.GetValues<BodyPrimitive>())
+            {
+                bool selected = _parts[_selectedPart].Primitive == primitive;
+                if (ImguiNative.igSelectable_Bool(
+                    primitive.ToString(), selected, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 0f)))
+                {
+                    _parts[_selectedPart] = Copy(_parts[_selectedPart], primitive: primitive);
+                    ApplySizeSymmetry();
+                    RefreshProjectedGeometry();
+                }
+            }
+            ImguiNative.igEndCombo();
         }
 
-        if (_parentLabel != null &&
-            IsPropertiesItemVisible(_parentButton.Position.Y, _parentButton.Size.Y))
+        ImguiNative.igSeparatorText("Симметрия и инструменты");
+        if (ButtonImGui("Выбрать симметричную пару"))
         {
-            int parent = _parts[_selectedPart].ParentIndex;
-            string parentName = parent >= 0 ? PartName(_regionIds[parent]) : "корень юнита";
-            _parentButton.FillColor = _parentSelectionActive
-                ? new Color(63, 93, 124, 255)
-                : new Color(42, 57, 72, 255);
-            _parentLabel.DisplayedString = _parentSelectionActive
-                ? $"ВЫБОР РОДИТЕЛЯ: {_regionIds[_parentSourcePart]}"
-                : $"РОДИТЕЛЬ: {parentName} [выбрать]";
-            _parentLabel.Position = new Vector2f(
-                _parentButton.Position.X + 8f,
-                _parentButton.Position.Y + 6f);
-            window.Draw(_parentButton);
-            DrawText(window, _parentLabel);
+            _parentSelectionActive = false;
+            _parentSourcePart = -1;
+            _symmetryToolActive = true;
+            _symmetrySourcePart = _selectedPart;
+            _status = $"Исходная часть: «{PartName(_regionIds[_selectedPart])}». Теперь выбери парную часть слева.";
+        }
+        if (ButtonImGui("Снять симметрию у пары"))
+        {
+            ClearSymmetryPair(_selectedPart);
+            RefreshProjectedGeometry();
+            _status = $"Симметрия для «{PartName(_regionIds[_selectedPart])}» снята.";
         }
 
-        if (_detachParentLabel != null &&
-            IsPropertiesItemVisible(_detachParentButton.Position.Y, _detachParentButton.Size.Y))
+        byte grid = (byte)(_gridEnabled ? 1 : 0);
+        if (ImguiNative.igCheckbox("Сетка и привязка", &grid))
         {
-            _detachParentLabel.Position = new Vector2f(
-                _detachParentButton.Position.X + 6f,
-                _detachParentButton.Position.Y + 6f);
-            window.Draw(_detachParentButton);
-            DrawText(window, _detachParentLabel);
+            _gridEnabled = grid != 0;
+            _status = _gridEnabled ? "Сетка и привязка включены." : "Сетка и привязка выключены.";
         }
+        if (ButtonImGui($"Шаг сетки: {_gridSteps[_gridStepIndex]:0.####}"))
+            _gridStepIndex = (_gridStepIndex + 1) % _gridSteps.Length;
 
-        if (_allSymmetryLabel != null &&
-            IsPropertiesItemVisible(_allSymmetryButton.Position.Y, _allSymmetryButton.Size.Y))
+        byte surfaceSnap = (byte)(_surfaceSnapEnabled ? 1 : 0);
+        if (ImguiNative.igCheckbox("Привязка к нормали", &surfaceSnap))
         {
-            _allSymmetryLabel.DisplayedString = _symmetryEnabled[0] && _symmetryEnabled[1] && _symmetryEnabled[2]
-                ? "СИММЕТРИЯ ВСЕХ: ВКЛ"
-                : "СИММЕТРИЯ ВСЕХ: ВЫКЛ";
-            _allSymmetryLabel.Position = new Vector2f(
-                _allSymmetryButton.Position.X + 8f,
-                _allSymmetryButton.Position.Y + 6f);
-            window.Draw(_allSymmetryButton);
-            DrawText(window, _allSymmetryLabel);
+            _surfaceSnapEnabled = surfaceSnap != 0;
+            _surfaceSnapTargetPart = -1;
+            _surfaceSnapProjection = -1;
+            _hasSurfaceSnapDirection = false;
         }
+        byte normalized = (byte)(_normalizeViewsEnabled ? 1 : 0);
+        if (ImguiNative.igCheckbox("Общий масштаб трёх видов", &normalized))
+            _normalizeViewsEnabled = normalized != 0;
+        if (ButtonImGui("Центрировать часть (0,0,0)", _propertiesPanel.Size.X - 28f))
+            ResetSelectedPartToBodyCenter();
 
-        if (_gridLabel != null &&
-            IsPropertiesItemVisible(_gridButton.Position.Y, _gridButton.Size.Y))
-        {
-            _gridLabel.DisplayedString = _gridEnabled ? "СЕТКА" : "СЕТКА·";
-            _gridLabel.Position = new Vector2f(_gridButton.Position.X + 8f, _gridButton.Position.Y + 6f);
-            window.Draw(_gridButton);
-            DrawText(window, _gridLabel);
-        }
+        byte allSymmetry = (byte)(_symmetryEnabled[0] && _symmetryEnabled[1] && _symmetryEnabled[2] ? 1 : 0);
+        if (ImguiNative.igCheckbox("Зеркальное перемещение во всех видах", &allSymmetry))
+            Array.Fill(_symmetryEnabled, allSymmetry != 0);
+        ImguiNative.igSeparator();
+        TextImGui(_status);
+        ImguiNative.igEnd();
+    }
 
-        if (_gridStepLabel != null &&
-            IsPropertiesItemVisible(_gridStepButton.Position.Y, _gridStepButton.Size.Y))
+    private unsafe void DrawImGuiPartNameInput()
+    {
+        PrepareImGuiNameBuffer();
+        fixed (byte* text = _imguiPartNameBuffer)
         {
-            _gridStepLabel.DisplayedString = $"{_gridSteps[_gridStepIndex]:0.####}";
-            _gridStepLabel.Position = new Vector2f(_gridStepButton.Position.X + 3f, _gridStepButton.Position.Y + 6f);
-            window.Draw(_gridStepButton);
-            DrawText(window, _gridStepLabel);
-        }
-
-        if (_surfaceSnapLabel != null &&
-            IsPropertiesItemVisible(_surfaceSnapButton.Position.Y, _surfaceSnapButton.Size.Y))
-        {
-            _surfaceSnapButton.FillColor = _surfaceSnapEnabled
-                ? new Color(52, 99, 74, 255)
-                : new Color(42, 57, 72, 255);
-            _surfaceSnapLabel.DisplayedString = _surfaceSnapEnabled ? "НОРМ" : "НОРМ·";
-            _surfaceSnapLabel.Position = new Vector2f(_surfaceSnapButton.Position.X + 6f, _surfaceSnapButton.Position.Y + 6f);
-            window.Draw(_surfaceSnapButton);
-            DrawText(window, _surfaceSnapLabel);
-        }
-
-        if (_viewNormalizationLabel != null &&
-            IsPropertiesItemVisible(_viewNormalizationButton.Position.Y, _viewNormalizationButton.Size.Y))
-        {
-            _viewNormalizationButton.FillColor = _normalizeViewsEnabled
-                ? new Color(52, 99, 74, 255)
-                : new Color(42, 57, 72, 255);
-            _viewNormalizationLabel.DisplayedString = _normalizeViewsEnabled
-                ? "ОБЩИЙ МАСШТАБ: ВКЛ"
-                : "ОБЩИЙ МАСШТАБ: ВЫКЛ";
-            _viewNormalizationLabel.Position = new Vector2f(
-                _viewNormalizationButton.Position.X + 6f,
-                _viewNormalizationButton.Position.Y + 6f);
-            window.Draw(_viewNormalizationButton);
-            DrawText(window, _viewNormalizationLabel);
-        }
-
-        if (_resetCenterLabel != null &&
-            IsPropertiesItemVisible(_resetCenterButton.Position.Y, _resetCenterButton.Size.Y))
-        {
-            _resetCenterLabel.Position = new Vector2f(
-                _resetCenterButton.Position.X + 6f,
-                _resetCenterButton.Position.Y + 6f);
-            window.Draw(_resetCenterButton);
-            DrawText(window, _resetCenterLabel);
-        }
-
-        if (_symmetryClearLabel != null &&
-            IsPropertiesItemVisible(_symmetryClearButton.Position.Y, _symmetryClearButton.Size.Y))
-        {
-            _symmetryClearLabel.Position = new Vector2f(
-                _symmetryClearButton.Position.X + 6f,
-                _symmetryClearButton.Position.Y + 6f);
-            window.Draw(_symmetryClearButton);
-            DrawText(window, _symmetryClearLabel);
-        }
-
-        if (_renamePartLabel != null &&
-            IsPropertiesItemVisible(_renamePartButton.Position.Y, _renamePartButton.Size.Y))
-        {
-            _renamePartLabel.DisplayedString = _editingPartName
-                ? "ENTER — ПРИМЕНИТЬ ИМЯ"
-                : "ПЕРЕИМЕНОВАТЬ ЧАСТЬ";
-            _renamePartLabel.Position = new Vector2f(
-                _renamePartButton.Position.X + 6f,
-                _renamePartButton.Position.Y + 6f);
-            window.Draw(_renamePartButton);
-            DrawText(window, _renamePartLabel);
-        }
-
-        if (_helpText != null)
-            DrawText(window, _helpText);
-        if (_statusText != null)
-        {
-            _statusText.DisplayedString = _status;
-            DrawText(window, _statusText);
+            if (ImguiNative.igInputText(
+                "##BodyPartDisplayName", text, (uint)_imguiPartNameBuffer.Length,
+                ImGuiInputTextFlags.None, null, null))
+            {
+                int end = Array.IndexOf(_imguiPartNameBuffer, (byte)0);
+                if (end < 0) end = _imguiPartNameBuffer.Length;
+                string name = Encoding.UTF8.GetString(_imguiPartNameBuffer, 0, end).Trim();
+                _parts[_selectedPart] = Copy(_parts[_selectedPart], displayName: name);
+            }
         }
     }
+
+    private void PrepareImGuiNameBuffer()
+    {
+        if (_imguiNamePartIndex == _selectedPart) return;
+        Array.Fill(_imguiPartNameBuffer, (byte)0);
+        byte[] current = Encoding.UTF8.GetBytes(_parts[_selectedPart].DisplayName ?? string.Empty);
+        Array.Copy(current, _imguiPartNameBuffer, Math.Min(current.Length, _imguiPartNameBuffer.Length - 1));
+        _imguiNamePartIndex = _selectedPart;
+    }
+
+    private unsafe void DrawImGuiProjectionHeaders()
+    {
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse;
+        for (int i = 0; i < _previewPanels.Length; i++)
+        {
+            RectangleShape panel = _previewPanels[i];
+            BeginImGuiWindow($"##ProjectionHeader{i}", panel.Position, new Vector2f(panel.Size.X, 28f), flags);
+            TextImGui(i switch { 0 => "СПЕРЕДИ · Y / Z", 1 => "СБОКУ · X / Z", _ => "СВЕРХУ · X / Y" });
+            ImguiNative.igSameLine(0f, 10f);
+            byte symmetric = (byte)(_symmetryEnabled[i] ? 1 : 0);
+            if (ImguiNative.igCheckbox($"Симметрия##sym{i}", &symmetric))
+            {
+                _symmetryEnabled[i] = symmetric != 0;
+                if (_symmetryEnabled[i]) ApplyEnabledSymmetry(i);
+            }
+            ImguiNative.igEnd();
+        }
+    }
+
+    private static unsafe void BeginImGuiWindow(string id, Vector2f position, Vector2f size, ImGuiWindowFlags flags)
+    {
+        ImguiNative.igSetNextWindowPos(new ImGuiVector2(position.X, position.Y), ImGuiCond.Always, new ImGuiVector2(0f, 0f));
+        ImguiNative.igSetNextWindowSize(new ImGuiVector2(size.X, size.Y), ImGuiCond.Always);
+        ImguiNative.igBegin(id, null, flags);
+    }
+
+    private static unsafe void TextImGui(string text) => ImguiNative.igTextUnformatted(text, null);
+    private static unsafe bool ButtonImGui(string label, float width = 0f) => ImguiNative.igButton(label, new ImGuiVector2(width, 0f));
+
+    private void SelectPartFromImGui(int index)
+    {
+        if (index < 0 || index >= _parts.Length) return;
+        if (_parentSelectionActive)
+        {
+            int childIndex = _parentSourcePart;
+            if (index == childIndex)
+            {
+                _parentSelectionActive = false;
+                _parentSourcePart = -1;
+                _status = "Выбор родителя отменён.";
+                return;
+            }
+            if (index >= childIndex)
+            {
+                _status = "Родитель должен быть выше дочерней части в списке.";
+                return;
+            }
+            BindPartToParentPreservingLayout(childIndex, index);
+            _selectedPart = childIndex;
+            _parentSelectionActive = false;
+            _parentSourcePart = -1;
+            _imguiNamePartIndex = -1;
+            RefreshProjectedGeometry();
+            _status = $"Назначен родитель «{PartName(_regionIds[index])}».";
+            return;
+        }
+        if (_symmetryToolActive)
+        {
+            if (index == _symmetrySourcePart)
+            {
+                ClearSymmetryPair(index);
+                _status = $"Симметрия для «{PartName(_regionIds[index])}» снята.";
+            }
+            else
+            {
+                int source = _symmetrySourcePart;
+                SetSymmetryPair(source, index);
+                _selectedPart = index;
+                _status = $"«{PartName(_regionIds[source])}» и «{PartName(_regionIds[index])}» связаны зеркально.";
+            }
+            _symmetryToolActive = false;
+            _symmetrySourcePart = -1;
+            _imguiNamePartIndex = -1;
+            RefreshProjectedGeometry();
+            return;
+        }
+        _selectedPart = index;
+        _editingProperty = -1;
+        _editingPartName = false;
+        _imguiNamePartIndex = -1;
+        RefreshProjectedGeometry();
+    }
+
+    private bool IsImGuiUiPoint(Vector2i position)
+    {
+        if (_header.GetGlobalBounds().Contains(position) ||
+            _listPanel.GetGlobalBounds().Contains(position) ||
+            _propertiesPanel.GetGlobalBounds().Contains(position))
+            return true;
+        for (int i = 0; i < _previewPanels.Length; i++)
+        {
+            FloatRect panel = _previewPanels[i].GetGlobalBounds();
+            if (position.X >= panel.Left && position.X <= panel.Left + panel.Width &&
+                position.Y >= panel.Top && position.Y <= panel.Top + 28f)
+                return true;
+        }
+        return false;
+    }
+
+
 
     private void Layout(uint width, uint height)
     {
@@ -1839,21 +2010,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             : new Color(58, 75, 94, 255);
         panel.OutlineThickness = active ? 2f : 1f;
         window.Draw(panel);
-        if (_projectionLabels[projection] != null)
-            DrawText(window, _projectionLabels[projection]);
-
-        _symmetryButtons[projection].FillColor = _symmetryEnabled[projection]
-            ? new Color(52, 99, 74, 255)
-            : new Color(39, 51, 65, 255);
-        window.Draw(_symmetryButtons[projection]);
-        if (_symmetryLabels[projection] != null)
-        {
-            _symmetryLabels[projection]!.DisplayedString = _symmetryEnabled[projection] ? "СИМ: ВКЛ" : "СИМ: ВЫКЛ";
-            _symmetryLabels[projection]!.Position = new Vector2f(
-                _symmetryButtons[projection].Position.X + 6f,
-                _symmetryButtons[projection].Position.Y + 6f);
-            DrawText(window, _symmetryLabels[projection]);
-        }
+        // Projection headers and their controls are now ImGui windows.
 
         ProjectionLayout layout = _projectionLayouts[projection];
         float minX = float.PositiveInfinity;
@@ -3751,6 +3908,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _helpText?.Dispose();
         _statusText?.Dispose();
 
+        _imguiBackend?.Dispose();
+        _imguiBackend = null;
         _backdrop.Dispose();
         _panel.Dispose();
         _header.Dispose();
