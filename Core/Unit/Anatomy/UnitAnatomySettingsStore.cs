@@ -151,12 +151,16 @@ public static class UnitAnatomySettingsStore
         {
             // Keep the built-in profile when the saved file is malformed or references stale IDs.
             profile = fallback;
+            startingEquipment = Array.Empty<UnitStartingEquipment>();
+            hasEquipment = false;
             return false;
         }
     }
 
     private sealed class SettingsDocument
     {
+        public SettingsDocument() { }
+
         public int Version { get; set; } = 1;
         public List<RegionDocument> Regions { get; set; } = new();
         public List<VolumeDocument> Volumes { get; set; } = new();
@@ -165,6 +169,8 @@ public static class UnitAnatomySettingsStore
 
     private sealed class EquipmentDocument
     {
+        public EquipmentDocument() { }
+
         public string ItemId { get; set; } = string.Empty;
         public float Durability { get; set; } = 1f;
 
@@ -200,6 +206,8 @@ public static class UnitAnatomySettingsStore
 
     private sealed class RegionDocument
     {
+        public RegionDocument() { }
+
         public string Id { get; set; } = string.Empty;
         public float HitHalfHeight { get; set; } = 0.1f;
         public List<TissueDocument> Tissues { get; set; } = new();
@@ -208,6 +216,8 @@ public static class UnitAnatomySettingsStore
 
     private sealed class TissueDocument
     {
+        public TissueDocument() { }
+
         public string Id { get; set; } = string.Empty;
         public string ParentId { get; set; } = string.Empty;
         public string Part { get; set; } = nameof(UnitHealthPartId.WholeBody);
@@ -248,6 +258,8 @@ public static class UnitAnatomySettingsStore
 
     private sealed class MarkerDocument
     {
+        public MarkerDocument() { }
+
         public string Id { get; set; } = "target";
         public ushort Roles { get; set; }
         public float X { get; set; }
@@ -269,6 +281,8 @@ public static class UnitAnatomySettingsStore
 
     private sealed class VolumeDocument
     {
+        public VolumeDocument() { }
+
         public string Id { get; set; } = string.Empty;
         public string ParentRegionId { get; set; } = string.Empty;
         public string EntryBindingId { get; set; } = string.Empty;
