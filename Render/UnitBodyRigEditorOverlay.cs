@@ -4346,8 +4346,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 }
 
                 string newId = GetUnitIdFromPath(path);
-                if (!string.Equals(Path.GetFullPath(path), Path.GetFullPath(_projectUnitPath.Length > 0 ? _projectUnitPath : path),
-                    StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(_projectUnitPath) ||
+                    !string.Equals(Path.GetFullPath(path), Path.GetFullPath(_projectUnitPath), StringComparison.OrdinalIgnoreCase))
                 {
                     _projectRuntimeTypeId = UnitArchetypeFileStore.GetNextRuntimeTypeId();
                     _definition = RetypeDefinition(_definition, _projectRuntimeTypeId);
