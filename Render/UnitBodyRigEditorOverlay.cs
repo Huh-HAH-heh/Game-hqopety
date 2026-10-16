@@ -869,17 +869,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 return true;
             }
 
-            if (_editingOrgans && _organs.Length == 0)
+            if ((_editingOrgans || _editingOrganStats) && _organs.Length == 0)
             {
                 _status = "Сначала добавь орган.";
                 return true;
             }
 
-            BodyPrimitive currentPrimitive = _editingOrgans
+            BodyPrimitive currentPrimitive = _editingOrgans || _editingOrganStats
                 ? _organs[_selectedOrgan].Primitive
                 : _parts[_selectedPart].Primitive;
             BodyPrimitive primitive = NextEnum(currentPrimitive);
-            if (_editingOrgans)
+            if (_editingOrgans || _editingOrganStats)
                 _organs[_selectedOrgan] = CopyOrgan(_organs[_selectedOrgan], primitive: primitive);
             else
                 _parts[_selectedPart] = Copy(_parts[_selectedPart], primitive: primitive);
@@ -1218,7 +1218,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         {
             _selectedName.DisplayedString = _editingUnitStats
                 ? (_creatingNewUnitType ? "НОВЫЙ ТИП ЮНИТА" : "ХАРАКТЕРИСТИКИ ТИПА")
-                : _editingOrgans
+                : _editingOrgans || _editingOrganStats
                     ? (_organs.Length > 0 ? OrganName(_organs[_selectedOrgan].Id) : "ОРГАНОВ НЕТ")
                     : PartName(_regionIds[_selectedPart]);
             window.Draw(_selectedName);
@@ -1666,7 +1666,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             float sy = screenCenterY - (geometry.Y - worldCenterY) * pixelsPerUnit;
             float halfWidth = MathF.Max(1.5f, geometry.HalfWidth * pixelsPerUnit);
             float halfHeight = MathF.Max(1.5f, geometry.HalfHeight * pixelsPerUnit);
-            bool selected = _editingOrgans && i == _selectedOrgan;
+            bool selected = (_editingOrgans || _editingOrganStats) && i == _selectedOrgan;
             Color fill = selected
                 ? new Color(230, 174, 83, 235)
                 : new Color(193, 118, 105, 190);
@@ -2024,7 +2024,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (layout.PixelsPerUnit <= 0f)
             return;
 
-        if (_editingOrgans && _organs.Length > 0)
+        if ((_editingOrgans || _editingOrganStats) && _organs.Length > 0)
         {
             UnitAnatomyVolume organ = _organs[_selectedOrgan];
             float organDx = deltaX / layout.PixelsPerUnit;
@@ -2818,7 +2818,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void ApplyEnabledSymmetry(int activeProjection = -1)
     {
-        if (_editingOrgans)
+        if (_editingOrgans || _editingOrganStats)
         {
             if (_selectedOrgan < 0 || _selectedOrgan >= _organs.Length)
                 return;
@@ -2970,10 +2970,16 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _unitHeight = typeDocument.Height;
             _unitViewRange = typeDocument.ViewRange;
             _unitFieldOfView = typeDocument.FieldOfView;
+            _unitBodyType = Enum.TryParse(typeDocument.BodyType, ignoreCase: true, out UnitBodyType savedBodyType) &&
+                Enum.IsDefined(savedBodyType)
+                    ? savedBodyType
+                    : UnitBodyType.Colonist;
             _creatingNewUnitType = true;
             _editingOrgans = false;
             _editingPose = false;
             _editingUnitStats = false;
+            _editingAdvancedPart = false;
+            _editingOrganStats = false;
             _status = $"Загружен тип «{typeDocument.DisplayName}». Его можно редактировать и сохранить повторно.";
             return;
         }
