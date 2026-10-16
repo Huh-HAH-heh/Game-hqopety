@@ -11,7 +11,17 @@
     "length": 0.5,
     "height": 1.0,
     "viewRange": 20.0,
-    "fieldOfView": 110.0
+    "fieldOfView": 110.0,
+    "bodyMassKg": 75.0,
+    "muscleMassKg": 30.0,
+    "bodyFatKg": 13.0,
+    "bloodLiters": 5.0,
+    "baseEnergyKcal": 2200.0,
+    "baseWaterLiters": 2.5,
+    "strength": 4,
+    "constitution": 4,
+    "dexterity": 4,
+    "intelligence": 4
   },
   "regions": [
     {
