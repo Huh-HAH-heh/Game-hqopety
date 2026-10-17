@@ -129,6 +129,7 @@ public sealed class SimulationFrameSnapshot
     public long VisionCandidatesScanned { get; init; }
     public long VisionMemoryEntriesScanned { get; init; }
     public double AiMs { get; init; }
+    public double AiPlanningMs { get; init; }
     public double MovementMs { get; init; }
     public double WeaponsMs { get; init; }
     public double BallisticsMs { get; init; }
@@ -585,6 +586,7 @@ public sealed class SimulationFrameSnapshot
             VisionCandidatesScanned = vision.LastActiveCandidatesScanned,
             VisionMemoryEntriesScanned = vision.LastVisibilityMemoryEntriesScanned,
             AiMs = simulation.LastAIUpdateMilliseconds,
+            AiPlanningMs = simulation.AI.LastPlanningMilliseconds,
             MovementMs = simulation.LastMovementUpdateMilliseconds,
             WeaponsMs = simulation.LastWeaponUpdateMilliseconds,
             BallisticsMs = simulation.LastProjectileUpdateMilliseconds,
