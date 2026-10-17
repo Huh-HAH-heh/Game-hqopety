@@ -37,6 +37,8 @@ public sealed class GameRenderer
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
     private bool _isSelectingUnits;
+    private bool _isPanningCamera;
+    private Vector2i _lastCameraPanPixel;
     private Vector2i _selectionDragStartPixel;
     private Vector2i _selectionDragCurrentPixel;
     private Vector2f _selectionDragStartWorld;
@@ -1359,6 +1361,19 @@ public sealed class GameRenderer
         _window.MouseButtonPressed +=
             (_, e) =>
             {
+                if (e.Button == Mouse.Button.Middle)
+                {
+                    if (_menuPage == GameMenuPage.Closed)
+                    {
+                        _isPanningCamera = true;
+                        _lastCameraPanPixel = e.Position;
+                        _isSelectingUnits = false;
+                        _selectionBox.Size = new Vector2f(0f, 0f);
+                    }
+
+                    return;
+                }
+
                 if (e.Button == Mouse.Button.Right)
                 {
                     _isSelectingUnits = false;
@@ -1486,6 +1501,21 @@ public sealed class GameRenderer
         _window.MouseMoved +=
             (_, e) =>
             {
+                if (_isPanningCamera)
+                {
+                    Vector2f pixelDelta = new(
+                        e.Position.X - _lastCameraPanPixel.X,
+                        e.Position.Y - _lastCameraPanPixel.Y);
+
+                    _camera.PanByPixels(
+                        pixelDelta,
+                        _window.Size.X,
+                        _window.Size.Y);
+
+                    _lastCameraPanPixel = e.Position;
+                    return;
+                }
+
                 if (_isSelectingUnits)
                 {
                     _selectionDragCurrentPixel = e.Position;
@@ -1517,6 +1547,12 @@ public sealed class GameRenderer
         _window.MouseButtonReleased +=
             (_, e) =>
             {
+                if (e.Button == Mouse.Button.Middle)
+                {
+                    _isPanningCamera = false;
+                    return;
+                }
+
                 if (e.Button != Mouse.Button.Left)
                     return;
 
