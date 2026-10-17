@@ -22,6 +22,7 @@ public sealed class UnitBodySystem
         Vector3[] bodyNormals = units.BodyNormal;
         Vector3[] headNormals = units.HeadNormal;
         UnitPosture[] postures = units.Posture;
+        UnitType[] unitTypes = units.Type;
         int[] bodyStarts = units.BodyStart;
         short[] bodyCounts = units.BodyCount;
 
@@ -66,6 +67,7 @@ public sealed class UnitBodySystem
                 bodyNormals,
                 headNormals,
                 velocities,
+                unitTypes[unit],
                 postures[unit],
                 worldPositions,
                 tailAngles,
@@ -98,6 +100,7 @@ public sealed class UnitBodySystem
         Vector3[] bodyNormals,
         Vector3[] headNormals,
         Vector3[] velocities,
+        UnitType unitType,
         UnitPosture posture,
         Vector3[] worldPositions,
         float[] tailAngles,
@@ -139,7 +142,7 @@ public sealed class UnitBodySystem
         Quaternion headOrientation = BodyPartTransformMath.TopDownRotation(headRotation);
         int end = start + count;
         IReadOnlyDictionary<string, UnitBodyPoseTransform>? savedPose =
-            UnitBodyPoseSettingsStore.GetTransforms(posture);
+            UnitBodyPoseSettingsStore.GetTransforms(unitType, posture);
 
         // Definitions are parent-first, so every parent's transform has
         // already been calculated when its children are visited.
