@@ -53,7 +53,7 @@ public static class CombatSelfTest
         RunTest("Vision: combat target scan skips friendly formations", TestVisionHostilePairsOnly, ref passed, ref failed);
         RunTest("Weapon: firing consumes one round and emits telemetry", TestWeaponAmmoConsumption, ref passed, ref failed);
         RunTest("Projectile: dead units are excluded from collision grid", TestDeadUnitsExcludedFromProjectileGrid, ref passed, ref failed);
-        RunTest("Ballistics: close-range projectile can hit a real unit", TestProjectileHitsUnit, ref passed, ref failed);
+        RunTest("Projectile: close-range shot ignores shooter and hits target", TestProjectileHitsUnit, ref passed, ref failed);
         RunTest("Combat log: hit and blocked events survive shot spam", TestCombatLogPriorities, ref passed, ref failed);
         RunTest("Lifecycle: dead units stop moving and firing", TestDeadUnitCleanup, ref passed, ref failed);
         RunTest("Anatomy: all built-in and custom body definitions transform correctly", TestAnatomyProfiles, ref passed, ref failed);
@@ -1860,6 +1860,9 @@ private static bool TestVisionDetectsRegionInsideRange()
             Vector3.UnitY,
             Vector3.UnitY);
 
+        float shooterHealthBefore =
+            simulation.Health.OverallHitPoints[shooter.Index];
+
         int inventorySlot = simulation.AddInventoryItem(
             shooter,
             WeaponCatalog.AssaultRifle);
@@ -1905,7 +1908,14 @@ private static bool TestVisionDetectsRegionInsideRange()
         for (int i = 0; i < 4 && simulation.Projectiles.TotalHits == 0; i++)
             simulation.Update(worldMap, 0.05f);
 
-        return simulation.Projectiles.TotalHits > 0;
+        UnitId lastHitTarget = simulation.Projectiles.LastHitTarget;
+        float shooterHealthAfter =
+            simulation.Health.OverallHitPoints[shooter.Index];
+
+        return simulation.Projectiles.TotalHits > 0 &&
+               lastHitTarget.Index == target.Index &&
+               lastHitTarget.Generation == target.Generation &&
+               MathF.Abs(shooterHealthAfter - shooterHealthBefore) < 0.001f;
     }
 
     private static bool TestCombatLogPriorities()
