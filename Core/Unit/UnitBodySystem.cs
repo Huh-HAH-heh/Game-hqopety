@@ -221,7 +221,7 @@ public sealed class UnitBodySystem
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      motions[part] == BodyPartMotion.FollowParent &&
                      parent >= start &&
-                     !hasSavedPose)
+                     !hasCustomPoseOffset)
             {
                 UpdateFollower(
                     part,
