@@ -281,7 +281,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private UnitAnatomyMarker[][] _poseOriginMarkers = Array.Empty<UnitAnatomyMarker[]>();
     private UnitAnatomyVolume[] _poseOriginOrgans = Array.Empty<UnitAnatomyVolume>();
     private UnitStartingEquipment[] _poseOriginEquipment = Array.Empty<UnitStartingEquipment>();
-    private UnitPosture _selectedPose = UnitPosture.Sitting;
+    private UnitPosture _selectedPose = UnitPosture.Standing;
     private bool _editingPose;
     private bool _poseDirty;
     private UnitDefinition _definition = new(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f);
@@ -635,7 +635,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _definition = archetype.Definition;
         _editingPose = false;
         _poseDirty = false;
-        _selectedPose = UnitPosture.Sitting;
+        _selectedPose = UnitPosture.Standing;
         _poseBaseRegionIds = Array.Empty<string>();
         _poseBaseParts = Array.Empty<BodyPartDefinition>();
         _poseOriginRegionIds = Array.Empty<string>();
@@ -1754,6 +1754,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (ButtonImGui("Сохранить позу")) SavePose();
             ImguiNative.igSameLine(0f, 4f);
             if (ButtonImGui("Сбросить позу")) ResetCurrentPose();
+            ImguiNative.igNewLine();
+            if (ButtonImGui("Применить позу стоя ко всем"))
+                ApplyStandingPoseToAll();
+            ImguiNative.igSameLine(0f, 8f);
+            TextImGui("Копирует текущую сохранённую позу стоя в сидя, лёжа и присед. Пустая поза = базовый риг.");
         }
         else
         {
@@ -3200,7 +3205,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _panel.Position = new Vector2f(x, y);
         _panel.Size = new Vector2f(panelWidth, panelHeight);
         _header.Position = new Vector2f(x + 1f, y + 1f);
-        _header.Size = new Vector2f(panelWidth - 2f, 76f);
+        _header.Size = new Vector2f(panelWidth - 2f, 96f);
 
         // Compact the header on small windows instead of stacking captions over one another.
         _headerScale = Math.Clamp(panelWidth / 1180f, 0.65f, 1f);
@@ -3243,8 +3248,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _closeLabel.Position = new Vector2f(_closeButton.Position.X + (_closeButton.Size.X - _closeLabel.CharacterSize) * 0.5f, buttonY);
         }
 
-        float contentY = y + 86f;
-        float contentHeight = panelHeight - 136f;
+        float contentY = y + 106f;
+        float contentHeight = panelHeight - 156f;
         float listX = x + 10f;
         float listWidth = Math.Clamp(panelWidth * 0.18f, 140f, 188f);
         float propertiesWidth = Math.Clamp(panelWidth * 0.22f, 190f, 244f);
@@ -4838,22 +4843,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 continue;
             }
 
-            if (posture != UnitPosture.Standing)
-            {
-                NumericsVector3 position = part.LocalPosition;
-                NumericsVector3 euler = part.LocalEulerRotation;
-                UnitBodySystem.ApplyProceduralPosture(posture, part.Role, ref position, ref euler);
-                _parts[i] = Copy(
-                    part,
-                    localPosition: position,
-                    localRotation: euler.Z,
-                    localRotationX: euler.X,
-                    localRotationY: euler.Y);
-            }
-            else
-            {
-                _parts[i] = part;
-            }
+            // New/empty poses start from the user's exact base rig. There are no
+            // baked-in sitting, lying or crouching shapes to fight against.
+            _parts[i] = part;
         }
 
         _poseDirty = false;
@@ -4878,6 +4870,27 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         return true;
     }
 
+    private void ApplyStandingPoseToAll()
+    {
+        if (!_editingPose)
+            return;
+
+        // If Standing is currently being edited, capture the latest joint edits
+        // before copying it. A blank standing pose means an unmodified base rig.
+        if (_selectedPose == UnitPosture.Standing && _poseDirty && !SavePose())
+            return;
+
+        if (!UnitBodyPoseSettingsStore.CopyPoseToAll(
+                _definition.Type, UnitPosture.Standing, out string path, out string error))
+        {
+            _status = $"Не удалось применить позу стоя: {error}";
+            return;
+        }
+
+        LoadPoseForEditing(_selectedPose);
+        _status = $"Поза стоя применена ко всем позам для «{UnitTypeLabel(_definition.Type)}». Файл: {path}";
+    }
+
     private void ResetCurrentPose()
     {
         if (!_editingPose)
@@ -4890,7 +4903,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
 
         LoadPoseForEditing(_selectedPose);
-        _status = $"Поза «{PostureLabel(_selectedPose)}» сброшена к процедурному значению. Файл: {path}";
+        _status = $"Поза «{PostureLabel(_selectedPose)}» сброшена к базовому ригу. Файл: {path}";
     }
 
     private static string PostureLabel(UnitPosture posture) => posture switch
