@@ -133,7 +133,7 @@ public sealed class GameRenderer
                 TerrainTilePixelSize);
 
         _unitSimulation =
-            new UnitSimulation();
+            new UnitSimulation(unitCapacity: 2048);
 
         _unitRenderer =
             new UnitRenderSystem();
