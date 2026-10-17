@@ -185,53 +185,61 @@ public sealed class GameRenderer
 
     public void Run()
     {
-        InitializeWindow();
-
-        _camera.CenterOnWorld(
-            TerrainTilePixelSize,
-            _worldMap);
-
-        if (_massCombatMode)
-            StartSimulationThread();
-
-        Clock clock =
-            new Clock();
-
-        while (_window.IsOpen && !_closeRequested)
+        try
         {
-            _window.DispatchEvents();
+            InitializeWindow();
 
-            if (_closeRequested)
-                break;
+            _camera.CenterOnWorld(
+                TerrainTilePixelSize,
+                _worldMap);
 
-            float rawDeltaTime =
-                clock.Restart().AsSeconds();
-            float deltaTime = rawDeltaTime;
+            if (_massCombatMode)
+                StartSimulationThread();
 
-            if (deltaTime > 0.1f)
-                deltaTime = 0.1f;
+            Clock clock = new Clock();
 
-            Update(deltaTime, rawDeltaTime);
-            Draw();
+            while (_window.IsOpen && !_closeRequested)
+            {
+                _window.DispatchEvents();
+
+                if (_closeRequested)
+                    break;
+
+                float rawDeltaTime =
+                    clock.Restart().AsSeconds();
+                float deltaTime = rawDeltaTime;
+
+                if (deltaTime > 0.1f)
+                    deltaTime = 0.1f;
+
+                Update(deltaTime, rawDeltaTime);
+                Draw();
+            }
         }
+        finally
+        {
+            StopSimulationThread();
+            _simulationCommands.Clear();
+            _latestSnapshot = null;
+            _selectedUnits.Clear();
 
-        StopSimulationThread();
-
-        // Release GPU resources while the graphics context still exists.
-        _mapRenderer.Dispose();
-        _projectileRenderer.Dispose();
-        _gameMenuOverlay?.Dispose();
-        _contextMenuOverlay?.Dispose();
-        CloseUnitCards();
-        _unitGroupCardOverlay?.Dispose();
-        _bodyRigEditorOverlay?.Dispose();
-        _combatStatusOverlay?.Dispose();
-        _unitRenderer.Dispose();
-        _visionTestScene.Dispose();
-        _camera.Dispose();
-        _uiView?.Dispose();
-        _selectionBox.Dispose();
-        _window.Close();
+            // Release every native render resource while the SFML context
+            // still exists, even if initialization, update, or drawing throws.
+            _mapRenderer.Dispose();
+            _projectileRenderer.Dispose();
+            _unitRenderer.Dispose();
+            _visionTestScene.Dispose();
+            _gameMenuOverlay?.Dispose();
+            _contextMenuOverlay?.Dispose();
+            CloseUnitCards();
+            _unitGroupCardOverlay?.Dispose();
+            _bodyRigEditorOverlay?.Dispose();
+            _combatStatusOverlay?.Dispose();
+            _camera.Dispose();
+            _uiView?.Dispose();
+            _selectionBox.Dispose();
+            _window?.Close();
+        }
     }
 
     private void Update(
