@@ -12,6 +12,7 @@ public sealed class WaterLayer
     public int Width { get; }
     public int Height { get; }
     public int Levels { get; }
+    internal int AllocatedColumnCount { get; private set; }
 
     public long Version { get; private set; }
 
@@ -75,6 +76,7 @@ public sealed class WaterLayer
         {
             column = new byte[Levels];
             _waterByColumn[columnIndex] = column;
+            AllocatedColumnCount++;
         }
 
         if (column != null)
@@ -110,6 +112,7 @@ public sealed class WaterLayer
 
         _topLevels[columnIndex] = -1;
         _waterByColumn[columnIndex] = null;
+        AllocatedColumnCount--;
     }
 
     public void AddAmount(
@@ -134,6 +137,7 @@ public sealed class WaterLayer
 
             column = new byte[Levels];
             _waterByColumn[columnIndex] = column;
+            AllocatedColumnCount++;
         }
 
         column[z] =
@@ -167,6 +171,7 @@ public sealed class WaterLayer
 
         _topLevels[columnIndex] = -1;
         _waterByColumn[columnIndex] = null;
+        AllocatedColumnCount--;
     }
 
     public bool HasWater(
@@ -195,6 +200,7 @@ public sealed class WaterLayer
     public void Clear()
     {
         Array.Clear(_waterByColumn);
+        AllocatedColumnCount = 0;
 
         Array.Fill(
             _topLevels,
