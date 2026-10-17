@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Globalization;
 using System.Numerics;
@@ -825,6 +826,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     public void Close()
     {
+        if (_editingPose && _poseDirty && !SavePose())
+            return;
+
+        _editingPose = false;
+        _poseDirty = false;
         IsOpen = false;
         _draggingProperty = -1;
         _draggingProjection = -1;
@@ -4721,7 +4727,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             : _parts;
         _parts = (BodyPartDefinition[])baseParts.Clone();
 
-        var saved = UnitBodyPoseSettingsStore.GetTransforms(posture);
+        var saved = UnitBodyPoseSettingsStore.GetTransforms(_definition.Type, posture);
         for (int i = 0; i < _parts.Length; i++)
         {
             BodyPartDefinition part = _parts[i].WithId(ids[i]);
@@ -4765,7 +4771,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return false;
 
         if (!UnitBodyPoseSettingsStore.Save(
-                _selectedPose, _regionIds, _parts, out string path, out string error))
+                _definition.Type, _selectedPose, _regionIds, _parts, out string path, out string error))
         {
             _status = $"Не удалось сохранить позу: {error}";
             return false;
@@ -4781,7 +4787,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (!_editingPose)
             return;
 
-        if (!UnitBodyPoseSettingsStore.Reset(_selectedPose, out string path, out string error))
+        if (!UnitBodyPoseSettingsStore.Reset(_definition.Type, _selectedPose, out string path, out string error))
         {
             _status = $"Не удалось сбросить позу: {error}";
             return;
