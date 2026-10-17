@@ -50,7 +50,7 @@ public static class UnitBodyPoseSettingsStore
     {
         EnsureLoaded();
         int index = (int)posture;
-        if ((uint)index >= PoseCount)
+        if ((uint)index >= (uint)PoseCount)
             return null;
 
         lock (Sync)
@@ -205,7 +205,7 @@ public static class UnitBodyPoseSettingsStore
                     {
                         if (pose.UnitType < 0 ||
                             pose.UnitType > ushort.MaxValue ||
-                            (uint)pose.Posture >= PoseCount ||
+                            (uint)pose.Posture >= (uint)PoseCount ||
                             pose.Parts == null)
                             continue;
 
