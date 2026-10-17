@@ -372,7 +372,16 @@ public sealed class ProjectileSystem
                     }
                 }
 
+                UnitId owner = projectiles.Owner[projectileIndex];
+                UnitId candidate = units.GetId(unitIndex);
+                bool isProjectileOwner =
+                    owner.Index == candidate.Index &&
+                    owner.Generation == candidate.Generation;
+
+                // Ignore the exact firing unit while the muzzle exits its own hit region.
+                // Generation matching prevents slot reuse from ignoring a new unit.
                 if (alreadyHit ||
+                    isProjectileOwner ||
                     health.OverallHitPoints[unitIndex] <= 0f)
                 {
                     continue;

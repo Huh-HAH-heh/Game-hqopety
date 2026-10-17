@@ -13,7 +13,9 @@ public sealed class UnitNavigationSystem
 {
     private const float MaxStepHeight = 1.5f;
     private const float HeightCost = 0.15f;
-    private const int MaxRouteBuildsPerUpdate = 16;
+    private const int MinRouteBuildsPerUpdate = 16;
+    private const int MaxRouteBuildsPerUpdate = 48;
+    private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
     private const float RouteReuseCostPerUnit = 0.35f;
     private const int MovingGoalTolerance = 4;
@@ -45,6 +47,7 @@ public sealed class UnitNavigationSystem
     private int[] _failedGoalY = Array.Empty<int>();
     private int[] _failedStartCell = Array.Empty<int>();
     private long[] _failedTerrainVersion = Array.Empty<long>();
+    private long[] _failedRetryAfterUpdate = Array.Empty<long>();
     private long[] _routeTerrainVersion = Array.Empty<long>();
     private bool[] _routeTrafficRegistered = Array.Empty<bool>();
 
@@ -70,6 +73,7 @@ public sealed class UnitNavigationSystem
     private int _cellCount;
     private int _searchStamp;
     private int _routeBuildsRemaining;
+    private long _updateSequence;
 
     private float[] _gScore = Array.Empty<float>();
     private float[] _fScore = Array.Empty<float>();
@@ -87,12 +91,16 @@ public sealed class UnitNavigationSystem
 
     public void BeginUpdate(UnitStore units, WorldMap worldMap)
     {
+        _updateSequence++;
         EnsureUnitCapacity(units.Capacity);
         EnsureWorkspace(worldMap);
         EnsureRouteTrafficVersion(worldMap);
         NavigationGridBuildMilliseconds = 0d;
         EnsureNavigationGrid(worldMap);
-        _routeBuildsRemaining = MaxRouteBuildsPerUpdate;
+        _routeBuildsRemaining = Math.Clamp(
+            units.ActiveCount / 32,
+            MinRouteBuildsPerUpdate,
+            MaxRouteBuildsPerUpdate);
         RoutesBuiltThisUpdate = 0;
         RoutesFailedThisUpdate = 0;
         SearchesThisUpdate = 0;
@@ -188,7 +196,8 @@ public sealed class UnitNavigationSystem
                 _failedStartCell[unitIndex] == startCell &&
                 _failedFootprintX[unitIndex] == footprintX &&
                 _failedFootprintY[unitIndex] == footprintY &&
-                _failedTerrainVersion[unitIndex] == worldMap.TerrainVersion;
+                _failedTerrainVersion[unitIndex] == worldMap.TerrainVersion &&
+                _failedRetryAfterUpdate[unitIndex] > _updateSequence;
 
             if (!failedAlready && _routeBuildsRemaining > 0)
             {
@@ -237,6 +246,7 @@ public sealed class UnitNavigationSystem
                     RoutesBuiltThisUpdate++;
                     _failedGoalX[unitIndex] = int.MinValue;
                     _failedGoalY[unitIndex] = int.MinValue;
+                    _failedRetryAfterUpdate[unitIndex] = 0;
 
                     route = path;
                     waypoints = smoothedWaypoints;
@@ -268,6 +278,8 @@ public sealed class UnitNavigationSystem
                     _failedFootprintX[unitIndex] = footprintX;
                     _failedFootprintY[unitIndex] = footprintY;
                     _failedTerrainVersion[unitIndex] = worldMap.TerrainVersion;
+                    _failedRetryAfterUpdate[unitIndex] =
+                        _updateSequence + FailedRouteRetryUpdates;
                     RoutesFailed++;
                     RoutesFailedThisUpdate++;
                     waypoint = default;
@@ -358,6 +370,7 @@ public sealed class UnitNavigationSystem
         _routeOwner[unitIndex] = default;
         _failedGoalX[unitIndex] = int.MinValue;
         _failedGoalY[unitIndex] = int.MinValue;
+        _failedRetryAfterUpdate[unitIndex] = 0;
     }
 
     private bool TryBuildPath(
@@ -1034,6 +1047,7 @@ public sealed class UnitNavigationSystem
         Array.Resize(ref _failedGoalY, newCapacity);
         Array.Resize(ref _failedStartCell, newCapacity);
         Array.Resize(ref _failedTerrainVersion, newCapacity);
+        Array.Resize(ref _failedRetryAfterUpdate, newCapacity);
         Array.Resize(ref _routeTerrainVersion, newCapacity);
         Array.Resize(ref _routeTrafficRegistered, newCapacity);
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using Core.Items;
 using Core.Unit;
 using SFML.Graphics;
@@ -41,9 +42,21 @@ public sealed class UnitCardOverlay : IDisposable
         OutlineThickness = 1f
     };
 
+    private readonly RectangleShape _copyButton = new(new Vector2f(34f, 20f))
+    {
+        FillColor = new Color(38, 47, 59, 220),
+        OutlineColor = new Color(89, 105, 126, 120),
+        OutlineThickness = 1f
+    };
+
     private readonly Font? _font;
     private readonly Text? _title;
     private readonly Text? _closeLabel;
+    private readonly Text? _copyLabel;
+
+    private RenderUnitState _lastUnit;
+    private UnitCardDetailsSnapshot? _lastDetails;
+    private bool _hasLastUnit;
     private readonly RectangleShape _bodyTab = new(new Vector2f(88f, 28f))
     {
         FillColor = new Color(39, 52, 67, 255),
@@ -114,6 +127,10 @@ public sealed class UnitCardOverlay : IDisposable
         _closeLabel = new Text(_font, "×", 18)
         {
             FillColor = new Color(225, 232, 241)
+        };
+        _copyLabel = new Text(_font, "коп.", 9)
+        {
+            FillColor = new Color(164, 177, 194)
         };
         _bodyTabLabel = new Text(_font, "ТЕЛО", 11)
         {
@@ -224,6 +241,23 @@ public sealed class UnitCardOverlay : IDisposable
             }
         }
 
+        if (_copyButton.GetGlobalBounds().Contains(position))
+        {
+            if (_hasLastUnit)
+            {
+                List<CardLine> lines = BuildLines(_lastUnit, _lastDetails);
+                StringBuilder state = new(4096);
+                for (int i = 0; i < lines.Count; i++)
+                    state.AppendLine(lines[i].Text);
+
+                Clipboard.Contents = state.ToString();
+                if (_copyLabel != null)
+                    _copyLabel.DisplayedString = "OK";
+            }
+
+            return true;
+        }
+
         if (_closeButton.GetGlobalBounds().Contains(position))
         {
             Close();
@@ -292,6 +326,9 @@ public sealed class UnitCardOverlay : IDisposable
             return;
 
         Layout(windowWidth, windowHeight);
+        _lastUnit = unit;
+        _lastDetails = details;
+        _hasLastUnit = true;
         _latestAnatomyEntries = details?.AnatomyEntries ?? Array.Empty<AnatomyCardEntry>();
         AnatomyCardEntry? selectedEntry =
             (uint)_selectedAnatomyEntry < (uint)_latestAnatomyEntries.Length
@@ -317,7 +354,10 @@ public sealed class UnitCardOverlay : IDisposable
         window.Draw(_panel);
         window.Draw(_header);
         window.Draw(_accent);
+        window.Draw(_copyButton);
         window.Draw(_closeButton);
+        if (_copyLabel != null)
+            window.Draw(_copyLabel);
 
         _bodyTab.FillColor = _view == CardView.Anatomy
             ? new Color(67, 91, 115, 255)
@@ -516,6 +556,10 @@ public sealed class UnitCardOverlay : IDisposable
 
         if (_title != null)
             _title.Position = new Vector2f(x + 12f, y + 10f);
+
+        _copyButton.Position = new Vector2f(x + Width - 78f, y + 9f);
+        if (_copyLabel != null)
+            _copyLabel.Position = new Vector2f(x + Width - 73f, y + 12f);
 
         if (_closeLabel != null)
             _closeLabel.Position = new Vector2f(x + Width - 27f, y + 4f);
@@ -761,6 +805,8 @@ public sealed class UnitCardOverlay : IDisposable
 
         _title?.Dispose();
         _closeLabel?.Dispose();
+        _copyLabel?.Dispose();
+        _copyButton.Dispose();
         _bodyTabLabel?.Dispose();
         _detailsTabLabel?.Dispose();
         _organToggleLabel?.Dispose();

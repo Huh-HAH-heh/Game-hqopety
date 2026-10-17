@@ -18,6 +18,11 @@ public sealed class MapRenderSystem : IDisposable
 
     private const int MaxTerrainChunksBuiltPerFrame = 4;
 
+    // Retain nearby chunks for smooth camera movement without accumulating
+    // every GPU mesh ever visited. The currently visible set is always retained.
+    private const int MaxCachedTerrainChunks = 256;
+    private const int TerrainChunkCacheReserve = 32;
+
     private sealed class TerrainChunkMesh : IDisposable
     {
         public VertexBuffer? Buffer;
@@ -523,6 +528,8 @@ void main()
         for (int i = 0; i < _visibleTerrainChunks.Count; i++)
             _visibleTerrainChunks[i].Draw(window, terrainStates);
 
+        EvictExcessTerrainChunks();
+
         if (TerrainMeshRebuildCount != rebuildsBefore)
         {
             LastTerrainBuildMilliseconds =
@@ -531,6 +538,40 @@ void main()
 
         // Keep generated chunk meshes for the lifetime of this terrain version.
         // Zooming away and back therefore reuses existing GPU buffers.
+    }
+
+    private void EvictExcessTerrainChunks()
+    {
+        // Never evict a chunk needed by this frame. A small reserve keeps nearby
+        // camera pans cache-hot while stale native VertexBuffers are disposed.
+        int maxRetained = Math.Max(
+            MaxCachedTerrainChunks,
+            _visibleTerrainChunks.Count + TerrainChunkCacheReserve);
+
+        while (_terrainChunks.Count > maxRetained)
+        {
+            TerrainChunkKey oldestKey = default;
+            TerrainChunkMesh? oldestMesh = null;
+
+            foreach (KeyValuePair<TerrainChunkKey, TerrainChunkMesh> entry in _terrainChunks)
+            {
+                if (oldestMesh != null &&
+                    entry.Value.LastUsedFrame >= oldestMesh.LastUsedFrame)
+                {
+                    continue;
+                }
+
+                oldestKey = entry.Key;
+                oldestMesh = entry.Value;
+            }
+
+            if (oldestMesh == null)
+                return;
+
+            _terrainChunks.Remove(oldestKey);
+            _cachedTerrainVertexCount -= oldestMesh.VertexCount;
+            oldestMesh.Dispose();
+        }
     }
 
     private int ComparePendingTerrainChunks(

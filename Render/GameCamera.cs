@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace RimClone.Render;
 
-public sealed class GameCamera
+public sealed class GameCamera : IDisposable
 {
     private readonly View _view;
     private readonly float _moveSpeed;
@@ -105,6 +105,19 @@ public sealed class GameCamera
             newZoom;
     }
 
+    public void PanByPixels(
+        Vector2f pixelDelta,
+        float viewportWidth,
+        float viewportHeight)
+    {
+        if (viewportWidth <= 0f || viewportHeight <= 0f)
+            return;
+
+        _targetPosition.X -= pixelDelta.X * _view.Size.X / viewportWidth;
+        _targetPosition.Y -= pixelDelta.Y * _view.Size.Y / viewportHeight;
+        _view.Center = _targetPosition;
+    }
+
     public void Update(
         Vector2 moveDirection,
         float deltaTime)
@@ -151,5 +164,10 @@ public sealed class GameCamera
 
         _view.Center =
             center;
+    }
+
+    public void Dispose()
+    {
+        _view.Dispose();
     }
 }

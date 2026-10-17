@@ -52,6 +52,8 @@ public sealed class GameRenderer
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
     private bool _isSelectingUnits;
+    private bool _isPanningCamera;
+    private Vector2i _lastCameraPanPixel;
     private Vector2i _selectionDragStartPixel;
     private Vector2i _selectionDragCurrentPixel;
     private Vector2f _selectionDragStartWorld;
@@ -148,7 +150,7 @@ public sealed class GameRenderer
                 TerrainTilePixelSize);
 
         _unitSimulation =
-            new UnitSimulation();
+            new UnitSimulation(unitCapacity: 2048);
 
         _unitRenderer =
             new UnitRenderSystem();
@@ -183,50 +185,62 @@ public sealed class GameRenderer
 
     public void Run()
     {
-        InitializeWindow();
-
-        _camera.CenterOnWorld(
-            TerrainTilePixelSize,
-            _worldMap);
-
-        if (_massCombatMode)
-            StartSimulationThread();
-
-        Clock clock =
-            new Clock();
-
-        while (_window.IsOpen && !_closeRequested)
+        try
         {
-            _window.DispatchEvents();
+            InitializeWindow();
 
-            if (_closeRequested)
-                break;
+            _camera.CenterOnWorld(
+                TerrainTilePixelSize,
+                _worldMap);
 
-            float rawDeltaTime =
-                clock.Restart().AsSeconds();
-            float deltaTime = rawDeltaTime;
+            if (_massCombatMode)
+                StartSimulationThread();
 
-            if (deltaTime > 0.1f)
-                deltaTime = 0.1f;
+            Clock clock = new Clock();
 
-            Update(deltaTime, rawDeltaTime);
-            Draw();
+            while (_window.IsOpen && !_closeRequested)
+            {
+                _window.DispatchEvents();
+
+                if (_closeRequested)
+                    break;
+
+                float rawDeltaTime =
+                    clock.Restart().AsSeconds();
+                float deltaTime = rawDeltaTime;
+
+                if (deltaTime > 0.1f)
+                    deltaTime = 0.1f;
+
+                Update(deltaTime, rawDeltaTime);
+                Draw();
+            }
         }
+        finally
+        {
+            StopSimulationThread();
+            _simulationCommands.Clear();
+            _latestSnapshot = null;
+            _selectedUnits.Clear();
 
-        StopSimulationThread();
-
-        // Release GPU resources while the graphics context still exists.
-        _mapRenderer.Dispose();
-        _projectileRenderer.Dispose();
-        _gameMenuOverlay?.Dispose();
-        _contextMenuOverlay?.Dispose();
-        CloseUnitCards();
-        _unitGroupCardOverlay?.Dispose();
-        _bodyRigEditorOverlay?.Dispose();
-        _combatStatusOverlay?.Dispose();
-        _uiView?.Dispose();
-        _selectionBox.Dispose();
-        _window.Close();
+            // Release every native render resource while the SFML context
+            // still exists, even if initialization, update, or drawing throws.
+            _mapRenderer.Dispose();
+            _projectileRenderer.Dispose();
+            _unitRenderer.Dispose();
+            _visionTestScene.Dispose();
+            _gameMenuOverlay?.Dispose();
+            _contextMenuOverlay?.Dispose();
+            CloseUnitCards();
+            _unitGroupCardOverlay?.Dispose();
+            _bodyRigEditorOverlay?.Dispose();
+            _combatStatusOverlay?.Dispose();
+            _camera.Dispose();
+            _uiView?.Dispose();
+            _selectionBox.Dispose();
+            _window?.Close();
+            _window?.Dispose();
+        }
     }
 
     private void Update(
@@ -635,7 +649,7 @@ public sealed class GameRenderer
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
-            "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
+            "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             "A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
@@ -810,7 +824,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z F2=settings •••=menu | " +
+            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
     }
 
@@ -1611,6 +1625,34 @@ public sealed class GameRenderer
                     return;
                 }
 
+                if (e.Button == Mouse.Button.Middle)
+                {
+                    if (_menuPage == GameMenuPage.Closed)
+                    {
+                        Vector2f middleUi = _uiView != null
+                            ? _window.MapPixelToCoords(e.Position, _uiView)
+                            : new Vector2f(e.Position.X, e.Position.Y);
+                        Vector2i middlePosition = new(
+                            (int)middleUi.X,
+                            (int)middleUi.Y);
+
+                        bool overUi =
+                            _unitGroupCardOverlay?.Contains(middlePosition) == true;
+                        for (int i = _unitCards.Count - 1; i >= 0 && !overUi; i--)
+                            overUi = _unitCards[i].Overlay.Contains(middlePosition);
+
+                        if (!overUi)
+                        {
+                            _isPanningCamera = true;
+                            _lastCameraPanPixel = e.Position;
+                            _isSelectingUnits = false;
+                            _selectionBox.Size = new Vector2f(0f, 0f);
+                        }
+                    }
+
+                    return;
+                }
+
                 if (e.Button == Mouse.Button.Right)
                 {
                     _isSelectingUnits = false;
@@ -1810,6 +1852,21 @@ public sealed class GameRenderer
                     return;
                 }
 
+                if (_isPanningCamera)
+                {
+                    Vector2f pixelDelta = new(
+                        e.Position.X - _lastCameraPanPixel.X,
+                        e.Position.Y - _lastCameraPanPixel.Y);
+
+                    _camera.PanByPixels(
+                        pixelDelta,
+                        _window.Size.X,
+                        _window.Size.Y);
+
+                    _lastCameraPanPixel = e.Position;
+                    return;
+                }
+
                 if (_unitGroupCardOverlay?.HandleMouseMoved(
                         dragUiPosition,
                         _window.Size.X,
@@ -1863,6 +1920,12 @@ public sealed class GameRenderer
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
                     _bodyRigEditorOverlay.HandleMouseReleased(e.Button);
+                    return;
+                }
+
+                if (e.Button == Mouse.Button.Middle)
+                {
+                    _isPanningCamera = false;
                     return;
                 }
 
