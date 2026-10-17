@@ -5,8 +5,6 @@ namespace Core.Unit;
 
 public sealed class UnitBodySystem
 {
-    private float _animationTime;
-
     public void Update(
         UnitStore units,
         UnitBodyStore bodies,
@@ -15,13 +13,11 @@ public sealed class UnitBodySystem
         if (units.ActiveCount == 0)
             return;
 
-        _animationTime += Math.Clamp(deltaTime, 0f, 0.1f);
         float followAlpha = Math.Clamp(deltaTime * 14f, 0f, 1f);
         ReadOnlySpan<int> active = units.ActiveIndices;
 
         Vector3[] unitPositions = units.Position;
         Vector3[] velocities = units.Velocity;
-        float[] moveSpeeds = units.MoveSpeed;
         Vector3[] bodyNormals = units.BodyNormal;
         Vector3[] headNormals = units.HeadNormal;
         UnitPosture[] postures = units.Posture;
@@ -63,9 +59,7 @@ public sealed class UnitBodySystem
                 bodyNormals,
                 headNormals,
                 velocities,
-                moveSpeeds,
                 postures[unit],
-                _animationTime,
                 worldPositions,
                 tailAngles,
                 tailInitialized,
@@ -96,9 +90,7 @@ public sealed class UnitBodySystem
         Vector3[] bodyNormals,
         Vector3[] headNormals,
         Vector3[] velocities,
-        float[] moveSpeeds,
         UnitPosture posture,
-        float animationTime,
         Vector3[] worldPositions,
         float[] tailAngles,
         bool[] tailInitialized,
@@ -136,11 +128,6 @@ public sealed class UnitBodySystem
         float headRotation = MathF.Atan2(headNormal.Y, headNormal.X);
         Quaternion bodyOrientation = BodyPartTransformMath.TopDownRotation(bodyRotation);
         Quaternion headOrientation = BodyPartTransformMath.TopDownRotation(headRotation);
-        float gait = Math.Clamp(
-            speed / MathF.Max(0.5f, moveSpeeds[unit] * 0.20f),
-            0f,
-            1f);
-        float gaitPhase = animationTime * 11f + unit * 1.317f;
         int end = start + count;
 
         // Definitions are parent-first, so every parent's transform has
@@ -213,18 +200,6 @@ public sealed class UnitBodySystem
                 partBaseRotation = worldRotations[parent];
             }
 
-            float gaitRotation = motions[part] switch
-            {
-                BodyPartMotion.WalkCycle =>
-                    MathF.Sin(gaitPhase) * 0.32f * gait,
-
-                BodyPartMotion.WalkCycleOpposite =>
-                    -MathF.Sin(gaitPhase) * 0.32f * gait,
-
-                _ => 0f
-            };
-
-            localEuler.Z += gaitRotation;
             Quaternion worldOrientation = BodyPartTransformMath.Compose(partBaseOrientation, localEuler);
             float worldRotation = BodyPartTransformMath.Project(
                 scales[part], worldOrientation, 0, 1).Rotation;
@@ -242,20 +217,6 @@ public sealed class UnitBodySystem
 
             Vector3 joint =
                 origin + BodyPartTransformMath.TransformPosition(localPosition, positionOrientation);
-
-            float profilePhase = motions[part] switch
-            {
-                BodyPartMotion.WalkCycleProfile => MathF.Sin(gaitPhase),
-                BodyPartMotion.WalkCycleProfileOpposite => -MathF.Sin(gaitPhase),
-                _ => 0f
-            };
-
-            if (profilePhase != 0f)
-            {
-                joint += BodyPartTransformMath.TransformPosition(
-                    new Vector3(profilePhase * 0.17f * gait, profilePhase * 0.025f * gait, 0f),
-                    positionOrientation);
-            }
 
             // Rotating a limb around its center makes the shoulder/hip drift
             // away from the torso. Start-pivot parts are instead positioned
@@ -288,6 +249,37 @@ public sealed class UnitBodySystem
         // Joint offsets remain untouched: children must stay on the exact
         // endpoint of their parent. Only root attachment points and angles
         // are adjusted for the pose.
+        if (posture == UnitPosture.Sitting)
+        {
+            switch (role)
+            {
+                case BodyPartRole.UpperArm:
+                    localPosition.Y *= 0.78f;
+                    localRotation += MathF.CopySign(0.10f, localRotation);
+                    break;
+
+                case BodyPartRole.Forearm:
+                    localRotation = 1.10f;
+                    break;
+
+                case BodyPartRole.Thigh:
+                    localPosition.X *= 0.82f;
+                    localPosition.Y *= 0.68f;
+                    localRotation -= MathF.CopySign(0.62f, localRotation);
+                    break;
+
+                case BodyPartRole.Shin:
+                    localRotation = 1.15f;
+                    break;
+
+                case BodyPartRole.Foot:
+                    localRotation += 0.18f;
+                    break;
+            }
+
+            return;
+        }
+
         if (posture == UnitPosture.Crouching)
         {
             switch (role)
