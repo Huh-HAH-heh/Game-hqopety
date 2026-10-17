@@ -228,6 +228,8 @@ public sealed class GameMenuOverlay : IDisposable
     }
 
     private const int MaxContourChunksBuiltPerFrame = 3;
+    private const int MaxCachedContourChunks = 64;
+    private const int ContourChunkCacheReserve = 16;
 
     private const string ContourVertexShaderSource =
         @"void main()
@@ -253,6 +255,7 @@ void main()
     private readonly List<HeightContourChunk> _visibleContourChunks = new();
     private readonly List<ContourLabelCandidate> _visibleContourLabels = new();
     private readonly Dictionary<(int X, int Y), List<FloatRect>> _contourLabelSpatialCells = new();
+    private readonly List<(int X, int Y)> _staleContourLabelCells = new();
     private long _contourTerrainVersion = long.MinValue;
     private long _contourFrame;
 
@@ -926,8 +929,7 @@ void main()
         if (drawContourLabels)
             DrawNonOverlappingContourLabels(window, zoomLevel);
 
-        // Keep contour chunks cached until the terrain changes. Switching zoom
-        // levels no longer clears, rebuilds, or evicts the existing line meshes.
+        EvictExcessContourChunks();
     }
 
     private void DrawNonOverlappingContourLabels(
@@ -999,6 +1001,26 @@ void main()
 
             window.Draw(label);
         }
+
+        // The spatial grid is only a per-frame collision accelerator. Remove
+        // empty cells from previous views/zoom levels instead of retaining them
+        // for the full lifetime of the menu.
+        TrimEmptyContourLabelCells();
+    }
+
+    private void TrimEmptyContourLabelCells()
+    {
+        _staleContourLabelCells.Clear();
+
+        foreach (KeyValuePair<(int X, int Y), List<FloatRect>> entry
+                 in _contourLabelSpatialCells)
+        {
+            if (entry.Value.Count == 0)
+                _staleContourLabelCells.Add(entry.Key);
+        }
+
+        for (int i = 0; i < _staleContourLabelCells.Count; i++)
+            _contourLabelSpatialCells.Remove(_staleContourLabelCells[i]);
     }
 
     private static bool OverlapsWithPadding(
@@ -1183,6 +1205,38 @@ void main()
         }
 
         return chunk;
+    }
+
+    private void EvictExcessContourChunks()
+    {
+        int maxRetained = Math.Max(
+            MaxCachedContourChunks,
+            _visibleContourChunks.Count + ContourChunkCacheReserve);
+
+        while (_contourChunks.Count > maxRetained)
+        {
+            HeightContourChunkKey oldestKey = default;
+            HeightContourChunk? oldestChunk = null;
+
+            foreach (KeyValuePair<HeightContourChunkKey, HeightContourChunk> entry
+                     in _contourChunks)
+            {
+                if (oldestChunk != null &&
+                    entry.Value.LastUsedFrame >= oldestChunk.LastUsedFrame)
+                {
+                    continue;
+                }
+
+                oldestKey = entry.Key;
+                oldestChunk = entry.Value;
+            }
+
+            if (oldestChunk == null)
+                return;
+
+            _contourChunks.Remove(oldestKey);
+            oldestChunk.Dispose();
+        }
     }
 
     private void ClearContourChunkCache()
