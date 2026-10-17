@@ -9,7 +9,8 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    private const int InitialUnitsPerFaction = 400;
+    // Starts at 1,600 active units (800 per faction); F8 cycles 80/400/800 per side.
+    private const int InitialUnitsPerFaction = 800;
     private const int Columns = 40;
     private const float FormationSpacing = 2.5f;
 
@@ -17,10 +18,12 @@ public sealed class LongRangeCombatTestScene
     private int UnitsPerFaction => _unitsPerFaction;
     private int TotalUnits => _unitsPerFaction * 2;
     private int Rows => _unitsPerFaction / Columns;
-    private const float CombatDistance = 130f;
+    private const float CombatDistance = 200f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
-    private const float AdvanceDistance = 25f;
+    // The line-to-line gap is wider than vision after only 25 m of advance.
+    // Advance far enough for the front ranks to acquire targets while marching.
+    private const float AdvanceDistance = 50f;
     private const float VisionStressRange = 85f;
 
     private UnitId[] _units =
@@ -159,7 +162,7 @@ public sealed class LongRangeCombatTestScene
             $"FIREFIGHT {TotalUnits} | " +
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
-            $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
+            $"Initial center gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
             $"Fire mode {(simulation.AI.Enabled ? "AI" : "scripted volley")} | " +
             $"Vision {(simulation.VisionEnabled ? "ON" : "OFF")} | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
@@ -249,7 +252,7 @@ public sealed class LongRangeCombatTestScene
                             MathF.Abs(dx) / (4f * TerrainScale);
 
                         height +=
-                            10f *
+                            7f *
                             MathF.Max(
                                 0f,
                                 ridgeFactor);
@@ -268,7 +271,7 @@ public sealed class LongRangeCombatTestScene
                         (dx + 100f * TerrainScale) / (20f * TerrainScale)) % 2 == 0))
                 {
                     height +=
-                        6f *
+                        3.5f *
                         (1f -
                          ridgeA / (2f * TerrainScale));
                 }
@@ -284,7 +287,7 @@ public sealed class LongRangeCombatTestScene
                         (dx + 100f * TerrainScale) / (24f * TerrainScale)) % 2 != 0))
                 {
                     height +=
-                        5f *
+                        3.5f *
                         (1f -
                          ridgeB / (2f * TerrainScale));
                 }
@@ -297,8 +300,12 @@ public sealed class LongRangeCombatTestScene
                         centerY,
                         TerrainScale);
 
+                // Do not encode cover as a 5 m vertical cliff. Those cliffs
+                // overlapped the deployment rows and made A* report permanent
+                // no-route failures until terrain editing invalidated the cache.
+                // Keep the material marker and a low rise without trapping units.
                 if (hardCover)
-                    height += 5f;
+                    height += 1f;
 
                 ushort heightUnits =
                     checked(
