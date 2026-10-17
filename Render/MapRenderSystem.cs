@@ -9,7 +9,7 @@ namespace RimClone.Render;
 
 public sealed class MapRenderSystem : IDisposable
 {
-    private readonly record struct TerrainChunkKey(int RegionIndex);
+    private readonly record struct TerrainChunkKey(int RegionIndex, int LodStep);
 
     private readonly record struct PendingTerrainChunk(
         int RegionX,
@@ -270,9 +270,15 @@ void main()
         float screenMinY = center.Y - viewSize.Y * 0.5f;
         float screenMaxY = center.Y + viewSize.Y * 0.5f;
 
-        // Keep one baked terrain detail level across zoom changes.
-        // Existing chunk meshes are reused instead of rebuilt at each LOD threshold.
-        const int lodStep = 1;
+        // Estimate visible cells before building geometry. Preserve full detail when zoomed
+        // in, but reduce vertex work when zoomed out.
+        double visibleCellEstimate =
+            (double)viewSize.X / tilePixelSize * (viewSize.Y / tilePixelSize);
+        int lodStep = visibleCellEstimate >= 150_000d
+            ? 3
+            : visibleCellEstimate >= 45_000d
+                ? 2
+                : 1;
 
         int minTileX =
             Math.Max(
@@ -463,7 +469,7 @@ void main()
                  regionX++)
             {
                 int regionIndex = regionX + regionY * worldMap.RegionsX;
-                TerrainChunkKey key = new TerrainChunkKey(regionIndex);
+                TerrainChunkKey key = new TerrainChunkKey(regionIndex, lodStep);
 
                 if (!_terrainChunks.TryGetValue(key, out TerrainChunkMesh? mesh))
                 {
@@ -506,7 +512,7 @@ void main()
                 geometryMaxLayer);
 
             _terrainChunks.Add(
-                new TerrainChunkKey(pending.RegionIndex),
+                new TerrainChunkKey(pending.RegionIndex, lodStep),
                 mesh);
             _cachedTerrainVertexCount += mesh.VertexCount;
 
