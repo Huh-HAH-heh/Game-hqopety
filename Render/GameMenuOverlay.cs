@@ -1096,9 +1096,9 @@ void main()
             }
         }
 
-        // One contour per metre (terrain heights are stored in decimetres).
+        // One contour per two metres; terrain heights are stored in decimetres.
         // Emphasized 10/25 m index lines are selected independently below.
-        const int contourIntervalUnits = 10;
+        const int contourIntervalUnits = 20;
         bool allowLabels = _font != null && ((regionX + regionY * 2) % 3 == 0);
         Span<Vector2f> crossings = stackalloc Vector2f[4];
 
