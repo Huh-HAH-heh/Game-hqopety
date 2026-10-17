@@ -1,0 +1,1087 @@
+{
+  "Version": 1,
+  "Regions": [
+    {
+      "Id": "body.middle",
+      "HitHalfHeight": 0.10195455,
+      "Tissues": [
+        {
+          "Id": "torso.main",
+          "ParentId": "",
+          "Part": "Torso",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 14,
+          "MaxHitPoints": 60,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 190,
+          "ProjectilePenetrationLoss": 12
+        },
+        {
+          "Id": "heart.main",
+          "ParentId": "torso.main",
+          "Part": "Heart",
+          "ParentPart": "None",
+          "Kind": "Organ",
+          "Weight": 0.3,
+          "MaxHitPoints": 15,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        },
+        {
+          "Id": "lung.left",
+          "ParentId": "torso.main",
+          "Part": "LeftLung",
+          "ParentPart": "None",
+          "Kind": "Organ",
+          "Weight": 0.25,
+          "MaxHitPoints": 12,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        },
+        {
+          "Id": "lung.right",
+          "ParentId": "torso.main",
+          "Part": "RightLung",
+          "ParentPart": "None",
+          "Kind": "Organ",
+          "Weight": 0.25,
+          "MaxHitPoints": 12,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        },
+        {
+          "Id": "stomach.main",
+          "ParentId": "torso.main",
+          "Part": "Stomach",
+          "ParentPart": "None",
+          "Kind": "Organ",
+          "Weight": 0.18,
+          "MaxHitPoints": 12,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        },
+        {
+          "Id": "liver.main",
+          "ParentId": "torso.main",
+          "Part": "Liver",
+          "ParentPart": "None",
+          "Kind": "Organ",
+          "Weight": 0.2,
+          "MaxHitPoints": 15,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        },
+        {
+          "Id": "kidney.left",
+          "ParentId": "torso.main",
+          "Part": "LeftKidney",
+          "ParentPart": "None",
+          "Kind": "Organ",
+          "Weight": 0.12,
+          "MaxHitPoints": 10,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        },
+        {
+          "Id": "kidney.right",
+          "ParentId": "torso.main",
+          "Part": "RightKidney",
+          "ParentPart": "None",
+          "Kind": "Organ",
+          "Weight": 0.12,
+          "MaxHitPoints": 10,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        },
+        {
+          "Id": "locomotion",
+          "Roles": 64,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.lower",
+      "HitHalfHeight": 0.1468409,
+      "Tissues": [
+        {
+          "Id": "torso.lower",
+          "ParentId": "torso.main",
+          "Part": "Torso",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 42,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 190,
+          "ProjectilePenetrationLoss": 12
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        },
+        {
+          "Id": "locomotion",
+          "Roles": 64,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.torso.upper",
+      "HitHalfHeight": 0.163,
+      "Tissues": [
+        {
+          "Id": "torso.upper",
+          "ParentId": "torso.main",
+          "Part": "Torso",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 38,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 190,
+          "ProjectilePenetrationLoss": 12
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.arm.left.upper",
+      "HitHalfHeight": 0.18993182,
+      "Tissues": [
+        {
+          "Id": "arm.left",
+          "ParentId": "torso.main",
+          "Part": "LeftArm",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 2,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 90,
+          "ProjectilePenetrationLoss": 6
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.arm.left.lower",
+      "HitHalfHeight": 0.19531818,
+      "Tissues": [
+        {
+          "Id": "hand.left",
+          "ParentId": "arm.left",
+          "Part": "LeftHand",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 0.5,
+          "MaxHitPoints": 12,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 55,
+          "ProjectilePenetrationLoss": 4
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.arm.right.upper",
+      "HitHalfHeight": 0.18993182,
+      "Tissues": [
+        {
+          "Id": "arm.right",
+          "ParentId": "torso.main",
+          "Part": "RightArm",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 2,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 90,
+          "ProjectilePenetrationLoss": 6
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.arm.right.lower",
+      "HitHalfHeight": 0.19531818,
+      "Tissues": [
+        {
+          "Id": "hand.right",
+          "ParentId": "arm.right",
+          "Part": "RightHand",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 0.5,
+          "MaxHitPoints": 12,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 55,
+          "ProjectilePenetrationLoss": 4
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.leg.left.upper",
+      "HitHalfHeight": 0.22404546,
+      "Tissues": [
+        {
+          "Id": "leg.left",
+          "ParentId": "torso.main",
+          "Part": "LeftLeg",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 8,
+          "MaxHitPoints": 35,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 105,
+          "ProjectilePenetrationLoss": 7
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.leg.left.lower",
+      "HitHalfHeight": 0.20070454,
+      "Tissues": [
+        {
+          "Id": "foot.left",
+          "ParentId": "leg.left",
+          "Part": "LeftFoot",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 2,
+          "MaxHitPoints": 14,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 50,
+          "ProjectilePenetrationLoss": 4
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.leg.right.upper",
+      "HitHalfHeight": 0.22404546,
+      "Tissues": [
+        {
+          "Id": "leg.right",
+          "ParentId": "torso.main",
+          "Part": "RightLeg",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 8,
+          "MaxHitPoints": 35,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 105,
+          "ProjectilePenetrationLoss": 7
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.leg.right.lower",
+      "HitHalfHeight": 0.20070454,
+      "Tissues": [
+        {
+          "Id": "foot.right",
+          "ParentId": "leg.right",
+          "Part": "RightFoot",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 2,
+          "MaxHitPoints": 14,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 50,
+          "ProjectilePenetrationLoss": 4
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.neck",
+      "HitHalfHeight": 0.05527273,
+      "Tissues": [
+        {
+          "Id": "neck.main",
+          "ParentId": "torso.upper",
+          "Part": "Neck",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 18,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 100,
+          "ProjectilePenetrationLoss": 6
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 6,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "body.upper",
+      "HitHalfHeight": 0.09836364,
+      "Tissues": [
+        {
+          "Id": "head.main",
+          "ParentId": "torso.main",
+          "Part": "Head",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 19,
+          "MaxHitPoints": 40,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": 170,
+          "ProjectilePenetrationLoss": 10
+        },
+        {
+          "Id": "brain.main",
+          "ParentId": "head.main",
+          "Part": "Brain",
+          "ParentPart": "None",
+          "Kind": "Organ",
+          "Weight": 1,
+          "MaxHitPoints": 10,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "eye",
+          "Roles": 9,
+          "X": 0,
+          "Y": 0,
+          "Z": 0.015
+        },
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        },
+        {
+          "Id": "muzzle",
+          "Roles": 256,
+          "X": 0.035,
+          "Y": 0,
+          "Z": 0.005
+        }
+      ]
+    },
+    {
+      "Id": "custom.segment.001",
+      "HitHalfHeight": 0.06,
+      "Tissues": [
+        {
+          "Id": "custom.segment.001.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-segment-001.001",
+      "HitHalfHeight": 0.06,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-segment-001.001.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-segment-001.002",
+      "HitHalfHeight": 0.06,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-segment-001.002.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-copy-custom-segment-001-002.001",
+      "HitHalfHeight": 0.06,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-copy-custom-segment-001-002.001.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.001",
+      "HitHalfHeight": 0.06,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.001.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.002",
+      "HitHalfHeight": 0.06,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.002.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.001",
+      "HitHalfHeight": 0.06,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.001.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.segment.002",
+      "HitHalfHeight": 0.024,
+      "Tissues": [
+        {
+          "Id": "custom.segment.002.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-segment-002.001",
+      "HitHalfHeight": 0.024,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-segment-002.001.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.segment.003",
+      "HitHalfHeight": 0.021,
+      "Tissues": [
+        {
+          "Id": "custom.segment.003.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-segment-003.001",
+      "HitHalfHeight": 0.021,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-segment-003.001.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    },
+    {
+      "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.002",
+      "HitHalfHeight": 0.06,
+      "Tissues": [
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.002.tissue",
+          "ParentId": "",
+          "Part": "WholeBody",
+          "ParentPart": "None",
+          "Kind": "BodyPart",
+          "Weight": 1,
+          "MaxHitPoints": 30,
+          "ArmorZone": -1,
+          "ProjectileEnergyLoss": -1,
+          "ProjectilePenetrationLoss": -1
+        }
+      ],
+      "Markers": [
+        {
+          "Id": "target",
+          "Roles": 7,
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        }
+      ]
+    }
+  ],
+  "Volumes": [
+    {
+      "Id": "organ.heart",
+      "ParentRegionId": "body.middle",
+      "EntryBindingId": "torso.main",
+      "TargetBindingId": "heart.main",
+      "Primitive": "Circle",
+      "CenterX": 0.012,
+      "CenterY": 0.008,
+      "CenterZ": 0.005,
+      "HalfX": 0.02,
+      "HalfY": 0.016,
+      "HalfZ": 0.012,
+      "Rotation": 0,
+      "EnergyLoss": 26,
+      "PenetrationLoss": 2,
+      "DamageMultiplier": 0.85,
+      "BleedMultiplier": 1.5
+    },
+    {
+      "Id": "organ.lung.left",
+      "ParentRegionId": "body.middle",
+      "EntryBindingId": "torso.main",
+      "TargetBindingId": "lung.left",
+      "Primitive": "Circle",
+      "CenterX": 0.005,
+      "CenterY": 0.03,
+      "CenterZ": 0.005,
+      "HalfX": 0.026,
+      "HalfY": 0.018,
+      "HalfZ": 0.012,
+      "Rotation": 0,
+      "EnergyLoss": 18,
+      "PenetrationLoss": 1.5,
+      "DamageMultiplier": 0.65,
+      "BleedMultiplier": 1.2
+    },
+    {
+      "Id": "organ.lung.right",
+      "ParentRegionId": "body.middle",
+      "EntryBindingId": "torso.main",
+      "TargetBindingId": "lung.right",
+      "Primitive": "Circle",
+      "CenterX": 0.005,
+      "CenterY": -0.03,
+      "CenterZ": 0.005,
+      "HalfX": 0.026,
+      "HalfY": 0.018,
+      "HalfZ": 0.012,
+      "Rotation": 0,
+      "EnergyLoss": 18,
+      "PenetrationLoss": 1.5,
+      "DamageMultiplier": 0.65,
+      "BleedMultiplier": 1.2
+    },
+    {
+      "Id": "organ.stomach",
+      "ParentRegionId": "body.middle",
+      "EntryBindingId": "torso.main",
+      "TargetBindingId": "stomach.main",
+      "Primitive": "Circle",
+      "CenterX": -0.035,
+      "CenterY": 0.008,
+      "CenterZ": -0.025,
+      "HalfX": 0.022,
+      "HalfY": 0.018,
+      "HalfZ": 0.012,
+      "Rotation": 0,
+      "EnergyLoss": 14,
+      "PenetrationLoss": 1,
+      "DamageMultiplier": 0.65,
+      "BleedMultiplier": 0.8
+    },
+    {
+      "Id": "organ.liver",
+      "ParentRegionId": "body.middle",
+      "EntryBindingId": "torso.main",
+      "TargetBindingId": "liver.main",
+      "Primitive": "Circle",
+      "CenterX": -0.012,
+      "CenterY": -0.02,
+      "CenterZ": -0.015,
+      "HalfX": 0.023,
+      "HalfY": 0.018,
+      "HalfZ": 0.012,
+      "Rotation": 0,
+      "EnergyLoss": 22,
+      "PenetrationLoss": 1.5,
+      "DamageMultiplier": 0.8,
+      "BleedMultiplier": 1.4
+    },
+    {
+      "Id": "organ.kidney.left",
+      "ParentRegionId": "body.middle",
+      "EntryBindingId": "torso.main",
+      "TargetBindingId": "kidney.left",
+      "Primitive": "Circle",
+      "CenterX": -0.045,
+      "CenterY": 0.032,
+      "CenterZ": -0.035,
+      "HalfX": 0.012,
+      "HalfY": 0.01,
+      "HalfZ": 0.01,
+      "Rotation": 0,
+      "EnergyLoss": 12,
+      "PenetrationLoss": 1,
+      "DamageMultiplier": 0.55,
+      "BleedMultiplier": 0.8
+    },
+    {
+      "Id": "organ.kidney.right",
+      "ParentRegionId": "body.middle",
+      "EntryBindingId": "torso.main",
+      "TargetBindingId": "kidney.right",
+      "Primitive": "Circle",
+      "CenterX": -0.045,
+      "CenterY": -0.032,
+      "CenterZ": -0.035,
+      "HalfX": 0.012,
+      "HalfY": 0.01,
+      "HalfZ": 0.01,
+      "Rotation": 0,
+      "EnergyLoss": 12,
+      "PenetrationLoss": 1,
+      "DamageMultiplier": 0.55,
+      "BleedMultiplier": 0.8
+    },
+    {
+      "Id": "organ.brain",
+      "ParentRegionId": "body.upper",
+      "EntryBindingId": "head.main",
+      "TargetBindingId": "brain.main",
+      "Primitive": "Circle",
+      "CenterX": 0,
+      "CenterY": 0,
+      "CenterZ": 0.015,
+      "HalfX": 0.018,
+      "HalfY": 0.018,
+      "HalfZ": 0.014,
+      "Rotation": 0,
+      "EnergyLoss": 20,
+      "PenetrationLoss": 1.5,
+      "DamageMultiplier": 1.5,
+      "BleedMultiplier": 1.8
+    }
+  ],
+  "Equipment": [
+    {
+      "ItemId": "WorkShirt",
+      "Durability": 55,
+      "Armor": {
+        "Name": "Thermal undersuit",
+        "Weight": 0.8,
+        "WorldColorR": 54,
+        "WorldColorG": 94,
+        "WorldColorB": 105,
+        "ProtectedZone": 0,
+        "DamageAbsorption": 0.08,
+        "ArmorDamageCoefficient": 0.08,
+        "BleedProtectionChance": 0,
+        "EnergyLoss": 70,
+        "PenetrationResistance": 8,
+        "SharpRating": 8,
+        "BluntRating": 5,
+        "HeatRating": 4,
+        "SoftArmor": true,
+        "HardArmorDamageFactor": 0.5,
+        "ArmorRating": 8,
+        "Coverage": 62,
+        "Layer": 1,
+        "WorldRenderPadding": 0.085,
+        "MovementSpeedMultiplier": 1
+      }
+    },
+    {
+      "ItemId": "WorkTrousers",
+      "Durability": 60,
+      "Armor": {
+        "Name": "Light composite legwear",
+        "Weight": 1,
+        "WorldColorR": 55,
+        "WorldColorG": 75,
+        "WorldColorB": 96,
+        "ProtectedZone": 0,
+        "DamageAbsorption": 0.1,
+        "ArmorDamageCoefficient": 0.08,
+        "BleedProtectionChance": 0,
+        "EnergyLoss": 55,
+        "PenetrationResistance": 10,
+        "SharpRating": 10,
+        "BluntRating": 6,
+        "HeatRating": 4,
+        "SoftArmor": true,
+        "HardArmorDamageFactor": 0.5,
+        "ArmorRating": 10,
+        "Coverage": 960,
+        "Layer": 1,
+        "WorldRenderPadding": 0.075,
+        "MovementSpeedMultiplier": 1
+      }
+    },
+    {
+      "ItemId": "CombatVest",
+      "Durability": 120,
+      "Armor": {
+        "Name": "Light ceramic-fiber vest",
+        "Weight": 3.2,
+        "WorldColorR": 108,
+        "WorldColorG": 128,
+        "WorldColorB": 142,
+        "ProtectedZone": 0,
+        "DamageAbsorption": 0.42,
+        "ArmorDamageCoefficient": 0.18,
+        "BleedProtectionChance": 0,
+        "EnergyLoss": 190,
+        "PenetrationResistance": 62,
+        "SharpRating": 62,
+        "BluntRating": 28,
+        "HeatRating": 42,
+        "SoftArmor": false,
+        "HardArmorDamageFactor": 0.24,
+        "ArmorRating": 62,
+        "Coverage": 2,
+        "Layer": 2,
+        "WorldRenderPadding": 0.14,
+        "MovementSpeedMultiplier": 1
+      }
+    },
+    {
+      "ItemId": "CombatHelmet",
+      "Durability": 90,
+      "Armor": {
+        "Name": "Light ballistic helmet",
+        "Weight": 1.1,
+        "WorldColorR": 88,
+        "WorldColorG": 103,
+        "WorldColorB": 108,
+        "ProtectedZone": 0,
+        "DamageAbsorption": 0.36,
+        "ArmorDamageCoefficient": 0.18,
+        "BleedProtectionChance": 0,
+        "EnergyLoss": 170,
+        "PenetrationResistance": 64,
+        "SharpRating": 64,
+        "BluntRating": 27,
+        "HeatRating": 35,
+        "SoftArmor": false,
+        "HardArmorDamageFactor": 0.22,
+        "ArmorRating": 64,
+        "Coverage": 1,
+        "Layer": 2,
+        "WorldRenderPadding": 0.12,
+        "MovementSpeedMultiplier": 1
+      }
+    },
+    {
+      "ItemId": "PoweredExoskeleton",
+      "Durability": 160,
+      "Armor": {
+        "Name": "Powered mobility frame",
+        "Weight": 6.6,
+        "WorldColorR": 112,
+        "WorldColorG": 166,
+        "WorldColorB": 186,
+        "ProtectedZone": 0,
+        "DamageAbsorption": 0.12,
+        "ArmorDamageCoefficient": 0.14,
+        "BleedProtectionChance": 0,
+        "EnergyLoss": 55,
+        "PenetrationResistance": 20,
+        "SharpRating": 20,
+        "BluntRating": 34,
+        "HeatRating": 16,
+        "SoftArmor": false,
+        "HardArmorDamageFactor": 0.16,
+        "ArmorRating": 20,
+        "Coverage": 1023,
+        "Layer": 0,
+        "WorldRenderPadding": 0.18,
+        "MovementSpeedMultiplier": 1.12
+      }
+    }
+  ]
+}

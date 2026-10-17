@@ -1,0 +1,19 @@
+{
+  "BodyType": "Colonist",
+  "MoveSpeed": 2.8,
+  "Width": 0.35,
+  "Length": 0.6,
+  "Height": 1.75,
+  "ViewRange": 20,
+  "FieldOfView": 110,
+  "BodyMassKg": 75,
+  "MuscleMassKg": 30,
+  "BodyFatKg": 13,
+  "BloodLiters": 5,
+  "BaseEnergyKcal": 2200,
+  "BaseWaterLiters": 2.5,
+  "Strength": 4,
+  "Constitution": 4,
+  "Dexterity": 4,
+  "Intelligence": 4
+}
