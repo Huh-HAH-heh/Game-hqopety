@@ -210,7 +210,10 @@ public sealed class GameRenderer
             finally
             {
                 DisposeSafely(_mapRenderer);
+                DisposeSafely(_unitRenderer);
                 DisposeSafely(_projectileRenderer);
+                DisposeSafely(_visionTestScene);
+                DisposeSafely(_camera);
                 DisposeSafely(_gameMenuOverlay);
                 DisposeSafely(_contextMenuOverlay);
                 DisposeSafely(_unitCardOverlay);
