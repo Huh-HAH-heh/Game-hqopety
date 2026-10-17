@@ -1074,7 +1074,7 @@ void main()
             }
         }
 
-        const int contourIntervalUnits = 50;
+        const int contourIntervalUnits = 20;
         bool allowLabels = _font != null && ((regionX + regionY * 2) % 3 == 0);
         Span<Vector2f> crossings = stackalloc Vector2f[4];
 
@@ -1096,8 +1096,8 @@ void main()
             bool labelAdded = false;
 
             Color lineColor = isIndexContour
-                ? new Color(105, 105, 105, 185)
-                : new Color(48, 48, 48, 135);
+                ? new Color(118, 128, 140, 205)
+                : new Color(58, 66, 77, 160);
 
             for (int y = minY; y <= maxY; y += lodStep)
             {
