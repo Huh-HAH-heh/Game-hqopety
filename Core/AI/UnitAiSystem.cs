@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Numerics;
 using System.Threading.Tasks;
 using Core.Combat;
@@ -33,6 +34,7 @@ public sealed class UnitAiSystem
     public bool Enabled { get; set; }
 
     public UnitAiStore Store { get; }
+    public double LastPlanningMilliseconds { get; private set; }
 
     public UnitAiSystem(
         int initialUnitCapacity = 1024,
@@ -77,6 +79,7 @@ public sealed class UnitAiSystem
         Store.EnsureCapacity(
             units.Capacity);
 
+        long planningStarted = Stopwatch.GetTimestamp();
         ReadOnlySpan<int> active =
             units.ActiveIndices;
 
@@ -100,6 +103,9 @@ public sealed class UnitAiSystem
                     _activeUnitScratch[i], thinkDelta);
             }
         }
+
+        LastPlanningMilliseconds =
+            Stopwatch.GetElapsedTime(planningStarted).TotalMilliseconds;
 
         for (int i = 0;
              i < active.Length;
