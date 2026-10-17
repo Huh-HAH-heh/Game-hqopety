@@ -119,7 +119,7 @@ public sealed class UnitCardOverlay : IDisposable
 
         if (_copyButton.GetGlobalBounds().Contains(position))
         {
-            if (_hasLastUnit && _copyLabel != null)
+            if (_hasLastUnit)
             {
                 List<CardLine> lines = BuildLines(_lastUnit, _lastDetails);
                 StringBuilder text = new(2048);
@@ -128,7 +128,8 @@ public sealed class UnitCardOverlay : IDisposable
                     text.AppendLine(lines[i].Text);
 
                 Clipboard.Contents = text.ToString();
-                _copyLabel.DisplayedString = "OK";
+                if (_copyLabel != null)
+                    _copyLabel.DisplayedString = "OK";
             }
 
             return true;
