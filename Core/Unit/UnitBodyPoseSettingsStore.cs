@@ -19,11 +19,12 @@ public readonly struct UnitBodyPoseTransform
 }
 
 /// <summary>
-/// Saved per-node joint transforms for authored standing, sitting, prone and crouching poses.
+/// Saved per-node joint transforms for each unit archetype and posture.
 /// Shape, scale, topology and hit geometry stay in the base anatomy definition.
 /// </summary>
 public static class UnitBodyPoseSettingsStore
 {
+    private const int PoseCount = 4;
     private static readonly object Sync = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -32,7 +33,7 @@ public static class UnitBodyPoseSettingsStore
     };
 
     private static bool _loaded;
-    private static Dictionary<string, UnitBodyPoseTransform>[] _poses = CreateEmptyPoses();
+    private static Dictionary<ushort, Dictionary<string, UnitBodyPoseTransform>[]> _poses = new();
 
     public static string FilePath
     {
@@ -43,23 +44,32 @@ public static class UnitBodyPoseSettingsStore
         }
     }
 
-    public static IReadOnlyDictionary<string, UnitBodyPoseTransform>? GetTransforms(UnitPosture posture)
+    public static IReadOnlyDictionary<string, UnitBodyPoseTransform>? GetTransforms(
+        UnitType unitType,
+        UnitPosture posture)
     {
         EnsureLoaded();
         int index = (int)posture;
-        if ((uint)index >= (uint)_poses.Length)
+        if ((uint)index >= PoseCount)
             return null;
 
-        Dictionary<string, UnitBodyPoseTransform> pose = _poses[index];
-        return pose.Count == 0 ? null : pose;
+        lock (Sync)
+        {
+            if (!_poses.TryGetValue((ushort)unitType, out Dictionary<string, UnitBodyPoseTransform>[]? poses))
+                return null;
+
+            Dictionary<string, UnitBodyPoseTransform> pose = poses[index];
+            return pose.Count == 0 ? null : pose;
+        }
     }
 
     public static bool TryGetTransform(
+        UnitType unitType,
         UnitPosture posture,
         string? partId,
         out UnitBodyPoseTransform transform)
     {
-        IReadOnlyDictionary<string, UnitBodyPoseTransform>? pose = GetTransforms(posture);
+        IReadOnlyDictionary<string, UnitBodyPoseTransform>? pose = GetTransforms(unitType, posture);
         if (pose != null &&
             !string.IsNullOrWhiteSpace(partId) &&
             pose.TryGetValue(partId, out transform))
@@ -72,6 +82,7 @@ public static class UnitBodyPoseSettingsStore
     }
 
     public static bool Save(
+        UnitType unitType,
         UnitPosture posture,
         ReadOnlySpan<string> regionIds,
         ReadOnlySpan<BodyPartDefinition> parts,
@@ -81,7 +92,7 @@ public static class UnitBodyPoseSettingsStore
         fullPath = FilePath;
         error = string.Empty;
         int poseIndex = (int)posture;
-        if ((uint)poseIndex >= 4u)
+        if ((uint)poseIndex >= PoseCount)
         {
             error = "Неизвестный тип позы.";
             return false;
@@ -113,8 +124,15 @@ public static class UnitBodyPoseSettingsStore
         EnsureLoaded();
         lock (Sync)
         {
-            var updated = (Dictionary<string, UnitBodyPoseTransform>[])_poses.Clone();
-            updated[poseIndex] = nextPose;
+            var updated = new Dictionary<ushort, Dictionary<string, UnitBodyPoseTransform>[]>(_poses);
+            ushort typeKey = (ushort)unitType;
+            Dictionary<string, UnitBodyPoseTransform>[] typePoses =
+                updated.TryGetValue(typeKey, out Dictionary<string, UnitBodyPoseTransform>[]? existing)
+                    ? (Dictionary<string, UnitBodyPoseTransform>[])existing.Clone()
+                    : CreateEmptyPoses();
+            typePoses[poseIndex] = nextPose;
+            updated[typeKey] = typePoses;
+
             if (!WriteFile(updated, fullPath, out error))
                 return false;
 
@@ -125,12 +143,16 @@ public static class UnitBodyPoseSettingsStore
         return true;
     }
 
-    public static bool Reset(UnitPosture posture, out string fullPath, out string error)
+    public static bool Reset(
+        UnitType unitType,
+        UnitPosture posture,
+        out string fullPath,
+        out string error)
     {
         fullPath = FilePath;
         error = string.Empty;
         int poseIndex = (int)posture;
-        if ((uint)poseIndex >= 4u)
+        if ((uint)poseIndex >= PoseCount)
         {
             error = "Неизвестный тип позы.";
             return false;
@@ -139,8 +161,15 @@ public static class UnitBodyPoseSettingsStore
         EnsureLoaded();
         lock (Sync)
         {
-            var updated = (Dictionary<string, UnitBodyPoseTransform>[])_poses.Clone();
-            updated[poseIndex] = new Dictionary<string, UnitBodyPoseTransform>(StringComparer.Ordinal);
+            var updated = new Dictionary<ushort, Dictionary<string, UnitBodyPoseTransform>[]>(_poses);
+            ushort typeKey = (ushort)unitType;
+            Dictionary<string, UnitBodyPoseTransform>[] typePoses =
+                updated.TryGetValue(typeKey, out Dictionary<string, UnitBodyPoseTransform>[]? existing)
+                    ? (Dictionary<string, UnitBodyPoseTransform>[])existing.Clone()
+                    : CreateEmptyPoses();
+            typePoses[poseIndex] = new Dictionary<string, UnitBodyPoseTransform>(StringComparer.Ordinal);
+            updated[typeKey] = typePoses;
+
             if (!WriteFile(updated, fullPath, out error))
                 return false;
 
@@ -161,7 +190,7 @@ public static class UnitBodyPoseSettingsStore
             if (_loaded)
                 return;
 
-            var loaded = CreateEmptyPoses();
+            var loaded = new Dictionary<ushort, Dictionary<string, UnitBodyPoseTransform>[]>();
             string path = FilePath;
             if (File.Exists(path))
             {
@@ -169,15 +198,25 @@ public static class UnitBodyPoseSettingsStore
                 {
                     PoseFileDocument? document =
                         JsonSerializer.Deserialize<PoseFileDocument>(File.ReadAllText(path), JsonOptions);
-                    if (document == null || document.Version != 1 || document.Poses == null)
+                    if (document == null || document.Version is < 1 or > 2 || document.Poses == null)
                         throw new InvalidDataException("Неподдерживаемый формат файла поз.");
 
                     foreach (PoseDocument pose in document.Poses)
                     {
-                        if ((uint)pose.Posture >= (uint)loaded.Length || pose.Parts == null)
+                        if (pose.UnitType < 0 ||
+                            pose.UnitType > ushort.MaxValue ||
+                            (uint)pose.Posture >= PoseCount ||
+                            pose.Parts == null)
                             continue;
 
-                        Dictionary<string, UnitBodyPoseTransform> parts = loaded[pose.Posture];
+                        ushort typeKey = (ushort)pose.UnitType;
+                        if (!loaded.TryGetValue(typeKey, out Dictionary<string, UnitBodyPoseTransform>[]? typePoses))
+                        {
+                            typePoses = CreateEmptyPoses();
+                            loaded[typeKey] = typePoses;
+                        }
+
+                        Dictionary<string, UnitBodyPoseTransform> parts = typePoses[pose.Posture];
                         foreach (PosePartDocument part in pose.Parts)
                         {
                             if (string.IsNullOrWhiteSpace(part.Id))
@@ -195,7 +234,7 @@ public static class UnitBodyPoseSettingsStore
                 catch (Exception exception)
                 {
                     Console.Error.WriteLine($"[Body poses] Cannot load '{path}': {exception.Message}");
-                    loaded = CreateEmptyPoses();
+                    loaded.Clear();
                 }
             }
 
@@ -205,37 +244,44 @@ public static class UnitBodyPoseSettingsStore
     }
 
     private static bool WriteFile(
-        Dictionary<string, UnitBodyPoseTransform>[] poses,
+        Dictionary<ushort, Dictionary<string, UnitBodyPoseTransform>[]> poses,
         string path,
         out string error)
     {
         error = string.Empty;
         try
         {
-            var document = new PoseFileDocument { Version = 1 };
-            for (int posture = 0; posture < poses.Length; posture++)
+            var document = new PoseFileDocument { Version = 2 };
+            foreach (KeyValuePair<ushort, Dictionary<string, UnitBodyPoseTransform>[]> typeEntry in poses)
             {
-                Dictionary<string, UnitBodyPoseTransform> pose = poses[posture];
-                if (pose.Count == 0)
-                    continue;
-
-                var record = new PoseDocument { Posture = posture };
-                foreach (KeyValuePair<string, UnitBodyPoseTransform> pair in pose)
+                for (int posture = 0; posture < typeEntry.Value.Length; posture++)
                 {
-                    UnitBodyPoseTransform transform = pair.Value;
-                    record.Parts.Add(new PosePartDocument
-                    {
-                        Id = pair.Key,
-                        PositionX = transform.LocalPosition.X,
-                        PositionY = transform.LocalPosition.Y,
-                        PositionZ = transform.LocalPosition.Z,
-                        RotationX = transform.LocalEulerRotation.X,
-                        RotationY = transform.LocalEulerRotation.Y,
-                        RotationZ = transform.LocalEulerRotation.Z
-                    });
-                }
+                    Dictionary<string, UnitBodyPoseTransform> pose = typeEntry.Value[posture];
+                    if (pose.Count == 0)
+                        continue;
 
-                document.Poses.Add(record);
+                    var record = new PoseDocument
+                    {
+                        UnitType = typeEntry.Key,
+                        Posture = posture
+                    };
+                    foreach (KeyValuePair<string, UnitBodyPoseTransform> pair in pose)
+                    {
+                        UnitBodyPoseTransform transform = pair.Value;
+                        record.Parts.Add(new PosePartDocument
+                        {
+                            Id = pair.Key,
+                            PositionX = transform.LocalPosition.X,
+                            PositionY = transform.LocalPosition.Y,
+                            PositionZ = transform.LocalPosition.Z,
+                            RotationX = transform.LocalEulerRotation.X,
+                            RotationY = transform.LocalEulerRotation.Y,
+                            RotationZ = transform.LocalEulerRotation.Z
+                        });
+                    }
+
+                    document.Poses.Add(record);
+                }
             }
 
             string directory = Path.GetDirectoryName(path) ?? Environment.CurrentDirectory;
@@ -254,7 +300,7 @@ public static class UnitBodyPoseSettingsStore
 
     private static Dictionary<string, UnitBodyPoseTransform>[] CreateEmptyPoses()
     {
-        var result = new Dictionary<string, UnitBodyPoseTransform>[4];
+        var result = new Dictionary<string, UnitBodyPoseTransform>[PoseCount];
         for (int i = 0; i < result.Length; i++)
             result[i] = new Dictionary<string, UnitBodyPoseTransform>(StringComparer.Ordinal);
         return result;
@@ -283,12 +329,13 @@ public static class UnitBodyPoseSettingsStore
 
     private sealed class PoseFileDocument
     {
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
         public List<PoseDocument> Poses { get; set; } = new();
     }
 
     private sealed class PoseDocument
     {
+        public int UnitType { get; set; }
         public int Posture { get; set; }
         public List<PosePartDocument> Parts { get; set; } = new();
     }
