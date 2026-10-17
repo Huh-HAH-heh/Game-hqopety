@@ -10,11 +10,16 @@ public readonly struct UnitBodyPoseTransform
 {
     public Vector3 LocalPosition { get; }
     public Vector3 LocalEulerRotation { get; }
+    public bool IsOffset { get; }
 
-    public UnitBodyPoseTransform(Vector3 localPosition, Vector3 localEulerRotation)
+    public UnitBodyPoseTransform(
+        Vector3 localPosition,
+        Vector3 localEulerRotation,
+        bool isOffset = false)
     {
         LocalPosition = localPosition;
         LocalEulerRotation = localEulerRotation;
+        IsOffset = isOffset;
     }
 }
 
@@ -86,6 +91,7 @@ public static class UnitBodyPoseSettingsStore
         UnitPosture posture,
         ReadOnlySpan<string> regionIds,
         ReadOnlySpan<BodyPartDefinition> parts,
+        ReadOnlySpan<BodyPartDefinition> baseParts,
         out string fullPath,
         out string error)
     {
@@ -98,7 +104,10 @@ public static class UnitBodyPoseSettingsStore
             return false;
         }
 
-        if (regionIds.Length == 0 || regionIds.Length != parts.Length || regionIds.Length > 256)
+        if (regionIds.Length == 0 ||
+            regionIds.Length != parts.Length ||
+            baseParts.Length != parts.Length ||
+            regionIds.Length > 256)
         {
             error = "Поза должна содержать от 1 до 256 частей тела.";
             return false;
@@ -109,12 +118,13 @@ public static class UnitBodyPoseSettingsStore
         {
             string id = regionIds[i];
             BodyPartDefinition part = parts[i];
-            Vector3 position = part.LocalPosition;
-            Vector3 euler = part.LocalEulerRotation;
+            BodyPartDefinition basePart = baseParts[i];
+            Vector3 position = part.LocalPosition - basePart.LocalPosition;
+            Vector3 euler = part.LocalEulerRotation - basePart.LocalEulerRotation;
             if (string.IsNullOrWhiteSpace(id) ||
                 !IsFinite(position) ||
                 !IsFinite(euler) ||
-                !nextPose.TryAdd(id, new UnitBodyPoseTransform(position, euler)))
+                !nextPose.TryAdd(id, new UnitBodyPoseTransform(position, euler, isOffset: true)))
             {
                 error = $"Пустой/повторяющийся ID или некорректный трансформ части №{i + 1}.";
                 return false;
@@ -198,7 +208,7 @@ public static class UnitBodyPoseSettingsStore
                 {
                     PoseFileDocument? document =
                         JsonSerializer.Deserialize<PoseFileDocument>(File.ReadAllText(path), JsonOptions);
-                    if (document == null || document.Version is < 1 or > 2 || document.Poses == null)
+                    if (document == null || document.Version is < 1 or > 3 || document.Poses == null)
                         throw new InvalidDataException("Неподдерживаемый формат файла поз.");
 
                     foreach (PoseDocument pose in document.Poses)
@@ -227,7 +237,8 @@ public static class UnitBodyPoseSettingsStore
                             if (!IsFinite(position) || !IsFinite(euler))
                                 continue;
 
-                            parts[part.Id] = new UnitBodyPoseTransform(position, euler);
+                            parts[part.Id] = new UnitBodyPoseTransform(
+                                position, euler, isOffset: document.Version >= 3);
                         }
                     }
                 }
@@ -251,7 +262,7 @@ public static class UnitBodyPoseSettingsStore
         error = string.Empty;
         try
         {
-            var document = new PoseFileDocument { Version = 2 };
+            var document = new PoseFileDocument { Version = 3 };
             foreach (KeyValuePair<ushort, Dictionary<string, UnitBodyPoseTransform>[]> typeEntry in poses)
             {
                 for (int posture = 0; posture < typeEntry.Value.Length; posture++)
@@ -329,7 +340,7 @@ public static class UnitBodyPoseSettingsStore
 
     private sealed class PoseFileDocument
     {
-        public int Version { get; set; } = 2;
+        public int Version { get; set; } = 3;
         public List<PoseDocument> Poses { get; set; } = new();
     }
 
