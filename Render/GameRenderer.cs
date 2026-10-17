@@ -340,6 +340,7 @@ public sealed class GameRenderer
 
             double simMs = snapshot?.SimulationMs ?? _unitSimulation.LastSimulationUpdateMilliseconds;
             double aiMs = snapshot?.AiMs ?? _unitSimulation.LastAIUpdateMilliseconds;
+            double aiPlanningMs = snapshot?.AiPlanningMs ?? _unitSimulation.AI.LastPlanningMilliseconds;
             double moveMs = snapshot?.MovementMs ?? _unitSimulation.LastMovementUpdateMilliseconds;
             double weaponsMs = snapshot?.WeaponsMs ?? _unitSimulation.LastWeaponUpdateMilliseconds;
             double ballisticsMs = snapshot?.BallisticsMs ?? _unitSimulation.LastProjectileUpdateMilliseconds;
@@ -366,7 +367,7 @@ public sealed class GameRenderer
                 $"TotalAlloc={_allocatedBytes / 1024d / 1024d:0.0}MB " +
                 $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
                 $"Units={activeUnits} SimPaused={_simulationPaused} Sim={simMs:0.0}ms " +
-                $"Vision={visionMetrics} AI={aiMs:0.0}ms Move={moveMs:0.0}ms " +
+                $"Vision={visionMetrics} AI={aiMs:0.0}ms Plan={aiPlanningMs:0.0}ms Move={moveMs:0.0}ms "
                 $"Weapons={weaponsMs:0.0}ms Ballistics={ballisticsMs:0.0}ms Grid={gridMs:0.0}ms " +
                 $"P={pVisited} TraceCells={traceCells} UnitCandidates={unitCandidates} " +
                 $"Shots/s={shotsPerSecond:0} Rounds/s={roundsPerSecond:0} " +
