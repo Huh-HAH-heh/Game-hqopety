@@ -4,7 +4,9 @@ namespace Core.Map;
 
 public sealed class WaterLayer
 {
-    private readonly byte[] _water;
+    // Allocate storage only for columns that actually contain water.
+    // A dense 768x768x320 byte array costs about 180 MiB even on a dry map.
+    private readonly byte[]?[] _waterByColumn;
     private readonly short[] _topLevels;
 
     public int Width { get; }
@@ -31,11 +33,7 @@ public sealed class WaterLayer
         Height = height;
         Levels = levels;
 
-        _water =
-            new byte[
-                width *
-                height *
-                levels];
+        _waterByColumn = new byte[]?[checked(width * height)];
 
         _topLevels =
             new short[
@@ -57,7 +55,8 @@ public sealed class WaterLayer
         if (!IsInside(x, y, z))
             return 0;
 
-        return _water[GetIndex(x, y, z)];
+        byte[]? column = _waterByColumn[GetColumnIndex(x, y)];
+        return column == null ? (byte)0 : column[z];
     }
 
     public void SetAmount(
@@ -69,11 +68,20 @@ public sealed class WaterLayer
         if (!IsInside(x, y, z))
             throw new IndexOutOfRangeException();
 
-        int index = GetIndex(x, y, z);
-        _water[index] = amount;
+        int columnIndex = GetColumnIndex(x, y);
+        byte[]? column = _waterByColumn[columnIndex];
+
+        if (amount > 0 && column == null)
+        {
+            column = new byte[Levels];
+            _waterByColumn[columnIndex] = column;
+        }
+
+        if (column != null)
+            column[z] = amount;
+
         Version++;
 
-        int columnIndex = GetColumnIndex(x, y);
         int top = _topLevels[columnIndex];
 
         if (amount > 0)
@@ -91,7 +99,7 @@ public sealed class WaterLayer
              level >= 0;
              level--)
         {
-            if (_water[GetIndex(x, y, level)] > 0)
+            if (column != null && column[level] > 0)
             {
                 _topLevels[columnIndex] =
                     (short)level;
@@ -101,6 +109,7 @@ public sealed class WaterLayer
         }
 
         _topLevels[columnIndex] = -1;
+        _waterByColumn[columnIndex] = null;
     }
 
     public void AddAmount(
@@ -112,23 +121,52 @@ public sealed class WaterLayer
         if (!IsInside(x, y, z))
             return;
 
-        int index = GetIndex(x, y, z);
+        int columnIndex = GetColumnIndex(x, y);
+        byte[]? column = _waterByColumn[columnIndex];
 
-        _water[index] =
+        if (column == null)
+        {
+            if (amount <= 0)
+            {
+                Version++;
+                return;
+            }
+
+            column = new byte[Levels];
+            _waterByColumn[columnIndex] = column;
+        }
+
+        column[z] =
             (byte)Math.Clamp(
-                _water[index] + amount,
+                column[z] + amount,
                 0,
                 byte.MaxValue);
 
         Version++;
 
-        if (_water[index] > 0)
+        if (column[z] > 0)
         {
-            int columnIndex = GetColumnIndex(x, y);
-
             if (z > _topLevels[columnIndex])
                 _topLevels[columnIndex] = (short)z;
+
+            return;
         }
+
+        // Keep the cached top level exact when the highest water cell drains.
+        if (z != _topLevels[columnIndex])
+            return;
+
+        for (int level = z - 1; level >= 0; level--)
+        {
+            if (column[level] <= 0)
+                continue;
+
+            _topLevels[columnIndex] = (short)level;
+            return;
+        }
+
+        _topLevels[columnIndex] = -1;
+        _waterByColumn[columnIndex] = null;
     }
 
     public bool HasWater(
@@ -156,7 +194,7 @@ public sealed class WaterLayer
 
     public void Clear()
     {
-        Array.Clear(_water);
+        Array.Clear(_waterByColumn);
 
         Array.Fill(
             _topLevels,
@@ -170,17 +208,6 @@ public sealed class WaterLayer
         int y)
     {
         return x + y * Width;
-    }
-
-    private int GetIndex(
-        int x,
-        int y,
-        int z)
-    {
-        return
-            x +
-            y * Width +
-            z * Width * Height;
     }
 
     private bool IsInside(
