@@ -88,7 +88,7 @@ public sealed class GameRenderer
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
     private bool _showVisionDebug;
-    private bool _massCombatMode;
+    private volatile bool _massCombatMode;
     private volatile bool _simulationPaused;
     private bool _terrainStressMode;
     private bool _showCombatTracers = true;
