@@ -21,7 +21,9 @@ public sealed class LongRangeCombatTestScene
     private const float CombatDistance = 200f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
-    private const float AdvanceDistance = 25f;
+    // The line-to-line gap is wider than vision after only 25 m of advance.
+    // Advance far enough for the front ranks to acquire targets while marching.
+    private const float AdvanceDistance = 70f;
     private const float VisionStressRange = 85f;
 
     private UnitId[] _units =
