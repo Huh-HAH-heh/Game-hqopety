@@ -252,7 +252,7 @@ public sealed class LongRangeCombatTestScene
                             MathF.Abs(dx) / (4f * TerrainScale);
 
                         height +=
-                            10f *
+                            7f *
                             MathF.Max(
                                 0f,
                                 ridgeFactor);
@@ -271,7 +271,7 @@ public sealed class LongRangeCombatTestScene
                         (dx + 100f * TerrainScale) / (20f * TerrainScale)) % 2 == 0))
                 {
                     height +=
-                        6f *
+                        3.5f *
                         (1f -
                          ridgeA / (2f * TerrainScale));
                 }
@@ -287,7 +287,7 @@ public sealed class LongRangeCombatTestScene
                         (dx + 100f * TerrainScale) / (24f * TerrainScale)) % 2 != 0))
                 {
                     height +=
-                        5f *
+                        3.5f *
                         (1f -
                          ridgeB / (2f * TerrainScale));
                 }
