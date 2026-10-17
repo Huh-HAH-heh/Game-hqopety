@@ -23,7 +23,7 @@ public sealed class LongRangeCombatTestScene
     private const float TerrainScale = 2.25f;
     // The line-to-line gap is wider than vision after only 25 m of advance.
     // Advance far enough for the front ranks to acquire targets while marching.
-    private const float AdvanceDistance = 70f;
+    private const float AdvanceDistance = 50f;
     private const float VisionStressRange = 85f;
 
     private UnitId[] _units =
@@ -300,8 +300,12 @@ public sealed class LongRangeCombatTestScene
                         centerY,
                         TerrainScale);
 
+                // Do not encode cover as a 5 m vertical cliff. Those cliffs
+                // overlapped the deployment rows and made A* report permanent
+                // no-route failures until terrain editing invalidated the cache.
+                // Keep the material marker and a low rise without trapping units.
                 if (hardCover)
-                    height += 5f;
+                    height += 1f;
 
                 ushort heightUnits =
                     checked(
