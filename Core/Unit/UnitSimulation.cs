@@ -1077,6 +1077,7 @@ public sealed class UnitSimulation
 
         Units.HasTarget[unitIndex] = false;
         Units.Velocity[unitIndex] = Vector3.Zero;
+        Units.Posture[unitIndex] = UnitPosture.Lying;
         _movementSystem.Navigation.ClearRoute(unitIndex);
         _visionSystem.ClearUnit(unitIndex);
         Weapons.CancelActions(unitIndex);
