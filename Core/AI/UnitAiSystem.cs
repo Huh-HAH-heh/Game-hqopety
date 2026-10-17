@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Threading.Tasks;
 using Core.Combat;
 using Core.Items;
 using Core.Map;
@@ -14,6 +15,17 @@ public sealed class UnitAiSystem
     private const float CoverSearchRadius = 8f;
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
+    private static readonly int MaxAiPlanningParallelism =
+        Math.Max(1, Environment.ProcessorCount - 1);
+    private static readonly ParallelOptions AiPlanningOptions = new()
+    {
+        MaxDegreeOfParallelism = MaxAiPlanningParallelism
+    };
+
+    private int[] _activeUnitScratch = Array.Empty<int>();
+    private int[] _nearestVisibleEnemyByUnit = Array.Empty<int>();
+    private Vector3[] _suppressionCoverByUnit = Array.Empty<Vector3>();
+    private bool[] _hasSuppressionCoverByUnit = Array.Empty<bool>();
 
     private readonly UnitWeaponSystem _weaponSystem;
     private float _thinkTimer;
@@ -67,6 +79,27 @@ public sealed class UnitAiSystem
 
         ReadOnlySpan<int> active =
             units.ActiveIndices;
+
+        EnsurePlanningCapacity(units.Capacity);
+        active.CopyTo(_activeUnitScratch);
+        int activeCount = active.Length;
+
+        if (activeCount >= 32 && MaxAiPlanningParallelism > 1)
+        {
+            Parallel.For(0, activeCount, AiPlanningOptions, i =>
+                PrepareUnitPlan(
+                    units, health, suppression, vision, worldMap,
+                    _activeUnitScratch[i], thinkDelta));
+        }
+        else
+        {
+            for (int i = 0; i < activeCount; i++)
+            {
+                PrepareUnitPlan(
+                    units, health, suppression, vision, worldMap,
+                    _activeUnitScratch[i], thinkDelta);
+            }
+        }
 
         for (int i = 0;
              i < active.Length;
@@ -126,17 +159,11 @@ public sealed class UnitAiSystem
                     Store.SuppressionRetrySource[unit] =
                         suppressionSource;
 
-                    if (TryFindSuppressionCover(
-                            units,
-                            vision,
-                            worldMap,
-                            unit,
-                            suppressionSource,
-                            out Vector3 suppressionCover))
+                    if (_hasSuppressionCoverByUnit[unit])
                     {
                         Store.SetGoal(
                             unit,
-                            suppressionCover);
+                            _suppressionCoverByUnit[unit]);
                     }
                 }
 
@@ -156,11 +183,7 @@ public sealed class UnitAiSystem
             }
 
             int visibleEnemy =
-                FindNearestVisibleEnemy(
-                    units,
-                    health,
-                    vision,
-                    unit);
+                _nearestVisibleEnemyByUnit[unit];
 
             bool keepCurrentVisibleTarget = false;
 
@@ -567,6 +590,66 @@ public sealed class UnitAiSystem
             waypoint.Y - position.Y);
 
         return delta.LengthSquared() > 1f;
+    }
+
+    private void EnsurePlanningCapacity(int capacity)
+    {
+        if (_activeUnitScratch.Length < capacity)
+            Array.Resize(ref _activeUnitScratch, capacity);
+        if (_nearestVisibleEnemyByUnit.Length < capacity)
+            Array.Resize(ref _nearestVisibleEnemyByUnit, capacity);
+        if (_suppressionCoverByUnit.Length < capacity)
+            Array.Resize(ref _suppressionCoverByUnit, capacity);
+        if (_hasSuppressionCoverByUnit.Length < capacity)
+            Array.Resize(ref _hasSuppressionCoverByUnit, capacity);
+    }
+
+    private void PrepareUnitPlan(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitSuppressionStore suppression,
+        VisionSystem vision,
+        WorldMap worldMap,
+        int unit,
+        float thinkDelta)
+    {
+        _nearestVisibleEnemyByUnit[unit] = -1;
+        _hasSuppressionCoverByUnit[unit] = false;
+
+        if (health.OverallMaxHitPoints[unit] <= 0f ||
+            health.OverallHitPoints[unit] <= 0f)
+        {
+            return;
+        }
+
+        _nearestVisibleEnemyByUnit[unit] =
+            FindNearestVisibleEnemy(units, health, vision, unit);
+
+        UnitSuppressionState state = suppression.GetState(unit);
+        if ((state != UnitSuppressionState.Panicked &&
+             state != UnitSuppressionState.Suppressed) ||
+            Store.HasGoal[unit])
+        {
+            return;
+        }
+
+        Vector3 threat = suppression.Source[unit];
+        Vector3 previousSource = Store.SuppressionRetrySource[unit];
+        float sourceDx = threat.X - previousSource.X;
+        float sourceDy = threat.Y - previousSource.Y;
+        bool threatChanged = sourceDx * sourceDx + sourceDy * sourceDy >= 16f;
+
+        // The sequential phase subtracts thinkDelta before checking the timer.
+        // Precompute cover only when that same check would request a new search.
+        if (Store.SuppressionCoverRetry[unit] > thinkDelta && !threatChanged)
+            return;
+
+        if (TryFindSuppressionCover(
+                units, vision, worldMap, unit, threat, out Vector3 cover))
+        {
+            _suppressionCoverByUnit[unit] = cover;
+            _hasSuppressionCoverByUnit[unit] = true;
+        }
     }
 
     private static int FindNearestVisibleEnemy(
