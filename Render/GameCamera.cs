@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace RimClone.Render;
 
-public sealed class GameCamera
+public sealed class GameCamera : IDisposable
 {
     private readonly View _view;
     private readonly float _moveSpeed;
@@ -164,5 +164,10 @@ public sealed class GameCamera
 
         _view.Center =
             center;
+    }
+
+    public void Dispose()
+    {
+        _view.Dispose();
     }
 }
