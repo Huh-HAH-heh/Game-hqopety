@@ -171,8 +171,7 @@ public sealed class GameRenderer
         _massCombatTestScene =
             new LongRangeCombatTestScene();
 
-        // Always produce a rate-limited [SHOT]/[HIT]/[BLOCKED] combat trace.
-        CombatDiagnostics.Enabled = true;
+        // Combat event logging stays disabled to keep the console readable.
 
         // The battlefield is a live micro-AI demonstration by default.
         // A is idempotent: it only enables AI and cannot switch it off.
@@ -2172,12 +2171,11 @@ public sealed class GameRenderer
                 bool wasEnabled = _unitSimulation.AI.Enabled;
                 _unitSimulation.AI.Enabled = true;
                 _unitSimulation.VisionEnabled = true;
-                CombatDiagnostics.Enabled = true;
 
                 Console.WriteLine(
                     wasEnabled
                         ? "[TEST] AI is already enabled; A never disables it."
-                        : "[TEST] AI enabled; vision and combat diagnostics enabled. A will not turn AI off.");
+                        : "[TEST] AI enabled; vision enabled. A will not turn AI off.");
             });
             return;
         }
