@@ -198,14 +198,15 @@ public sealed class UnitRenderSystem : IDisposable
 
             // Long/segmented bodies can enter the camera while their root is off-screen.
             if (!rootVisible &&
-                !IsAnyBodyPartInView(
+                (!showUnitDetails ||
+                 !IsAnyBodyPartInView(
                     bodies,
                     bodyStart,
                     bodyCount,
                     minWorldX,
                     maxWorldX,
                     minWorldY,
-                    maxWorldY))
+                    maxWorldY)))
             {
                 continue;
             }
@@ -224,34 +225,47 @@ public sealed class UnitRenderSystem : IDisposable
                 tilePixelSize,
                 screenScale);
 
-            int renderedParts = AppendBodyParts(
-                _vertices,
-                _bodyOutlines,
-                bodies,
-                bodyStart,
-                bodyCount,
-                units.FactionTag[unitIndex],
-                isAlive,
-                tilePixelSize,
-                screenScale);
-
-            // Keep the marker only for a unit with no model rig at all.
-            if (renderedParts == 0)
+            if (showUnitDetails)
             {
-                AppendUnitMarker(
+                int renderedParts = AppendBodyParts(
                     _vertices,
                     _bodyOutlines,
-                    _statusIcons,
+                    bodies,
+                    bodyStart,
+                    bodyCount,
+                    units.FactionTag[unitIndex],
+                    isAlive,
+                    tilePixelSize,
+                    screenScale);
+
+                // Keep the marker only for a unit with no model rig at all.
+                if (renderedParts == 0)
+                {
+                    AppendUnitMarker(
+                        _vertices,
+                        _bodyOutlines,
+                        _statusIcons,
+                        screenX,
+                        screenY,
+                        markerRadius,
+                        headNormals[unitIndex],
+                        units.FactionTag[unitIndex],
+                        isAlive,
+                        healthRatio,
+                        suppression,
+                        suppressionState,
+                        screenScale);
+                }
+            }
+            else
+            {
+                AppendLowDetailUnitMarker(
+                    _vertices,
                     screenX,
                     screenY,
                     markerRadius,
-                    headNormals[unitIndex],
                     units.FactionTag[unitIndex],
-                    isAlive,
-                    healthRatio,
-                    suppression,
-                    suppressionState,
-                    screenScale);
+                    isAlive);
             }
 
             if (!isAlive)
