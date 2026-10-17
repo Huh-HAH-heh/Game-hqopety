@@ -168,48 +168,104 @@ public sealed class GameRenderer
 
     public void Run()
     {
-        InitializeWindow();
-
-        _camera.CenterOnWorld(
-            TerrainTilePixelSize,
-            _worldMap);
-
-        if (_massCombatMode)
-            StartSimulationThread();
-
-        Clock clock =
-            new Clock();
-
-        while (_window.IsOpen && !_closeRequested)
+        try
         {
-            _window.DispatchEvents();
+            InitializeWindow();
 
-            if (_closeRequested)
-                break;
+            _camera.CenterOnWorld(
+                TerrainTilePixelSize,
+                _worldMap);
 
-            float rawDeltaTime =
-                clock.Restart().AsSeconds();
-            float deltaTime = rawDeltaTime;
+            if (_massCombatMode)
+                StartSimulationThread();
 
-            if (deltaTime > 0.1f)
-                deltaTime = 0.1f;
+            using Clock clock = new Clock();
 
-            Update(deltaTime, rawDeltaTime);
-            Draw();
+            while (_window.IsOpen && !_closeRequested)
+            {
+                _window.DispatchEvents();
+
+                if (_closeRequested)
+                    break;
+
+                float rawDeltaTime =
+                    clock.Restart().AsSeconds();
+                float deltaTime = rawDeltaTime;
+
+                if (deltaTime > 0.1f)
+                    deltaTime = 0.1f;
+
+                Update(deltaTime, rawDeltaTime);
+                Draw();
+            }
         }
+        finally
+        {
+            // Thread and native SFML/GPU resources must be released even when
+            // initialization, update, or drawing throws.
+            try
+            {
+                StopSimulationThread();
+            }
+            finally
+            {
+                // Release the last immutable frame and queued closures explicitly.
+                // If the renderer instance is retained, these references must not
+                // keep hundreds of units' snapshot arrays alive after shutdown.
+                while (_simulationCommands.TryDequeue(out _))
+                {
+                }
 
-        StopSimulationThread();
+                Volatile.Write(ref _latestSnapshot, null);
+                Volatile.Write(ref _latestUnitCardDetails, null);
+                _selectedUnits.Clear();
+                _selectedUnit = default;
 
-        // Release GPU resources while the graphics context still exists.
-        _mapRenderer.Dispose();
-        _projectileRenderer.Dispose();
-        _gameMenuOverlay?.Dispose();
-        _contextMenuOverlay?.Dispose();
-        _unitCardOverlay?.Dispose();
-        _combatStatusOverlay?.Dispose();
-        _uiView?.Dispose();
-        _selectionBox.Dispose();
-        _window.Close();
+                DisposeSafely(_mapRenderer);
+                DisposeSafely(_unitRenderer);
+                DisposeSafely(_projectileRenderer);
+                DisposeSafely(_visionTestScene);
+                DisposeSafely(_camera);
+                DisposeSafely(_gameMenuOverlay);
+                _gameMenuOverlay = null;
+                DisposeSafely(_contextMenuOverlay);
+                _contextMenuOverlay = null;
+                DisposeSafely(_unitCardOverlay);
+                _unitCardOverlay = null;
+                DisposeSafely(_combatStatusOverlay);
+                _combatStatusOverlay = null;
+                DisposeSafely(_uiView);
+                _uiView = null;
+                DisposeSafely(_selectionBox);
+
+                if (_window != null)
+                {
+                    try
+                    {
+                        _window.Close();
+                    }
+                    catch (Exception exception)
+                    {
+                        Console.WriteLine($"[Cleanup] Window close failed: {exception.Message}");
+                    }
+
+                    DisposeSafely(_window);
+                }
+            }
+        }
+    }
+
+    private static void DisposeSafely(IDisposable? resource)
+    {
+        try
+        {
+            resource?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            // Keep cleaning up remaining native resources if one disposal fails.
+            Console.WriteLine($"[Cleanup] Resource disposal failed: {exception.Message}");
+        }
     }
 
     private void Update(
@@ -1114,9 +1170,8 @@ public sealed class GameRenderer
         _stopSimulationThread = true;
         thread.Join();
         _simulationThread = null;
-        Volatile.Write(
-            ref _latestSnapshot,
-            SimulationFrameSnapshot.Capture(_unitSimulation));
+        // Shutdown does not publish another frame: capturing here would allocate
+        // a complete snapshot that cannot be consumed after the renderer exits.
     }
 
     private void ExecuteSimulationCommand(Action command)

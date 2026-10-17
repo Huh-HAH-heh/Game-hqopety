@@ -10,7 +10,7 @@ using System.Numerics;
 
 namespace RimClone.Render;
 
-public sealed class UnitRenderSystem
+public sealed class UnitRenderSystem : IDisposable
 {
     private const int CircleSegments = 16;
     private const int VisionConeSegments = 20;
@@ -2300,4 +2300,17 @@ private static Vector3 NormalizeHorizontal(
             MathF.Sqrt(
                 lengthSquared);
     }
+    public void Dispose()
+    {
+        _vertices.Dispose();
+        _bodyOutlines.Dispose();
+        _statusIcons.Dispose();
+        _visionArea.Dispose();
+        _selection.Dispose();
+        _aiming.Dispose();
+        _visionDebug.Dispose();
+        _aiDebug.Dispose();
+        _aimTargetDrawn = Array.Empty<bool>();
+    }
+
 }
