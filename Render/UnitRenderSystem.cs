@@ -13,6 +13,8 @@ namespace RimClone.Render;
 public sealed class UnitRenderSystem : IDisposable
 {
     private const int CircleSegments = 16;
+    private const float UnitDetailFadeStartPixels = 8f;
+    private const float UnitDetailFadeEndPixels = 12f;
     private const int VisionConeSegments = 20;
     private const int VisionRingSegments = 48;
 
@@ -73,9 +75,8 @@ public sealed class UnitRenderSystem : IDisposable
         float pixelsPerWorldUnit =
             tilePixelSize * screenScale;
 
-        // Keep aim details quiet at mass-combat zoom; unit markers stay readable.
-        bool showUnitDetails =
-            pixelsPerWorldUnit >= 8f;
+        float detailBlend = GetUnitDetailBlend(pixelsPerWorldUnit);
+        bool showUnitDetails = detailBlend > 0f;
 
         _vertices.Clear();
         _bodyOutlines.Clear();
@@ -236,9 +237,10 @@ public sealed class UnitRenderSystem : IDisposable
                     units.FactionTag[unitIndex],
                     isAlive,
                     tilePixelSize,
-                    screenScale);
+                    screenScale,
+                    detailBlend);
 
-                // Keep the marker only for a unit with no model rig at all.
+                // Keep the fallback marker only while a rig is unavailable.
                 if (renderedParts == 0)
                 {
                     AppendUnitMarker(
@@ -254,10 +256,14 @@ public sealed class UnitRenderSystem : IDisposable
                         healthRatio,
                         suppression,
                         suppressionState,
-                        screenScale);
+                        screenScale,
+                        detailBlend);
                 }
             }
-            else
+
+            // Cross-fade faction markers out while detailed anatomy fades in.
+            float markerOpacity = 1f - detailBlend;
+            if (markerOpacity > 0f)
             {
                 AppendLowDetailUnitMarker(
                     _vertices,
@@ -265,7 +271,8 @@ public sealed class UnitRenderSystem : IDisposable
                     screenY,
                     markerRadius,
                     units.FactionTag[unitIndex],
-                    isAlive);
+                    isAlive,
+                    markerOpacity);
             }
 
             if (!isAlive)
@@ -376,7 +383,8 @@ public void DrawSnapshot(
         float screenScale = MathF.Max(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
-        bool showUnitDetails = tilePixelSize * screenScale >= 8f;
+        float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
+        bool showUnitDetails = detailBlend > 0f;
 
         float centerX = cameraView.Center.X;
         float centerY = cameraView.Center.Y;
@@ -484,7 +492,8 @@ public void DrawSnapshot(
                     unit.FactionTag,
                     isAlive,
                     tilePixelSize,
-                    screenScale);
+                    screenScale,
+                    detailBlend);
 
                 if (renderedParts == 0)
                 {
@@ -501,10 +510,13 @@ public void DrawSnapshot(
                         unit.HealthRatio,
                         unit.Suppression,
                         unit.SuppressionState,
-                        screenScale);
+                        screenScale,
+                        detailBlend);
                 }
             }
-            else
+
+            float markerOpacity = 1f - detailBlend;
+            if (markerOpacity > 0f)
             {
                 AppendLowDetailUnitMarker(
                     _vertices,
@@ -512,7 +524,8 @@ public void DrawSnapshot(
                     y,
                     markerRadius,
                     unit.FactionTag,
-                    isAlive);
+                    isAlive,
+                    markerOpacity);
             }
 
             if (!isAlive)
@@ -586,7 +599,8 @@ public void DrawSnapshot(
         ushort factionTag,
         bool isAlive,
         float tilePixelSize,
-        float screenScale)
+        float screenScale,
+        float opacity = 1f)
     {
         if (start < 0 || count <= 0 || start >= bodies.Count)
             return 0;
@@ -615,7 +629,8 @@ public void DrawSnapshot(
                 factionTag,
                 isAlive,
                 tilePixelSize,
-                screenScale);
+                screenScale,
+                opacity);
             rendered++;
         }
 
@@ -631,7 +646,8 @@ public void DrawSnapshot(
         ushort factionTag,
         bool isAlive,
         float tilePixelSize,
-        float screenScale)
+        float screenScale,
+        float opacity = 1f)
     {
         if (start < 0 || count <= 0 || start >= bodyParts.Length)
             return 0;
@@ -655,7 +671,8 @@ public void DrawSnapshot(
                 factionTag,
                 isAlive,
                 tilePixelSize,
-                screenScale);
+                screenScale,
+                opacity);
             rendered++;
         }
 
@@ -720,7 +737,8 @@ public void DrawSnapshot(
         ushort factionTag,
         bool isAlive,
         float tilePixelSize,
-        float screenScale)
+        float screenScale,
+        float opacity = 1f)
     {
         float radiusX = MathF.Abs(scale.X) * tilePixelSize;
         float radiusY = MathF.Abs(scale.Y) * tilePixelSize;
@@ -731,8 +749,8 @@ public void DrawSnapshot(
         float centerX = position.X * tilePixelSize;
         float centerY = position.Y * tilePixelSize;
 
-        Color fill = GetBodyPartColor(role, factionTag, isAlive);
-        Color outline = new Color(20, 26, 32, 245);
+        Color fill = ApplyOpacity(GetBodyPartColor(role, factionTag, isAlive), opacity);
+        Color outline = ApplyOpacity(new Color(20, 26, 32, 245), opacity);
 
         if (primitive == BodyPrimitive.Line)
         {
@@ -871,6 +889,27 @@ public void DrawSnapshot(
         return isAlive
             ? color
             : Blend(color, new Color(91, 96, 102, 255), 0.72f);
+    }
+
+    private static Color ApplyOpacity(Color color, float opacity)
+    {
+        byte alpha = (byte)Math.Clamp(
+            (int)MathF.Round(color.A * Math.Clamp(opacity, 0f, 1f)),
+            0,
+            255);
+        return new Color(color.R, color.G, color.B, alpha);
+    }
+
+    private static float GetUnitDetailBlend(float pixelsPerWorldUnit)
+    {
+        float t = Math.Clamp(
+            (pixelsPerWorldUnit - UnitDetailFadeStartPixels) /
+            (UnitDetailFadeEndPixels - UnitDetailFadeStartPixels),
+            0f,
+            1f);
+
+        // Smoothstep avoids visible banding at the beginning and end of the fade.
+        return t * t * (3f - 2f * t);
     }
 
     private static bool IsAnyBodyPartInView(
@@ -1302,14 +1341,14 @@ public void DrawSnapshot(
         float y,
         float radius,
         ushort factionTag,
-        bool isAlive)
+        bool isAlive,
+        float opacity)
     {
         // A six-sided faction marker is enough when a full rig is sub-pixel.
         // It replaces dozens of outlined limb primitives with six triangles.
-        Color color = GetBodyPartColor(
-            BodyPartRole.Torso,
-            factionTag,
-            isAlive);
+        Color color = ApplyOpacity(
+            GetBodyPartColor(BodyPartRole.Torso, factionTag, isAlive),
+            opacity);
 
         const int segments = 6;
         Vector2f center = new(x, y);
@@ -1344,7 +1383,8 @@ public void DrawSnapshot(
         float healthRatio,
         float suppression,
         UnitSuppressionState suppressionState,
-        float screenScale)
+        float screenScale,
+        float opacity = 1f)
     {
         // Baseline unit visualization: a plain white disk with a thin dark edge.
         // All gameplay state is deliberately hidden from the marker for this pass.
@@ -1354,12 +1394,12 @@ public void DrawSnapshot(
         AppendEllipse(
             fills, x, y,
             radius + pixel * 0.72f, radius + pixel * 0.72f,
-            0f, new Color(16, 21, 27, 255), segments);
+            0f, ApplyOpacity(new Color(16, 21, 27, 255), opacity), segments);
 
         AppendEllipse(
             fills, x, y,
             radius, radius,
-            0f, new Color(255, 255, 255, 255), segments);
+            0f, ApplyOpacity(new Color(255, 255, 255, 255), opacity), segments);
     }
 
     private static void AppendFactionHalo(
