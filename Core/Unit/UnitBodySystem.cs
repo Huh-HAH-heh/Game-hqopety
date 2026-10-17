@@ -158,10 +158,26 @@ public sealed class UnitBodySystem
             bool hasSavedPose = savedPose != null &&
                 !string.IsNullOrWhiteSpace(partIds[part]) &&
                 savedPose.TryGetValue(partIds[part]!, out savedTransform);
+            bool hasCustomPoseOffset = false;
             if (hasSavedPose)
             {
-                localPosition = savedTransform.LocalPosition;
-                localEuler = savedTransform.LocalEulerRotation;
+                if (savedTransform.IsOffset)
+                {
+                    localPosition += savedTransform.LocalPosition;
+                    localEuler += savedTransform.LocalEulerRotation;
+                    hasCustomPoseOffset =
+                        savedTransform.LocalPosition.LengthSquared() > 0.0000001f ||
+                        savedTransform.LocalEulerRotation.LengthSquared() > 0.0000001f;
+                }
+                else
+                {
+                    localPosition = savedTransform.LocalPosition;
+                    localEuler = savedTransform.LocalEulerRotation;
+                    hasCustomPoseOffset =
+                        Vector3.DistanceSquared(localPosition, localPositions[part]) > 0.0000001f ||
+                        Vector3.DistanceSquared(localEuler, new Vector3(
+                            localRotationsX[part], localRotationsY[part], localRotations[part])) > 0.0000001f;
+                }
             }
             else
             {
@@ -184,7 +200,7 @@ public sealed class UnitBodySystem
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start &&
                      (motions[part] is BodyPartMotion.SpinalChain or BodyPartMotion.PhysicalTail) &&
-                     !hasSavedPose)
+                     !hasCustomPoseOffset)
             {
                 UpdateChainLink(
                     part,
