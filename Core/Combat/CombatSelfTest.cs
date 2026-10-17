@@ -2052,6 +2052,9 @@ private static bool TestVisionDetectsRegionInsideRange()
             Vector3.UnitY,
             Vector3.UnitY);
 
+        float shooterHealthBefore = simulation.Health.OverallHitPoints[shooter.Index];
+        float targetHealthBefore = simulation.Health.OverallHitPoints[target.Index];
+
         int inventorySlot = simulation.AddInventoryItem(
             shooter,
             WeaponCatalog.AssaultRifle);
@@ -2097,7 +2100,9 @@ private static bool TestVisionDetectsRegionInsideRange()
         for (int i = 0; i < 4 && simulation.Projectiles.TotalHits == 0; i++)
             simulation.Update(worldMap, 0.05f);
 
-        return simulation.Projectiles.TotalHits > 0;
+        return simulation.Projectiles.TotalHits > 0 &&
+               simulation.Health.OverallHitPoints[target.Index] < targetHealthBefore &&
+               MathF.Abs(simulation.Health.OverallHitPoints[shooter.Index] - shooterHealthBefore) < 0.001f;
     }
 
     private static bool TestCombatLogPriorities()
