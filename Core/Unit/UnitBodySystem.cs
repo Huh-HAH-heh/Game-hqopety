@@ -179,11 +179,8 @@ public sealed class UnitBodySystem
                             localRotationsX[part], localRotationsY[part], localRotations[part])) > 0.0000001f;
                 }
             }
-            else
-            {
-                ApplyPosture(posture, roles[part], pivots[part],
-                    ref localPosition, ref localEuler.Z);
-            }
+            // No built-in sit/lie/crouch deformation: absent authored pose data
+            // means the original base-rig transforms remain unchanged.
 
             Vector3 origin = unitPositions[unit];
             Quaternion positionOrientation = bodyOrientation;
@@ -277,115 +274,6 @@ public sealed class UnitBodySystem
             worldScales[part] = BodyPartTransformMath.Project(
                 scales[part], worldOrientation, 0, 1).Scale;
             worldRotations[part] = worldRotation;
-        }
-    }
-
-    public static void ApplyProceduralPosture(
-        UnitPosture posture,
-        BodyPartRole role,
-        ref Vector3 localPosition,
-        ref Vector3 localEulerRotation)
-    {
-        float rotationZ = localEulerRotation.Z;
-        ApplyPosture(posture, role, BodyPartPivot.Center, ref localPosition, ref rotationZ);
-        localEulerRotation.Z = rotationZ;
-    }
-
-    private static void ApplyPosture(
-        UnitPosture posture,
-        BodyPartRole role,
-        BodyPartPivot pivot,
-        ref Vector3 localPosition,
-        ref float localRotation)
-    {
-        if (posture == UnitPosture.Standing)
-            return;
-
-        // Joint offsets remain untouched: children must stay on the exact
-        // endpoint of their parent. Only root attachment points and angles
-        // are adjusted for the pose.
-        if (posture == UnitPosture.Sitting)
-        {
-            switch (role)
-            {
-                case BodyPartRole.UpperArm:
-                    localPosition.Y *= 0.78f;
-                    localRotation += MathF.CopySign(0.10f, localRotation);
-                    break;
-
-                case BodyPartRole.Forearm:
-                    localRotation = 1.10f;
-                    break;
-
-                case BodyPartRole.Thigh:
-                    localPosition.X *= 0.82f;
-                    localPosition.Y *= 0.68f;
-                    localRotation -= MathF.CopySign(0.62f, localRotation);
-                    break;
-
-                case BodyPartRole.Shin:
-                    localRotation = 1.15f;
-                    break;
-
-                case BodyPartRole.Foot:
-                    localRotation += 0.18f;
-                    break;
-            }
-
-            return;
-        }
-
-        if (posture == UnitPosture.Crouching)
-        {
-            switch (role)
-            {
-                case BodyPartRole.UpperArm:
-                    localPosition.Y *= 0.82f;
-                    localRotation *= 0.84f;
-                    break;
-
-                case BodyPartRole.Forearm:
-                    localRotation = MathF.CopySign(2.20f, localRotation);
-                    break;
-
-                case BodyPartRole.Thigh:
-                    localPosition.X *= 1.05f;
-                    localPosition.Y *= 0.82f;
-                    localRotation -= MathF.Sign(localRotation) * 0.12f;
-                    break;
-
-                case BodyPartRole.Shin:
-                    localRotation = MathF.CopySign(0.45f, localRotation);
-                    break;
-            }
-
-            return;
-        }
-
-        // Prone is still an overhead silhouette: arms open out and the legs
-        // extend back. It never rotates the pawn into a side-on presentation.
-        switch (role)
-        {
-            case BodyPartRole.UpperArm:
-                localPosition.Y *= 1.12f;
-                localRotation = MathF.CopySign(
-                    MathF.Max(MathF.Abs(localRotation), 1.55f),
-                    localRotation);
-                break;
-
-            case BodyPartRole.Forearm:
-                localRotation = MathF.CopySign(1.80f, localRotation);
-                break;
-
-            case BodyPartRole.Thigh:
-                localPosition.X *= 1.08f;
-                localPosition.Y *= 1.18f;
-                localRotation = MathF.CopySign(MathF.PI - 0.12f, localRotation);
-                break;
-
-            case BodyPartRole.Shin:
-                localRotation *= 0.5f;
-                break;
         }
     }
 
