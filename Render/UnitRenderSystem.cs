@@ -432,16 +432,22 @@ public void DrawSnapshot(
 
             }
 
-            if ((position.X < minX || position.X > maxX ||
-                 position.Y < minY || position.Y > maxY) &&
-                !IsAnyBodyPartInView(
+            bool rootInView =
+                position.X >= minX && position.X <= maxX &&
+                position.Y >= minY && position.Y <= maxY;
+
+            // At macro zoom, individual limbs have no useful screen-space size.
+            // Don't scan every body part just to reject an off-screen unit.
+            if (!rootInView &&
+                (!showUnitDetails ||
+                 !IsAnyBodyPartInView(
                     bodyParts,
                     unit.BodyPartStart,
                     unit.BodyPartCount,
                     minX,
                     maxX,
                     minY,
-                    maxY))
+                    maxY)))
             {
                 continue;
             }
@@ -453,33 +459,46 @@ public void DrawSnapshot(
                 tilePixelSize,
                 screenScale);
 
-            int renderedParts = AppendBodyParts(
-                _vertices,
-                _bodyOutlines,
-                bodyParts,
-                unit.BodyPartStart,
-                unit.BodyPartCount,
-                unit.FactionTag,
-                isAlive,
-                tilePixelSize,
-                screenScale);
-
-            if (renderedParts == 0)
+            if (showUnitDetails)
             {
-                AppendUnitMarker(
+                int renderedParts = AppendBodyParts(
                     _vertices,
                     _bodyOutlines,
-                    _statusIcons,
+                    bodyParts,
+                    unit.BodyPartStart,
+                    unit.BodyPartCount,
+                    unit.FactionTag,
+                    isAlive,
+                    tilePixelSize,
+                    screenScale);
+
+                if (renderedParts == 0)
+                {
+                    AppendUnitMarker(
+                        _vertices,
+                        _bodyOutlines,
+                        _statusIcons,
+                        x,
+                        y,
+                        markerRadius,
+                        unit.HeadNormal,
+                        unit.FactionTag,
+                        isAlive,
+                        unit.HealthRatio,
+                        unit.Suppression,
+                        unit.SuppressionState,
+                        screenScale);
+                }
+            }
+            else
+            {
+                AppendLowDetailUnitMarker(
+                    _vertices,
                     x,
                     y,
                     markerRadius,
-                    unit.HeadNormal,
                     unit.FactionTag,
-                    isAlive,
-                    unit.HealthRatio,
-                    unit.Suppression,
-                    unit.SuppressionState,
-                    screenScale);
+                    isAlive);
             }
 
             if (!isAlive)
@@ -506,6 +525,14 @@ public void DrawSnapshot(
             for (int i = 0; i < aimRings.Length; i++)
             {
                 RenderAimRing aim = aimRings[i];
+
+                // Aim rings outside the camera never contribute visible pixels.
+                if (aim.AimPoint.X < minX || aim.AimPoint.X > maxX ||
+                    aim.AimPoint.Y < minY || aim.AimPoint.Y > maxY)
+                {
+                    continue;
+                }
+
                 float radius = tilePixelSize * (0.72f - 0.60f * aim.Progress);
                 byte alpha = (byte)Math.Clamp(
                     (int)(78f * (1f - aim.Progress) + 12f),
@@ -1253,6 +1280,41 @@ public void DrawSnapshot(
         return MathF.Max(
             2.0f / MathF.Max(0.001f, screenScale),
             MathF.Max(0.13f, footprint * 0.125f) * tilePixelSize);
+    }
+
+    private static void AppendLowDetailUnitMarker(
+        VertexArray vertices,
+        float x,
+        float y,
+        float radius,
+        ushort factionTag,
+        bool isAlive)
+    {
+        // A six-sided faction marker is enough when a full rig is sub-pixel.
+        // It replaces dozens of outlined limb primitives with six triangles.
+        Color color = GetBodyPartColor(
+            BodyPartRole.Torso,
+            factionTag,
+            isAlive);
+
+        const int segments = 6;
+        Vector2f center = new(x, y);
+
+        for (int i = 0; i < segments; i++)
+        {
+            float a0 = i * MathF.Tau / segments;
+            float a1 = (i + 1) * MathF.Tau / segments;
+            Vector2f p0 = new(
+                x + MathF.Cos(a0) * radius,
+                y + MathF.Sin(a0) * radius);
+            Vector2f p1 = new(
+                x + MathF.Cos(a1) * radius,
+                y + MathF.Sin(a1) * radius);
+
+            vertices.Append(new Vertex(center, color));
+            vertices.Append(new Vertex(p0, color));
+            vertices.Append(new Vertex(p1, color));
+        }
     }
 
     private static void AppendUnitMarker(
