@@ -8,7 +8,7 @@ using SFML.System;
 
 namespace RimClone.Render;
 
-public sealed class VisionTestScene
+public sealed class VisionTestScene : IDisposable
 {
     private const float BaseHeight = 10f;
     private const float FullWallHeight = 14f;
@@ -786,5 +786,10 @@ public sealed class VisionTestScene
                     minX,
                     minY),
                 color));
+    }
+
+    public void Dispose()
+    {
+        _obstacles.Dispose();
     }
 }
