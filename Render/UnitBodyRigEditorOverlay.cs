@@ -4823,10 +4823,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             {
                 _parts[i] = Copy(
                     part,
-                    localPosition: transform.LocalPosition,
-                    localRotation: transform.LocalEulerRotation.Z,
-                    localRotationX: transform.LocalEulerRotation.X,
-                    localRotationY: transform.LocalEulerRotation.Y);
+                    localPosition: transform.IsOffset
+                        ? part.LocalPosition + transform.LocalPosition
+                        : transform.LocalPosition,
+                    localRotation: transform.IsOffset
+                        ? part.LocalRotation + transform.LocalEulerRotation.Z
+                        : transform.LocalEulerRotation.Z,
+                    localRotationX: transform.IsOffset
+                        ? part.LocalRotationX + transform.LocalEulerRotation.X
+                        : transform.LocalEulerRotation.X,
+                    localRotationY: transform.IsOffset
+                        ? part.LocalRotationY + transform.LocalEulerRotation.Y
+                        : transform.LocalEulerRotation.Y);
                 continue;
             }
 
@@ -4859,7 +4867,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             return false;
 
         if (!UnitBodyPoseSettingsStore.Save(
-                _definition.Type, _selectedPose, _regionIds, _parts, out string path, out string error))
+                _definition.Type, _selectedPose, _regionIds, _parts, _poseBaseParts, out string path, out string error))
         {
             _status = $"Не удалось сохранить позу: {error}";
             return false;
