@@ -1617,45 +1617,80 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui(_showUnitSettings ? "К геометрии" : "Настройки юнита"))
         {
-            _showUnitSettings = !_showUnitSettings;
-            if (_showUnitSettings)
-                _showOrganSettings = _showTissueSettings = _showEquipmentSettings = false;
+            if (_editingPose)
+                _status = "Выйди из редактора поз перед изменением характеристик.";
+            else
+            {
+                _showUnitSettings = !_showUnitSettings;
+                if (_showUnitSettings)
+                    _showOrganSettings = _showTissueSettings = _showEquipmentSettings = false;
+            }
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui(_showOrganSettings ? "К геометрии" : "Органы"))
         {
-            _showOrganSettings = !_showOrganSettings;
-            if (_showOrganSettings)
-                _showUnitSettings = _showTissueSettings = _showEquipmentSettings = false;
+            if (_editingPose)
+                _status = "Выйди из редактора поз перед изменением органов.";
+            else
+            {
+                _showOrganSettings = !_showOrganSettings;
+                if (_showOrganSettings)
+                    _showUnitSettings = _showTissueSettings = _showEquipmentSettings = false;
+            }
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui(_showTissueSettings ? "К геометрии" : "Ткани / маркеры"))
         {
-            _showTissueSettings = !_showTissueSettings;
-            if (_showTissueSettings)
-                _showUnitSettings = _showOrganSettings = _showEquipmentSettings = false;
+            if (_editingPose)
+                _status = "Выйди из редактора поз перед изменением тканей и маркеров.";
+            else
+            {
+                _showTissueSettings = !_showTissueSettings;
+                if (_showTissueSettings)
+                    _showUnitSettings = _showOrganSettings = _showEquipmentSettings = false;
+            }
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui(_showEquipmentSettings ? "К геометрии" : "Снаряжение"))
         {
-            _showEquipmentSettings = !_showEquipmentSettings;
-            if (_showEquipmentSettings)
-                _showUnitSettings = _showOrganSettings = _showTissueSettings = false;
+            if (_editingPose)
+                _status = "Выйди из редактора поз перед изменением экипировки.";
+            else
+            {
+                _showEquipmentSettings = !_showEquipmentSettings;
+                if (_showEquipmentSettings)
+                    _showUnitSettings = _showOrganSettings = _showTissueSettings = false;
+            }
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui("По умолчанию"))
         {
-            if (_defaultParts.Length == _parts.Length)
-                Array.Copy(_defaultParts, _parts, _parts.Length);
-            _definition = CreateDefaultColonistDefinition();
-            RefreshProjectedGeometry();
-            _status = "Восстановлены базовые формы. Нажми «Сохранить», чтобы применить.";
+            if (_editingPose)
+            {
+                ResetCurrentPose();
+            }
+            else
+            {
+                if (_defaultParts.Length == _parts.Length)
+                    Array.Copy(_defaultParts, _parts, _parts.Length);
+                _definition = CreateDefaultColonistDefinition();
+                RefreshProjectedGeometry();
+                _status = "Восстановлены базовые формы. Нажми «Сохранить», чтобы применить.";
+            }
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui("Откатить"))
         {
-            SetRigData(_openedRegionIds, _openedParts, setDefaults: false, setOpenedSnapshot: false);
-            _status = "Возвращена конфигурация, с которой редактор был открыт.";
+            if (_editingPose)
+            {
+                LoadPoseForEditing(_selectedPose);
+                _status = $"Правки позы «{PostureLabel(_selectedPose)}» отменены.";
+            }
+            else
+            {
+                SetRigData(_openedRegionIds, _openedParts, setDefaults: false, setOpenedSnapshot: false);
+                _status = "Возвращена конфигурация, с которой редактор был открыт.";
+            }
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui("Закрыть")) Close();
