@@ -17,7 +17,7 @@ public sealed class UnitAiSystem
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
     private static readonly int MaxAiPlanningParallelism =
-        Math.Max(1, Environment.ProcessorCount - 1);
+        Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
     {
         MaxDegreeOfParallelism = MaxAiPlanningParallelism
