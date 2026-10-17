@@ -269,6 +269,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private BodyPartDefinition[] _parts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _defaultParts = Array.Empty<BodyPartDefinition>();
     private BodyPartDefinition[] _openedParts = Array.Empty<BodyPartDefinition>();
+    private string[] _poseBaseRegionIds = Array.Empty<string>();
+    private BodyPartDefinition[] _poseBaseParts = Array.Empty<BodyPartDefinition>();
+    private UnitPosture _selectedPose = UnitPosture.Sitting;
+    private bool _editingPose;
+    private bool _poseDirty;
     private UnitDefinition _definition = new(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f);
     private bool _editingProjectAsset;
     private string _projectUnitPath = string.Empty;
@@ -618,6 +623,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(UnitType.Colonist);
         _definition = archetype.Definition;
+        _editingPose = false;
+        _poseDirty = false;
+        _selectedPose = UnitPosture.Sitting;
+        _poseBaseRegionIds = Array.Empty<string>();
+        _poseBaseParts = Array.Empty<BodyPartDefinition>();
         _editingProjectAsset = false;
         _projectUnitPath = string.Empty;
         _projectUnitId = string.Empty;
@@ -676,16 +686,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _hasSurfaceSnapDirection = false;
         IsOpen = true;
 
-        bool clearedBindings = DetachAllParentsPreservingLayout();
+        // Preserve the authored joint hierarchy. Detaching every part here made
+        // rotations behave like loose shapes and silently rewrote the saved rig.
         _defaultParts = (BodyPartDefinition[])_parts.Clone();
         _openedRegionIds = (string[])_regionIds.Clone();
         _openedParts = (BodyPartDefinition[])_parts.Clone();
-        if (clearedBindings)
-            Save();
-
-        _status = clearedBindings
-            ? $"Удалены все привязки: {_parts.Length} независимых частей. Положение сохранено; риг записан в файлы игры."
-            : $"Загружено {_parts.Length} независимых частей. Родителей можно назначать инструментом справа.";
+        _poseBaseRegionIds = (string[])_regionIds.Clone();
+        _poseBaseParts = (BodyPartDefinition[])_parts.Clone();
+        _status = $"Загружено {_parts.Length} частей тела. Иерархия суставов сохранена.";
     }
 
     private bool SetRigData(
@@ -723,7 +731,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         UnitAnatomyProfile sourceAnatomy = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
 
         _regionIds = (string[])regionIds.Clone();
-        _parts = (BodyPartDefinition[])parts.Clone();
+        _parts = new BodyPartDefinition[parts.Length];
+        for (int i = 0; i < parts.Length; i++)
+            _parts[i] = parts[i].WithId(_regionIds[i]);
         _hitHalfHeights = new float[_regionIds.Length];
         _tissuesByRegion = new HitRegionPartBinding[_regionIds.Length][];
         _markersByRegion = new UnitAnatomyMarker[_regionIds.Length][];
@@ -781,6 +791,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _selectedMarker = 0;
         if (setDefaults || _defaultParts.Length != _parts.Length)
             _defaultParts = UnitBodyRigSettingsStore.GetDefaultBodyParts(_regionIds, _parts);
+        if (_defaultParts.Length == _regionIds.Length)
+        {
+            for (int i = 0; i < _defaultParts.Length; i++)
+                _defaultParts[i] = _defaultParts[i].WithId(_regionIds[i]);
+        }
         if (setOpenedSnapshot)
         {
             _openedRegionIds = (string[])_regionIds.Clone();
@@ -1644,6 +1659,34 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
         ImguiNative.igSameLine(0f, 5f);
         if (ButtonImGui("Закрыть")) Close();
+
+        ImguiNative.igNewLine();
+        if (ButtonImGui(_editingPose ? "Вернуться к ригу" : "Редактор поз"))
+            TogglePoseEditing();
+
+        if (_editingPose)
+        {
+            ImguiNative.igSameLine(0f, 8f);
+            TextImGui($"Поза: {PostureLabel(_selectedPose)}");
+            ImguiNative.igSameLine(0f, 8f);
+            if (ButtonImGui("Стоя")) SelectPose(UnitPosture.Standing);
+            ImguiNative.igSameLine(0f, 4f);
+            if (ButtonImGui("Сидя")) SelectPose(UnitPosture.Sitting);
+            ImguiNative.igSameLine(0f, 4f);
+            if (ButtonImGui("Лёжа")) SelectPose(UnitPosture.Lying);
+            ImguiNative.igSameLine(0f, 4f);
+            if (ButtonImGui("Присесть")) SelectPose(UnitPosture.Crouching);
+            ImguiNative.igSameLine(0f, 4f);
+            if (ButtonImGui("Сохранить позу")) SavePose();
+            ImguiNative.igSameLine(0f, 4f);
+            if (ButtonImGui("Сбросить позу")) ResetCurrentPose();
+        }
+        else
+        {
+            ImguiNative.igSameLine(0f, 8f);
+            TextImGui("Создавай отдельные позы; базовая геометрия рига останется неизменной.");
+        }
+
         ImguiNative.igEnd();
     }
 
@@ -1736,7 +1779,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
 
         BodyPartDefinition part = _parts[_selectedPart];
-        TextImGui("ПАРАМЕТРЫ ЧАСТИ");
+        TextImGui(_editingPose ? "ПАРАМЕТРЫ ПОЗЫ / СУСТАВА" : "ПАРАМЕТРЫ ЧАСТИ");
         ImguiNative.igSeparator();
         TextImGui(PartName(_regionIds[_selectedPart]));
         TextImGui($"Внутренний ID: {_regionIds[_selectedPart]}");
@@ -1775,6 +1818,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         };
         for (int i = 0; i < PropertyCount; i++)
         {
+            if (_editingPose && i is >= 3 and <= 5)
+                continue;
+
             PropertyInfo property = GetProperty(i);
             TextImGui(propertyNames[i]);
             float sliderValue = property.Value;
@@ -1788,6 +1834,17 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (ImguiNative.igInputFloat(
                 $"##propInput{i}", &inputValue, 0f, 0f, "%.4f", ImGuiInputTextFlags.None))
                 SetProperty(i, inputValue);
+        }
+
+        if (_editingPose)
+        {
+            TextImGui("Поза хранит локальные смещения и углы суставов. Размер, форма и иерархия берутся из базового рига.");
+            if (ButtonImGui("Центрировать часть (0,0,0)", _propertiesPanel.Size.X - 28f))
+                ResetSelectedPartToBodyCenter();
+            ImguiNative.igSeparator();
+            TextImGui(_status);
+            ImguiNative.igEnd();
+            return;
         }
 
         if (ImguiNative.igBeginCombo("Форма", _parts[_selectedPart].Primitive.ToString(), ImGuiComboFlags.None))
@@ -3069,7 +3126,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _panel.Position = new Vector2f(x, y);
         _panel.Size = new Vector2f(panelWidth, panelHeight);
         _header.Position = new Vector2f(x + 1f, y + 1f);
-        _header.Size = new Vector2f(panelWidth - 2f, 44f);
+        _header.Size = new Vector2f(panelWidth - 2f, 76f);
 
         // Compact the header on small windows instead of stacking captions over one another.
         _headerScale = Math.Clamp(panelWidth / 1180f, 0.65f, 1f);
@@ -3112,8 +3169,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _closeLabel.Position = new Vector2f(_closeButton.Position.X + (_closeButton.Size.X - _closeLabel.CharacterSize) * 0.5f, buttonY);
         }
 
-        float contentY = y + 54f;
-        float contentHeight = panelHeight - 104f;
+        float contentY = y + 86f;
+        float contentHeight = panelHeight - 136f;
         float listX = x + 10f;
         float listWidth = Math.Clamp(panelWidth * 0.18f, 140f, 188f);
         float propertiesWidth = Math.Clamp(panelWidth * 0.22f, 190f, 244f);
@@ -3583,6 +3640,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _parts[_selectedPart] = Copy(
             part,
             localPosition: part.LocalPosition + localDelta);
+        if (_editingPose)
+            _poseDirty = true;
         if (alignToSurface)
             AlignSelectedPartToSurfaceNormal(projection, surfaceNormal.X, surfaceNormal.Y);
         ApplyEnabledSymmetry(projection);
@@ -3645,6 +3704,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _parts[_selectedPart] = Copy(
             part,
             localPosition: part.LocalPosition + localDelta);
+        if (_editingPose)
+            _poseDirty = true;
         ApplyEnabledSymmetry();
         RefreshProjectedGeometry();
         _status = $"«{PartName(_regionIds[_selectedPart])}» перемещена в центр тела (0, 0, 0). Нажми Ctrl+S.";
@@ -4134,6 +4195,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void SetProperty(int index, float value)
     {
+        if (_editingPose && index is >= 3 and <= 5)
+        {
+            _status = "Размер частей меняется в базовом риге, не в режиме поз.";
+            return;
+        }
+
         BodyPartDefinition part = _parts[_selectedPart];
         NumericsVector3 position = part.LocalPosition;
         NumericsVector3 scale = part.Scale;
@@ -4176,6 +4243,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _parts[_selectedPart] = Copy(part, position, scale, rotation,
             localRotationX: rotationX, localRotationY: rotationY);
+        if (_editingPose)
+            _poseDirty = true;
         if (index is >= 3 and <= 5)
             ApplySizeSymmetry();
         ApplyEnabledSymmetry();
@@ -4546,6 +4615,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void Save()
     {
+        if (_editingPose)
+        {
+            SavePose();
+            return;
+        }
+
         if (_editingProjectAsset)
         {
             SaveProjectUnitFile(saveAs: false);
@@ -4565,8 +4640,139 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             (UnitStartingEquipment[])_startingEquipment.Clone());
     }
 
+    private void TogglePoseEditing()
+    {
+        if (!_editingPose)
+        {
+            _poseBaseRegionIds = (string[])_regionIds.Clone();
+            _poseBaseParts = (BodyPartDefinition[])_parts.Clone();
+            _showUnitSettings = _showOrganSettings = _showTissueSettings = _showEquipmentSettings = false;
+            _editingPose = true;
+            _poseDirty = false;
+            LoadPoseForEditing(_selectedPose);
+            _status = $"Редактируется поза «{PostureLabel(_selectedPose)}». Двигай и вращай части в проекциях или меняй локальные координаты.";
+            return;
+        }
+
+        if (_poseDirty && !SavePose())
+            return;
+
+        _editingPose = false;
+        _poseDirty = false;
+        SetRigData(_poseBaseRegionIds, _poseBaseParts, setDefaults: false, setOpenedSnapshot: false);
+        RefreshProjectedGeometry();
+        _status = "Возвращён базовый риг. Позы хранятся отдельно и не меняют геометрию.";
+    }
+
+    private void SelectPose(UnitPosture posture)
+    {
+        if (!_editingPose || _selectedPose == posture)
+            return;
+
+        if (_poseDirty && !SavePose())
+            return;
+
+        LoadPoseForEditing(posture);
+    }
+
+    private void LoadPoseForEditing(UnitPosture posture)
+    {
+        _selectedPose = posture;
+        string[] ids = _poseBaseRegionIds.Length == _regionIds.Length
+            ? _poseBaseRegionIds
+            : _regionIds;
+        BodyPartDefinition[] baseParts = _poseBaseParts.Length == _parts.Length
+            ? _poseBaseParts
+            : _parts;
+        _parts = (BodyPartDefinition[])baseParts.Clone();
+
+        var saved = UnitBodyPoseSettingsStore.GetTransforms(posture);
+        for (int i = 0; i < _parts.Length; i++)
+        {
+            BodyPartDefinition part = _parts[i].WithId(ids[i]);
+            if (saved != null && saved.TryGetValue(ids[i], out UnitBodyPoseTransform transform))
+            {
+                _parts[i] = Copy(
+                    part,
+                    localPosition: transform.LocalPosition,
+                    localRotation: transform.LocalEulerRotation.Z,
+                    localRotationX: transform.LocalEulerRotation.X,
+                    localRotationY: transform.LocalEulerRotation.Y);
+                continue;
+            }
+
+            if (posture != UnitPosture.Standing)
+            {
+                NumericsVector3 position = part.LocalPosition;
+                NumericsVector3 euler = part.LocalEulerRotation;
+                UnitBodySystem.ApplyProceduralPosture(posture, part.Role, ref position, ref euler);
+                _parts[i] = Copy(
+                    part,
+                    localPosition: position,
+                    localRotation: euler.Z,
+                    localRotationX: euler.X,
+                    localRotationY: euler.Y);
+            }
+            else
+            {
+                _parts[i] = part;
+            }
+        }
+
+        _poseDirty = false;
+        RefreshProjectedGeometry();
+        _status = $"Загружена поза «{PostureLabel(posture)}». Правки сохраняются отдельно от рига.";
+    }
+
+    private bool SavePose()
+    {
+        if (!_editingPose)
+            return false;
+
+        if (!UnitBodyPoseSettingsStore.Save(
+                _selectedPose, _regionIds, _parts, out string path, out string error))
+        {
+            _status = $"Не удалось сохранить позу: {error}";
+            return false;
+        }
+
+        _poseDirty = false;
+        _status = $"Поза «{PostureLabel(_selectedPose)}» сохранена: {path}";
+        return true;
+    }
+
+    private void ResetCurrentPose()
+    {
+        if (!_editingPose)
+            return;
+
+        if (!UnitBodyPoseSettingsStore.Reset(_selectedPose, out string path, out string error))
+        {
+            _status = $"Не удалось сбросить позу: {error}";
+            return;
+        }
+
+        LoadPoseForEditing(_selectedPose);
+        _status = $"Поза «{PostureLabel(_selectedPose)}» сброшена к процедурному значению. Файл: {path}";
+    }
+
+    private static string PostureLabel(UnitPosture posture) => posture switch
+    {
+        UnitPosture.Standing => "Стоя",
+        UnitPosture.Sitting => "Сидя",
+        UnitPosture.Lying => "Лёжа",
+        UnitPosture.Crouching => "Присесть",
+        _ => posture.ToString()
+    };
+
     private void CopySelectedPart()
     {
+        if (_editingPose)
+        {
+            _status = "В режиме поз нельзя менять состав рига.";
+            return;
+        }
+
         if (_parts.Length >= MaxParts)
         {
             _status = $"Достигнут предел в {MaxParts} частей тела.";
@@ -4586,6 +4792,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void AddRegion()
     {
+        if (_editingPose)
+        {
+            _status = "В режиме поз нельзя менять состав рига.";
+            return;
+        }
+
         if (_parts.Length >= MaxParts)
         {
             _status = $"Достигнут предел в {MaxParts} регионов.";
@@ -4611,6 +4823,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void AddAllPrimitiveExamples()
     {
+        if (_editingPose)
+        {
+            _status = "В режиме поз нельзя менять состав рига.";
+            return;
+        }
+
         if (_parts.Length + 3 > MaxParts)
         {
             _status = $"Для трёх примеров недостаточно места. Предел — {MaxParts} регионов.";
@@ -4673,6 +4891,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void RemoveSelectedCustomRegion()
     {
+        if (_editingPose)
+        {
+            _status = "В режиме поз нельзя менять состав рига.";
+            return;
+        }
+
         if (_selectedPart < 0 || _selectedPart >= _parts.Length ||
             !_regionIds[_selectedPart].StartsWith("custom.", StringComparison.Ordinal))
         {
@@ -5011,6 +5235,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void LoadRigFromDialog()
     {
+        if (_editingPose)
+        {
+            _status = "Сначала вернись к базовому ригу, затем загружай файл геометрии.";
+            return;
+        }
+
         string? path = PickRigFile(save: false);
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -5053,6 +5283,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private void ExportRigFromDialog()
     {
+        if (_editingPose)
+        {
+            _status = "Режим поз экспортирует только суставные трансформы через «Сохранить позу».";
+            return;
+        }
+
         string? path = PickRigFile(save: true);
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -5204,7 +5440,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             localRotationX: localRotationX ?? original.LocalRotationX,
             localRotationY: localRotationY ?? original.LocalRotationY,
             symmetryPartnerId: symmetryPartnerId ?? original.SymmetryPartnerId,
-            displayName: displayName ?? original.DisplayName);
+            displayName: displayName ?? original.DisplayName,
+            id: original.Id);
 
     private static ProjectedPart Project(
         BodyPartDefinition part,
