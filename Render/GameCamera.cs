@@ -105,6 +105,19 @@ public sealed class GameCamera
             newZoom;
     }
 
+    public void PanByPixels(
+        Vector2f pixelDelta,
+        float viewportWidth,
+        float viewportHeight)
+    {
+        if (viewportWidth <= 0f || viewportHeight <= 0f)
+            return;
+
+        _targetPosition.X -= pixelDelta.X * _view.Size.X / viewportWidth;
+        _targetPosition.Y -= pixelDelta.Y * _view.Size.Y / viewportHeight;
+        _view.Center = _targetPosition;
+    }
+
     public void Update(
         Vector2 moveDirection,
         float deltaTime)
