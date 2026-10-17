@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using Core.Items;
 using Core.Unit;
 using SFML.Graphics;
@@ -40,10 +41,22 @@ public sealed class UnitCardOverlay : IDisposable
         OutlineThickness = 1f
     };
 
+    private readonly RectangleShape _copyButton = new(new Vector2f(34f, 20f))
+    {
+        FillColor = new Color(38, 47, 59, 220),
+        OutlineColor = new Color(89, 105, 126, 120),
+        OutlineThickness = 1f
+    };
+
     private readonly Font? _font;
     private readonly Text? _title;
     private readonly Text? _closeLabel;
+    private readonly Text? _copyLabel;
     private readonly Text? _footer;
+
+    private RenderUnitState _lastUnit;
+    private UnitCardDetailsSnapshot? _lastDetails;
+    private bool _hasLastUnit;
     private readonly Text?[] _lineTexts = new Text?[MaxVisibleLines];
 
     private int _scrollOffset;
@@ -70,6 +83,11 @@ public sealed class UnitCardOverlay : IDisposable
             FillColor = new Color(225, 232, 241)
         };
 
+        _copyLabel = new Text(_font, "коп.", 9)
+        {
+            FillColor = new Color(164, 177, 194)
+        };
+
         _footer = new Text(_font, "Колесо мыши — прокрутка   •   Esc — закрыть", 10)
         {
             FillColor = new Color(143, 155, 171)
@@ -88,6 +106,8 @@ public sealed class UnitCardOverlay : IDisposable
     {
         IsOpen = true;
         _scrollOffset = 0;
+        if (_copyLabel != null)
+            _copyLabel.DisplayedString = "коп.";
     }
 
     public void Close() => IsOpen = false;
@@ -96,6 +116,23 @@ public sealed class UnitCardOverlay : IDisposable
     {
         if (!IsOpen || !_panel.GetGlobalBounds().Contains(position))
             return false;
+
+        if (_copyButton.GetGlobalBounds().Contains(position))
+        {
+            if (_hasLastUnit && _copyLabel != null)
+            {
+                List<CardLine> lines = BuildLines(_lastUnit, _lastDetails);
+                StringBuilder text = new(2048);
+
+                for (int i = 0; i < lines.Count; i++)
+                    text.AppendLine(lines[i].Text);
+
+                Clipboard.Contents = text.ToString();
+                _copyLabel.DisplayedString = "OK";
+            }
+
+            return true;
+        }
 
         if (_closeButton.GetGlobalBounds().Contains(position))
             Close();
@@ -123,6 +160,9 @@ public sealed class UnitCardOverlay : IDisposable
             return;
 
         Layout(windowWidth, windowHeight);
+        _lastUnit = unit;
+        _lastDetails = details;
+        _hasLastUnit = true;
         List<CardLine> lines = BuildLines(unit, details);
         _lineCount = lines.Count;
         _visibleLines = Math.Min(
@@ -136,7 +176,11 @@ public sealed class UnitCardOverlay : IDisposable
         window.Draw(_panel);
         window.Draw(_header);
         window.Draw(_accent);
+        window.Draw(_copyButton);
         window.Draw(_closeButton);
+
+        if (_copyLabel != null)
+            window.Draw(_copyLabel);
 
         if (_title != null)
         {
@@ -206,6 +250,10 @@ public sealed class UnitCardOverlay : IDisposable
         if (_title != null)
             _title.Position = new Vector2f(x + 12f, y + 10f);
 
+        if (_copyLabel != null)
+            _copyLabel.Position = new Vector2f(x + Width - 73f, y + 12f);
+
+        _copyButton.Position = new Vector2f(x + Width - 78f, y + 9f);
         if (_closeLabel != null)
             _closeLabel.Position = new Vector2f(x + Width - 27f, y + 4f);
     }
@@ -396,12 +444,14 @@ public sealed class UnitCardOverlay : IDisposable
 
         _title?.Dispose();
         _closeLabel?.Dispose();
+        _copyLabel?.Dispose();
         _footer?.Dispose();
         _font?.Dispose();
         _panel.Dispose();
         _header.Dispose();
         _accent.Dispose();
         _closeButton.Dispose();
+        _copyButton.Dispose();
     }
 
     private readonly record struct CardLine(string Text, bool IsHeader);
