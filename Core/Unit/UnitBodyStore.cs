@@ -12,6 +12,7 @@ public sealed class UnitBodyStore
     private float[] _tailAngle;
     private bool[] _tailInitialized;
     private Vector3[] _scale;
+    private string?[] _partId;
 
     private float[] _localRotationX;
     private float[] _localRotationY;
@@ -51,6 +52,8 @@ public sealed class UnitBodyStore
 
     public Vector3[] Scale =>
         _scale;
+
+    public string?[] PartId => _partId;
 
     public float[] LocalRotationX => _localRotationX;
     public float[] LocalRotationY => _localRotationY;
@@ -96,6 +99,7 @@ public sealed class UnitBodyStore
         _tailAngle = new float[initialCapacity];
         _tailInitialized = new bool[initialCapacity];
         _scale = new Vector3[initialCapacity];
+        _partId = new string?[initialCapacity];
 
         _localRotationX = new float[initialCapacity];
         _localRotationY = new float[initialCapacity];
@@ -160,7 +164,8 @@ public sealed class UnitBodyStore
                 part.Motion,
                 part.Anchor,
                 part.Role,
-                part.Pivot);
+                part.Pivot,
+                part.Id);
         }
 
         return new BodyHandle(start, parts.Length);
@@ -201,6 +206,7 @@ public sealed class UnitBodyStore
             _anchor[index] = part.Anchor;
             _role[index] = part.Role;
             _pivot[index] = part.Pivot;
+            _partId[index] = part.Id;
             _worldOrientation[index] = Quaternion.Identity;
             _worldScale[index] = part.Scale;
             _tailInitialized[index] = false;
@@ -305,7 +311,8 @@ public sealed class UnitBodyStore
         BodyPartMotion motion,
         BodyPartAnchor anchor,
         BodyPartRole role,
-        BodyPartPivot pivot)
+        BodyPartPivot pivot,
+        string? partId)
     {
         int index = _writeIndex++;
 
@@ -334,6 +341,7 @@ public sealed class UnitBodyStore
         _anchor[index] = anchor;
         _role[index] = role;
         _pivot[index] = pivot;
+        _partId[index] = partId;
     }
 
     private void EnsureCapacityAt(
@@ -374,6 +382,8 @@ public sealed class UnitBodyStore
         Array.Resize(
             ref _scale,
             newCapacity);
+
+        Array.Resize(ref _partId, newCapacity);
 
         Array.Resize(ref _localRotationX, newCapacity);
         Array.Resize(ref _localRotationY, newCapacity);
