@@ -272,6 +272,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     private BodyPartDefinition[] _openedParts = Array.Empty<BodyPartDefinition>();
     private string[] _poseBaseRegionIds = Array.Empty<string>();
     private BodyPartDefinition[] _poseBaseParts = Array.Empty<BodyPartDefinition>();
+    private string[] _poseOriginRegionIds = Array.Empty<string>();
+    private BodyPartDefinition[] _poseOriginParts = Array.Empty<BodyPartDefinition>();
+    private BodyPartDefinition[] _poseOriginDefaultParts = Array.Empty<BodyPartDefinition>();
+    private UnitDefinition _poseOriginDefinition = new(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f);
+    private float[] _poseOriginHitHalfHeights = Array.Empty<float>();
+    private HitRegionPartBinding[][] _poseOriginTissues = Array.Empty<HitRegionPartBinding[]>();
+    private UnitAnatomyMarker[][] _poseOriginMarkers = Array.Empty<UnitAnatomyMarker[]>();
+    private UnitAnatomyVolume[] _poseOriginOrgans = Array.Empty<UnitAnatomyVolume>();
+    private UnitStartingEquipment[] _poseOriginEquipment = Array.Empty<UnitStartingEquipment>();
     private UnitPosture _selectedPose = UnitPosture.Sitting;
     private bool _editingPose;
     private bool _poseDirty;
@@ -629,6 +638,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _selectedPose = UnitPosture.Sitting;
         _poseBaseRegionIds = Array.Empty<string>();
         _poseBaseParts = Array.Empty<BodyPartDefinition>();
+        _poseOriginRegionIds = Array.Empty<string>();
+        _poseOriginParts = Array.Empty<BodyPartDefinition>();
+        _poseOriginDefaultParts = Array.Empty<BodyPartDefinition>();
+        _poseOriginHitHalfHeights = Array.Empty<float>();
+        _poseOriginTissues = Array.Empty<HitRegionPartBinding[]>();
+        _poseOriginMarkers = Array.Empty<UnitAnatomyMarker[]>();
+        _poseOriginOrgans = Array.Empty<UnitAnatomyVolume>();
+        _poseOriginEquipment = Array.Empty<UnitStartingEquipment>();
         _editingProjectAsset = false;
         _projectUnitPath = string.Empty;
         _projectUnitId = string.Empty;
@@ -1613,7 +1630,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse;
         BeginImGuiWindow("##BodyRigToolbar", _header.Position, _header.Size, flags);
-        TextImGui("КОНСТРУКТОР ТЕЛА КОЛОНИСТА");
+        TextImGui(_editingPose
+            ? $"РЕДАКТОР ПОЗ — {UnitTypeLabel(_definition.Type).ToUpperInvariant()}"
+            : "КОНСТРУКТОР ТЕЛА КОЛОНИСТА");
         ImguiNative.igSameLine(265f, 6f);
         if (ButtonImGui("Загрузить")) LoadRigFromDialog();
         ImguiNative.igSameLine(0f, 5f);
@@ -1707,6 +1726,20 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_editingPose)
         {
+            ImguiNative.igSameLine(0f, 8f);
+            if (ImguiNative.igBeginCombo("Тип юнита", UnitTypeLabel(_definition.Type), ImGuiComboFlags.None))
+            {
+                foreach (UnitType unitType in Enum.GetValues<UnitType>())
+                {
+                    bool selected = _definition.Type == unitType;
+                    if (ImguiNative.igSelectable_Bool(
+                            UnitTypeLabel(unitType), selected, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 0f)))
+                    {
+                        SelectPoseUnitType(unitType);
+                    }
+                }
+                ImguiNative.igEndCombo();
+            }
             ImguiNative.igSameLine(0f, 8f);
             TextImGui($"Поза: {PostureLabel(_selectedPose)}");
             ImguiNative.igSameLine(0f, 8f);
@@ -4685,6 +4718,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         if (!_editingPose)
         {
+            _poseOriginRegionIds = (string[])_regionIds.Clone();
+            _poseOriginParts = (BodyPartDefinition[])_parts.Clone();
+            _poseOriginDefaultParts = (BodyPartDefinition[])_defaultParts.Clone();
+            _poseOriginDefinition = _definition;
+            _poseOriginHitHalfHeights = (float[])_hitHalfHeights.Clone();
+            _poseOriginTissues = CloneRows(_tissuesByRegion);
+            _poseOriginMarkers = CloneRows(_markersByRegion);
+            _poseOriginOrgans = (UnitAnatomyVolume[])_organs.Clone();
+            _poseOriginEquipment = (UnitStartingEquipment[])_startingEquipment.Clone();
             _poseBaseRegionIds = (string[])_regionIds.Clone();
             _poseBaseParts = (BodyPartDefinition[])_parts.Clone();
             _showUnitSettings = _showOrganSettings = _showTissueSettings = _showEquipmentSettings = false;
@@ -4700,10 +4742,56 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         _editingPose = false;
         _poseDirty = false;
-        SetRigData(_poseBaseRegionIds, _poseBaseParts, setDefaults: false, setOpenedSnapshot: false);
+        SetRigData(_poseOriginRegionIds, _poseOriginParts, setDefaults: false, setOpenedSnapshot: false);
+        _definition = _poseOriginDefinition;
+        _defaultParts = (BodyPartDefinition[])_poseOriginDefaultParts.Clone();
+        _hitHalfHeights = (float[])_poseOriginHitHalfHeights.Clone();
+        _tissuesByRegion = CloneRows(_poseOriginTissues);
+        _markersByRegion = CloneRows(_poseOriginMarkers);
+        _organs = (UnitAnatomyVolume[])_poseOriginOrgans.Clone();
+        _startingEquipment = (UnitStartingEquipment[])_poseOriginEquipment.Clone();
         RefreshProjectedGeometry();
-        _status = "Возвращён базовый риг. Позы хранятся отдельно и не меняют геометрию.";
+        _status = "Возвращён исходный риг редактора. Позы сохраняются отдельно для выбранного типа юнита.";
     }
+
+    private void SelectPoseUnitType(UnitType unitType)
+    {
+        if (!_editingPose || _definition.Type == unitType)
+            return;
+
+        if (_poseDirty && !SavePose())
+            return;
+
+        UnitArchetypeProfile archetype = UnitAnatomyCatalog.Get(unitType);
+        UnitAnatomyProfile anatomy = archetype.Anatomy;
+        ReadOnlySpan<UnitAnatomyNode> nodes = anatomy.Nodes;
+        if (!anatomy.HasSharedShapes || nodes.Length == 0 || nodes.Length > MaxParts)
+        {
+            _status = $"Для типа «{UnitTypeLabel(unitType)}» нет редактируемого рига (1–{MaxParts} частей).";
+            return;
+        }
+
+        var ids = new string[nodes.Length];
+        for (int i = 0; i < nodes.Length; i++)
+            ids[i] = nodes[i].Id;
+
+        if (!SetRigData(ids, anatomy.BodyParts.ToArray(), setDefaults: true, setOpenedSnapshot: false))
+            return;
+
+        _definition = archetype.Definition;
+        _poseBaseRegionIds = (string[])_regionIds.Clone();
+        _poseBaseParts = (BodyPartDefinition[])_parts.Clone();
+        LoadPoseForEditing(_selectedPose);
+        _status = $"Выбран тип «{UnitTypeLabel(unitType)}». Настрой позу «{PostureLabel(_selectedPose)}» и сохрани её.";
+    }
+
+    private static string UnitTypeLabel(UnitType unitType) => unitType switch
+    {
+        UnitType.Colonist => "Колонист",
+        UnitType.Greenbob => "Гринбоб",
+        UnitType.SegmentedMonster => "Сегментированное существо",
+        _ => $"Тип {((ushort)unitType)}"
+    };
 
     private void SelectPose(UnitPosture posture)
     {
