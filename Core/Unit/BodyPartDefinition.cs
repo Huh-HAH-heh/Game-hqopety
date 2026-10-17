@@ -43,6 +43,7 @@ public readonly struct BodyPartDefinition
     public BodyPartPivot Pivot { get; }
     public string? SymmetryPartnerId { get; }
     public string? DisplayName { get; }
+    public string? Id { get; }
 
     public BodyPartDefinition(
         Vector3 localPosition,
@@ -58,7 +59,8 @@ public readonly struct BodyPartDefinition
         float localRotationX = 0f,
         float localRotationY = 0f,
         string? symmetryPartnerId = null,
-        string? displayName = null)
+        string? displayName = null,
+        string? id = null)
     {
         LocalPosition = localPosition;
         Scale = scale;
@@ -74,5 +76,11 @@ public readonly struct BodyPartDefinition
         Pivot = pivot;
         SymmetryPartnerId = symmetryPartnerId;
         DisplayName = displayName;
+        Id = id;
     }
+
+    public BodyPartDefinition WithId(string? id) => new(
+        LocalPosition, Scale, Primitive,
+        ParentIndex, LocalRotation, Motion, FollowDistance, Anchor, Role, Pivot,
+        LocalRotationX, LocalRotationY, SymmetryPartnerId, DisplayName, id);
 }
