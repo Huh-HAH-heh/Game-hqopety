@@ -151,9 +151,10 @@ public sealed class UnitBodySystem
                 localRotationsX[part],
                 localRotationsY[part],
                 localRotations[part]);
+            UnitBodyPoseTransform savedTransform = default;
             bool hasSavedPose = savedPose != null &&
                 !string.IsNullOrWhiteSpace(partIds[part]) &&
-                savedPose.TryGetValue(partIds[part]!, out UnitBodyPoseTransform savedTransform);
+                savedPose.TryGetValue(partIds[part]!, out savedTransform);
             if (hasSavedPose)
             {
                 localPosition = savedTransform.LocalPosition;
@@ -179,7 +180,7 @@ public sealed class UnitBodySystem
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start &&
-                     motions[part] is BodyPartMotion.SpinalChain or BodyPartMotion.PhysicalTail &&
+                     (motions[part] is BodyPartMotion.SpinalChain or BodyPartMotion.PhysicalTail) &&
                      !hasSavedPose)
             {
                 UpdateChainLink(
