@@ -9,7 +9,8 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    private const int InitialUnitsPerFaction = 400;
+    // Starts at 1,600 active units (800 per faction); F8 cycles 80/400/800 per side.
+    private const int InitialUnitsPerFaction = 800;
     private const int Columns = 40;
     private const float FormationSpacing = 2.5f;
 
@@ -17,7 +18,7 @@ public sealed class LongRangeCombatTestScene
     private int UnitsPerFaction => _unitsPerFaction;
     private int TotalUnits => _unitsPerFaction * 2;
     private int Rows => _unitsPerFaction / Columns;
-    private const float CombatDistance = 130f;
+    private const float CombatDistance = 200f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
     private const float AdvanceDistance = 25f;
@@ -159,7 +160,7 @@ public sealed class LongRangeCombatTestScene
             $"FIREFIGHT {TotalUnits} | " +
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
-            $"Initial gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
+            $"Initial center gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
             $"Fire mode {(simulation.AI.Enabled ? "AI" : "scripted volley")} | " +
             $"Vision {(simulation.VisionEnabled ? "ON" : "OFF")} | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
