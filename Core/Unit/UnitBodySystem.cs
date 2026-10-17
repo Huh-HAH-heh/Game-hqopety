@@ -51,6 +51,11 @@ public sealed class UnitBodySystem
             if (count <= 0)
                 continue;
 
+            // Movement wins over a stationary/combat pose in the same frame.
+            Vector3 velocity = velocities[unit];
+            if (velocity.X * velocity.X + velocity.Y * velocity.Y > 0.04f)
+                postures[unit] = UnitPosture.Standing;
+
             UpdateBody(
                 unit,
                 start,
@@ -206,7 +211,7 @@ public sealed class UnitBodySystem
 
             // Preserve unwrapped angular accumulation for a truly planar chain.
             // Quaternion projection returns an equivalent angle in [-PI, PI], which
-            // is fine for rendering but causes discontinuities in gait/follower math.
+            // is fine for rendering but causes discontinuities in chain/follower math.
             if (MathF.Abs(localEuler.X) < 0.0001f &&
                 MathF.Abs(localEuler.Y) < 0.0001f &&
                 MathF.Abs(partBaseOrientation.X) < 0.0001f &&
