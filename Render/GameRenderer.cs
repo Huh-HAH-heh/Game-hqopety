@@ -209,16 +209,33 @@ public sealed class GameRenderer
             }
             finally
             {
+                // Release the last immutable frame and queued closures explicitly.
+                // If the renderer instance is retained, these references must not
+                // keep hundreds of units' snapshot arrays alive after shutdown.
+                while (_simulationCommands.TryDequeue(out _))
+                {
+                }
+
+                Volatile.Write(ref _latestSnapshot, null);
+                Volatile.Write(ref _latestUnitCardDetails, null);
+                _selectedUnits.Clear();
+                _selectedUnit = default;
+
                 DisposeSafely(_mapRenderer);
                 DisposeSafely(_unitRenderer);
                 DisposeSafely(_projectileRenderer);
                 DisposeSafely(_visionTestScene);
                 DisposeSafely(_camera);
                 DisposeSafely(_gameMenuOverlay);
+                _gameMenuOverlay = null;
                 DisposeSafely(_contextMenuOverlay);
+                _contextMenuOverlay = null;
                 DisposeSafely(_unitCardOverlay);
+                _unitCardOverlay = null;
                 DisposeSafely(_combatStatusOverlay);
+                _combatStatusOverlay = null;
                 DisposeSafely(_uiView);
+                _uiView = null;
                 DisposeSafely(_selectionBox);
 
                 if (_window != null)
