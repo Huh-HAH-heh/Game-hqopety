@@ -226,6 +226,9 @@ public sealed class GameRenderer
         _unitGroupCardOverlay?.Dispose();
         _bodyRigEditorOverlay?.Dispose();
         _combatStatusOverlay?.Dispose();
+        _unitRenderer.Dispose();
+        _visionTestScene.Dispose();
+        _camera.Dispose();
         _uiView?.Dispose();
         _selectionBox.Dispose();
         _window.Close();
