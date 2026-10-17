@@ -42,6 +42,8 @@ public static class CombatSelfTest
         RunTest("Vision: candidate work scales with living units", TestVisionWorkScalesWithLivingUnits, ref passed, ref failed);
         RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
+        RunTest("Terrain: solid height columns stay compact and materialize on edit", TestCompactSolidHeightColumns, ref passed, ref failed);
+        RunTest("Water: dry maps do not allocate dense vertical storage", TestSparseWaterLayerStorage, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);
         RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
@@ -1140,6 +1142,89 @@ public static class CombatSelfTest
         before = GC.GetAllocatedBytesForCurrentThread();
         _ = worldMap.GetTileRanges(5, 5);
         return GC.GetAllocatedBytesForCurrentThread() == before;
+    }
+
+    private static bool TestCompactSolidHeightColumns()
+    {
+        WorldMap worldMap = new WorldMap(regionsX: 1, regionsY: 1);
+        worldMap.GetOrCreateRegion(0, 0);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int y = 0; y < TerrainRegion.TilesPerSide; y++)
+        {
+            for (int x = 0; x < TerrainRegion.TilesPerSide; x++)
+                worldMap.SetSolidHeight(x, y, 100, 1);
+        }
+        long generationBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        if (generationBytes > 4096 ||
+            worldMap.GetMaterialId(5, 5, 0) != 1 ||
+            worldMap.GetMaterialId(5, 5, 99) != 1 ||
+            worldMap.GetMaterialId(5, 5, 100) != 0 ||
+            worldMap.GetLayer(50).GetMaterialId(5, 5) != 1 ||
+            worldMap.GetSurfaceLayer(5, 5) != 99)
+        {
+            return false;
+        }
+
+        // Editing a single voxel must first materialize the compact column.
+        worldMap.SetMaterialId(5, 5, 50, 2);
+        if (worldMap.GetMaterialId(5, 5, 49) != 1 ||
+            worldMap.GetMaterialId(5, 5, 50) != 2 ||
+            worldMap.GetMaterialId(5, 5, 99) != 1 ||
+            worldMap.GetMaterialId(5, 5, 100) != 0)
+        {
+            return false;
+        }
+
+        // Replacing that edited column with a simple height must clear stale upper voxels.
+        worldMap.SetSolidHeight(5, 5, 30, 1);
+        return worldMap.GetMaterialId(5, 5, 29) == 1 &&
+               worldMap.GetMaterialId(5, 5, 30) == 0 &&
+               worldMap.GetLayer(30).GetMaterialId(5, 5) == 0 &&
+               worldMap.GetSurfaceLayer(5, 5) == 29;
+    }
+
+    private static bool TestSparseWaterLayerStorage()
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        WaterLayer water = new WaterLayer(768, 768, 320);
+        long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        if (allocatedBytes > 16L * 1024 * 1024 ||
+            water.AllocatedColumnCount != 0 ||
+            water.GetAmount(5, 7, 3) != 0 ||
+            water.GetTopLevel(5, 7) != -1)
+        {
+            return false;
+        }
+
+        water.SetAmount(5, 7, 3, 100);
+        water.SetAmount(5, 7, 9, 50);
+        if (water.AllocatedColumnCount != 1 ||
+            water.GetAmount(5, 7, 3) != 100 ||
+            water.GetTopLevel(5, 7) != 9)
+        {
+            return false;
+        }
+
+        water.SetAmount(5, 7, 9, 0);
+        if (water.GetTopLevel(5, 7) != 3)
+            return false;
+
+        water.AddAmount(5, 7, 3, -100);
+        if (water.AllocatedColumnCount != 0 || water.GetTopLevel(5, 7) != -1)
+            return false;
+
+        water.AddAmount(2, 4, 1, 12);
+        water.SetAmount(8, 4, 2, 7);
+        water.Clear();
+
+        return water.AllocatedColumnCount == 0 &&
+               water.GetAmount(2, 4, 1) == 0 &&
+               water.GetAmount(8, 4, 2) == 0 &&
+               water.GetTopLevel(2, 4) == -1 &&
+               water.GetTopLevel(8, 4) == -1;
     }
 
     private static bool TestVisionBoundedCandidateSampling()

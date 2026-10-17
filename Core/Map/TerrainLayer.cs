@@ -12,6 +12,7 @@ public sealed class TerrainLayer
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly int _regionsX;
     private readonly int _regionsY;
+    private readonly WorldMap? _ownerWorldMap;
 
     public int ZLevel { get; }
     public int Width { get; }
@@ -43,7 +44,8 @@ public sealed class TerrainLayer
         int height,
         int regionsX,
         int regionsY,
-        TerrainTileRegion?[]? sharedTileRegions)
+        TerrainTileRegion?[]? sharedTileRegions,
+        WorldMap? ownerWorldMap = null)
     {
         if (zLevel < 0)
             throw new ArgumentOutOfRangeException(nameof(zLevel));
@@ -91,6 +93,7 @@ public sealed class TerrainLayer
         Height = height;
         _regionsX = regionsX;
         _regionsY = regionsY;
+        _ownerWorldMap = ownerWorldMap;
 
         // Voxel chunks are explicit and dense: one region for every
         // XY chunk on every Z level. No sparse or lazy voxel arrays.
@@ -126,9 +129,10 @@ public sealed class TerrainLayer
         if (!IsInside(x, y))
             return 0;
 
-        return GetRegionForCell(x, y).GetMaterialId(
-            x % TerrainRegion.TilesPerSide,
-            y % TerrainRegion.TilesPerSide);
+        if (_ownerWorldMap != null)
+            return _ownerWorldMap.GetMaterialId(x, y, ZLevel);
+
+        return GetStoredMaterialId(x, y);
     }
 
     internal void SetMaterialId(
@@ -151,9 +155,16 @@ public sealed class TerrainLayer
         if (index < 0 || index >= checked(Width * Height))
             throw new IndexOutOfRangeException();
 
-        return GetMaterialId(
+        return GetStoredMaterialId(
             index % Width,
             index / Width);
+    }
+
+    private ushort GetStoredMaterialId(int x, int y)
+    {
+        return GetRegionForCell(x, y).GetMaterialId(
+            x % TerrainRegion.TilesPerSide,
+            y % TerrainRegion.TilesPerSide);
     }
 
     internal void SetMaterialIdAtIndex(

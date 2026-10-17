@@ -88,7 +88,7 @@ public sealed class GameRenderer
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
     private bool _showVisionDebug;
-    private bool _massCombatMode;
+    private volatile bool _massCombatMode;
     private volatile bool _simulationPaused;
     private bool _terrainStressMode;
     private bool _showCombatTracers = true;
@@ -116,6 +116,13 @@ public sealed class GameRenderer
     private long _allocatedBytes;
     private long _lastAllocatedBytesSample;
     private double _allocatedBytesPerSecond;
+    private double _lastRenderMilliseconds;
+    private double _lastTerrainDrawMilliseconds;
+    private double _lastUnitDrawMilliseconds;
+    private double _lastProjectileDrawMilliseconds;
+    private double _lastUiDrawMilliseconds;
+    private bool _massCombatWorldReady;
+    private bool _startupMassCombatSelectionApplied;
     private float _titleTimer;
     private string _windowTitle = "RimClone";
     private Thread? _simulationThread;
@@ -173,9 +180,10 @@ public sealed class GameRenderer
         _unitSimulation.VisionEnabled = true;
         _showVisionDebug = false;
 
-        // Launch directly into the 800-unit navigation/combat test.
+        // Show the window before constructing the 1,600-unit combat scene.
+        // The simulation thread builds the scene after the first frame.
         _terrainStressMode = false;
-        EnterMassCombatMode();
+        _massCombatMode = true;
         for (int i = 0; i < 3; i++)
             _camera.HandleZoom(-1f);
 
@@ -248,6 +256,17 @@ public sealed class GameRenderer
         float rawDeltaTime)
     {
         _input.Update();
+
+        if (_massCombatMode &&
+            !_startupMassCombatSelectionApplied &&
+            Volatile.Read(ref _massCombatWorldReady))
+        {
+            _startupMassCombatSelectionApplied = true;
+            UnitId firstUnit = _massCombatTestScene.FirstUnit;
+            if (!_selectedUnit.IsValid && firstUnit.IsValid)
+                SetSelectedUnit(firstUnit);
+            _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
+        }
 
         rawDeltaTime = MathF.Max(0f, rawDeltaTime);
         _perfTimer += rawDeltaTime;
@@ -375,7 +394,10 @@ public sealed class GameRenderer
                 $"Events/Round={_combatHitEventsPerRound:0.00} TotalHitEvents={totalHits} Health={healthMs:0.0}ms " +
                 $"Nav={routesBuilt} built/{routesFailed} failed/{navSearches} A*/{navCells:N0} nodes/{navMs:0.0}ms " +
                 $"NavGrid={navGridMs:0.0}ms RouteReuse={routesReused}/{routeTrafficCells:N0} " +
-                $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} Chunks={_mapRenderer.TerrainChunkCacheCount} " +
+                $"Render={_lastRenderMilliseconds:0.0}ms TerrainDraw={_lastTerrainDrawMilliseconds:0.0}ms " +
+                 $"UnitsDraw={_lastUnitDrawMilliseconds:0.0}ms ProjectilesDraw={_lastProjectileDrawMilliseconds:0.0}ms " +
+                 $"UiDraw={_lastUiDrawMilliseconds:0.0}ms Snapshot={snapshot?.SnapshotCaptureMs ?? 0d:0.0}ms " +
+                 $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"LayerShader={_mapRenderer.UsesTerrainLayerShader} VisibleV={_mapRenderer.TerrainVertexCount:N0} " +
                 $"CacheV={_mapRenderer.TerrainCachedVertexCount:N0} ScratchV={_mapRenderer.TerrainScratchCapacity:N0} " +
                 $"VBO={_mapRenderer.UsesTerrainVertexBuffer} LastChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
@@ -417,12 +439,15 @@ public sealed class GameRenderer
 
     private void Draw()
     {
+        long renderStarted = Stopwatch.GetTimestamp();
+
         // Re-activate the render context explicitly. On some desktop/window
         // switches the window can regain focus while its GL context is not
         // current yet; drawing against it can leave the window black.
         if (!_window.SetActive(true))
         {
             _graphicsRecoveryPending = true;
+            _lastRenderMilliseconds = Stopwatch.GetElapsedTime(renderStarted).TotalMilliseconds;
             return;
         }
 
@@ -439,6 +464,20 @@ public sealed class GameRenderer
                 "[Render] Graphics context restored; terrain GPU cache will rebuild.");
         }
 
+        // Do not read terrain or unit stores while the worker is rebuilding the startup
+        // world. Keep the window responsive during this one-off initialization.
+        if (_massCombatMode && !Volatile.Read(ref _massCombatWorldReady))
+        {
+            _window.Clear(new Color(7, 8, 9));
+            _window.Display();
+            _lastTerrainDrawMilliseconds = 0d;
+            _lastUnitDrawMilliseconds = 0d;
+            _lastProjectileDrawMilliseconds = 0d;
+            _lastUiDrawMilliseconds = 0d;
+            _lastRenderMilliseconds = Stopwatch.GetElapsedTime(renderStarted).TotalMilliseconds;
+            return;
+        }
+
         _window.Clear(
             new Color(
                 7,
@@ -448,6 +487,7 @@ public sealed class GameRenderer
         _window.SetView(
             _camera.View);
 
+        long stageStarted = Stopwatch.GetTimestamp();
         _mapRenderer.Draw(
             _window,
             _worldMap,
@@ -456,6 +496,7 @@ public sealed class GameRenderer
             _camera.ZoomLevel,
             _showDebugGrid,
             _visibleMaxLayer);
+        _lastTerrainDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
         if (_showVisionDebug &&
             !_massCombatMode &&
@@ -471,6 +512,7 @@ public sealed class GameRenderer
 
         if (renderSnapshot != null)
         {
+            stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.DrawSnapshot(
                 _window,
                 renderSnapshot,
@@ -479,15 +521,19 @@ public sealed class GameRenderer
                 _selectedUnit.IsValid ? _selectedUnit.Index : -1,
                 _showAiStateDebug && renderSnapshot.AiEnabled,
                 _selectedUnits);
+            _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
+            stageStarted = Stopwatch.GetTimestamp();
             _projectileRenderer.DrawSnapshot(
                 _window,
                 renderSnapshot,
                 TerrainTilePixelSize,
                 _showCombatTracers);
+            _lastProjectileDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
         }
         else
         {
+            stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.Draw(
                 _window,
                 _unitSimulation,
@@ -499,12 +545,15 @@ public sealed class GameRenderer
                 _showAiStateDebug && _unitSimulation.AI.Enabled,
                 false,
                 _selectedUnits);
+            _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
+            stageStarted = Stopwatch.GetTimestamp();
             _projectileRenderer.Draw(
                 _window,
                 _unitSimulation.Projectiles,
                 TerrainTilePixelSize,
                 _showCombatTracers);
+            _lastProjectileDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
         }
 
         if (_isSelectingUnits && IsSelectionDrag())
@@ -521,6 +570,7 @@ public sealed class GameRenderer
             _showHeightContours,
             _showContourLabels);
 
+        long uiStarted = Stopwatch.GetTimestamp();
         if (_uiView != null)
         {
             _window.SetView(_uiView);
@@ -621,7 +671,9 @@ public sealed class GameRenderer
             _window.SetTitle(_windowTitle);
         }
 
+        _lastUiDrawMilliseconds = Stopwatch.GetElapsedTime(uiStarted).TotalMilliseconds;
         _window.Display();
+        _lastRenderMilliseconds = Stopwatch.GetElapsedTime(renderStarted).TotalMilliseconds;
     }
 
     private string BuildSnapshotWindowTitle(SimulationFrameSnapshot snapshot)
@@ -838,14 +890,14 @@ public sealed class GameRenderer
         _simulationRunEnabled = _menuPage == GameMenuPage.Closed && !_simulationPaused;
 
         // Publish a complete initial frame before starting the producer thread.
-        Volatile.Write(
-            ref _latestSnapshot,
-            SimulationFrameSnapshot.Capture(_unitSimulation));
+        // Avoid capturing all 1,600 units on the window thread before its first draw.
+        Volatile.Write(ref _latestSnapshot, new SimulationFrameSnapshot());
 
         _simulationThread = new Thread(SimulationLoop)
         {
             IsBackground = true,
-            Name = "RimClone.Simulation"
+            Name = "RimClone.Simulation",
+            Priority = ThreadPriority.BelowNormal
         };
         _simulationThread.Start();
         Console.WriteLine("[Threading] Simulation runs independently; SFML rendering stays on the window thread.");
@@ -1434,6 +1486,24 @@ public sealed class GameRenderer
 
         while (true)
         {
+            // Terrain generation and spawning are deferred until the window exists;
+            // Draw() displays a responsive loading frame during this one-off work.
+            if (_massCombatMode && !Volatile.Read(ref _massCombatWorldReady))
+            {
+                try
+                {
+                    _massCombatTestScene.Start(_unitSimulation, _worldMap);
+                    Volatile.Write(ref _massCombatWorldReady, true);
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine($"[Mass combat initialization] {exception}");
+                    _massCombatMode = false;
+                    _terrainStressMode = true;
+                    Volatile.Write(ref _massCombatWorldReady, true);
+                }
+            }
+
             while (_simulationCommands.TryDequeue(out Action? command))
             {
                 try
@@ -2599,6 +2669,8 @@ public sealed class GameRenderer
         _massCombatTestScene.Start(
             _unitSimulation,
             _worldMap);
+        Volatile.Write(ref _massCombatWorldReady, true);
+        _startupMassCombatSelectionApplied = true;
 
         SetSelectedUnit(_massCombatTestScene.FirstUnit);
 

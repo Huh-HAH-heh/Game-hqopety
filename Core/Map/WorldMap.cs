@@ -75,7 +75,8 @@ public sealed class WorldMap
                     height,
                     regionsX,
                     regionsY,
-                    _tileRegions);
+                    _tileRegions,
+                    this);
         }
 
         _surfaceHeights = new ushort[columnCount];
@@ -120,7 +121,21 @@ public sealed class WorldMap
             return 0;
         }
 
-        return _layers[z].GetMaterialId(x, y);
+        int columnIndex = GetColumnIndex(x, y);
+
+        if (_simpleFillColumns[columnIndex])
+        {
+            int filledLayers = Math.Clamp(
+                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
+                LayerHeightUnits,
+                0,
+                LayerCount);
+
+            ushort materialId = _columnMaterialIds[columnIndex];
+            return z < filledLayers ? materialId : (ushort)0;
+        }
+
+        return _layers[z].GetMaterialIdAtIndex(columnIndex);
     }
 
     public void SetMaterialId(
@@ -141,6 +156,7 @@ public sealed class WorldMap
             y / TerrainRegion.TilesPerSide);
 
         int columnIndex = GetColumnIndex(x, y);
+        MaterializeSimpleFillColumn(x, y, columnIndex);
 
         _layers[z].SetMaterialId(
             x,
@@ -554,6 +570,8 @@ public sealed class WorldMap
             (globalY % TerrainRegion.TilesPerSide) *
             TerrainRegion.TilesPerSide;
 
+        MaterializeSimpleFillColumn(globalX, globalY, columnIndex);
+
         int startLayer =
             Math.Clamp(
                 startZ / LayerHeightUnits,
@@ -631,6 +649,7 @@ public sealed class WorldMap
                 height,
                 LayerCount * LayerHeightUnits);
 
+        bool wasSimpleFill = _simpleFillColumns[columnIndex];
         int previousLayers =
             (_surfaceHeights[columnIndex] +
              LayerHeightUnits - 1) /
@@ -647,19 +666,22 @@ public sealed class WorldMap
         // Only touch the old/new occupied height span.
         // This avoids clearing and refilling unused vertical layers
         // whenever a terrain generator replaces its height.
-        int layersToUpdate =
-            Math.Max(
-                previousLayers,
-                filledLayers);
-
-        for (int z = 0; z < layersToUpdate; z++)
+        if (!wasSimpleFill)
         {
-            _layers[z].GetRegion(regionX, regionY)!
-                .SetMaterialIdAtIndex(
-                    localIndex,
-                    z < filledLayers
-                        ? materialId
-                        : (ushort)0);
+            int layersToUpdate =
+                Math.Max(
+                    previousLayers,
+                    filledLayers);
+
+            for (int z = 0; z < layersToUpdate; z++)
+            {
+                _layers[z].GetRegion(regionX, regionY)!
+                    .SetMaterialIdAtIndex(
+                        localIndex,
+                        z < filledLayers
+                            ? materialId
+                            : (ushort)0);
+            }
         }
 
         _surfaceHeights[columnIndex] =
@@ -692,6 +714,41 @@ public sealed class WorldMap
         int globalY)
     {
         return GetSurfaceHeightUnits(globalX, globalY) * 0.1f;
+    }
+
+    private void MaterializeSimpleFillColumn(
+        int globalX,
+        int globalY,
+        int columnIndex)
+    {
+        if (!_simpleFillColumns[columnIndex])
+            return;
+
+        int filledLayers = Math.Clamp(
+            (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
+            LayerHeightUnits,
+            0,
+            LayerCount);
+        ushort materialId = _columnMaterialIds[columnIndex];
+
+        if (materialId != 0 && filledLayers > 0)
+        {
+            int regionX = globalX / TerrainRegion.TilesPerSide;
+            int regionY = globalY / TerrainRegion.TilesPerSide;
+            int localIndex =
+                globalX % TerrainRegion.TilesPerSide +
+                (globalY % TerrainRegion.TilesPerSide) *
+                TerrainRegion.TilesPerSide;
+
+            for (int z = 0; z < filledLayers; z++)
+            {
+                _layers[z].GetRegion(regionX, regionY)!
+                    .SetMaterialIdAtIndex(localIndex, materialId);
+            }
+        }
+
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
     }
 
     private void ClearColumn(
