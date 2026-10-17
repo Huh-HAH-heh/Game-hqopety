@@ -132,11 +132,18 @@ public sealed class UnitAiSystem
                 units.HasTarget[unit] = false;
                 Store.ClearGoal(unit);
                 Store.State[unit] = UnitAiState.Dead;
+                units.Posture[unit] = UnitPosture.Lying;
                 continue;
             }
 
             UnitSuppressionState suppressionState =
                 suppression.GetState(unit);
+
+            bool moving = units.Velocity[unit].LengthSquared() > 0.04f;
+            if (moving)
+                units.Posture[unit] = UnitPosture.Standing;
+            else if (suppressionState is UnitSuppressionState.Suppressed or UnitSuppressionState.Panicked)
+                units.Posture[unit] = UnitPosture.Lying;
 
             if (suppressionState == UnitSuppressionState.Panicked ||
                 suppressionState == UnitSuppressionState.Suppressed)
@@ -259,6 +266,8 @@ public sealed class UnitAiSystem
                     else
                     {
                         Store.State[unit] = UnitAiState.Idle;
+                        if (!moving && suppressionState == UnitSuppressionState.Calm)
+                            units.Posture[unit] = UnitPosture.Sitting;
                     }
                 }
                 else
@@ -315,23 +324,23 @@ public sealed class UnitAiSystem
                     target);
             }
 
-            bool moving =
-                units.Velocity[unit].LengthSquared() >
-                0.04f;
-
-            if (targetVisible &&
-                !moving &&
-                suppressionState != UnitSuppressionState.Panicked)
+            if (moving)
             {
-                units.Posture[unit] =
-                    UnitPosture.Crouching;
+                units.Posture[unit] = UnitPosture.Standing;
             }
-            else if (moving &&
-                     units.Posture[unit] ==
-                     UnitPosture.Crouching)
+            else if (suppressionState is UnitSuppressionState.Suppressed or UnitSuppressionState.Panicked)
             {
-                units.Posture[unit] =
-                    UnitPosture.Standing;
+                units.Posture[unit] = UnitPosture.Lying;
+            }
+            else if (targetVisible)
+            {
+                // A stationary pawn switches to a stable seated firing posture.
+                units.Posture[unit] = UnitPosture.Sitting;
+            }
+            else if (units.Posture[unit] == UnitPosture.Lying)
+            {
+                // Recover from the prone suppression pose after the threat passes.
+                units.Posture[unit] = UnitPosture.Standing;
             }
 
             if (IsLowHealth(
