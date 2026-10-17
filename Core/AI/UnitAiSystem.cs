@@ -59,6 +59,8 @@ public sealed class UnitAiSystem
         WorldMap worldMap,
         float deltaTime)
     {
+        LastPlanningMilliseconds = 0d;
+
         if (!Enabled ||
             deltaTime <= 0f ||
             units.ActiveCount == 0)
