@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Core.Items;
 using Core.Combat;
 using Core.Unit;
@@ -121,6 +122,7 @@ public sealed class SimulationFrameSnapshot
     public int SuppressedCount { get; init; }
     public int PanickedCount { get; init; }
 
+    public double SnapshotCaptureMs { get; init; }
     public double SimulationMs { get; init; }
     public double VisionMs { get; init; }
     public long VisionCandidatePairs { get; init; }
@@ -180,6 +182,7 @@ public sealed class SimulationFrameSnapshot
     public static SimulationFrameSnapshot Capture(
         UnitSimulation simulation)
     {
+        long captureStarted = Stopwatch.GetTimestamp();
         UnitStore units = simulation.Units;
         ReadOnlySpan<int> active = units.ActiveIndices;
         RenderUnitState[] unitStates = new RenderUnitState[active.Length];
@@ -578,6 +581,7 @@ public sealed class SimulationFrameSnapshot
             DeadCount = dead,
             SuppressedCount = suppressed,
             PanickedCount = panicked,
+            SnapshotCaptureMs = Stopwatch.GetElapsedTime(captureStarted).TotalMilliseconds,
             SimulationMs = simulation.LastSimulationUpdateMilliseconds,
             VisionMs = vision.LastUpdateMilliseconds,
             VisionCandidatePairs = vision.LastCandidatePairs,
