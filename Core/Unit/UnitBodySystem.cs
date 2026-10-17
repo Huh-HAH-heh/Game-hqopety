@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 
 namespace Core.Unit;
@@ -39,6 +40,7 @@ public sealed class UnitBodySystem
         BodyPartMotion[] motions = bodies.Motion;
         BodyPartAnchor[] anchors = bodies.Anchor;
         BodyPartRole[] roles = bodies.Role;
+        string?[] partIds = bodies.PartId;
         BodyPartPivot[] pivots = bodies.Pivot;
         Vector3[] scales = bodies.Scale;
 
@@ -79,6 +81,7 @@ public sealed class UnitBodySystem
                 motions,
                 anchors,
                 roles,
+                partIds,
                 pivots,
                 scales,
                 followDistances,
@@ -110,6 +113,7 @@ public sealed class UnitBodySystem
         BodyPartMotion[] motions,
         BodyPartAnchor[] anchors,
         BodyPartRole[] roles,
+        string?[] partIds,
         BodyPartPivot[] pivots,
         Vector3[] scales,
         float[] followDistances,
@@ -134,6 +138,8 @@ public sealed class UnitBodySystem
         Quaternion bodyOrientation = BodyPartTransformMath.TopDownRotation(bodyRotation);
         Quaternion headOrientation = BodyPartTransformMath.TopDownRotation(headRotation);
         int end = start + count;
+        IReadOnlyDictionary<string, UnitBodyPoseTransform>? savedPose =
+            UnitBodyPoseSettingsStore.GetTransforms(posture);
 
         // Definitions are parent-first, so every parent's transform has
         // already been calculated when its children are visited.
@@ -145,8 +151,19 @@ public sealed class UnitBodySystem
                 localRotationsX[part],
                 localRotationsY[part],
                 localRotations[part]);
-            ApplyPosture(posture, roles[part], pivots[part],
-                ref localPosition, ref localEuler.Z);
+            bool hasSavedPose = savedPose != null &&
+                !string.IsNullOrWhiteSpace(partIds[part]) &&
+                savedPose.TryGetValue(partIds[part]!, out UnitBodyPoseTransform savedTransform);
+            if (hasSavedPose)
+            {
+                localPosition = savedTransform.LocalPosition;
+                localEuler = savedTransform.LocalEulerRotation;
+            }
+            else
+            {
+                ApplyPosture(posture, roles[part], pivots[part],
+                    ref localPosition, ref localEuler.Z);
+            }
 
             Vector3 origin = unitPositions[unit];
             Quaternion positionOrientation = bodyOrientation;
@@ -162,7 +179,8 @@ public sealed class UnitBodySystem
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start &&
-                     motions[part] is BodyPartMotion.SpinalChain or BodyPartMotion.PhysicalTail)
+                     motions[part] is BodyPartMotion.SpinalChain or BodyPartMotion.PhysicalTail &&
+                     !hasSavedPose)
             {
                 UpdateChainLink(
                     part,
@@ -182,7 +200,8 @@ public sealed class UnitBodySystem
             }
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      motions[part] == BodyPartMotion.FollowParent &&
-                     parent >= start)
+                     parent >= start &&
+                     !hasSavedPose)
             {
                 UpdateFollower(
                     part,
@@ -239,6 +258,17 @@ public sealed class UnitBodySystem
                 scales[part], worldOrientation, 0, 1).Scale;
             worldRotations[part] = worldRotation;
         }
+    }
+
+    public static void ApplyProceduralPosture(
+        UnitPosture posture,
+        BodyPartRole role,
+        ref Vector3 localPosition,
+        ref Vector3 localEulerRotation)
+    {
+        float rotationZ = localEulerRotation.Z;
+        ApplyPosture(posture, role, BodyPartPivot.Center, ref localPosition, ref rotationZ);
+        localEulerRotation.Z = rotationZ;
     }
 
     private static void ApplyPosture(
