@@ -60,7 +60,8 @@ public sealed class VisionSystem
     private const int MaxNearbyUnitsPerCell = 4;
     private const int NearbyCellRadius = 1;
     private const int CandidateSlots = VisibilitySectorCount * CandidatesPerSector;
-    private static readonly int MaxVisionParallelism = Math.Max(1, Environment.ProcessorCount - 1);
+    private static readonly int MaxVisionParallelism =
+        Math.Max(1, Math.Min(4, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions VisionParallelOptions = new()
     {
         MaxDegreeOfParallelism = MaxVisionParallelism
