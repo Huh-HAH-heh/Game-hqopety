@@ -239,6 +239,7 @@ public sealed class GameRenderer
             _uiView?.Dispose();
             _selectionBox.Dispose();
             _window?.Close();
+            _window?.Dispose();
         }
     }
 
