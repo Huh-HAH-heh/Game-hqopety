@@ -536,7 +536,7 @@ public sealed class UnitAnatomyProfile : UnitHitRegionProfile
                     $"Parent index of anatomy node '{nodes[i].Id}' must precede the node.",
                     nameof(nodes));
 
-            _bodyParts[i] = shape;
+            _bodyParts[i] = shape.WithId(nodes[i].Id);
         }
     }
 
