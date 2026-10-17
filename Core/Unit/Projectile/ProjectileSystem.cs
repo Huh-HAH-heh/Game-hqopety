@@ -358,12 +358,24 @@ public sealed class ProjectileSystem
                     _unitGrid.GetNextNode(
                         node);
 
-                bool alreadyHit =
-                    false;
+                UnitId owner = projectiles.Owner[projectileIndex];
+                UnitId candidate = units.GetId(unitIndex);
+                bool isProjectileOwner =
+                    owner.Index == candidate.Index &&
+                    owner.Generation == candidate.Generation;
 
-                for (int h = 0;
-                     h < hitUnitCount;
-                     h++)
+                // A projectile begins at its weapon's muzzle, which may still
+                // overlap the shooter's hit region. Ignore the exact owner identity
+                // for its flight; generation matching prevents an old projectile
+                // from ignoring a new unit that later reuses the same slot.
+                if (isProjectileOwner ||
+                    health.OverallHitPoints[unitIndex] <= 0f)
+                {
+                    continue;
+                }
+
+                bool alreadyHit = false;
+                for (int h = 0; h < hitUnitCount; h++)
                 {
                     if (hitUnits[h] == unitIndex)
                     {
@@ -372,11 +384,8 @@ public sealed class ProjectileSystem
                     }
                 }
 
-                if (alreadyHit ||
-                    health.OverallHitPoints[unitIndex] <= 0f)
-                {
+                if (alreadyHit)
                     continue;
-                }
 
                 if (!_hitSystem.TryHitUnit(
                         units,
@@ -391,9 +400,8 @@ public sealed class ProjectileSystem
                         bodies,
                         hitRegions))
                 {
-                    if (projectiles.Owner[projectileIndex].Index != unitIndex &&
-                        (projectiles.FactionTag[projectileIndex] == 0 ||
-                         units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex]))
+                    if (projectiles.FactionTag[projectileIndex] == 0 ||
+                        units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex])
                     {
                         UnitSuppressionSystem.AddNearMiss(
                             suppression,
