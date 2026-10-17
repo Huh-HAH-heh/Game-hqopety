@@ -20,8 +20,8 @@ public sealed class MapRenderSystem : IDisposable
 
     // Retain nearby chunks for smooth camera movement without accumulating
     // every GPU mesh ever visited. The currently visible set is always retained.
-    private const int MaxCachedTerrainChunks = 96;
-    private const int TerrainChunkCacheReserve = 16;
+    private const int MaxCachedTerrainChunks = 256;
+    private const int TerrainChunkCacheReserve = 32;
 
     private sealed class TerrainChunkMesh : IDisposable
     {
