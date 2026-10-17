@@ -153,6 +153,54 @@ public static class UnitBodyPoseSettingsStore
         return true;
     }
 
+    /// <summary>
+    /// Makes every posture use the source posture's authored transform offsets.
+    /// An empty source means the unmodified base rig for every posture.
+    /// </summary>
+    public static bool CopyPoseToAll(
+        UnitType unitType,
+        UnitPosture sourcePosture,
+        out string fullPath,
+        out string error)
+    {
+        fullPath = FilePath;
+        error = string.Empty;
+        int sourceIndex = (int)sourcePosture;
+        if ((uint)sourceIndex >= (uint)PoseCount)
+        {
+            error = "Неизвестный тип исходной позы.";
+            return false;
+        }
+
+        EnsureLoaded();
+        lock (Sync)
+        {
+            var updated = new Dictionary<ushort, Dictionary<string, UnitBodyPoseTransform>[]>(_poses);
+            ushort typeKey = (ushort)unitType;
+            Dictionary<string, UnitBodyPoseTransform>[] typePoses =
+                updated.TryGetValue(typeKey, out Dictionary<string, UnitBodyPoseTransform>[]? existing)
+                    ? (Dictionary<string, UnitBodyPoseTransform>[])existing.Clone()
+                    : CreateEmptyPoses();
+
+            var source = new Dictionary<string, UnitBodyPoseTransform>(
+                typePoses[sourceIndex], StringComparer.Ordinal);
+            for (int posture = 0; posture < PoseCount; posture++)
+            {
+                typePoses[posture] = new Dictionary<string, UnitBodyPoseTransform>(
+                    source, StringComparer.Ordinal);
+            }
+
+            updated[typeKey] = typePoses;
+            if (!WriteFile(updated, fullPath, out error))
+                return false;
+
+            _poses = updated;
+            _loaded = true;
+        }
+
+        return true;
+    }
+
     public static bool Reset(
         UnitType unitType,
         UnitPosture posture,
