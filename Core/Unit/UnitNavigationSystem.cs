@@ -13,7 +13,8 @@ public sealed class UnitNavigationSystem
 {
     private const float MaxStepHeight = 1.5f;
     private const float HeightCost = 0.15f;
-    private const int MaxRouteBuildsPerUpdate = 16;
+    private const int MinRouteBuildsPerUpdate = 16;
+    private const int MaxRouteBuildsPerUpdate = 48;
     private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
     private const float RouteReuseCostPerUnit = 0.35f;
@@ -96,7 +97,10 @@ public sealed class UnitNavigationSystem
         EnsureRouteTrafficVersion(worldMap);
         NavigationGridBuildMilliseconds = 0d;
         EnsureNavigationGrid(worldMap);
-        _routeBuildsRemaining = MaxRouteBuildsPerUpdate;
+        _routeBuildsRemaining = Math.Clamp(
+            units.ActiveCount / 32,
+            MinRouteBuildsPerUpdate,
+            MaxRouteBuildsPerUpdate);
         RoutesBuiltThisUpdate = 0;
         RoutesFailedThisUpdate = 0;
         SearchesThisUpdate = 0;
