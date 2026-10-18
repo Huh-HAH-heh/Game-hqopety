@@ -262,6 +262,60 @@
           "RotationX": 0,
           "RotationY": 0,
           "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.body-core.002",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-body-core-002.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-body-core-002-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-body-core-002-001-001-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.002",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
         }
       ]
     },
@@ -306,7 +360,7 @@
           "Id": "body.core",
           "PositionX": 0,
           "PositionY": 0,
-          "PositionZ": 0.04,
+          "PositionZ": 0.004999995,
           "RotationX": 0,
           "RotationY": 0,
           "RotationZ": 0
@@ -322,6 +376,60 @@
         },
         {
           "Id": "custom.copy.custom-copy-body-core-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.body-core.002",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0.055,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-body-core-002.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0.055,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-body-core-002-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-body-core-002-001-001-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.002",
           "PositionX": 0,
           "PositionY": 0,
           "PositionZ": 0,
@@ -339,7 +447,7 @@
           "Id": "body.core",
           "PositionX": 0.02,
           "PositionY": 0,
-          "PositionZ": 0.07,
+          "PositionZ": 0,
           "RotationX": 0,
           "RotationY": 0,
           "RotationZ": 0
@@ -356,6 +464,60 @@
         {
           "Id": "custom.copy.custom-copy-body-core-001.001",
           "PositionX": -0.0050000027,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.body-core.002",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-body-core-002.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-body-core-002-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-body-core-002-001-001-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.002",
+          "PositionX": 0,
           "PositionY": 0,
           "PositionZ": 0,
           "RotationX": 0,

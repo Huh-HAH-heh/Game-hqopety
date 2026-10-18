@@ -32,21 +32,21 @@
         "parentIndex": -1,
         "x": 0.005,
         "y": 0.48499998,
-        "z": 0.085,
-        "scaleX": 0.1,
-        "scaleY": 0.1,
-        "scaleZ": 0.1,
+        "z": 0.145,
+        "scaleX": 0.063,
+        "scaleY": 0.079,
+        "scaleZ": 0.037,
         "rotation": 0,
         "rotationX": 0,
         "rotationY": 0,
         "followDistance": 0,
         "primitive": "Circle",
         "motion": "SpinalChain",
-        "anchor": "Parent",
+        "anchor": "UnitBody",
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": null,
-        "displayName": "\u0413\u043E\u043B\u043E\u0432\u0430"
+        "displayName": "\u0442\u0435\u043B\u043E\u041D\u0438\u0437"
       },
       "tissues": [
         {
@@ -154,6 +154,294 @@
       "tissues": [
         {
           "id": "custom.copy.custom-copy-body-core-001.001.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Vision, Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "custom.copy.body-core.002",
+      "hitHalfHeight": 0.037,
+      "part": {
+        "id": "custom.copy.body-core.002",
+        "parentIndex": -1,
+        "x": -0.005,
+        "y": 0.435,
+        "z": 0.074999996,
+        "scaleX": 0.039,
+        "scaleY": 0.032,
+        "scaleZ": 0.104,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u041F\u0440\u0430\u0432\u0430\u044F"
+      },
+      "tissues": [
+        {
+          "id": "custom.copy.body-core.002.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Vision, Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "custom.copy.custom-copy-body-core-002.001",
+      "hitHalfHeight": 0.104,
+      "part": {
+        "id": "custom.copy.custom-copy-body-core-002.001",
+        "parentIndex": -1,
+        "x": -0.005,
+        "y": 0.53499997,
+        "z": 0.074999996,
+        "scaleX": 0.039,
+        "scaleY": 0.032,
+        "scaleZ": 0.104,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+      },
+      "tissues": [
+        {
+          "id": "custom.copy.custom-copy-body-core-002.001.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Vision, Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "custom.copy.custom-copy-custom-copy-body-core-002-001.001",
+      "hitHalfHeight": 0.104,
+      "part": {
+        "id": "custom.copy.custom-copy-custom-copy-body-core-002-001.001",
+        "parentIndex": -1,
+        "x": -0.005,
+        "y": 0.59499997,
+        "z": 0.17999999,
+        "scaleX": 0.039,
+        "scaleY": 0.016,
+        "scaleZ": 0.092,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+      },
+      "tissues": [
+        {
+          "id": "custom.copy.custom-copy-custom-copy-body-core-002-001.001.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Vision, Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.001",
+      "hitHalfHeight": 0.092,
+      "part": {
+        "id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.001",
+        "parentIndex": -1,
+        "x": 0,
+        "y": 0.57,
+        "z": 0.26,
+        "scaleX": 0.039,
+        "scaleY": 0.03,
+        "scaleZ": 0.013,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+      },
+      "tissues": [
+        {
+          "id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.001.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Vision, Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-body-core-002-001-001-001.001",
+      "hitHalfHeight": 0.013,
+      "part": {
+        "id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-body-core-002-001-001-001.001",
+        "parentIndex": -1,
+        "x": 0,
+        "y": 0.405,
+        "z": 0.26,
+        "scaleX": 0.039,
+        "scaleY": 0.03,
+        "scaleZ": 0.013,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+      },
+      "tissues": [
+        {
+          "id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-body-core-002-001-001-001.001.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Vision, Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.002",
+      "hitHalfHeight": 0.092,
+      "part": {
+        "id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.002",
+        "parentIndex": -1,
+        "x": -0.005,
+        "y": 0.375,
+        "z": 0.17999999,
+        "scaleX": 0.039,
+        "scaleY": 0.016,
+        "scaleZ": 0.092,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "StaticRelative",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+      },
+      "tissues": [
+        {
+          "id": "custom.copy.custom-copy-custom-copy-custom-copy-body-core-002-001-001.002.tissue",
           "parentId": "",
           "part": "WholeBody",
           "parentPart": "None",
