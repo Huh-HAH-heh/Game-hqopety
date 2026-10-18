@@ -925,8 +925,14 @@ public sealed class UnitSimulation
             _visionSystem,
             worldMap,
             deltaTime);
-        LastAIUpdateMilliseconds =
+        double aiUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+        // The profiler samples once per second while the AI think cadence is 150 ms.
+        // Keep the last full think-pass duration so it isn't replaced by an idle-frame zero.
+        if (!_aiSystem.Enabled || Units.ActiveCount == 0)
+            LastAIUpdateMilliseconds = 0d;
+        else if (_aiSystem.LastUpdateRanThinkPass)
+            LastAIUpdateMilliseconds = aiUpdateMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();
         _movementSystem.Update(Units, worldMap, deltaTime, Health);
