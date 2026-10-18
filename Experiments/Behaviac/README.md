@@ -8,8 +8,10 @@ On this experiment branch, interactive game runs use Behaviac by default. `UnitA
 
 - `Dead`: stop aiming and movement, mark the unit dead.
 - `SeekCover`: prioritize available suppression cover over attacking.
+- `RetreatToCover`: low-health units with a current or remembered enemy prioritize the existing cover search rather than normal engagement.
 - `FlankTarget`: move assigned flankers to a lateral position around the currently visible target.
 - `EngageTarget`: hold a firing position and use the existing weapon/combat systems.
+- `SuppressiveFire`: when the target is no longer visible, choose the existing suppressive-fire path only if the unit has a compatible weapon.
 - `InvestigateLastKnownTarget`: pursue the remembered target location or apply the existing suppressive-fire policy.
 - `Patrol`: use the existing search-waypoint behavior when there is no known target.
 
@@ -43,7 +45,7 @@ dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release -- --
 dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release -- --decision-benchmark
 ```
 
-The first command loads and runs the upstream `demo_running` XML behavior. The decision tests compare eight deterministic input cases against the expected intents, including flank assignment and interruption priority. The benchmark measures 800 pre-created agents over 100 ticks (80,000 decisions) after warm-up; tree setup/agent creation are excluded. It reports elapsed time, time ratio, allocations, mismatches and checksums. Timing is informational; semantic mismatches fail the test.
+The first command loads and runs the upstream `demo_running` XML behavior. The decision tests compare eleven deterministic input cases against expected intents, including cover priority, low-health retreat, flanking, suppressive fire and interruption priority. The benchmark measures 800 pre-created agents over 100 ticks (80,000 decisions) after warm-up; tree setup/agent creation are excluded. It reports elapsed time, time ratio, allocations, mismatches and checksums. Timing is informational; semantic mismatches fail the test.
 
 The runtime is built with `BEHAVIAC_RELEASE` so Behaviac's node-level debug profiling/formatting does not dominate the measured loop.
 
