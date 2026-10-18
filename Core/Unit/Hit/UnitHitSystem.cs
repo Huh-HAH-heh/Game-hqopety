@@ -57,11 +57,19 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null)
     {
+        if (bodies != null &&
+            TryGetMarkerPoint(
+                units, unitIndex, UnitAnatomyMarkerRole.Eye,
+                out Vector3 eye, hitRegions, bodies))
+        {
+            return eye;
+        }
+
         Vector3 position = units.Position[unitIndex];
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
         float eyeHeight = units.Posture[unitIndex] switch
         {
-            UnitPosture.Lying => 0.15f,
+            UnitPosture.Lying => 0.17f,
             UnitPosture.Crouching => 0.56f,
             UnitPosture.Sitting => 0.68f,
             _ => 0.82f
@@ -801,6 +809,20 @@ private static Vector3 GetMarkerWorldPosition(
         UnitHitRegionStore? hitRegions,
         UnitBodyStore? bodies)
     {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if (bodies != null &&
+            TryGetBodyShape(
+                units, unitIndex, profile, regionIndex, bodies,
+                out int bodyIndex, out Vector3 shapeCenter, out _, out _, out _, out _))
+        {
+            // Anatomy markers belong to the rendered node. Transform their local
+            // offset through that node's live orientation so eyes and muzzle stay
+            // on the flattened head when a unit lies down or crawls.
+            return shapeCenter + BodyPartTransformMath.TransformPosition(
+                marker.LocalOffset,
+                bodies.WorldOrientation[bodyIndex]);
+        }
+
         Vector3 position = units.Position[unitIndex];
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
         Vector3 facing = (marker.Roles &
@@ -812,13 +834,29 @@ private static Vector3 GetMarkerWorldPosition(
             ? new Vector3(facing.X / MathF.Sqrt(facingLengthSquared), facing.Y / MathF.Sqrt(facingLengthSquared), 0f)
             : Vector3.UnitX;
 
+        float prone = units.Posture[unitIndex] == UnitPosture.Lying ? 0.17f : 0f;
         float heightFraction = (marker.Roles & UnitAnatomyMarkerRole.Eye) != 0
-            ? 0.82f
+            ? (prone > 0f ? prone : units.Posture[unitIndex] switch
+            {
+                UnitPosture.Crouching => 0.56f,
+                UnitPosture.Sitting => 0.68f,
+                _ => 0.82f
+            })
             : (marker.Roles & UnitAnatomyMarkerRole.Muzzle) != 0
-                ? 0.70f
+                ? (prone > 0f ? prone : units.Posture[unitIndex] switch
+                {
+                    UnitPosture.Crouching => 0.58f,
+                    UnitPosture.Sitting => 0.68f,
+                    _ => 0.70f
+                })
                 : (marker.Roles & UnitAnatomyMarkerRole.Vision) != 0
-                    ? 0.70f
-                    : 0.52f;
+                    ? (prone > 0f ? prone : units.Posture[unitIndex] switch
+                    {
+                        UnitPosture.Crouching => 0.56f,
+                        UnitPosture.Sitting => 0.68f,
+                        _ => 0.70f
+                    })
+                    : (prone > 0f ? prone : 0.52f);
 
         float forwardDistance = MathF.Max(0.01f, units.Radius[unitIndex]) * 0.65f;
         return position + facing * forwardDistance + new Vector3(0f, 0f, height * heightFraction);
