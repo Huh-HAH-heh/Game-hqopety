@@ -468,18 +468,16 @@ public void DrawSnapshot(
                 }
             }
 
-            float markerOpacity = 1f - detailBlend;
-            if (markerOpacity > 0f)
-            {
-                AppendLowDetailUnitMarker(
-                    _vertices,
-                    x,
-                    y,
-                    markerRadius,
-                    unit.FactionTag,
-                    isAlive,
-                    markerOpacity);
-            }
+            // The gameplay marker is permanent and remains visible over the static rig.
+            // Zoom only controls anatomical detail; it never fades the unit's own marker.
+            AppendLowDetailUnitMarker(
+                _vertices,
+                x,
+                y,
+                markerRadius,
+                unit.FactionTag,
+                isAlive,
+                1f);
 
             if (!isAlive)
                 continue;

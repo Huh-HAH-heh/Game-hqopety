@@ -2573,28 +2573,34 @@ public static class CombatSelfTest
         Vector3[] beforePositions = new Vector3[count];
         float[] beforeRotations = new float[count];
         Vector3[] beforeScales = new Vector3[count];
+        Vector3 initialUnitPosition = simulation.Units.Position[colonist.Index];
         for (int i = 0; i < count; i++)
         {
-            beforePositions[i] = simulation.Bodies.WorldPosition[start + i];
+            // Store the base rig relative to its pawn, not as a stale world-space pose.
+            beforePositions[i] = simulation.Bodies.WorldPosition[start + i] - initialUnitPosition;
             beforeRotations[i] = simulation.Bodies.WorldRotation[start + i];
             beforeScales[i] = simulation.Bodies.WorldScale[start + i];
         }
 
+        // Move the root before a simulation tick: the whole base rig must follow it.
+        simulation.Units.Position[colonist.Index] = initialUnitPosition + new Vector3(0.75f, 0.35f, 0f);
         simulation.SetPosture(colonist, UnitPosture.Crouching);
         simulation.Update(worldMap, 0.016f);
-        if (simulation.LastBodyUpdateMilliseconds != 0d ||
+        if (!double.IsFinite(simulation.LastBodyUpdateMilliseconds) ||
             simulation.Units.Posture[colonist.Index] != UnitPosture.Crouching)
             return Fail();
 
         stage = 5;
+        Vector3 currentUnitPosition = simulation.Units.Position[colonist.Index];
         for (int i = 0; i < count; i++)
         {
             int index = start + i;
-            if (Vector3.Distance(beforePositions[i], simulation.Bodies.WorldPosition[index]) > 0.0001f ||
+            Vector3 relativePosition = simulation.Bodies.WorldPosition[index] - currentUnitPosition;
+            if (Vector3.Distance(beforePositions[i], relativePosition) > 0.0001f ||
                 MathF.Abs(beforeRotations[i] - simulation.Bodies.WorldRotation[index]) > 0.0001f ||
                 Vector3.Distance(beforeScales[i], simulation.Bodies.WorldScale[index]) > 0.0001f)
             {
-                Console.Error.WriteLine($"[Static rig test] bodyPart={i} positionBefore={beforePositions[i]} positionAfter={simulation.Bodies.WorldPosition[index]}.");
+                Console.Error.WriteLine($"[Static rig test] bodyPart={i} relativeBefore={beforePositions[i]} relativeAfter={relativePosition}.");
                 return Fail();
             }
         }
