@@ -982,12 +982,18 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         if (_detachAllParentsButton.GetGlobalBounds().Contains(position))
         {
+            if (_editingPose)
+            {
+                _status = "Сначала выйди из редактора поз: иерархия относится к базовому ригу.";
+                return true;
+            }
+
             bool changed = DetachAllParentsPreservingLayout();
-            _defaultParts = (BodyPartDefinition[])_parts.Clone();
-            _openedRegionIds = (string[])_regionIds.Clone();
-            _openedParts = (BodyPartDefinition[])_parts.Clone();
             if (changed)
-                Save();
+            {
+                _defaultParts = (BodyPartDefinition[])_parts.Clone();
+                SaveParentHierarchyEdit();
+            }
             _status = changed
                 ? "Все родительские связи удалены. Положение и ориентация частей сохранены."
                 : "Все части уже независимы.";
@@ -1016,9 +1022,15 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (IsPropertiesItemVisible(_detachParentButton.Position.Y, _detachParentButton.Size.Y) &&
             _detachParentButton.GetGlobalBounds().Contains(position))
         {
+            if (_editingPose)
+            {
+                _status = "Смена родителя доступна только в режиме «Редактор рига».";
+                return true;
+            }
+
             bool changed = DetachPartPreservingLayout(_selectedPart);
             if (changed)
-                Save();
+                SaveParentHierarchyEdit();
             _status = changed
                 ? $"«{PartName(_regionIds[_selectedPart])}» отвязана и осталась на прежнем месте."
                 : "Эта часть уже независима.";
@@ -1806,16 +1818,21 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 ? $"Исходная часть: «{PartName(_regionIds[_symmetrySourcePart])}». Теперь выбери парную часть."
                 : "Инструмент симметрии закрыт.";
         }
-        if (ButtonImGui("Отвязать все части", _listPanel.Size.X - 28f))
+        if (!_editingPose && ButtonImGui("Отвязать все части", _listPanel.Size.X - 28f))
         {
             bool changed = DetachAllParentsPreservingLayout();
-            _defaultParts = (BodyPartDefinition[])_parts.Clone();
-            _openedRegionIds = (string[])_regionIds.Clone();
-            _openedParts = (BodyPartDefinition[])_parts.Clone();
-            if (changed) Save();
+            if (changed)
+            {
+                _defaultParts = (BodyPartDefinition[])_parts.Clone();
+                SaveParentHierarchyEdit();
+            }
             _status = changed
                 ? "Все родительские связи удалены, расположение частей сохранено."
                 : "Все части уже независимы.";
+        }
+        else if (_editingPose)
+        {
+            TextImGui("Иерархия доступна в режиме «Редактор рига».");
         }
         ImguiNative.igEnd();
     }
