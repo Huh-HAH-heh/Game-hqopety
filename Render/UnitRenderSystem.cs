@@ -444,6 +444,42 @@ public void DrawSnapshot(
                 continue;
             }
 
+            // I toggles the tactical overlay. Draw active flank and cover goals
+            // for every on-screen unit, not just the selected pawn, so the player
+            // can actually see whether the XML policy is producing movement.
+            if (showAiDebug &&
+                rootInView &&
+                unit.HitPoints > 0f &&
+                unit.HasGoal &&
+                unit.AiState is UnitAiState.Flank or UnitAiState.SeekCover)
+            {
+                bool isFlanking = unit.AiState == UnitAiState.Flank;
+                Color maneuverColor = isFlanking
+                    ? new Color(235, 105, 255, 205)
+                    : new Color(70, 175, 255, 195);
+                float goalX = unit.Goal.X * tilePixelSize;
+                float goalY = unit.Goal.Y * tilePixelSize;
+
+                AppendDebugLine(
+                    _aiDebug,
+                    x,
+                    y,
+                    goalX,
+                    goalY,
+                    new Color(
+                        maneuverColor.R,
+                        maneuverColor.G,
+                        maneuverColor.B,
+                        150));
+                AppendCircleOutline(
+                    _aiDebug,
+                    goalX,
+                    goalY,
+                    (isFlanking ? 0.62f : 0.48f) * tilePixelSize,
+                    maneuverColor,
+                    12);
+            }
+
             bool isAlive = unit.HitPoints > 0f;
             float markerRadius = GetMarkerRadius(
                 unit.Width,
@@ -1767,6 +1803,12 @@ private static void AppendSuppressionDebug(
                     245,
                     75,
                     75),
+
+            UnitAiState.Flank =>
+                new Color(
+                    235,
+                    105,
+                    255),
 
             UnitAiState.SeekCover =>
                 new Color(
