@@ -688,7 +688,7 @@ public sealed class UnitAiSystem
     {
         if (!_behaviacInitialized)
         {
-            BehaviacRuntimeHost.InitializeCompiled();
+            BehaviacRuntimeHost.InitializeDefaultBehavior();
             _behaviacInitialized = true;
         }
 
