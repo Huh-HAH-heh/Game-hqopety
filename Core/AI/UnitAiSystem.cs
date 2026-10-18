@@ -29,6 +29,8 @@ public sealed class UnitAiSystem
     private Vector3[] _suppressionCoverByUnit = Array.Empty<Vector3>();
     private bool[] _hasSuppressionCoverByUnit = Array.Empty<bool>();
     private BehaviacUnitDecisionAgent?[] _behaviacAgents = Array.Empty<BehaviacUnitDecisionAgent?>();
+    private UnitId[] _flankTargetByUnit = Array.Empty<UnitId>();
+    private bool[] _hasFlankTargetByUnit = Array.Empty<bool>();
     private bool _behaviacInitialized;
 
     private readonly UnitWeaponSystem _weaponSystem;
@@ -56,9 +58,11 @@ public sealed class UnitAiSystem
         _weaponSystem =
             weaponSystem ?? new UnitWeaponSystem();
 
-        UseBehaviacDecisionLayer = string.Equals(
+        // New branch uses Behaviac by default. Set RIMCLONE_USE_BEHAVIAC_AI=0
+        // to compare against the legacy decision path.
+        UseBehaviacDecisionLayer = !string.Equals(
             Environment.GetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI"),
-            "1",
+            "0",
             StringComparison.Ordinal);
     }
 
@@ -154,12 +158,24 @@ public sealed class UnitAiSystem
             if (!isAlive ||
                 (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.Dead))
             {
+                _hasFlankTargetByUnit[unit] = false;
+                _flankTargetByUnit[unit] = default;
                 ClearAiming(weapons, unit);
                 units.HasTarget[unit] = false;
                 Store.ClearGoal(unit);
                 Store.State[unit] = UnitAiState.Dead;
                 units.Posture[unit] = UnitPosture.Lying;
                 continue;
+            }
+
+            if (UseBehaviacDecisionLayer &&
+                intent != BehaviacUnitIntent.FlankTarget &&
+                Store.State[unit] == UnitAiState.Flank)
+            {
+                // If the tree interrupts a flanking run (lost target, suppression,
+                // or a tactical change), cancel the stale destination immediately.
+                Store.ClearGoal(unit);
+                Store.State[unit] = UnitAiState.Search;
             }
 
             bool moving = units.Velocity[unit].LengthSquared() > 0.04f;
@@ -443,7 +459,51 @@ public sealed class UnitAiSystem
                 }
             }
 
-            Store.ClearGoal(unit);
+            if (UseBehaviacDecisionLayer &&
+                targetVisible &&
+                intent == BehaviacUnitIntent.FlankTarget)
+            {
+                bool targetChanged = !_hasFlankTargetByUnit[unit] ||
+                    !_flankTargetByUnit[unit].Equals(target);
+
+                if (Store.State[unit] != UnitAiState.Flank ||
+                    !Store.HasGoal[unit] ||
+                    targetChanged)
+                {
+                    Store.ClearGoal(unit);
+                    if (TryFindFlankWaypoint(
+                            units,
+                            worldMap,
+                            unit,
+                            target.Index,
+                            out Vector3 flankWaypoint))
+                    {
+                        Store.SetGoal(unit, flankWaypoint);
+                        _flankTargetByUnit[unit] = target;
+                        _hasFlankTargetByUnit[unit] = true;
+                    }
+                }
+
+                if (Store.HasGoal[unit] &&
+                    !ReachedGoal(units.Position[unit], Store.Goal[unit]))
+                {
+                    ClearAiming(weapons, unit);
+                    units.Target[unit] = Store.Goal[unit];
+                    units.HasTarget[unit] = true;
+                    Store.State[unit] = UnitAiState.Flank;
+                    continue;
+                }
+
+                // Mark this target as already flanked so the unit doesn't oscillate
+                // between a firing position and another flank waypoint every tick.
+                Store.ClearGoal(unit);
+                Store.State[unit] = UnitAiState.Attack;
+                intent = BehaviacUnitIntent.EngageTarget;
+            }
+            else
+            {
+                Store.ClearGoal(unit);
+            }
 
             if (targetVisible &&
                 (!UseBehaviacDecisionLayer ||
@@ -620,25 +680,56 @@ public sealed class UnitAiSystem
             _behaviacAgents[unit] = agent;
         }
 
-        bool hasVisibleTarget = _nearestVisibleEnemyByUnit[unit] >= 0;
-        if (!hasVisibleTarget && Store.HasTarget[unit])
+        int visibleTargetIndex = _nearestVisibleEnemyByUnit[unit];
+        if (Store.HasTarget[unit])
         {
-            UnitId target = Store.Target[unit];
-            hasVisibleTarget =
-                units.IsAlive(target) &&
-                health.OverallHitPoints[target.Index] > 0f &&
-                IsHostile(units, unit, target.Index) &&
-                vision.IsRecentlyVisible(unit, target.Index, units);
+            UnitId currentTarget = Store.Target[unit];
+            if (units.IsAlive(currentTarget) &&
+                health.OverallHitPoints[currentTarget.Index] > 0f &&
+                IsHostile(units, unit, currentTarget.Index) &&
+                vision.IsRecentlyVisible(unit, currentTarget.Index, units))
+            {
+                // Don't change an ongoing maneuver just because the rotating vision
+                // sampler found a different enemy in the same tick.
+                visibleTargetIndex = currentTarget.Index;
+            }
         }
 
-        // HasGoal is included for compatibility with the current suppression
-        // flow, which resumes its saved goal before selecting a new one.
+        bool hasVisibleTarget = visibleTargetIndex >= 0;
+        bool isSuppressed =
+            suppressionState is UnitSuppressionState.Panicked or UnitSuppressionState.Suppressed;
+        float healthRatio = health.OverallMaxHitPoints[unit] > 0f
+            ? health.OverallHitPoints[unit] / health.OverallMaxHitPoints[unit]
+            : 0f;
+        bool isHealthyEnoughToFlank = healthRatio >= LowHealthThreshold && !isSuppressed;
+        bool canFlank = false;
+
+        if (hasVisibleTarget && isHealthyEnoughToFlank && unit % 4 == 0)
+        {
+            Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
+            float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
+            bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
+                _flankTargetByUnit[unit].Equals(units.GetId(visibleTargetIndex));
+
+            // A quarter of the squad are designated flankers. Keep the maneuver
+            // in useful weapon engagement ranges and do it only once per target.
+            canFlank = !alreadyFlankedThisTarget &&
+                distanceSquared >= 49f &&
+                distanceSquared <= 400f;
+        }
+
+        bool isFlanking =
+            Store.State[unit] == UnitAiState.Flank &&
+            isHealthyEnoughToFlank;
+
         agent.SetFacts(
             isAlive,
-            suppressionState is UnitSuppressionState.Panicked or UnitSuppressionState.Suppressed,
+            isSuppressed,
             Store.HasGoal[unit] || _hasSuppressionCoverByUnit[unit],
             hasVisibleTarget,
-            Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f);
+            Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f,
+            canFlank,
+            isFlanking);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
@@ -648,6 +739,45 @@ public sealed class UnitAiSystem
         }
 
         return agent.Intent;
+    }
+
+    private static bool TryFindFlankWaypoint(
+        UnitStore units,
+        WorldMap worldMap,
+        int unit,
+        int targetIndex,
+        out Vector3 waypoint)
+    {
+        waypoint = Vector3.Zero;
+        Vector3 position = units.Position[unit];
+        Vector3 target = units.Position[targetIndex];
+        Vector2 towardTarget = new(target.X - position.X, target.Y - position.Y);
+        float lengthSquared = towardTarget.LengthSquared();
+        if (lengthSquared < 1f)
+            return false;
+
+        Vector2 forward = Vector2.Normalize(towardTarget);
+        Vector2 side = new(-forward.Y, forward.X);
+        float sideSign = (unit & 1) == 0 ? 1f : -1f;
+
+        // Move to a point behind and to one side of the target. This is a genuine
+        // movement command, not a debug-only role label.
+        float targetX = target.X - forward.X * 3f + side.X * 5f * sideSign;
+        float targetY = target.Y - forward.Y * 3f + side.Y * 5f * sideSign;
+        targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
+        targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+
+        int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
+        waypoint = new Vector3(
+            tileX + 0.5f,
+            tileY + 0.5f,
+            worldMap.GetSurfaceHeight(tileX, tileY));
+
+        Vector2 toWaypoint = new(
+            waypoint.X - position.X,
+            waypoint.Y - position.Y);
+        return toWaypoint.LengthSquared() > 4f;
     }
 
     private static bool TryFindSearchWaypoint(
@@ -717,6 +847,10 @@ public sealed class UnitAiSystem
             Array.Resize(ref _suppressionCoverByUnit, capacity);
         if (_hasSuppressionCoverByUnit.Length < capacity)
             Array.Resize(ref _hasSuppressionCoverByUnit, capacity);
+        if (_flankTargetByUnit.Length < capacity)
+            Array.Resize(ref _flankTargetByUnit, capacity);
+        if (_hasFlankTargetByUnit.Length < capacity)
+            Array.Resize(ref _hasFlankTargetByUnit, capacity);
     }
 
     private void PrepareUnitPlan(
