@@ -37,6 +37,7 @@ public sealed class UnitAiSystem
     private float _thinkTimer;
 
     public bool Enabled { get; set; }
+    public bool LastUpdateRanThinkPass { get; private set; }
 
     /// <summary>
     /// Uses Behaviac for high-level unit intent selection.
@@ -90,6 +91,8 @@ public sealed class UnitAiSystem
         WorldMap worldMap,
         float deltaTime)
     {
+        LastUpdateRanThinkPass = false;
+
         if (!Enabled ||
             deltaTime <= 0f ||
             units.ActiveCount == 0)
@@ -107,6 +110,7 @@ public sealed class UnitAiSystem
             _thinkTimer;
 
         _thinkTimer = 0f;
+        LastUpdateRanThinkPass = true;
 
         // Preserve these results between think ticks so the one-second
         // performance logger doesn't usually sample a zero-work render frame.
