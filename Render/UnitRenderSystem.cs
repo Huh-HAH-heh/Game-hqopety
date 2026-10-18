@@ -240,7 +240,9 @@ public sealed class UnitRenderSystem : IDisposable
                     markerRadius,
                     units.FactionTag[unitIndex],
                     isAlive,
-                    markerOpacity);
+                    markerOpacity,
+                    units.Posture[unitIndex],
+                    units.BodyNormal[unitIndex]);
             }
 
             if (!isAlive)
@@ -517,7 +519,9 @@ public void DrawSnapshot(
                     markerRadius,
                     unit.FactionTag,
                     isAlive,
-                    markerOpacity);
+                    markerOpacity,
+                    unit.Posture,
+                    unit.BodyNormal);
             }
 
             if (!isAlive)
@@ -1334,16 +1338,41 @@ public void DrawSnapshot(
         float radius,
         ushort factionTag,
         bool isAlive,
-        float opacity)
+        float opacity,
+        UnitPosture posture,
+        Vector3 facing)
     {
-        // A compact filled circle stays readable at macro zoom without drawing the rig.
         Color color = ApplyOpacity(
             GetBodyPartColor(BodyPartRole.Torso, factionTag, isAlive),
             opacity);
 
         const int segments = 16;
-        Vector2f center = new(x, y);
+        if (posture == UnitPosture.Lying)
+        {
+            // Marker-only view must communicate the same prone silhouette as the rig:
+            // an elongated torso aligned to the facing direction, with the head at
+            // the front. Layered ellipses keep it legible at macro zoom.
+            float facingLengthSquared = facing.X * facing.X + facing.Y * facing.Y;
+            float angle = facingLengthSquared > 0.000001f
+                ? MathF.Atan2(facing.Y, facing.X)
+                : 0f;
+            Color outline = ApplyOpacity(new Color(16, 21, 27, 255), opacity);
+            AppendEllipse(vertices, x, y,
+                radius * 1.72f, radius * 0.78f, angle, outline, segments);
+            AppendEllipse(vertices, x, y,
+                radius * 1.53f, radius * 0.61f, angle, color, segments);
 
+            float headX = x + MathF.Cos(angle) * radius * 1.05f;
+            float headY = y + MathF.Sin(angle) * radius * 1.05f;
+            AppendEllipse(vertices, headX, headY,
+                radius * 0.39f, radius * 0.39f, angle, outline, segments);
+            AppendEllipse(vertices, headX, headY,
+                radius * 0.29f, radius * 0.29f, angle, color, segments);
+            return;
+        }
+
+        // Standing and other non-prone postures retain the compact circle marker.
+        Vector2f center = new(x, y);
         for (int i = 0; i < segments; i++)
         {
             float a0 = i * MathF.Tau / segments;
