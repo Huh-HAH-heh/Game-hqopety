@@ -616,7 +616,7 @@ public sealed class UnitCardOverlay : IDisposable
             2 => "Красные (2)",
             _ => unit.FactionTag.ToString()
         });
-        Value("Состояние ИИ", unit.AiState.ToString());
+        Value("Состояние ИИ", FormatAiState(unit.AiState));
         Value("Поза", unit.Posture.ToString());
         Value("Здоровье", $"{unit.HitPoints:0.0} / {unit.MaxHitPoints:0.0} HP ({unit.HealthRatio * 100f:0.0}%)");
         Value("Подавление", $"{unit.Suppression:0.00} — {unit.SuppressionState}");
@@ -767,6 +767,18 @@ public sealed class UnitCardOverlay : IDisposable
 
         Value("Перезарядка оружия", $"{config.ReloadTime:0.00} с");
     }
+
+    private static string FormatAiState(UnitAiState state) =>
+        state switch
+        {
+            UnitAiState.Idle => "Ожидание",
+            UnitAiState.Attack => "Бой",
+            UnitAiState.SeekCover => "Укрытие",
+            UnitAiState.Search => "Поиск",
+            UnitAiState.Dead => "Мёртв",
+            UnitAiState.Flank => "Фланг",
+            _ => state.ToString()
+        };
 
     private static string FormatVector(System.Numerics.Vector3 value) =>
         $"({value.X:0.00}, {value.Y:0.00}, {value.Z:0.00})";
