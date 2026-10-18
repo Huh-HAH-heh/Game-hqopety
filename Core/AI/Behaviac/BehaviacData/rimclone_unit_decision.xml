@@ -53,6 +53,17 @@
             <property ResultOption="BT_INVALID" />
           </node>
         </node>
+        <node class="Sequence" id="24">
+          <node class="Condition" id="25">
+            <property Operator="Equal" />
+            <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldTakePronePosition()" />
+            <property Opr="const bool true" />
+          </node>
+          <node class="Action" id="26">
+            <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectProneEngage()" />
+            <property ResultOption="BT_INVALID" />
+          </node>
+        </node>
         <node class="Action" id="16">
           <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectEngageTarget()" />
           <property ResultOption="BT_INVALID" />
