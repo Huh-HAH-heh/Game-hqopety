@@ -317,7 +317,6 @@ public sealed class UnitCardOverlay : IDisposable
     public void Draw(
         RenderWindow window,
         RenderUnitState unit,
-        RenderBodyPart[] bodyParts,
         UnitCardDetailsSnapshot? details,
         uint windowWidth,
         uint windowHeight)
@@ -422,7 +421,6 @@ public sealed class UnitCardOverlay : IDisposable
             _anatomyView.Draw(
                 window,
                 unit,
-                bodyParts,
                 details,
                 _panel.Position.X + 5f,
                 _panel.Position.Y + 101f,
