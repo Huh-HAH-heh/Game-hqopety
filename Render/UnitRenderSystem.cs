@@ -62,7 +62,8 @@ public sealed class UnitRenderSystem : IDisposable
         bool showVisionDebug,
         bool showAiDebug = true,
         bool hideUnseenTargets = false,
-        HashSet<UnitId>? selectedUnits = null)
+        HashSet<UnitId>? selectedUnits = null,
+        bool showUnitRig = true)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -77,6 +78,7 @@ public sealed class UnitRenderSystem : IDisposable
 
         float detailBlend = GetUnitDetailBlend(pixelsPerWorldUnit);
         bool showUnitDetails = detailBlend > 0f;
+        bool showRigDetails = showUnitRig && showUnitDetails;
 
         _vertices.Clear();
         _bodyOutlines.Clear();
@@ -122,6 +124,8 @@ public sealed class UnitRenderSystem : IDisposable
 
         Vector3[] headNormals = units.HeadNormal;
         UnitType[] unitTypes = units.Type;
+        int[] bodyStarts = units.BodyStart;
+        short[] bodyCounts = units.BodyCount;
         UnitBodyStore bodies = simulation.Bodies;
 
         if (showUnitDetails)
@@ -212,21 +216,38 @@ public sealed class UnitRenderSystem : IDisposable
                 tilePixelSize,
                 screenScale);
 
-            AppendUnitMarker(
-                _vertices,
-                _bodyOutlines,
-                _statusIcons,
-                screenX,
-                screenY,
-                markerRadius,
-                headNormals[unitIndex],
-                units.FactionTag[unitIndex],
-                isAlive,
-                healthRatio,
-                suppression,
-                suppressionState,
-                screenScale,
-                1f);
+            int renderedParts = 0;
+            if (showRigDetails)
+            {
+                renderedParts = AppendBodyParts(
+                    _vertices,
+                    _bodyOutlines,
+                    bodies,
+                    bodyStarts[unitIndex],
+                    bodyCounts[unitIndex],
+                    units.FactionTag[unitIndex],
+                    isAlive,
+                    tilePixelSize,
+                    screenScale,
+                    detailBlend);
+            }
+
+            // In rig mode the faction marker fades out as the static body
+            // details fade in. Marker-only mode never draws a body part.
+            float markerOpacity = showUnitRig && renderedParts > 0
+                ? 1f - detailBlend
+                : 1f;
+            if (markerOpacity > 0f)
+            {
+                AppendLowDetailUnitMarker(
+                    _vertices,
+                    screenX,
+                    screenY,
+                    markerRadius,
+                    units.FactionTag[unitIndex],
+                    isAlive,
+                    markerOpacity);
+            }
 
             if (!isAlive)
                 continue;
@@ -328,7 +349,8 @@ public void DrawSnapshot(
         float tilePixelSize,
         int selectedUnitIndex,
         bool showAiDebug,
-        HashSet<UnitId>? selectedUnits = null)
+        HashSet<UnitId>? selectedUnits = null,
+        bool showUnitRig = true)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -338,6 +360,7 @@ public void DrawSnapshot(
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
         bool showUnitDetails = detailBlend > 0f;
+        bool showRigDetails = showUnitRig && showUnitDetails;
 
         float centerX = cameraView.Center.X;
         float centerY = cameraView.Center.Y;
@@ -414,7 +437,7 @@ public void DrawSnapshot(
             // At macro zoom, individual limbs have no useful screen-space size.
             // Don't scan every body part just to reject an off-screen unit.
             if (!rootInView &&
-                (!showUnitDetails ||
+                (!showRigDetails ||
                  !IsAnyBodyPartInView(
                     bodyParts,
                     unit.BodyPartStart,
@@ -434,9 +457,10 @@ public void DrawSnapshot(
                 tilePixelSize,
                 screenScale);
 
-            if (showUnitDetails)
+            int renderedParts = 0;
+            if (showRigDetails)
             {
-                int renderedParts = AppendBodyParts(
+                renderedParts = AppendBodyParts(
                     _vertices,
                     _bodyOutlines,
                     bodyParts,
@@ -447,37 +471,24 @@ public void DrawSnapshot(
                     tilePixelSize,
                     screenScale,
                     detailBlend);
-
-                if (renderedParts == 0)
-                {
-                    AppendUnitMarker(
-                        _vertices,
-                        _bodyOutlines,
-                        _statusIcons,
-                        x,
-                        y,
-                        markerRadius,
-                        unit.HeadNormal,
-                        unit.FactionTag,
-                        isAlive,
-                        unit.HealthRatio,
-                        unit.Suppression,
-                        unit.SuppressionState,
-                        screenScale,
-                        detailBlend);
-                }
             }
 
-            // The gameplay marker is permanent and remains visible over the static rig.
-            // Zoom only controls anatomical detail; it never fades the unit's own marker.
-            AppendLowDetailUnitMarker(
-                _vertices,
-                x,
-                y,
-                markerRadius,
-                unit.FactionTag,
-                isAlive,
-                1f);
+            // In marker-only mode this remains a fully opaque faction circle.
+            // In rig mode the marker fades out at the same rate the rig fades in.
+            float markerOpacity = showUnitRig && renderedParts > 0
+                ? 1f - detailBlend
+                : 1f;
+            if (markerOpacity > 0f)
+            {
+                AppendLowDetailUnitMarker(
+                    _vertices,
+                    x,
+                    y,
+                    markerRadius,
+                    unit.FactionTag,
+                    isAlive,
+                    markerOpacity);
+            }
 
             if (!isAlive)
                 continue;
