@@ -39,8 +39,8 @@ public sealed class UnitAiSystem
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// Uses the Behaviac decision tree for high-level unit intent selection.
-    /// Disabled by default; enable with RIMCLONE_USE_BEHAVIAC_AI=1 or set this property.
+    /// Uses Behaviac for high-level unit intent selection.
+    /// Enabled by default on this experiment branch; set RIMCLONE_USE_BEHAVIAC_AI=0 for legacy AI.
     /// </summary>
     public bool UseBehaviacDecisionLayer { get; set; }
 
