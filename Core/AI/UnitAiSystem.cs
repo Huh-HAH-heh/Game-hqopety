@@ -219,12 +219,16 @@ public sealed class UnitAiSystem
             }
 
             bool moving = units.Velocity[unit].LengthSquared() > 0.04f;
-            if (moving)
-                units.Posture[unit] = UnitPosture.Standing;
+            if (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.ProneEngage)
+                units.Posture[unit] = UnitPosture.Lying;
             else if (suppressionState == UnitSuppressionState.Panicked)
                 units.Posture[unit] = UnitPosture.Lying;
+            else if (moving)
+                units.Posture[unit] = UnitPosture.Standing;
             else if (suppressionState == UnitSuppressionState.Suppressed)
                 units.Posture[unit] = UnitPosture.Crouching;
+            else if (units.Posture[unit] == UnitPosture.Lying)
+                units.Posture[unit] = UnitPosture.Standing;
 
             if (suppressionState == UnitSuppressionState.Panicked &&
                 Store.HasGoal[unit] &&
@@ -431,13 +435,18 @@ public sealed class UnitAiSystem
                     target);
             }
 
-            if (moving)
+            if (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.ProneEngage)
             {
-                units.Posture[unit] = UnitPosture.Standing;
+                // Stay prone while crawling to, holding, or firing from the chosen position.
+                units.Posture[unit] = UnitPosture.Lying;
             }
             else if (suppressionState == UnitSuppressionState.Panicked)
             {
                 units.Posture[unit] = UnitPosture.Lying;
+            }
+            else if (moving)
+            {
+                units.Posture[unit] = UnitPosture.Standing;
             }
             else if (suppressionState == UnitSuppressionState.Suppressed)
             {
@@ -450,7 +459,7 @@ public sealed class UnitAiSystem
             }
             else if (units.Posture[unit] == UnitPosture.Lying)
             {
-                // Recover from the prone suppression pose after the threat passes.
+                // Recover from a temporary prone posture after the threat passes.
                 units.Posture[unit] = UnitPosture.Standing;
             }
 
@@ -572,7 +581,7 @@ public sealed class UnitAiSystem
 
             if (targetVisible &&
                 (!UseBehaviacDecisionLayer ||
-                 intent == BehaviacUnitIntent.EngageTarget))
+                 intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage))
             {
                 FaceTarget(
                     units,
@@ -733,7 +742,8 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.SeekCover: LastBehaviacCoverDecisions++; break;
             case BehaviacUnitIntent.RetreatToCover: LastBehaviacRetreatDecisions++; break;
             case BehaviacUnitIntent.FlankTarget: LastBehaviacFlankDecisions++; break;
-            case BehaviacUnitIntent.EngageTarget: LastBehaviacEngageDecisions++; break;
+            case BehaviacUnitIntent.EngageTarget:
+            case BehaviacUnitIntent.ProneEngage: LastBehaviacEngageDecisions++; break;
             case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
             case BehaviacUnitIntent.InvestigateLastKnownTarget: LastBehaviacInvestigateDecisions++; break;
             case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
@@ -814,6 +824,28 @@ public sealed class UnitAiSystem
             Store.State[unit] == UnitAiState.Flank &&
             isHealthyEnoughToFlank;
 
+        float proneUtility = 0f;
+        if (hasVisibleTarget &&
+            suppressionState == UnitSuppressionState.Calm &&
+            !isLowHealth &&
+            !canFlank &&
+            !isFlanking)
+        {
+            Vector3 targetDelta = units.Position[visibleTargetIndex] - units.Position[unit];
+            float distance = MathF.Sqrt(
+                targetDelta.X * targetDelta.X + targetDelta.Y * targetDelta.Y);
+            float distanceAdvantage = Math.Clamp((distance - 9f) / 25f, 0f, 1f);
+            bool exposed = !_hasSuppressionCoverByUnit[unit] &&
+                !(Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover);
+            float exposureAdvantage = exposed ? 1f : 0.2f;
+            proneUtility = Math.Clamp(
+                distanceAdvantage * 0.65f +
+                exposureAdvantage * 0.25f +
+                healthRatio * 0.10f,
+                0f,
+                1f);
+        }
+
         agent.SetFacts(
             isAlive,
             suppressionState == UnitSuppressionState.Panicked,
@@ -824,7 +856,8 @@ public sealed class UnitAiSystem
             isLowHealth,
             hasSuppressiveWeapon,
             canFlank,
-            isFlanking);
+            isFlanking,
+            proneUtility);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
