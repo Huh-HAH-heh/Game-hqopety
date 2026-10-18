@@ -957,7 +957,11 @@ public static class CombatSelfTest
             return false;
 
         simulation.SetPosture(target, UnitPosture.Lying);
+        simulation.Units.Velocity[target.Index] = new Vector3(0.6f, 0f, 0f);
         new UnitBodySystem().Update(simulation.Units, simulation.Bodies, 0.016f);
+        if (simulation.Units.Posture[target.Index] != UnitPosture.Lying)
+            return false;
+
         WorldMap map = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 32);
         simulation.Vision.Update(
             simulation.Units, map, 0.11f, simulation.Health, simulation.Bodies);
