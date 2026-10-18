@@ -61,7 +61,7 @@ public sealed class UnitHitSystem
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
         float eyeHeight = units.Posture[unitIndex] switch
         {
-            UnitPosture.Lying => 0.22f,
+            UnitPosture.Lying => 0.15f,
             UnitPosture.Crouching => 0.56f,
             UnitPosture.Sitting => 0.68f,
             _ => 0.82f
