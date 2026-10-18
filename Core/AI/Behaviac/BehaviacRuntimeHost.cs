@@ -6,8 +6,8 @@ using behaviac;
 namespace Core.AI.Behaviac;
 
 /// <summary>
-/// Owns Behaviac's process-wide workspace. This is opt-in infrastructure only;
-/// the current UnitAiSystem does not call it yet.
+/// Owns Behaviac's process-wide workspace for the live UnitAiSystem decision tree.
+
 /// </summary>
 public static class BehaviacRuntimeHost
 {
