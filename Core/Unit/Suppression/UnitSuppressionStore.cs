@@ -12,8 +12,10 @@ public enum UnitSuppressionState : byte
 
 public sealed class UnitSuppressionStore
 {
-    public const float SuppressedThreshold = 1f;
-    public const float PanickedThreshold = 2.5f;
+    public const float SuppressedThreshold = 1.5f;
+    public const float PanickedThreshold = 4.5f;
+
+    private UnitSkillStore? _skills;
 
     private float[] _value;
     private Vector3[] _source;
@@ -30,6 +32,9 @@ public sealed class UnitSuppressionStore
         _value = new float[initialCapacity];
         _source = new Vector3[initialCapacity];
     }
+
+    public void BindSkillStore(UnitSkillStore skills) =>
+        _skills = skills ?? throw new ArgumentNullException(nameof(skills));
 
     public void InitializeUnit(int unitIndex)
     {
@@ -57,10 +62,9 @@ public sealed class UnitSuppressionStore
             amount <= 0f)
             return;
 
-        _value[unitIndex] =
-            MathF.Min(
-                10f,
-                _value[unitIndex] + amount);
+        float resistance = _skills?.GetSuppressionResistance(unitIndex) ?? 0f;
+        float resistanceMultiplier = Math.Clamp(1f - resistance * 0.80f, 0.18f, 1f);
+        _value[unitIndex] = MathF.Min(10f, _value[unitIndex] + amount * resistanceMultiplier);
 
         _source[unitIndex] = source;
     }
@@ -83,7 +87,7 @@ public sealed class UnitSuppressionStore
                 MathF.Max(
                     0f,
                     _value[unit] -
-                    0.35f * deltaTime);
+                    0.60f * deltaTime);
         }
     }
 
@@ -104,8 +108,8 @@ public sealed class UnitSuppressionStore
 
         return 1f +
             MathF.Min(
-                2f,
-                value * 0.35f);
+                0.55f,
+                value * 0.12f);
     }
 
     public void EnsureCapacity(int required)

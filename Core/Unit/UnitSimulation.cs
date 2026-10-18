@@ -21,6 +21,7 @@ public sealed class UnitSimulation
     private float[] _baseMoveSpeed = Array.Empty<float>();
 
     public UnitStore Units { get; }
+    public UnitSkillStore Skills { get; }
     public UnitNavigationSystem Navigation => _movementSystem.Navigation;
     public UnitBodyStore Bodies { get; }
     public UnitHitRegionStore HitRegions { get; }
@@ -129,11 +130,13 @@ public sealed class UnitSimulation
         Projectiles =
             new ProjectileStore();
 
+        Skills = new UnitSkillStore(unitCapacity);
         Suppression =
             new UnitSuppressionStore(unitCapacity);
+        Suppression.BindSkillStore(Skills);
 
         _weaponSystem =
-            new UnitWeaponSystem(HitRegions, Bodies);
+            new UnitWeaponSystem(HitRegions, Bodies, Skills);
 
         _projectileSystem =
             new ProjectileSystem();
@@ -146,7 +149,8 @@ public sealed class UnitSimulation
         _aiSystem =
             new UnitAiSystem(
                 unitCapacity,
-                _weaponSystem);
+                _weaponSystem,
+                Skills);
     }
 
     public UnitId Spawn(
@@ -319,6 +323,7 @@ public sealed class UnitSimulation
         Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);
         Weapons.InitializeUnit(id.Index);
+        Skills.InitializeUnit(id.Index, definition.Type, Units.FactionTag[id.Index]);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
 

@@ -35,6 +35,7 @@ public sealed class UnitAiSystem
     private bool _behaviacInitialized;
 
     private readonly UnitWeaponSystem _weaponSystem;
+    private readonly UnitSkillStore? _skills;
     private float _thinkTimer;
 
     public bool Enabled { get; set; }
@@ -64,7 +65,8 @@ public sealed class UnitAiSystem
 
     public UnitAiSystem(
         int initialUnitCapacity = 1024,
-        UnitWeaponSystem? weaponSystem = null)
+        UnitWeaponSystem? weaponSystem = null,
+        UnitSkillStore? skills = null)
     {
         Store =
             new UnitAiStore(
@@ -72,6 +74,7 @@ public sealed class UnitAiSystem
 
         _weaponSystem =
             weaponSystem ?? new UnitWeaponSystem();
+        _skills = skills;
 
         // New branch uses Behaviac by default. Set RIMCLONE_USE_BEHAVIAC_AI=0
         // to compare against the legacy decision path.
@@ -221,8 +224,7 @@ public sealed class UnitAiSystem
             else if (suppressionState is UnitSuppressionState.Suppressed or UnitSuppressionState.Panicked)
                 units.Posture[unit] = UnitPosture.Lying;
 
-            if ((suppressionState == UnitSuppressionState.Panicked ||
-                 suppressionState == UnitSuppressionState.Suppressed) &&
+            if (suppressionState == UnitSuppressionState.Panicked &&
                 Store.HasGoal[unit] &&
                 Store.State[unit] != UnitAiState.SeekCover)
             {
@@ -232,8 +234,7 @@ public sealed class UnitAiSystem
                 units.HasTarget[unit] = false;
             }
 
-            if (suppressionState == UnitSuppressionState.Panicked ||
-                suppressionState == UnitSuppressionState.Suppressed)
+            if (suppressionState == UnitSuppressionState.Panicked)
             {
                 Vector3 suppressionSource =
                     suppression.Source[unit];
@@ -625,7 +626,7 @@ public sealed class UnitAiSystem
                         target,
                         vision,
                         worldMap,
-                        suppression.GetAccuracyMultiplier(unit));
+                        GetSpreadMultiplier(units, suppression, unit));
 
                 if (fired)
                 {
@@ -690,7 +691,7 @@ public sealed class UnitAiSystem
                         unit,
                         target,
                         lastSeenAimPoint,
-                        suppression.GetAccuracyMultiplier(unit));
+                        GetSpreadMultiplier(units, suppression, unit));
 
                     units.Target[unit] = units.Position[unit];
                     units.HasTarget[unit] = false;
@@ -809,7 +810,7 @@ public sealed class UnitAiSystem
 
         agent.SetFacts(
             isAlive,
-            isSuppressed,
+            suppressionState == UnitSuppressionState.Panicked,
             _hasSuppressionCoverByUnit[unit] ||
                 (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover),
             hasVisibleTarget,
@@ -1015,8 +1016,7 @@ public sealed class UnitAiSystem
             FindNearestVisibleEnemy(units, health, vision, unit);
 
         UnitSuppressionState state = suppression.GetState(unit);
-        if ((state != UnitSuppressionState.Panicked &&
-             state != UnitSuppressionState.Suppressed) ||
+        if (state != UnitSuppressionState.Panicked ||
             (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover))
         {
             return;
@@ -1167,6 +1167,24 @@ public sealed class UnitAiSystem
         }
 
         return false;
+    }
+
+    private float GetSpreadMultiplier(
+        UnitStore units,
+        UnitSuppressionStore suppression,
+        int unit)
+    {
+        float skillMultiplier = _skills?.GetShootingSpreadMultiplier(unit) ?? 1f;
+        float postureMultiplier = units.Posture[unit] switch
+        {
+            UnitPosture.Lying => 0.78f,
+            UnitPosture.Crouching => 0.86f,
+            UnitPosture.Sitting => 0.92f,
+            _ => 1f
+        };
+        return Math.Clamp(
+            suppression.GetAccuracyMultiplier(unit) * skillMultiplier * postureMultiplier,
+            0.45f, 2f);
     }
 
     private bool TryFireAnyRangedWeapon(

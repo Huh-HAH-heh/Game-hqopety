@@ -10,13 +10,16 @@ public sealed class UnitWeaponSystem
 {
     private readonly UnitHitRegionStore? _hitRegions;
     private readonly UnitBodyStore? _bodies;
+    private readonly UnitSkillStore? _skills;
 
     public UnitWeaponSystem(
         UnitHitRegionStore? hitRegions = null,
-        UnitBodyStore? bodies = null)
+        UnitBodyStore? bodies = null,
+        UnitSkillStore? skills = null)
     {
         _hitRegions = hitRegions;
         _bodies = bodies;
+        _skills = skills;
     }
 
     public long TotalShotsFired { get; private set; }
@@ -410,6 +413,7 @@ public sealed class UnitWeaponSystem
         weapons.Ammo[stateIndex]--;
 
         TotalShotsFired++;
+        _skills?.GainExperience(unitIndex, UnitSkill.Shooting, 8f);
         TotalRoundsConsumed++;
         TotalProjectilesSpawned += pelletCount;
         ShotsFiredThisFrame++;
@@ -850,7 +854,7 @@ private static AmmunitionConfig? GetCurrentAmmunition(
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
         float heightFraction = units.Posture[unitIndex] switch
         {
-            UnitPosture.Lying => 0.42f,
+            UnitPosture.Lying => 0.25f,
             UnitPosture.Crouching => 0.58f,
             UnitPosture.Sitting => 0.68f,
             _ => 0.82f
