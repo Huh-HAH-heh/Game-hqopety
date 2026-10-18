@@ -583,9 +583,16 @@ public sealed class UnitAiSystem
                 Store.State[unit] = UnitAiState.Attack;
                 intent = BehaviacUnitIntent.EngageTarget;
             }
-            else if (!(UseBehaviacDecisionLayer &&
-                         targetVisible &&
-                         intent == BehaviacUnitIntent.ProneEngage))
+            else if (UseBehaviacDecisionLayer &&
+                     targetVisible &&
+                     intent == BehaviacUnitIntent.ProneEngage)
+            {
+                // Replace a patrol/cover destination on the first prone-engage
+                // tick, but retain the crawl goal on subsequent thinking ticks.
+                if (Store.State[unit] != UnitAiState.Attack)
+                    Store.ClearGoal(unit);
+            }
+            else
             {
                 Store.ClearGoal(unit);
             }
