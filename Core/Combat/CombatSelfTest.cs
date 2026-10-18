@@ -1409,7 +1409,7 @@ public static class CombatSelfTest
         return aboveWallVisible && !throughWallVisible;
     }
 
-                        private static bool TestHitRegionProfilesDriveVisionCollisionAndArmor()
+    private static bool TestHitRegionProfilesDriveVisionCollisionAndArmor()
     {
         UnitHitRegionProfile profile = new UnitHitRegionProfile(
             new UnitCircleHitRegion(
@@ -1451,6 +1451,44 @@ public static class CombatSelfTest
 
         UnitDamageResult damage = simulation.ApplyDamage(unit, torsoHit.Part, 20f);
         return damage.ArmorAbsorbed > 0f && damage.FinalDamage < damage.RawDamage;
+    }
+
+    private static bool TestColonistUsesAnatomyNodes()
+    {
+        UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
+        if (profile.RegionCount != 13 || profile.NodeCount != 13 ||
+            !profile.HasSharedShapes || profile.VolumeCount != 8)
+            return false;
+
+        int torso = profile.FindRegion("body.middle");
+        int head = profile.FindRegion("body.upper");
+        int leg = profile.FindRegion("body.leg.left.upper");
+        if (torso < 0 || head < 0 || leg < 0 ||
+            !profile.TryFindPart(UnitHealthPartId.Torso, out int torsoRegion, out _) ||
+            torsoRegion != torso ||
+            !profile.TryFindPart(UnitHealthPartId.LeftLeg, out int legRegion, out _) ||
+            legRegion != leg ||
+            !profile.TryFindPart("heart.main", out int heartRegion, out _) ||
+            heartRegion != torso ||
+            !profile.TryFindPart("brain.main", out int brainRegion, out _) ||
+            brainRegion != head)
+            return false;
+
+        UnitSimulation simulation = new UnitSimulation(4, 32);
+        UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f));
+        Vector3 expected = simulation.Units.Position[unit.Index] +
+            new Vector3(0f, 0f, simulation.Units.Height[unit.Index] * 0.5f);
+
+        for (int i = 0; i < profile.RegionCount; i++)
+        {
+            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                simulation.Units, unit.Index, i, simulation.HitRegions, simulation.Bodies);
+            if (Vector3.Distance(geometry.Center, expected) > 0.001f)
+                return false;
+        }
+
+        return UnitHitSystem.GetVisibilityPointCount(
+            simulation.Units, unit.Index, simulation.HitRegions) == 1;
     }
 
     private static bool TestAnatomyRigEditsPreserveBindings()
@@ -2170,7 +2208,7 @@ public static class CombatSelfTest
     }
 
 
-        private static bool TestNamedAnatomyMarkers()
+    private static bool TestNamedAnatomyMarkers()
     {
         UnitAnatomyProfile withMarkers = new(
             UnitAnatomyNode.Circle(
@@ -2212,6 +2250,60 @@ public static class CombatSelfTest
         return Vector3.Distance(eyeA, eyeB) < 0.001f &&
             Vector3.Distance(aimA, aimB) < 0.001f &&
             muzzleFound && Vector3.Distance(muzzle, expectedMuzzle) < 0.001f;
+    }
+
+    private static bool TestGenericAnatomyTissueHealth()
+    {
+        UnitAnatomyNode first = UnitAnatomyNode.Circle(
+            "damage.root", new Vector3(0f, 0f, 0.2f), 0.2f, 0.1f,
+            new[]
+            {
+                new HitRegionPartBinding(
+                    UnitHealthPartId.WholeBody,
+                    kind: UnitHealthPartKind.BodyPart,
+                    maxHitPoints: 30f,
+                    id: "damage.root.tissue")
+            });
+
+        UnitSimulation simulation = new UnitSimulation(4, 32);
+        UnitId unit = simulation.Spawn(
+            UnitType.SegmentedMonster,
+            new Vector3(10f, 12f, 0.1f),
+            hitProfile: new UnitAnatomyProfile(first));
+
+        if (!simulation.Health.TryFindRegionPart(unit.Index, 0, 0, out int rootHealthIndex))
+            return false;
+        simulation.ApplyAnatomyDamage(unit, 0, 0, 10f);
+        if (MathF.Abs(simulation.Health.HitPoints[rootHealthIndex] - 20f) > 0.001f)
+            return false;
+
+        UnitAnatomyNode second = UnitAnatomyNode.Circle(
+            "damage.child", "damage.root", new Vector3(0f, 0f, 0.8f), 0.15f, 0.08f,
+            new[]
+            {
+                new HitRegionPartBinding(
+                    UnitHealthPartId.WholeBody,
+                    kind: UnitHealthPartKind.BodyPart,
+                    maxHitPoints: 40f,
+                    id: "damage.child.tissue",
+                    parentId: "damage.root.tissue")
+            });
+
+        if (!simulation.AddAnatomyNode(unit, second) ||
+            !simulation.Health.TryFindRegionPart(unit.Index, 0, 0, out int preservedIndex) ||
+            !simulation.Health.TryFindRegionPart(unit.Index, 1, 0, out int childIndex))
+            return false;
+
+        simulation.ApplyAnatomyDamage(unit, 1, 0, 10f);
+        UnitHitRegionGeometry rootGeometry = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 0, simulation.HitRegions);
+        UnitHitRegionGeometry childGeometry = UnitHitSystem.GetRegionGeometry(
+            simulation.Units, unit.Index, 1, simulation.HitRegions);
+
+        return MathF.Abs(simulation.Health.HitPoints[preservedIndex] - 20f) < 0.001f &&
+            MathF.Abs(simulation.Health.HitPoints[childIndex] - 30f) < 0.001f &&
+            simulation.Health.Parent[childIndex] == preservedIndex &&
+            Vector3.Distance(rootGeometry.Center, childGeometry.Center) < 0.001f;
     }
 
     private static bool TestStartingArmorMitigatesRifleHits()
@@ -2405,7 +2497,7 @@ public static class CombatSelfTest
                simulation.Inventory.Durability[itemStart + helmet] > 0f;
     }
 
-            private static bool TestAnatomyProfiles()
+    private static bool TestAnatomyProfiles()
     {
         BodyPartDefinition[] colonist = UnitBodyCatalog.Get(UnitBodyType.Colonist).ToArray();
         BodyPartDefinition[] greenbob = UnitBodyCatalog.Get(UnitBodyType.SmallCreature).ToArray();
