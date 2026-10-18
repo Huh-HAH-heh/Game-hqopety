@@ -54,3 +54,6 @@ jobs:
         run: dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release
       - name: Run Behaviac unit-intent decision tests
         run: dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release -- --decision-test
+
+      - name: Benchmark Behaviac unit-intent decisions
+        run: dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release -- --decision-benchmark
