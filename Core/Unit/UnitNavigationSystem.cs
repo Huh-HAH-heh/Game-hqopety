@@ -78,6 +78,7 @@ public sealed class UnitNavigationSystem
     private float[] _gScore = Array.Empty<float>();
     private float[] _fScore = Array.Empty<float>();
     private float[] _navigationHeights = Array.Empty<float>();
+    private float[] _navigationEdgeCost = Array.Empty<float>();
     private bool[] _navigationPassable = Array.Empty<bool>();
     private byte[] _navigationNeighbors = Array.Empty<byte>();
     private long _navigationGridTerrainVersion = long.MinValue;
@@ -472,6 +473,7 @@ public sealed class UnitNavigationSystem
                     _gScore[current] +
                     stepCost +
                     heightDifference * HeightCost +
+                    _navigationEdgeCost[neighbor] +
                     routeReuseCost;
 
                 if (tentativeG >= _gScore[neighbor])
@@ -1088,6 +1090,7 @@ public sealed class UnitNavigationSystem
         _routeTrafficTerrainVersion = long.MinValue;
         Array.Clear(_routeTrafficRegistered);
         _navigationHeights = new float[_cellCount];
+        _navigationEdgeCost = new float[_cellCount];
         _navigationPassable = new bool[_cellCount];
         _navigationNeighbors = new byte[_cellCount];
         _navigationGridTerrainVersion = long.MinValue;
@@ -1272,6 +1275,38 @@ public sealed class UnitNavigationSystem
                     mask |= 1 << 7;
 
                 _navigationNeighbors[cell] = mask;
+            }
+        }
+
+        // A* used to treat every traversable cell as equally good, so shortest
+        // paths often scraped along walls and steep contour edges. Prefer cells
+        // with more open neighbours, but keep edge cells legal in narrow passages.
+        for (int y = 0; y < _height; y++)
+        {
+            int row = y * _width;
+            for (int x = 0; x < _width; x++)
+            {
+                int cell = row + x;
+                if (!_navigationPassable[cell])
+                {
+                    _navigationEdgeCost[cell] = 0f;
+                    continue;
+                }
+
+                byte mask = _navigationNeighbors[cell];
+                int cardinalCount = 0;
+                int diagonalCount = 0;
+                for (int bit = 0; bit < 4; bit++)
+                {
+                    if ((mask & (1 << bit)) != 0)
+                        cardinalCount++;
+                    if ((mask & (1 << (bit + 4))) != 0)
+                        diagonalCount++;
+                }
+
+                _navigationEdgeCost[cell] =
+                    (4 - cardinalCount) * 0.32f +
+                    (4 - diagonalCount) * 0.08f;
             }
         }
 
