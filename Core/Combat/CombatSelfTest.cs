@@ -36,6 +36,7 @@ public static class CombatSelfTest
         RunTest("Pawn stats: RimWorld skills and suppression resistance", TestPawnSkillsAndResistance, ref passed, ref failed);
         RunTest("Posture: prone silhouette and firing", TestPronePostureAndFiring, ref passed, ref failed);
         RunTest("Targeting: prone visibility and aim points follow the posed rig", TestProneTargetPointsFollowRig, ref passed, ref failed);
+        RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
@@ -1021,6 +1022,75 @@ public static class CombatSelfTest
             UnitHitSystem.IsPointInsideRegion(
                 simulation.Units, target.Index, visibleRegion, check.VisibleTargetPoint,
                 tolerance: 0.003f, hitRegions: simulation.HitRegions, bodies: simulation.Bodies);
+    }
+
+    private static bool TestProneCrawlApproach()
+    {
+        WorldMap map = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 16);
+        for (int y = 0; y < map.TileHeight; y++)
+        {
+            for (int x = 0; x < map.TileWidth; x++)
+                map.SetSolidHeight(x, y, 10, 1);
+        }
+
+        UnitSimulation simulation = new UnitSimulation(8, 64);
+        _ = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(0.5f, 0.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(35.5f, 24.5f, 1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10.5f, 24.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        simulation.Units.ViewRange[target.Index] = 20f;
+        simulation.Units.FieldOfView[target.Index] = 360f;
+        simulation.Units.ViewRange[shooter.Index] = 40f;
+        simulation.Units.FieldOfView[shooter.Index] = 360f;
+        simulation.AI.Enabled = true;
+        simulation.VisionEnabled = true;
+
+        int inventorySlot = simulation.AddInventoryItem(shooter, WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(shooter, inventorySlot, UnitWeaponSlot.Primary))
+            return false;
+
+        float startX = simulation.Units.Position[shooter.Index].X;
+        float initialDistance = Vector3.Distance(
+            simulation.Units.Position[shooter.Index],
+            simulation.Units.Position[target.Index]);
+
+        // Seed perception before measuring movement so this test exercises the
+        // tree's live prone decision rather than initial candidate warm-up.
+        for (int i = 0; i < 3; i++)
+            simulation.Vision.Update(
+                simulation.Units, map, 0.11f, simulation.Health, simulation.Bodies);
+
+        ReadOnlySpan<int> visible = simulation.Vision.GetVisibleTargets(shooter.Index);
+        bool targetVisible = false;
+        for (int i = 0; i < visible.Length; i++)
+            targetVisible |= visible[i] == target.Index;
+        if (!targetVisible)
+            return false;
+
+        for (int tick = 0; tick < 15; tick++)
+            simulation.Update(map, 0.1f);
+
+        Vector3 finalPosition = simulation.Units.Position[shooter.Index];
+        float finalDistance = Vector3.Distance(finalPosition, simulation.Units.Position[target.Index]);
+        return simulation.Units.Posture[shooter.Index] == UnitPosture.Lying &&
+            finalPosition.X > startX + 1f &&
+            finalDistance < initialDistance - 1f;
     }
 
     private static bool TestAccuracy()
