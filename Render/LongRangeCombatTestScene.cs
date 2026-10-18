@@ -292,6 +292,91 @@ public sealed class LongRangeCombatTestScene
                          ridgeB / (2f * TerrainScale));
                 }
 
+                // Three broken, winding ridgelines cut across the advance.
+                // Their broad shoulders stay traversable; only the crests block LOS.
+                // Sine-weighted gaps create saddles so A* has alternate routes to flank.
+                float ridgeCLine =
+                    13f * TerrainScale +
+                    dy * 0.22f +
+                    MathF.Sin(dy * 0.032f) * 10f * TerrainScale;
+                float ridgeCDistance =
+                    MathF.Abs(dx - ridgeCLine);
+                float ridgeCExposure =
+                    Math.Clamp(
+                        (MathF.Sin(dy / (17f * TerrainScale) + 0.8f) + 0.28f) * 1.25f,
+                        0f,
+                        1f);
+
+                if (ridgeCDistance < 6.5f * TerrainScale)
+                {
+                    height +=
+                        7.5f *
+                        (1f - ridgeCDistance / (6.5f * TerrainScale)) *
+                        ridgeCExposure;
+                }
+
+                float ridgeDLine =
+                    -14f * TerrainScale -
+                    dy * 0.17f +
+                    MathF.Sin(dy / (21f * TerrainScale)) * 8f * TerrainScale;
+                float ridgeDDistance =
+                    MathF.Abs(dx - ridgeDLine);
+                float ridgeDExposure =
+                    Math.Clamp(
+                        (MathF.Cos(dy / (14f * TerrainScale) + 1.3f) + 0.30f) * 1.15f,
+                        0f,
+                        1f);
+
+                if (ridgeDDistance < 5.5f * TerrainScale)
+                {
+                    height +=
+                        5.8f *
+                        (1f - ridgeDDistance / (5.5f * TerrainScale)) *
+                        ridgeDExposure;
+                }
+
+                // A winding drainage cut creates low ground between raised shoulders.
+                // It is deliberately shallow enough to navigate but deep enough to
+                // break silhouettes when units move along the bottom.
+                float washoutCenterY =
+                    dx * 0.20f +
+                    MathF.Sin(dx * 0.035f + 0.4f) * 8f * TerrainScale -
+                    10f * TerrainScale;
+                float washoutDistance =
+                    MathF.Abs(dy - washoutCenterY);
+
+                if (washoutDistance < 3.2f * TerrainScale)
+                {
+                    height =
+                        MathF.Max(
+                            2f,
+                            height -
+                            2.8f *
+                            (1f - washoutDistance / (3.2f * TerrainScale)));
+                }
+
+                // A shallow impact basin with a broken rim adds nearby hard
+                // occlusion, so a unit can disappear even when it is not far away.
+                float craterDx =
+                    (dx - 34f * TerrainScale) / (13f * TerrainScale);
+                float craterDy =
+                    (dy + 18f * TerrainScale) / (10f * TerrainScale);
+                float craterDistance =
+                    MathF.Sqrt(craterDx * craterDx + craterDy * craterDy);
+
+                if (craterDistance < 0.62f)
+                {
+                    height -=
+                        2.6f * (1f - craterDistance / 0.62f);
+                }
+                else if (craterDistance < 1f)
+                {
+                    float rim =
+                        1f - MathF.Abs(craterDistance - 0.81f) / 0.19f;
+                    height +=
+                        3.8f * MathF.Max(0f, rim);
+                }
+
                 bool hardCover =
                     IsHardCover(
                         x,
