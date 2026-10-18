@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Numerics;
 using System.Threading.Tasks;
+using Core.AI.Behaviac;
 using Core.Combat;
 using Core.Items;
 using Core.Map;
@@ -27,11 +28,19 @@ public sealed class UnitAiSystem
     private int[] _nearestVisibleEnemyByUnit = Array.Empty<int>();
     private Vector3[] _suppressionCoverByUnit = Array.Empty<Vector3>();
     private bool[] _hasSuppressionCoverByUnit = Array.Empty<bool>();
+    private BehaviacUnitDecisionAgent?[] _behaviacAgents = Array.Empty<BehaviacUnitDecisionAgent?>();
+    private bool _behaviacInitialized;
 
     private readonly UnitWeaponSystem _weaponSystem;
     private float _thinkTimer;
 
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Uses the Behaviac decision tree for high-level unit intent selection.
+    /// Disabled by default; enable with RIMCLONE_USE_BEHAVIAC_AI=1 or set this property.
+    /// </summary>
+    public bool UseBehaviacDecisionLayer { get; set; }
 
     public UnitAiStore Store { get; }
     public double LastPlanningMilliseconds { get; private set; }
@@ -46,6 +55,11 @@ public sealed class UnitAiSystem
 
         _weaponSystem =
             weaponSystem ?? new UnitWeaponSystem();
+
+        UseBehaviacDecisionLayer = string.Equals(
+            Environment.GetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI"),
+            "1",
+            StringComparison.Ordinal);
     }
 
     public void Update(
@@ -125,8 +139,20 @@ public sealed class UnitAiSystem
                     0f,
                     Store.SuppressionCoverRetry[unit] - thinkDelta);
 
-            if (health.OverallMaxHitPoints[unit] <= 0f ||
-                health.OverallHitPoints[unit] <= 0f)
+            UnitSuppressionState suppressionState =
+                suppression.GetState(unit);
+
+            bool isAlive =
+                health.OverallMaxHitPoints[unit] > 0f &&
+                health.OverallHitPoints[unit] > 0f;
+
+            BehaviacUnitIntent intent = UseBehaviacDecisionLayer
+                ? SelectUnitIntent(
+                    units, health, vision, unit, suppressionState, isAlive)
+                : BehaviacUnitIntent.None;
+
+            if (!isAlive ||
+                (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.Dead))
             {
                 ClearAiming(weapons, unit);
                 units.HasTarget[unit] = false;
@@ -135,9 +161,6 @@ public sealed class UnitAiSystem
                 units.Posture[unit] = UnitPosture.Lying;
                 continue;
             }
-
-            UnitSuppressionState suppressionState =
-                suppression.GetState(unit);
 
             bool moving = units.Velocity[unit].LengthSquared() > 0.04f;
             if (moving)
@@ -182,7 +205,9 @@ public sealed class UnitAiSystem
                     }
                 }
 
-                if (Store.HasGoal[unit])
+                if (Store.HasGoal[unit] &&
+                    (!UseBehaviacDecisionLayer ||
+                     intent == BehaviacUnitIntent.SeekCover))
                 {
                     ClearAiming(weapons, unit);
                     units.Target[unit] =
@@ -231,6 +256,19 @@ public sealed class UnitAiSystem
                     targetId,
                     units.Position[visibleEnemy],
                     TargetMemorySeconds);
+            }
+
+            // The tree can select Patrol only when there is neither a visible
+            // target nor a remembered target. Drop an expired target before the
+            // existing patrol/search path runs.
+            if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.Patrol &&
+                Store.HasTarget[unit] &&
+                Store.TargetMemory[unit] <= 0f)
+            {
+                ClearAiming(weapons, unit);
+                Store.ClearTarget(unit);
+                units.HasTarget[unit] = false;
             }
 
             if (!Store.HasTarget[unit])
@@ -407,7 +445,9 @@ public sealed class UnitAiSystem
 
             Store.ClearGoal(unit);
 
-            if (targetVisible)
+            if (targetVisible &&
+                (!UseBehaviacDecisionLayer ||
+                 intent == BehaviacUnitIntent.EngageTarget))
             {
                 FaceTarget(
                     units,
@@ -511,7 +551,10 @@ public sealed class UnitAiSystem
                 continue;
             }
 
-            if (Store.TargetMemory[unit] > 0f)
+            if (Store.TargetMemory[unit] > 0f &&
+                (!UseBehaviacDecisionLayer ||
+                 intent == BehaviacUnitIntent.InvestigateLastKnownTarget ||
+                 !targetVisible))
             {
                 if (HasSuppressFireWeapon(inventory, weapons, unit))
                 {
@@ -550,6 +593,61 @@ public sealed class UnitAiSystem
             units.HasTarget[unit] = false;
             Store.State[unit] = UnitAiState.Search;
         }
+    }
+
+    private BehaviacUnitIntent SelectUnitIntent(
+        UnitStore units,
+        UnitHealthStore health,
+        VisionSystem vision,
+        int unit,
+        UnitSuppressionState suppressionState,
+        bool isAlive)
+    {
+        if (!_behaviacInitialized)
+        {
+            BehaviacRuntimeHost.InitializeCompiled();
+            _behaviacInitialized = true;
+        }
+
+        if (_behaviacAgents.Length < units.Capacity)
+            Array.Resize(ref _behaviacAgents, units.Capacity);
+
+        BehaviacUnitDecisionAgent? agent = _behaviacAgents[unit];
+        if (agent is null)
+        {
+            agent = BehaviacRuntimeHost.CreateAgent<BehaviacUnitDecisionAgent>(
+                "rimclone_unit_decision");
+            _behaviacAgents[unit] = agent;
+        }
+
+        bool hasVisibleTarget = _nearestVisibleEnemyByUnit[unit] >= 0;
+        if (!hasVisibleTarget && Store.HasTarget[unit])
+        {
+            UnitId target = Store.Target[unit];
+            hasVisibleTarget =
+                units.IsAlive(target) &&
+                health.OverallHitPoints[target.Index] > 0f &&
+                IsHostile(units, unit, target.Index) &&
+                vision.IsRecentlyVisible(unit, target.Index, units);
+        }
+
+        // HasGoal is included for compatibility with the current suppression
+        // flow, which resumes its saved goal before selecting a new one.
+        agent.SetFacts(
+            isAlive,
+            suppressionState is UnitSuppressionState.Panicked or UnitSuppressionState.Suppressed,
+            Store.HasGoal[unit] || _hasSuppressionCoverByUnit[unit],
+            hasVisibleTarget,
+            Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f);
+
+        EBTStatus status = BehaviacRuntimeHost.Tick(agent);
+        if (status != EBTStatus.BT_SUCCESS)
+        {
+            throw new InvalidOperationException(
+                $"Behaviac unit decision failed for unit index {unit}: {status}.");
+        }
+
+        return agent.Intent;
     }
 
     private static bool TryFindSearchWaypoint(

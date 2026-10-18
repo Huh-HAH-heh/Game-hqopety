@@ -26,6 +26,15 @@ public static class BehaviacRuntimeHost
         }
     }
 
+    /// <summary>
+    /// Initializes the compiled C# behavior trees shipped with RimClone.
+    /// No external behavior-data directory is required for EFF_cs.
+    /// </summary>
+    public static void InitializeCompiled()
+    {
+        Initialize(AppContext.BaseDirectory, Workspace.EFileFormat.EFF_cs);
+    }
+
     public static void Initialize(string behaviorRoot, Workspace.EFileFormat fileFormat = Workspace.EFileFormat.EFF_xml)
     {
         if (string.IsNullOrWhiteSpace(behaviorRoot))
