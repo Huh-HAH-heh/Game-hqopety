@@ -12,8 +12,10 @@ public static class bt_rimclone_unit_decision
     {
         Dead,
         SeekCover,
+        RetreatToCover,
         FlankVisibleTarget,
         EngageVisibleTarget,
+        SuppressLastKnownTarget,
         InvestigateLastKnownTarget
     }
 
@@ -30,8 +32,10 @@ public static class bt_rimclone_unit_decision
             {
                 PredicateKind.Dead => agent.ShouldReturnDead(),
                 PredicateKind.SeekCover => agent.ShouldSeekCover(),
+                PredicateKind.RetreatToCover => agent.ShouldRetreatToCover(),
                 PredicateKind.FlankVisibleTarget => agent.ShouldFlankVisibleTarget(),
                 PredicateKind.EngageVisibleTarget => agent.ShouldEngageVisibleTarget(),
+                PredicateKind.SuppressLastKnownTarget => agent.ShouldSuppressLastKnownTarget(),
                 PredicateKind.InvestigateLastKnownTarget => agent.ShouldInvestigateLastKnownTarget(),
                 _ => false
             };
@@ -67,12 +71,14 @@ public static class bt_rimclone_unit_decision
 
         AddBranch(root, 1, PredicateKind.Dead, BehaviacUnitIntent.Dead);
         AddBranch(root, 4, PredicateKind.SeekCover, BehaviacUnitIntent.SeekCover);
-        AddBranch(root, 7, PredicateKind.FlankVisibleTarget, BehaviacUnitIntent.FlankTarget);
-        AddBranch(root, 10, PredicateKind.EngageVisibleTarget, BehaviacUnitIntent.EngageTarget);
-        AddBranch(root, 13, PredicateKind.InvestigateLastKnownTarget, BehaviacUnitIntent.InvestigateLastKnownTarget);
+        AddBranch(root, 7, PredicateKind.RetreatToCover, BehaviacUnitIntent.RetreatToCover);
+        AddBranch(root, 10, PredicateKind.FlankVisibleTarget, BehaviacUnitIntent.FlankTarget);
+        AddBranch(root, 13, PredicateKind.EngageVisibleTarget, BehaviacUnitIntent.EngageTarget);
+        AddBranch(root, 16, PredicateKind.SuppressLastKnownTarget, BehaviacUnitIntent.SuppressiveFire);
+        AddBranch(root, 19, PredicateKind.InvestigateLastKnownTarget, BehaviacUnitIntent.InvestigateLastKnownTarget);
 
         var patrol = new IntentAction(BehaviacUnitIntent.Patrol);
-        ConfigureNode(patrol, "Action", 16);
+        ConfigureNode(patrol, "Action", 22);
         root.AddChild(patrol);
 
         return true;
