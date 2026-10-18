@@ -1456,7 +1456,7 @@ public static class CombatSelfTest
     private static bool TestColonistUsesAnatomyNodes()
     {
         int stage = 1;
-        bool Fail() { Console.Error.WriteLine($"[Anatomy sphere test] Failed stage {stage}."); return false; }
+        bool Fail() { Console.Error.WriteLine($"[Anatomy shape test] Failed stage {stage}."); return false; }
 
         UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
         if (profile.RegionCount < 13 || profile.NodeCount < 13 ||
@@ -1492,24 +1492,39 @@ public static class CombatSelfTest
         stage = 3;
         UnitSimulation simulation = new UnitSimulation(4, 64);
         UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f));
-        float sphereRadius = MathF.Max(
-            simulation.Units.Radius[unit.Index],
-            simulation.Units.Height[unit.Index] * 0.5f);
-        Vector3 expectedCenter = simulation.Units.Position[unit.Index] +
-            new Vector3(0f, 0f, sphereRadius);
+        int bodyStart = simulation.Units.BodyStart[unit.Index];
+        int checkedShapes = 0;
 
         for (int i = 0; i < profile.RegionCount; i++)
         {
+            UnitAnatomyNode node = profile.GetNode(i);
+            if (!node.HasShape || profile.IsInternalNode(i))
+                continue;
+
             UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
                 simulation.Units, unit.Index, i, simulation.HitRegions, simulation.Bodies);
+            int bodyIndex = bodyStart + i;
+            Vector3 expectedCenter = simulation.Bodies.WorldPosition[bodyIndex];
+            Vector3 expectedScale = Vector3.Abs(simulation.Bodies.WorldScale[bodyIndex]);
+            float expectedRadius = MathF.Max(expectedScale.X, expectedScale.Y);
+            float expectedHalfHeight = expectedScale.Z;
+
             if (Vector3.Distance(geometry.Center, expectedCenter) > 0.001f ||
-                MathF.Abs(geometry.Radius - sphereRadius) > 0.001f ||
-                MathF.Abs(geometry.HalfHeight - sphereRadius) > 0.001f)
+                MathF.Abs(geometry.Radius - expectedRadius) > 0.001f ||
+                MathF.Abs(geometry.HalfHeight - expectedHalfHeight) > 0.001f)
             {
-                Console.Error.WriteLine($"[Anatomy sphere test] region={i} geometry={geometry.Center}/{geometry.Radius}/{geometry.HalfHeight}.");
+                Console.Error.WriteLine(
+                    $"[Anatomy shape test] region={node.Id} " +
+                    $"geometry={geometry.Center}/{geometry.Radius}/{geometry.HalfHeight}; " +
+                    $"rig={expectedCenter}/{expectedRadius}/{expectedHalfHeight}.");
                 return Fail();
             }
+
+            checkedShapes++;
         }
+
+        if (checkedShapes < 13)
+            return Fail();
 
         stage = 4;
         return UnitHitSystem.GetVisibilityPointCount(
