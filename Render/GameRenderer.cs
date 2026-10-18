@@ -1254,7 +1254,9 @@ public sealed class GameRenderer
         float maxX = MathF.Max(startPixels.X, endPixels.X) / TerrainTilePixelSize;
         float minY = MathF.Min(startPixels.Y, endPixels.Y) / TerrainTilePixelSize;
         float maxY = MathF.Max(startPixels.Y, endPixels.Y) / TerrainTilePixelSize;
-        RenderBodyPart[] parts = snapshot.BodyParts;
+        float pixelsPerUnit = TerrainTilePixelSize *
+            _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
+        float minimumMarkerRadius = 2f / MathF.Max(1f, pixelsPerUnit);
 
         for (int i = 0; i < snapshot.Units.Length; i++)
         {
@@ -1262,54 +1264,18 @@ public sealed class GameRenderer
             if (unit.HitPoints <= 0f)
                 continue;
 
-            int start = Math.Clamp(unit.BodyPartStart, 0, parts.Length);
-            int count = Math.Clamp(unit.BodyPartCount, 0, parts.Length - start);
-            bool intersects = false;
-
-            for (int partIndex = start; partIndex < start + count; partIndex++)
-            {
-                if (!IntersectsSelectionRectangle(
-                        parts[partIndex], minX, minY, maxX, maxY))
-                    continue;
-
-                intersects = true;
-                break;
-            }
-
-            if (!intersects && count == 0)
-            {
-                System.Numerics.Vector3 position = unit.Position;
-                intersects = position.X >= minX && position.X <= maxX &&
-                             position.Y >= minY && position.Y <= maxY;
-            }
-
-            if (!intersects)
+            float radius = GetMarkerWorldRadius(unit, minimumMarkerRadius);
+            float closestX = Math.Clamp(unit.Position.X, minX, maxX);
+            float closestY = Math.Clamp(unit.Position.Y, minY, maxY);
+            float dx = unit.Position.X - closestX;
+            float dy = unit.Position.Y - closestY;
+            if (dx * dx + dy * dy > radius * radius)
                 continue;
 
             UnitId id = new(unit.Index, unit.Generation);
             _selectedUnits.Add(id);
             _selectedUnit = id;
         }
-    }
-
-    private static bool IntersectsSelectionRectangle(
-        in RenderBodyPart part,
-        float minX,
-        float minY,
-        float maxX,
-        float maxY)
-    {
-        float absCos = MathF.Abs(MathF.Cos(part.Rotation));
-        float absSin = MathF.Abs(MathF.Sin(part.Rotation));
-        float extentX = MathF.Abs(part.Scale.X) * absCos +
-                        MathF.Abs(part.Scale.Y) * absSin;
-        float extentY = MathF.Abs(part.Scale.X) * absSin +
-                        MathF.Abs(part.Scale.Y) * absCos;
-
-        return part.Position.X + extentX >= minX &&
-               part.Position.X - extentX <= maxX &&
-               part.Position.Y + extentY >= minY &&
-               part.Position.Y - extentY <= maxY;
     }
 
     private void SelectWorldUnit(Vector2i mousePixel)
@@ -1325,9 +1291,10 @@ public sealed class GameRenderer
         float pixelsPerUnit = TerrainTilePixelSize *
             _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
         float hitPadding = 4f / MathF.Max(1f, pixelsPerUnit);
+        float minimumMarkerRadius = 2f / MathF.Max(1f, pixelsPerUnit);
 
         if (snapshot != null &&
-            TryPickWorldUnit(snapshot, worldX, worldY, hitPadding, out RenderUnitState unit))
+            TryPickWorldUnit(snapshot, worldX, worldY, hitPadding, minimumMarkerRadius, out RenderUnitState unit))
         {
             SetSelectedUnit(new UnitId(unit.Index, unit.Generation));
             return;
@@ -1341,89 +1308,43 @@ public sealed class GameRenderer
         float worldX,
         float worldY,
         float padding,
+        float minimumMarkerRadius,
         out RenderUnitState selected)
     {
         selected = default;
         bool found = false;
-        RenderBodyPart[] parts = snapshot.BodyParts;
 
-        // Units are painted in snapshot order, so the last intersected unit
-        // matches the object visually on top when silhouettes overlap.
+        // World selection follows the visible gameplay marker at the live unit
+        // position. Static anatomy is for inspection/damage, never a pick target.
         for (int i = 0; i < snapshot.Units.Length; i++)
         {
             RenderUnitState unit = snapshot.Units[i];
             if (unit.HitPoints <= 0f)
                 continue;
 
-            int start = Math.Clamp(unit.BodyPartStart, 0, parts.Length);
-            int count = Math.Clamp(unit.BodyPartCount, 0, parts.Length - start);
-            bool hit = false;
+            float radius = GetMarkerWorldRadius(unit, minimumMarkerRadius) + padding;
+            float dx = worldX - unit.Position.X;
+            float dy = worldY - unit.Position.Y;
 
-            for (int part = start; part < start + count; part++)
-            {
-                if (!ContainsWorldPoint(parts[part], worldX, worldY, padding))
-                    continue;
+            if (dx * dx + dy * dy > radius * radius)
+                continue;
 
-                hit = true;
-                break;
-            }
-
-            if (!hit && count == 0)
-            {
-                float radiusX = MathF.Max(0.18f, unit.Width * 0.5f) + padding;
-                float radiusY = MathF.Max(0.18f, unit.Length * 0.5f) + padding;
-                float dx = (worldX - unit.Position.X) / radiusX;
-                float dy = (worldY - unit.Position.Y) / radiusY;
-                hit = dx * dx + dy * dy <= 1f;
-            }
-
-            if (hit)
-            {
-                selected = unit;
-                found = true;
-            }
+            // Draw order is snapshot order, so the last overlapping marker wins.
+            selected = unit;
+            found = true;
         }
 
         return found;
     }
 
-    private static bool ContainsWorldPoint(
-        in RenderBodyPart part,
-        float worldX,
-        float worldY,
-        float padding)
+    private static float GetMarkerWorldRadius(
+        in RenderUnitState unit,
+        float minimumMarkerRadius)
     {
-        float dx = worldX - part.Position.X;
-        float dy = worldY - part.Position.Y;
-        float cos = MathF.Cos(part.Rotation);
-        float sin = MathF.Sin(part.Rotation);
-        float localX = dx * cos + dy * sin;
-        float localY = -dx * sin + dy * cos;
-        float halfX = MathF.Max(0.001f, MathF.Abs(part.Scale.X) + padding);
-        float halfY = MathF.Max(0.001f, MathF.Abs(part.Scale.Y) + padding);
-
-        switch (part.Primitive)
-        {
-            case BodyPrimitive.Box:
-                return MathF.Abs(localX) <= halfX &&
-                       MathF.Abs(localY) <= halfY;
-
-            case BodyPrimitive.Line:
-                halfY = MathF.Max(0.008f, halfY);
-                return MathF.Abs(localX) <= halfX &&
-                       MathF.Abs(localY) <= halfY;
-
-            case BodyPrimitive.Triangle:
-                float nx = localX / halfX;
-                float ny = localY / halfY;
-                return nx >= -1f && nx <= 1f &&
-                       MathF.Abs(ny) <= (1f - nx) * 0.5f;
-
-            default:
-                float circleX = localX / halfX;
-                float circleY = localY / halfY;
-                return circleX * circleX + circleY * circleY <= 1f;
-        }
+        float footprint = MathF.Max(unit.Width, unit.Length);
+        return MathF.Max(
+            minimumMarkerRadius,
+            MathF.Max(0.13f, footprint * 0.125f));
     }
 
     private void CycleMassCombatSelection()
@@ -1752,6 +1673,7 @@ public sealed class GameRenderer
                         float pixelsPerUnit = TerrainTilePixelSize *
                             _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
                         float hitPadding = 4f / MathF.Max(1f, pixelsPerUnit);
+                        float minimumMarkerRadius = 2f / MathF.Max(1f, pixelsPerUnit);
 
                         RenderUnitState contextUnit = default;
                         bool hasUnit = inputSnapshot != null &&
@@ -1760,6 +1682,7 @@ public sealed class GameRenderer
                                 worldPosition.X / TerrainTilePixelSize,
                                 worldPosition.Y / TerrainTilePixelSize,
                                 hitPadding,
+                                minimumMarkerRadius,
                                 out contextUnit);
 
                         _contextMenuUnit = hasUnit
