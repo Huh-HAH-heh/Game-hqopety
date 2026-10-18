@@ -8,12 +8,18 @@ using NumericsVector3 = System.Numerics.Vector3;
 namespace RimClone.Render;
 
 /// <summary>
-/// Orthographic inspection of the same body geometry used by the world renderer.
-/// It consumes the live frame's body transforms and the anatomy catalog's real
-/// internal volumes; it does not synthesize a humanoid illustration.
+/// Static orthographic inspection of the saved anatomical information model.
+/// These shapes are for editing and inspection only, not the live pawn geometry.
 /// </summary>
 public sealed class UnitAnatomyCardView : IDisposable
 {
+    private readonly record struct AnatomyPreviewPart(
+        NumericsVector3 Position,
+        NumericsVector3 Scale,
+        float Rotation,
+        BodyPrimitive Primitive,
+        BodyPartRole Role);
+
     private const int ProjectionCount = 3;
     private static readonly Color PanelColor = new(21, 28, 37, 245);
     private static readonly Color PanelOutline = new(62, 76, 94, 255);
@@ -71,7 +77,6 @@ public sealed class UnitAnatomyCardView : IDisposable
     public void Draw(
         RenderWindow window,
         RenderUnitState unit,
-        RenderBodyPart[] bodyParts,
         UnitCardDetailsSnapshot? details,
         float x,
         float y,
@@ -80,7 +85,7 @@ public sealed class UnitAnatomyCardView : IDisposable
         bool showOrgans)
     {
         UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(unit.Type).Anatomy;
-        bodyParts = BuildStaticBodyParts(profile, unit.Position);
+        AnatomyPreviewPart[] bodyParts = BuildStaticBodyParts(profile, unit.Position);
         int start = 0;
         int count = Math.Min(profile.NodeCount, bodyParts.Length);
         if (count <= 0)
@@ -135,13 +140,13 @@ public sealed class UnitAnatomyCardView : IDisposable
         }
     }
 
-    private static RenderBodyPart[] BuildStaticBodyParts(
+    private static AnatomyPreviewPart[] BuildStaticBodyParts(
         UnitAnatomyProfile profile,
         NumericsVector3 unitPosition)
     {
         ReadOnlySpan<BodyPartDefinition> definitions = profile.BodyParts;
         int count = definitions.Length;
-        var result = new RenderBodyPart[count];
+        var result = new AnatomyPreviewPart[count];
         var positions = new NumericsVector3[count];
         var orientations = new System.Numerics.Quaternion[count];
         var rotations = new float[count];
@@ -194,7 +199,7 @@ public sealed class UnitAnatomyCardView : IDisposable
             positions[i] = joint;
             orientations[i] = orientation;
             rotations[i] = rotation;
-            result[i] = new RenderBodyPart(
+            result[i] = new AnatomyPreviewPart(
                 joint, projectedScale, rotation, part.Primitive, part.Role);
         }
 
@@ -204,7 +209,7 @@ public sealed class UnitAnatomyCardView : IDisposable
     private void DrawProjection(
         RenderWindow window,
         RenderUnitState unit,
-        RenderBodyPart[] bodyParts,
+        AnatomyPreviewPart[] bodyParts,
         int start,
         int count,
         UnitAnatomyProfile profile,
@@ -267,7 +272,7 @@ public sealed class UnitAnatomyCardView : IDisposable
             if (i < profile.NodeCount && !IsNodeVisible(profile, i, details))
                 continue;
 
-            RenderBodyPart part = bodyParts[start + i];
+            AnatomyPreviewPart part = bodyParts[start + i];
             ProjectedGeometry geometry = ProjectBodyPart(
                 part, unit.Position, bodyAngle, projection);
 
@@ -343,7 +348,7 @@ public sealed class UnitAnatomyCardView : IDisposable
     }
 
     private static ProjectedGeometry ProjectBodyPart(
-        RenderBodyPart part,
+        AnatomyPreviewPart part,
         NumericsVector3 unitPosition,
         float bodyAngle,
         int projection)
@@ -361,7 +366,7 @@ public sealed class UnitAnatomyCardView : IDisposable
     private static bool TryProjectVolume(
         UnitAnatomyVolume volume,
         RenderUnitState unit,
-        RenderBodyPart[] bodyParts,
+        AnatomyPreviewPart[] bodyParts,
         int start,
         int count,
         float bodyAngle,
@@ -385,7 +390,7 @@ public sealed class UnitAnatomyCardView : IDisposable
             return false;
         }
 
-        RenderBodyPart parent = bodyParts[parentIndex];
+        AnatomyPreviewPart parent = bodyParts[parentIndex];
         float rotation = parent.Rotation;
         float cos = MathF.Cos(rotation);
         float sin = MathF.Sin(rotation);
