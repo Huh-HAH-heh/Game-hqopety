@@ -47,12 +47,21 @@ public readonly record struct RenderInventoryItem(
     float MaxDurability,
     bool Equipped);
 
+public readonly record struct RenderPawnSkill(
+    UnitSkill Skill,
+    byte Level,
+    UnitSkillPassion Passion,
+    float Experience,
+    float ExperienceToNextLevel);
+
 public sealed class UnitCardDetailsSnapshot
 {
     public UnitId Unit { get; init; }
     public RenderHealthPart[] HealthParts { get; init; } = Array.Empty<RenderHealthPart>();
     public AnatomyCardEntry[] AnatomyEntries { get; init; } = Array.Empty<AnatomyCardEntry>();
     public RenderInventoryItem[] Inventory { get; init; } = Array.Empty<RenderInventoryItem>();
+    public RenderPawnSkill[] PawnSkills { get; init; } = Array.Empty<RenderPawnSkill>();
+    public float SuppressionResistance { get; init; }
     public RenderMetabolismState Metabolism { get; init; }
 
     public static UnitCardDetailsSnapshot Capture(UnitSimulation simulation, UnitId id)
@@ -152,6 +161,19 @@ public sealed class UnitCardDetailsSnapshot
                 equipped);
         }
 
+        UnitSkillStore skills = simulation.Skills;
+        RenderPawnSkill[] pawnSkills = new RenderPawnSkill[UnitSkillStore.SkillCount];
+        for (int i = 0; i < pawnSkills.Length; i++)
+        {
+            UnitSkill skill = (UnitSkill)i;
+            pawnSkills[i] = new RenderPawnSkill(
+                skill,
+                skills.GetLevel(unitIndex, skill),
+                skills.GetPassion(unitIndex, skill),
+                skills.GetExperience(unitIndex, skill),
+                skills.GetExperienceToNextLevel(unitIndex, skill));
+        }
+
         UnitMetabolismStore metabolism = simulation.Metabolism;
         RenderMetabolismState metabolicState = new(
             metabolism.Strength[unitIndex],
@@ -189,6 +211,8 @@ public sealed class UnitCardDetailsSnapshot
             HealthParts = healthParts,
             AnatomyEntries = anatomyEntries,
             Inventory = inventoryItems,
+            PawnSkills = pawnSkills,
+            SuppressionResistance = skills.GetSuppressionResistance(unitIndex),
             Metabolism = metabolicState
         };
     }

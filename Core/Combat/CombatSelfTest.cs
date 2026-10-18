@@ -33,6 +33,8 @@ public static class CombatSelfTest
         RunTest("Weapon: burst mode completes the configured burst", TestBurstFireCadence, ref passed, ref failed);
         RunTest("Weapon: suppressive auto fire continues without LOS", TestSuppressiveFireThroughOcclusion, ref passed, ref failed);
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
+        RunTest("Pawn stats: RimWorld skills and suppression resistance", TestPawnSkillsAndResistance, ref passed, ref failed);
+        RunTest("Posture: prone silhouette and firing", TestPronePostureAndFiring, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
@@ -805,7 +807,7 @@ public static class CombatSelfTest
 
         suppression.Add(
             0,
-            1.2f,
+            1.6f,
             Vector3.Zero);
 
         if (suppression.GetState(0) !=
@@ -816,12 +818,104 @@ public static class CombatSelfTest
 
         suppression.Add(
             0,
-            1.5f,
+            3.0f,
             Vector3.Zero);
 
         return suppression.GetState(0) ==
                UnitSuppressionState.Panicked &&
                suppression.GetAccuracyMultiplier(0) > 1f;
+    }
+
+    private static bool TestPawnSkillsAndResistance()
+    {
+        UnitSkillStore skills = new UnitSkillStore(2);
+        skills.InitializeUnit(0, UnitType.Colonist, 1);
+        skills.InitializeUnit(1, UnitType.Colonist, 2);
+
+        if (UnitSkillStore.SkillCount != 12)
+            return false;
+
+        for (int i = 0; i < UnitSkillStore.SkillCount; i++)
+        {
+            UnitSkill skill = (UnitSkill)i;
+            if (skills.GetLevel(0, skill) > UnitSkillStore.MaxLevel ||
+                skills.GetLevel(1, skill) > UnitSkillStore.MaxLevel)
+                return false;
+        }
+
+        skills.SetSkillLevel(0, UnitSkill.Shooting, 2);
+        skills.SetSkillLevel(1, UnitSkill.Shooting, 18);
+        if (skills.GetShootingSpreadMultiplier(1) >= skills.GetShootingSpreadMultiplier(0))
+            return false;
+
+        skills.SetSkillLevel(1, UnitSkill.Medical, 0);
+        skills.SetPassion(1, UnitSkill.Medical, UnitSkillPassion.Major);
+        skills.GainExperience(1, UnitSkill.Medical, 600f);
+        if (skills.GetLevel(1, UnitSkill.Medical) != 1)
+            return false;
+
+        skills.SetSuppressionResistance(0, 0f);
+        skills.SetSuppressionResistance(1, 0.8f);
+        UnitSuppressionStore suppression = new UnitSuppressionStore(2);
+        suppression.BindSkillStore(skills);
+        suppression.InitializeUnit(0);
+        suppression.InitializeUnit(1);
+        suppression.Add(0, 3f, Vector3.Zero);
+        suppression.Add(1, 3f, Vector3.Zero);
+
+        return suppression.Value[0] > suppression.Value[1] &&
+            skills.GetSuppressionResistance(1) > skills.GetSuppressionResistance(0);
+    }
+
+    private static bool TestPronePostureAndFiring()
+    {
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        int inventorySlot = simulation.AddInventoryItem(shooter, WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(shooter, inventorySlot, UnitWeaponSlot.Primary))
+            return false;
+
+        int bodyStart = simulation.Units.BodyStart[shooter.Index];
+        int bodyCount = simulation.Units.BodyCount[shooter.Index];
+        int headPart = -1;
+        int torsoPart = -1;
+        float standingMaxZ = float.NegativeInfinity;
+        for (int i = 0; i < bodyCount; i++)
+        {
+            int partIndex = bodyStart + i;
+            string? id = simulation.Bodies.PartId[partIndex];
+            if (id == "body.upper") headPart = partIndex;
+            if (id == "body.middle") torsoPart = partIndex;
+            standingMaxZ = MathF.Max(standingMaxZ, simulation.Bodies.WorldPosition[partIndex].Z);
+        }
+        if (headPart < 0 || torsoPart < 0)
+            return false;
+
+        float standingHeadZ = simulation.Bodies.WorldPosition[headPart].Z;
+        float standingTorsoZ = simulation.Bodies.WorldPosition[torsoPart].Z;
+        simulation.SetPosture(shooter, UnitPosture.Lying);
+        WorldMap map = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 16);
+        simulation.Update(map, 0.016f);
+
+        float proneMaxZ = float.NegativeInfinity;
+        for (int i = 0; i < bodyCount; i++)
+            proneMaxZ = MathF.Max(proneMaxZ, simulation.Bodies.WorldPosition[bodyStart + i].Z);
+
+        int weaponIndex = UnitWeaponStore.GetIndex(shooter.Index, UnitWeaponSlot.Primary);
+        simulation.Weapons.Ammo[weaponIndex] = 1;
+        bool fired = simulation.FireWeapon(shooter, UnitWeaponSlot.Primary, Vector3.UnitX);
+
+        return simulation.Units.Posture[shooter.Index] == UnitPosture.Lying &&
+            simulation.Bodies.WorldPosition[headPart].Z < standingHeadZ * 0.45f &&
+            simulation.Bodies.WorldPosition[torsoPart].Z < standingTorsoZ * 0.45f &&
+            proneMaxZ < standingMaxZ * 0.5f &&
+            fired &&
+            simulation.Projectiles.ActiveCount == 1;
     }
 
     private static bool TestAccuracy()

@@ -650,6 +650,36 @@ public sealed class UnitCardOverlay : IDisposable
             details.Unit.Index == unit.Index &&
             details.Unit.Generation == unit.Generation)
         {
+            Heading("НАВЫКИ");
+            for (int i = 0; i < details.PawnSkills.Length; i++)
+            {
+                RenderPawnSkill skill = details.PawnSkills[i];
+                string name = skill.Skill switch
+                {
+                    UnitSkill.Shooting => "Стрельба",
+                    UnitSkill.Melee => "Ближний бой",
+                    UnitSkill.Construction => "Строительство",
+                    UnitSkill.Mining => "Горное дело",
+                    UnitSkill.Cooking => "Кулинария",
+                    UnitSkill.Plants => "Растения",
+                    UnitSkill.Animals => "Животные",
+                    UnitSkill.Crafting => "Ремесло",
+                    UnitSkill.Artistic => "Искусство",
+                    UnitSkill.Medical => "Медицина",
+                    UnitSkill.Social => "Социальное",
+                    UnitSkill.Intellectual => "Интеллект",
+                    _ => skill.Skill.ToString()
+                };
+                string passion = skill.Passion switch
+                {
+                    UnitSkillPassion.Minor => " ★",
+                    UnitSkillPassion.Major => " ★★",
+                    _ => string.Empty
+                };
+                Value(name, $"{skill.Level}/20{passion} · {skill.Experience:0}/{skill.ExperienceToNextLevel:0} XP");
+            }
+            Value("Стойкость к подавлению", $"{details.SuppressionResistance:P0}");
+
             int anatomyCount = details.AnatomyEntries.Length > 0
                 ? details.AnatomyEntries.Length
                 : details.HealthParts.Length;

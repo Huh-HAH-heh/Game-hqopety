@@ -228,6 +228,15 @@ public sealed class UnitBodySystem
                             localRotationsX[part], localRotationsY[part], localRotations[part])) > 0.0000001f;
                 }
             }
+            if (posture == UnitPosture.Lying)
+            {
+                // Prone lowers every part centre (including head and organs),
+                // compresses its vertical extent and lengthens the XY outline.
+                localPosition.X *= 1.25f;
+                localPosition.Y *= 1.08f;
+                localPosition.Z = 0.035f + localPosition.Z * 0.22f;
+            }
+
             // WalkCycle motions were present in the rig, but never evaluated.
             // Keep the animation layered on top of saved pose offsets; the opposing
             // variants make left/right limbs swing in alternating phases.
@@ -269,7 +278,8 @@ public sealed class UnitBodySystem
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start &&
                      (motions[part] is BodyPartMotion.SpinalChain or BodyPartMotion.PhysicalTail) &&
-                     !hasCustomPoseOffset)
+                     !hasCustomPoseOffset &&
+                     posture != UnitPosture.Lying)
             {
                 UpdateChainLink(
                     part,
@@ -290,7 +300,8 @@ public sealed class UnitBodySystem
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      motions[part] == BodyPartMotion.FollowParent &&
                      parent >= start &&
-                     !hasCustomPoseOffset)
+                     !hasCustomPoseOffset &&
+                     posture != UnitPosture.Lying)
             {
                 UpdateFollower(
                     part,
@@ -343,8 +354,11 @@ public sealed class UnitBodySystem
 
             worldPositions[part] = joint;
             worldOrientations[part] = worldOrientation;
-            worldScales[part] = BodyPartTransformMath.Project(
+            Vector3 projectedScale = BodyPartTransformMath.Project(
                 scales[part], worldOrientation, 0, 1).Scale;
+            if (posture == UnitPosture.Lying)
+                projectedScale.Z *= 0.55f;
+            worldScales[part] = projectedScale;
             worldRotations[part] = worldRotation;
         }
     }
