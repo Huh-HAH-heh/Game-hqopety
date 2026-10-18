@@ -410,7 +410,7 @@ public static bool TryFindBindingForPart(
             position.Z + height * heightFraction);
     }
 
-public bool TryHitUnit(
+    public bool TryHitUnit(
         UnitStore units,
         int unitIndex,
         Vector3 start,
@@ -423,12 +423,11 @@ public bool TryHitUnit(
     {
         Vector3 position = units.Position[unitIndex];
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
-        Vector3 center = position + new Vector3(0f, 0f, height * 0.5f);
-        float radius = MathF.Max(0.01f, units.Radius[unitIndex]);
+        float sphereRadius = MathF.Max(MathF.Max(0.01f, units.Radius[unitIndex]), height * 0.5f);
+        Vector3 center = position + new Vector3(0f, 0f, sphereRadius);
         float padding = MathF.Max(0f, projectileRadius);
 
-        if (!TryIntersectEllipsoid(
-                start, end, center, radius + padding, height * 0.5f + padding, out float t))
+        if (!TryIntersectSphere(start, end, center, sphereRadius + padding, out float t))
         {
             result = default;
             return false;
@@ -450,7 +449,7 @@ public bool TryHitUnit(
         return true;
     }
 
-public static bool TryFindNextAnatomyVolumeHit(
+    public static bool TryFindNextAnatomyVolumeHit(
         UnitStore units,
         int unitIndex,
         int parentRegionIndex,
@@ -773,7 +772,7 @@ private static void GetWorldGeometry(
         GetGameplayCollider(units, unitIndex, out center, out radius, out halfHeight);
     }
 
-    private static void GetGameplayCollider(
+        private static void GetGameplayCollider(
         UnitStore units,
         int unitIndex,
         out Vector3 center,
@@ -781,12 +780,13 @@ private static void GetWorldGeometry(
         out float halfHeight)
     {
         Vector3 position = units.Position[unitIndex];
-        halfHeight = MathF.Max(0.025f, units.Height[unitIndex] * 0.5f);
-        radius = MathF.Max(0.01f, units.Radius[unitIndex]);
-        center = position + new Vector3(0f, 0f, halfHeight);
+        float height = MathF.Max(0.05f, units.Height[unitIndex]);
+        radius = MathF.Max(MathF.Max(0.01f, units.Radius[unitIndex]), height * 0.5f);
+        halfHeight = radius;
+        center = position + new Vector3(0f, 0f, radius);
     }
 
-private static int CountTargetRegions(UnitHitRegionProfile profile) => 1;
+    private static int CountTargetRegions(UnitHitRegionProfile profile) => 1;
 
 private static bool IsInternalNode(UnitHitRegionProfile profile, int index) =>
         profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(index);
@@ -978,29 +978,18 @@ private static bool TryIntersectPrimitive(
         return enter <= exit;
     }
 
-    private static bool TryIntersectEllipsoid(
+        private static bool TryIntersectSphere(
         Vector3 start,
         Vector3 end,
         Vector3 center,
         float radius,
-        float halfHeight,
         out float t)
     {
         t = 0f;
-        float rx = MathF.Max(0.001f, radius);
-        float ry = rx;
-        float rz = MathF.Max(0.001f, halfHeight);
-
-        Vector3 offset = new(
-            (start.X - center.X) / rx,
-            (start.Y - center.Y) / ry,
-            (start.Z - center.Z) / rz);
-        Vector3 delta = new(
-            (end.X - start.X) / rx,
-            (end.Y - start.Y) / ry,
-            (end.Z - start.Z) / rz);
-
-        float c = Vector3.Dot(offset, offset) - 1f;
+        float r = MathF.Max(0.001f, radius);
+        Vector3 offset = start - center;
+        Vector3 delta = end - start;
+        float c = Vector3.Dot(offset, offset) - r * r;
         if (c <= 0f)
             return true;
 
