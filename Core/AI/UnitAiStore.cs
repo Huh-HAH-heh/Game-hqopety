@@ -9,7 +9,8 @@ public enum UnitAiState : byte
     Attack = 1,
     SeekCover = 2,
     Search = 3,
-    Dead = 4
+    Dead = 4,
+    Flank = 5
 }
 
 public sealed class UnitAiStore
