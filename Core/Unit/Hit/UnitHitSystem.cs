@@ -480,16 +480,35 @@ public static bool TryFindBindingForPart(
                 1f / MathF.Sqrt(
                     localDirection.X * localDirection.X / (radiusX * radiusX) +
                     localDirection.Y * localDirection.Y / (radiusY * radiusY)),
+            BodyPrimitive.Triangle =>
+                GetTriangleSurfaceDistance(radiusX, radiusY, localDirection.X, localDirection.Y),
             _ => MathF.Min(
                 radiusX / MathF.Max(0.0001f, MathF.Abs(localDirection.X)),
                 radiusY / MathF.Max(0.0001f, MathF.Abs(localDirection.Y)))
         };
 
-        // Triangle bounds are not elliptical; stay further inside the projected
-        // triangle. The other primitives use a point close to their facing surface.
-        float inset = primitive == BodyPrimitive.Triangle ? 0.45f : 0.90f;
+        const float inset = 0.90f;
         Vector3 offset = Rotate2D(localDirection * (distance * inset), rotation);
         return new Vector3(center.X + offset.X, center.Y + offset.Y, center.Z);
+    }
+
+    private static float GetTriangleSurfaceDistance(
+        float halfLength,
+        float halfWidth,
+        float directionX,
+        float directionY)
+    {
+        float distance = halfLength /
+            MathF.Max(0.0001f, MathF.Abs(directionX));
+        float sideDenominator = MathF.Abs(directionY) +
+            halfWidth * directionX / (2f * halfLength);
+        if (sideDenominator > 0.0001f)
+        {
+            float sideDistance = halfWidth / (2f * sideDenominator);
+            distance = MathF.Min(distance, sideDistance);
+        }
+
+        return distance;
     }
 
     public bool TryHitUnit(
