@@ -997,6 +997,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (IsPropertiesItemVisible(_parentButton.Position.Y, _parentButton.Size.Y) &&
             _parentButton.GetGlobalBounds().Contains(position))
         {
+            if (_editingPose)
+            {
+                _status = "Смена родителя доступна только в режиме «Редактор рига».";
+                return true;
+            }
+
             _symmetryToolActive = false;
             _symmetrySourcePart = -1;
             _parentSelectionActive = !_parentSelectionActive;
@@ -1138,6 +1144,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                     _parentSelectionActive = false;
                     _parentSourcePart = -1;
                     _status = "Выбор родителя отменён.";
+                    return true;
+                }
+
+                if (WouldCreateParentCycle(childIndex, itemIndex))
+                {
+                    _status = $"«{PartName(_regionIds[itemIndex])}» — потомок выбранной части. Такой родитель создаст цикл.";
                     return true;
                 }
 
@@ -1846,16 +1858,26 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         ImguiNative.igSeparator();
         TextImGui(PartName(_regionIds[_selectedPart]));
         TextImGui($"Внутренний ID: {_regionIds[_selectedPart]}");
-        DrawImGuiParentCombo();
-        ImguiNative.igSameLine(0f, 5f);
-        if (ButtonImGui("Отвязать", 88f))
+        if (_editingPose)
         {
-            bool changed = DetachPartPreservingLayout(_selectedPart);
-            if (changed) Save();
-            _status = changed
-                ? $"«{PartName(_regionIds[_selectedPart])}» отвязана с сохранением положения."
-                : "Эта часть уже независима.";
-            RefreshProjectedGeometry();
+            TextImGui("Иерархия изменяется только в режиме «Редактор рига».");
+        }
+        else
+        {
+            DrawImGuiParentCombo();
+            ImguiNative.igSameLine(0f, 5f);
+            if (ButtonImGui("Отвязать", 88f))
+            {
+                bool changed = DetachPartPreservingLayout(_selectedPart);
+                if (changed)
+                {
+                    SaveParentHierarchyEdit();
+                    RefreshProjectedGeometry();
+                }
+                _status = changed
+                    ? $"«{PartName(_regionIds[_selectedPart])}» отвязана от родителя с сохранением мирового положения."
+                    : "Эта часть уже привязана к корню.";
+            }
         }
 
         TextImGui("Имя части (пусто = исходное)");
@@ -3161,6 +3183,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (index < 0 || index >= _parts.Length) return;
         if (_parentSelectionActive)
         {
+            if (_editingPose)
+            {
+                _parentSelectionActive = false;
+                _parentSourcePart = -1;
+                _status = "Смена родителя доступна только в режиме «Редактор рига».";
+                return;
+            }
+
             int childIndex = _parentSourcePart;
             if (index == childIndex)
             {
@@ -3593,7 +3623,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             Quaternion positionOrientation = Quaternion.Identity;
             Quaternion baseOrientation = Quaternion.Identity;
 
-            if (part.Anchor == BodyPartAnchor.Parent && parent >= 0)
+            if (part.Anchor == BodyPartAnchor.Parent &&
+                parent >= 0 && parent < i && parent < _parts.Length)
             {
                 origin = _worldPositions[parent];
                 positionOrientation = _worldOrientations[parent];
@@ -4757,6 +4788,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         if (!_editingPose)
         {
+            _parentSelectionActive = false;
+            _parentSourcePart = -1;
+            _symmetryToolActive = false;
+            _symmetrySourcePart = -1;
             _poseOriginRegionIds = (string[])_regionIds.Clone();
             _poseOriginParts = (BodyPartDefinition[])_parts.Clone();
             _poseOriginDefaultParts = (BodyPartDefinition[])_defaultParts.Clone();
@@ -5213,6 +5248,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private bool TrySetPartParent(int childIndex, int parentIndex)
     {
+        if (_editingPose)
+        {
+            _status = "Сначала выйди из редактора поз: иерархия относится к базовому ригу.";
+            _parentSelectionActive = false;
+            _parentSourcePart = -1;
+            return false;
+        }
+
         if ((uint)childIndex >= (uint)_parts.Length ||
             (uint)parentIndex >= (uint)_parts.Length ||
             childIndex == parentIndex)
