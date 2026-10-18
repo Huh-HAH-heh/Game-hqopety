@@ -455,6 +455,16 @@ public static bool TryFindBindingForPart(
             position.Z + height * heightFraction);
     }
 
+    private static Vector3 Rotate2D(Vector3 value, float angle)
+    {
+        float cosine = MathF.Cos(angle);
+        float sine = MathF.Sin(angle);
+        return new Vector3(
+            value.X * cosine - value.Y * sine,
+            value.X * sine + value.Y * cosine,
+            value.Z);
+    }
+
     private static Vector3 GetVisibleSurfacePoint(
         Vector3 source,
         Vector3 center,
