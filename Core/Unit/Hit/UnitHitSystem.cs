@@ -57,51 +57,37 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null)
     {
-        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-
-        for (int i = 0; i < profile.RegionCount; i++)
+        Vector3 position = units.Position[unitIndex];
+        float height = MathF.Max(0.05f, units.Height[unitIndex]);
+        float eyeHeight = units.Posture[unitIndex] switch
         {
-            if (TryGetMarker(profile, i, UnitAnatomyMarkerRole.Eye, out UnitAnatomyMarker marker))
-                return GetMarkerWorldPosition(units, unitIndex, i, marker, hitRegions, bodies);
-        }
+            UnitPosture.Lying => 0.38f,
+            UnitPosture.Crouching => 0.56f,
+            UnitPosture.Sitting => 0.68f,
+            _ => 0.82f
+        };
 
-        for (int i = 0; i < profile.RegionCount; i++)
-        {
-            if (!RegionHasPart(profile, i, UnitHealthPartId.Head))
-                continue;
-
-            GetWorldGeometry(units, unitIndex, i, profile,
-                out Vector3 center, out _, out float halfHeight, hitRegions, bodies);
-            return center + new Vector3(0f, 0f, halfHeight * 0.55f);
-        }
-
-        return units.Position[unitIndex] +
-            new Vector3(0f, 0f, MathF.Max(0.05f, units.Height[unitIndex]) * 0.8f);
+        return position + new Vector3(0f, 0f, height * eyeHeight);
     }
 
-    public static int GetVisibilityPointCount(
+public static int GetVisibilityPointCount(
         UnitStore units,
         int unitIndex,
-        UnitHitRegionStore? hitRegions = null) =>
-        CountTargetRegions(GetProfile(units, unitIndex, hitRegions));
+        UnitHitRegionStore? hitRegions = null) => 1;
 
-    public static int GetVisibilityRegionIndex(
+public static int GetVisibilityRegionIndex(
         UnitStore units,
         int unitIndex,
         int visibleIndex,
         UnitHitRegionStore? hitRegions = null)
     {
-        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-        if (profile is UnitAnatomyProfile anatomy)
-            return anatomy.GetVisibleRegionIndex(visibleIndex);
-
-        if ((uint)visibleIndex >= (uint)profile.RegionCount)
+        if (visibleIndex != 0)
             throw new ArgumentOutOfRangeException(nameof(visibleIndex));
 
-        return visibleIndex;
+        return 0;
     }
 
-    public static int GetVisibilityPoints(
+public static int GetVisibilityPoints(
         UnitStore units,
         int unitIndex,
         Vector3 source,
@@ -201,37 +187,20 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null)
     {
         if (!float.IsFinite(tolerance) || tolerance < 0f ||
-            !float.IsFinite(point.X) ||
-            !float.IsFinite(point.Y) ||
-            !float.IsFinite(point.Z))
+            !float.IsFinite(point.X) || !float.IsFinite(point.Y) || !float.IsFinite(point.Z))
             return false;
 
-        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-        if ((uint)regionIndex >= (uint)profile.RegionCount)
-            return false;
-
-        if (TryGetBodyShape(
-                units, unitIndex, profile, regionIndex, bodies,
-                out _, out Vector3 center, out Vector3 scale,
-                out float rotation, out BodyPrimitive primitive, out float halfHeight))
-        {
-            return TryIntersectPrimitive(
-                point, point, center, scale, rotation, primitive,
-                halfHeight, tolerance, out _);
-        }
-
-        UnitHitRegionGeometry geometry = GetRegionGeometry(
-            units, unitIndex, regionIndex, hitRegions, bodies);
-
-        float dx = point.X - geometry.Center.X;
-        float dy = point.Y - geometry.Center.Y;
-        float radius = geometry.Radius + tolerance;
-
-        return dx * dx + dy * dy <= radius * radius &&
-               MathF.Abs(point.Z - geometry.Center.Z) <= geometry.HalfHeight + tolerance;
+        GetGameplayCollider(units, unitIndex, out Vector3 center, out float radius, out float halfHeight);
+        float rx = radius + tolerance;
+        float ry = radius + tolerance;
+        float rz = halfHeight + tolerance;
+        float dx = (point.X - center.X) / rx;
+        float dy = (point.Y - center.Y) / ry;
+        float dz = (point.Z - center.Z) / rz;
+        return dx * dx + dy * dy + dz * dz <= 1f;
     }
 
-    public static bool TryFindBindingForPart(
+public static bool TryFindBindingForPart(
         UnitStore units,
         int unitIndex,
         UnitHealthPartId part,
@@ -420,32 +389,25 @@ public sealed class UnitHitSystem
         if ((uint)regionIndex >= (uint)profile.RegionCount)
             throw new ArgumentOutOfRangeException(nameof(regionIndex));
 
-        GetWorldGeometry(units, unitIndex, regionIndex, profile,
-            out Vector3 center, out float radius, out float halfHeight, hitRegions, bodies);
-
-        bool hasMarker = TryGetPreferredMarker(
-            profile, regionIndex, markerRole, out UnitAnatomyMarker marker);
-
-        if (hasMarker)
-            return GetMarkerWorldPosition(units, unitIndex, regionIndex, marker, hitRegions, bodies);
-
-        Vector2 direction = new Vector2(source.X - center.X, source.Y - center.Y);
+        Vector3 position = units.Position[unitIndex];
+        Vector3 direction = new(source.X - position.X, source.Y - position.Y, 0f);
         float lengthSquared = direction.LengthSquared();
+        direction = lengthSquared > 0.000001f
+            ? direction / MathF.Sqrt(lengthSquared)
+            : Vector3.UnitX;
 
-        if (lengthSquared > 0.000001f)
-            direction /= MathF.Sqrt(lengthSquared);
-        else
-            direction = Vector2.UnitX;
-
-        float vertical = Math.Clamp(
-            source.Z - center.Z,
-            -halfHeight * 0.65f,
-            halfHeight * 0.65f);
+        float radius = MathF.Max(0.01f, units.Radius[unitIndex]);
+        float height = MathF.Max(0.05f, units.Height[unitIndex]);
+        float heightFraction = (markerRole & (UnitAnatomyMarkerRole.Eye | UnitAnatomyMarkerRole.Muzzle)) != 0
+            ? 0.82f
+            : (markerRole & UnitAnatomyMarkerRole.Vision) != 0
+                ? 0.70f
+                : 0.52f;
 
         return new Vector3(
-            center.X + direction.X * radius * 0.65f,
-            center.Y + direction.Y * radius * 0.65f,
-            center.Z + vertical);
+            position.X + direction.X * radius * 0.65f,
+            position.Y + direction.Y * radius * 0.65f,
+            position.Z + height * heightFraction);
     }
 
     public bool TryHitUnit(
@@ -459,68 +421,31 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null)
     {
-        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        Vector3 position = units.Position[unitIndex];
+        float height = MathF.Max(0.05f, units.Height[unitIndex]);
+        float sphereRadius = MathF.Max(MathF.Max(0.01f, units.Radius[unitIndex]), height * 0.5f);
+        Vector3 center = position + new Vector3(0f, 0f, sphereRadius);
+        float padding = MathF.Max(0f, projectileRadius);
 
-        bool found = false;
-        bool bestIsInternal = false;
-        float bestT = 2f;
-        UnitHealthPartId bestPart = UnitHealthPartId.None;
-        int bestRegion = -1;
-        int bestBinding = -1;
-        Vector3 bestPosition = default;
-
-        for (int i = 0; i < profile.RegionCount; i++)
-        {
-            float padding = MathF.Max(0f, projectileRadius);
-            float t;
-            bool intersects;
-
-            if (TryGetBodyShape(
-                    units, unitIndex, profile, i, bodies,
-                    out _, out Vector3 shapeCenter, out Vector3 scale,
-                    out float rotation, out BodyPrimitive primitive, out float shapeHalfHeight))
-            {
-                intersects = TryIntersectPrimitive(
-                    start, end, shapeCenter, scale, rotation, primitive,
-                    shapeHalfHeight, padding, out t);
-            }
-            else
-            {
-                GetWorldGeometry(units, unitIndex, i, profile,
-                    out Vector3 center, out float radius, out float halfHeight,
-                    hitRegions, bodies);
-                intersects = TryIntersectCylinder(
-                    start, end, center, radius + padding, halfHeight + padding, out t);
-            }
-
-            bool isInternal = IsInternalNode(profile, i);
-            if (!intersects ||
-                (found && bestIsInternal && !isInternal) ||
-                (found && bestIsInternal == isInternal && t >= bestT))
-                continue;
-
-            Vector3 hitPosition = start + (end - start) * t;
-            int bindingIndex = SelectPart(profile, i, hitPosition, unitIndex, out UnitHealthPartId part);
-
-            if (ignoredPart != UnitHealthPartId.None && part == ignoredPart)
-                continue;
-
-            bestT = t;
-            bestIsInternal = isInternal;
-            bestPart = part;
-            bestRegion = i;
-            bestBinding = bindingIndex;
-            bestPosition = hitPosition;
-            found = true;
-        }
-
-        if (!found)
+        if (!TryIntersectSphere(start, end, center, sphereRadius + padding, out float t))
         {
             result = default;
             return false;
         }
 
-        result = new UnitHitResult(bestPart, bestPosition, bestT, bestRegion, bestBinding);
+        Vector3 hitPosition = start + (end - start) * t;
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        float heightFraction = Math.Clamp((hitPosition.Z - position.Z) / height, 0f, 1f);
+
+        if (!TrySelectDamageBinding(
+                profile, unitIndex, hitPosition, heightFraction, ignoredPart,
+                out int regionIndex, out int bindingIndex, out UnitHealthPartId part))
+        {
+            result = default;
+            return false;
+        }
+
+        result = new UnitHitResult(part, hitPosition, t, regionIndex, bindingIndex);
         return true;
     }
 
@@ -538,130 +463,12 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null)
     {
+        // Internal organs are damage targets, not intersectable gameplay volumes.
         result = default;
-        if (string.IsNullOrWhiteSpace(entryBindingId))
-            return false;
-
-        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-        if (profile is not UnitAnatomyProfile anatomy ||
-            (uint)parentRegionIndex >= (uint)anatomy.NodeCount ||
-            anatomy.VolumeCount == 0)
-            return false;
-
-        float directionLengthSquared = direction.LengthSquared();
-        if (directionLengthSquared < 0.000001f)
-            return false;
-        direction /= MathF.Sqrt(directionLengthSquared);
-
-        Vector3 parentCenter;
-        Vector3 parentScale;
-        float parentRotation;
-        float parentHalfHeight;
-        BodyPrimitive parentPrimitive;
-        if (!TryGetBodyShape(
-                units, unitIndex, profile, parentRegionIndex, bodies,
-                out int parentBodyIndex, out parentCenter, out parentScale,
-                out parentRotation, out parentPrimitive, out parentHalfHeight))
-        {
-            GetWorldGeometry(
-                units, unitIndex, parentRegionIndex, profile,
-                out parentCenter, out float radius, out parentHalfHeight,
-                hitRegions, bodies);
-            parentScale = new Vector3(radius, radius, parentHalfHeight);
-            parentRotation = 0f;
-            parentPrimitive = BodyPrimitive.Circle;
-            parentBodyIndex = -1;
-        }
-
-        Quaternion parentOrientation = BodyPartTransformMath.TopDownRotation(parentRotation);
-        if (bodies != null && parentBodyIndex >= 0 && parentBodyIndex < bodies.Count)
-            parentOrientation = bodies.WorldOrientation[parentBodyIndex];
-
-        float rayLength =
-            2f * MathF.Sqrt(
-                parentScale.X * parentScale.X +
-                parentScale.Y * parentScale.Y +
-                parentHalfHeight * parentHalfHeight) +
-            MathF.Max(0f, padding) * 2f + 0.001f;
-        if (rayLength <= 0.001f)
-            return false;
-
-        // Keep the internal ray inside the actual entry body volume. This prevents
-        // malformed/custom internal-volume data outside the torso from being hit.
-        Vector3 rayEnd = origin + direction * rayLength;
-        if (!TryIntersectPrimitive(
-                origin, rayEnd, parentCenter, parentScale, parentRotation,
-                parentPrimitive, parentHalfHeight, MathF.Max(0f, padding),
-                out _, out float parentExitT))
-            return false;
-
-        float maximumDistance = rayLength * parentExitT;
-        if (maximumDistance <= 0.0001f)
-            return false;
-
-        Vector3 end = origin + direction * maximumDistance;
-        UnitAnatomyNode parentNode = anatomy.GetNode(parentRegionIndex);
-        float bestDistance = float.PositiveInfinity;
-        int bestVolumeIndex = -1;
-        int bestTargetRegion = -1;
-        int bestTargetBinding = -1;
-        Vector3 bestPosition = default;
-        UnitAnatomyVolume bestVolume = default;
-        const float tieTolerance = 0.0001f;
-
-        ReadOnlySpan<UnitAnatomyVolume> volumes = anatomy.Volumes;
-        for (int i = 0; i < volumes.Length; i++)
-        {
-            UnitAnatomyVolume volume = volumes[i];
-            if (!string.Equals(volume.ParentRegionId, parentNode.Id, StringComparison.Ordinal) ||
-                !string.Equals(volume.EntryBindingId, entryBindingId, StringComparison.Ordinal))
-                continue;
-
-            if (!anatomy.TryFindPart(volume.TargetBindingId,
-                    out int targetRegion, out int targetBinding))
-                continue;
-
-            Vector3 volumeCenter = parentCenter +
-                BodyPartTransformMath.TransformPosition(volume.LocalCenter, parentOrientation);
-            Quaternion volumeOrientation = BodyPartTransformMath.Compose(
-                parentOrientation, new Vector3(0f, 0f, volume.LocalRotation));
-            BodyPartTransformMath.ProjectedShape volumeShape =
-                BodyPartTransformMath.Project(volume.HalfExtents, volumeOrientation, 0, 1);
-
-            if (!TryIntersectPrimitive(
-                    origin, end, volumeCenter, volumeShape.Scale,
-                    volumeShape.Rotation, volume.Primitive, volumeShape.Scale.Z,
-                    MathF.Max(0f, padding), out float t))
-                continue;
-
-            float distance = t * maximumDistance;
-            if (minimumDistance >= 0f &&
-                (distance < minimumDistance - tieTolerance ||
-                 (distance <= minimumDistance + tieTolerance && i <= previousVolumeIndex)))
-                continue;
-
-            if (distance > bestDistance + tieTolerance ||
-                (MathF.Abs(distance - bestDistance) <= tieTolerance && i > bestVolumeIndex))
-                continue;
-
-            bestDistance = distance;
-            bestVolumeIndex = i;
-            bestTargetRegion = targetRegion;
-            bestTargetBinding = targetBinding;
-            bestPosition = origin + direction * distance;
-            bestVolume = volume;
-        }
-
-        if (bestVolumeIndex < 0)
-            return false;
-
-        result = new UnitAnatomyVolumeHit(
-            bestVolume, bestVolumeIndex, bestTargetRegion,
-            bestTargetBinding, bestPosition, bestDistance);
-        return true;
+        return false;
     }
 
-    private static int FillRegionPoints(
+private static int FillRegionPoints(
         UnitStore units,
         int unitIndex,
         Vector3 source,
@@ -689,65 +496,128 @@ public sealed class UnitHitSystem
         return written;
     }
 
-    private static int SelectPart(
+    private static bool TrySelectDamageBinding(
         UnitHitRegionProfile profile,
-        int regionIndex,
-        Vector3 point,
         int unitIndex,
+        Vector3 point,
+        float heightFraction,
+        UnitHealthPartId ignoredPart,
+        out int regionIndex,
+        out int bindingIndex,
         out UnitHealthPartId part)
     {
-        ReadOnlySpan<HitRegionPartBinding> parts = GetBindings(profile, regionIndex);
-        bool hasSurfaceTissue = false;
-        for (int i = 0; i < parts.Length; i++)
-            hasSurfaceTissue |= parts[i].Kind != UnitHealthPartKind.Organ;
-
-        bool excludeInternalTargets = !IsInternalNode(profile, regionIndex) && hasSurfaceTissue;
+        regionIndex = -1;
+        bindingIndex = -1;
+        part = UnitHealthPartId.None;
         float totalWeight = 0f;
-        for (int i = 0; i < parts.Length; i++)
+
+        for (int r = 0; r < profile.RegionCount; r++)
         {
-            if (excludeInternalTargets && parts[i].Kind == UnitHealthPartKind.Organ)
-                continue;
-            totalWeight += parts[i].Weight;
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
+            for (int b = 0; b < bindings.Length; b++)
+            {
+                HitRegionPartBinding binding = bindings[b];
+                if (ignoredPart != UnitHealthPartId.None && binding.Part == ignoredPart)
+                    continue;
+
+                float likelihood = GetHeightLikelihood(binding.Part, heightFraction);
+                if (binding.Kind == UnitHealthPartKind.Organ)
+                    likelihood *= 0.16f;
+                totalWeight += MathF.Sqrt(MathF.Max(0.01f, binding.Weight)) * likelihood;
+            }
         }
 
+        if (totalWeight <= 0f || !float.IsFinite(totalWeight))
+            return false;
+
         uint hash = unchecked((uint)(unitIndex + 1) * 2654435761u);
-        hash ^= unchecked((uint)(regionIndex + 1) * 2246822519u);
-        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.X) * 3266489917u);
-        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.Y) * 668265263u);
-        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.Z) * 374761393u);
+        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.X) * 2246822519u);
+        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.Y) * 3266489917u);
+        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.Z) * 668265263u);
         hash ^= hash >> 16;
         hash *= 2246822519u;
         hash ^= hash >> 13;
+        float roll = (hash / 4294967296f) * totalWeight;
 
-        float selection = hash / (float)uint.MaxValue * totalWeight;
-
-        for (int i = 0; i < parts.Length; i++)
+        for (int r = 0; r < profile.RegionCount; r++)
         {
-            if (excludeInternalTargets && parts[i].Kind == UnitHealthPartKind.Organ)
-                continue;
-
-            selection -= parts[i].Weight;
-            if (selection <= 0f)
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
+            for (int b = 0; b < bindings.Length; b++)
             {
-                part = parts[i].Part;
-                return i;
+                HitRegionPartBinding binding = bindings[b];
+                if (ignoredPart != UnitHealthPartId.None && binding.Part == ignoredPart)
+                    continue;
+
+                float likelihood = GetHeightLikelihood(binding.Part, heightFraction);
+                if (binding.Kind == UnitHealthPartKind.Organ)
+                    likelihood *= 0.16f;
+
+                roll -= MathF.Sqrt(MathF.Max(0.01f, binding.Weight)) * likelihood;
+                if (roll > 0f)
+                    continue;
+
+                regionIndex = r;
+                bindingIndex = b;
+                part = binding.Part;
+                return true;
             }
         }
 
-        for (int i = parts.Length - 1; i >= 0; i--)
+        for (int r = profile.RegionCount - 1; r >= 0; r--)
         {
-            if (!excludeInternalTargets || parts[i].Kind != UnitHealthPartKind.Organ)
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
+            for (int b = bindings.Length - 1; b >= 0; b--)
             {
-                part = parts[i].Part;
-                return i;
+                if (ignoredPart != UnitHealthPartId.None && bindings[b].Part == ignoredPart)
+                    continue;
+                regionIndex = r;
+                bindingIndex = b;
+                part = bindings[b].Part;
+                return true;
             }
         }
 
-        part = UnitHealthPartId.None;
-        return -1;
+        return false;
     }
 
-    private static Vector3 GetMarkerWorldPosition(
+    private static float GetHeightLikelihood(UnitHealthPartId part, float height)
+    {
+        float center;
+        float sigma;
+        switch (part)
+        {
+            case UnitHealthPartId.Head: center = 0.86f; sigma = 0.17f; break;
+            case UnitHealthPartId.Brain: center = 0.91f; sigma = 0.12f; break;
+            case UnitHealthPartId.Neck: center = 0.75f; sigma = 0.16f; break;
+            case UnitHealthPartId.Torso: center = 0.52f; sigma = 0.27f; break;
+            case UnitHealthPartId.Heart:
+            case UnitHealthPartId.LeftLung:
+            case UnitHealthPartId.RightLung:
+            case UnitHealthPartId.Stomach:
+            case UnitHealthPartId.Liver:
+            case UnitHealthPartId.LeftKidney:
+            case UnitHealthPartId.RightKidney:
+                center = 0.49f; sigma = 0.22f; break;
+            case UnitHealthPartId.LeftArm:
+            case UnitHealthPartId.RightArm:
+            case UnitHealthPartId.LeftHand:
+            case UnitHealthPartId.RightHand:
+                center = 0.54f; sigma = 0.25f; break;
+            case UnitHealthPartId.LeftLeg:
+            case UnitHealthPartId.RightLeg:
+                center = 0.22f; sigma = 0.20f; break;
+            case UnitHealthPartId.LeftFoot:
+            case UnitHealthPartId.RightFoot:
+                center = 0.08f; sigma = 0.15f; break;
+            default:
+                return 1f;
+        }
+
+        float normalized = (height - center) / sigma;
+        return MathF.Max(0.015f, MathF.Exp(-0.5f * normalized * normalized));
+    }
+
+private static Vector3 GetMarkerWorldPosition(
         UnitStore units,
         int unitIndex,
         int regionIndex,
@@ -755,39 +625,30 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions,
         UnitBodyStore? bodies)
     {
-        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-        GetWorldGeometry(units, unitIndex, regionIndex, profile,
-            out Vector3 center, out _, out _, hitRegions, bodies);
-
-        if (bodies != null &&
-            TryGetBodyShape(units, unitIndex, GetProfile(units, unitIndex, hitRegions),
-                regionIndex, bodies, out _, out _, out _, out float bodyRotation, out _, out _))
-        {
-            Vector3 offset = marker.LocalOffset;
-            float cos = MathF.Cos(bodyRotation);
-            float sin = MathF.Sin(bodyRotation);
-            return center + new Vector3(
-                offset.X * cos - offset.Y * sin,
-                offset.X * sin + offset.Y * cos,
-                offset.Z);
-        }
-
-        Vector3 direction = (marker.Roles &
+        Vector3 position = units.Position[unitIndex];
+        float height = MathF.Max(0.05f, units.Height[unitIndex]);
+        Vector3 facing = (marker.Roles &
             (UnitAnatomyMarkerRole.Eye | UnitAnatomyMarkerRole.Muzzle)) != 0
             ? units.HeadNormal[unitIndex]
             : units.BodyNormal[unitIndex];
-        float angle = MathF.Atan2(direction.Y, direction.X);
-        float fallbackCos = MathF.Cos(angle);
-        float fallbackSin = MathF.Sin(angle);
-        Vector3 fallbackOffset = marker.LocalOffset;
+        float facingLengthSquared = facing.X * facing.X + facing.Y * facing.Y;
+        facing = facingLengthSquared > 0.000001f
+            ? new Vector3(facing.X / MathF.Sqrt(facingLengthSquared), facing.Y / MathF.Sqrt(facingLengthSquared), 0f)
+            : Vector3.UnitX;
 
-        return center + new Vector3(
-            fallbackOffset.X * fallbackCos - fallbackOffset.Y * fallbackSin,
-            fallbackOffset.X * fallbackSin + fallbackOffset.Y * fallbackCos,
-            fallbackOffset.Z);
+        float heightFraction = (marker.Roles & UnitAnatomyMarkerRole.Eye) != 0
+            ? 0.82f
+            : (marker.Roles & UnitAnatomyMarkerRole.Muzzle) != 0
+                ? 0.70f
+                : (marker.Roles & UnitAnatomyMarkerRole.Vision) != 0
+                    ? 0.70f
+                    : 0.52f;
+
+        float forwardDistance = MathF.Max(0.01f, units.Radius[unitIndex]) * 0.65f;
+        return position + facing * forwardDistance + new Vector3(0f, 0f, height * heightFraction);
     }
 
-    private static ReadOnlySpan<HitRegionPartBinding> GetBindings(
+private static ReadOnlySpan<HitRegionPartBinding> GetBindings(
         UnitHitRegionProfile profile,
         int regionIndex) =>
         profile is UnitAnatomyProfile anatomy
@@ -895,20 +756,10 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions = null,
         UnitBodyStore? bodies = null)
     {
-        if (TryGetBodyShape(
-                units, unitIndex, profile, regionIndex, bodies,
-                out _, out center, out Vector3 scale, out _, out _, out halfHeight))
-        {
-            radius = MathF.Max(MathF.Abs(scale.X), MathF.Abs(scale.Y));
-            return;
-        }
-
-        GetWorldGeometry(
-            units, unitIndex, profile.Regions[regionIndex],
-            out center, out radius, out halfHeight, hitRegions, bodies);
+        GetGameplayCollider(units, unitIndex, out center, out radius, out halfHeight);
     }
 
-    private static void GetWorldGeometry(
+private static void GetWorldGeometry(
         UnitStore units,
         int unitIndex,
         in UnitCircleHitRegion region,
@@ -918,75 +769,26 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions = null,
         UnitBodyStore? bodies = null)
     {
-        UnitHitRegionProfile assignedProfile = GetProfile(units, unitIndex, hitRegions);
-        int assignedRegionIndex = FindRegion(assignedProfile, region.Id);
-        if (TryGetBodyShape(
-                units, unitIndex, assignedProfile, assignedRegionIndex, bodies,
-                out _, out center, out Vector3 sharedScale, out _, out _, out halfHeight))
-        {
-            radius = MathF.Max(MathF.Abs(sharedScale.X), MathF.Abs(sharedScale.Y));
-            return;
-        }
-
-        Vector3 position = units.Position[unitIndex];
-        Vector3 factors = region.DimensionCenterFactors;
-
-        Vector3 offset = region.LocalCenter + new Vector3(
-            units.Width[unitIndex] * factors.X,
-            units.Length[unitIndex] * factors.Y,
-            units.Height[unitIndex] * factors.Z);
-
-        Vector3 bodyNormal = units.BodyNormal[unitIndex];
-        float angle = MathF.Atan2(bodyNormal.Y, bodyNormal.X);
-        float cos = MathF.Cos(angle);
-        float sin = MathF.Sin(angle);
-        Vector3 rotatedOffset = new Vector3(
-            offset.X * cos - offset.Y * sin,
-            offset.X * sin + offset.Y * cos,
-            offset.Z);
-
-        if (!string.IsNullOrWhiteSpace(region.ParentId))
-        {
-            UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-            int parentIndex = FindRegion(profile, region.ParentId);
-
-            if (parentIndex >= 0 && parentIndex < profile.RegionCount)
-            {
-                UnitCircleHitRegion parent = profile.Regions[parentIndex];
-                GetWorldGeometry(
-                    units, unitIndex, parent,
-                    out Vector3 parentCenter, out _, out _, hitRegions, bodies);
-                center = parentCenter + rotatedOffset;
-            }
-            else
-            {
-                center = position + rotatedOffset;
-            }
-        }
-        else
-        {
-            center = position + rotatedOffset;
-        }
-
-        radius = MathF.Max(
-            0.001f,
-            region.Radius +
-            units.Width[unitIndex] * region.WidthRadiusFactor +
-            units.Length[unitIndex] * region.LengthRadiusFactor);
-
-        halfHeight = MathF.Max(
-            0.001f,
-            region.HalfHeight +
-            units.Height[unitIndex] * region.HeightHalfExtentFactor);
+        GetGameplayCollider(units, unitIndex, out center, out radius, out halfHeight);
     }
 
+        private static void GetGameplayCollider(
+        UnitStore units,
+        int unitIndex,
+        out Vector3 center,
+        out float radius,
+        out float halfHeight)
+    {
+        Vector3 position = units.Position[unitIndex];
+        float height = MathF.Max(0.05f, units.Height[unitIndex]);
+        radius = MathF.Max(MathF.Max(0.01f, units.Radius[unitIndex]), height * 0.5f);
+        halfHeight = radius;
+        center = position + new Vector3(0f, 0f, radius);
+    }
 
-    private static int CountTargetRegions(UnitHitRegionProfile profile) =>
-        profile is UnitAnatomyProfile anatomy
-            ? anatomy.VisibleRegionCount
-            : profile.RegionCount;
+    private static int CountTargetRegions(UnitHitRegionProfile profile) => 1;
 
-    private static bool IsInternalNode(UnitHitRegionProfile profile, int index) =>
+private static bool IsInternalNode(UnitHitRegionProfile profile, int index) =>
         profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(index);
 
     private static bool TryGetBodyShape(
@@ -1008,27 +810,10 @@ public sealed class UnitHitSystem
         rotation = 0f;
         primitive = BodyPrimitive.Circle;
         halfHeight = 0f;
-
-        if (bodies == null ||
-            profile is not UnitAnatomyProfile anatomy ||
-            !anatomy.HasSharedShapes ||
-            (uint)regionIndex >= (uint)anatomy.NodeCount ||
-            units.BodyCount[unitIndex] != anatomy.NodeCount)
-            return false;
-
-        bodyIndex = units.BodyStart[unitIndex] + regionIndex;
-        if ((uint)bodyIndex >= (uint)bodies.Count)
-            return false;
-
-        center = bodies.WorldPosition[bodyIndex];
-        scale = bodies.WorldScale[bodyIndex];
-        rotation = bodies.WorldRotation[bodyIndex];
-        primitive = bodies.Primitive[bodyIndex];
-        halfHeight = MathF.Max(0.001f, bodies.WorldScale[bodyIndex].Z);
-        return halfHeight > 0f;
+        return false;
     }
 
-    private static bool TryIntersectPrimitive(
+private static bool TryIntersectPrimitive(
         Vector3 start,
         Vector3 end,
         Vector3 center,
@@ -1191,6 +976,48 @@ public sealed class UnitHitSystem
             enter = MathF.Max(enter, crossing);
 
         return enter <= exit;
+    }
+
+        private static bool TryIntersectSphere(
+        Vector3 start,
+        Vector3 end,
+        Vector3 center,
+        float radius,
+        out float t)
+    {
+        t = 0f;
+        float r = MathF.Max(0.001f, radius);
+        Vector3 offset = start - center;
+        Vector3 delta = end - start;
+        float c = Vector3.Dot(offset, offset) - r * r;
+        if (c <= 0f)
+            return true;
+
+        float a = Vector3.Dot(delta, delta);
+        if (a <= 0.0000001f)
+            return false;
+
+        float b = 2f * Vector3.Dot(offset, delta);
+        float discriminant = b * b - 4f * a * c;
+        if (discriminant < 0f)
+            return false;
+
+        float root = MathF.Sqrt(discriminant);
+        float t0 = (-b - root) / (2f * a);
+        float t1 = (-b + root) / (2f * a);
+        if (t0 >= 0f && t0 <= 1f)
+        {
+            t = t0;
+            return true;
+        }
+
+        if (t1 >= 0f && t1 <= 1f)
+        {
+            t = t1;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryIntersectCylinder(

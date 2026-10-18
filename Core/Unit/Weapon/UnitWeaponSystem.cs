@@ -779,96 +779,33 @@ public sealed class UnitWeaponSystem
         Vector3 source,
         TargetMode targetMode)
     {
-        UnitHitRegionProfile profile = _hitRegions?.GetProfile(targetIndex) ??
-            UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[targetIndex]).BodyType);
+        Vector3 position = units.Position[targetIndex];
+        Vector3 towardSource = new(source.X - position.X, source.Y - position.Y, 0f);
+        float lengthSquared = towardSource.LengthSquared();
+        if (lengthSquared > 0.000001f)
+            towardSource /= MathF.Sqrt(lengthSquared);
+        else
+            towardSource = Vector3.UnitX;
 
-        int regionIndex = FindTargetModeRegion(
-            units,
-            targetIndex,
-            profile,
-            source,
-            targetMode);
+        float radius = MathF.Max(0.01f, units.Radius[targetIndex]);
+        float height = MathF.Max(0.05f, units.Height[targetIndex]);
+        float verticalFraction = targetMode switch
+        {
+            TargetMode.Head => 0.84f,
+            TargetMode.Legs => 0.18f,
+            TargetMode.Torso => 0.52f,
+            _ => 0.55f
+        };
 
-        return UnitHitSystem.GetRegionPoint(
-            units,
-            targetIndex,
-            regionIndex,
-            source,
-            _hitRegions,
-            UnitAnatomyMarkerRole.Aim,
-            _bodies);
+        // Target modes only change shot height. The sphere accepts the hit; height
+        // biases the separate, probabilistic damage-zone resolver.
+        return new Vector3(
+            position.X + towardSource.X * radius * 0.65f,
+            position.Y + towardSource.Y * radius * 0.65f,
+            position.Z + height * verticalFraction);
     }
 
-    // Target modes are vertical targeting bands, not anatomical labels:
-    // Legs = lowest available segment, Torso/Automatic = middle, Head = highest.
-    // This works for bipeds, segmented creatures and arbitrary custom profiles.
-    private int FindTargetModeRegion(
-        UnitStore units,
-        int targetIndex,
-        UnitHitRegionProfile profile,
-        Vector3 source,
-        TargetMode targetMode)
-    {
-        float minHeight = float.PositiveInfinity;
-        float maxHeight = float.NegativeInfinity;
-
-        for (int i = 0; i < profile.RegionCount; i++)
-        {
-            if (profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(i))
-                continue;
-
-            float height = UnitHitSystem.GetRegionPoint(
-                units, targetIndex, i, source, _hitRegions,
-                UnitAnatomyMarkerRole.Aim, _bodies).Z;
-            minHeight = MathF.Min(minHeight, height);
-            maxHeight = MathF.Max(maxHeight, height);
-        }
-
-        if (!float.IsFinite(minHeight))
-            return 0;
-
-        float middleHeight = (minHeight + maxHeight) * 0.5f;
-        int selected = -1;
-        float selectedHeight = 0f;
-        float selectedMiddleDistance = float.PositiveInfinity;
-
-        for (int i = 0; i < profile.RegionCount; i++)
-        {
-            if (profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(i))
-                continue;
-
-            float height = UnitHitSystem.GetRegionPoint(
-                units, targetIndex, i, source, _hitRegions,
-                UnitAnatomyMarkerRole.Aim, _bodies).Z;
-            float middleDistance = MathF.Abs(height - middleHeight);
-
-            if (selected < 0)
-            {
-                selected = i;
-                selectedHeight = height;
-                selectedMiddleDistance = middleDistance;
-                continue;
-            }
-
-            bool preferred = targetMode switch
-            {
-                TargetMode.Head => height > selectedHeight,
-                TargetMode.Legs => height < selectedHeight,
-                _ => middleDistance < selectedMiddleDistance
-            };
-
-            if (!preferred)
-                continue;
-
-            selected = i;
-            selectedHeight = height;
-            selectedMiddleDistance = middleDistance;
-        }
-
-        return selected >= 0 ? selected : 0;
-    }
-
-    private static AmmunitionConfig? GetCurrentAmmunition(
+private static AmmunitionConfig? GetCurrentAmmunition(
         RangedWeaponConfig weapon,
         int ammoType)
     {
@@ -908,66 +845,23 @@ public sealed class UnitWeaponSystem
         UnitStore units,
         int unitIndex)
     {
-        if (UnitHitSystem.TryGetMarkerPoint(
-                units,
-                unitIndex,
-                UnitAnatomyMarkerRole.Muzzle,
-                out Vector3 markerPosition,
-                _hitRegions,
-                _bodies))
+        Vector3 head = NormalizeHorizontal(units.HeadNormal[unitIndex]);
+        float radius = MathF.Max(0.05f, units.Radius[unitIndex]);
+        float height = MathF.Max(0.05f, units.Height[unitIndex]);
+        float heightFraction = units.Posture[unitIndex] switch
         {
-            return markerPosition;
-        }
+            UnitPosture.Lying => 0.42f,
+            UnitPosture.Crouching => 0.58f,
+            UnitPosture.Sitting => 0.68f,
+            _ => 0.82f
+        };
 
-        Vector3 head =
-            NormalizeHorizontal(
-                units.HeadNormal[unitIndex]);
-
-        float width =
-            MathF.Max(
-                0.05f,
-                units.Width[unitIndex]);
-
-        float length =
-            MathF.Max(
-                0.05f,
-                units.Length[unitIndex]);
-
-        float height =
-            MathF.Max(
-                0.05f,
-                units.Height[unitIndex]);
-
-        float bodyLength =
-            units.Posture[unitIndex] ==
-            UnitPosture.Lying
-                ? length
-                : length * 0.60f;
-
-        float headRadius =
-            MathF.Min(
-                width,
-                length) *
-            0.32f;
-
-        float headDistance =
-            bodyLength * 0.5f +
-            headRadius * 1.15f;
-
-        return
-            units.Position[unitIndex] +
-            head *
-            (headDistance + 0.15f) +
-            new Vector3(
-                0f,
-                0f,
-                units.Posture[unitIndex] ==
-                UnitPosture.Lying
-                    ? height * 0.55f
-                    : height);
+        return units.Position[unitIndex] +
+            head * (radius * 0.75f + 0.08f) +
+            new Vector3(0f, 0f, height * heightFraction);
     }
 
-    private static Vector3 ApplySpread(
+private static Vector3 ApplySpread(
         Vector3 direction,
         float spread,
         uint randomA,

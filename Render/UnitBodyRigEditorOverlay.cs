@@ -1141,18 +1141,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                     return true;
                 }
 
-                if (itemIndex >= childIndex)
-                {
-                    _status = $"«{PartName(_regionIds[itemIndex])}» расположена ниже дочерней части. Родитель должен быть выше в списке.";
-                    return true;
-                }
-
-                BindPartToParentPreservingLayout(childIndex, itemIndex);
-                _selectedPart = childIndex;
-                _parentSelectionActive = false;
-                _parentSourcePart = -1;
-                RefreshProjectedGeometry();
-                _status = $"Назначен родитель «{PartName(_regionIds[itemIndex])}». Положение не изменилось; Ctrl+S — сохранить.";
+                TrySetPartParent(childIndex, itemIndex);
                 return true;
             }
 
@@ -1182,14 +1171,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             bool shiftPressed =
                 Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
                 Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-            if (shiftPressed && itemIndex < _selectedPart)
+            if (shiftPressed && itemIndex != _selectedPart)
             {
-                BodyPartDefinition selectedPart = _parts[_selectedPart];
-                _parts[_selectedPart] = Copy(
-                    selectedPart,
-                    parentIndex: itemIndex,
-                    anchor: BodyPartAnchor.Parent);
-                _status = $"«{PartName(_regionIds[_selectedPart])}» теперь зависит от «{PartName(_regionIds[itemIndex])}». Нажми Ctrl+S.";
+                TrySetPartParent(_selectedPart, itemIndex);
                 return true;
             }
 
@@ -1201,7 +1185,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             _draggingProperty = -1;
             _draggingProjection = -1;
             _draggingPart = false;
-            _status = $"Выбрано: {PartName(_regionIds[itemIndex])}. Shift+щелчок по более раннему региону задаёт родителя.";
+            _status = $"Выбрано: {PartName(_regionIds[itemIndex])}. Shift+щелчок по любой части задаёт родителя.";
             return true;
         }
 
@@ -3126,18 +3110,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _status = "Выбор родителя отменён.";
                 return;
             }
-            if (index >= childIndex)
-            {
-                _status = "Родитель должен быть выше дочерней части в списке.";
-                return;
-            }
-            BindPartToParentPreservingLayout(childIndex, index);
-            _selectedPart = childIndex;
-            _parentSelectionActive = false;
-            _parentSourcePart = -1;
+
+            TrySetPartParent(childIndex, index);
             _imguiNamePartIndex = -1;
-            RefreshProjectedGeometry();
-            _status = $"Назначен родитель «{PartName(_regionIds[index])}».";
             return;
         }
         if (_symmetryToolActive)
@@ -5177,10 +5152,165 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         return true;
     }
 
+    private bool TrySetPartParent(int childIndex, int parentIndex)
+    {
+        if ((uint)childIndex >= (uint)_parts.Length ||
+            (uint)parentIndex >= (uint)_parts.Length ||
+            childIndex == parentIndex)
+        {
+            _status = "Выбери другую существующую часть тела.";
+            return false;
+        }
+
+        if (WouldCreateParentCycle(childIndex, parentIndex))
+        {
+            _status = "Нельзя назначить дочернюю часть родителем: это создаст цикл.";
+            return false;
+        }
+
+        string childId = _regionIds[childIndex];
+        string parentName = PartName(_regionIds[parentIndex]);
+        BindPartToParentPreservingLayout(childIndex, parentIndex);
+        if (!ReorderPartsParentFirst())
+        {
+            _status = "Не удалось перестроить иерархию. Изменение не сохранено.";
+            RefreshProjectedGeometry();
+            return false;
+        }
+
+        _selectedPart = Array.IndexOf(_regionIds, childId);
+        _parentSelectionActive = false;
+        _parentSourcePart = -1;
+        _symmetryToolActive = false;
+        _symmetrySourcePart = -1;
+        _surfaceSnapTargetPart = -1;
+        _surfaceSnapProjection = -1;
+        _hasSurfaceSnapDirection = false;
+        RefreshProjectedGeometry();
+
+        bool wasEditingPose = _editingPose;
+        if (wasEditingPose)
+            SavePose();
+        _editingPose = false;
+        Save();
+        _editingPose = wasEditingPose;
+
+        _status = $"Назначен родитель «{parentName}»; мировое положение сохранено.";
+        return true;
+    }
+
+    private bool WouldCreateParentCycle(int childIndex, int parentIndex)
+    {
+        int current = parentIndex;
+        for (int step = 0; current >= 0 && step < _parts.Length; step++)
+        {
+            if (current == childIndex)
+                return true;
+            if (current >= _parts.Length)
+                return true;
+            current = _parts[current].ParentIndex;
+        }
+
+        return current >= 0;
+    }
+
+    private bool ReorderPartsParentFirst()
+    {
+        int count = _parts.Length;
+        var order = new int[count];
+        var oldToNew = new int[count];
+        var state = new byte[count];
+        int written = 0;
+
+        bool Visit(int index)
+        {
+            if (state[index] == 2)
+                return true;
+            if (state[index] == 1)
+                return false;
+
+            state[index] = 1;
+            int parent = _parts[index].ParentIndex;
+            if (parent < -1 || parent >= count)
+                return false;
+            if (parent >= 0 && !Visit(parent))
+                return false;
+
+            state[index] = 2;
+            order[written++] = index;
+            return true;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            if (!Visit(i))
+                return false;
+        }
+
+        if (written != count)
+            return false;
+
+        for (int newIndex = 0; newIndex < count; newIndex++)
+            oldToNew[order[newIndex]] = newIndex;
+
+        _regionIds = ReorderArray(_regionIds, order);
+        _hitHalfHeights = ReorderArray(_hitHalfHeights, order);
+        _tissuesByRegion = ReorderArray(_tissuesByRegion, order);
+        _markersByRegion = ReorderArray(_markersByRegion, order);
+        _parts = ReorderDefinitions(_parts, order, oldToNew);
+        _defaultParts = ReorderDefinitions(_defaultParts, order, oldToNew);
+        _openedRegionIds = ReorderArray(_openedRegionIds, order);
+        _openedParts = ReorderDefinitions(_openedParts, order, oldToNew);
+        _poseBaseRegionIds = ReorderArray(_poseBaseRegionIds, order);
+        _poseBaseParts = ReorderDefinitions(_poseBaseParts, order, oldToNew);
+        _poseOriginRegionIds = ReorderArray(_poseOriginRegionIds, order);
+        _poseOriginParts = ReorderDefinitions(_poseOriginParts, order, oldToNew);
+        _poseOriginDefaultParts = ReorderDefinitions(_poseOriginDefaultParts, order, oldToNew);
+        _poseOriginHitHalfHeights = ReorderArray(_poseOriginHitHalfHeights, order);
+        _poseOriginTissues = ReorderArray(_poseOriginTissues, order);
+        _poseOriginMarkers = ReorderArray(_poseOriginMarkers, order);
+        return true;
+    }
+
+    private static T[] ReorderArray<T>(T[] source, int[] order)
+    {
+        if (source.Length != order.Length)
+            return source;
+
+        var result = new T[source.Length];
+        for (int i = 0; i < order.Length; i++)
+            result[i] = source[order[i]];
+        return result;
+    }
+
+    private static BodyPartDefinition[] ReorderDefinitions(
+        BodyPartDefinition[] source,
+        int[] order,
+        int[] oldToNew)
+    {
+        if (source.Length != order.Length)
+            return source;
+
+        var result = new BodyPartDefinition[source.Length];
+        for (int i = 0; i < order.Length; i++)
+        {
+            BodyPartDefinition part = source[order[i]];
+            int parent = part.ParentIndex;
+            int remappedParent = parent >= 0 && parent < oldToNew.Length
+                ? oldToNew[parent]
+                : -1;
+            result[i] = Copy(
+                part,
+                parentIndex: remappedParent,
+                anchor: remappedParent >= 0 ? BodyPartAnchor.Parent : part.Anchor);
+        }
+        return result;
+    }
+
     private void BindPartToParentPreservingLayout(int childIndex, int parentIndex)
     {
         if (childIndex < 0 || childIndex >= _parts.Length ||
-            parentIndex < 0 || parentIndex >= childIndex)
+            parentIndex < 0 || parentIndex >= _parts.Length || parentIndex == childIndex)
             return;
 
         CalculateWorldTransforms();
