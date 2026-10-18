@@ -1864,7 +1864,11 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
         else
         {
-            DrawImGuiParentCombo();
+            // Parent assignment can reorder the backing arrays. Stop this frame's
+            // property drawing immediately so stale local copies cannot overwrite it.
+            if (DrawImGuiParentCombo())
+                return;
+
             ImguiNative.igSameLine(0f, 5f);
             if (ButtonImGui("Отвязать", 88f))
             {
@@ -2616,10 +2620,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
     }
 
-    private unsafe void DrawImGuiParentCombo()
+    private unsafe bool DrawImGuiParentCombo()
     {
         if (_parts.Length == 0 || _regionIds.Length != _parts.Length)
-            return;
+            return false;
 
         int childIndex = Math.Clamp(_selectedPart, 0, _parts.Length - 1);
         int currentParent = _parts[childIndex].ParentIndex;
@@ -2628,8 +2632,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             : "Корень юнита";
 
         if (!ImguiNative.igBeginCombo("Родитель", currentLabel, ImGuiComboFlags.None))
-            return;
+            return false;
 
+        bool rootChanged = false;
         if (ImguiNative.igSelectable_Bool(
                 "Корень юнита##parent_root",
                 currentParent < 0,
@@ -2637,13 +2642,13 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 new ImGuiVector2(0f, 0f)) &&
             currentParent >= 0)
         {
-            bool changed = DetachPartPreservingLayout(childIndex);
+            rootChanged = DetachPartPreservingLayout(childIndex);
             _parentSelectionActive = false;
             _parentSourcePart = -1;
             _symmetryToolActive = false;
             _symmetrySourcePart = -1;
 
-            if (changed)
+            if (rootChanged)
             {
                 SaveParentHierarchyEdit();
                 RefreshProjectedGeometry();
@@ -2652,28 +2657,33 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
 
         bool parentChanged = false;
-        for (int candidate = 0; candidate < _parts.Length; candidate++)
+        if (!rootChanged)
         {
-            if (candidate == childIndex ||
-                WouldCreateParentCycle(childIndex, candidate))
-                continue;
+            for (int candidate = 0; candidate < _parts.Length; candidate++)
+            {
+                if (candidate == childIndex ||
+                    WouldCreateParentCycle(childIndex, candidate))
+                    continue;
 
-            string label = $"{candidate + 1:00} {PartName(_regionIds[candidate])}##parent_{candidate}";
-            bool selected = candidate == currentParent;
-            if (!ImguiNative.igSelectable_Bool(
-                    label, selected, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 0f)) ||
-                selected)
-                continue;
+                string label = $"{candidate + 1:00} {PartName(_regionIds[candidate])}##parent_{candidate}";
+                bool selected = candidate == currentParent;
+                if (!ImguiNative.igSelectable_Bool(
+                        label, selected, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 0f)) ||
+                    selected)
+                    continue;
 
-            parentChanged = TrySetPartParent(childIndex, candidate);
-            _imguiNamePartIndex = -1;
-            break;
+                parentChanged = TrySetPartParent(childIndex, candidate);
+                _imguiNamePartIndex = -1;
+                break;
+            }
         }
 
         ImguiNative.igEndCombo();
 
         if (parentChanged)
             EnsureSelectionVisible();
+
+        return rootChanged || parentChanged;
     }
 
     private void SaveParentHierarchyEdit()
