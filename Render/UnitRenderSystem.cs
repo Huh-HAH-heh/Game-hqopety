@@ -122,8 +122,6 @@ public sealed class UnitRenderSystem : IDisposable
         UnitStore units =
             simulation.Units;
 
-        Vector3[] headNormals = units.HeadNormal;
-        UnitType[] unitTypes = units.Type;
         int[] bodyStarts = units.BodyStart;
         short[] bodyCounts = units.BodyCount;
         UnitBodyStore bodies = simulation.Bodies;
@@ -205,11 +203,7 @@ public sealed class UnitRenderSystem : IDisposable
             float screenX = unitPosition.X * tilePixelSize;
             float screenY = unitPosition.Y * tilePixelSize;
             float hitPoints = simulation.Health.OverallHitPoints[unitIndex];
-            float maxHitPoints = simulation.Health.OverallMaxHitPoints[unitIndex];
             bool isAlive = hitPoints > 0f;
-            float healthRatio = maxHitPoints > 0f ? hitPoints / maxHitPoints : 0f;
-            float suppression = simulation.Suppression.Value[unitIndex];
-            UnitSuppressionState suppressionState = simulation.Suppression.GetState(unitIndex);
             float markerRadius = GetMarkerRadius(
                 widths[unitIndex],
                 lengths[unitIndex],
