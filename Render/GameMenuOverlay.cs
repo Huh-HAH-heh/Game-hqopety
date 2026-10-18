@@ -33,6 +33,7 @@ public enum GameMenuActionType
     ToggleExtrema,
     ToggleHeightContours,
     ToggleContourLabels,
+    ToggleUnitRig,
     ResetTerrainSettings
 }
 
@@ -52,7 +53,8 @@ public readonly record struct GameSettingsSnapshot(
     int LayerCount,
     int SelectedResolutionIndex,
     uint CurrentWidth,
-    uint CurrentHeight);
+    uint CurrentHeight,
+    bool ShowUnitRig);
 
 public readonly record struct GameResolution(
     uint Width,
@@ -176,7 +178,7 @@ public sealed class GameMenuOverlay : IDisposable
 
     private const float MenuButtonSize = 38f;
     private const float SettingsWidth = 620f;
-    private const float SettingsHeight = 620f;
+    private const float SettingsHeight = 650f;
     private const float MainWidth = 390f;
     private const float MainHeight = 310f;
     private const float MaxContourLabelZoom = 2.5f;
@@ -322,6 +324,7 @@ void main()
     private readonly RectangleShape _extremaButton = ButtonShape(136f, 34f);
     private readonly RectangleShape _contoursButton = ButtonShape(136f, 34f);
     private readonly RectangleShape _contourLabelsButton = ButtonShape(136f, 34f);
+    private readonly RectangleShape _unitRigButton = ButtonShape(576f, 32f);
 
     private readonly RectangleShape _resolutionBox =
         new RectangleShape(new Vector2f(232f, 36f))
@@ -384,6 +387,7 @@ void main()
     private readonly Text? _extremaLabel;
     private readonly Text? _contoursLabel;
     private readonly Text? _contourLabelsLabel;
+    private readonly Text? _unitRigLabel;
     private readonly Text? _toneHeading;
     private readonly Text? _toneLowLabel;
     private readonly Text? _toneHighLabel;
@@ -395,6 +399,7 @@ void main()
     private string _lastExtremaLabel = string.Empty;
     private string _lastContoursLabel = string.Empty;
     private string _lastContourLabelsLabel = string.Empty;
+    private string _lastUnitRigLabel = string.Empty;
     private string _lastResolution = string.Empty;
     private string _lastAppliedResolution = string.Empty;
 
@@ -531,6 +536,8 @@ void main()
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _contourLabelsLabel = CreateText(
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _unitRigLabel = CreateText(
+            "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _toneHeading = CreateText(
             "ПРЕВЬЮ МОНОХРОМНОГО ТОНА", 11,
             new Color(195, 204, 215), new Vector2f(0f, 0f), Text.Styles.Bold);
@@ -570,6 +577,7 @@ void main()
             _extremaLabel,
             _contoursLabel,
             _contourLabelsLabel,
+            _unitRigLabel,
             _toneHeading,
             _toneLowLabel,
             _toneHighLabel,
@@ -698,6 +706,11 @@ void main()
         if (_contourLabelsButton.GetGlobalBounds().Contains(point))
         {
             return new GameMenuAction(GameMenuActionType.ToggleContourLabels);
+        }
+
+        if (_unitRigButton.GetGlobalBounds().Contains(point))
+        {
+            return new GameMenuAction(GameMenuActionType.ToggleUnitRig);
         }
 
         if (_resetButton.GetGlobalBounds().Contains(point))
@@ -1408,23 +1421,24 @@ void main()
         _extremaButton.Position = new Vector2f(settingsX + 166f, settingsY + 442f);
         _contoursButton.Position = new Vector2f(settingsX + 310f, settingsY + 442f);
         _contourLabelsButton.Position = new Vector2f(settingsX + 454f, settingsY + 442f);
+        _unitRigButton.Position = new Vector2f(settingsX + 22f, settingsY + 480f);
 
-        _toneHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 488f);
-        _toneLowLabel!.Position = new Vector2f(settingsX + 22f, settingsY + 520f);
-        _toneHighLabel!.Position = new Vector2f(settingsX + SettingsWidth - 80f, settingsY + 520f);
+        _toneHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 522f);
+        _toneLowLabel!.Position = new Vector2f(settingsX + 22f, settingsY + 554f);
+        _toneHighLabel!.Position = new Vector2f(settingsX + SettingsWidth - 80f, settingsY + 554f);
 
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
             _toneSwatches[i].Position = new Vector2f(
                 settingsX + 22f + i * 112f,
-                settingsY + 507f);
+                settingsY + 541f);
         }
 
-        _resetButton.Position = new Vector2f(settingsX + 22f, settingsY + 565f);
-        _backButton.Position = new Vector2f(settingsX + SettingsWidth - 150f, settingsY + 565f);
-        _resetLabel!.Position = new Vector2f(settingsX + 38f, settingsY + 574f);
-        _backLabel!.Position = new Vector2f(settingsX + SettingsWidth - 113f, settingsY + 574f);
-        _keyboardHelp!.Position = new Vector2f(settingsX + 22f, settingsY + 544f);
+        _resetButton.Position = new Vector2f(settingsX + 22f, settingsY + 594f);
+        _backButton.Position = new Vector2f(settingsX + SettingsWidth - 150f, settingsY + 594f);
+        _resetLabel!.Position = new Vector2f(settingsX + 38f, settingsY + 603f);
+        _backLabel!.Position = new Vector2f(settingsX + SettingsWidth - 113f, settingsY + 603f);
+        _keyboardHelp!.Position = new Vector2f(settingsX + 22f, settingsY + 574f);
 
         if (_lastSelectedResolutionIndex != settings.SelectedResolutionIndex)
         {
@@ -1466,10 +1480,16 @@ void main()
             ref _lastContourLabelsLabel,
             settings.ShowContourLabels ? "ЦИФРЫ: ВКЛ" : "ЦИФРЫ: ВЫКЛ");
 
+        SetText(
+            _unitRigLabel,
+            ref _lastUnitRigLabel,
+            settings.ShowUnitRig ? "ЮНИТЫ: МАРКЕР + РИГ" : "ЮНИТЫ: ТОЛЬКО МАРКЕР");
+
         CenterButtonLabel(_gridButton, _gridLabel!);
         CenterButtonLabel(_extremaButton, _extremaLabel!);
         CenterButtonLabel(_contoursButton, _contoursLabel!);
         CenterButtonLabel(_contourLabelsButton, _contourLabelsLabel!);
+        CenterButtonLabel(_unitRigButton, _unitRigLabel!);
 
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
@@ -1508,6 +1528,7 @@ void main()
         UpdateHover(_extremaButton, mouse);
         UpdateHover(_contoursButton, mouse);
         UpdateHover(_contourLabelsButton, mouse);
+        UpdateHover(_unitRigButton, mouse);
         UpdateHover(_resetButton, mouse);
         UpdateHover(_backButton, mouse);
 
@@ -1523,6 +1544,9 @@ void main()
         _contourLabelsButton.FillColor = settings.ShowContourLabels
             ? new Color(63, 75, 90)
             : new Color(27, 34, 44);
+        _unitRigButton.FillColor = settings.ShowUnitRig
+            ? new Color(63, 75, 90)
+            : new Color(27, 34, 44);
 
         window.Draw(_panel);
         window.Draw(_accent);
@@ -1536,6 +1560,7 @@ void main()
         window.Draw(_extremaButton);
         window.Draw(_contoursButton);
         window.Draw(_contourLabelsButton);
+        window.Draw(_unitRigButton);
         window.Draw(_resetButton);
         window.Draw(_backButton);
 
@@ -1731,6 +1756,8 @@ void main()
         _gridButton.Dispose();
         _extremaButton.Dispose();
         _contoursButton.Dispose();
+        _contourLabelsButton.Dispose();
+        _unitRigButton.Dispose();
         _resolutionBox.Dispose();
         _divider.Dispose();
         _minimumPin.Dispose();
