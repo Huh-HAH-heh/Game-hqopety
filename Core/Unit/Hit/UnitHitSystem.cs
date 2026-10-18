@@ -422,11 +422,16 @@ public static bool TryFindBindingForPart(
         if (bodies != null &&
             profile is UnitAnatomyProfile anatomy &&
             anatomy.HasSharedShapes &&
-            !anatomy.IsInternalNode(regionIndex))
+            !anatomy.IsInternalNode(regionIndex) &&
+            TryGetBodyShape(
+                units, unitIndex, profile, regionIndex, bodies,
+                out _, out Vector3 shapeCenter, out Vector3 shapeScale,
+                out float shapeRotation, out BodyPrimitive primitive, out _))
         {
-            UnitHitRegionGeometry geometry = GetRegionGeometry(
-                units, unitIndex, regionIndex, hitRegions, bodies);
-            return geometry.Center;
+            // Aim at the observer-facing side of the live primitive, not a point
+            // floating above the root or hidden behind the target's own silhouette.
+            return GetVisibleSurfacePoint(
+                source, shapeCenter, shapeScale, shapeRotation, primitive);
         }
 
         Vector3 position = units.Position[unitIndex];
@@ -448,6 +453,43 @@ public static bool TryFindBindingForPart(
             position.X + direction.X * radius * 0.65f,
             position.Y + direction.Y * radius * 0.65f,
             position.Z + height * heightFraction);
+    }
+
+    private static Vector3 GetVisibleSurfacePoint(
+        Vector3 source,
+        Vector3 center,
+        Vector3 scale,
+        float rotation,
+        BodyPrimitive primitive)
+    {
+        Vector3 towardSource = new(
+            source.X - center.X,
+            source.Y - center.Y,
+            0f);
+        float lengthSquared = towardSource.LengthSquared();
+        towardSource = lengthSquared > 0.000001f
+            ? towardSource / MathF.Sqrt(lengthSquared)
+            : Vector3.UnitX;
+
+        Vector3 localDirection = Rotate2D(towardSource, -rotation);
+        float radiusX = MathF.Max(0.001f, MathF.Abs(scale.X));
+        float radiusY = MathF.Max(0.001f, MathF.Abs(scale.Y));
+        float distance = primitive switch
+        {
+            BodyPrimitive.Circle =>
+                1f / MathF.Sqrt(
+                    localDirection.X * localDirection.X / (radiusX * radiusX) +
+                    localDirection.Y * localDirection.Y / (radiusY * radiusY)),
+            _ => MathF.Min(
+                radiusX / MathF.Max(0.0001f, MathF.Abs(localDirection.X)),
+                radiusY / MathF.Max(0.0001f, MathF.Abs(localDirection.Y)))
+        };
+
+        // Triangle bounds are not elliptical; stay further inside the projected
+        // triangle. The other primitives use a point close to their facing surface.
+        float inset = primitive == BodyPrimitive.Triangle ? 0.45f : 0.90f;
+        Vector3 offset = Rotate2D(localDirection * (distance * inset), rotation);
+        return new Vector3(center.X + offset.X, center.Y + offset.Y, center.Z);
     }
 
     public bool TryHitUnit(
