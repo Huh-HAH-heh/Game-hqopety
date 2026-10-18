@@ -1724,8 +1724,20 @@ public static class CombatSelfTest
             return Fail();
 
         stage = 4;
-        return UnitHitSystem.GetVisibilityPointCount(
-            simulation.Units, unit.Index, simulation.HitRegions) == 1 || Fail();
+        int visibilityCount = UnitHitSystem.GetVisibilityPointCount(
+            simulation.Units, unit.Index, simulation.HitRegions);
+        if (visibilityCount != profile.VisibleRegionCount || visibilityCount < checkedShapes)
+            return Fail();
+
+        for (int i = 0; i < visibilityCount; i++)
+        {
+            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+                simulation.Units, unit.Index, i, simulation.HitRegions);
+            if (profile.IsInternalNode(regionIndex))
+                return Fail();
+        }
+
+        return true;
     }
 
     private static bool TestAnatomyRigEditsPreserveBindings()
