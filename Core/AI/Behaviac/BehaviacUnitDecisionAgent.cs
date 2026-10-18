@@ -58,7 +58,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool hasSuppressiveWeapon,
         bool canFlank,
         bool isFlanking,
-        float proneCombatUtility)
+        float proneCombatUtility = 0f)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
