@@ -59,7 +59,8 @@ public sealed class UnitBodySystem
 
             // Movement wins over a stationary/combat pose in the same frame.
             Vector3 velocity = velocities[unit];
-            if (velocity.X * velocity.X + velocity.Y * velocity.Y > 0.04f)
+            if (velocity.X * velocity.X + velocity.Y * velocity.Y > 0.04f &&
+                postures[unit] != UnitPosture.Lying)
                 postures[unit] = UnitPosture.Standing;
 
             UpdateBody(
@@ -244,6 +245,10 @@ public sealed class UnitBodySystem
             if (speed > 0.05f)
             {
                 float gaitAmount = Math.Clamp(speed / 2.8f, 0f, 1f);
+                // Prone locomotion is a crawl: keep the prone silhouette and use
+                // a shorter alternating limb cycle rather than snapping upright.
+                if (posture == UnitPosture.Lying)
+                    gaitAmount *= 0.42f;
                 float gait = MathF.Sin(animationTime * (5.5f + speed * 0.75f)) * gaitAmount;
                 switch (motions[part])
                 {
