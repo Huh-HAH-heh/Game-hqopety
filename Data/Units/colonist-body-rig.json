@@ -83,7 +83,7 @@
       "Role": "UpperArm",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "Плечо левой руки"
+      "DisplayName": "Левая рука — плечо"
     },
     {
       "Id": "body.arm.left.lower",
@@ -104,7 +104,7 @@
       "Role": "Forearm",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "Предплечье левой руки"
+      "DisplayName": "Левая рука — предплечье"
     },
     {
       "Id": "body.arm.right.upper",
@@ -125,7 +125,7 @@
       "Role": "UpperArm",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "Плечо правой руки"
+      "DisplayName": "Правая рука — плечо"
     },
     {
       "Id": "body.arm.right.lower",
@@ -146,7 +146,7 @@
       "Role": "Forearm",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "Предплечье правой руки"
+      "DisplayName": "Правая рука — предплечье"
     },
     {
       "Id": "body.leg.left.upper",
@@ -167,7 +167,7 @@
       "Role": "Thigh",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "Бедро левой ноги"
+      "DisplayName": "Левая нога — бедро"
     },
     {
       "Id": "body.leg.left.lower",
@@ -188,7 +188,7 @@
       "Role": "Shin",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "Голень левой ноги"
+      "DisplayName": "Левая нога — голень"
     },
     {
       "Id": "body.leg.right.upper",
@@ -209,7 +209,7 @@
       "Role": "Thigh",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "Бедро правой ноги"
+      "DisplayName": "Правая нога — бедро"
     },
     {
       "Id": "body.leg.right.lower",
@@ -230,7 +230,7 @@
       "Role": "Shin",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "Голень правой ноги"
+      "DisplayName": "Правая нога — голень"
     },
     {
       "Id": "body.neck",
@@ -293,7 +293,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Левый коленный сустав"
+      "DisplayName": "Левая нога — коленный сустав"
     },
     {
       "Id": "custom.copy.custom-segment-001.001",
@@ -314,7 +314,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Правый коленный сустав"
+      "DisplayName": "Правая нога — коленный сустав"
     },
     {
       "Id": "custom.copy.custom-segment-001.002",
@@ -335,7 +335,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Левый локтевой сустав"
+      "DisplayName": "Левая рука — локтевой сустав"
     },
     {
       "Id": "custom.copy.custom-copy-custom-segment-001-002.001",
@@ -356,7 +356,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Правый локтевой сустав"
+      "DisplayName": "Правая рука — локтевой сустав"
     },
     {
       "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.001",
@@ -377,7 +377,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Дополнительный левый плечевой сустав"
+      "DisplayName": "Левая рука — дополнительный плечевой сустав"
     },
     {
       "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.002",
@@ -398,7 +398,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Дополнительный правый локтевой сустав"
+      "DisplayName": "Правая рука — дополнительный локтевой сустав"
     },
     {
       "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.001",
@@ -419,7 +419,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Дополнительный левый локтевой сустав"
+      "DisplayName": "Левая рука — дополнительный локтевой сустав"
     },
     {
       "Id": "custom.segment.002",
@@ -440,7 +440,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": "Правый голеностопный сустав"
+      "DisplayName": "Правая нога — голеностопный сустав"
     },
     {
       "Id": "custom.copy.custom-segment-002.001",
@@ -461,7 +461,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Левый голеностопный сустав"
+      "DisplayName": "Левая нога — голеностопный сустав"
     },
     {
       "Id": "custom.segment.003",
@@ -482,7 +482,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": "Левая стопа"
+      "DisplayName": "Левая нога — стопа"
     },
     {
       "Id": "custom.copy.custom-segment-003.001",
@@ -503,7 +503,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Правая стопа"
+      "DisplayName": "Правая нога — стопа"
     },
     {
       "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.002",
@@ -524,7 +524,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "Дополнительный правый плечевой сустав"
+      "DisplayName": "Правая рука — дополнительный плечевой сустав"
     }
   ]
 }
