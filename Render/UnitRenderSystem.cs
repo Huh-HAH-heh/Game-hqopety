@@ -78,7 +78,7 @@ public sealed class UnitRenderSystem : IDisposable
 
         float detailBlend = GetUnitDetailBlend(pixelsPerWorldUnit);
         bool showUnitDetails = detailBlend > 0f;
-        bool showRigDetails = showUnitRig && showUnitDetails;
+        bool showRigDetails = showUnitRig;
 
         _vertices.Clear();
         _bodyOutlines.Clear();
@@ -223,14 +223,12 @@ public sealed class UnitRenderSystem : IDisposable
                     isAlive,
                     tilePixelSize,
                     screenScale,
-                    detailBlend);
+                    1f);
             }
 
-            // In rig mode the faction marker fades out as the static body
-            // details fade in. Marker-only mode never draws a body part.
-            float markerOpacity = showUnitRig && renderedParts > 0
-                ? 1f - detailBlend
-                : 1f;
+            // A marker is a substitute for the rig, never an overlay on it.
+            // Rig mode renders anatomy; marker-only mode renders this silhouette.
+            float markerOpacity = showUnitRig ? 0f : 1f;
             if (markerOpacity > 0f)
             {
                 AppendLowDetailUnitMarker(
@@ -356,7 +354,7 @@ public void DrawSnapshot(
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
         bool showUnitDetails = detailBlend > 0f;
-        bool showRigDetails = showUnitRig && showUnitDetails;
+        bool showRigDetails = showUnitRig;
 
         float centerX = cameraView.Center.X;
         float centerY = cameraView.Center.Y;
@@ -502,14 +500,12 @@ public void DrawSnapshot(
                     isAlive,
                     tilePixelSize,
                     screenScale,
-                    detailBlend);
+                    1f);
             }
 
-            // In marker-only mode this remains a fully opaque faction circle.
-            // In rig mode the marker fades out at the same rate the rig fades in.
-            float markerOpacity = showUnitRig && renderedParts > 0
-                ? 1f - detailBlend
-                : 1f;
+            // Marker-only mode draws the full silhouette. When rig mode is on,
+            // the anatomical parts replace the marker completely.
+            float markerOpacity = showUnitRig ? 0f : 1f;
             if (markerOpacity > 0f)
             {
                 AppendLowDetailUnitMarker(
