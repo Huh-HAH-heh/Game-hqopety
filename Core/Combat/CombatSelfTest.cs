@@ -1081,16 +1081,38 @@ public static class CombatSelfTest
         for (int i = 0; i < visible.Length; i++)
             targetVisible |= visible[i] == target.Index;
         if (!targetVisible)
+        {
+            VisionCheck direct = simulation.Vision.Evaluate(
+                simulation.Units, map, shooter.Index, target.Index, simulation.Bodies);
+            Console.Error.WriteLine(
+                $"[Prone crawl test] Target was not in perception list; direct LOS={direct.State}, " +
+                $"distance={initialDistance:0.0}, visibleCount={visible.Length}.");
             return false;
+        }
 
         for (int tick = 0; tick < 15; tick++)
             simulation.Update(map, 0.1f);
 
         Vector3 finalPosition = simulation.Units.Position[shooter.Index];
         float finalDistance = Vector3.Distance(finalPosition, simulation.Units.Position[target.Index]);
-        return simulation.Units.Posture[shooter.Index] == UnitPosture.Lying &&
+        bool passed = simulation.Units.Posture[shooter.Index] == UnitPosture.Lying &&
             finalPosition.X > startX + 1f &&
             finalDistance < initialDistance - 1f;
+        if (!passed)
+        {
+            Console.Error.WriteLine(
+                $"[Prone crawl test] posture={simulation.Units.Posture[shooter.Index]}, " +
+                $"startX={startX:0.00}, final=({finalPosition.X:0.00},{finalPosition.Y:0.00}), " +
+                $"dist={initialDistance:0.00}->{finalDistance:0.00}, " +
+                $"movementTarget={simulation.Units.HasTarget[shooter.Index]}:" +
+                $"{simulation.Units.Target[shooter.Index]}, " +
+                $"aiTarget={simulation.AI.Store.HasTarget[shooter.Index]}, " +
+                $"aiState={simulation.AI.Store.State[shooter.Index]}, " +
+                $"behaviac={simulation.AI.UseBehaviacDecisionLayer}/{simulation.AI.BehaviacRuntimeReady}, " +
+                $"engageDecisions={simulation.AI.LastBehaviacEngageDecisions}.");
+        }
+
+        return passed;
     }
 
     private static bool TestAccuracy()
