@@ -8,8 +8,6 @@ namespace behaviac;
 /// </summary>
 public static class bt_rimclone_unit_decision
 {
-    private const string AgentTypeName = "Core.AI.Behaviac.BehaviacUnitDecisionAgent";
-
     private enum PredicateKind
     {
         Dead,
@@ -60,7 +58,6 @@ public static class bt_rimclone_unit_decision
         bt.SetId(-1);
         bt.SetName("rimclone_unit_decision");
         bt.IsFSM = false;
-        bt.SetAgentType(AgentTypeName);
 
         var root = new Selector();
         ConfigureNode(root, "Selector", 0);
@@ -101,6 +98,5 @@ public static class bt_rimclone_unit_decision
     {
         node.SetClassNameString(className);
         node.SetId(id);
-        node.SetAgentType(AgentTypeName);
     }
 }

@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Threading.Tasks;
 using Core.AI.Behaviac;
-using behaviac;
 using Core.Combat;
 using Core.Items;
 using Core.Map;
@@ -641,7 +640,7 @@ public sealed class UnitAiSystem
             hasVisibleTarget,
             Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f);
 
-        EBTStatus status = BehaviacRuntimeHost.Tick(agent);
+        behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != EBTStatus.BT_SUCCESS)
         {
             throw new InvalidOperationException(
