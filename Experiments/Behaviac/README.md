@@ -47,4 +47,13 @@ dotnet run --project App/App.csproj -c Release
 
 Remove the environment variable or set it to `0` to use the original AI path. Code can also toggle `UnitAiSystem.UseBehaviacDecisionLayer` directly. Agent instances are cached by unit slot and reused; the tree is not loaded per decision. The first opt-in update pays one-time initialization and agent-creation costs.
 
-The next CI benchmark validates the post-optimization allocation and timing numbers. In-game FPS remains a separate measurement and is not inferred from the decision microbenchmark.
+### Stage 4 benchmark result (Windows CI)
+
+Run 1307 completed successfully on 2026-10-18:
+
+- 800 agents × 100 ticks = 80,000 decisions; 0 mismatches and matching checksums.
+- Direct conditions: 24.43 ms total, 305 ns per decision.
+- Behaviac: 72.38 ms total, 905 ns per decision, 2.96× the direct-condition time.
+- Allocations during the measured Behaviac pass: 40 bytes total (previous measurement was about 63 MB before disabling runtime debug instrumentation).
+
+The measured decision layer is now substantially cheaper and effectively allocation-free in this test, while remaining about 3× slower than the direct baseline. The switch stays opt-in until an in-game FPS comparison and a live-session stability check are completed. Full simulation FPS is not inferred from this microbenchmark.
