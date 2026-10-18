@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using behaviac;
+using System.Numerics;
 
 namespace Core.AI.Behaviac;
 
@@ -27,12 +28,12 @@ public static class BehaviacRuntimeHost
     }
 
     /// <summary>
-    /// Initializes the compiled C# behavior trees shipped with RimClone.
-    /// No external behavior-data directory is required for EFF_cs.
+    /// Initializes the XML behavior assets shipped with RimClone.
+    /// The tree structure is data; RimClone-specific facts and actions are registered below.
     /// </summary>
     public static void InitializeCompiled()
     {
-        Initialize(AppContext.BaseDirectory, Workspace.EFileFormat.EFF_cs);
+        Initialize(Path.Combine(AppContext.BaseDirectory, "BehaviacData"), Workspace.EFileFormat.EFF_xml);
     }
 
     public static void Initialize(string behaviorRoot, Workspace.EFileFormat fileFormat = Workspace.EFileFormat.EFF_xml)
@@ -59,11 +60,78 @@ public static class BehaviacRuntimeHost
             Config.IsHotReload = false;
             Workspace.Instance.FilePath = fullPath;
             Workspace.Instance.FileFormat = fileFormat;
+            Workspace.Instance.MetaFile = string.Empty;
+
+            // Ensure built-in Behaviac node types and value parsers exist before
+            // registering RimClone's method bindings for XML Condition/Action nodes.
+            AgentMeta.Register();
+            RegisterDecisionAgentMetadata();
 
             _behaviorRoot = fullPath;
             _fileFormat = fileFormat;
             _initialized = true;
         }
+    }
+
+    private static void RegisterDecisionAgentMetadata()
+    {
+        const string agentTypeName = nameof(BehaviacUnitDecisionAgent);
+        uint classId = Utils.MakeVariableId(agentTypeName);
+        var meta = new AgentMeta();
+        AgentMeta._AgentMetas_[classId] = meta;
+        AgentMeta.Register<BehaviacUnitDecisionAgent>(agentTypeName);
+
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldReturnDead),
+            self => self.ShouldReturnDead());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldSeekCover),
+            self => self.ShouldSeekCover());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldRetreatToCover),
+            self => self.ShouldRetreatToCover());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldFlankVisibleTarget),
+            self => self.ShouldFlankVisibleTarget());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldEngageVisibleTarget),
+            self => self.ShouldEngageVisibleTarget());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldSuppressLastKnownTarget),
+            self => self.ShouldSuppressLastKnownTarget());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldInvestigateLastKnownTarget),
+            self => self.ShouldInvestigateLastKnownTarget());
+
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectDead),
+            self => self.SelectDead());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectSeekCover),
+            self => self.SelectSeekCover());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectRetreatToCover),
+            self => self.SelectRetreatToCover());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectFlankTarget),
+            self => self.SelectFlankTarget());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectEngageTarget),
+            self => self.SelectEngageTarget());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectSuppressiveFire),
+            self => self.SelectSuppressiveFire());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectInvestigateLastKnownTarget),
+            self => self.SelectInvestigateLastKnownTarget());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectPatrol),
+            self => self.SelectPatrol());
+    }
+
+    private static void RegisterCondition(
+        AgentMeta meta,
+        string methodName,
+        Func<BehaviacUnitDecisionAgent, bool> condition)
+    {
+        meta.RegisterMethod(
+            Utils.MakeVariableId(methodName),
+            new CAgentMethod<bool>(self => condition((BehaviacUnitDecisionAgent)self)));
+    }
+
+    private static void RegisterAction(
+        AgentMeta meta,
+        string methodName,
+        Func<BehaviacUnitDecisionAgent, EBTStatus> action)
+    {
+        meta.RegisterMethod(
+            Utils.MakeVariableId(methodName),
+            new CAgentMethod<EBTStatus>(self => action((BehaviacUnitDecisionAgent)self)));
     }
 
     public static TAgent CreateAgent<TAgent>(string behaviorName)
