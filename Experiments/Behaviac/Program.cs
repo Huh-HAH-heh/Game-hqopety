@@ -256,6 +256,7 @@ internal static class Program
         if (test.HasVisibleTarget)
         {
             if (!test.IsSuppressed &&
+                !test.IsLowHealth &&
                 !test.CanFlank &&
                 !test.IsFlanking &&
                 test.ProneCombatUtility >= 0.60f)
