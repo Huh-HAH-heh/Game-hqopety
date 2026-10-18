@@ -1,59 +1,52 @@
-# Behaviac integration experiment
+# Behaviac live AI integration
 
-The production `UnitAiSystem` remains unchanged. This experiment evaluates Behaviac in isolation before any live AI switch.
+RimClone uses the vendored upstream Behaviac C# runtime from Tencent/behaviac (see `Vendor/BehaviacRuntime/UPSTREAM.md` and its BSD 3-Clause license). Decision evaluation goes through Behaviac's `Agent`, `BehaviorTree`, `Selector`, `Sequence`, `Condition`, and `Action` runtime types. `Core/AI/Behaviac/BehaviacUnitDecisionTree.cs` is the current generated-style C# tree definition; it is not a tree exported from Behaviac Designer yet.
 
-## Stage 1 — runtime compatibility
+## What controls live gameplay now
 
-The test compiles the vendored C# runtime on .NET 10, loads Behaviac's upstream `demo_running` XML tree, runs it, and checks the expected condition/action sequence.
+On this experiment branch, interactive game runs use Behaviac by default. `UnitAiSystem` builds facts from RimClone's existing health, suppression, visibility, target-memory and tactical state; the Behaviac tree selects one of these intents:
 
-Run from the repository root:
+- `Dead`: stop aiming and movement, mark the unit dead.
+- `SeekCover`: prioritize available suppression cover over attacking.
+- `FlankTarget`: move assigned flankers to a lateral position around the currently visible target.
+- `EngageTarget`: hold a firing position and use the existing weapon/combat systems.
+- `InvestigateLastKnownTarget`: pursue the remembered target location or apply the existing suppressive-fire policy.
+- `Patrol`: use the existing search-waypoint behavior when there is no known target.
 
-```powershell
-dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release
-```
+One in four unit slots can be a flanker. A healthy, unsuppressed flanker with a visible enemy 7–20 map units away receives a real movement goal around the target; the side is stable by unit index and a target is not repeatedly flanked after the maneuver completes. Suppression, low health, target loss, or a changed target interrupts the maneuver. Movement, pathfinding, vision, ammunition, weapons, damage and rendering remain in RimClone's systems—they are not reimplemented in the behavior tree.
 
-## Stage 2 — unit-intent adapter
+This gives the branch an observable gameplay difference rather than just routing the old decisions through a wrapper.
 
-`Core/AI/Behaviac` contains an opt-in runtime host and a minimal facts-in/intent-out decision agent. The behavior tree only chooses an intent (`Dead`, `SeekCover`, `EngageTarget`, `InvestigateLastKnownTarget`, or `Patrol`). Movement, vision, combat, health and rendering remain under existing RimClone systems.
+## Run and compare
 
-## Stage 3 — deterministic checks and benchmark
-
-Run the six deterministic scenarios:
-
-```powershell
-dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release -- --decision-test
-```
-
-Measure the decision layer with 800 pre-created agents and 100 ticks (80,000 decisions), after a short warm-up:
+Run the Behaviac-driven AI (default on this branch):
 
 ```powershell
-dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release -- --decision-benchmark
-```
-
-The benchmark compares a direct decision policy against the Behaviac tree and reports elapsed time, nanoseconds per decision, time ratio, bytes allocated by the Behaviac pass, and semantic mismatches. Timing is informational rather than a hard pass/fail threshold because CI machine load varies; any incorrect intent or non-success status fails the test. Agent creation and initial tree loading are excluded from the measured loop.
-
-The runtime is built with `BEHAVIAC_RELEASE` so node-level debug profiling and formatting do not pollute gameplay timings or per-decision allocations.
-
-## Stage 4 — opt-in live integration
-
-`UnitAiSystem` now routes high-level intent selection through the compiled Behaviac tree when enabled. The selected intent controls the existing branches for death, suppression cover, visible-target engagement, last-known-target investigation, and patrol fallback. Movement, pathfinding, vision, weapon handling, damage and rendering remain in their existing systems.
-
-The feature remains off by default. Enable it for a local game run in PowerShell:
-
-```powershell
-$env:RIMCLONE_USE_BEHAVIAC_AI = "1"
+Remove-Item Env:RIMCLONE_USE_BEHAVIAC_AI -ErrorAction SilentlyContinue
 dotnet run --project App/App.csproj -c Release
 ```
 
-Remove the environment variable or set it to `0` to use the original AI path. Code can also toggle `UnitAiSystem.UseBehaviacDecisionLayer` directly. Agent instances are cached by unit slot and reused; the tree is not loaded per decision. The first opt-in update pays one-time initialization and agent-creation costs.
+Run the legacy policy to compare:
 
-### Stage 4 benchmark result (Windows CI)
+```powershell
+$env:RIMCLONE_USE_BEHAVIAC_AI = "0"
+dotnet run --project App/App.csproj -c Release
+```
 
-Run 1307 completed successfully on 2026-10-18:
+The setting applies to that PowerShell process and its child processes. Deterministic simulation self-tests set it to `0` internally so this experiment does not silently rewrite the established test baseline.
 
-- 800 agents × 100 ticks = 80,000 decisions; 0 mismatches and matching checksums.
-- Direct conditions: 24.43 ms total, 305 ns per decision.
-- Behaviac: 72.38 ms total, 905 ns per decision, 2.96× the direct-condition time.
-- Allocations during the measured Behaviac pass: 40 bytes total (previous measurement was about 63 MB before disabling runtime debug instrumentation).
+## Validate the runtime and decision policy
 
-The measured decision layer is now substantially cheaper and effectively allocation-free in this test, while remaining about 3× slower than the direct baseline. The switch stays opt-in until an in-game FPS comparison and a live-session stability check are completed. Full simulation FPS is not inferred from this microbenchmark.
+```powershell
+dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release
+dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release -- --decision-test
+dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release -- --decision-benchmark
+```
+
+The first command loads and runs the upstream `demo_running` XML behavior. The decision tests compare eight deterministic input cases against the expected intents, including flank assignment and interruption priority. The benchmark measures 800 pre-created agents over 100 ticks (80,000 decisions) after warm-up; tree setup/agent creation are excluded. It reports elapsed time, time ratio, allocations, mismatches and checksums. Timing is informational; semantic mismatches fail the test.
+
+The runtime is built with `BEHAVIAC_RELEASE` so Behaviac's node-level debug profiling/formatting does not dominate the measured loop.
+
+## Scope boundary
+
+This is a real Behaviac runtime integration and its selected tactics now change live movement. It is not yet a full Behaviac Designer content pipeline: the current unit tree is authored as generated-style C# under `Core/AI/Behaviac`, while the upstream XML tree is used by the compatibility smoke test. The next integration slice should move the unit tree into a Designer-authored data asset without moving pathfinding, vision, combat, or unit simulation into Behaviac.
