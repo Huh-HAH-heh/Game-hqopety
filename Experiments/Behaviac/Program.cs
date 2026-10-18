@@ -89,7 +89,7 @@ internal static class Program
                 BehaviacUnitDecisionAgent agent =
                     BehaviacRuntimeHost.CreateAgent<BehaviacUnitDecisionAgent>("rimclone_unit_decision");
                 agent.SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
-                    test.HasVisibleTarget, test.HasRecentTarget);
+                    test.HasVisibleTarget, test.HasRecentTarget, test.CanFlank, test.IsFlanking);
 
                 EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                 BehaviacUnitIntent directIntent = ResolveDirect(test);
@@ -221,9 +221,11 @@ internal static class Program
 
     private static DecisionCase[] GetDecisionCases() =>
     [
-        new("dead overrides every other fact", false, true, true, true, true, BehaviacUnitIntent.Dead),
-        new("cover seeking overrides visible target", true, true, true, true, true, BehaviacUnitIntent.SeekCover),
-        new("visible target engages", true, false, false, true, false, BehaviacUnitIntent.EngageTarget),
+        new("dead overrides every other fact", false, true, true, true, true, BehaviacUnitIntent.Dead, true, true),
+        new("cover seeking overrides visible target and flank", true, true, true, true, true, BehaviacUnitIntent.SeekCover, true, false),
+        new("flanker selects a flank maneuver", true, false, false, true, false, BehaviacUnitIntent.FlankTarget, true, false),
+        new("ongoing flank survives closing distance", true, false, false, true, false, BehaviacUnitIntent.FlankTarget, false, true),
+        new("ordinary unit engages visible target", true, false, false, true, false, BehaviacUnitIntent.EngageTarget),
         new("recent target is investigated", true, false, false, false, true, BehaviacUnitIntent.InvestigateLastKnownTarget),
         new("no target falls back to patrol", true, false, false, false, false, BehaviacUnitIntent.Patrol),
         new("suppression without cover does not force cover intent", true, true, false, true, false, BehaviacUnitIntent.EngageTarget)
@@ -236,6 +238,9 @@ internal static class Program
 
         if (test.IsSuppressed && test.HasCover)
             return BehaviacUnitIntent.SeekCover;
+
+        if (test.HasVisibleTarget && !test.IsSuppressed && (test.CanFlank || test.IsFlanking))
+            return BehaviacUnitIntent.FlankTarget;
 
         if (test.HasVisibleTarget)
             return BehaviacUnitIntent.EngageTarget;
@@ -253,7 +258,9 @@ internal static class Program
         bool HasCover,
         bool HasVisibleTarget,
         bool HasRecentTarget,
-        BehaviacUnitIntent Expected);
+        BehaviacUnitIntent Expected,
+        bool CanFlank = false,
+        bool IsFlanking = false);
 }
 
 [TypeMetaInfo()]
