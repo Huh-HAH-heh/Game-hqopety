@@ -542,10 +542,10 @@ public static bool TryFindBindingForPart(
         UnitHitRegionStore? hitRegions = null)
     {
         result = default;
-        if (!float.IsFinite(minimumDistance) ||
+        if (unitIndex < 0 || unitIndex >= units.Capacity ||
+            !float.IsFinite(minimumDistance) ||
             !float.IsFinite(padding) || padding < 0f ||
             direction.LengthSquared() < 0.000001f ||
-            !units.TryGetIndex(units.GetId(unitIndex), out _) ||
             !TryGetBodyShape(
                 units, unitIndex, GetProfile(units, unitIndex, hitRegions),
                 parentRegionIndex, bodies,
@@ -559,8 +559,6 @@ public static bool TryFindBindingForPart(
             return false;
 
         UnitAnatomyNode parentNode = anatomy.GetNode(parentRegionIndex);
-        if (!string.Equals(parentNode.Id, anatomy.GetNode(parentRegionIndex).Id, StringComparison.Ordinal))
-            return false;
 
         Vector3 rayDirection = Vector3.Normalize(direction);
         const float maxDistance = 1.5f;
