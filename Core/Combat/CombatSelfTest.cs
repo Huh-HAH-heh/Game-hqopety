@@ -35,6 +35,7 @@ public static class CombatSelfTest
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
         RunTest("Pawn stats: RimWorld skills and suppression resistance", TestPawnSkillsAndResistance, ref passed, ref failed);
         RunTest("Posture: prone silhouette and firing", TestPronePostureAndFiring, ref passed, ref failed);
+        RunTest("Targeting: prone visibility and aim points follow the posed rig", TestProneTargetPointsFollowRig, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
@@ -934,6 +935,61 @@ public static class CombatSelfTest
             proneSpanX > standingSpanX + 0.20f &&
             fired &&
             simulation.Projectiles.ActiveCount == 1;
+    }
+
+    private static bool TestProneTargetPointsFollowRig()
+    {
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId observer = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(16.5f, 10.5f, 0.1f),
+            -Vector3.UnitX,
+            -Vector3.UnitX,
+            factionTag: 2);
+
+        if (simulation.HitRegions.GetProfile(target.Index) is not UnitAnatomyProfile anatomy)
+            return false;
+
+        simulation.SetPosture(target, UnitPosture.Lying);
+        new UnitBodySystem().Update(simulation.Units, simulation.Bodies, 0.016f);
+
+        int visiblePointCount = UnitHitSystem.GetVisibilityPointCount(
+            simulation.Units, target.Index, simulation.HitRegions);
+        if (visiblePointCount < 3)
+            return false;
+
+        Vector3 source = simulation.Units.Position[observer.Index];
+        float proneHeightLimit = simulation.Units.Position[target.Index].Z +
+            simulation.Units.Height[target.Index] * 0.45f;
+
+        for (int i = 0; i < visiblePointCount; i++)
+        {
+            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+                simulation.Units, target.Index, i, simulation.HitRegions);
+            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                simulation.Units, target.Index, regionIndex,
+                simulation.HitRegions, simulation.Bodies);
+            Vector3 aimPoint = UnitHitSystem.GetRegionPoint(
+                simulation.Units, target.Index, regionIndex, source,
+                simulation.HitRegions, UnitAnatomyMarkerRole.Aim, simulation.Bodies);
+
+            // Target points must be inside the live posed primitives, not a synthetic
+            // standing-height point. This also prevents the visible prone pawn being
+            // selected by aiming at empty space above its actual silhouette.
+            if (Vector3.DistanceSquared(aimPoint, geometry.Center) > 0.000001f ||
+                aimPoint.Z > proneHeightLimit)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TestAccuracy()
