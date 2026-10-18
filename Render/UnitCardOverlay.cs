@@ -618,7 +618,10 @@ public sealed class UnitCardOverlay : IDisposable
         });
         Value("Состояние ИИ", FormatAiState(unit.AiState));
         Value("Поза", unit.Posture.ToString());
-        Value("Здоровье", $"{unit.HitPoints:0.0} / {unit.MaxHitPoints:0.0} HP ({unit.HealthRatio * 100f:0.0}%)");
+        Value("Общее здоровье", $"{unit.HitPoints:0.0} / {unit.MaxHitPoints:0.0} HP ({unit.HealthRatio * 100f:0.0}%)");
+        Value("Учёт здоровья", "Общий HP — запас жизни; HP анатомии — состояние отдельных тканей.");
+        if (unit.HitPoints <= 0f)
+            Value("Причина смерти", "Общий запас HP исчерпан; локальные HP тканей сохраняются отдельно.");
         Value("Подавление", $"{unit.Suppression:0.00} — {unit.SuppressionState}");
         Value("Одежда / броня", unit.HasApparel ? (unit.HasPoweredArmor ? "Есть, силовая" : "Есть") : "Нет");
 
@@ -647,13 +650,39 @@ public sealed class UnitCardOverlay : IDisposable
             details.Unit.Index == unit.Index &&
             details.Unit.Generation == unit.Generation)
         {
-            Heading($"АНАТОМИЯ И ЗДОРОВЬЕ ({details.HealthParts.Length})");
-            if (details.HealthParts.Length == 0)
+            int anatomyCount = details.AnatomyEntries.Length > 0
+                ? details.AnatomyEntries.Length
+                : details.HealthParts.Length;
+            Heading($"АНАТОМИЯ И ЗДОРОВЬЕ ({anatomyCount})");
+
+            if (details.AnatomyEntries.Length > 0)
+            {
+                // Show stable region IDs beside friendly names. Multiple torso
+                // segments and authored rig nodes can share the legacy Part enum;
+                // omitting their IDs made all of them look like duplicate parts.
+                if (details.HealthParts.Length != details.AnatomyEntries.Length)
+                {
+                    Value("Сверка здоровья",
+                        $"Слотов HP: {details.HealthParts.Length}; подписанных тканей: {details.AnatomyEntries.Length}.");
+                }
+
+                for (int i = 0; i < details.AnatomyEntries.Length; i++)
+                {
+                    AnatomyCardEntry tissue = details.AnatomyEntries[i];
+                    string label =
+                        $"{tissue.Name} [{tissue.Part}/{tissue.Category}] · {tissue.RegionId}";
+                    string status = tissue.Present ? "" : "; отсутствует/разрушена";
+                    Value(label,
+                        $"{tissue.HitPoints:0.0}/{tissue.MaxHitPoints:0.0} HP; кровотечение {tissue.BleedRate:0.000}{status}");
+                }
+            }
+            else if (details.HealthParts.Length == 0)
             {
                 Value("Части тела", "Нет данных");
             }
             else
             {
+                // Compatibility display for units without an authored anatomy profile.
                 for (int i = 0; i < details.HealthParts.Length; i++)
                 {
                     RenderHealthPart part = details.HealthParts[i];
@@ -702,9 +731,18 @@ public sealed class UnitCardOverlay : IDisposable
 
                     if (item.Config is ArmorConfig armor)
                     {
-                        Value("  Защита " + armor.Name,
-                            $"поглощение {armor.DamageAbsorption:P0}; рейтинг {armor.ArmorRating:0.0}; " +
-                            $"энергия {armor.EnergyLoss:0.0}; пробитие {armor.PenetrationResistance:0.0}");
+                        float ballisticRating = armor.SharpRating > 0f
+                            ? armor.SharpRating
+                            : MathF.Max(armor.PenetrationResistance, armor.ArmorRating);
+                        Value("  Покрытие / слой",
+                            $"{armor.Coverage} / {armor.Layer} ({(armor.SoftArmor ? "мягкая" : "жёсткая")} броня)");
+                        Value("  Защита от пуль/острого",
+                            $"рейтинг {ballisticRating:0.0}; сопротивление пробитию {armor.PenetrationResistance:0.0}");
+                        Value("  Защита от тупого / тепла",
+                            $"{armor.BluntRating:0.0} / {armor.HeatRating:0.0}");
+                        Value("  Потери энергии снаряда", $"{armor.EnergyLoss:0.0}");
+                        Value("  Процентное поглощение обычного урона",
+                            $"{armor.DamageAbsorption:P0} (не формула баллистики)");
                     }
                 }
             }
