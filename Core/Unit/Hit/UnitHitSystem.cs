@@ -73,7 +73,8 @@ public sealed class UnitHitSystem
 public static int GetVisibilityPointCount(
         UnitStore units,
         int unitIndex,
-        UnitHitRegionStore? hitRegions = null) => 1;
+        UnitHitRegionStore? hitRegions = null) =>
+        CountTargetRegions(GetProfile(units, unitIndex, hitRegions));
 
 public static int GetVisibilityRegionIndex(
         UnitStore units,
@@ -81,10 +82,14 @@ public static int GetVisibilityRegionIndex(
         int visibleIndex,
         UnitHitRegionStore? hitRegions = null)
     {
-        if (visibleIndex != 0)
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        int visibleCount = CountTargetRegions(profile);
+        if ((uint)visibleIndex >= (uint)visibleCount)
             throw new ArgumentOutOfRangeException(nameof(visibleIndex));
 
-        return 0;
+        return profile is UnitAnatomyProfile anatomy
+            ? anatomy.GetVisibleRegionIndex(visibleIndex)
+            : visibleIndex;
     }
 
 public static int GetVisibilityPoints(
@@ -402,6 +407,19 @@ public static bool TryFindBindingForPart(
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         if ((uint)regionIndex >= (uint)profile.RegionCount)
             throw new ArgumentOutOfRangeException(nameof(regionIndex));
+
+        // Shared anatomy geometry is the single source of truth for spotting and
+        // aiming. Use the live posed primitive centre so prone targets are not
+        // represented by an imaginary standing-height point above their silhouette.
+        if (bodies != null &&
+            profile is UnitAnatomyProfile anatomy &&
+            anatomy.HasSharedShapes &&
+            !anatomy.IsInternalNode(regionIndex))
+        {
+            UnitHitRegionGeometry geometry = GetRegionGeometry(
+                units, unitIndex, regionIndex, hitRegions, bodies);
+            return geometry.Center;
+        }
 
         Vector3 position = units.Position[unitIndex];
         Vector3 direction = new(source.X - position.X, source.Y - position.Y, 0f);
@@ -952,7 +970,10 @@ private static void GetWorldGeometry(
         center = position + new Vector3(0f, 0f, radius);
     }
 
-    private static int CountTargetRegions(UnitHitRegionProfile profile) => 1;
+    private static int CountTargetRegions(UnitHitRegionProfile profile) =>
+        profile is UnitAnatomyProfile anatomy
+            ? anatomy.VisibleRegionCount
+            : profile.RegionCount;
 
 private static bool IsInternalNode(UnitHitRegionProfile profile, int index) =>
         profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(index);
