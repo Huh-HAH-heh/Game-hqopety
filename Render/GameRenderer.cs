@@ -82,6 +82,7 @@ public sealed class GameRenderer
     private bool _showTerrainExtrema;
     private bool _showHeightContours = true;
     private bool _showContourLabels = true;
+    private bool _showUnitRig = true;
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
@@ -519,7 +520,8 @@ public sealed class GameRenderer
                 TerrainTilePixelSize,
                 _selectedUnit.IsValid ? _selectedUnit.Index : -1,
                 _showAiStateDebug && renderSnapshot.AiEnabled,
-                _selectedUnits);
+                _selectedUnits,
+                _showUnitRig);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -543,7 +545,8 @@ public sealed class GameRenderer
                 _showVisionDebug && !_massCombatMode,
                 _showAiStateDebug && _unitSimulation.AI.Enabled,
                 false,
-                _selectedUnits);
+                _selectedUnits,
+                _showUnitRig);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -2389,7 +2392,8 @@ public sealed class GameRenderer
             _worldMap.LayerCount,
             _selectedResolutionIndex,
             currentSize.X,
-            currentSize.Y);
+            currentSize.Y,
+            _showUnitRig);
     }
 
     private void ApplyGameMenuAction(GameMenuAction action)
@@ -2469,6 +2473,10 @@ public sealed class GameRenderer
 
             case GameMenuActionType.ToggleContourLabels:
                 _showContourLabels = !_showContourLabels;
+                break;
+
+            case GameMenuActionType.ToggleUnitRig:
+                _showUnitRig = !_showUnitRig;
                 break;
 
             case GameMenuActionType.ResetTerrainSettings:
