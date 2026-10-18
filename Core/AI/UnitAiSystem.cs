@@ -909,7 +909,7 @@ public sealed class UnitAiSystem
 
         agent.SetFacts(
             isAlive,
-            suppressionState == UnitSuppressionState.Panicked,
+            isSuppressed,
             _hasSuppressionCoverByUnit[unit] ||
                 (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover),
             hasVisibleTarget,
