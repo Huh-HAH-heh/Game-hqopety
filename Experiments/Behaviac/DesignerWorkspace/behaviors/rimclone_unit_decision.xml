@@ -60,6 +60,17 @@
                       </Node>
                     </Connector>
                   </Node>
+                  <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="24" PrefabName="" PrefabNodeId="-1">
+                    <Comment Background="NoColor" Text="Choose a low prone firing position when distance and exposure make it worthwhile." />
+                    <Connector Identifier="GenericChildren">
+                      <Node Class="PluginBehaviac.Nodes.Condition" Enable="true" HasOwnPrefabData="false" Id="25" Operator="Equal" Opl="bool Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldTakePronePosition()" Opr="const bool true" PrefabName="" PrefabNodeId="-1">
+                        <Comment Background="NoColor" Text="Uses ProneCombatUtility, calculated from target distance, exposure and health." />
+                      </Node>
+                      <Node Class="PluginBehaviac.Nodes.Action" Enable="true" HasOwnPrefabData="false" Id="26" Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectProneEngage()" PrefabName="" PrefabNodeId="-1" ResultFunctor="&quot;&quot;" ResultOption="BT_INVALID">
+                        <Comment Background="NoColor" Text="Move or crawl while remaining prone, then use regular visible-target combat." />
+                      </Node>
+                    </Connector>
+                  </Node>
                   <Node Class="PluginBehaviac.Nodes.Action" Enable="true" HasOwnPrefabData="false" Id="16" Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectEngageTarget()" PrefabName="" PrefabNodeId="-1" ResultFunctor="&quot;&quot;" ResultOption="BT_INVALID">
                     <Comment Background="NoColor" Text="Fallback: engage a visible target when no flank is requested." />
                   </Node>
