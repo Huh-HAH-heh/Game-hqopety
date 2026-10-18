@@ -82,7 +82,7 @@ internal static class Program
         try
         {
             string dataRoot = Path.Combine(AppContext.BaseDirectory, "BehaviacData");
-            BehaviacRuntimeHost.Initialize(dataRoot, Workspace.EFileFormat.EFF_cs);
+            BehaviacRuntimeHost.Initialize(dataRoot, Workspace.EFileFormat.EFF_xml);
 
             foreach (DecisionCase test in cases)
             {
@@ -125,7 +125,7 @@ internal static class Program
 
         try
         {
-            BehaviacRuntimeHost.Initialize(dataRoot, Workspace.EFileFormat.EFF_cs);
+            BehaviacRuntimeHost.Initialize(dataRoot, Workspace.EFileFormat.EFF_xml);
 
             for (int unit = 0; unit < agents.Length; unit++)
                 agents[unit] = BehaviacRuntimeHost.CreateAgent<BehaviacUnitDecisionAgent>("rimclone_unit_decision");
