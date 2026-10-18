@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <DefineConstants>$(DefineConstants);BEHAVIAC_NOT_USE_UNITY</DefineConstants>
+    <NoWarn>$(NoWarn);CS0618;CS0672</NoWarn>
+  </PropertyGroup>
+</Project>
