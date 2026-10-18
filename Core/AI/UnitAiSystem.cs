@@ -221,8 +221,10 @@ public sealed class UnitAiSystem
             bool moving = units.Velocity[unit].LengthSquared() > 0.04f;
             if (moving)
                 units.Posture[unit] = UnitPosture.Standing;
-            else if (suppressionState is UnitSuppressionState.Suppressed or UnitSuppressionState.Panicked)
+            else if (suppressionState == UnitSuppressionState.Panicked)
                 units.Posture[unit] = UnitPosture.Lying;
+            else if (suppressionState == UnitSuppressionState.Suppressed)
+                units.Posture[unit] = UnitPosture.Crouching;
 
             if (suppressionState == UnitSuppressionState.Panicked &&
                 Store.HasGoal[unit] &&
@@ -433,9 +435,13 @@ public sealed class UnitAiSystem
             {
                 units.Posture[unit] = UnitPosture.Standing;
             }
-            else if (suppressionState is UnitSuppressionState.Suppressed or UnitSuppressionState.Panicked)
+            else if (suppressionState == UnitSuppressionState.Panicked)
             {
                 units.Posture[unit] = UnitPosture.Lying;
+            }
+            else if (suppressionState == UnitSuppressionState.Suppressed)
+            {
+                units.Posture[unit] = UnitPosture.Crouching;
             }
             else if (targetVisible)
             {

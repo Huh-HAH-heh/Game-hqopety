@@ -232,9 +232,10 @@ public sealed class UnitBodySystem
             {
                 // Prone lowers every part centre (including head and organs),
                 // compresses its vertical extent and lengthens the XY outline.
-                localPosition.X *= 1.25f;
-                localPosition.Y *= 1.08f;
-                localPosition.Z = 0.035f + localPosition.Z * 0.22f;
+                float standingHeight = localPosition.Z;
+                localPosition.X += (standingHeight - 0.62f) * 0.28f;
+                localPosition.Y *= 1.12f;
+                localPosition.Z = 0.025f + standingHeight * 0.18f;
             }
 
             // WalkCycle motions were present in the rig, but never evaluated.

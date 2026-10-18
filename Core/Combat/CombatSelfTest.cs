@@ -898,13 +898,30 @@ public static class CombatSelfTest
 
         float standingHeadZ = simulation.Bodies.WorldPosition[headPart].Z;
         float standingTorsoZ = simulation.Bodies.WorldPosition[torsoPart].Z;
+        float standingMinX = float.PositiveInfinity;
+        float standingMaxX = float.NegativeInfinity;
+        for (int i = 0; i < bodyCount; i++)
+        {
+            float x = simulation.Bodies.WorldPosition[bodyStart + i].X;
+            standingMinX = MathF.Min(standingMinX, x);
+            standingMaxX = MathF.Max(standingMaxX, x);
+        }
+        float standingSpanX = standingMaxX - standingMinX;
         simulation.SetPosture(shooter, UnitPosture.Lying);
         WorldMap map = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 16);
         simulation.Update(map, 0.016f);
 
         float proneMaxZ = float.NegativeInfinity;
+        float proneMinX = float.PositiveInfinity;
+        float proneMaxX = float.NegativeInfinity;
         for (int i = 0; i < bodyCount; i++)
-            proneMaxZ = MathF.Max(proneMaxZ, simulation.Bodies.WorldPosition[bodyStart + i].Z);
+        {
+            Vector3 partPosition = simulation.Bodies.WorldPosition[bodyStart + i];
+            proneMaxZ = MathF.Max(proneMaxZ, partPosition.Z);
+            proneMinX = MathF.Min(proneMinX, partPosition.X);
+            proneMaxX = MathF.Max(proneMaxX, partPosition.X);
+        }
+        float proneSpanX = proneMaxX - proneMinX;
 
         int weaponIndex = UnitWeaponStore.GetIndex(shooter.Index, UnitWeaponSlot.Primary);
         simulation.Weapons.Ammo[weaponIndex] = 1;
@@ -914,6 +931,7 @@ public static class CombatSelfTest
             simulation.Bodies.WorldPosition[headPart].Z < standingHeadZ * 0.45f &&
             simulation.Bodies.WorldPosition[torsoPart].Z < standingTorsoZ * 0.45f &&
             proneMaxZ < standingMaxZ * 0.5f &&
+            proneSpanX > standingSpanX + 0.20f &&
             fired &&
             simulation.Projectiles.ActiveCount == 1;
     }
