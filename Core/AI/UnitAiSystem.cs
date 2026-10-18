@@ -47,6 +47,19 @@ public sealed class UnitAiSystem
     public UnitAiStore Store { get; }
     public double LastPlanningMilliseconds { get; private set; }
 
+    public bool BehaviacRuntimeReady => _behaviacInitialized;
+    public long TotalBehaviacDecisions { get; private set; }
+    public int LastBehaviacDecisions { get; private set; }
+    public double LastBehaviacDecisionBatchMilliseconds { get; private set; }
+    public int LastBehaviacDeadDecisions { get; private set; }
+    public int LastBehaviacCoverDecisions { get; private set; }
+    public int LastBehaviacRetreatDecisions { get; private set; }
+    public int LastBehaviacFlankDecisions { get; private set; }
+    public int LastBehaviacEngageDecisions { get; private set; }
+    public int LastBehaviacSuppressDecisions { get; private set; }
+    public int LastBehaviacInvestigateDecisions { get; private set; }
+    public int LastBehaviacPatrolDecisions { get; private set; }
+
     public UnitAiSystem(
         int initialUnitCapacity = 1024,
         UnitWeaponSystem? weaponSystem = null)
@@ -77,12 +90,11 @@ public sealed class UnitAiSystem
         WorldMap worldMap,
         float deltaTime)
     {
-        LastPlanningMilliseconds = 0d;
-
         if (!Enabled ||
             deltaTime <= 0f ||
             units.ActiveCount == 0)
         {
+            LastPlanningMilliseconds = 0d;
             return;
         }
 
@@ -95,6 +107,20 @@ public sealed class UnitAiSystem
             _thinkTimer;
 
         _thinkTimer = 0f;
+
+        // Preserve these results between think ticks so the one-second
+        // performance logger doesn't usually sample a zero-work render frame.
+        LastPlanningMilliseconds = 0d;
+        LastBehaviacDecisions = 0;
+        LastBehaviacDecisionBatchMilliseconds = 0d;
+        LastBehaviacDeadDecisions = 0;
+        LastBehaviacCoverDecisions = 0;
+        LastBehaviacRetreatDecisions = 0;
+        LastBehaviacFlankDecisions = 0;
+        LastBehaviacEngageDecisions = 0;
+        LastBehaviacSuppressDecisions = 0;
+        LastBehaviacInvestigateDecisions = 0;
+        LastBehaviacPatrolDecisions = 0;
 
         Store.EnsureCapacity(
             units.Capacity);
@@ -150,10 +176,16 @@ public sealed class UnitAiSystem
                 health.OverallMaxHitPoints[unit] > 0f &&
                 health.OverallHitPoints[unit] > 0f;
 
-            BehaviacUnitIntent intent = UseBehaviacDecisionLayer
-                ? SelectUnitIntent(
-                    units, health, inventory, weapons, vision, unit, suppressionState, isAlive)
-                : BehaviacUnitIntent.None;
+            BehaviacUnitIntent intent = BehaviacUnitIntent.None;
+            if (UseBehaviacDecisionLayer)
+            {
+                long decisionStarted = Stopwatch.GetTimestamp();
+                intent = SelectUnitIntent(
+                    units, health, inventory, weapons, vision, unit, suppressionState, isAlive);
+                LastBehaviacDecisionBatchMilliseconds +=
+                    Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
+                RecordBehaviacIntent(intent);
+            }
 
             if (!isAlive ||
                 (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.Dead))
@@ -676,6 +708,24 @@ public sealed class UnitAiSystem
         }
     }
 
+    private void RecordBehaviacIntent(BehaviacUnitIntent intent)
+    {
+        LastBehaviacDecisions++;
+        TotalBehaviacDecisions++;
+
+        switch (intent)
+        {
+            case BehaviacUnitIntent.Dead: LastBehaviacDeadDecisions++; break;
+            case BehaviacUnitIntent.SeekCover: LastBehaviacCoverDecisions++; break;
+            case BehaviacUnitIntent.RetreatToCover: LastBehaviacRetreatDecisions++; break;
+            case BehaviacUnitIntent.FlankTarget: LastBehaviacFlankDecisions++; break;
+            case BehaviacUnitIntent.EngageTarget: LastBehaviacEngageDecisions++; break;
+            case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
+            case BehaviacUnitIntent.InvestigateLastKnownTarget: LastBehaviacInvestigateDecisions++; break;
+            case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
+        }
+    }
+
     private BehaviacUnitIntent SelectUnitIntent(
         UnitStore units,
         UnitHealthStore health,
@@ -736,11 +786,13 @@ public sealed class UnitAiSystem
             bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
                 _flankTargetByUnit[unit].Equals(units.GetId(visibleTargetIndex));
 
-            // A quarter of the squad are designated flankers. Keep the maneuver
-            // in useful weapon engagement ranges and do it only once per target.
+            // A quarter of the formation are flankers. Start the maneuver before
+            // units are already at point-blank range; the old 7-20 tile window
+            // almost never activated in the 200-tile mass-combat scenario.
+            float maxFlankRange = MathF.Min(75f, MathF.Max(25f, units.ViewRange[unit] * 0.85f));
             canFlank = !alreadyFlankedThisTarget &&
-                distanceSquared >= 49f &&
-                distanceSquared <= 400f;
+                distanceSquared >= 16f * 16f &&
+                distanceSquared <= maxFlankRange * maxFlankRange;
         }
 
         bool isFlanking =
@@ -793,9 +845,10 @@ public sealed class UnitAiSystem
         for (int candidate = 0; candidate < 4; candidate++)
         {
             float sideSign = candidate % 2 == 0 ? preferredSide : -preferredSide;
-            float backoff = candidate < 2 ? 3f : 0f;
-            float targetX = target.X - forward.X * backoff + side.X * 5f * sideSign;
-            float targetY = target.Y - forward.Y * backoff + side.Y * 5f * sideSign;
+            float backoff = candidate < 2 ? 8f : 16f;
+            float lateral = candidate < 2 ? 12f : 18f;
+            float targetX = target.X - forward.X * backoff + side.X * lateral * sideSign;
+            float targetY = target.Y - forward.Y * backoff + side.Y * lateral * sideSign;
             targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
             targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
 
