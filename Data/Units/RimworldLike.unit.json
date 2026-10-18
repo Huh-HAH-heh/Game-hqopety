@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "rimworldlike",
-  "displayName": "\u041D\u043E\u0432\u044B\u0439 \u044E\u043D\u0438\u0442",
+  "displayName": "Новый юнит",
   "description": "",
   "runtimeTypeId": 1025,
   "stats": {
@@ -46,7 +46,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": null,
-        "displayName": "\u0442\u0435\u043B\u043E\u041D\u0438\u0437"
+        "displayName": "Туловище — нижний сегмент"
       },
       "tissues": [
         {
@@ -101,7 +101,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "\u0422\u0435\u043B\u043E"
+        "displayName": "Туловище — средний сегмент"
       },
       "tissues": [
         {
@@ -149,7 +149,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "\u0413\u043E\u043B\u043E\u0432\u0430"
+        "displayName": "Голова"
       },
       "tissues": [
         {
@@ -197,7 +197,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u041F\u0440\u0430\u0432\u0430\u044F"
+        "displayName": "Правая нога — голень"
       },
       "tissues": [
         {
@@ -245,7 +245,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+        "displayName": "Левая нога — голень"
       },
       "tissues": [
         {
@@ -293,7 +293,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+        "displayName": "Левая нога — бедро"
       },
       "tissues": [
         {
@@ -341,7 +341,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+        "displayName": "Левая нога — коленный сустав"
       },
       "tissues": [
         {
@@ -389,7 +389,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+        "displayName": "Правая нога — коленный сустав"
       },
       "tissues": [
         {
@@ -437,7 +437,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "\u043A\u043E\u043D\u0435\u0447\u043D\u043E\u0441\u0442\u044C_\u041D\u043E\u0433\u0430_\u043B\u0435\u0432\u0430\u044F"
+        "displayName": "Правая нога — бедро"
       },
       "tissues": [
         {

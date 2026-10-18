@@ -5893,26 +5893,63 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
     {
         for (int i = 0; i < _regionIds.Length && i < _parts.Length; i++)
         {
-            if (string.Equals(_regionIds[i], id, StringComparison.Ordinal) &&
-                !string.IsNullOrWhiteSpace(_parts[i].DisplayName))
-                return _parts[i].DisplayName!;
+            if (!string.Equals(_regionIds[i], id, StringComparison.Ordinal))
+                continue;
+
+            string? displayName = _parts[i].DisplayName;
+            if (!string.IsNullOrWhiteSpace(displayName))
+                return displayName.Trim();
+
+            return DefaultPartName(id, _parts[i].Role, i);
         }
 
-        return id switch
+        return DefaultPartName(id, BodyPartRole.Generic, -1);
+    }
+
+    private static string DefaultPartName(string id, BodyPartRole role, int index)
+    {
+        string? builtInName = id switch
         {
-            "body.middle" => "Туловище · середина",
-            "body.lower" => "Туловище · низ",
-            "body.torso.upper" => "Туловище · верх",
-            "body.arm.left.upper" => "Левая рука · верх",
-            "body.arm.left.lower" => "Левая рука · низ",
-            "body.arm.right.upper" => "Правая рука · верх",
-            "body.arm.right.lower" => "Правая рука · низ",
-            "body.leg.left.upper" => "Левая нога · верх",
-            "body.leg.left.lower" => "Левая нога · низ",
-            "body.leg.right.upper" => "Правая нога · верх",
-            "body.leg.right.lower" => "Правая нога · низ",
+            "body.middle" => "Туловище — средний сегмент",
+            "body.lower" => "Туловище — нижний сегмент",
+            "body.torso.upper" => "Туловище — верхний сегмент",
+            "body.arm.left.upper" => "Левая рука — плечо",
+            "body.arm.left.lower" => "Левая рука — предплечье",
+            "body.arm.right.upper" => "Правая рука — плечо",
+            "body.arm.right.lower" => "Правая рука — предплечье",
+            "body.leg.left.upper" => "Левая нога — бедро",
+            "body.leg.left.lower" => "Левая нога — голень",
+            "body.leg.right.upper" => "Правая нога — бедро",
+            "body.leg.right.lower" => "Правая нога — голень",
             "body.neck" => "Шея",
             "body.upper" => "Голова",
+            _ => null
+        };
+
+        if (builtInName != null)
+            return builtInName;
+
+        if (id.StartsWith("custom.", StringComparison.Ordinal))
+            return index >= 0
+                ? $"Дополнительная часть {index + 1:00}"
+                : "Дополнительная часть";
+
+        return role switch
+        {
+            BodyPartRole.Head => "Голова",
+            BodyPartRole.Neck => "Шея",
+            BodyPartRole.Torso => index >= 0
+                ? $"Сегмент туловища {index + 1:00}"
+                : "Сегмент туловища",
+            BodyPartRole.UpperArm => "Плечевой сегмент",
+            BodyPartRole.Forearm => "Сегмент предплечья",
+            BodyPartRole.Hand => "Кисть",
+            BodyPartRole.Thigh => "Бедро",
+            BodyPartRole.Shin => "Голень",
+            BodyPartRole.Foot => "Стопа",
+            BodyPartRole.Elbow => "Локтевой сустав",
+            BodyPartRole.Knee => "Коленный сустав",
+            BodyPartRole.Segment => "Сегмент",
             _ => id
         };
     }

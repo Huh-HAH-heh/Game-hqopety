@@ -185,7 +185,7 @@
         "role": "Head",
         "pivot": "Center",
         "symmetryPartnerId": null,
-        "displayName": "Голова — единый сегмент"
+        "displayName": "Голова"
       },
       "tissues": [
         {
@@ -259,7 +259,7 @@
         "role": "UpperArm",
         "pivot": "Start",
         "symmetryPartnerId": "body.arm.right.upper",
-        "displayName": "Плечо"
+        "displayName": "Левая рука — плечо"
       },
       "tissues": [
         {
@@ -307,7 +307,7 @@
         "role": "Forearm",
         "pivot": "Start",
         "symmetryPartnerId": "body.arm.right.lower",
-        "displayName": "Предплечье"
+        "displayName": "Левая рука — предплечье"
       },
       "tissues": [
         {
@@ -355,7 +355,7 @@
         "role": "UpperArm",
         "pivot": "Start",
         "symmetryPartnerId": "body.arm.left.upper",
-        "displayName": "Плечо"
+        "displayName": "Правая рука — плечо"
       },
       "tissues": [
         {
@@ -403,7 +403,7 @@
         "role": "Forearm",
         "pivot": "Start",
         "symmetryPartnerId": "body.arm.left.lower",
-        "displayName": "Предплечье"
+        "displayName": "Правая рука — предплечье"
       },
       "tissues": [
         {
@@ -451,7 +451,7 @@
         "role": "Thigh",
         "pivot": "Start",
         "symmetryPartnerId": "body.leg.right.upper",
-        "displayName": "Бедро"
+        "displayName": "Левая нога — бедро"
       },
       "tissues": [
         {
@@ -499,7 +499,7 @@
         "role": "Shin",
         "pivot": "Start",
         "symmetryPartnerId": "body.leg.right.lower",
-        "displayName": "Голень"
+        "displayName": "Левая нога — голень"
       },
       "tissues": [
         {
@@ -547,7 +547,7 @@
         "role": "Foot",
         "pivot": "Start",
         "symmetryPartnerId": "body.leg.right.foot",
-        "displayName": "Стопа"
+        "displayName": "Левая нога — стопа"
       },
       "tissues": [
         {
@@ -595,7 +595,7 @@
         "role": "Thigh",
         "pivot": "Start",
         "symmetryPartnerId": "body.leg.left.upper",
-        "displayName": "Бедро"
+        "displayName": "Правая нога — бедро"
       },
       "tissues": [
         {
@@ -643,7 +643,7 @@
         "role": "Shin",
         "pivot": "Start",
         "symmetryPartnerId": "body.leg.left.lower",
-        "displayName": "Голень"
+        "displayName": "Правая нога — голень"
       },
       "tissues": [
         {
@@ -691,7 +691,7 @@
         "role": "Foot",
         "pivot": "Start",
         "symmetryPartnerId": "body.leg.left.foot",
-        "displayName": "Стопа"
+        "displayName": "Правая нога — стопа"
       },
       "tissues": [
         {
