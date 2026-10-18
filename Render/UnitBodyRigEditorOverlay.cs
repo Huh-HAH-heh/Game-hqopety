@@ -1886,8 +1886,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (DrawImGuiParentCombo())
                 return;
 
-            ImguiNative.igSameLine(0f, 5f);
-            if (ButtonImGui("Отвязать", 88f))
+            if (ButtonImGui("Отвязать от родителя", _propertiesPanel.Size.X - 24f))
             {
                 bool changed = DetachPartPreservingLayout(_selectedPart);
                 if (changed)
@@ -2648,7 +2647,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             ? $"{currentParent + 1:00} {PartName(_regionIds[currentParent])}"
             : "Корень юнита";
 
-        if (!ImguiNative.igBeginCombo("Родитель", currentLabel, ImGuiComboFlags.None))
+        TextImGui("Родитель");
+        ImguiNative.igSetNextItemWidth(MathF.Max(120f, _propertiesPanel.Size.X - 24f));
+        if (!ImguiNative.igBeginCombo("##ParentCombo", currentLabel, ImGuiComboFlags.None))
             return false;
 
         bool rootChanged = false;
