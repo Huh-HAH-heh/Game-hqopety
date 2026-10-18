@@ -17,27 +17,27 @@ The selector tests branches in priority order:
 7. `InvestigateLastKnownTarget` — otherwise investigate the last known target position.
 8. `Patrol` — continue the game's existing search-waypoint behavior if there is no known target.
 
-Approximately one quarter of unit slots can receive the flanker role, selected deterministically. Flanking is attempted for a healthy, unsuppressed unit with a visible hostile target 7–20 map units away; the unit receives an actual movement goal and uses existing RimClone movement/pathfinding. The goal is stable per target, tries alternate sides around blocked tiles, and is interrupted by suppression, low health or target loss. A completed maneuver transitions into the existing combat behavior rather than repeatedly oscillating.
+Approximately one quarter of unit slots can receive the flanker role, selected deterministically. Flanking can start from 16 map units out to the lesser of 75 units or 85% of the unit's vision range; the previous 7–20 window activated too late in the mass-combat scenario. The goal is a lateral supporting-fire position rather than point-blank proximity, is stable per target, tries alternate sides around blocked tiles, and is interrupted by suppression, low health or target loss. A completed maneuver transitions into the existing combat behavior rather than repeatedly oscillating.
 
 The unit card reports localized AI states, including **Фланг**, so the new behavior is visible when selecting a unit.
 
 ## Run and compare
 
-Interactive runs use the Behaviac AI by default on this experiment branch:
+Interactive runs use the Behaviac AI by default on this experiment branch. The mode is printed at startup, and the performance line keeps the last actual decision batch rather than sampling a frame where the 150 ms AI think timer did no work.
+
+Compare in two separate runs:
 
 ```powershell
-Remove-Item Env:RIMCLONE_USE_BEHAVIAC_AI -ErrorAction SilentlyContinue
-dotnet run --project App/App.csproj -c Release
+dotnet run --project App/App.csproj -c Release -- --ai=legacy
 ```
 
-To compare the old AI:
+Close the game, then run:
 
 ```powershell
-$env:RIMCLONE_USE_BEHAVIAC_AI = "0"
-dotnet run --project App/App.csproj -c Release
+dotnet run --project App/App.csproj -c Release -- --ai=behaviac
 ```
 
-The environment variable applies only to the current PowerShell process and child processes. Deterministic simulation self-tests deliberately set it to `0` internally to preserve the existing regression baseline.
+The `--ai=legacy` and `--ai=behaviac` arguments override the environment variable for that process. You can also still use `RIMCLONE_USE_BEHAVIAC_AI=0` or `1`; do not set both values before launching and treat them as two tests, because only the final environment value is used. Deterministic simulation self-tests deliberately set it to `0` internally to preserve the existing regression baseline.
 
 To experiment with priorities, edit `Core/AI/Behaviac/BehaviacData/rimclone_unit_decision.xml`. The `Selector` order is tactical priority; each `Sequence` contains a method-backed condition and its intent action. The content is copied to `BehaviacData/rimclone_unit_decision.xml` beside the built game.
 
