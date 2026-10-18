@@ -69,7 +69,12 @@ internal static class Program
 [TypeMetaInfo()]
 internal sealed class CBTPlayer : Agent
 {
-    private int _frames;
+    // Names and signatures must match the metadata exported by the Behaviac demo.
+    [MemberMetaInfo()]
+    public uint m_iBaseSpeed;
+
+    [MemberMetaInfo()]
+    public int m_Frames;
 
     public int ConditionCalls { get; private set; }
     public int Action1Calls { get; private set; }
@@ -79,7 +84,8 @@ internal sealed class CBTPlayer : Agent
     public bool Condition()
     {
         ConditionCalls++;
-        _frames = 0;
+        m_iBaseSpeed = 0;
+        m_Frames = 0;
         return true;
     }
 
@@ -94,7 +100,7 @@ internal sealed class CBTPlayer : Agent
     public EBTStatus Action3()
     {
         Action3Calls++;
-        _frames++;
-        return _frames == 3 ? EBTStatus.BT_SUCCESS : EBTStatus.BT_RUNNING;
+        m_Frames++;
+        return m_Frames == 3 ? EBTStatus.BT_SUCCESS : EBTStatus.BT_RUNNING;
     }
 }
