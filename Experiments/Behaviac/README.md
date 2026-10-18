@@ -1,43 +1,49 @@
-# Behaviac live AI integration
+# Behaviac tactical AI integration for RimClone
 
-RimClone uses the vendored upstream Behaviac C# runtime from Tencent/behaviac (see `Vendor/BehaviacRuntime/UPSTREAM.md` and its BSD 3-Clause license). Decision evaluation goes through Behaviac's `Agent`, `BehaviorTree`, `Selector`, `Sequence`, `Condition`, and `Action` runtime types. `Core/AI/Behaviac/BehaviacUnitDecisionTree.cs` is the current generated-style C# tree definition; it is not a tree exported from Behaviac Designer yet.
+RimClone uses the vendored upstream Behaviac C# runtime from Tencent/behaviac (see `Vendor/BehaviacRuntime/UPSTREAM.md` and its BSD 3-Clause license). The live decision policy is now loaded from an external Behaviac XML asset at `Core/AI/Behaviac/BehaviacData/rimclone_unit_decision.xml`; the game no longer selects its policy from a C#-constructed tree. Behaviac's own runtime `Workspace`, `Agent`, `Selector`, `Sequence`, `Condition` and `Action` classes load and execute the XML.
 
-## What controls live gameplay now
+RimClone-specific facts and action bindings are registered in `BehaviacRuntimeHost`. They connect decisions to the existing game simulation; they do not reimplement movement, pathfinding, vision, weapons, ammo, damage or rendering.
 
-On this experiment branch, interactive game runs use Behaviac by default. `UnitAiSystem` builds facts from RimClone's existing health, suppression, visibility, target-memory and tactical state; the Behaviac tree selects one of these intents:
+## Live intents in the XML tree
 
-- `Dead`: stop aiming and movement, mark the unit dead.
-- `SeekCover`: prioritize available suppression cover over attacking.
-- `RetreatToCover`: low-health units with a current or remembered enemy prioritize the existing cover search rather than normal engagement.
-- `FlankTarget`: move assigned flankers to a lateral position around the currently visible target.
-- `EngageTarget`: hold a firing position and use the existing weapon/combat systems.
-- `SuppressiveFire`: when the target is no longer visible, choose the existing suppressive-fire path only if the unit has a compatible weapon.
-- `InvestigateLastKnownTarget`: pursue the remembered target location or apply the existing suppressive-fire policy.
-- `Patrol`: use the existing search-waypoint behavior when there is no known target.
+The selector tests branches in priority order:
 
-One in four unit slots can be a flanker. A healthy, unsuppressed flanker with a visible enemy 7–20 map units away receives a real movement goal around the target; the side is stable by unit index and a target is not repeatedly flanked after the maneuver completes. Suppression, low health, target loss, or a changed target interrupts the maneuver. Movement, pathfinding, vision, ammunition, weapons, damage and rendering remain in RimClone's systems—they are not reimplemented in the behavior tree.
+1. `Dead` — stop aiming/movement and mark the unit dead.
+2. `SeekCover` — suppression cover overrides offensive action.
+3. `RetreatToCover` — when health is below the existing threshold, use the current cover search before normal engagement.
+4. `FlankTarget` — healthy, unsuppressed flankers move to a lateral waypoint around a visible enemy.
+5. `EngageTarget` — hold a firing position and use the existing weapon/combat systems.
+6. `SuppressiveFire` — when the target is no longer visible, use the existing suppression-fire path if the unit has a compatible weapon.
+7. `InvestigateLastKnownTarget` — otherwise investigate the last known target position.
+8. `Patrol` — continue the game's existing search-waypoint behavior if there is no known target.
 
-This gives the branch an observable gameplay difference rather than just routing the old decisions through a wrapper.
+Approximately one quarter of unit slots can receive the flanker role, selected deterministically. Flanking is attempted for a healthy, unsuppressed unit with a visible hostile target 7–20 map units away; the unit receives an actual movement goal and uses existing RimClone movement/pathfinding. The goal is stable per target, tries alternate sides around blocked tiles, and is interrupted by suppression, low health or target loss. A completed maneuver transitions into the existing combat behavior rather than repeatedly oscillating.
+
+The unit card reports localized AI states, including **Фланг**, so the new behavior is visible when selecting a unit.
 
 ## Run and compare
 
-Run the Behaviac-driven AI (default on this branch):
+Interactive runs use the Behaviac AI by default on this experiment branch:
 
 ```powershell
 Remove-Item Env:RIMCLONE_USE_BEHAVIAC_AI -ErrorAction SilentlyContinue
 dotnet run --project App/App.csproj -c Release
 ```
 
-Run the legacy policy to compare:
+To compare the old AI:
 
 ```powershell
 $env:RIMCLONE_USE_BEHAVIAC_AI = "0"
 dotnet run --project App/App.csproj -c Release
 ```
 
-The setting applies to that PowerShell process and its child processes. Deterministic simulation self-tests set it to `0` internally so this experiment does not silently rewrite the established test baseline.
+The environment variable applies only to the current PowerShell process and child processes. Deterministic simulation self-tests deliberately set it to `0` internally to preserve the existing regression baseline.
 
-## Validate the runtime and decision policy
+To experiment with priorities, edit `Core/AI/Behaviac/BehaviacData/rimclone_unit_decision.xml`. The `Selector` order is tactical priority; each `Sequence` contains a method-backed condition and its intent action. The content is copied to `BehaviacData/rimclone_unit_decision.xml` beside the built game.
+
+## Validation
+
+Run these commands from the repository root:
 
 ```powershell
 dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release
@@ -45,10 +51,8 @@ dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release -- --
 dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release -- --decision-benchmark
 ```
 
-The first command loads and runs the upstream `demo_running` XML behavior. The decision tests compare eleven deterministic input cases against expected intents, including cover priority, low-health retreat, flanking, suppressive fire and interruption priority. The benchmark measures 800 pre-created agents over 100 ticks (80,000 decisions) after warm-up; tree setup/agent creation are excluded. It reports elapsed time, time ratio, allocations, mismatches and checksums. Timing is informational; semantic mismatches fail the test.
+The compatibility command keeps testing the upstream `demo_running` XML. Decision tests use the same XML tree asset that the live game loads and compare eleven tactical scenarios with the expected direct policy. The benchmark covers 800 agents × 100 ticks = 80,000 decisions and checks intents/checksums; timing is informational because the Behaviac node traversal costs more than simple direct conditions.
 
-The runtime is built with `BEHAVIAC_RELEASE` so Behaviac's node-level debug profiling/formatting does not dominate the measured loop.
+## Honest scope boundary
 
-## Scope boundary
-
-This is a real Behaviac runtime integration and its selected tactics now change live movement. It is not yet a full Behaviac Designer content pipeline: the current unit tree is authored as generated-style C# under `Core/AI/Behaviac`, while the upstream XML tree is used by the compatibility smoke test. The next integration slice should move the unit tree into a Designer-authored data asset without moving pathfinding, vision, combat, or unit simulation into Behaviac.
+The gameplay decision policy is external XML, loaded and executed by Behaviac's real runtime. The predicates and actions it calls are registered C# bindings to RimClone state. This branch does not yet include a packaged Behaviac Designer workspace/project with a generated editor metadata pipeline and hot-reload workflow; for now the XML is directly editable and the game's runtime reads it at startup. `main` is unchanged and the PR remains a draft until latest CI and an in-game comparison are checked.
