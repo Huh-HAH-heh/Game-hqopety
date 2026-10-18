@@ -958,6 +958,17 @@ public static class CombatSelfTest
 
         simulation.SetPosture(target, UnitPosture.Lying);
         new UnitBodySystem().Update(simulation.Units, simulation.Bodies, 0.016f);
+        WorldMap map = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 32);
+        simulation.Vision.Update(
+            simulation.Units, map, 0.11f, simulation.Health, simulation.Bodies);
+
+        Vector3 eyeMarker = UnitHitSystem.GetEyePosition(
+            simulation.Units, observer.Index, simulation.Bodies, simulation.HitRegions);
+        if (!UnitHitSystem.TryGetMarkerPoint(
+                simulation.Units, observer.Index, UnitAnatomyMarkerRole.Eye,
+                out Vector3 actualEyeMarker, simulation.HitRegions, simulation.Bodies) ||
+            Vector3.DistanceSquared(eyeMarker, actualEyeMarker) > 0.000001f)
+            return false;
 
         int visiblePointCount = UnitHitSystem.GetVisibilityPointCount(
             simulation.Units, target.Index, simulation.HitRegions);
@@ -989,7 +1000,29 @@ public static class CombatSelfTest
             }
         }
 
-        return true;
+        // Direct AI combat checks do not always pass the body store explicitly.
+        // VisionSystem must retain the live store and return a point on the prone rig.
+        VisionCheck check = simulation.Vision.Evaluate(
+            simulation.Units, map, observer.Index, target.Index);
+        if (!check.IsVisible || check.VisibleTargetPoint.Z > proneHeightLimit)
+            return false;
+
+        bool pointOnRig = false;
+        for (int i = 0; i < visiblePointCount; i++)
+        {
+            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+                simulation.Units, target.Index, i, simulation.HitRegions);
+            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                simulation.Units, target.Index, regionIndex,
+                simulation.HitRegions, simulation.Bodies);
+            if (Vector3.DistanceSquared(check.VisibleTargetPoint, geometry.Center) <= 0.000001f)
+            {
+                pointOnRig = true;
+                break;
+            }
+        }
+
+        return pointOnRig;
     }
 
     private static bool TestAccuracy()
