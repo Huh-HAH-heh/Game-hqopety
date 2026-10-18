@@ -197,7 +197,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "Голень правой ноги"
+        "displayName": "Правая нога — голень"
       },
       "tissues": [
         {
@@ -245,7 +245,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "Голень левой ноги"
+        "displayName": "Левая нога — голень"
       },
       "tissues": [
         {
@@ -293,7 +293,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "Бедро левой ноги"
+        "displayName": "Левая нога — бедро"
       },
       "tissues": [
         {
@@ -341,7 +341,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "Левый коленный сустав"
+        "displayName": "Левая нога — коленный сустав"
       },
       "tissues": [
         {
@@ -389,7 +389,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "Правый коленный сустав"
+        "displayName": "Правая нога — коленный сустав"
       },
       "tissues": [
         {
@@ -437,7 +437,7 @@
         "role": "Torso",
         "pivot": "Center",
         "symmetryPartnerId": "",
-        "displayName": "Бедро правой ноги"
+        "displayName": "Правая нога — бедро"
       },
       "tissues": [
         {
