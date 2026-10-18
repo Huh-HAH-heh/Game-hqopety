@@ -1455,25 +1455,26 @@ public static class CombatSelfTest
 
     private static bool TestColonistUsesAnatomyNodes()
     {
+        int stage = 1;
+        bool Fail() { Console.Error.WriteLine($"[Anatomy sphere test] Failed stage {stage}."); return false; }
+
         UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
         if (profile.RegionCount != 13 || profile.NodeCount != 13 ||
             !profile.HasSharedShapes || profile.VolumeCount != 8)
-            return false;
+            return Fail();
 
+        stage = 2;
         int torso = profile.FindRegion("body.middle");
         int head = profile.FindRegion("body.upper");
         int leg = profile.FindRegion("body.leg.left.upper");
         if (torso < 0 || head < 0 || leg < 0 ||
-            !profile.TryFindPart(UnitHealthPartId.Torso, out int torsoRegion, out _) ||
-            torsoRegion != torso ||
-            !profile.TryFindPart(UnitHealthPartId.LeftLeg, out int legRegion, out _) ||
-            legRegion != leg ||
-            !profile.TryFindPart("heart.main", out int heartRegion, out _) ||
-            heartRegion != torso ||
-            !profile.TryFindPart("brain.main", out int brainRegion, out _) ||
-            brainRegion != head)
-            return false;
+            !profile.TryFindPart(UnitHealthPartId.Torso, out int torsoRegion, out _) || torsoRegion != torso ||
+            !profile.TryFindPart(UnitHealthPartId.LeftLeg, out int legRegion, out _) || legRegion != leg ||
+            !profile.TryFindPart("heart.main", out int heartRegion, out _) || heartRegion != torso ||
+            !profile.TryFindPart("brain.main", out int brainRegion, out _) || brainRegion != head)
+            return Fail();
 
+        stage = 3;
         UnitSimulation simulation = new UnitSimulation(4, 32);
         UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f));
         Vector3 expected = simulation.Units.Position[unit.Index] +
@@ -1484,11 +1485,15 @@ public static class CombatSelfTest
             UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
                 simulation.Units, unit.Index, i, simulation.HitRegions, simulation.Bodies);
             if (Vector3.Distance(geometry.Center, expected) > 0.001f)
-                return false;
+            {
+                Console.Error.WriteLine($"[Anatomy sphere test] region={i} center={geometry.Center}; expected={expected}.");
+                return Fail();
+            }
         }
 
+        stage = 4;
         return UnitHitSystem.GetVisibilityPointCount(
-            simulation.Units, unit.Index, simulation.HitRegions) == 1;
+            simulation.Units, unit.Index, simulation.HitRegions) == 1 || Fail();
     }
 
     private static bool TestAnatomyRigEditsPreserveBindings()
@@ -2499,41 +2504,52 @@ public static class CombatSelfTest
 
     private static bool TestAnatomyProfiles()
     {
-        BodyPartDefinition[] colonist = UnitBodyCatalog.Get(UnitBodyType.Colonist).ToArray();
-        BodyPartDefinition[] greenbob = UnitBodyCatalog.Get(UnitBodyType.SmallCreature).ToArray();
-        BodyPartDefinition[] segmented = UnitBodyCatalog.Get(UnitBodyType.SegmentedCreature).ToArray();
-        if (colonist.Length != 13 || greenbob.Length != 10 || segmented.Length != 10)
-            return false;
+        int stage = 1;
+        bool Fail() { Console.Error.WriteLine($"[Static rig test] Failed stage {stage}."); return false; }
 
-        int headCount = 0, torsoCount = 0;
-        for (int i = 0; i < colonist.Length; i++)
+        UnitBodyStore definitions = new UnitBodyStore(4);
+        BodyHandle colonistBody = definitions.CreateBody(UnitBodyType.Colonist);
+        if (colonistBody.Count != 13 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Head) != 1 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Torso) != 3 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.UpperArm) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Forearm) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Thigh) != 2 ||
+            CountBodyRole(definitions, colonistBody, BodyPartRole.Shin) != 2)
+            return Fail();
+
+        stage = 2;
+        for (int part = colonistBody.Start; part < colonistBody.Start + colonistBody.Count; part++)
         {
-            BodyPartDefinition part = colonist[i];
-            if (part.Role == BodyPartRole.Head) headCount++;
-            if (part.Role == BodyPartRole.Torso) torsoCount++;
-            if (part.ParentIndex < -1 || part.ParentIndex >= i)
-                return false;
+            int parent = definitions.Parent[part];
+            if (parent < -1 || parent >= part)
+                return Fail();
 
-            if (part.Role is BodyPartRole.UpperArm or BodyPartRole.Forearm or BodyPartRole.Thigh or BodyPartRole.Shin)
+            BodyPartRole role = definitions.Role[part];
+            if (role is BodyPartRole.UpperArm or BodyPartRole.Forearm or BodyPartRole.Thigh or BodyPartRole.Shin)
             {
-                if (part.Primitive != BodyPrimitive.Circle || part.Pivot != BodyPartPivot.Start ||
-                    part.Scale.X > 0.051f || part.Scale.Y > 0.026f)
-                    return false;
+                Vector3 scale = definitions.Scale[part];
+                if (definitions.Primitive[part] != BodyPrimitive.Circle ||
+                    definitions.Pivot[part] != BodyPartPivot.Start ||
+                    scale.X > 0.051f || scale.Y > 0.026f)
+                    return Fail();
             }
         }
-        if (headCount != 1 || torsoCount != 3)
-            return false;
 
-        foreach (BodyPartDefinition[] definitions in new[] { greenbob, segmented })
-            for (int i = 0; i < definitions.Length; i++)
-                if (definitions[i].ParentIndex < -1 || definitions[i].ParentIndex >= i)
-                    return false;
-
-        UnitSimulation simulation = new UnitSimulation(8, 128);
+        stage = 3;
         WorldMap worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 32);
-        UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f), Vector3.UnitX, Vector3.UnitX);
-        int start = simulation.Units.BodyStart[unit.Index];
-        int count = simulation.Units.BodyCount[unit.Index];
+        UnitSimulation simulation = new UnitSimulation(8, 128);
+        UnitId colonist = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f), Vector3.UnitX, Vector3.UnitX);
+        UnitId greenbob = simulation.Spawn(UnitType.Greenbob, new Vector3(12f, 10f, 0.1f), Vector3.UnitX, Vector3.UnitX);
+        UnitId segmented = simulation.Spawn(UnitType.SegmentedMonster, new Vector3(14f, 10f, 0.1f), Vector3.UnitX, Vector3.UnitX);
+        if (simulation.Units.BodyCount[colonist.Index] != 13 ||
+            simulation.Units.BodyCount[greenbob.Index] != 10 ||
+            simulation.Units.BodyCount[segmented.Index] != 10)
+            return Fail();
+
+        stage = 4;
+        int start = simulation.Units.BodyStart[colonist.Index];
+        int count = simulation.Units.BodyCount[colonist.Index];
         Vector3[] beforePositions = new Vector3[count];
         float[] beforeRotations = new float[count];
         Vector3[] beforeScales = new Vector3[count];
@@ -2544,19 +2560,23 @@ public static class CombatSelfTest
             beforeScales[i] = simulation.Bodies.WorldScale[start + i];
         }
 
-        simulation.SetPosture(unit, UnitPosture.Crouching);
+        simulation.SetPosture(colonist, UnitPosture.Crouching);
         simulation.Update(worldMap, 0.016f);
         if (simulation.LastBodyUpdateMilliseconds != 0d ||
-            simulation.Units.Posture[unit.Index] != UnitPosture.Crouching)
-            return false;
+            simulation.Units.Posture[colonist.Index] != UnitPosture.Crouching)
+            return Fail();
 
+        stage = 5;
         for (int i = 0; i < count; i++)
         {
             int index = start + i;
             if (Vector3.Distance(beforePositions[i], simulation.Bodies.WorldPosition[index]) > 0.0001f ||
                 MathF.Abs(beforeRotations[i] - simulation.Bodies.WorldRotation[index]) > 0.0001f ||
                 Vector3.Distance(beforeScales[i], simulation.Bodies.WorldScale[index]) > 0.0001f)
-                return false;
+            {
+                Console.Error.WriteLine($"[Static rig test] bodyPart={i} positionBefore={beforePositions[i]} positionAfter={simulation.Bodies.WorldPosition[index]}.");
+                return Fail();
+            }
         }
         return true;
     }
