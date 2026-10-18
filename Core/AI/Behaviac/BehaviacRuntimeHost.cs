@@ -60,9 +60,11 @@ public static class BehaviacRuntimeHost
             Workspace.Instance.FileFormat = fileFormat;
             Workspace.Instance.MetaFile = string.Empty;
 
-            // Ensure built-in Behaviac node types and value parsers exist before
-            // registering RimClone's method bindings for XML Condition/Action nodes.
-            AgentMeta.Register();
+            // Let Behaviac initialize comparer/computer registries and register its
+            // standard metadata exactly once before binding RimClone's XML methods.
+            if (!Workspace.Instance.TryInit())
+                throw new InvalidOperationException("Behaviac workspace initialization failed.");
+
             RegisterDecisionAgentMetadata();
 
             _behaviorRoot = fullPath;
