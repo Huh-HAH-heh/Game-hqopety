@@ -1,86 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Editable Behaviac XML policy tree for RimClone units. -->
-<behavior name="rimclone_unit_decision" agenttype="BehaviacUnitDecisionAgent" version="5">
+<behavior name="rimclone_unit_decision" agenttype="Core::AI::Behaviac::BehaviacUnitDecisionAgent" version="5">
   <node class="Selector" id="0">
     <node class="Sequence" id="1">
       <node class="Condition" id="2">
         <property Operator="Equal" />
-        <property Opl="Self.BehaviacUnitDecisionAgent::ShouldReturnDead()" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldReturnDead()" />
         <property Opr="const bool true" />
       </node>
       <node class="Action" id="3">
-        <property Method="Self.BehaviacUnitDecisionAgent::SelectDead()" />
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectDead()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
     <node class="Sequence" id="4">
       <node class="Condition" id="5">
         <property Operator="Equal" />
-        <property Opl="Self.BehaviacUnitDecisionAgent::ShouldSeekCover()" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldSeekCover()" />
         <property Opr="const bool true" />
       </node>
       <node class="Action" id="6">
-        <property Method="Self.BehaviacUnitDecisionAgent::SelectSeekCover()" />
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectSeekCover()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
     <node class="Sequence" id="7">
       <node class="Condition" id="8">
         <property Operator="Equal" />
-        <property Opl="Self.BehaviacUnitDecisionAgent::ShouldRetreatToCover()" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldRetreatToCover()" />
         <property Opr="const bool true" />
       </node>
       <node class="Action" id="9">
-        <property Method="Self.BehaviacUnitDecisionAgent::SelectRetreatToCover()" />
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectRetreatToCover()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
     <node class="Sequence" id="10">
       <node class="Condition" id="11">
         <property Operator="Equal" />
-        <property Opl="Self.BehaviacUnitDecisionAgent::ShouldFlankVisibleTarget()" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldFlankVisibleTarget()" />
         <property Opr="const bool true" />
       </node>
       <node class="Action" id="12">
-        <property Method="Self.BehaviacUnitDecisionAgent::SelectFlankTarget()" />
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectFlankTarget()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
     <node class="Sequence" id="13">
       <node class="Condition" id="14">
         <property Operator="Equal" />
-        <property Opl="Self.BehaviacUnitDecisionAgent::ShouldEngageVisibleTarget()" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldEngageVisibleTarget()" />
         <property Opr="const bool true" />
       </node>
       <node class="Action" id="15">
-        <property Method="Self.BehaviacUnitDecisionAgent::SelectEngageTarget()" />
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectEngageTarget()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
     <node class="Sequence" id="16">
       <node class="Condition" id="17">
         <property Operator="Equal" />
-        <property Opl="Self.BehaviacUnitDecisionAgent::ShouldSuppressLastKnownTarget()" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldSuppressLastKnownTarget()" />
         <property Opr="const bool true" />
       </node>
       <node class="Action" id="18">
-        <property Method="Self.BehaviacUnitDecisionAgent::SelectSuppressiveFire()" />
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectSuppressiveFire()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
     <node class="Sequence" id="19">
       <node class="Condition" id="20">
         <property Operator="Equal" />
-        <property Opl="Self.BehaviacUnitDecisionAgent::ShouldInvestigateLastKnownTarget()" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateLastKnownTarget()" />
         <property Opr="const bool true" />
       </node>
       <node class="Action" id="21">
-        <property Method="Self.BehaviacUnitDecisionAgent::SelectInvestigateLastKnownTarget()" />
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectInvestigateLastKnownTarget()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
     <node class="Action" id="22">
-      <property Method="Self.BehaviacUnitDecisionAgent::SelectPatrol()" />
+      <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectPatrol()" />
       <property ResultOption="BT_INVALID" />
     </node>
   </node>
