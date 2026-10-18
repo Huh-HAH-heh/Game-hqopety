@@ -990,10 +990,11 @@ public static class CombatSelfTest
                 simulation.Units, target.Index, regionIndex, source,
                 simulation.HitRegions, UnitAnatomyMarkerRole.Aim, simulation.Bodies);
 
-            // Target points must be inside the live posed primitives, not a synthetic
-            // standing-height point. This also prevents the visible prone pawn being
-            // selected by aiming at empty space above its actual silhouette.
-            if (Vector3.DistanceSquared(aimPoint, geometry.Center) > 0.000001f ||
+            // Target points must land on the live posed primitive, not a synthetic
+            // standing-height point above the prone silhouette.
+            if (!UnitHitSystem.IsPointInsideRegion(
+                    simulation.Units, target.Index, regionIndex, aimPoint,
+                    tolerance: 0.003f, simulation.HitRegions, simulation.Bodies) ||
                 aimPoint.Z > proneHeightLimit)
             {
                 return false;
@@ -1007,22 +1008,15 @@ public static class CombatSelfTest
         if (!check.IsVisible || check.VisibleTargetPoint.Z > proneHeightLimit)
             return false;
 
-        bool pointOnRig = false;
-        for (int i = 0; i < visiblePointCount; i++)
-        {
-            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
-                simulation.Units, target.Index, i, simulation.HitRegions);
-            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
-                simulation.Units, target.Index, regionIndex,
-                simulation.HitRegions, simulation.Bodies);
-            if (Vector3.DistanceSquared(check.VisibleTargetPoint, geometry.Center) <= 0.000001f)
-            {
-                pointOnRig = true;
-                break;
-            }
-        }
+        if ((uint)check.VisiblePoint >= (uint)visiblePointCount)
+            return false;
 
-        return pointOnRig;
+        int visibleRegion = UnitHitSystem.GetVisibilityRegionIndex(
+            simulation.Units, target.Index, check.VisiblePoint, simulation.HitRegions);
+        return check.VisibleTargetPoint.Z <= proneHeightLimit &&
+            UnitHitSystem.IsPointInsideRegion(
+                simulation.Units, target.Index, visibleRegion, check.VisibleTargetPoint,
+                tolerance: 0.003f, simulation.HitRegions, simulation.Bodies);
     }
 
     private static bool TestAccuracy()
