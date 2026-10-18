@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Threading.Tasks;
 using Core.AI.Behaviac;
+using behaviac;
 using Core.Combat;
 using Core.Items;
 using Core.Map;
