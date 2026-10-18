@@ -12,7 +12,8 @@ public enum BehaviacUnitIntent : byte
     EngageTarget = 5,
     SuppressiveFire = 6,
     InvestigateLastKnownTarget = 7,
-    Patrol = 8
+    Patrol = 8,
+    ProneEngage = 9
 }
 
 /// <summary>
@@ -41,6 +42,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MemberMetaInfo("Is flanking", "Whether this unit is already executing a flank maneuver.", true)]
     public bool IsFlanking { get; private set; }
 
+    [MemberMetaInfo("Prone combat utility", "How beneficial a low prone firing position is right now (0 to 1).", true)]
+    public float ProneCombatUtility { get; private set; }
+
     [MemberMetaInfo("Selected intent", "The tactical intent returned by the behavior tree.", true)]
     public BehaviacUnitIntent Intent { get; private set; }
 
@@ -53,7 +57,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool isLowHealth,
         bool hasSuppressiveWeapon,
         bool canFlank,
-        bool isFlanking)
+        bool isFlanking,
+        float proneCombatUtility)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -64,6 +69,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         HasSuppressiveWeapon = hasSuppressiveWeapon;
         CanFlank = canFlank;
         IsFlanking = isFlanking;
+        ProneCombatUtility = float.IsFinite(proneCombatUtility)
+            ? System.Math.Clamp(proneCombatUtility, 0f, 1f)
+            : 0f;
         Intent = BehaviacUnitIntent.None;
     }
 
@@ -77,6 +85,11 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldRetreatToCover", "Check whether low health requires retreat.")]
     public bool ShouldRetreatToCover() =>
         IsAlive && IsLowHealth && (HasVisibleTarget || HasRecentTarget);
+
+    [MethodMetaInfo("ShouldTakePronePosition", "Prefer a prone firing position when distance and exposure justify it.")]
+    public bool ShouldTakePronePosition() =>
+        IsAlive && HasVisibleTarget && !IsSuppressed && !CanFlank && !IsFlanking &&
+        ProneCombatUtility >= 0.60f;
 
     [MethodMetaInfo("ShouldEngageVisibleTarget", "Check whether a visible target should be engaged.")]
     public bool ShouldEngageVisibleTarget() =>
@@ -109,6 +122,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("SelectFlankTarget", "Return the flank-maneuver intent.")]
     public EBTStatus SelectFlankTarget() =>
         SelectIntent(BehaviacUnitIntent.FlankTarget);
+
+    [MethodMetaInfo("SelectProneEngage", "Return the prone firing intent selected by tactical utility.")]
+    public EBTStatus SelectProneEngage() =>
+        SelectIntent(BehaviacUnitIntent.ProneEngage);
 
     [MethodMetaInfo("SelectEngageTarget", "Return the visible-target combat intent.")]
     public EBTStatus SelectEngageTarget() =>
