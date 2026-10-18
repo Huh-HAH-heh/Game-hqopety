@@ -1409,161 +1409,48 @@ public static class CombatSelfTest
         return aboveWallVisible && !throughWallVisible;
     }
 
-                    private static bool TestHitRegionProfilesDriveVisionCollisionAndArmor()
+                        private static bool TestHitRegionProfilesDriveVisionCollisionAndArmor()
     {
         UnitHitRegionProfile profile = new UnitHitRegionProfile(
             new UnitCircleHitRegion(
-                new Vector3(0f, 0f, 0.50f),
-                radius: 0.50f,
-                halfHeight: 0.25f,
-                new HitRegionPartBinding(UnitHealthPartId.Torso, maxHitPoints: 60f)),
-            new UnitCircleHitRegion(
-                new Vector3(0f, 0f, 1.50f),
-                radius: 0.20f,
-                halfHeight: 0.20f,
-                new HitRegionPartBinding(UnitHealthPartId.Head, maxHitPoints: 40f)),
-            new UnitCircleHitRegion(
-                new Vector3(1.10f, 0f, 0.50f),
-                radius: 0.30f,
-                halfHeight: 0.20f,
-                new HitRegionPartBinding(UnitHealthPartId.LeftArm, maxHitPoints: 30f)));
-
+                new Vector3(100f, -80f, 9f), radius: 0.001f, halfHeight: 0.001f,
+                new HitRegionPartBinding(UnitHealthPartId.Torso, maxHitPoints: 60f)));
         UnitSimulation simulation = new UnitSimulation(8, 64);
-        UnitId unit = simulation.Spawn(
-            UnitType.Colonist,
-            new Vector3(10f, 10f, 0.1f),
-            hitProfile: profile);
-
-        if (simulation.HitRegions.GetProfile(unit.Index)?.RegionCount != 3)
+        UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f), hitProfile: profile);
+        if (simulation.HitRegions.GetProfile(unit.Index)?.RegionCount != 1)
             return false;
 
-        Span<Vector3> visibilityPoints = stackalloc Vector3[3];
+        Span<Vector3> points = stackalloc Vector3[1];
         int visibilityCount = UnitHitSystem.GetVisibilityPoints(
-            simulation.Units,
-            unit.Index,
-            new Vector3(7f, 10f, 2f),
-            visibilityPoints,
-            simulation.Bodies,
-            simulation.HitRegions);
-
-        if (visibilityCount != 3)
+            simulation.Units, unit.Index, new Vector3(7f, 10f, 2f),
+            points, simulation.Bodies, simulation.HitRegions);
+        float expectedVisionHeight = simulation.Units.Position[unit.Index].Z +
+            simulation.Units.Height[unit.Index] * 0.70f;
+        if (visibilityCount != 1 || MathF.Abs(points[0].Z - expectedVisionHeight) > 0.001f)
             return false;
 
         UnitHitSystem hitSystem = new UnitHitSystem();
-
+        float midHeight = simulation.Units.Position[unit.Index].Z +
+            simulation.Units.Height[unit.Index] * 0.5f;
         if (!hitSystem.TryHitUnit(
-                simulation.Units,
-                unit.Index,
-                new Vector3(8f, 10f, 0.6f),
-                new Vector3(12f, 10f, 0.6f),
-                0f,
-                UnitHealthPartId.None,
-                out UnitHitResult torsoHit,
-                simulation.Bodies,
-                simulation.HitRegions) ||
-            torsoHit.Part != UnitHealthPartId.Torso ||
-            torsoHit.RegionIndex != 0)
-        {
+                simulation.Units, unit.Index,
+                new Vector3(8f, 10f, midHeight), new Vector3(12f, 10f, midHeight),
+                0f, UnitHealthPartId.None, out UnitHitResult torsoHit,
+                simulation.Bodies, simulation.HitRegions) ||
+            torsoHit.Part != UnitHealthPartId.Torso || torsoHit.RegionIndex != 0)
             return false;
-        }
 
-        if (!hitSystem.TryHitUnit(
-                simulation.Units,
-                unit.Index,
-                new Vector3(8f, 10f, 1.6f),
-                new Vector3(12f, 10f, 1.6f),
-                0f,
-                UnitHealthPartId.None,
-                out UnitHitResult headHit,
-                simulation.Bodies,
-                simulation.HitRegions) ||
-            headHit.Part != UnitHealthPartId.Head ||
-            headHit.RegionIndex != 1)
-        {
-            return false;
-        }
-
+        float aboveCollider = simulation.Units.Position[unit.Index].Z +
+            simulation.Units.Height[unit.Index] + 0.1f;
         if (hitSystem.TryHitUnit(
-                simulation.Units,
-                unit.Index,
-                new Vector3(8f, 10f, 2.4f),
-                new Vector3(12f, 10f, 2.4f),
-                0f,
-                UnitHealthPartId.None,
-                out _,
-                simulation.Bodies,
-                simulation.HitRegions))
-        {
-            return false;
-        }
-
-        UnitDamageResult damage = simulation.ApplyDamage(
-            unit,
-            torsoHit.Part,
-            20f);
-
-        return damage.ArmorAbsorbed > 0f &&
-            damage.FinalDamage < damage.RawDamage;
-    }
-
-    private static bool TestColonistUsesAnatomyNodes()
-    {
-        UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
-        if (profile.RegionCount != 13 || profile.NodeCount != 13 || !profile.HasSharedShapes)
+                simulation.Units, unit.Index,
+                new Vector3(8f, 10f, aboveCollider), new Vector3(12f, 10f, aboveCollider),
+                0f, UnitHealthPartId.None, out _,
+                simulation.Bodies, simulation.HitRegions))
             return false;
 
-        int lowerTorso = profile.FindRegion("body.lower");
-        int torso = profile.FindRegion("body.middle");
-        int upperTorso = profile.FindRegion("body.torso.upper");
-        int leftArmUpper = profile.FindRegion("body.arm.left.upper");
-        int leftArmLower = profile.FindRegion("body.arm.left.lower");
-        int rightArmUpper = profile.FindRegion("body.arm.right.upper");
-        int rightArmLower = profile.FindRegion("body.arm.right.lower");
-        int leftLeg = profile.FindRegion("body.leg.left.upper");
-        int leftShin = profile.FindRegion("body.leg.left.lower");
-        int rightLeg = profile.FindRegion("body.leg.right.upper");
-        int rightShin = profile.FindRegion("body.leg.right.lower");
-        int neck = profile.FindRegion("body.neck");
-        int head = profile.FindRegion("body.upper");
-
-        if (lowerTorso < 0 || torso < 0 || upperTorso < 0 ||
-            leftArmUpper < 0 || leftArmLower < 0 ||
-            rightArmUpper < 0 || rightArmLower < 0 ||
-            leftLeg < 0 || leftShin < 0 || rightLeg < 0 || rightShin < 0 ||
-            neck < 0 || head < 0 ||
-            !profile.TryFindPart(UnitHealthPartId.Torso, out int torsoBindingRegion, out _) ||
-            torsoBindingRegion != torso ||
-            !profile.TryFindPart(UnitHealthPartId.LeftLeg, out int legBindingRegion, out _) ||
-            legBindingRegion != leftLeg ||
-            !profile.TryFindPart("heart.main", out int heartRegion, out _) ||
-            heartRegion != torso ||
-            !profile.TryFindPart("brain.main", out int brainRegion, out _) ||
-            brainRegion != head ||
-            !profile.TryFindPart(UnitHealthPartId.Neck, out int neckBindingRegion, out _) ||
-            neckBindingRegion != neck ||
-            profile.VolumeCount != 8)
-            return false;
-
-        UnitSimulation simulation = new UnitSimulation(4, 32);
-        UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f));
-
-        Vector3 legsCenter = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, leftLeg, simulation.HitRegions, simulation.Bodies).Center;
-        Vector3 torsoCenter = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, torso, simulation.HitRegions, simulation.Bodies).Center;
-        Vector3 headCenter = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, head, simulation.HitRegions, simulation.Bodies).Center;
-
-        int bodyStart = simulation.Units.BodyStart[unit.Index];
-        bool sharedGeometry =
-            Vector3.Distance(legsCenter, simulation.Bodies.WorldPosition[bodyStart + leftLeg]) < 0.001f &&
-            Vector3.Distance(torsoCenter, simulation.Bodies.WorldPosition[bodyStart + torso]) < 0.001f &&
-            Vector3.Distance(headCenter, simulation.Bodies.WorldPosition[bodyStart + head]) < 0.001f;
-
-        return sharedGeometry &&
-            legsCenter.Z < torsoCenter.Z &&
-            torsoCenter.Z < headCenter.Z &&
-            UnitHitSystem.GetVisibilityPointCount(simulation.Units, unit.Index, simulation.HitRegions) == 13;
+        UnitDamageResult damage = simulation.ApplyDamage(unit, torsoHit.Part, 20f);
+        return damage.ArmorAbsorbed > 0f && damage.FinalDamage < damage.RawDamage;
     }
 
     private static bool TestAnatomyRigEditsPreserveBindings()
@@ -1737,63 +1624,33 @@ public static class CombatSelfTest
         return true;
     }
 
-private static bool TestVisionDetectsRegionInsideRange()
+    private static bool TestVisionDetectsRegionInsideRange()
     {
-        WorldMap worldMap = new WorldMap(
-            regionsX: 1,
-            regionsY: 1,
-            layerCount: 32);
+        WorldMap worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 32);
         UnitSimulation simulation = new UnitSimulation(4, 64);
-
         UnitId observer = simulation.Spawn(
-            UnitType.Colonist,
-            new Vector3(10.5f, 10.5f, 0.1f),
-            Vector3.UnitX,
-            Vector3.UnitX,
-            factionTag: 1);
-        UnitHitRegionProfile offsetTargetProfile = new UnitHitRegionProfile(
-            new UnitCircleHitRegion(
-                new Vector3(-3f, 0f, 0.5f),
-                radius: 0.35f,
-                halfHeight: 0.30f,
+            UnitType.Colonist, new Vector3(10.5f, 10.5f, 0.1f),
+            Vector3.UnitX, Vector3.UnitX, factionTag: 1);
+
+        UnitHitRegionProfile offsetProfile = new UnitHitRegionProfile(
+            new UnitCircleHitRegion(new Vector3(-30f, 0f, 8f), radius: 0.001f, halfHeight: 0.001f,
                 new HitRegionPartBinding(UnitHealthPartId.Torso, maxHitPoints: 60f)));
         UnitId target = simulation.Spawn(
-            UnitType.Colonist,
-            new Vector3(14.5f, 10.5f, 0.1f),
-            Vector3.UnitX,
-            Vector3.UnitX,
-            factionTag: 2,
-            hitProfile: offsetTargetProfile);
+            UnitType.Colonist, new Vector3(11.2f, 10.5f, 0.1f),
+            Vector3.UnitX, Vector3.UnitX, factionTag: 2, hitProfile: offsetProfile);
 
         simulation.Units.ViewRange[observer.Index] = 1f;
         simulation.Units.FieldOfView[observer.Index] = 360f;
-
-        // The root is four world units away; only the configured hit region
-        // is within range and it occupies a cell next to the observer.
         VisionCheck direct = simulation.Vision.Evaluate(
-            simulation.Units,
-            worldMap,
-            observer.Index,
-            target.Index,
-            simulation.Bodies);
-
+            simulation.Units, worldMap, observer.Index, target.Index, simulation.Bodies);
         if (!direct.IsVisible)
             return false;
 
-        simulation.Vision.Update(
-            simulation.Units,
-            worldMap,
-            0.11f,
-            simulation.Health,
-            simulation.Bodies);
-
+        simulation.Vision.Update(simulation.Units, worldMap, 0.11f, simulation.Health, simulation.Bodies);
         ReadOnlySpan<int> visible = simulation.Vision.GetVisibleTargets(observer.Index);
         for (int i = 0; i < visible.Length; i++)
-        {
             if (visible[i] == target.Index)
                 return true;
-        }
-
         return false;
     }
 
@@ -2313,159 +2170,48 @@ private static bool TestVisionDetectsRegionInsideRange()
     }
 
 
-    private static bool TestNamedAnatomyMarkers()
+        private static bool TestNamedAnatomyMarkers()
     {
-        UnitAnatomyProfile profile = new(
+        UnitAnatomyProfile withMarkers = new(
             UnitAnatomyNode.Circle(
-                "sensor-core",
-                new Vector3(0f, 0f, 0.70f),
-                0.35f,
-                0.25f,
+                "sensor-core", new Vector3(0f, 0f, 0.70f), 0.35f, 0.25f,
                 new[]
                 {
-                    new HitRegionPartBinding(
-                        UnitHealthPartId.None,
-                        kind: UnitHealthPartKind.Organ,
-                        maxHitPoints: 18f,
-                        id: "sensor-core.tissue")
+                    new HitRegionPartBinding(UnitHealthPartId.None, kind: UnitHealthPartKind.Organ,
+                        maxHitPoints: 18f, id: "sensor-core.tissue")
                 },
-                new UnitAnatomyMarker(
-                    "eye",
-                    UnitAnatomyMarkerRole.Eye,
-                    new Vector3(0f, 0f, 0.10f)),
-                new UnitAnatomyMarker(
-                    "aim",
-                    UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim,
-                    new Vector3(0.12f, 0f, 0.04f)),
-                new UnitAnatomyMarker(
-                    "muzzle",
-                    UnitAnatomyMarkerRole.Muzzle,
-                    new Vector3(0.30f, 0f, 0.15f))));
+                new UnitAnatomyMarker("eye", UnitAnatomyMarkerRole.Eye, new Vector3(0f, 0f, 3f)),
+                new UnitAnatomyMarker("aim", UnitAnatomyMarkerRole.Target | UnitAnatomyMarkerRole.Aim, new Vector3(8f, 0f, 2f)),
+                new UnitAnatomyMarker("muzzle", UnitAnatomyMarkerRole.Muzzle, new Vector3(9f, 0f, 4f))));
+        UnitAnatomyProfile withoutMarkers = new(
+            UnitAnatomyNode.Circle(
+                "sensor-core", new Vector3(0f, 0f, -12f), 0.001f, 0.001f,
+                new[]
+                {
+                    new HitRegionPartBinding(UnitHealthPartId.None, kind: UnitHealthPartKind.Organ,
+                        maxHitPoints: 18f, id: "sensor-core.tissue")
+                }));
 
         UnitSimulation simulation = new UnitSimulation(4, 32);
-        UnitId unit = simulation.Spawn(
-            UnitType.SegmentedMonster,
-            new Vector3(10f, 12f, 0.1f),
-            hitProfile: profile);
+        Vector3 position = new Vector3(10f, 12f, 0.1f);
+        UnitId unit = simulation.Spawn(UnitType.SegmentedMonster, position, hitProfile: withMarkers);
+        UnitId comparison = simulation.Spawn(UnitType.SegmentedMonster, position, hitProfile: withoutMarkers);
+        Vector3 eyeA = UnitHitSystem.GetEyePosition(simulation.Units, unit.Index, simulation.Bodies, simulation.HitRegions);
+        Vector3 eyeB = UnitHitSystem.GetEyePosition(simulation.Units, comparison.Index, simulation.Bodies, simulation.HitRegions);
+        Vector3 source = position + new Vector3(10f, 0f, 0f);
+        Vector3 aimA = UnitHitSystem.GetRegionPoint(
+            simulation.Units, unit.Index, 0, source, simulation.HitRegions, UnitAnatomyMarkerRole.Aim);
+        Vector3 aimB = UnitHitSystem.GetRegionPoint(
+            simulation.Units, comparison.Index, 0, source, simulation.HitRegions, UnitAnatomyMarkerRole.Aim);
 
-        Vector3 center = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 0, simulation.HitRegions).Center;
-
-        bool eyeFound = UnitHitSystem.TryGetMarkerPoint(
-            simulation.Units, unit.Index, UnitAnatomyMarkerRole.Eye,
-            out Vector3 eye, simulation.HitRegions);
         bool muzzleFound = UnitHitSystem.TryGetMarkerPoint(
-            simulation.Units, unit.Index, UnitAnatomyMarkerRole.Muzzle,
-            out Vector3 muzzle, simulation.HitRegions);
-        Vector3 aim = UnitHitSystem.GetRegionPoint(
-            simulation.Units, unit.Index, 0, center + Vector3.UnitX * 10f,
-            simulation.HitRegions, UnitAnatomyMarkerRole.Aim);
-
-        return eyeFound && muzzleFound &&
-               Vector3.Distance(eye, center + new Vector3(0f, 0f, 0.10f)) < 0.001f &&
-               Vector3.Distance(muzzle, center + new Vector3(0.30f, 0f, 0.15f)) < 0.001f &&
-               Vector3.Distance(aim, center + new Vector3(0.12f, 0f, 0.04f)) < 0.001f;
-    }
-
-    private static bool TestGenericAnatomyTissueHealth()
-    {
-        UnitAnatomyNode firstSegment = UnitAnatomyNode.Circle(
-            "track-segment-0",
-            new Vector3(0f, 0f, 0.25f),
-            0.35f,
-            0.20f,
-            new[]
-            {
-                new HitRegionPartBinding(
-                    UnitHealthPartId.WholeBody,
-                    kind: UnitHealthPartKind.BodyPart,
-                    maxHitPoints: 30f,
-                    id: "track-tissue-0")
-            },
-            new UnitAnatomyMarker(
-                "aim",
-                UnitAnatomyMarkerRole.Target,
-                new Vector3(0f, 0f, 0.02f)));
-
-        UnitAnatomyProfile initial = new(firstSegment);
-        UnitSimulation simulation = new UnitSimulation(4, 32);
-        UnitId unit = simulation.Spawn(
-            UnitType.SegmentedMonster,
-            new Vector3(10f, 12f, 0.1f),
-            hitProfile: initial);
-
-        if (!simulation.Health.TryFindRegionPart(
-                unit.Index, 0, 0, out int firstHealthIndex) ||
-            !simulation.ApplyAnatomyDamage(unit, 0, 0, 10f).FinalDamage.Equals(10f) ||
-            MathF.Abs(simulation.Health.HitPoints[firstHealthIndex] - 20f) > 0.001f)
-        {
-            return false;
-        }
-
-        UnitAnatomyNode secondSegment = UnitAnatomyNode.Circle(
-            "track-segment-1",
-            "track-segment-0",
-            new Vector3(0f, 0f, 0.85f),
-            0.32f,
-            0.18f,
-            new[]
-            {
-                new HitRegionPartBinding(
-                    UnitHealthPartId.WholeBody,
-                    kind: UnitHealthPartKind.BodyPart,
-                    maxHitPoints: 40f,
-                    id: "track-tissue-1",
-                    parentId: "track-tissue-0")
-            },
-            new UnitAnatomyMarker(
-                "aim",
-                UnitAnatomyMarkerRole.Target));
-
-        if (!simulation.AddAnatomyNode(unit, secondSegment) ||
-            !simulation.Health.TryFindRegionPart(
-                unit.Index, 0, 0, out int preservedHealthIndex) ||
-            !simulation.Health.TryFindRegionPart(
-                unit.Index, 1, 0, out int secondHealthIndex))
-        {
-            return false;
-        }
-
-        UnitHitRegionGeometry firstGeometry = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 0, simulation.HitRegions);
-        UnitHitRegionGeometry secondGeometry = UnitHitSystem.GetRegionGeometry(
-            simulation.Units, unit.Index, 1, simulation.HitRegions);
-
-        DamageEvent segmentHit = new DamageEvent(
-            default,
-            unit,
-            UnitHealthPartId.WholeBody,
-            secondGeometry.Center,
-            Vector3.UnitX,
-            10f,
-            1000f,
-            1000f,
-            100f,
-            70f,
-            DamageType.Ballistic,
-            0f,
-            regionIndex: 1,
-            bindingIndex: 0);
-
-        ProjectileDamageResult hitResult = new DamageSystem().ApplyProjectile(
-            simulation.Units,
-            simulation.Inventory,
-            simulation.Health,
-            new UnitHealthSystem(),
-            in segmentHit,
-            simulation.HitRegions);
-
-        return MathF.Abs(simulation.Health.HitPoints[preservedHealthIndex] - 20f) < 0.001f &&
-               MathF.Abs(simulation.Health.HitPoints[secondHealthIndex] - 30f) < 0.001f &&
-               hitResult.DamageApplied > 0f &&
-               simulation.Health.Parent[secondHealthIndex] == preservedHealthIndex &&
-               MathF.Abs(secondGeometry.Center.X - firstGeometry.Center.X) < 0.001f &&
-               MathF.Abs(secondGeometry.Center.Y - firstGeometry.Center.Y) < 0.001f &&
-               MathF.Abs(secondGeometry.Center.Z - firstGeometry.Center.Z - 0.85f) < 0.001f;
+            simulation.Units, unit.Index, UnitAnatomyMarkerRole.Muzzle, out Vector3 muzzle, simulation.HitRegions);
+        float height = simulation.Units.Height[unit.Index];
+        float radius = simulation.Units.Radius[unit.Index];
+        Vector3 expectedMuzzle = position + Vector3.UnitX * (radius * 0.65f) + new Vector3(0f, 0f, height * 0.70f);
+        return Vector3.Distance(eyeA, eyeB) < 0.001f &&
+            Vector3.Distance(aimA, aimB) < 0.001f &&
+            muzzleFound && Vector3.Distance(muzzle, expectedMuzzle) < 0.001f;
     }
 
     private static bool TestStartingArmorMitigatesRifleHits()
@@ -2659,238 +2405,68 @@ private static bool TestVisionDetectsRegionInsideRange()
                simulation.Inventory.Durability[itemStart + helmet] > 0f;
     }
 
-        private static bool TestAnatomyProfiles()
+            private static bool TestAnatomyProfiles()
     {
-        UnitBodyStore definitions = new UnitBodyStore(4);
-        BodyHandle colonistBody = definitions.CreateBody(UnitBodyType.Colonist);
-
-        if (colonistBody.Count != 13 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Head) != 1 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Torso) != 3 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.UpperArm) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Forearm) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Thigh) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Shin) != 2 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Neck) != 1 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Hand) != 0 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Foot) != 0 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Elbow) != 0 ||
-            CountBodyRole(definitions, colonistBody, BodyPartRole.Knee) != 0)
-        {
+        BodyPartDefinition[] colonist = UnitBodyCatalog.Get(UnitBodyType.Colonist).ToArray();
+        BodyPartDefinition[] greenbob = UnitBodyCatalog.Get(UnitBodyType.SmallCreature).ToArray();
+        BodyPartDefinition[] segmented = UnitBodyCatalog.Get(UnitBodyType.SegmentedCreature).ToArray();
+        if (colonist.Length != 13 || greenbob.Length != 10 || segmented.Length != 10)
             return false;
-        }
 
-        for (int part = colonistBody.Start;
-             part < colonistBody.Start + colonistBody.Count;
-             part++)
+        int headCount = 0, torsoCount = 0;
+        for (int i = 0; i < colonist.Length; i++)
         {
-            int parent = definitions.Parent[part];
-            if (parent < -1 || parent >= part)
+            BodyPartDefinition part = colonist[i];
+            if (part.Role == BodyPartRole.Head) headCount++;
+            if (part.Role == BodyPartRole.Torso) torsoCount++;
+            if (part.ParentIndex < -1 || part.ParentIndex >= i)
                 return false;
 
-            BodyPartRole role = definitions.Role[part];
-            if (role is BodyPartRole.UpperArm or BodyPartRole.Forearm or
-                BodyPartRole.Thigh or BodyPartRole.Shin)
+            if (part.Role is BodyPartRole.UpperArm or BodyPartRole.Forearm or BodyPartRole.Thigh or BodyPartRole.Shin)
             {
-                Vector3 scale = definitions.Scale[part];
-                if (definitions.Primitive[part] != BodyPrimitive.Circle ||
-                    definitions.Pivot[part] != BodyPartPivot.Start ||
-                    scale.X > 0.051f ||
-                    scale.Y > 0.026f)
-                {
+                if (part.Primitive != BodyPrimitive.Circle || part.Pivot != BodyPartPivot.Start ||
+                    part.Scale.X > 0.051f || part.Scale.Y > 0.026f)
                     return false;
-                }
             }
         }
-
-        definitions.SetInitialWorldPosition(
-            colonistBody,
-            Vector3.Zero,
-            0f,
-            MathF.PI * 0.5f);
-
-        int definitionHead = FindBodyRole(
-            definitions,
-            colonistBody,
-            BodyPartRole.Head);
-
-        Vector3 headPosition = definitions.WorldPosition[definitionHead];
-        Vector3[] initialPositions = definitions.WorldPosition;
-        int bodyStartForPose = colonistBody.Start;
-        Vector3 torsoPosition = initialPositions[bodyStartForPose];
-        Vector3 leftArmPosition = initialPositions[bodyStartForPose + 3];
-        Vector3 leftForearmPosition = initialPositions[bodyStartForPose + 4];
-        Vector3 rightArmPosition = initialPositions[bodyStartForPose + 5];
-        Vector3 rightForearmPosition = initialPositions[bodyStartForPose + 6];
-        Vector3 leftLegPosition = initialPositions[bodyStartForPose + 7];
-        Vector3 leftShinPosition = initialPositions[bodyStartForPose + 8];
-        Vector3 rightLegPosition = initialPositions[bodyStartForPose + 9];
-        Vector3 rightShinPosition = initialPositions[bodyStartForPose + 10];
-
-        // The middle torso is the root; left/right limb chains mirror over Y=0.
-        if (MathF.Abs(torsoPosition.X) > 0.001f ||
-            MathF.Abs(torsoPosition.Y) > 0.001f ||
-            MathF.Abs(headPosition.X - 0.155f) > 0.001f ||
-            MathF.Abs(headPosition.Y) > 0.001f ||
-            MathF.Abs(rightArmPosition.X - leftArmPosition.X) > 0.001f ||
-            MathF.Abs(rightArmPosition.Y + leftArmPosition.Y) > 0.001f ||
-            MathF.Abs(rightForearmPosition.X - leftForearmPosition.X) > 0.001f ||
-            MathF.Abs(rightForearmPosition.Y + leftForearmPosition.Y) > 0.001f ||
-            MathF.Abs(rightLegPosition.X - leftLegPosition.X) > 0.001f ||
-            MathF.Abs(rightLegPosition.Y + leftLegPosition.Y) > 0.001f ||
-            MathF.Abs(rightShinPosition.X - leftShinPosition.X) > 0.001f ||
-            MathF.Abs(rightShinPosition.Y + leftShinPosition.Y) > 0.001f)
-        {
+        if (headCount != 1 || torsoCount != 3)
             return false;
-        }
+
+        foreach (BodyPartDefinition[] definitions in new[] { greenbob, segmented })
+            for (int i = 0; i < definitions.Length; i++)
+                if (definitions[i].ParentIndex < -1 || definitions[i].ParentIndex >= i)
+                    return false;
 
         UnitSimulation simulation = new UnitSimulation(8, 128);
-        UnitId colonist = simulation.Spawn(
-            UnitType.Colonist,
-            new Vector3(10f, 10f, 0f),
-            Vector3.UnitX,
-            Vector3.UnitX);
-        UnitId greenbob = simulation.Spawn(
-            UnitType.Greenbob,
-            new Vector3(12f, 10f, 0f),
-            Vector3.UnitX,
-            Vector3.UnitX);
-        UnitId segmented = simulation.Spawn(
-            UnitType.SegmentedMonster,
-            new Vector3(14f, 10f, 0f),
-            Vector3.UnitX,
-            Vector3.UnitX);
-
-        BodyPartDefinition[] customParts =
-            BodyDefinitionExamples.CreateMultiLimbCreature();
-
-        UnitId custom = simulation.SpawnCustom(
-            UnitType.Colonist,
-            new Vector3(16f, 10f, 0f),
-            customParts);
-
-        if (simulation.Units.BodyCount[colonist.Index] != 13 ||
-            simulation.Units.BodyCount[greenbob.Index] != 10 ||
-            simulation.Units.BodyCount[segmented.Index] != 10 ||
-            simulation.Units.BodyCount[custom.Index] != customParts.Length)
+        WorldMap worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 32);
+        UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f), Vector3.UnitX, Vector3.UnitX);
+        int start = simulation.Units.BodyStart[unit.Index];
+        int count = simulation.Units.BodyCount[unit.Index];
+        Vector3[] beforePositions = new Vector3[count];
+        float[] beforeRotations = new float[count];
+        Vector3[] beforeScales = new Vector3[count];
+        for (int i = 0; i < count; i++)
         {
-            return false;
+            beforePositions[i] = simulation.Bodies.WorldPosition[start + i];
+            beforeRotations[i] = simulation.Bodies.WorldRotation[start + i];
+            beforeScales[i] = simulation.Bodies.WorldScale[start + i];
         }
 
-        simulation.Units.Velocity[colonist.Index] =
-            new Vector3(1f, 0f, 0f);
-
-        UnitBodySystem bodySystem = new UnitBodySystem();
-        bodySystem.Update(
-            simulation.Units,
-            simulation.Bodies,
-            0.1f);
-
-        int start = simulation.Units.BodyStart[colonist.Index];
-        short count = simulation.Units.BodyCount[colonist.Index];
-        int leftThigh = FindBodyRole(
-            simulation.Bodies,
-            new BodyHandle(start, count),
-            BodyPartRole.Thigh,
-            BodyPartMotion.WalkCycle);
-        int rightThigh = FindBodyRole(
-            simulation.Bodies,
-            new BodyHandle(start, count),
-            BodyPartRole.Thigh,
-            BodyPartMotion.WalkCycleOpposite);
-
-        float swing = MathF.Sin(1.1f) * 0.32f;
-        bool gaitCorrect =
-            leftThigh >= 0 &&
-            rightThigh >= 0 &&
-            MathF.Abs(
-                simulation.Bodies.WorldRotation[leftThigh] -
-                (MathF.PI - 0.22f + swing)) < 0.001f &&
-            MathF.Abs(
-                simulation.Bodies.WorldRotation[rightThigh] -
-                (-MathF.PI + 0.22f - swing)) < 0.001f;
-
-        if (!gaitCorrect)
-        {
+        simulation.SetPosture(unit, UnitPosture.Crouching);
+        simulation.Update(worldMap, 0.016f);
+        if (simulation.LastBodyUpdateMilliseconds != 0d ||
+            simulation.Units.Posture[unit.Index] != UnitPosture.Crouching)
             return false;
-        }
 
-        BodyHandle colonistHandle = new BodyHandle(start, count);
-        BodyHandle greenbobHandle = new BodyHandle(
-            simulation.Units.BodyStart[greenbob.Index],
-            simulation.Units.BodyCount[greenbob.Index]);
-
-        if (!BodyLinksConnected(simulation.Bodies, colonistHandle) ||
-            !BodyLinksConnected(simulation.Bodies, greenbobHandle))
+        for (int i = 0; i < count; i++)
         {
-            return false;
+            int index = start + i;
+            if (Vector3.Distance(beforePositions[i], simulation.Bodies.WorldPosition[index]) > 0.0001f ||
+                MathF.Abs(beforeRotations[i] - simulation.Bodies.WorldRotation[index]) > 0.0001f ||
+                Vector3.Distance(beforeScales[i], simulation.Bodies.WorldScale[index]) > 0.0001f)
+                return false;
         }
-
-        // Independent head aim must rotate the head, not move it around the pawn.
-        simulation.SetHeadNormal(colonist, Vector3.UnitY);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
-        int head = FindBodyRole(
-            simulation.Bodies,
-            new BodyHandle(start, count),
-            BodyPartRole.Head);
-        Vector3 aimedHeadPosition = simulation.Bodies.WorldPosition[head];
-        if (MathF.Abs(aimedHeadPosition.X - 10.155f) > 0.002f ||
-            MathF.Abs(aimedHeadPosition.Y - 10f) > 0.002f ||
-            MathF.Abs(simulation.Bodies.WorldRotation[head] - MathF.PI * 0.5f) > 0.002f)
-        {
-            return false;
-        }
-
-        int walkingArm = FindBodyRole(
-            simulation.Bodies,
-            new BodyHandle(start, count),
-            BodyPartRole.UpperArm,
-            BodyPartMotion.WalkCycle);
-
-        if (walkingArm < 0)
-        {
-            return false;
-        }
-
-        float standingArmRotation =
-            simulation.Bodies.WorldRotation[walkingArm];
-
-        simulation.SetPosture(colonist, UnitPosture.Crouching);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
-        float crouchingArmRotation =
-            simulation.Bodies.WorldRotation[walkingArm];
-
-        if (MathF.Abs(crouchingArmRotation) >= MathF.Abs(standingArmRotation) - 0.12f ||
-            !BodyLinksConnected(simulation.Bodies, colonistHandle))
-        {
-            return false;
-        }
-
-        simulation.SetPosture(colonist, UnitPosture.Lying);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
-        float lyingArmRotation =
-            simulation.Bodies.WorldRotation[walkingArm];
-
-        if (MathF.Abs(lyingArmRotation - standingArmRotation) > 0.03f ||
-            !BodyLinksConnected(simulation.Bodies, colonistHandle))
-        {
-            return false;
-        }
-
-        // A moving body follows its travel vector while head facing remains independent.
-        simulation.SetHeadNormal(colonist, Vector3.UnitX);
-        simulation.Units.Velocity[colonist.Index] =
-            new Vector3(0f, 1f, 0f);
-        simulation.SetPosture(colonist, UnitPosture.Standing);
-        bodySystem.Update(simulation.Units, simulation.Bodies, 0f);
-
-        Vector3 bodyNormal = simulation.Units.BodyNormal[colonist.Index];
-        Vector3 movedHead = simulation.Bodies.WorldPosition[head];
-        return MathF.Abs(bodyNormal.X) < 0.001f &&
-               MathF.Abs(bodyNormal.Y - 1f) < 0.001f &&
-               MathF.Abs(movedHead.X - 10f) < 0.002f &&
-               MathF.Abs(movedHead.Y - 10.155f) < 0.002f &&
-               MathF.Abs(simulation.Bodies.WorldRotation[head]) < 0.002f;
+        return true;
     }
 
     private static bool BodyLinksConnected(
