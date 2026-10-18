@@ -2,13 +2,11 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using behaviac;
-using System.Numerics;
 
 namespace Core.AI.Behaviac;
 
 /// <summary>
 /// Owns Behaviac's process-wide workspace for the live UnitAiSystem decision tree.
-
 /// </summary>
 public static class BehaviacRuntimeHost
 {
@@ -31,7 +29,7 @@ public static class BehaviacRuntimeHost
     /// Initializes the XML behavior assets shipped with RimClone.
     /// The tree structure is data; RimClone-specific facts and actions are registered below.
     /// </summary>
-    public static void InitializeCompiled()
+    public static void InitializeDefaultBehavior()
     {
         Initialize(Path.Combine(AppContext.BaseDirectory, "BehaviacData"), Workspace.EFileFormat.EFF_xml);
     }
