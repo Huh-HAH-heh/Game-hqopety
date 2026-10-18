@@ -1,0 +1,1 @@
+This directory is reserved for optional Behaviac Designer metadata XML assets. The live tree currently uses method bindings registered by BehaviacRuntimeHost, so no generated metadata file is required here.
