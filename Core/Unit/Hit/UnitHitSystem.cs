@@ -58,6 +58,8 @@ public sealed class UnitHitSystem
         UnitHitRegionStore? hitRegions = null)
     {
         if (bodies != null &&
+            hitRegions?.GetProfile(unitIndex) is UnitAnatomyProfile anatomy &&
+            anatomy.HasSharedShapes &&
             TryGetMarkerPoint(
                 units, unitIndex, UnitAnatomyMarkerRole.Eye,
                 out Vector3 eye, hitRegions, bodies))
