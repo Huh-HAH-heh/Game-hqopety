@@ -641,7 +641,7 @@ public sealed class UnitAiSystem
             Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
-        if (status != EBTStatus.BT_SUCCESS)
+        if (status != behaviac.EBTStatus.BT_SUCCESS)
         {
             throw new InvalidOperationException(
                 $"Behaviac unit decision failed for unit index {unit}: {status}.");
