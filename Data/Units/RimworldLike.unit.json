@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "id": "rimworldlike",
+  "displayName": "\u041D\u043E\u0432\u044B\u0439 \u044E\u043D\u0438\u0442",
+  "description": "",
+  "runtimeTypeId": 1025,
+  "stats": {
+    "bodyType": "Colonist",
+    "moveSpeed": 2.8,
+    "width": 0.36,
+    "length": 0.5,
+    "height": 1,
+    "viewRange": 20,
+    "fieldOfView": 110,
+    "bodyMassKg": 75,
+    "muscleMassKg": 30,
+    "bodyFatKg": 13,
+    "bloodLiters": 5,
+    "baseEnergyKcal": 2200,
+    "baseWaterLiters": 2.5,
+    "strength": 4,
+    "constitution": 4,
+    "dexterity": 4,
+    "intelligence": 4
+  },
+  "regions": [
+    {
+      "id": "body.core",
+      "hitHalfHeight": 0.16,
+      "part": {
+        "id": "body.core",
+        "parentIndex": -1,
+        "x": 0.005,
+        "y": 0.48499998,
+        "z": 0.085,
+        "scaleX": 0.1,
+        "scaleY": 0.1,
+        "scaleZ": 0.1,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "SpinalChain",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": null,
+        "displayName": "\u0413\u043E\u043B\u043E\u0432\u0430"
+      },
+      "tissues": [
+        {
+          "id": "body.core.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 100,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Target, Locomotion",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        {
+          "id": "locomotion",
+          "roles": "Locomotion",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "custom.copy.body-core.001",
+      "hitHalfHeight": 0.1,
+      "part": {
+        "id": "custom.copy.body-core.001",
+        "parentIndex": -1,
+        "x": 0.01,
+        "y": 0.48499998,
+        "z": 0.225,
+        "scaleX": 0.09,
+        "scaleY": 0.09,
+        "scaleZ": 0.09,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "SpinalChain",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "\u0422\u0435\u043B\u043E"
+      },
+      "tissues": [
+        {
+          "id": "custom.copy.body-core.001.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Target, WeaponMount",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    },
+    {
+      "id": "custom.copy.custom-copy-body-core-001.001",
+      "hitHalfHeight": 0.1,
+      "part": {
+        "id": "custom.copy.custom-copy-body-core-001.001",
+        "parentIndex": -1,
+        "x": 0.055,
+        "y": 0.48499998,
+        "z": 0.32999998,
+        "scaleX": 0.05,
+        "scaleY": 0.05,
+        "scaleZ": 0.05,
+        "rotation": 0,
+        "rotationX": 0,
+        "rotationY": 0,
+        "followDistance": 0,
+        "primitive": "Circle",
+        "motion": "SpinalChain",
+        "anchor": "Parent",
+        "role": "Torso",
+        "pivot": "Center",
+        "symmetryPartnerId": "",
+        "displayName": "\u0413\u043E\u043B\u043E\u0432\u0430"
+      },
+      "tissues": [
+        {
+          "id": "custom.copy.custom-copy-body-core-001.001.tissue",
+          "parentId": "",
+          "part": "WholeBody",
+          "parentPart": "None",
+          "kind": "BodyPart",
+          "weight": 1,
+          "maxHitPoints": 30,
+          "armorZone": -1,
+          "projectileEnergyLoss": -1,
+          "projectilePenetrationLoss": -1
+        }
+      ],
+      "markers": [
+        {
+          "id": "target",
+          "roles": "Vision, Target, Aim",
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      ]
+    }
+  ],
+  "organs": [],
+  "startingEquipment": []
+}

@@ -1,0 +1,368 @@
+{
+  "Version": 3,
+  "Poses": [
+    {
+      "UnitType": 0,
+      "Posture": 3,
+      "Parts": [
+        {
+          "Id": "body.middle",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "body.lower",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "body.torso.upper",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "body.arm.left.upper",
+          "PositionX": 0,
+          "PositionY": -0.034100004,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0.1
+        },
+        {
+          "Id": "body.arm.left.lower",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 1.1
+        },
+        {
+          "Id": "body.arm.right.upper",
+          "PositionX": 0,
+          "PositionY": 0.034100004,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0.1
+        },
+        {
+          "Id": "body.arm.right.lower",
+          "PositionX": 0,
+          "PositionY": 0.011686832,
+          "PositionZ": 0.014999986,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 1.1
+        },
+        {
+          "Id": "body.leg.left.upper",
+          "PositionX": 0.009,
+          "PositionY": -0.028508324,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": -0.62
+        },
+        {
+          "Id": "body.leg.left.lower",
+          "PositionX": 0.01570294,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 1.15
+        },
+        {
+          "Id": "body.leg.right.upper",
+          "PositionX": 0.009,
+          "PositionY": 0.028508328,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": -0.62
+        },
+        {
+          "Id": "body.leg.right.lower",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 1.15
+        },
+        {
+          "Id": "body.neck",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "body.upper",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.segment.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-segment-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-segment-001.002",
+          "PositionX": 0,
+          "PositionY": -0.019999996,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-segment-001-002.001",
+          "PositionX": 0,
+          "PositionY": 0.030000001,
+          "PositionZ": 0.004999995,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.002",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.segment.002",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-segment-002.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.segment.003",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-segment-003.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.002",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        }
+      ]
+    },
+    {
+      "UnitType": 1025,
+      "Posture": 0,
+      "Parts": [
+        {
+          "Id": "body.core",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.body-core.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-body-core-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        }
+      ]
+    },
+    {
+      "UnitType": 1025,
+      "Posture": 1,
+      "Parts": [
+        {
+          "Id": "body.core",
+          "PositionX": -0.075,
+          "PositionY": 0,
+          "PositionZ": 0.13999999,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.body-core.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-body-core-001.001",
+          "PositionX": 0.030000001,
+          "PositionY": 0,
+          "PositionZ": -0.044999987,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        }
+      ]
+    },
+    {
+      "UnitType": 1025,
+      "Posture": 2,
+      "Parts": [
+        {
+          "Id": "body.core",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0.04,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.body-core.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-body-core-001.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        }
+      ]
+    },
+    {
+      "UnitType": 1025,
+      "Posture": 3,
+      "Parts": [
+        {
+          "Id": "body.core",
+          "PositionX": 0.02,
+          "PositionY": 0,
+          "PositionZ": 0.07,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.body-core.001",
+          "PositionX": 0,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        },
+        {
+          "Id": "custom.copy.custom-copy-body-core-001.001",
+          "PositionX": -0.0050000027,
+          "PositionY": 0,
+          "PositionZ": 0,
+          "RotationX": 0,
+          "RotationY": 0,
+          "RotationZ": 0
+        }
+      ]
+    }
+  ]
+}
