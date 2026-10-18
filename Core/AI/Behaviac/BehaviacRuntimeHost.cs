@@ -76,10 +76,16 @@ public static class BehaviacRuntimeHost
     private static void RegisterDecisionAgentMetadata()
     {
         const string agentTypeName = nameof(BehaviacUnitDecisionAgent);
-        uint classId = Utils.MakeVariableId(agentTypeName);
+        string fullAgentTypeName = typeof(BehaviacUnitDecisionAgent).FullName
+            ?? agentTypeName;
         var meta = new AgentMeta();
-        AgentMeta._AgentMetas_[classId] = meta;
+
+        // Keep the short alias for the checked-in runtime asset and the fully
+        // qualified name used by Designer-exported source trees.
+        AgentMeta._AgentMetas_[Utils.MakeVariableId(agentTypeName)] = meta;
+        AgentMeta._AgentMetas_[Utils.MakeVariableId(fullAgentTypeName)] = meta;
         AgentMeta.Register<BehaviacUnitDecisionAgent>(agentTypeName);
+        AgentMeta.Register<BehaviacUnitDecisionAgent>(fullAgentTypeName);
 
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldReturnDead),
             self => self.ShouldReturnDead());
