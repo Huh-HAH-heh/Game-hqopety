@@ -632,7 +632,10 @@ private static Vector3 GetMarkerWorldPosition(
             (UnitAnatomyMarkerRole.Eye | UnitAnatomyMarkerRole.Muzzle)) != 0
             ? units.HeadNormal[unitIndex]
             : units.BodyNormal[unitIndex];
-        facing = NormalizeHorizontal(facing);
+        float facingLengthSquared = facing.X * facing.X + facing.Y * facing.Y;
+        facing = facingLengthSquared > 0.000001f
+            ? new Vector3(facing.X / MathF.Sqrt(facingLengthSquared), facing.Y / MathF.Sqrt(facingLengthSquared), 0f)
+            : Vector3.UnitX;
 
         float heightFraction = (marker.Roles & UnitAnatomyMarkerRole.Eye) != 0
             ? 0.82f
