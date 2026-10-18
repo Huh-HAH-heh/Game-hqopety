@@ -152,7 +152,7 @@ public sealed class UnitAiSystem
 
             BehaviacUnitIntent intent = UseBehaviacDecisionLayer
                 ? SelectUnitIntent(
-                    units, health, vision, unit, suppressionState, isAlive)
+                    units, health, inventory, weapons, vision, unit, suppressionState, isAlive)
                 : BehaviacUnitIntent.None;
 
             if (!isAlive ||
@@ -399,8 +399,16 @@ public sealed class UnitAiSystem
 
             if (IsLowHealth(
                     health,
-                    unit))
+                    unit) &&
+                (!UseBehaviacDecisionLayer ||
+                 intent == BehaviacUnitIntent.RetreatToCover))
             {
+                if (UseBehaviacDecisionLayer &&
+                    Store.State[unit] != UnitAiState.SeekCover)
+                {
+                    Store.ClearGoal(unit);
+                }
+
                 if (Store.HasGoal[unit] &&
                     ReachedGoal(
                         units.Position[unit],
@@ -613,10 +621,13 @@ public sealed class UnitAiSystem
 
             if (Store.TargetMemory[unit] > 0f &&
                 (!UseBehaviacDecisionLayer ||
+                 intent == BehaviacUnitIntent.SuppressiveFire ||
                  intent == BehaviacUnitIntent.InvestigateLastKnownTarget ||
                  !targetVisible))
             {
-                if (HasSuppressFireWeapon(inventory, weapons, unit))
+                if ((!UseBehaviacDecisionLayer ||
+                     intent == BehaviacUnitIntent.SuppressiveFire) &&
+                    HasSuppressFireWeapon(inventory, weapons, unit))
                 {
                     Vector3 lastSeenAimPoint = Store.LastSeenAimPoint[unit];
                     if (lastSeenAimPoint == Vector3.Zero)
@@ -658,6 +669,8 @@ public sealed class UnitAiSystem
     private BehaviacUnitIntent SelectUnitIntent(
         UnitStore units,
         UnitHealthStore health,
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
         VisionSystem vision,
         int unit,
         UnitSuppressionState suppressionState,
@@ -701,7 +714,9 @@ public sealed class UnitAiSystem
         float healthRatio = health.OverallMaxHitPoints[unit] > 0f
             ? health.OverallHitPoints[unit] / health.OverallMaxHitPoints[unit]
             : 0f;
-        bool isHealthyEnoughToFlank = healthRatio >= LowHealthThreshold && !isSuppressed;
+        bool isLowHealth = healthRatio < LowHealthThreshold;
+        bool hasSuppressiveWeapon = HasSuppressFireWeapon(inventory, weapons, unit);
+        bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
 
         if (hasVisibleTarget && isHealthyEnoughToFlank && unit % 4 == 0)
@@ -728,6 +743,8 @@ public sealed class UnitAiSystem
             Store.HasGoal[unit] || _hasSuppressionCoverByUnit[unit],
             hasVisibleTarget,
             Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f,
+            isLowHealth,
+            hasSuppressiveWeapon,
             canFlank,
             isFlanking);
 
