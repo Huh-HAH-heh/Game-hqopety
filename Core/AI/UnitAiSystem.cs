@@ -786,26 +786,39 @@ public sealed class UnitAiSystem
 
         Vector2 forward = Vector2.Normalize(towardTarget);
         Vector2 side = new(-forward.Y, forward.X);
-        float sideSign = (unit & 1) == 0 ? 1f : -1f;
+        float preferredSide = (unit & 1) == 0 ? 1f : -1f;
 
-        // Move to a point behind and to one side of the target. This is a genuine
-        // movement command, not a debug-only role label.
-        float targetX = target.X - forward.X * 3f + side.X * 5f * sideSign;
-        float targetY = target.Y - forward.Y * 3f + side.Y * 5f * sideSign;
-        targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
-        targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+        // Try both sides and a shallower side-step if the preferred point is blocked.
+        // This reduces stalls near walls while keeping the maneuver deterministic.
+        for (int candidate = 0; candidate < 4; candidate++)
+        {
+            float sideSign = candidate % 2 == 0 ? preferredSide : -preferredSide;
+            float backoff = candidate < 2 ? 3f : 0f;
+            float targetX = target.X - forward.X * backoff + side.X * 5f * sideSign;
+            float targetY = target.Y - forward.Y * backoff + side.Y * 5f * sideSign;
+            targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
+            targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
 
-        int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
-        int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
-        waypoint = new Vector3(
-            tileX + 0.5f,
-            tileY + 0.5f,
-            worldMap.GetSurfaceHeight(tileX, tileY));
+            int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
+            if (worldMap.IsNavigationBlocked(tileX, tileY))
+                continue;
 
-        Vector2 toWaypoint = new(
-            waypoint.X - position.X,
-            waypoint.Y - position.Y);
-        return toWaypoint.LengthSquared() > 4f;
+            Vector3 candidateWaypoint = new(
+                tileX + 0.5f,
+                tileY + 0.5f,
+                worldMap.GetSurfaceHeight(tileX, tileY));
+            Vector2 toWaypoint = new(
+                candidateWaypoint.X - position.X,
+                candidateWaypoint.Y - position.Y);
+            if (toWaypoint.LengthSquared() <= 4f)
+                continue;
+
+            waypoint = candidateWaypoint;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryFindSearchWaypoint(
