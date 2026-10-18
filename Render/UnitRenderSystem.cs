@@ -336,8 +336,7 @@ public void DrawSnapshot(
         float screenScale = MathF.Max(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
-        float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
-        bool showUnitDetails = detailBlend > 0f;
+        bool showAimDetails = GetUnitDetailBlend(tilePixelSize * screenScale) > 0f;
 
         float centerX = cameraView.Center.X;
         float centerY = cameraView.Center.Y;
@@ -358,28 +357,50 @@ public void DrawSnapshot(
         _aiDebug.Clear();
 
         RenderUnitState[] units = snapshot.Units;
-        RenderBodyPart[] bodyParts = snapshot.BodyParts;
         for (int i = 0; i < units.Length; i++)
         {
             RenderUnitState unit = units[i];
             Vector3 position = unit.Position;
+            if (position.X < minX || position.X > maxX ||
+                position.Y < minY || position.Y > maxY)
+            {
+                continue;
+            }
+
             float x = position.X * tilePixelSize;
             float y = position.Y * tilePixelSize;
+            bool isAlive = unit.HitPoints > 0f;
+            float markerRadius = GetMarkerRadius(
+                unit.Width,
+                unit.Length,
+                tilePixelSize,
+                screenScale);
 
-            // Debug geometry is produced from the same immutable frame data
-            // as the unit markers; no live AI store reads happen on the render thread.
-            if (showAiDebug &&
-                unit.Index == selectedUnitIndex &&
-                unit.HitPoints > 0f)
+            // World rendering uses only the gameplay marker. The rig exists for
+            // anatomy editing and inspection; it is not live pawn geometry.
+            AppendUnitMarker(
+                _vertices,
+                _bodyOutlines,
+                _statusIcons,
+                x,
+                y,
+                markerRadius,
+                unit.HeadNormal,
+                unit.FactionTag,
+                isAlive,
+                unit.HealthRatio,
+                unit.Suppression,
+                unit.SuppressionState,
+                screenScale,
+                1f);
+
+            if (isAlive && showAiDebug && unit.Index == selectedUnitIndex)
             {
                 Color debugColor = GetAiColor(unit.AiState);
-
                 if (unit.HasTarget)
                 {
                     AppendDebugLine(
-                        _aiDebug,
-                        x,
-                        y,
+                        _aiDebug, x, y,
                         unit.TargetPosition.X * tilePixelSize,
                         unit.TargetPosition.Y * tilePixelSize,
                         new Color(debugColor.R, debugColor.G, debugColor.B, 140));
@@ -390,94 +411,12 @@ public void DrawSnapshot(
                     float goalX = unit.Goal.X * tilePixelSize;
                     float goalY = unit.Goal.Y * tilePixelSize;
                     AppendCircleOutline(
-                        _aiDebug,
-                        goalX,
-                        goalY,
-                        0.42f * tilePixelSize,
-                        debugColor,
-                        12);
+                        _aiDebug, goalX, goalY, 0.42f * tilePixelSize, debugColor, 12);
                     AppendDebugLine(
-                        _aiDebug,
-                        x,
-                        y,
-                        goalX,
-                        goalY,
+                        _aiDebug, x, y, goalX, goalY,
                         new Color(debugColor.R, debugColor.G, debugColor.B, 110));
                 }
-
             }
-
-            bool rootInView =
-                position.X >= minX && position.X <= maxX &&
-                position.Y >= minY && position.Y <= maxY;
-
-            // At macro zoom, individual limbs have no useful screen-space size.
-            // Don't scan every body part just to reject an off-screen unit.
-            if (!rootInView &&
-                (!showUnitDetails ||
-                 !IsAnyBodyPartInView(
-                    bodyParts,
-                    unit.BodyPartStart,
-                    unit.BodyPartCount,
-                    minX,
-                    maxX,
-                    minY,
-                    maxY)))
-            {
-                continue;
-            }
-
-            bool isAlive = unit.HitPoints > 0f;
-            float markerRadius = GetMarkerRadius(
-                unit.Width,
-                unit.Length,
-                tilePixelSize,
-                screenScale);
-
-            if (showUnitDetails)
-            {
-                int renderedParts = AppendBodyParts(
-                    _vertices,
-                    _bodyOutlines,
-                    bodyParts,
-                    unit.BodyPartStart,
-                    unit.BodyPartCount,
-                    unit.FactionTag,
-                    isAlive,
-                    tilePixelSize,
-                    screenScale,
-                    detailBlend);
-
-                if (renderedParts == 0)
-                {
-                    AppendUnitMarker(
-                        _vertices,
-                        _bodyOutlines,
-                        _statusIcons,
-                        x,
-                        y,
-                        markerRadius,
-                        unit.HeadNormal,
-                        unit.FactionTag,
-                        isAlive,
-                        unit.HealthRatio,
-                        unit.Suppression,
-                        unit.SuppressionState,
-                        screenScale,
-                        detailBlend);
-                }
-            }
-
-            // The gameplay marker is permanent and remains visible over the static rig.
-            // Zoom only controls anatomical detail; it never fades the unit's own marker.
-            AppendLowDetailUnitMarker(
-                _vertices,
-                x,
-                y,
-                markerRadius,
-                unit.FactionTag,
-                isAlive,
-                1f);
 
             if (!isAlive)
                 continue;
@@ -490,21 +429,17 @@ public void DrawSnapshot(
             {
                 float selectionRadius = MathF.Max(unit.Width, unit.Length) * 0.6f;
                 AppendSelection(
-                    _selection,
-                    x,
-                    y,
+                    _selection, x, y,
                     MathF.Max(selectionRadius, 0.45f) * tilePixelSize);
             }
         }
 
-        if (showUnitDetails)
+        if (showAimDetails)
         {
             RenderAimRing[] aimRings = snapshot.AimRings;
             for (int i = 0; i < aimRings.Length; i++)
             {
                 RenderAimRing aim = aimRings[i];
-
-                // Aim rings outside the camera never contribute visible pixels.
                 if (aim.AimPoint.X < minX || aim.AimPoint.X > maxX ||
                     aim.AimPoint.Y < minY || aim.AimPoint.Y > maxY)
                 {
@@ -516,7 +451,6 @@ public void DrawSnapshot(
                     (int)(78f * (1f - aim.Progress) + 12f),
                     0,
                     90);
-
                 AppendCircleOutline(
                     _aiming,
                     aim.AimPoint.X * tilePixelSize,
@@ -539,260 +473,6 @@ public void DrawSnapshot(
             window.Draw(_aiming);
         if (_aiDebug.VertexCount > 0)
             window.Draw(_aiDebug);
-    }
-
-    private static int AppendBodyParts(
-        VertexArray fills,
-        VertexArray outlines,
-        UnitBodyStore bodies,
-        int start,
-        int count,
-        ushort factionTag,
-        bool isAlive,
-        float tilePixelSize,
-        float screenScale,
-        float opacity = 1f)
-    {
-        if (start < 0 || count <= 0 || start >= bodies.Count)
-            return 0;
-
-        count = Math.Min(count, bodies.Count - start);
-        Vector3[] positions = bodies.WorldPosition;
-        Vector3[] scales = bodies.WorldScale;
-        float[] rotations = bodies.WorldRotation;
-        BodyPrimitive[] primitives = bodies.Primitive;
-        BodyPartRole[] roles = bodies.Role;
-
-        int rendered = 0;
-        for (int i = start; i < start + count; i++)
-        {
-            if (roles[i] == BodyPartRole.Internal)
-                continue;
-
-            AppendBodyPart(
-                fills,
-                outlines,
-                positions[i],
-                scales[i],
-                rotations[i],
-                primitives[i],
-                roles[i],
-                factionTag,
-                isAlive,
-                tilePixelSize,
-                screenScale,
-                opacity);
-            rendered++;
-        }
-
-        return rendered;
-    }
-
-    private static int AppendBodyParts(
-        VertexArray fills,
-        VertexArray outlines,
-        RenderBodyPart[] bodyParts,
-        int start,
-        int count,
-        ushort factionTag,
-        bool isAlive,
-        float tilePixelSize,
-        float screenScale,
-        float opacity = 1f)
-    {
-        if (start < 0 || count <= 0 || start >= bodyParts.Length)
-            return 0;
-
-        count = Math.Min(count, bodyParts.Length - start);
-        int rendered = 0;
-        for (int i = start; i < start + count; i++)
-        {
-            RenderBodyPart part = bodyParts[i];
-            if (part.Role == BodyPartRole.Internal)
-                continue;
-
-            AppendBodyPart(
-                fills,
-                outlines,
-                part.Position,
-                part.Scale,
-                part.Rotation,
-                part.Primitive,
-                part.Role,
-                factionTag,
-                isAlive,
-                tilePixelSize,
-                screenScale,
-                opacity);
-            rendered++;
-        }
-
-        return rendered;
-    }
-
-    private static int AppendHitRegions(
-        VertexArray fills,
-        VertexArray outlines,
-        UnitStore units,
-        UnitHitRegionStore hitRegions,
-        int unitIndex,
-        ushort factionTag,
-        bool isAlive,
-        float tilePixelSize,
-        float screenScale)
-    {
-        UnitHitRegionProfile? profile = hitRegions.GetProfile(unitIndex);
-        if (profile == null)
-            return 0;
-
-        ReadOnlySpan<UnitCircleHitRegion> regions = profile.Regions;
-        for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
-        {
-            UnitCircleHitRegion region = regions[regionIndex];
-            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
-                units,
-                unitIndex,
-                regionIndex,
-                hitRegions);
-            RenderBodyPart part = UnitHitRegionRenderGeometry.CreatePart(
-                units,
-                unitIndex,
-                region,
-                geometry);
-
-            AppendBodyPart(
-                fills,
-                outlines,
-                part.Position,
-                part.Scale,
-                part.Rotation,
-                part.Primitive,
-                part.Role,
-                factionTag,
-                isAlive,
-                tilePixelSize,
-                screenScale);
-        }
-
-        return regions.Length;
-    }
-
-    private static void AppendBodyPart(
-        VertexArray fills,
-        VertexArray outlines,
-        Vector3 position,
-        Vector3 scale,
-        float rotation,
-        BodyPrimitive primitive,
-        BodyPartRole role,
-        ushort factionTag,
-        bool isAlive,
-        float tilePixelSize,
-        float screenScale,
-        float opacity = 1f)
-    {
-        float radiusX = MathF.Abs(scale.X) * tilePixelSize;
-        float radiusY = MathF.Abs(scale.Y) * tilePixelSize;
-        if (radiusX <= 0f ||
-            (primitive != BodyPrimitive.Line && radiusY <= 0f))
-            return;
-
-        float centerX = position.X * tilePixelSize;
-        float centerY = position.Y * tilePixelSize;
-
-        Color fill = ApplyOpacity(GetBodyPartColor(role, factionTag, isAlive), opacity);
-        Color outline = ApplyOpacity(new Color(20, 26, 32, 245), opacity);
-
-        if (primitive == BodyPrimitive.Line)
-        {
-            float dx = MathF.Cos(rotation) * radiusX;
-            float dy = MathF.Sin(rotation) * radiusX;
-
-            AppendDebugLine(
-                outlines,
-                centerX - dx,
-                centerY - dy,
-                centerX + dx,
-                centerY + dy,
-                fill);
-            return;
-        }
-
-        int segments = MathF.Max(radiusX, radiusY) * screenScale >= 5f
-            ? 16
-            : 10;
-
-        if (primitive == BodyPrimitive.Box)
-        {
-            AppendOrientedRect(
-                fills,
-                centerX,
-                centerY,
-                radiusY,
-                radiusX,
-                rotation,
-                fill);
-        }
-        else if (primitive == BodyPrimitive.Triangle)
-        {
-            AppendTriangleFill(
-                fills,
-                centerX,
-                centerY,
-                radiusX,
-                radiusY,
-                rotation,
-                fill);
-        }
-        else
-        {
-            AppendEllipse(
-                fills,
-                centerX,
-                centerY,
-                radiusX,
-                radiusY,
-                rotation,
-                fill,
-                segments);
-        }
-
-        // Keep the outline slightly larger than the fill to preserve readability.
-        float outlinePad = 0.45f / MathF.Max(0.001f, screenScale);
-        if (primitive == BodyPrimitive.Box)
-        {
-            AppendOrientedRectOutline(
-                outlines,
-                centerX,
-                centerY,
-                radiusY + outlinePad,
-                radiusX + outlinePad,
-                rotation,
-                outline);
-        }
-        else if (primitive == BodyPrimitive.Triangle)
-        {
-            AppendTriangleOutline(
-                outlines,
-                centerX,
-                centerY,
-                radiusX + outlinePad,
-                radiusY + outlinePad,
-                rotation,
-                outline);
-        }
-        else
-        {
-            AppendEllipseOutline(
-                outlines,
-                centerX,
-                centerY,
-                radiusX + outlinePad,
-                radiusY + outlinePad,
-                rotation,
-                outline,
-                segments);
-        }
     }
 
     private static Color GetBodyPartColor(
@@ -861,58 +541,6 @@ public void DrawSnapshot(
 
         // Smoothstep avoids visible banding at the beginning and end of the fade.
         return t * t * (3f - 2f * t);
-    }
-
-    private static bool IsAnyBodyPartInView(
-        UnitBodyStore bodies,
-        int start,
-        int count,
-        float minX,
-        float maxX,
-        float minY,
-        float maxY)
-    {
-        if (start < 0 || count <= 0 || start >= bodies.Count)
-            return false;
-
-        count = Math.Min(count, bodies.Count - start);
-        Vector3[] positions = bodies.WorldPosition;
-        Vector3[] scales = bodies.WorldScale;
-        for (int i = start; i < start + count; i++)
-        {
-            Vector3 scale = scales[i];
-            float extent = MathF.Max(MathF.Abs(scale.X), MathF.Abs(scale.Y));
-            if (IsPartInView(positions[i], extent, minX, maxX, minY, maxY))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsAnyBodyPartInView(
-        RenderBodyPart[] bodyParts,
-        int start,
-        int count,
-        float minX,
-        float maxX,
-        float minY,
-        float maxY)
-    {
-        if (start < 0 || count <= 0 || start >= bodyParts.Length)
-            return false;
-
-        count = Math.Min(count, bodyParts.Length - start);
-        for (int i = start; i < start + count; i++)
-        {
-            RenderBodyPart part = bodyParts[i];
-            float extent = MathF.Max(
-                MathF.Abs(part.Scale.X),
-                MathF.Abs(part.Scale.Y));
-            if (IsPartInView(part.Position, extent, minX, maxX, minY, maxY))
-                return true;
-        }
-
-        return false;
     }
 
     private static void AppendEllipse(
@@ -1284,41 +912,6 @@ public void DrawSnapshot(
         return MathF.Max(
             2.0f / MathF.Max(0.001f, screenScale),
             MathF.Max(0.13f, footprint * 0.125f) * tilePixelSize);
-    }
-
-    private static void AppendLowDetailUnitMarker(
-        VertexArray vertices,
-        float x,
-        float y,
-        float radius,
-        ushort factionTag,
-        bool isAlive,
-        float opacity)
-    {
-        // A six-sided faction marker is enough when a full rig is sub-pixel.
-        // It replaces dozens of outlined limb primitives with six triangles.
-        Color color = ApplyOpacity(
-            GetBodyPartColor(BodyPartRole.Torso, factionTag, isAlive),
-            opacity);
-
-        const int segments = 6;
-        Vector2f center = new(x, y);
-
-        for (int i = 0; i < segments; i++)
-        {
-            float a0 = i * MathF.Tau / segments;
-            float a1 = (i + 1) * MathF.Tau / segments;
-            Vector2f p0 = new(
-                x + MathF.Cos(a0) * radius,
-                y + MathF.Sin(a0) * radius);
-            Vector2f p1 = new(
-                x + MathF.Cos(a1) * radius,
-                y + MathF.Sin(a1) * radius);
-
-            vertices.Append(new Vertex(center, color));
-            vertices.Append(new Vertex(p0, color));
-            vertices.Append(new Vertex(p1, color));
-        }
     }
 
     private static void AppendUnitMarker(
