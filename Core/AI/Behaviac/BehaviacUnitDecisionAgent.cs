@@ -7,10 +7,12 @@ public enum BehaviacUnitIntent : byte
     None = 0,
     Dead = 1,
     SeekCover = 2,
-    EngageTarget = 3,
+    RetreatToCover = 3,
     FlankTarget = 4,
-    InvestigateLastKnownTarget = 5,
-    Patrol = 6
+    EngageTarget = 5,
+    SuppressiveFire = 6,
+    InvestigateLastKnownTarget = 7,
+    Patrol = 8
 }
 
 /// <summary>
@@ -25,6 +27,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasCover { get; private set; }
     public bool HasVisibleTarget { get; private set; }
     public bool HasRecentTarget { get; private set; }
+    public bool IsLowHealth { get; private set; }
+    public bool HasSuppressiveWeapon { get; private set; }
     public bool CanFlank { get; private set; }
     public bool IsFlanking { get; private set; }
 
@@ -36,6 +40,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool hasCover,
         bool hasVisibleTarget,
         bool hasRecentTarget,
+        bool isLowHealth,
+        bool hasSuppressiveWeapon,
         bool canFlank,
         bool isFlanking)
     {
@@ -44,6 +50,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         HasCover = hasCover;
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
+        IsLowHealth = isLowHealth;
+        HasSuppressiveWeapon = hasSuppressiveWeapon;
         CanFlank = canFlank;
         IsFlanking = isFlanking;
         Intent = BehaviacUnitIntent.None;
@@ -54,8 +62,14 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool ShouldSeekCover() =>
         IsAlive && IsSuppressed && HasCover;
 
+    public bool ShouldRetreatToCover() =>
+        IsAlive && IsLowHealth && (HasVisibleTarget || HasRecentTarget);
+
     public bool ShouldEngageVisibleTarget() =>
         IsAlive && HasVisibleTarget;
+
+    public bool ShouldSuppressLastKnownTarget() =>
+        IsAlive && !HasVisibleTarget && HasRecentTarget && HasSuppressiveWeapon;
 
     public bool ShouldFlankVisibleTarget() =>
         IsAlive && !IsSuppressed && HasVisibleTarget && (CanFlank || IsFlanking);
