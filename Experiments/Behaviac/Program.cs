@@ -80,7 +80,8 @@ internal static class Program
         bool allPassed = true;
         try
         {
-            BehaviacRuntimeHost.Initialize(AppContext.BaseDirectory, Workspace.EFileFormat.EFF_cs);
+            string dataRoot = Path.Combine(AppContext.BaseDirectory, "BehaviacData");
+            BehaviacRuntimeHost.Initialize(dataRoot, Workspace.EFileFormat.EFF_cs);
             foreach (DecisionCase test in cases)
             {
                 BehaviacUnitDecisionAgent agent =
