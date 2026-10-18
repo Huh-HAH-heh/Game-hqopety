@@ -952,9 +952,10 @@ public sealed class UnitSimulation
         LastWeaponUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
-        // Keep the base anatomy rigid, but move its world transforms with the pawn.
+        // Apply the selected posture, saved pose transforms and articulated motion
+        // before projectile tracing so render and hit geometry use the same rig pose.
         phaseStarted = Stopwatch.GetTimestamp();
-        _bodySystem.UpdateStatic(Units, Bodies);
+        _bodySystem.Update(Units, Bodies, deltaTime);
         LastBodyUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
