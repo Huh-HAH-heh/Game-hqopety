@@ -16,8 +16,8 @@ public enum BehaviacUnitIntent : byte
 }
 
 /// <summary>
-/// Minimal facts-in / intent-out agent for the first Behaviac integration slice.
-/// It has no access to movement, combat or rendering systems.
+/// Facts-in / intent-out agent for the live tactical decision tree.
+/// It selects policies but has no direct access to movement, combat or rendering systems.
 /// </summary>
 [TypeMetaInfo()]
 public sealed class BehaviacUnitDecisionAgent : Agent
