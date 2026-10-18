@@ -9,7 +9,6 @@ namespace Core.Unit;
 public sealed class UnitSimulation
 {
     private readonly UnitMovementSystem _movementSystem;
-    private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
     private readonly UnitMetabolismSystem _metabolismSystem;
     private readonly UnitInventorySystem _inventorySystem;
@@ -110,9 +109,6 @@ public sealed class UnitSimulation
 
         _movementSystem =
             new UnitMovementSystem();
-
-        _bodySystem =
-            new UnitBodySystem();
 
         _healthSystem =
             new UnitHealthSystem();
@@ -947,10 +943,8 @@ public sealed class UnitSimulation
         LastWeaponUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
-        phaseStarted = Stopwatch.GetTimestamp();
-        _bodySystem.Update(Units, Bodies, deltaTime);
-        LastBodyUpdateMilliseconds =
-            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+        // Anatomy is a static damage model; gameplay never animates or poses its nodes.
+        LastBodyUpdateMilliseconds = 0d;
 
         phaseStarted = Stopwatch.GetTimestamp();
         _projectileSystem.Update(
@@ -1017,6 +1011,36 @@ public sealed class UnitSimulation
                 if (Inventory.Durability[durabilityIndex] > 0f)
                     multiplier = armor.MovementSpeedMultiplier;
             }
+        }
+
+        // Damaged/missing legs and feet slow the unit, but never change its gameplay collider.
+        int healthStart = unitIndex * Health.MaxParts;
+        int partCount = Health.PartCount[unitIndex];
+        float locomotionHp = 0f;
+        float locomotionMaxHp = 0f;
+        for (int partIndex = 0; partIndex < partCount; partIndex++)
+        {
+            int healthIndex = healthStart + partIndex;
+            UnitHealthPartId part = Health.Part[healthIndex];
+            bool locomotionPart = part is
+                UnitHealthPartId.LeftLeg or UnitHealthPartId.RightLeg or
+                UnitHealthPartId.LeftFoot or UnitHealthPartId.RightFoot;
+            if (!locomotionPart)
+                continue;
+
+            float maxHp = Health.MaxHitPoints[healthIndex];
+            if (maxHp <= 0f)
+                continue;
+
+            locomotionMaxHp += maxHp;
+            if (Health.Present[healthIndex])
+                locomotionHp += Math.Clamp(Health.HitPoints[healthIndex], 0f, maxHp);
+        }
+
+        if (locomotionMaxHp > 0f)
+        {
+            float locomotionRatio = Math.Clamp(locomotionHp / locomotionMaxHp, 0f, 1f);
+            multiplier *= 0.25f + 0.75f * locomotionRatio;
         }
 
         Units.MoveSpeed[unitIndex] =

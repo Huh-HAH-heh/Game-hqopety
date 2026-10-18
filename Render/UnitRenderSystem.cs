@@ -194,23 +194,9 @@ public sealed class UnitRenderSystem : IDisposable
                 unitPosition.Y >= minWorldY &&
                 unitPosition.Y <= maxWorldY;
 
-            int bodyStart = units.BodyStart[unitIndex];
-            int bodyCount = Math.Max(0, (int)units.BodyCount[unitIndex]);
-
-            // Long/segmented bodies can enter the camera while their root is off-screen.
-            if (!rootVisible &&
-                (!showUnitDetails ||
-                 !IsAnyBodyPartInView(
-                    bodies,
-                    bodyStart,
-                    bodyCount,
-                    minWorldX,
-                    maxWorldX,
-                    minWorldY,
-                    maxWorldY)))
-            {
+            // Only the gameplay collider contributes to the world-space footprint.
+            if (!rootVisible)
                 continue;
-            }
 
             float screenX = unitPosition.X * tilePixelSize;
             float screenY = unitPosition.Y * tilePixelSize;
@@ -226,54 +212,21 @@ public sealed class UnitRenderSystem : IDisposable
                 tilePixelSize,
                 screenScale);
 
-            if (showUnitDetails)
-            {
-                int renderedParts = AppendBodyParts(
-                    _vertices,
-                    _bodyOutlines,
-                    bodies,
-                    bodyStart,
-                    bodyCount,
-                    units.FactionTag[unitIndex],
-                    isAlive,
-                    tilePixelSize,
-                    screenScale,
-                    detailBlend);
-
-                // Keep the fallback marker only while a rig is unavailable.
-                if (renderedParts == 0)
-                {
-                    AppendUnitMarker(
-                        _vertices,
-                        _bodyOutlines,
-                        _statusIcons,
-                        screenX,
-                        screenY,
-                        markerRadius,
-                        headNormals[unitIndex],
-                        units.FactionTag[unitIndex],
-                        isAlive,
-                        healthRatio,
-                        suppression,
-                        suppressionState,
-                        screenScale,
-                        detailBlend);
-                }
-            }
-
-            // Cross-fade faction markers out while detailed anatomy fades in.
-            float markerOpacity = 1f - detailBlend;
-            if (markerOpacity > 0f)
-            {
-                AppendLowDetailUnitMarker(
-                    _vertices,
-                    screenX,
-                    screenY,
-                    markerRadius,
-                    units.FactionTag[unitIndex],
-                    isAlive,
-                    markerOpacity);
-            }
+            AppendUnitMarker(
+                _vertices,
+                _bodyOutlines,
+                _statusIcons,
+                screenX,
+                screenY,
+                markerRadius,
+                headNormals[unitIndex],
+                units.FactionTag[unitIndex],
+                isAlive,
+                healthRatio,
+                suppression,
+                suppressionState,
+                screenScale,
+                1f);
 
             if (!isAlive)
                 continue;
