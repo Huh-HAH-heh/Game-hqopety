@@ -1648,8 +1648,10 @@ public sealed class UnitAiSystem
                 goal.X - position.X,
                 goal.Y - position.Y);
 
+        // Don't switch patrol legs half a cell before the current target.
+        // Let the movement controller reach its fractional sub-cell destination.
         return delta.LengthSquared() <=
-               0.50f * 0.50f;
+               0.08f * 0.08f;
     }
 
     private static bool TryFindCover(
