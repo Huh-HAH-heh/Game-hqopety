@@ -783,19 +783,20 @@ public sealed class UnitAiSystem
         bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
 
-        if (hasVisibleTarget && isHealthyEnoughToFlank && unit % 4 == 0)
+        if (hasVisibleTarget && isHealthyEnoughToFlank && unit % 3 == 0)
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
             bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
                 _flankTargetByUnit[unit].Equals(units.GetId(visibleTargetIndex));
 
-            // A quarter of the formation are flankers. Start the maneuver before
-            // units are already at point-blank range; the old 7-20 tile window
-            // almost never activated in the 200-tile mass-combat scenario.
+            // Keep a small dedicated flanking cohort, but let it commit before
+            // frontal units collapse into close range. The 12 m floor makes
+            // the maneuver visible in the live mass-combat scenario without
+            // allowing already-engaged units to repeatedly circle one target.
             float maxFlankRange = MathF.Min(75f, MathF.Max(25f, units.ViewRange[unit] * 0.85f));
             canFlank = !alreadyFlankedThisTarget &&
-                distanceSquared >= 16f * 16f &&
+                distanceSquared >= 12f * 12f &&
                 distanceSquared <= maxFlankRange * maxFlankRange;
         }
 
