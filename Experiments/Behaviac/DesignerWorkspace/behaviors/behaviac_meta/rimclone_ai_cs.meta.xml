@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<meta>
+  <types />
+  <agents>
+    <agent classfullname="behaviac::Agent" DisplayName="behaviac::Agent" Desc="behaviac::Agent" IsRefType="true" IsImplemented="true">
+      <Method Name="VectorLength" DisplayName="VectorLength" Desc="VectorLength" Class="behaviac::Agent" ReturnType="int" ReturnTypeFullName="System.Int32" Static="true" Public="true" istask="false">
+        <Param Name="param0" Type="const IList&amp;" TypeFullName="System.Collections.IList" DisplayName="param0" Desc="param0" />
+      </Method>
+      <Method Name="VectorAdd" DisplayName="VectorAdd" Desc="VectorAdd" Class="behaviac::Agent" ReturnType="void" ReturnTypeFullName="System.Void" Static="true" Public="true" istask="false">
+        <Param Name="param0" Type="IList&amp;" TypeFullName="System.Collections.IList" DisplayName="param0" Desc="param0" />
+        <Param Name="param1" Type="const System::Object&amp;" TypeFullName="System.Object" DisplayName="param1" Desc="param1" />
+      </Method>
+      <Method Name="VectorRemove" DisplayName="VectorRemove" Desc="VectorRemove" Class="behaviac::Agent" ReturnType="void" ReturnTypeFullName="System.Void" Static="true" Public="true" istask="false">
+        <Param Name="param0" Type="IList&amp;" TypeFullName="System.Collections.IList" DisplayName="param0" Desc="param0" />
+        <Param Name="param1" Type="const System::Object&amp;" TypeFullName="System.Object" DisplayName="param1" Desc="param1" />
+      </Method>
+      <Method Name="VectorContains" DisplayName="VectorContains" Desc="VectorContains" Class="behaviac::Agent" ReturnType="bool" ReturnTypeFullName="System.Boolean" Static="true" Public="true" istask="false">
+        <Param Name="param0" Type="const IList&amp;" TypeFullName="System.Collections.IList" DisplayName="param0" Desc="param0" />
+        <Param Name="param1" Type="const System::Object&amp;" TypeFullName="System.Object" DisplayName="param1" Desc="param1" />
+      </Method>
+      <Method Name="VectorClear" DisplayName="VectorClear" Desc="VectorClear" Class="behaviac::Agent" ReturnType="void" ReturnTypeFullName="System.Void" Static="true" Public="true" istask="false">
+        <Param Name="param0" Type="IList&amp;" TypeFullName="System.Collections.IList" DisplayName="param0" Desc="param0" />
+      </Method>
+      <Method Name="LogMessage" DisplayName="LogMessage" Desc="LogMessage" Class="behaviac::Agent" ReturnType="void" ReturnTypeFullName="System.Void" Static="true" Public="true" istask="false">
+        <Param Name="param0" Type="const char*" TypeFullName="System.String" DisplayName="param0" Desc="param0" />
+      </Method>
+    </agent>
+    <agent classfullname="Core::AI::Behaviac::BehaviacUnitDecisionAgent" base="behaviac::Agent" DisplayName="RimClone Unit AI" Desc="Tactical facts and action bindings for unit behavior trees" IsRefType="true" IsCustomized="true">
+      <Member Name="IsAlive" DisplayName="Alive" Desc="Whether the unit is alive." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Member Name="IsSuppressed" DisplayName="Suppressed" Desc="Whether suppression or panic is active." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Member Name="HasCover" DisplayName="Has cover" Desc="Whether a valid cover goal exists." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Member Name="HasVisibleTarget" DisplayName="Visible target" Desc="Whether a hostile target is visible." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Member Name="HasRecentTarget" DisplayName="Recent target" Desc="Whether remembered target data is valid." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Member Name="IsLowHealth" DisplayName="Low health" Desc="Whether health is below the retreat threshold." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Member Name="HasSuppressiveWeapon" DisplayName="Suppressive weapon" Desc="Whether the current loadout supports suppression fire." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Member Name="CanFlank" DisplayName="Can flank" Desc="Whether the unit has a flank opportunity." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Member Name="IsFlanking" DisplayName="Is flanking" Desc="Whether a flank maneuver is already active." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" Type="bool" TypeFullName="System.Boolean" defaultvalue="false" Static="false" Public="true" Readonly="true" />
+      <Method Name="ShouldReturnDead" DisplayName="ShouldReturnDead" Desc="Check whether the unit is dead." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="bool" ReturnTypeFullName="System.Boolean" Static="false" Public="true" istask="false" />
+      <Method Name="ShouldSeekCover" DisplayName="ShouldSeekCover" Desc="Check whether suppression cover is available." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="bool" ReturnTypeFullName="System.Boolean" Static="false" Public="true" istask="false" />
+      <Method Name="ShouldRetreatToCover" DisplayName="ShouldRetreatToCover" Desc="Check whether low health requires retreat." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="bool" ReturnTypeFullName="System.Boolean" Static="false" Public="true" istask="false" />
+      <Method Name="ShouldFlankVisibleTarget" DisplayName="ShouldFlankVisibleTarget" Desc="Check whether the tree should select a flank maneuver." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="bool" ReturnTypeFullName="System.Boolean" Static="false" Public="true" istask="false" />
+      <Method Name="ShouldEngageVisibleTarget" DisplayName="ShouldEngageVisibleTarget" Desc="Check whether a visible hostile should be engaged." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="bool" ReturnTypeFullName="System.Boolean" Static="false" Public="true" istask="false" />
+      <Method Name="ShouldSuppressLastKnownTarget" DisplayName="ShouldSuppressLastKnownTarget" Desc="Check whether to use suppressive fire at a remembered target." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="bool" ReturnTypeFullName="System.Boolean" Static="false" Public="true" istask="false" />
+      <Method Name="ShouldInvestigateLastKnownTarget" DisplayName="ShouldInvestigateLastKnownTarget" Desc="Check whether to investigate a remembered target." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="bool" ReturnTypeFullName="System.Boolean" Static="false" Public="true" istask="false" />
+      <Method Name="SelectDead" DisplayName="SelectDead" Desc="Select the dead-unit intent." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="EBTStatus" ReturnTypeFullName="behaviac.EBTStatus" Static="false" Public="true" istask="false" />
+      <Method Name="SelectSeekCover" DisplayName="SelectSeekCover" Desc="Select the suppression-cover intent." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="EBTStatus" ReturnTypeFullName="behaviac.EBTStatus" Static="false" Public="true" istask="false" />
+      <Method Name="SelectRetreatToCover" DisplayName="SelectRetreatToCover" Desc="Select the low-health retreat intent." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="EBTStatus" ReturnTypeFullName="behaviac.EBTStatus" Static="false" Public="true" istask="false" />
+      <Method Name="SelectFlankTarget" DisplayName="SelectFlankTarget" Desc="Select the flank-maneuver intent." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="EBTStatus" ReturnTypeFullName="behaviac.EBTStatus" Static="false" Public="true" istask="false" />
+      <Method Name="SelectEngageTarget" DisplayName="SelectEngageTarget" Desc="Select the direct-engagement intent." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="EBTStatus" ReturnTypeFullName="behaviac.EBTStatus" Static="false" Public="true" istask="false" />
+      <Method Name="SelectSuppressiveFire" DisplayName="SelectSuppressiveFire" Desc="Select the suppressive-fire intent." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="EBTStatus" ReturnTypeFullName="behaviac.EBTStatus" Static="false" Public="true" istask="false" />
+      <Method Name="SelectInvestigateLastKnownTarget" DisplayName="SelectInvestigateLastKnownTarget" Desc="Select the investigation intent." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="EBTStatus" ReturnTypeFullName="behaviac.EBTStatus" Static="false" Public="true" istask="false" />
+      <Method Name="SelectPatrol" DisplayName="SelectPatrol" Desc="Select the patrol intent." Class="Core::AI::Behaviac::BehaviacUnitDecisionAgent" ReturnType="EBTStatus" ReturnTypeFullName="behaviac.EBTStatus" Static="false" Public="true" istask="false" />
+    </agent>
+  </agents>
+  <instances />
+</meta>
