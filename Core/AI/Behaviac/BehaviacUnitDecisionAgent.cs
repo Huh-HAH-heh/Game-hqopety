@@ -88,8 +88,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldTakePronePosition", "Prefer a prone firing position when distance and exposure justify it.")]
     public bool ShouldTakePronePosition() =>
-        IsAlive && HasVisibleTarget && !IsSuppressed && !CanFlank && !IsFlanking &&
-        ProneCombatUtility >= 0.60f;
+        IsAlive && HasVisibleTarget && !IsSuppressed && !IsLowHealth &&
+        !CanFlank && !IsFlanking && ProneCombatUtility >= 0.60f;
 
     [MethodMetaInfo("ShouldEngageVisibleTarget", "Check whether a visible target should be engaged.")]
     public bool ShouldEngageVisibleTarget() =>
