@@ -17,6 +17,7 @@ public sealed class UnitAiSystem
     private const float CoverSearchRadius = 8f;
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
+    private const float ProneCrawlFiringDistance = 9f;
     private static readonly int MaxAiPlanningParallelism =
         Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
@@ -582,7 +583,9 @@ public sealed class UnitAiSystem
                 Store.State[unit] = UnitAiState.Attack;
                 intent = BehaviacUnitIntent.EngageTarget;
             }
-            else
+            else if (!(UseBehaviacDecisionLayer &&
+                         targetVisible &&
+                         intent == BehaviacUnitIntent.ProneEngage))
             {
                 Store.ClearGoal(unit);
             }
@@ -591,6 +594,49 @@ public sealed class UnitAiSystem
                 (!UseBehaviacDecisionLayer ||
                  intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage))
             {
+                if (UseBehaviacDecisionLayer &&
+                    intent == BehaviacUnitIntent.ProneEngage)
+                {
+                    Vector3 position = units.Position[unit];
+                    Vector3 targetPosition = units.Position[target.Index];
+                    float dx = targetPosition.X - position.X;
+                    float dy = targetPosition.Y - position.Y;
+                    float distanceSquared = dx * dx + dy * dy;
+                    float crawlDistance = ProneCrawlFiringDistance + 1f;
+
+                    // At longer range, stay prone and crawl toward a reachable
+                    // firing ring. Once near the enemy, hold the prone silhouette
+                    // and continue through the normal aim/fire pipeline.
+                    if (distanceSquared > crawlDistance * crawlDistance &&
+                        TryFindProneCrawlWaypoint(
+                            units, worldMap, unit, target.Index, out Vector3 crawlWaypoint))
+                    {
+                        bool replaceGoal = !Store.HasGoal[unit] ||
+                            ReachedGoal(position, Store.Goal[unit]);
+                        if (Store.HasGoal[unit] && !replaceGoal)
+                        {
+                            float goalDx = Store.Goal[unit].X - crawlWaypoint.X;
+                            float goalDy = Store.Goal[unit].Y - crawlWaypoint.Y;
+                            replaceGoal = goalDx * goalDx + goalDy * goalDy > 9f;
+                        }
+
+                        if (replaceGoal)
+                            Store.SetGoal(unit, crawlWaypoint);
+
+                        if (Store.HasGoal[unit] &&
+                            !ReachedGoal(position, Store.Goal[unit]))
+                        {
+                            ClearAiming(weapons, unit);
+                            units.Target[unit] = Store.Goal[unit];
+                            units.HasTarget[unit] = true;
+                            Store.State[unit] = UnitAiState.Attack;
+                            continue;
+                        }
+                    }
+
+                    Store.ClearGoal(unit);
+                }
+
                 FaceTarget(
                     units,
                     unit,
@@ -865,7 +911,8 @@ public sealed class UnitAiSystem
             hasSuppressiveWeapon,
             canFlank,
             isFlanking,
-            proneUtility);
+            proneUtility,
+            units.Posture[unit] == UnitPosture.Lying);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
@@ -875,6 +922,76 @@ public sealed class UnitAiSystem
         }
 
         return agent.Intent;
+    }
+
+    private static bool TryFindProneCrawlWaypoint(
+        UnitStore units,
+        WorldMap worldMap,
+        int unit,
+        int targetIndex,
+        out Vector3 waypoint)
+    {
+        waypoint = Vector3.Zero;
+        Vector3 position = units.Position[unit];
+        Vector3 target = units.Position[targetIndex];
+        Vector2 awayFromTarget = new(position.X - target.X, position.Y - target.Y);
+        float lengthSquared = awayFromTarget.LengthSquared();
+        if (lengthSquared < 0.01f)
+            return false;
+
+        Vector2 forward = Vector2.Normalize(awayFromTarget);
+        Vector2 side = new(-forward.Y, forward.X);
+
+        // Prefer a direct approach point, then deterministic side steps around
+        // blocked terrain. This gives prone units a real crawl destination while
+        // letting the shared navigation system find the route there.
+        for (int candidate = 0; candidate < 8; candidate++)
+        {
+            float standoff = candidate < 3 ? ProneCrawlFiringDistance : ProneCrawlFiringDistance + 1.5f;
+            float lateral = candidate switch
+            {
+                0 => 0f,
+                1 => 4f,
+                2 => -4f,
+                3 => 6f,
+                4 => -6f,
+                5 => 8f,
+                6 => -8f,
+                _ => 0f
+            };
+
+            float targetX = target.X + forward.X * standoff + side.X * lateral;
+            float targetY = target.Y + forward.Y * standoff + side.Y * lateral;
+            targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
+            targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+
+            int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
+            if (worldMap.IsNavigationBlocked(tileX, tileY))
+                continue;
+
+            Vector3 candidateWaypoint = new(
+                tileX + 0.5f,
+                tileY + 0.5f,
+                worldMap.GetSurfaceHeight(tileX, tileY));
+            Vector2 toWaypoint = new(
+                candidateWaypoint.X - position.X,
+                candidateWaypoint.Y - position.Y);
+            if (toWaypoint.LengthSquared() < 1f)
+                continue;
+
+            Vector2 fromTarget = new(
+                candidateWaypoint.X - target.X,
+                candidateWaypoint.Y - target.Y);
+            if (fromTarget.LengthSquared() <
+                (ProneCrawlFiringDistance - 1f) * (ProneCrawlFiringDistance - 1f))
+                continue;
+
+            waypoint = candidateWaypoint;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryFindFlankWaypoint(
