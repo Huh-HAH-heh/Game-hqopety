@@ -471,6 +471,8 @@ public sealed class UnitAiSystem
                     targetChanged)
                 {
                     Store.ClearGoal(unit);
+                    _flankTargetByUnit[unit] = target;
+                    _hasFlankTargetByUnit[unit] = true;
                     if (TryFindFlankWaypoint(
                             units,
                             worldMap,
@@ -479,8 +481,6 @@ public sealed class UnitAiSystem
                             out Vector3 flankWaypoint))
                     {
                         Store.SetGoal(unit, flankWaypoint);
-                        _flankTargetByUnit[unit] = target;
-                        _hasFlankTargetByUnit[unit] = true;
                     }
                 }
 
