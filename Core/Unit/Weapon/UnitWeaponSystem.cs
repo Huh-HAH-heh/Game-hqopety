@@ -942,6 +942,8 @@ private static AmmunitionConfig? GetCurrentAmmunition(
         int unitIndex)
     {
         if (_bodies != null &&
+            _hitRegions?.GetProfile(unitIndex) is UnitAnatomyProfile anatomy &&
+            anatomy.HasSharedShapes &&
             UnitHitSystem.TryGetMarkerPoint(
                 units,
                 unitIndex,
