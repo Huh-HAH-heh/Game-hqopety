@@ -20,7 +20,7 @@
       "Role": "Torso",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Туловище — средний сегмент"
     },
     {
       "Id": "body.lower",
@@ -41,7 +41,7 @@
       "Role": "Torso",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Туловище — нижний сегмент"
     },
     {
       "Id": "body.torso.upper",
@@ -62,7 +62,7 @@
       "Role": "Torso",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Туловище — верхний сегмент"
     },
     {
       "Id": "body.arm.left.upper",
@@ -83,7 +83,7 @@
       "Role": "UpperArm",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": "\u041B\u0435\u0432\u0430\u044F \u0440\u0443\u043A\u0430 - \u0432\u0435\u0440\u0445"
+      "DisplayName": "Плечо левой руки"
     },
     {
       "Id": "body.arm.left.lower",
@@ -104,7 +104,7 @@
       "Role": "Forearm",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Предплечье левой руки"
     },
     {
       "Id": "body.arm.right.upper",
@@ -125,7 +125,7 @@
       "Role": "UpperArm",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Плечо правой руки"
     },
     {
       "Id": "body.arm.right.lower",
@@ -146,7 +146,7 @@
       "Role": "Forearm",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Предплечье правой руки"
     },
     {
       "Id": "body.leg.left.upper",
@@ -167,7 +167,7 @@
       "Role": "Thigh",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Бедро левой ноги"
     },
     {
       "Id": "body.leg.left.lower",
@@ -188,7 +188,7 @@
       "Role": "Shin",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Голень левой ноги"
     },
     {
       "Id": "body.leg.right.upper",
@@ -209,7 +209,7 @@
       "Role": "Thigh",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Бедро правой ноги"
     },
     {
       "Id": "body.leg.right.lower",
@@ -230,7 +230,7 @@
       "Role": "Shin",
       "Pivot": "Start",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Голень правой ноги"
     },
     {
       "Id": "body.neck",
@@ -251,7 +251,7 @@
       "Role": "Neck",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Шея"
     },
     {
       "Id": "body.upper",
@@ -272,7 +272,7 @@
       "Role": "Head",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": null
+      "DisplayName": "Голова"
     },
     {
       "Id": "custom.segment.001",
@@ -293,7 +293,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u0441\u0443\u0441\u0442\u0430\u0432 \u043B\u0435\u0432\u043E\u0439 \u043D\u043E\u0433\u0438"
+      "DisplayName": "Левый коленный сустав"
     },
     {
       "Id": "custom.copy.custom-segment-001.001",
@@ -314,7 +314,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u0441\u0443\u0441\u0442\u0430\u0432 \u043F\u0440\u0430\u0432\u043E\u0439 \u043D\u043E\u0433\u0438"
+      "DisplayName": "Правый коленный сустав"
     },
     {
       "Id": "custom.copy.custom-segment-001.002",
@@ -335,7 +335,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u043B\u0435\u0432\u043E\u0435\u043F\u0440\u0435\u0434\u043F\u043B\u0435\u0447\u044C\u0435 \u0441\u0443\u0441\u0442\u0430\u0432 \u043B\u0435\u0432\u0430\u044F\u0440\u0443\u043A\u0430"
+      "DisplayName": "Левый локтевой сустав"
     },
     {
       "Id": "custom.copy.custom-copy-custom-segment-001-002.001",
@@ -356,12 +356,12 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u043F\u0440\u0430\u0432\u043E\u0435\u043F\u0440\u0435\u0434\u043B\u0435\u0447\u044C\u0435 \u0441\u0443\u0441\u0442\u0430\u0432 \u043F\u0440\u0430\u0432\u0430\u044F\u0440\u0443\u043A\u0430"
+      "DisplayName": "Правый локтевой сустав"
     },
     {
       "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.001",
       "ParentIndex": 3,
-      "X": 4.0909275E-05,
+      "X": 0.000040909275,
       "Y": -0.025000006,
       "Z": 0.120000005,
       "ScaleX": 0.035068184,
@@ -377,7 +377,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u043B\u0435\u0432\u0430\u044F\u0440\u0443\u043A\u0430\u0441\u0443\u0441\u0442\u0430\u0432\u0432\u0435\u0440\u0445"
+      "DisplayName": "Дополнительный левый плечевой сустав"
     },
     {
       "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001.002",
@@ -398,7 +398,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u0441\u0443\u0441\u0442\u0430\u0432 \u043F\u0440\u0430\u0432\u043E\u0439 \u043D\u043E\u0433\u0438"
+      "DisplayName": "Дополнительный правый локтевой сустав"
     },
     {
       "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.001",
@@ -419,12 +419,12 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u0441\u0443\u0442\u0441\u0430\u0432 \u043B\u0435\u0432\u043E\u0439 \u043D\u043E\u0433\u0438"
+      "DisplayName": "Дополнительный левый локтевой сустав"
     },
     {
       "Id": "custom.segment.002",
       "ParentIndex": -1,
-      "X": 4.0978193E-08,
+      "X": 4.0978193e-8,
       "Y": -0.099999994,
       "Z": -0.13,
       "ScaleX": 0.03,
@@ -440,12 +440,12 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": "\u043F\u0440\u0430\u0432\u044B\u0439 \u0433\u043E\u043B\u0438\u043D\u043E\u0441\u0442\u043E\u043F"
+      "DisplayName": "Правый голеностопный сустав"
     },
     {
       "Id": "custom.copy.custom-segment-002.001",
       "ParentIndex": -1,
-      "X": 4.0978193E-08,
+      "X": 4.0978193e-8,
       "Y": 0.099999994,
       "Z": -0.13,
       "ScaleX": 0.03,
@@ -461,7 +461,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u043B\u0435\u0432\u044B\u0439 \u0433\u043E\u043B\u0438\u043D\u043E\u0441\u0442\u043E\u043F"
+      "DisplayName": "Левый голеностопный сустав"
     },
     {
       "Id": "custom.segment.003",
@@ -482,7 +482,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": null,
-      "DisplayName": "\u043B\u0435\u0432\u0430\u044F \u0441\u0442\u0443\u043F\u043D\u044F"
+      "DisplayName": "Левая стопа"
     },
     {
       "Id": "custom.copy.custom-segment-003.001",
@@ -503,7 +503,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u043F\u0440\u0430\u0432\u0430\u044F \u0441\u0442\u0443\u043F\u043D\u044F"
+      "DisplayName": "Правая стопа"
     },
     {
       "Id": "custom.copy.custom-copy-custom-copy-custom-copy-custom-copy-custom-segment-001-002-001-001-001.002",
@@ -524,7 +524,7 @@
       "Role": "Generic",
       "Pivot": "Center",
       "SymmetryPartnerId": "",
-      "DisplayName": "\u043F\u0440\u0430\u0432\u043E\u0435\u043F\u0440\u0435\u0434\u043F\u043B\u0435\u0447\u044C\u0435 \u0441\u0443\u0441\u0442\u0430\u0432"
+      "DisplayName": "Дополнительный правый плечевой сустав"
     }
   ]
 }
