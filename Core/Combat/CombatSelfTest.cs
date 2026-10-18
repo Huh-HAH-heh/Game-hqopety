@@ -994,7 +994,7 @@ public static class CombatSelfTest
             // standing-height point above the prone silhouette.
             if (!UnitHitSystem.IsPointInsideRegion(
                     simulation.Units, target.Index, regionIndex, aimPoint,
-                    tolerance: 0.003f, simulation.HitRegions, simulation.Bodies) ||
+                    tolerance: 0.003f, hitRegions: simulation.HitRegions, bodies: simulation.Bodies) ||
                 aimPoint.Z > proneHeightLimit)
             {
                 return false;
@@ -1016,7 +1016,7 @@ public static class CombatSelfTest
         return check.VisibleTargetPoint.Z <= proneHeightLimit &&
             UnitHitSystem.IsPointInsideRegion(
                 simulation.Units, target.Index, visibleRegion, check.VisibleTargetPoint,
-                tolerance: 0.003f, simulation.HitRegions, simulation.Bodies);
+                tolerance: 0.003f, hitRegions: simulation.HitRegions, bodies: simulation.Bodies);
     }
 
     private static bool TestAccuracy()
