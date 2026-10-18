@@ -15,18 +15,19 @@ namespace RimClone
                 return;
             }
 
-            if (Array.Exists(args, arg => string.Equals(arg, "--ai=legacy", System.StringComparison.OrdinalIgnoreCase)))
-                System.Environment.SetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI", "0");
-            else if (Array.Exists(args, arg => string.Equals(arg, "--ai=behaviac", System.StringComparison.OrdinalIgnoreCase)))
-                System.Environment.SetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI", "1");
+            bool useLegacyAi = Array.Exists(
+                args,
+                arg => string.Equals(arg, "--ai=legacy", System.StringComparison.OrdinalIgnoreCase));
 
-            bool behaviacEnabled = !string.Equals(
-                System.Environment.GetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI"),
-                "0",
-                System.StringComparison.Ordinal);
+            // Ignore stale PowerShell/IDE environment values during ordinary game launches.
+            // Behaviac is the default; legacy AI is available only as an explicit comparison.
+            System.Environment.SetEnvironmentVariable(
+                "RIMCLONE_USE_BEHAVIAC_AI",
+                useLegacyAi ? "0" : "1");
+
             System.Console.WriteLine(
-                $"[AI] Policy={(behaviacEnabled ? "BEHAVIAC XML runtime" : "LEGACY C# path")}; " +
-                "override with --ai=behaviac or --ai=legacy.");
+                $"[AI] Policy={(useLegacyAi ? "LEGACY C# path" : "BEHAVIAC XML runtime")}; " +
+                $"Override: --ai={(useLegacyAi ? "behaviac" : "legacy")} for comparison.");
 
             GameBootstrap.Run();
         }
