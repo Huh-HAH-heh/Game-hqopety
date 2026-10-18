@@ -8,8 +8,9 @@ public enum BehaviacUnitIntent : byte
     Dead = 1,
     SeekCover = 2,
     EngageTarget = 3,
-    InvestigateLastKnownTarget = 4,
-    Patrol = 5
+    FlankTarget = 4,
+    InvestigateLastKnownTarget = 5,
+    Patrol = 6
 }
 
 /// <summary>
@@ -24,6 +25,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasCover { get; private set; }
     public bool HasVisibleTarget { get; private set; }
     public bool HasRecentTarget { get; private set; }
+    public bool CanFlank { get; private set; }
+    public bool IsFlanking { get; private set; }
 
     public BehaviacUnitIntent Intent { get; private set; }
 
@@ -32,13 +35,17 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool isSuppressed,
         bool hasCover,
         bool hasVisibleTarget,
-        bool hasRecentTarget)
+        bool hasRecentTarget,
+        bool canFlank,
+        bool isFlanking)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
         HasCover = hasCover;
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
+        CanFlank = canFlank;
+        IsFlanking = isFlanking;
         Intent = BehaviacUnitIntent.None;
     }
 
@@ -49,6 +56,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     public bool ShouldEngageVisibleTarget() =>
         IsAlive && HasVisibleTarget;
+
+    public bool ShouldFlankVisibleTarget() =>
+        IsAlive && !IsSuppressed && HasVisibleTarget && (CanFlank || IsFlanking);
 
     public bool ShouldInvestigateLastKnownTarget() =>
         IsAlive && HasRecentTarget;
