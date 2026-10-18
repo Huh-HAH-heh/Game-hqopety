@@ -77,7 +77,31 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool ShouldInvestigateLastKnownTarget() =>
         IsAlive && HasRecentTarget;
 
-    public EBTStatus SelectIntent(BehaviacUnitIntent intent)
+    public EBTStatus SelectDead() =>
+        SelectIntent(BehaviacUnitIntent.Dead);
+
+    public EBTStatus SelectSeekCover() =>
+        SelectIntent(BehaviacUnitIntent.SeekCover);
+
+    public EBTStatus SelectRetreatToCover() =>
+        SelectIntent(BehaviacUnitIntent.RetreatToCover);
+
+    public EBTStatus SelectFlankTarget() =>
+        SelectIntent(BehaviacUnitIntent.FlankTarget);
+
+    public EBTStatus SelectEngageTarget() =>
+        SelectIntent(BehaviacUnitIntent.EngageTarget);
+
+    public EBTStatus SelectSuppressiveFire() =>
+        SelectIntent(BehaviacUnitIntent.SuppressiveFire);
+
+    public EBTStatus SelectInvestigateLastKnownTarget() =>
+        SelectIntent(BehaviacUnitIntent.InvestigateLastKnownTarget);
+
+    public EBTStatus SelectPatrol() =>
+        SelectIntent(BehaviacUnitIntent.Patrol);
+
+    private EBTStatus SelectIntent(BehaviacUnitIntent intent)
     {
         Intent = intent;
         return EBTStatus.BT_SUCCESS;
