@@ -122,7 +122,6 @@ public sealed class UnitRenderSystem : IDisposable
 
         Vector3[] headNormals = units.HeadNormal;
         UnitType[] unitTypes = units.Type;
-        UnitBodyStore bodies = simulation.Bodies;
 
         if (showUnitDetails)
         {
@@ -181,8 +180,7 @@ public sealed class UnitRenderSystem : IDisposable
                         units,
                         worldMap,
                         selectedIndex,
-                        unitIndex,
-                        simulation.Bodies).State;
+                        unitIndex).State;
 
                 if (state != VisionState.Visible)
                     continue;
@@ -1397,8 +1395,7 @@ private static void AppendSuppressionDebug(
         Vector3 observerEye =
             simulation.Vision.GetEyePosition(
                 units,
-                observerIndex,
-                simulation.Bodies);
+                observerIndex);
 
         float headAngle =
             MathF.Atan2(
@@ -1494,8 +1491,7 @@ private static void AppendSuppressionDebug(
                     units,
                     worldMap,
                     observerIndex,
-                    targetIndex,
-                    simulation.Bodies);
+                    targetIndex);
 
             Color targetColor =
                 GetVisionColor(
