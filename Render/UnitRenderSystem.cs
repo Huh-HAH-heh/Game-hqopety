@@ -1306,13 +1306,12 @@ public void DrawSnapshot(
         bool isAlive,
         float opacity)
     {
-        // A six-sided faction marker is enough when a full rig is sub-pixel.
-        // It replaces dozens of outlined limb primitives with six triangles.
+        // A compact filled circle stays readable at macro zoom without drawing the rig.
         Color color = ApplyOpacity(
             GetBodyPartColor(BodyPartRole.Torso, factionTag, isAlive),
             opacity);
 
-        const int segments = 6;
+        const int segments = 16;
         Vector2f center = new(x, y);
 
         for (int i = 0; i < segments; i++)
