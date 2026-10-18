@@ -184,6 +184,17 @@ public sealed class UnitAiSystem
             else if (suppressionState is UnitSuppressionState.Suppressed or UnitSuppressionState.Panicked)
                 units.Posture[unit] = UnitPosture.Lying;
 
+            if ((suppressionState == UnitSuppressionState.Panicked ||
+                 suppressionState == UnitSuppressionState.Suppressed) &&
+                Store.HasGoal[unit] &&
+                Store.State[unit] != UnitAiState.SeekCover)
+            {
+                // Don't let a patrol or flank waypoint masquerade as a cover goal
+                // when suppression changes the selected behavior.
+                Store.ClearGoal(unit);
+                units.HasTarget[unit] = false;
+            }
+
             if (suppressionState == UnitSuppressionState.Panicked ||
                 suppressionState == UnitSuppressionState.Suppressed)
             {
@@ -622,8 +633,7 @@ public sealed class UnitAiSystem
             if (Store.TargetMemory[unit] > 0f &&
                 (!UseBehaviacDecisionLayer ||
                  intent == BehaviacUnitIntent.SuppressiveFire ||
-                 intent == BehaviacUnitIntent.InvestigateLastKnownTarget ||
-                 !targetVisible))
+                 intent == BehaviacUnitIntent.InvestigateLastKnownTarget))
             {
                 if ((!UseBehaviacDecisionLayer ||
                      intent == BehaviacUnitIntent.SuppressiveFire) &&
