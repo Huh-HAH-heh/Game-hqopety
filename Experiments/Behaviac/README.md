@@ -15,3 +15,7 @@ dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release
 Expected output: `Behaviac smoke test: PASS`.
 
 The upstream C# runtime and original license notices are in `Vendor/BehaviacRuntime`. This is a compatibility test, not a benchmark; activation in the real unit AI will be a separate stage.
+
+## Stage 3: unit intent decision
+
+The optional `--decision-test` mode builds a tiny C# behavior tree inside `Core`, feeds it six deterministic combinations of unit facts and checks the selected intent. It does not mutate `UnitAiSystem`; movement, combat, vision and health remain outside Behaviac.

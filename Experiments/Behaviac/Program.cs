@@ -1,15 +1,23 @@
+using System;
 using behaviac;
+using Core.AI.Behaviac;
 
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
+    {
+        return Array.Exists(args, arg => string.Equals(arg, "--decision-test", StringComparison.Ordinal))
+            ? RunDecisionTests()
+            : RunXmlSmokeTest();
+    }
+
+    private static int RunXmlSmokeTest()
     {
         string dataRoot = Path.Combine(AppContext.BaseDirectory, "BehaviacData")
             .Replace('\\', '/');
 
         try
         {
-            // Configure all global settings before the workspace is first initialized.
             Config.IsLogging = false;
             Config.IsSocketing = false;
             Config.IsHotReload = false;
@@ -41,7 +49,7 @@ internal static class Program
                 agent.Action3Calls == 9;
 
             Console.WriteLine(
-                $"Behaviac smoke test: {(passed ? "PASS" : "FAIL")}; " +
+                $"Behaviac XML smoke test: {(passed ? "PASS" : "FAIL")}; " +
                 $"status={status}; ticks={ticks}; " +
                 $"conditions={agent.ConditionCalls}; " +
                 $"action1={agent.Action1Calls}; action3={agent.Action3Calls}");
@@ -51,25 +59,68 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Behaviac smoke test: FAIL; {exception}");
-            try
-            {
-                Workspace.Instance.Cleanup();
-            }
-            catch
-            {
-                // Preserve the original failure in the test output.
-            }
-
+            Console.Error.WriteLine($"Behaviac XML smoke test: FAIL; {exception}");
+            try { Workspace.Instance.Cleanup(); } catch { }
             return 1;
         }
     }
+
+    private static int RunDecisionTests()
+    {
+        var cases = new[]
+        {
+            new DecisionCase("dead overrides every other fact", false, true, true, true, true, BehaviacUnitIntent.Dead),
+            new DecisionCase("cover seeking overrides visible target", true, true, true, true, true, BehaviacUnitIntent.SeekCover),
+            new DecisionCase("visible target engages", true, false, false, true, false, BehaviacUnitIntent.EngageTarget),
+            new DecisionCase("recent target is investigated", true, false, false, false, true, BehaviacUnitIntent.InvestigateLastKnownTarget),
+            new DecisionCase("no target falls back to patrol", true, false, false, false, false, BehaviacUnitIntent.Patrol),
+            new DecisionCase("suppression without cover does not force cover intent", true, true, false, true, false, BehaviacUnitIntent.EngageTarget)
+        };
+
+        bool allPassed = true;
+        try
+        {
+            BehaviacRuntimeHost.Initialize(AppContext.BaseDirectory, Workspace.EFileFormat.EFF_cs);
+            foreach (DecisionCase test in cases)
+            {
+                BehaviacUnitDecisionAgent agent =
+                    BehaviacRuntimeHost.CreateAgent<BehaviacUnitDecisionAgent>("rimclone_unit_decision");
+                agent.SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
+                    test.HasVisibleTarget, test.HasRecentTarget);
+
+                EBTStatus status = BehaviacRuntimeHost.Tick(agent);
+                bool passed = status == EBTStatus.BT_SUCCESS && agent.Intent == test.Expected;
+                allPassed &= passed;
+                Console.WriteLine(
+                    $"Behaviac decision test: {(passed ? "PASS" : "FAIL")}; " +
+                    $"{test.Name}; status={status}; intent={agent.Intent}; expected={test.Expected}");
+            }
+
+            BehaviacRuntimeHost.Shutdown();
+            Console.WriteLine($"Behaviac decision tests: {(allPassed ? "PASS" : "FAIL")}; {cases.Length} cases");
+            return allPassed ? 0 : 1;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Behaviac decision tests: FAIL; {exception}");
+            try { BehaviacRuntimeHost.Shutdown(); } catch { }
+            return 1;
+        }
+    }
+
+    private sealed record DecisionCase(
+        string Name,
+        bool IsAlive,
+        bool IsSuppressed,
+        bool HasCover,
+        bool HasVisibleTarget,
+        bool HasRecentTarget,
+        BehaviacUnitIntent Expected);
 }
 
 [TypeMetaInfo()]
 internal sealed class CBTPlayer : Agent
 {
-    // Names and signatures must match the metadata exported by the Behaviac demo.
     [MemberMetaInfo()]
     public uint m_iBaseSpeed;
 

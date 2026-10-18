@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using behaviac;
 
 namespace Core.AI.Behaviac;
@@ -13,6 +14,8 @@ public static class BehaviacRuntimeHost
     private static readonly object Sync = new();
     private static string? _behaviorRoot;
     private static bool _initialized;
+    private static Workspace.EFileFormat _fileFormat;
+    private static readonly HashSet<Type> RegisteredAgentTypes = new();
 
     public static bool IsInitialized
     {
@@ -23,7 +26,7 @@ public static class BehaviacRuntimeHost
         }
     }
 
-    public static void Initialize(string behaviorRoot)
+    public static void Initialize(string behaviorRoot, Workspace.EFileFormat fileFormat = Workspace.EFileFormat.EFF_xml)
     {
         if (string.IsNullOrWhiteSpace(behaviorRoot))
             throw new ArgumentException("A Behaviac behavior directory is required.", nameof(behaviorRoot));
@@ -36,8 +39,8 @@ public static class BehaviacRuntimeHost
         {
             if (_initialized)
             {
-                if (!string.Equals(_behaviorRoot, fullPath, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("Behaviac workspace is already initialized with a different behavior directory.");
+                if (!string.Equals(_behaviorRoot, fullPath, StringComparison.OrdinalIgnoreCase) || _fileFormat != fileFormat)
+                    throw new InvalidOperationException("Behaviac workspace is already initialized with different settings.");
                 return;
             }
 
@@ -46,9 +49,10 @@ public static class BehaviacRuntimeHost
             Config.IsSocketing = false;
             Config.IsHotReload = false;
             Workspace.Instance.FilePath = fullPath;
-            Workspace.Instance.FileFormat = Workspace.EFileFormat.EFF_xml;
+            Workspace.Instance.FileFormat = fileFormat;
 
             _behaviorRoot = fullPath;
+            _fileFormat = fileFormat;
             _initialized = true;
         }
     }
@@ -64,7 +68,9 @@ public static class BehaviacRuntimeHost
             if (!_initialized)
                 throw new InvalidOperationException("Initialize BehaviacRuntimeHost before creating an agent.");
 
-            Agent.RegisterInstanceName<TAgent>();
+            if (RegisteredAgentTypes.Add(typeof(TAgent)))
+                Agent.RegisterInstanceName<TAgent>();
+
             var agent = new TAgent();
             if (!agent.btload(behaviorName))
                 throw new InvalidOperationException($"Behaviac failed to load behavior '{behaviorName}'.");

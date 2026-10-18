@@ -52,3 +52,5 @@ jobs:
 
       - name: Run Behaviac .NET 10 compatibility probe
         run: dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release
+      - name: Run Behaviac unit-intent decision tests
+        run: dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release -- --decision-test
