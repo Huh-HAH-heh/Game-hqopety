@@ -1897,6 +1897,10 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 _status = changed
                     ? $"«{PartName(_regionIds[_selectedPart])}» отвязана от родителя с сохранением мирового положения."
                     : "Эта часть уже привязана к корню.";
+
+                // The inspector holds a copy of BodyPartDefinition from before
+                // the click. Never draw its stale transform controls this frame.
+                return;
             }
         }
 
