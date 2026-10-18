@@ -50,14 +50,5 @@ jobs:
       - name: Run simulation self-tests
         run: dotnet run --project App/App.csproj --configuration Release --no-build -- --self-test
 
-      - name: Extract Behaviac sources for isolated compatibility probe
-        shell: pwsh
-        run: |
-          $archive = Join-Path $env:GITHUB_WORKSPACE "Интересные фреймворки/behaviac-master.zip"
-          $destination = Join-Path $env:GITHUB_WORKSPACE "Experiments/Behaviac/.work"
-          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
-          $sourceRoot = Join-Path $destination "behaviac-master"
-          if (-not (Test-Path (Join-Path $sourceRoot "integration/demo_running/behaviac/Workspace.cs"))) {
-            throw "Behaviac source root was not found after extraction."
-          }
-          dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release "-p:BehaviacSourceRoot=$sourceRoot"
+      - name: Run Behaviac .NET 10 compatibility probe
+        run: dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release

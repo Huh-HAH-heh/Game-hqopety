@@ -1,21 +1,17 @@
 # Behaviac compatibility probe
 
-This is stage 1 of evaluating Behaviac for RimClone. It does not alter or replace the game's current AI.
+This is stage 1 of evaluating Behaviac for RimClone. The game's current AI remains unchanged.
 
-The probe compiles the C# runtime from the repository's archived `behaviac-master.zip` against .NET 10, loads the upstream `demo_running` behavior tree from XML, executes it, and checks that the expected condition/action sequence completes.
+The test compiles the vendored C# runtime against .NET 10, loads Behaviac's upstream `demo_running` behavior tree from XML, executes it, and verifies the expected condition/action sequence.
 
-## Run locally (PowerShell)
+## Run locally
 
 From the repository root:
 
 ```powershell
-$archive = "Интересные фреймворки/behaviac-master.zip"
-$destination = "Experiments/Behaviac/.work"
-Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
-$sourceRoot = (Resolve-Path "$destination/behaviac-master").Path
-dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release "-p:BehaviacSourceRoot=$sourceRoot"
+dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj -c Release
 ```
 
-Expected output contains `Behaviac smoke test: PASS`. Any build or runtime failure is a blocker to further integration and should be fixed before adding an adapter to the in-game AI.
+Expected output: `Behaviac smoke test: PASS`.
 
-The upstream runtime source is compiled directly for this experiment; it is not copied into RimClone's production projects. Preserve the upstream Behaviac license and third-party license notices when deciding on distribution.
+The upstream C# runtime and original license notices are in `Vendor/BehaviacRuntime`. This is a compatibility test, not a benchmark; activation in the real unit AI will be a separate stage.
