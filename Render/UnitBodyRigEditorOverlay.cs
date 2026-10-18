@@ -1846,21 +1846,9 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         ImguiNative.igSeparator();
         TextImGui(PartName(_regionIds[_selectedPart]));
         TextImGui($"Внутренний ID: {_regionIds[_selectedPart]}");
-        string parent = part.ParentIndex >= 0 ? PartName(_regionIds[part.ParentIndex]) : "Корень юнита";
-        TextImGui($"Родитель: {parent}");
-
-        if (ButtonImGui(_parentSelectionActive ? "Выбери родителя слева…" : "Назначить родителя"))
-        {
-            _symmetryToolActive = false;
-            _symmetrySourcePart = -1;
-            _parentSelectionActive = !_parentSelectionActive;
-            _parentSourcePart = _parentSelectionActive ? _selectedPart : -1;
-            _status = _parentSelectionActive
-                ? $"Назначь родителя для «{PartName(_regionIds[_parentSourcePart])}»: выбери часть выше неё слева."
-                : "Выбор родителя отменён.";
-        }
+        DrawImGuiParentCombo();
         ImguiNative.igSameLine(0f, 5f);
-        if (ButtonImGui("Отвязать"))
+        if (ButtonImGui("Отвязать", 88f))
         {
             bool changed = DetachPartPreservingLayout(_selectedPart);
             if (changed) Save();
@@ -2604,6 +2592,77 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 : marker.Roles & ~role;
             UpdateSelectedMarker(current => CopyMarker(current, roles: roles));
         }
+    }
+
+    private unsafe void DrawImGuiParentCombo()
+    {
+        if (_parts.Length == 0 || _regionIds.Length != _parts.Length)
+            return;
+
+        int childIndex = Math.Clamp(_selectedPart, 0, _parts.Length - 1);
+        int currentParent = _parts[childIndex].ParentIndex;
+        string currentLabel = currentParent >= 0 && currentParent < _parts.Length
+            ? $"{currentParent + 1:00} {PartName(_regionIds[currentParent])}"
+            : "Корень юнита";
+
+        if (!ImguiNative.igBeginCombo("Родитель", currentLabel, ImGuiComboFlags.None))
+            return;
+
+        if (ImguiNative.igSelectable_Bool(
+                "Корень юнита##parent_root",
+                currentParent < 0,
+                ImGuiSelectableFlags.None,
+                new ImGuiVector2(0f, 0f)) &&
+            currentParent >= 0)
+        {
+            bool changed = DetachPartPreservingLayout(childIndex);
+            _parentSelectionActive = false;
+            _parentSourcePart = -1;
+            _symmetryToolActive = false;
+            _symmetrySourcePart = -1;
+
+            if (changed)
+            {
+                SaveParentHierarchyEdit();
+                RefreshProjectedGeometry();
+                _status = $"«{PartName(_regionIds[childIndex])}» привязана к корню; мировое положение сохранено.";
+            }
+        }
+
+        bool parentChanged = false;
+        for (int candidate = 0; candidate < _parts.Length; candidate++)
+        {
+            if (candidate == childIndex ||
+                WouldCreateParentCycle(childIndex, candidate))
+                continue;
+
+            string label = $"{candidate + 1:00} {PartName(_regionIds[candidate])}##parent_{candidate}";
+            bool selected = candidate == currentParent;
+            if (!ImguiNative.igSelectable_Bool(
+                    label, selected, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 0f)) ||
+                selected)
+                continue;
+
+            parentChanged = TrySetPartParent(childIndex, candidate);
+            _imguiNamePartIndex = -1;
+            break;
+        }
+
+        ImguiNative.igEndCombo();
+
+        if (parentChanged)
+            EnsureSelectionVisible();
+    }
+
+    private void SaveParentHierarchyEdit()
+    {
+        bool wasEditingPose = _editingPose;
+        if (wasEditingPose)
+            SavePose();
+
+        _editingPose = false;
+        Save();
+        _editingPose = wasEditingPose;
     }
 
     private unsafe void DrawImGuiStringCombo(
@@ -5170,10 +5229,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
         string childId = _regionIds[childIndex];
         string parentName = PartName(_regionIds[parentIndex]);
+        BodyPartDefinition previousChild = _parts[childIndex];
         BindPartToParentPreservingLayout(childIndex, parentIndex);
         if (!ReorderPartsParentFirst())
         {
-            _status = "Не удалось перестроить иерархию. Изменение не сохранено.";
+            // Parent changes are transactional. Do not leave the in-memory rig
+            // pointing at an invalid or out-of-order parent after a failed reorder.
+            _parts[childIndex] = previousChild;
+            _status = "Иерархия невалидна; назначение отменено, исходная связь восстановлена.";
             RefreshProjectedGeometry();
             return false;
         }
@@ -5188,12 +5251,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         _hasSurfaceSnapDirection = false;
         RefreshProjectedGeometry();
 
-        bool wasEditingPose = _editingPose;
-        if (wasEditingPose)
-            SavePose();
-        _editingPose = false;
-        Save();
-        _editingPose = wasEditingPose;
+        SaveParentHierarchyEdit();
 
         _status = $"Назначен родитель «{parentName}»; мировое положение сохранено.";
         return true;
@@ -5209,6 +5267,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
             if (current >= _parts.Length)
                 return true;
             current = _parts[current].ParentIndex;
+            if (current < -1)
+                return true;
         }
 
         return current >= 0;
