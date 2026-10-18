@@ -1832,6 +1832,27 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 : "Назначение родителя отменено.";
         }
 
+        if (!_editingPose && _parentSelectionActive &&
+            ButtonImGui("Сделать эту часть корнем", _listPanel.Size.X - 28f))
+        {
+            int childIndex = _parentSourcePart;
+            string childId = _regionIds[childIndex];
+            bool changed = DetachPartPreservingLayout(childIndex);
+            _parentSelectionActive = false;
+            _parentSourcePart = -1;
+            if (changed)
+            {
+                _selectedPart = Array.IndexOf(_regionIds, childId);
+                SaveParentHierarchyEdit();
+                RefreshProjectedGeometry();
+                _status = $"«{PartName(childId)}» стала корнем; мировое положение сохранено.";
+            }
+            else
+            {
+                _status = $"«{PartName(childId)}» уже является корнем.";
+            }
+        }
+
         string symmetryLabel = _symmetryToolActive ? "Выбери парную часть…" : $"Симметрия: {CountSymmetryPairs()} пар";
         if (ButtonImGui(symmetryLabel, _listPanel.Size.X - 28f))
         {
