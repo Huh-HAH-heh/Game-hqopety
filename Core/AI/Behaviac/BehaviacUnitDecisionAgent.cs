@@ -42,6 +42,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MemberMetaInfo("Is flanking", "Whether this unit is already executing a flank maneuver.", true)]
     public bool IsFlanking { get; private set; }
 
+    [MemberMetaInfo("Already prone", "Whether the unit is currently lying down and can continue a crawl.", true)]
+    public bool IsProne { get; private set; }
+
     [MemberMetaInfo("Prone combat utility", "How beneficial a low prone firing position is right now (0 to 1).", true)]
     public float ProneCombatUtility { get; private set; }
 
@@ -58,7 +61,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool hasSuppressiveWeapon,
         bool canFlank,
         bool isFlanking,
-        float proneCombatUtility = 0f)
+        float proneCombatUtility = 0f,
+        bool isProne = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -69,6 +73,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         HasSuppressiveWeapon = hasSuppressiveWeapon;
         CanFlank = canFlank;
         IsFlanking = isFlanking;
+        IsProne = isProne;
         ProneCombatUtility = float.IsFinite(proneCombatUtility)
             ? System.Math.Clamp(proneCombatUtility, 0f, 1f)
             : 0f;
@@ -89,7 +94,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldTakePronePosition", "Prefer a prone firing position when distance and exposure justify it.")]
     public bool ShouldTakePronePosition() =>
         IsAlive && HasVisibleTarget && !IsSuppressed && !IsLowHealth &&
-        !CanFlank && !IsFlanking && ProneCombatUtility >= 0.60f;
+        !CanFlank && !IsFlanking && (ProneCombatUtility >= 0.60f || IsProne);
 
     [MethodMetaInfo("ShouldEngageVisibleTarget", "Check whether a visible target should be engaged.")]
     public bool ShouldEngageVisibleTarget() =>
