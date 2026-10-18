@@ -6,16 +6,9 @@ RimClone-specific facts and action bindings are registered in `BehaviacRuntimeHo
 
 ## Live intents in the XML tree
 
-The selector tests branches in priority order:
+The root selector tests high-priority safety branches first: `Dead`, suppression-driven `SeekCover`, then `RetreatToCover`. Visible enemies enter a nested **Combat Response** sequence and selector: try `FlankTarget` when the unit is eligible; otherwise fall through to `EngageTarget`. This is an actual nested Behaviac selector in both the runtime XML and Designer workspace, not just a flat list of C# if-statements.
 
-1. `Dead` — stop aiming/movement and mark the unit dead.
-2. `SeekCover` — suppression cover overrides offensive action.
-3. `RetreatToCover` — when health is below the existing threshold, use the current cover search before normal engagement.
-4. `FlankTarget` — healthy, unsuppressed flankers move to a lateral waypoint around a visible enemy.
-5. `EngageTarget` — hold a firing position and use the existing weapon/combat systems.
-6. `SuppressiveFire` — when the target is no longer visible, use the existing suppression-fire path if the unit has a compatible weapon.
-7. `InvestigateLastKnownTarget` — otherwise investigate the last known target position.
-8. `Patrol` — continue the game's existing search-waypoint behavior if there is no known target.
+If no visible-target branch succeeds, the tree tries `SuppressiveFire` against a remembered point, `InvestigateLastKnownTarget` through the blind terrain, and finally `Patrol` when there is no current target. The selected intent continues into RimClone's existing pathfinding, movement, weapon and damage systems.
 
 One third of unit slots are eligible to be flankers, selected deterministically. Flanking starts at 12 map units and continues up to the lesser of 75 units or 85% of the unit's vision range. The lower threshold was deliberately widened because front-line units often acquire a clear target only after advancing through the terrain folds. The maneuver uses a lateral supporting-fire position, tries alternate sides around blocked tiles, stays stable for the same target and is interrupted by suppression, low health or target loss. On completion, the unit returns to normal combat instead of oscillating around the enemy.
 
