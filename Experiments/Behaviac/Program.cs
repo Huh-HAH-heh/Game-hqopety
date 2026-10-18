@@ -90,7 +90,7 @@ internal static class Program
                     BehaviacRuntimeHost.CreateAgent<BehaviacUnitDecisionAgent>("rimclone_unit_decision");
                 agent.SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
                     test.HasVisibleTarget, test.HasRecentTarget, test.IsLowHealth,
-                    test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking);
+                    test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking, test.ProneCombatUtility);
 
                 EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                 BehaviacUnitIntent directIntent = ResolveDirect(test);
@@ -140,7 +140,7 @@ internal static class Program
 
                     agents[unit].SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
                         test.HasVisibleTarget, test.HasRecentTarget, test.IsLowHealth,
-                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking);
+                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking, test.ProneCombatUtility);
                     _ = BehaviacRuntimeHost.Tick(agents[unit]);
                 }
             }
@@ -175,7 +175,7 @@ internal static class Program
                     BehaviacUnitDecisionAgent agent = agents[unit];
                     agent.SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
                         test.HasVisibleTarget, test.HasRecentTarget, test.IsLowHealth,
-                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking);
+                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking, test.ProneCombatUtility);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
@@ -230,6 +230,8 @@ internal static class Program
         new("flanker selects a flank maneuver", true, false, false, true, false, BehaviacUnitIntent.FlankTarget, true, false),
         new("ongoing flank survives closing distance", true, false, false, true, false, BehaviacUnitIntent.FlankTarget, false, true),
         new("ordinary unit engages visible target", true, false, false, true, false, BehaviacUnitIntent.EngageTarget),
+        new("exposed unit chooses a prone firing position", true, false, false, true, false, BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.75f),
+        new("low prone utility keeps a normal firing posture", true, false, false, true, false, BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.40f),
         new("lost target with suppressive weapon uses fire support", true, false, false, false, true, BehaviacUnitIntent.SuppressiveFire, false, false, false, true),
         new("recent target without suppressive weapon is investigated", true, false, false, false, true, BehaviacUnitIntent.InvestigateLastKnownTarget),
         new("no target falls back to patrol", true, false, false, false, false, BehaviacUnitIntent.Patrol),
@@ -252,7 +254,17 @@ internal static class Program
             return BehaviacUnitIntent.FlankTarget;
 
         if (test.HasVisibleTarget)
+        {
+            if (!test.IsSuppressed &&
+                !test.CanFlank &&
+                !test.IsFlanking &&
+                test.ProneCombatUtility >= 0.60f)
+            {
+                return BehaviacUnitIntent.ProneEngage;
+            }
+
             return BehaviacUnitIntent.EngageTarget;
+        }
 
         if (test.HasRecentTarget && test.HasSuppressiveWeapon)
             return BehaviacUnitIntent.SuppressiveFire;
@@ -274,7 +286,8 @@ internal static class Program
         bool CanFlank = false,
         bool IsFlanking = false,
         bool IsLowHealth = false,
-        bool HasSuppressiveWeapon = false);
+        bool HasSuppressiveWeapon = false,
+        float ProneCombatUtility = 0f);
 }
 
 [TypeMetaInfo()]
