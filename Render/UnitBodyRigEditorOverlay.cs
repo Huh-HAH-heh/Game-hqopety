@@ -1818,10 +1818,30 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
         ImguiNative.igEndChild();
 
-        if (ButtonImGui("Добавить часть", _listPanel.Size.X - 28f)) AddRegion();
-        if (ButtonImGui("Копировать часть", _listPanel.Size.X - 28f)) CopySelectedPart();
-        if (ButtonImGui("Добавить примеры форм", _listPanel.Size.X - 28f)) AddAllPrimitiveExamples();
-        if (ButtonImGui("Удалить свою часть", _listPanel.Size.X - 28f)) RemoveSelectedCustomRegion();
+        if (ButtonImGui("Добавить часть", _listPanel.Size.X - 28f))
+        {
+            CancelParentSelection();
+            AddRegion();
+        }
+        if (ButtonImGui("Копировать часть", _listPanel.Size.X - 28f))
+        {
+            CancelParentSelection();
+            CopySelectedPart();
+        }
+        if (ButtonImGui("Добавить примеры форм", _listPanel.Size.X - 28f))
+        {
+            CancelParentSelection();
+            AddAllPrimitiveExamples();
+        }
+        if (ButtonImGui("Удалить свою часть", _listPanel.Size.X - 28f))
+        {
+            CancelParentSelection();
+            RemoveSelectedCustomRegion();
+        }
+
+        if (_parentSelectionActive &&
+            (uint)_parentSourcePart >= (uint)_regionIds.Length)
+            CancelParentSelection();
 
         string parentToolLabel = _parentSelectionActive
             ? $"Выбрать родителя для «{PartName(_regionIds[_parentSourcePart])}»…"
@@ -1874,6 +1894,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         }
         if (!_editingPose && ButtonImGui("Отвязать все части", _listPanel.Size.X - 28f))
         {
+            CancelParentSelection();
             bool changed = DetachAllParentsPreservingLayout();
             if (changed)
             {
@@ -3263,6 +3284,12 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
 
     private static unsafe void TextImGui(string text) => ImguiNative.igTextUnformatted(text, null);
     private static unsafe bool ButtonImGui(string label, float width = 0f) => ImguiNative.igButton(label, new ImGuiVector2(width, 0f));
+
+    private void CancelParentSelection()
+    {
+        _parentSelectionActive = false;
+        _parentSourcePart = -1;
+    }
 
     private void SelectPartFromImGui(int index)
     {
