@@ -247,6 +247,19 @@ public sealed class UnitWeaponSystem
             return false;
         }
 
+        // Apply pawn skill and posture to every shot, including auto-fire and
+        // continued bursts that are emitted by UnitWeaponSystem.Update rather
+        // than an AI decision tick.
+        float skillSpread = _skills?.GetShootingSpreadMultiplier(unitIndex) ?? 1f;
+        float postureSpread = units.Posture[unitIndex] switch
+        {
+            UnitPosture.Lying => 0.78f,
+            UnitPosture.Crouching => 0.86f,
+            UnitPosture.Sitting => 0.92f,
+            _ => 1f
+        };
+        accuracyMultiplier *= skillSpread * postureSpread;
+
         short inventorySlot =
             inventory.GetWeaponEquipment(
                 unitIndex,

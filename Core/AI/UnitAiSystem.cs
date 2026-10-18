@@ -1180,17 +1180,7 @@ public sealed class UnitAiSystem
         UnitSuppressionStore suppression,
         int unit)
     {
-        float skillMultiplier = _skills?.GetShootingSpreadMultiplier(unit) ?? 1f;
-        float postureMultiplier = units.Posture[unit] switch
-        {
-            UnitPosture.Lying => 0.78f,
-            UnitPosture.Crouching => 0.86f,
-            UnitPosture.Sitting => 0.92f,
-            _ => 1f
-        };
-        return Math.Clamp(
-            suppression.GetAccuracyMultiplier(unit) * skillMultiplier * postureMultiplier,
-            0.45f, 2f);
+        return Math.Clamp(suppression.GetAccuracyMultiplier(unit), 1f, 1.55f);
     }
 
     private bool TryFireAnyRangedWeapon(
