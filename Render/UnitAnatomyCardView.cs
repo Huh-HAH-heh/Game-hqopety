@@ -80,21 +80,19 @@ public sealed class UnitAnatomyCardView : IDisposable
         bool showOrgans)
     {
         UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(unit.Type).Anatomy;
-        int start = unit.BodyPartStart;
-        if (start < 0 || start >= bodyParts.Length)
-        {
-            DrawEmpty(window, x, y, width, height);
-            return;
-        }
-
-        int count = Math.Min(unit.BodyPartCount, bodyParts.Length - start);
+        bodyParts = BuildStaticBodyParts(profile, unit.Position);
+        int start = 0;
+        int count = Math.Min(profile.NodeCount, bodyParts.Length);
         if (count <= 0)
         {
             DrawEmpty(window, x, y, width, height);
             return;
         }
 
-        float bodyAngle = MathF.Atan2(unit.BodyNormal.Y, unit.BodyNormal.X);
+        // The damage anatomy has a stable orientation and never follows the pawn's posture or facing.
+        float bodyAngle = 0f;
+        
+
         float margin = 7f;
         float gap = 6f;
         float panelWidth = (width - margin * 2f - gap * 2f) / 3f;
@@ -137,6 +135,72 @@ public sealed class UnitAnatomyCardView : IDisposable
         }
     }
 
+    private static RenderBodyPart[] BuildStaticBodyParts(
+        UnitAnatomyProfile profile,
+        NumericsVector3 unitPosition)
+    {
+        ReadOnlySpan<BodyPartDefinition> definitions = profile.BodyParts;
+        int count = definitions.Length;
+        var result = new RenderBodyPart[count];
+        var positions = new NumericsVector3[count];
+        var orientations = new System.Numerics.Quaternion[count];
+        var rotations = new float[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            BodyPartDefinition part = definitions[i];
+            int parent = part.ParentIndex;
+            NumericsVector3 origin = unitPosition;
+            System.Numerics.Quaternion positionOrientation = System.Numerics.Quaternion.Identity;
+            System.Numerics.Quaternion parentOrientation = System.Numerics.Quaternion.Identity;
+            float parentRotation = 0f;
+
+            if (part.Anchor == BodyPartAnchor.Parent && parent >= 0 && parent < i)
+            {
+                origin = positions[parent];
+                positionOrientation = orientations[parent];
+                parentOrientation = orientations[parent];
+                parentRotation = rotations[parent];
+            }
+
+            NumericsVector3 localEuler = new(
+                part.LocalRotationX,
+                part.LocalRotationY,
+                part.LocalRotation);
+            System.Numerics.Quaternion orientation =
+                BodyPartTransformMath.Compose(parentOrientation, localEuler);
+
+            float rotation = BodyPartTransformMath.Project(
+                part.Scale, orientation, 0, 1).Rotation;
+            if (MathF.Abs(localEuler.X) < 0.0001f &&
+                MathF.Abs(localEuler.Y) < 0.0001f &&
+                MathF.Abs(parentOrientation.X) < 0.0001f &&
+                MathF.Abs(parentOrientation.Y) < 0.0001f)
+            {
+                rotation = parentRotation + localEuler.Z;
+            }
+
+            NumericsVector3 joint = origin +
+                BodyPartTransformMath.TransformPosition(part.LocalPosition, positionOrientation);
+            if (part.Pivot == BodyPartPivot.Start)
+            {
+                joint += BodyPartTransformMath.TransformPosition(
+                    new NumericsVector3(MathF.Abs(part.Scale.X), 0f, 0f),
+                    orientation);
+            }
+
+            NumericsVector3 projectedScale = BodyPartTransformMath.Project(
+                part.Scale, orientation, 0, 1).Scale;
+            positions[i] = joint;
+            orientations[i] = orientation;
+            rotations[i] = rotation;
+            result[i] = new RenderBodyPart(
+                joint, projectedScale, rotation, part.Primitive, part.Role);
+        }
+
+        return result;
+    }
+
     private void DrawProjection(
         RenderWindow window,
         RenderUnitState unit,
@@ -160,6 +224,9 @@ public sealed class UnitAnatomyCardView : IDisposable
 
         for (int i = 0; i < count; i++)
         {
+            if (i < profile.NodeCount && !IsNodeVisible(profile, i, details))
+                continue;
+
             ProjectedGeometry geometry = ProjectBodyPart(
                 bodyParts[start + i], unit.Position, bodyAngle, projection);
             IncludeBounds(geometry, ref minX, ref minY, ref maxX, ref maxY);
@@ -197,6 +264,9 @@ public sealed class UnitAnatomyCardView : IDisposable
 
         for (int i = 0; i < count; i++)
         {
+            if (i < profile.NodeCount && !IsNodeVisible(profile, i, details))
+                continue;
+
             RenderBodyPart part = bodyParts[start + i];
             ProjectedGeometry geometry = ProjectBodyPart(
                 part, unit.Position, bodyAngle, projection);
@@ -308,7 +378,8 @@ public sealed class UnitAnatomyCardView : IDisposable
         }
 
         int parentIndex = start + parentRegion;
-        if ((uint)parentIndex >= (uint)bodyParts.Length)
+        if ((uint)parentIndex >= (uint)bodyParts.Length ||
+            !IsNodeVisible(profile, parentRegion, details))
         {
             geometry = default;
             return false;
@@ -388,6 +459,46 @@ public sealed class UnitAnatomyCardView : IDisposable
             screenRotation,
             primitive,
             Math.Clamp(ratio, 0f, 1f));
+    }
+
+    private static bool IsNodeVisible(
+        UnitAnatomyProfile profile,
+        int nodeIndex,
+        UnitCardDetailsSnapshot? details)
+    {
+        if (details == null)
+            return true;
+
+        ReadOnlySpan<BodyPartDefinition> parts = profile.BodyParts;
+        int current = nodeIndex;
+        for (int step = 0; current >= 0 && step < parts.Length; step++)
+        {
+            if (current >= parts.Length || !IsNodePresent(profile.GetNode(current), details))
+                return false;
+
+            current = parts[current].ParentIndex;
+        }
+
+        return current < 0;
+    }
+
+    private static bool IsNodePresent(
+        UnitAnatomyNode node,
+        UnitCardDetailsSnapshot details)
+    {
+        AnatomyCardEntry[] entries = details.AnatomyEntries;
+        bool found = false;
+        bool anyPresent = false;
+        for (int i = 0; i < entries.Length; i++)
+        {
+            if (entries[i] is not BodyPartCardEntry || entries[i].RegionId != node.Id)
+                continue;
+
+            found = true;
+            anyPresent |= entries[i].Present;
+        }
+
+        return !found || anyPresent;
     }
 
     private static float GetNodeHealthRatio(
