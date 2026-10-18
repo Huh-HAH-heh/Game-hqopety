@@ -9,14 +9,10 @@ namespace Core.Unit;
 public sealed class UnitWeaponSystem
 {
     private readonly UnitHitRegionStore? _hitRegions;
-    private readonly UnitBodyStore? _bodies;
 
-    public UnitWeaponSystem(
-        UnitHitRegionStore? hitRegions = null,
-        UnitBodyStore? bodies = null)
+    public UnitWeaponSystem(UnitHitRegionStore? hitRegions = null)
     {
         _hitRegions = hitRegions;
-        _bodies = bodies;
     }
 
     public long TotalShotsFired { get; private set; }
