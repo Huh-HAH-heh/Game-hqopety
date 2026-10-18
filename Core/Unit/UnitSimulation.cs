@@ -9,7 +9,6 @@ namespace Core.Unit;
 public sealed class UnitSimulation
 {
     private readonly UnitMovementSystem _movementSystem;
-    private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
     private readonly UnitMetabolismSystem _metabolismSystem;
     private readonly UnitInventorySystem _inventorySystem;
@@ -110,8 +109,6 @@ public sealed class UnitSimulation
 
         _movementSystem =
             new UnitMovementSystem();
-
-        _bodySystem = new UnitBodySystem();
 
         _healthSystem =
             new UnitHealthSystem();
@@ -309,10 +306,10 @@ public sealed class UnitSimulation
         _deathHandled[id.Index] = false;
         _baseMoveSpeed[id.Index] = Units.MoveSpeed[id.Index];
 
+        // Health bindings come from the anatomy profile; rig node count is not gameplay state.
         bool initializeLegacyHealth =
             hitProfile is not UnitAnatomyProfile anatomy ||
-            !anatomy.HasSharedShapes ||
-            body.Count != anatomy.NodeCount;
+            !anatomy.HasSharedShapes;
         Health.InitializeUnit(id.Index, definition.Type, initializeLegacyHealth);
         Metabolism.InitializeUnit(id.Index, definition);
         HitRegions.SetProfile(id.Index, hitProfile);
@@ -946,11 +943,8 @@ public sealed class UnitSimulation
         LastWeaponUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
-        // Keep the base anatomy rigid, but move its world transforms with the pawn.
-        phaseStarted = Stopwatch.GetTimestamp();
-        _bodySystem.UpdateStatic(Units, Bodies);
-        LastBodyUpdateMilliseconds =
-            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+        // Rig transforms are informational/editor data, not part of the simulation loop.
+        LastBodyUpdateMilliseconds = 0d;
 
         phaseStarted = Stopwatch.GetTimestamp();
         _projectileSystem.Update(
