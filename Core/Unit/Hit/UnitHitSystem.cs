@@ -57,8 +57,9 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null)
     {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
         if (bodies != null &&
-            hitRegions?.GetProfile(unitIndex) is UnitAnatomyProfile anatomy &&
+            profile is UnitAnatomyProfile anatomy &&
             anatomy.HasSharedShapes &&
             TryGetMarkerPoint(
                 units, unitIndex, UnitAnatomyMarkerRole.Eye,
@@ -891,8 +892,12 @@ private static Vector3 GetMarkerWorldPosition(
             // Anatomy markers belong to the rendered node. Transform their local
             // offset through that node's live orientation so eyes and muzzle stay
             // on the flattened head when a unit lies down or crawls.
+            Vector3 localOffset = marker.LocalOffset;
+            if (units.Posture[unitIndex] == UnitPosture.Lying)
+                localOffset.Z *= 0.55f;
+
             return shapeCenter + BodyPartTransformMath.TransformPosition(
-                marker.LocalOffset,
+                localOffset,
                 bodies.WorldOrientation[bodyIndex]);
         }
 
