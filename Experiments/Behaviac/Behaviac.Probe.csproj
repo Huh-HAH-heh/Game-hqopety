@@ -12,6 +12,10 @@
     <Compile Include="$(BehaviacSourceRoot)\integration\demo_running\behaviac\**\*.cs"
              Exclude="$(BehaviacSourceRoot)\integration\demo_running\behaviac\**\obj\**\*.cs"
              Link="BehaviacRuntime\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="$(BehaviacSourceRoot)\integration\demo_running\exported\behaviac_generated\behaviors\generated_behaviors.cs"
+             Link="Generated\generated_behaviors.cs" />
+    <Compile Include="$(BehaviacSourceRoot)\integration\demo_running\exported\behaviac_generated\types\AgentProperties.cs"
+             Link="Generated\AgentProperties.cs" />
     <Content Include="$(BehaviacSourceRoot)\integration\demo_running\exported\**\*.xml">
       <Link>BehaviacData\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
