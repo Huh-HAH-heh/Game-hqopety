@@ -12,6 +12,7 @@ public static class bt_rimclone_unit_decision
     {
         Dead,
         SeekCover,
+        FlankVisibleTarget,
         EngageVisibleTarget,
         InvestigateLastKnownTarget
     }
@@ -29,6 +30,7 @@ public static class bt_rimclone_unit_decision
             {
                 PredicateKind.Dead => agent.ShouldReturnDead(),
                 PredicateKind.SeekCover => agent.ShouldSeekCover(),
+                PredicateKind.FlankVisibleTarget => agent.ShouldFlankVisibleTarget(),
                 PredicateKind.EngageVisibleTarget => agent.ShouldEngageVisibleTarget(),
                 PredicateKind.InvestigateLastKnownTarget => agent.ShouldInvestigateLastKnownTarget(),
                 _ => false
@@ -65,11 +67,12 @@ public static class bt_rimclone_unit_decision
 
         AddBranch(root, 1, PredicateKind.Dead, BehaviacUnitIntent.Dead);
         AddBranch(root, 4, PredicateKind.SeekCover, BehaviacUnitIntent.SeekCover);
-        AddBranch(root, 7, PredicateKind.EngageVisibleTarget, BehaviacUnitIntent.EngageTarget);
-        AddBranch(root, 10, PredicateKind.InvestigateLastKnownTarget, BehaviacUnitIntent.InvestigateLastKnownTarget);
+        AddBranch(root, 7, PredicateKind.FlankVisibleTarget, BehaviacUnitIntent.FlankTarget);
+        AddBranch(root, 10, PredicateKind.EngageVisibleTarget, BehaviacUnitIntent.EngageTarget);
+        AddBranch(root, 13, PredicateKind.InvestigateLastKnownTarget, BehaviacUnitIntent.InvestigateLastKnownTarget);
 
         var patrol = new IntentAction(BehaviacUnitIntent.Patrol);
-        ConfigureNode(patrol, "Action", 13);
+        ConfigureNode(patrol, "Action", 16);
         root.AddChild(patrol);
 
         return true;
