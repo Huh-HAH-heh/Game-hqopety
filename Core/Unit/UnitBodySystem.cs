@@ -92,6 +92,50 @@ public sealed class UnitBodySystem
         }
     }
 
+    /// <summary>
+    /// Rebuilds the authored base rig at each unit's current position without applying
+    /// posture poses or articulated motion. Anatomy stays rigid in local space while
+    /// the complete model follows the gameplay unit.
+    /// </summary>
+    public void UpdateStatic(UnitStore units, UnitBodyStore bodies)
+    {
+        if (units.ActiveCount == 0)
+            return;
+
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        Vector3[] unitPositions = units.Position;
+        Vector3[] velocities = units.Velocity;
+        Vector3[] bodyNormals = units.BodyNormal;
+        Vector3[] headNormals = units.HeadNormal;
+        int[] bodyStarts = units.BodyStart;
+        short[] bodyCounts = units.BodyCount;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            int start = bodyStarts[unit];
+            int count = bodyCounts[unit];
+
+            if (start < 0 || count <= 0 || start + count > bodies.Count)
+                continue;
+
+            // Keep the body facing its travel direction, but never deform it for
+            // walking, crouching, lying down, tail motion, or authored posture poses.
+            Vector3 velocity = velocities[unit];
+            if (velocity.X * velocity.X + velocity.Y * velocity.Y > 0.04f)
+                bodyNormals[unit] = NormalizeHorizontal(velocity);
+
+            Vector3 bodyNormal = NormalizeHorizontal(bodyNormals[unit]);
+            Vector3 headNormal = NormalizeHorizontal(headNormals[unit]);
+
+            bodies.SetInitialWorldPosition(
+                new BodyHandle(start, count),
+                unitPositions[unit],
+                MathF.Atan2(bodyNormal.Y, bodyNormal.X),
+                MathF.Atan2(headNormal.Y, headNormal.X));
+        }
+    }
+
     private static void UpdateBody(
         int unit,
         int start,
