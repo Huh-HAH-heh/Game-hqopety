@@ -17,9 +17,18 @@ The selector tests branches in priority order:
 7. `InvestigateLastKnownTarget` — otherwise investigate the last known target position.
 8. `Patrol` — continue the game's existing search-waypoint behavior if there is no known target.
 
-Approximately one quarter of unit slots can receive the flanker role, selected deterministically. Flanking can start from 16 map units out to the lesser of 75 units or 85% of the unit's vision range; the previous 7–20 window activated too late in the mass-combat scenario. The goal is a lateral supporting-fire position rather than point-blank proximity, is stable per target, tries alternate sides around blocked tiles, and is interrupted by suppression, low health or target loss. A completed maneuver transitions into the existing combat behavior rather than repeatedly oscillating.
+One third of unit slots are eligible to be flankers, selected deterministically. Flanking starts at 12 map units and continues up to the lesser of 75 units or 85% of the unit's vision range. The lower threshold was deliberately widened because front-line units often acquire a clear target only after advancing through the terrain folds. The maneuver uses a lateral supporting-fire position, tries alternate sides around blocked tiles, stays stable for the same target and is interrupted by suppression, low health or target loss. On completion, the unit returns to normal combat instead of oscillating around the enemy.
 
-The unit card reports localized AI states, including **Фланг**, so the new behavior is visible when selecting a unit.
+## Watch the tactics in-game
+
+The default launch creates the 1,600-unit battle on a more folded test landscape. The battle terrain has winding broken ridgelines, low drainage cuts, a shallow crater with a rim, and gaps/saddles through the ridges. The raised shoulders create line-of-sight blind zones, while the gentler slopes and gaps preserve alternative routes for A*.
+
+- Press **I** to toggle AI tactical debug. Active flankers draw **purple lines and rings** to their flank goals; units seeking cover draw **blue lines and rings**. The overlay now shows all on-screen movers, not only the selected unit.
+- Select a unit to inspect its own target/goal line and the **Фланг**, **Поиск**, **Атака** or **Укрытие** state in the unit card.
+- Press **F8** to cycle the battle scale: 80, 400, then 800 units per faction. Start at 80 to watch individual maneuvers, then raise the scale to assess crowd behavior.
+- Press **F6** to toggle vision; it is useful for checking how ridges and crater rims cut sight lines.
+
+The status line still reports Behaviac decision counts per 150 ms think batch, including flank/cover/retreat/engage/investigate/patrol counts. The purple paths are a direct visual indicator that the tree's flank intent reached the movement layer rather than merely incrementing a decision counter.
 
 ## Run and compare
 
