@@ -1787,7 +1787,7 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         BeginImGuiWindow("##BodyRigPartList", _listPanel.Position, _listPanel.Size, flags);
         TextImGui("ЧАСТИ ТЕЛА");
         ImguiNative.igSeparator();
-        ImGuiVector2 childSize = new(0f, MathF.Max(80f, _listPanel.Size.Y - 210f));
+        ImGuiVector2 childSize = new(0f, MathF.Max(80f, _listPanel.Size.Y - 244f));
         if (ImguiNative.igBeginChild_Str("##BodyPartsScroll", childSize, default, ImGuiWindowFlags.None))
         {
             for (int i = 0; i < _parts.Length; i++)
@@ -1795,7 +1795,14 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 string pairMark = GetSymmetryCounterpartIndex(i) >= 0 ? "   <->" : string.Empty;
                 string sourceMark = _symmetryToolActive && i == _symmetrySourcePart ? "   [A]" : string.Empty;
                 string childMark = _parentSelectionActive && i == _parentSourcePart ? "   [ДОЧЕРНЯЯ]" : string.Empty;
-                string label = $"{i + 1:00}  {PartName(_regionIds[i])}{pairMark}{sourceMark}{childMark}##part{i}";
+                int parentIndex = _parts[i].ParentIndex;
+                string parentMark = parentIndex >= 0 && parentIndex < _regionIds.Length
+                    ? $"   ← {PartName(_regionIds[parentIndex])}"
+                    : "   ← корень";
+                string candidateMark = _parentSelectionActive && i != _parentSourcePart
+                    ? WouldCreateParentCycle(_parentSourcePart, i) ? "   [нельзя: потомок]" : "   [кандидат]"
+                    : string.Empty;
+                string label = $"{i + 1:00}  {PartName(_regionIds[i])}{parentMark}{pairMark}{sourceMark}{childMark}{candidateMark}##part{i}";
                 if (ImguiNative.igSelectable_Bool(
                     label, i == _selectedPart, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 24f)))
                     SelectPartFromImGui(i);
@@ -1807,6 +1814,24 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         if (ButtonImGui("Копировать часть", _listPanel.Size.X - 28f)) CopySelectedPart();
         if (ButtonImGui("Добавить примеры форм", _listPanel.Size.X - 28f)) AddAllPrimitiveExamples();
         if (ButtonImGui("Удалить свою часть", _listPanel.Size.X - 28f)) RemoveSelectedCustomRegion();
+
+        string parentToolLabel = _parentSelectionActive
+            ? $"Выбрать родителя для «{PartName(_regionIds[_parentSourcePart])}»…"
+            : "Назначить родителя выбранной части";
+        if (!_editingPose && ButtonImGui(parentToolLabel, _listPanel.Size.X - 28f))
+        {
+            _symmetryToolActive = false;
+            _symmetrySourcePart = -1;
+            _surfaceSnapTargetPart = -1;
+            _surfaceSnapProjection = -1;
+            _hasSurfaceSnapDirection = false;
+            _parentSelectionActive = !_parentSelectionActive;
+            _parentSourcePart = _parentSelectionActive ? _selectedPart : -1;
+            _status = _parentSelectionActive
+                ? $"Родитель для «{PartName(_regionIds[_parentSourcePart])}»: теперь нажми на часть-родителя в списке. Потомки и сама часть не могут быть родителем; Esc отменяет."
+                : "Назначение родителя отменено.";
+        }
+
         string symmetryLabel = _symmetryToolActive ? "Выбери парную часть…" : $"Симметрия: {CountSymmetryPairs()} пар";
         if (ButtonImGui(symmetryLabel, _listPanel.Size.X - 28f))
         {
