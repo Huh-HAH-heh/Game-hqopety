@@ -750,7 +750,8 @@ public sealed class UnitAiSystem
         agent.SetFacts(
             isAlive,
             isSuppressed,
-            Store.HasGoal[unit] || _hasSuppressionCoverByUnit[unit],
+            _hasSuppressionCoverByUnit[unit] ||
+                (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover),
             hasVisibleTarget,
             Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f,
             isLowHealth,
@@ -904,7 +905,7 @@ public sealed class UnitAiSystem
         UnitSuppressionState state = suppression.GetState(unit);
         if ((state != UnitSuppressionState.Panicked &&
              state != UnitSuppressionState.Suppressed) ||
-            Store.HasGoal[unit])
+            (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover))
         {
             return;
         }
