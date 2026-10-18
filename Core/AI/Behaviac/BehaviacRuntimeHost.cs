@@ -15,6 +15,7 @@ public static class BehaviacRuntimeHost
     private static bool _initialized;
     private static Workspace.EFileFormat _fileFormat;
     private static readonly HashSet<Type> RegisteredAgentTypes = new();
+    private static readonly HashSet<string> LoggedBehaviors = new(StringComparer.Ordinal);
 
     public static bool IsInitialized
     {
@@ -31,7 +32,14 @@ public static class BehaviacRuntimeHost
     /// </summary>
     public static void InitializeDefaultBehavior()
     {
-        Initialize(Path.Combine(AppContext.BaseDirectory, "BehaviacData"), Workspace.EFileFormat.EFF_xml);
+        string behaviorRoot = Path.Combine(AppContext.BaseDirectory, "BehaviacData");
+        string expectedTree = Path.Combine(behaviorRoot, "rimclone_unit_decision.xml");
+        if (!File.Exists(expectedTree))
+            throw new FileNotFoundException(
+                $"Behaviac runtime XML tree is missing from the game output: {expectedTree}",
+                expectedTree);
+
+        Initialize(behaviorRoot, Workspace.EFileFormat.EFF_xml);
     }
 
     public static void Initialize(string behaviorRoot, Workspace.EFileFormat fileFormat = Workspace.EFileFormat.EFF_xml)
@@ -156,7 +164,15 @@ public static class BehaviacRuntimeHost
 
             var agent = new TAgent();
             if (!agent.btload(behaviorName))
-                throw new InvalidOperationException($"Behaviac failed to load behavior '{behaviorName}'.");
+                throw new InvalidOperationException(
+                    $"Behaviac failed to load behavior '{behaviorName}' from '{_behaviorRoot}'.");
+
+            if (LoggedBehaviors.Add(behaviorName))
+            {
+                string xmlPath = Path.Combine(_behaviorRoot!, behaviorName + ".xml");
+                Console.WriteLine(
+                    $"[Behaviac] XML loaded by upstream runtime: {xmlPath}; agent={typeof(TAgent).FullName}");
+            }
 
             agent.btsetcurrent(behaviorName);
             return agent;
