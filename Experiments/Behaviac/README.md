@@ -23,7 +23,7 @@ The unit card reports localized AI states, including **Фланг**, so the new 
 
 ## Run and compare
 
-Interactive runs use the Behaviac AI by default on this experiment branch. The mode is printed at startup, and the performance line keeps the last actual decision batch rather than sampling a frame where the 150 ms AI think timer did no work.
+Behaviac is forced on by default for every ordinary game launch, independent of stale `RIMCLONE_USE_BEHAVIAC_AI` values left in PowerShell or an IDE launch profile. The application prints the selected policy at startup. On the first AI decision, the upstream runtime also prints the exact XML path it successfully loaded; a missing runtime tree now throws an explicit file error rather than failing silently. The performance line retains the last completed think batch instead of sampling a frame where the 150 ms AI think timer did no work.
 
 Compare in two separate runs:
 
@@ -31,13 +31,13 @@ Compare in two separate runs:
 dotnet run --project App/App.csproj -c Release -- --ai=legacy
 ```
 
-Close the game, then run:
+Close the game, then launch the default Behaviac path:
 
 ```powershell
-dotnet run --project App/App.csproj -c Release -- --ai=behaviac
+dotnet run --project App/App.csproj -c Release
 ```
 
-The `--ai=legacy` and `--ai=behaviac` arguments override the environment variable for that process. You can also still use `RIMCLONE_USE_BEHAVIAC_AI=0` or `1`; do not set both values before launching and treat them as two tests, because only the final environment value is used. Deterministic simulation self-tests deliberately set it to `0` internally to preserve the existing regression baseline.
+Use `--ai=legacy` only when intentionally comparing the old policy. An ordinary launch always selects Behaviac; the old environment variable no longer overrides that default. Deterministic simulation self-tests still explicitly use the legacy policy to preserve the existing regression baseline.
 
 To experiment with priorities, edit `Core/AI/Behaviac/BehaviacData/rimclone_unit_decision.xml`. The `Selector` order is tactical priority; each `Sequence` contains a method-backed condition and its intent action. The content is copied to `BehaviacData/rimclone_unit_decision.xml` beside the built game.
 
