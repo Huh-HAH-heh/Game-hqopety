@@ -653,6 +653,11 @@ public sealed class VisionSystem
         UnitBodyStore? bodies,
         ref int lineOfSightChecks)
     {
+        // Direct combat LOS checks often omit the optional body store. Reuse the
+        // same live rig bound during Update instead of reverting to standing-height
+        // aim points between rotating perception samples.
+        bodies ??= _bodies;
+
         Vector3 targetCenter = units.Position[targetIndex];
         Vector3 observerEye = UnitHitSystem.GetEyePosition(
             units,
@@ -946,7 +951,7 @@ public sealed class VisionSystem
         return UnitHitSystem.GetEyePosition(
             units,
             unitIndex,
-            bodies,
+            bodies ?? _bodies,
             _hitRegions);
     }
 
@@ -956,6 +961,7 @@ public sealed class VisionSystem
         Span<Vector3> points,
         UnitBodyStore? bodies = null)
     {
+        bodies ??= _bodies;
         Vector3 source = GetEyePosition(
             units,
             unitIndex,
@@ -981,7 +987,7 @@ public sealed class VisionSystem
             unitIndex,
             source,
             points,
-            bodies,
+            bodies ?? _bodies,
             _hitRegions);
     }
 
