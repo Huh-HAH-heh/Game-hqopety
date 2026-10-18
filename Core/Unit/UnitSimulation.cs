@@ -9,6 +9,7 @@ namespace Core.Unit;
 public sealed class UnitSimulation
 {
     private readonly UnitMovementSystem _movementSystem;
+    private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
     private readonly UnitMetabolismSystem _metabolismSystem;
     private readonly UnitInventorySystem _inventorySystem;
@@ -109,6 +110,8 @@ public sealed class UnitSimulation
 
         _movementSystem =
             new UnitMovementSystem();
+
+        _bodySystem = new UnitBodySystem();
 
         _healthSystem =
             new UnitHealthSystem();
@@ -943,8 +946,11 @@ public sealed class UnitSimulation
         LastWeaponUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
-        // Anatomy is a static damage model; gameplay never animates or poses its nodes.
-        LastBodyUpdateMilliseconds = 0d;
+        // Keep the base anatomy rigid, but move its world transforms with the pawn.
+        phaseStarted = Stopwatch.GetTimestamp();
+        _bodySystem.UpdateStatic(Units, Bodies);
+        LastBodyUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();
         _projectileSystem.Update(
