@@ -1787,7 +1787,8 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
         BeginImGuiWindow("##BodyRigPartList", _listPanel.Position, _listPanel.Size, flags);
         TextImGui("ЧАСТИ ТЕЛА");
         ImguiNative.igSeparator();
-        ImGuiVector2 childSize = new(0f, MathF.Max(80f, _listPanel.Size.Y - 244f));
+        float reservedControlsHeight = _parentSelectionActive ? 274f : 244f;
+        ImGuiVector2 childSize = new(0f, MathF.Max(80f, _listPanel.Size.Y - reservedControlsHeight));
         if (ImguiNative.igBeginChild_Str("##BodyPartsScroll", childSize, default, ImGuiWindowFlags.None))
         {
             for (int i = 0; i < _parts.Length; i++)
@@ -1799,12 +1800,19 @@ public sealed class UnitBodyRigEditorOverlay : IDisposable
                 string parentMark = parentIndex >= 0 && parentIndex < _regionIds.Length
                     ? $"   ← {PartName(_regionIds[parentIndex])}"
                     : "   ← корень";
+                bool invalidParentCandidate = _parentSelectionActive &&
+                    i != _parentSourcePart &&
+                    WouldCreateParentCycle(_parentSourcePart, i);
                 string candidateMark = _parentSelectionActive && i != _parentSourcePart
-                    ? WouldCreateParentCycle(_parentSourcePart, i) ? "   [нельзя: потомок]" : "   [кандидат]"
+                    ? invalidParentCandidate ? "   [недоступно]" : "   [выбрать родителем]"
                     : string.Empty;
                 string label = $"{i + 1:00}  {PartName(_regionIds[i])}{parentMark}{pairMark}{sourceMark}{childMark}{candidateMark}##part{i}";
+                ImGuiSelectableFlags rowFlags = invalidParentCandidate
+                    ? ImGuiSelectableFlags.Disabled
+                    : ImGuiSelectableFlags.None;
                 if (ImguiNative.igSelectable_Bool(
-                    label, i == _selectedPart, ImGuiSelectableFlags.None, new ImGuiVector2(0f, 24f)))
+                    label, i == _selectedPart, rowFlags, new ImGuiVector2(0f, 24f)) &&
+                    !invalidParentCandidate)
                     SelectPartFromImGui(i);
             }
         }
