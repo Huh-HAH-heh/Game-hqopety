@@ -174,7 +174,8 @@ internal static class Program
                     DecisionCase test = cases[(unit + tick) % cases.Length];
                     BehaviacUnitDecisionAgent agent = agents[unit];
                     agent.SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
-                        test.HasVisibleTarget, test.HasRecentTarget);
+                        test.HasVisibleTarget, test.HasRecentTarget, test.IsLowHealth,
+                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
