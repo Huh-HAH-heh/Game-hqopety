@@ -130,7 +130,7 @@ public sealed class UnitSimulation
             new UnitSuppressionStore(unitCapacity);
 
         _weaponSystem =
-            new UnitWeaponSystem(HitRegions, Bodies);
+            new UnitWeaponSystem(HitRegions);
 
         _projectileSystem =
             new ProjectileSystem();
@@ -902,7 +902,7 @@ public sealed class UnitSimulation
         if (VisionEnabled)
         {
             phaseStarted = Stopwatch.GetTimestamp();
-            _visionSystem.Update(Units, worldMap, deltaTime, Health, Bodies);
+            _visionSystem.Update(Units, worldMap, deltaTime, Health);
             LastVisionCallMilliseconds =
                 Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
         }
