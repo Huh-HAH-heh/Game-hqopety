@@ -26,6 +26,7 @@ public sealed class UnitAiSystem
 
     private int[] _activeUnitScratch = Array.Empty<int>();
     private int[] _nearestVisibleEnemyByUnit = Array.Empty<int>();
+    private int[] _searchPatrolLegByUnit = Array.Empty<int>();
     private Vector3[] _suppressionCoverByUnit = Array.Empty<Vector3>();
     private bool[] _hasSuppressionCoverByUnit = Array.Empty<bool>();
     private BehaviacUnitDecisionAgent?[] _behaviacAgents = Array.Empty<BehaviacUnitDecisionAgent?>();
@@ -348,10 +349,12 @@ public sealed class UnitAiSystem
                     {
                         Store.ClearGoal(unit);
 
+                        int patrolLeg = ++_searchPatrolLegByUnit[unit];
                         if (TryFindSearchWaypoint(
                                 units,
                                 worldMap,
                                 unit,
+                                patrolLeg,
                                 out Vector3 searchWaypoint))
                         {
                             Store.SetGoal(unit, searchWaypoint);
@@ -883,57 +886,93 @@ public sealed class UnitAiSystem
         UnitStore units,
         WorldMap worldMap,
         int unit,
+        int patrolLeg,
         out Vector3 waypoint)
     {
         waypoint = Vector3.Zero;
-
         Vector3 position = units.Position[unit];
-        float centerX = worldMap.TileWidth * 0.5f;
-        float centerY = worldMap.TileHeight * 0.5f;
 
+        // Continue through the centre instead of oscillating between centreX +/- 5.
         float direction = units.FactionTag[unit] switch
         {
             1 => 1f,
             2 => -1f,
-            _ => position.X < centerX ? 1f : -1f
+            _ => position.X < worldMap.TileWidth * 0.5f ? 1f : -1f
         };
+        if (position.X <= 8f)
+            direction = 1f;
+        else if (position.X >= worldMap.MaxTileX - 8f)
+            direction = -1f;
 
-        float distanceToCenter = (centerX - position.X) * direction;
-        float targetX;
+        uint seed = unchecked(
+            (uint)(unit + 1) * 73856093u ^
+            (uint)(patrolLeg + 1) * 19349663u);
+        float forwardDistance = 5f + (seed & 7u) * 0.55f;
+        float lateralDistance = ((int)((seed >> 4) % 9u) - 4) * 1.15f;
+        float desiredX = Math.Clamp(
+            position.X + direction * forwardDistance,
+            2f,
+            worldMap.MaxTileX - 2f);
+        float desiredY = Math.Clamp(
+            position.Y + lateralDistance,
+            2f,
+            worldMap.MaxTileY - 2f);
 
-        if (distanceToCenter > 8f)
+        // A* chooses traversable cells, but the destination retains a stable
+        // sub-cell offset. Idle units therefore don't stack on cell centres.
+        float fractionX = 0.22f + ((seed >> 8) % 57u) * 0.01f;
+        float fractionY = 0.22f + ((seed >> 16) % 57u) * 0.01f;
+        int desiredCellX = Math.Clamp((int)MathF.Floor(desiredX), 1, worldMap.MaxTileX - 1);
+        int desiredCellY = Math.Clamp((int)MathF.Floor(desiredY), 1, worldMap.MaxTileY - 1);
+
+        float bestDistance = float.PositiveInfinity;
+        Vector3 best = Vector3.Zero;
+        for (int radius = 0; radius <= 6; radius++)
         {
-            targetX = position.X + direction * MathF.Min(10f, distanceToCenter);
+            for (int offsetY = -radius; offsetY <= radius; offsetY++)
+            {
+                for (int offsetX = -radius; offsetX <= radius; offsetX++)
+                {
+                    if (Math.Max(Math.Abs(offsetX), Math.Abs(offsetY)) != radius)
+                        continue;
+
+                    int tileX = desiredCellX + offsetX;
+                    int tileY = desiredCellY + offsetY;
+                    if (tileX < 1 || tileY < 1 ||
+                        tileX >= worldMap.TileWidth - 1 ||
+                        tileY >= worldMap.TileHeight - 1 ||
+                        worldMap.IsNavigationBlocked(tileX, tileY) ||
+                        worldMap.GetSurfaceLayer(tileX, tileY) < 0)
+                    {
+                        continue;
+                    }
+
+                    float x = tileX + fractionX;
+                    float y = tileY + fractionY;
+                    float dx = x - desiredX;
+                    float dy = y - desiredY;
+                    float score = dx * dx + dy * dy;
+                    if (score >= bestDistance)
+                        continue;
+
+                    bestDistance = score;
+                    best = new Vector3(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
+                }
+            }
+
+            if (bestDistance < float.PositiveInfinity)
+                break;
         }
-        else
-        {
-            // Sweep across the center line while scanning a distinct lateral lane.
-            float forwardPoint = centerX + direction * 5f;
-            float reversePoint = centerX - direction * 5f;
-            targetX = MathF.Abs(position.X - forwardPoint) <= 2f
-                ? reversePoint
-                : forwardPoint;
-        }
 
-        float laneY = centerY + ((unit % 13) - 6) * 4f;
-        float targetY = position.Y + Math.Clamp(laneY - position.Y, -5f, 5f);
+        if (!float.IsFinite(bestDistance))
+            return false;
 
-        targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
-        targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+        Vector2 delta = new(best.X - position.X, best.Y - position.Y);
+        if (delta.LengthSquared() <= 1f)
+            return false;
 
-        int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
-        int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
-
-        waypoint = new Vector3(
-            tileX + 0.5f,
-            tileY + 0.5f,
-            worldMap.GetSurfaceHeight(tileX, tileY));
-
-        Vector2 delta = new Vector2(
-            waypoint.X - position.X,
-            waypoint.Y - position.Y);
-
-        return delta.LengthSquared() > 1f;
+        waypoint = best;
+        return true;
     }
 
     private void EnsurePlanningCapacity(int capacity)
@@ -942,6 +981,8 @@ public sealed class UnitAiSystem
             Array.Resize(ref _activeUnitScratch, capacity);
         if (_nearestVisibleEnemyByUnit.Length < capacity)
             Array.Resize(ref _nearestVisibleEnemyByUnit, capacity);
+        if (_searchPatrolLegByUnit.Length < capacity)
+            Array.Resize(ref _searchPatrolLegByUnit, capacity);
         if (_suppressionCoverByUnit.Length < capacity)
             Array.Resize(ref _suppressionCoverByUnit, capacity);
         if (_hasSuppressionCoverByUnit.Length < capacity)
