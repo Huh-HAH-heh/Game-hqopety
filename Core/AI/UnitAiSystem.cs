@@ -887,6 +887,7 @@ public sealed class UnitAiSystem
 
         float proneUtility = 0f;
         if (hasVisibleTarget &&
+            HasRangedWeapon(units, inventory, unit) &&
             suppressionState == UnitSuppressionState.Calm &&
             !isLowHealth &&
             !canFlank &&
