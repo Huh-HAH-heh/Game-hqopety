@@ -114,6 +114,9 @@ public sealed class SimulationFrameSnapshot
     public int BlueDead { get; init; }
     public int RedAlive { get; init; }
     public int RedDead { get; init; }
+    public int ThirdFactionAlive { get; init; }
+    public long MeleeSwings { get; init; }
+    public long MeleeHits { get; init; }
     public int AttackCount { get; init; }
     public int SearchCount { get; init; }
     public int CoverCount { get; init; }
@@ -235,6 +238,7 @@ public sealed class SimulationFrameSnapshot
         int blueDead = 0;
         int redAlive = 0;
         int redDead = 0;
+        int thirdFactionAlive = 0;
         int attack = 0;
         int search = 0;
         int cover = 0;
@@ -431,6 +435,10 @@ public sealed class SimulationFrameSnapshot
                 if (alive) redAlive++;
                 else redDead++;
             }
+            else if (faction == 3 && alive)
+            {
+                thirdFactionAlive++;
+            }
 
             switch (aiState)
             {
@@ -586,6 +594,9 @@ public sealed class SimulationFrameSnapshot
             BlueDead = blueDead,
             RedAlive = redAlive,
             RedDead = redDead,
+            ThirdFactionAlive = thirdFactionAlive,
+            MeleeSwings = simulation.MeleeCombat.TotalSwings,
+            MeleeHits = simulation.MeleeCombat.TotalHits,
             AttackCount = attack,
             SearchCount = search,
             CoverCount = cover,
