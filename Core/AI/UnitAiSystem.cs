@@ -893,7 +893,13 @@ public sealed class UnitAiSystem
         bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
 
-        if (hasVisibleTarget && isHealthyEnoughToFlank && unit % 3 == 0)
+        // Flanking is a ranged-fire maneuver. A melee-only unit should
+        // commit toward contact instead of spending its first approach on a
+        // wide side/back waypoint.
+        if (hasVisibleTarget &&
+            isHealthyEnoughToFlank &&
+            HasRangedWeapon(units, inventory, unit) &&
+            unit % 3 == 0)
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
@@ -912,7 +918,8 @@ public sealed class UnitAiSystem
 
         bool isFlanking =
             Store.State[unit] == UnitAiState.Flank &&
-            isHealthyEnoughToFlank;
+            isHealthyEnoughToFlank &&
+            HasRangedWeapon(units, inventory, unit);
 
         float proneUtility = 0f;
         if (hasVisibleTarget &&
