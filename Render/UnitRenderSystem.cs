@@ -364,6 +364,7 @@ public void DrawSnapshot(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
+        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
