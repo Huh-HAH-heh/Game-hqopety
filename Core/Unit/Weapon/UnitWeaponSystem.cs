@@ -796,6 +796,87 @@ public sealed class UnitWeaponSystem
         Vector3 source,
         TargetMode targetMode)
     {
+        if (_bodies != null &&
+            _hitRegions?.GetProfile(targetIndex) is UnitAnatomyProfile anatomy &&
+            anatomy.HasSharedShapes &&
+            units.BodyCount[targetIndex] >= anatomy.NodeCount)
+        {
+            int pointCount = anatomy.VisibleRegionCount;
+            if (pointCount > 0)
+            {
+                Span<Vector3> points = pointCount <= 256
+                    ? stackalloc Vector3[pointCount]
+                    : new Vector3[pointCount];
+                int written = UnitHitSystem.GetAimPoints(
+                    units, targetIndex, source, points, _bodies, _hitRegions);
+
+                if (written > 0)
+                {
+                    float minZ = float.PositiveInfinity;
+                    float maxZ = float.NegativeInfinity;
+                    for (int i = 0; i < written; i++)
+                    {
+                        minZ = MathF.Min(minZ, points[i].Z);
+                        maxZ = MathF.Max(maxZ, points[i].Z);
+                    }
+
+                    float middleZ = (minZ + maxZ) * 0.5f;
+                    int fallbackIndex = 0;
+                    float fallbackScore = float.PositiveInfinity;
+                    int preferredIndex = -1;
+                    float preferredScore = float.PositiveInfinity;
+
+                    for (int i = 0; i < written; i++)
+                    {
+                        int region = UnitHitSystem.GetVisibilityRegionIndex(
+                            units, targetIndex, i, _hitRegions);
+                        Vector3 point = points[i];
+                        float middleScore = MathF.Abs(point.Z - middleZ);
+                        if (middleScore < fallbackScore)
+                        {
+                            fallbackScore = middleScore;
+                            fallbackIndex = i;
+                        }
+
+                        bool matches = targetMode switch
+                        {
+                            TargetMode.Head =>
+                                UnitHitSystem.IsPartInRegion(units, targetIndex, region, UnitHealthPartId.Head, _hitRegions) ||
+                                UnitHitSystem.IsPartInRegion(units, targetIndex, region, UnitHealthPartId.Brain, _hitRegions),
+                            TargetMode.Torso =>
+                                UnitHitSystem.IsPartInRegion(units, targetIndex, region, UnitHealthPartId.Torso, _hitRegions),
+                            TargetMode.Legs =>
+                                UnitHitSystem.IsPartInRegion(units, targetIndex, region, UnitHealthPartId.LeftLeg, _hitRegions) ||
+                                UnitHitSystem.IsPartInRegion(units, targetIndex, region, UnitHealthPartId.RightLeg, _hitRegions) ||
+                                UnitHitSystem.IsPartInRegion(units, targetIndex, region, UnitHealthPartId.LeftFoot, _hitRegions) ||
+                                UnitHitSystem.IsPartInRegion(units, targetIndex, region, UnitHealthPartId.RightFoot, _hitRegions),
+                            _ => false
+                        };
+
+                        if (!matches)
+                            continue;
+
+                        float score = targetMode switch
+                        {
+                            TargetMode.Head => -point.Z,
+                            TargetMode.Legs => point.Z,
+                            _ => middleScore
+                        };
+                        if (score < preferredScore)
+                        {
+                            preferredScore = score;
+                            preferredIndex = i;
+                        }
+                    }
+
+                    // Aim at a live posed node. If this creature has no matching
+                    // tissue for the requested target mode, pick the middle of its
+                    // visible silhouette instead of inventing a standing-height point.
+                    return points[preferredIndex >= 0 ? preferredIndex : fallbackIndex];
+                }
+            }
+        }
+
         Vector3 position = units.Position[targetIndex];
         Vector3 towardSource = new(source.X - position.X, source.Y - position.Y, 0f);
         float lengthSquared = towardSource.LengthSquared();
@@ -808,14 +889,12 @@ public sealed class UnitWeaponSystem
         float height = MathF.Max(0.05f, units.Height[targetIndex]);
         float verticalFraction = targetMode switch
         {
-            TargetMode.Head => 0.84f,
-            TargetMode.Legs => 0.18f,
-            TargetMode.Torso => 0.52f,
-            _ => 0.55f
+            TargetMode.Head => units.Posture[targetIndex] == UnitPosture.Lying ? 0.22f : 0.84f,
+            TargetMode.Legs => units.Posture[targetIndex] == UnitPosture.Lying ? 0.06f : 0.18f,
+            TargetMode.Torso => units.Posture[targetIndex] == UnitPosture.Lying ? 0.15f : 0.52f,
+            _ => units.Posture[targetIndex] == UnitPosture.Lying ? 0.14f : 0.55f
         };
 
-        // Target modes only change shot height. The sphere accepts the hit; height
-        // biases the separate, probabilistic damage-zone resolver.
         return new Vector3(
             position.X + towardSource.X * radius * 0.65f,
             position.Y + towardSource.Y * radius * 0.65f,
@@ -862,6 +941,20 @@ private static AmmunitionConfig? GetCurrentAmmunition(
         UnitStore units,
         int unitIndex)
     {
+        if (_bodies != null &&
+            _hitRegions?.GetProfile(unitIndex) is UnitAnatomyProfile anatomy &&
+            anatomy.HasSharedShapes &&
+            UnitHitSystem.TryGetMarkerPoint(
+                units,
+                unitIndex,
+                UnitAnatomyMarkerRole.Muzzle,
+                out Vector3 muzzle,
+                _hitRegions,
+                _bodies))
+        {
+            return muzzle;
+        }
+
         Vector3 head = NormalizeHorizontal(units.HeadNormal[unitIndex]);
         float radius = MathF.Max(0.05f, units.Radius[unitIndex]);
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
@@ -870,7 +963,7 @@ private static AmmunitionConfig? GetCurrentAmmunition(
             UnitPosture.Lying => 0.17f,
             UnitPosture.Crouching => 0.58f,
             UnitPosture.Sitting => 0.68f,
-            _ => 0.82f
+            _ => 0.70f
         };
 
         return units.Position[unitIndex] +

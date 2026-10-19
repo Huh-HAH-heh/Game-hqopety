@@ -7,6 +7,7 @@ on:
       - experiment/behaviac-net10-probe
       - experimental/unit-development-terrain-data-refactor
       - feature/unit-navigation-800-battle
+      - feature/prone-crawl-silhouette
   pull_request:
     branches:
       - main

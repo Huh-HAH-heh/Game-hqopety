@@ -103,6 +103,8 @@ public static class BehaviacRuntimeHost
             self => self.ShouldRetreatToCover());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldFlankVisibleTarget),
             self => self.ShouldFlankVisibleTarget());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldTakePronePosition),
+            self => self.ShouldTakePronePosition());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldEngageVisibleTarget),
             self => self.ShouldEngageVisibleTarget());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldSuppressLastKnownTarget),
@@ -118,6 +120,8 @@ public static class BehaviacRuntimeHost
             self => self.SelectRetreatToCover());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectFlankTarget),
             self => self.SelectFlankTarget());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectProneEngage),
+            self => self.SelectProneEngage());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectEngageTarget),
             self => self.SelectEngageTarget());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectSuppressiveFire),

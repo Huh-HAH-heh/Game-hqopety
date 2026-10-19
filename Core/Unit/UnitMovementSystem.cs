@@ -28,6 +28,7 @@ public sealed class UnitMovementSystem
         float[] speeds = units.MoveSpeed;
         float[] widths = units.Width;
         float[] lengths = units.Length;
+        UnitPosture[] postures = units.Posture;
         bool[] hasTarget = units.HasTarget;
 
         for (int i = 0; i < active.Length; i++)
@@ -104,7 +105,13 @@ public sealed class UnitMovementSystem
                 continue;
             }
 
-            float step = MathF.Max(0f, speeds[unit]) * deltaTime;
+            // Crawling uses a distinct slow locomotion speed, not a standing
+            // walk cycle pasted over a prone silhouette.
+            float moveSpeed = MathF.Max(0f, speeds[unit]);
+            if (postures[unit] == UnitPosture.Lying)
+                moveSpeed *= 0.45f;
+
+            float step = moveSpeed * deltaTime;
 
             if (step <= 0f)
             {
@@ -126,8 +133,8 @@ public sealed class UnitMovementSystem
                 position.X += direction.X * step;
                 position.Y += direction.Y * step;
                 velocities[unit] = new Vector3(
-                    direction.X * speeds[unit],
-                    direction.Y * speeds[unit],
+                    direction.X * moveSpeed,
+                    direction.Y * moveSpeed,
                     0f);
             }
 

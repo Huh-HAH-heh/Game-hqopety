@@ -78,7 +78,7 @@ public sealed class UnitRenderSystem : IDisposable
 
         float detailBlend = GetUnitDetailBlend(pixelsPerWorldUnit);
         bool showUnitDetails = detailBlend > 0f;
-        bool showRigDetails = showUnitRig && showUnitDetails;
+        bool showRigDetails = showUnitRig;
 
         _vertices.Clear();
         _bodyOutlines.Clear();
@@ -223,14 +223,12 @@ public sealed class UnitRenderSystem : IDisposable
                     isAlive,
                     tilePixelSize,
                     screenScale,
-                    detailBlend);
+                    1f);
             }
 
-            // In rig mode the faction marker fades out as the static body
-            // details fade in. Marker-only mode never draws a body part.
-            float markerOpacity = showUnitRig && renderedParts > 0
-                ? 1f - detailBlend
-                : 1f;
+            // A marker is a substitute for the rig, never an overlay on it.
+            // Rig mode renders anatomy; marker-only mode renders this silhouette.
+            float markerOpacity = showUnitRig ? 0f : 1f;
             if (markerOpacity > 0f)
             {
                 AppendLowDetailUnitMarker(
@@ -240,7 +238,9 @@ public sealed class UnitRenderSystem : IDisposable
                     markerRadius,
                     units.FactionTag[unitIndex],
                     isAlive,
-                    markerOpacity);
+                    markerOpacity,
+                    units.Posture[unitIndex],
+                    units.BodyNormal[unitIndex]);
             }
 
             if (!isAlive)
@@ -354,7 +354,7 @@ public void DrawSnapshot(
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
         bool showUnitDetails = detailBlend > 0f;
-        bool showRigDetails = showUnitRig && showUnitDetails;
+        bool showRigDetails = showUnitRig;
 
         float centerX = cameraView.Center.X;
         float centerY = cameraView.Center.Y;
@@ -500,14 +500,12 @@ public void DrawSnapshot(
                     isAlive,
                     tilePixelSize,
                     screenScale,
-                    detailBlend);
+                    1f);
             }
 
-            // In marker-only mode this remains a fully opaque faction circle.
-            // In rig mode the marker fades out at the same rate the rig fades in.
-            float markerOpacity = showUnitRig && renderedParts > 0
-                ? 1f - detailBlend
-                : 1f;
+            // Marker-only mode draws the full silhouette. When rig mode is on,
+            // the anatomical parts replace the marker completely.
+            float markerOpacity = showUnitRig ? 0f : 1f;
             if (markerOpacity > 0f)
             {
                 AppendLowDetailUnitMarker(
@@ -517,7 +515,9 @@ public void DrawSnapshot(
                     markerRadius,
                     unit.FactionTag,
                     isAlive,
-                    markerOpacity);
+                    markerOpacity,
+                    unit.Posture,
+                    unit.BodyNormal);
             }
 
             if (!isAlive)
@@ -1334,16 +1334,41 @@ public void DrawSnapshot(
         float radius,
         ushort factionTag,
         bool isAlive,
-        float opacity)
+        float opacity,
+        UnitPosture posture,
+        Vector3 facing)
     {
-        // A compact filled circle stays readable at macro zoom without drawing the rig.
         Color color = ApplyOpacity(
             GetBodyPartColor(BodyPartRole.Torso, factionTag, isAlive),
             opacity);
 
         const int segments = 16;
-        Vector2f center = new(x, y);
+        if (posture == UnitPosture.Lying)
+        {
+            // Marker-only view must communicate the same prone silhouette as the rig:
+            // an elongated torso aligned to the facing direction, with the head at
+            // the front. Layered ellipses keep it legible at macro zoom.
+            float facingLengthSquared = facing.X * facing.X + facing.Y * facing.Y;
+            float angle = facingLengthSquared > 0.000001f
+                ? MathF.Atan2(facing.Y, facing.X)
+                : 0f;
+            Color outline = ApplyOpacity(new Color(16, 21, 27, 255), opacity);
+            AppendEllipse(vertices, x, y,
+                radius * 1.72f, radius * 0.78f, angle, outline, segments);
+            AppendEllipse(vertices, x, y,
+                radius * 1.53f, radius * 0.61f, angle, color, segments);
 
+            float headX = x + MathF.Cos(angle) * radius * 1.05f;
+            float headY = y + MathF.Sin(angle) * radius * 1.05f;
+            AppendEllipse(vertices, headX, headY,
+                radius * 0.39f, radius * 0.39f, angle, outline, segments);
+            AppendEllipse(vertices, headX, headY,
+                radius * 0.29f, radius * 0.29f, angle, color, segments);
+            return;
+        }
+
+        // Standing and other non-prone postures retain the compact circle marker.
+        Vector2f center = new(x, y);
         for (int i = 0; i < segments; i++)
         {
             float a0 = i * MathF.Tau / segments;

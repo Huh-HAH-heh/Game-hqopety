@@ -57,11 +57,22 @@ public sealed class UnitHitSystem
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null)
     {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if (bodies != null &&
+            profile is UnitAnatomyProfile anatomy &&
+            anatomy.HasSharedShapes &&
+            TryGetMarkerPoint(
+                units, unitIndex, UnitAnatomyMarkerRole.Eye,
+                out Vector3 eye, hitRegions, bodies))
+        {
+            return eye;
+        }
+
         Vector3 position = units.Position[unitIndex];
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
         float eyeHeight = units.Posture[unitIndex] switch
         {
-            UnitPosture.Lying => 0.15f,
+            UnitPosture.Lying => 0.17f,
             UnitPosture.Crouching => 0.56f,
             UnitPosture.Sitting => 0.68f,
             _ => 0.82f
@@ -73,7 +84,8 @@ public sealed class UnitHitSystem
 public static int GetVisibilityPointCount(
         UnitStore units,
         int unitIndex,
-        UnitHitRegionStore? hitRegions = null) => 1;
+        UnitHitRegionStore? hitRegions = null) =>
+        CountTargetRegions(GetProfile(units, unitIndex, hitRegions));
 
 public static int GetVisibilityRegionIndex(
         UnitStore units,
@@ -81,10 +93,14 @@ public static int GetVisibilityRegionIndex(
         int visibleIndex,
         UnitHitRegionStore? hitRegions = null)
     {
-        if (visibleIndex != 0)
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        int visibleCount = CountTargetRegions(profile);
+        if ((uint)visibleIndex >= (uint)visibleCount)
             throw new ArgumentOutOfRangeException(nameof(visibleIndex));
 
-        return 0;
+        return profile is UnitAnatomyProfile anatomy
+            ? anatomy.GetVisibleRegionIndex(visibleIndex)
+            : visibleIndex;
     }
 
 public static int GetVisibilityPoints(
@@ -403,6 +419,24 @@ public static bool TryFindBindingForPart(
         if ((uint)regionIndex >= (uint)profile.RegionCount)
             throw new ArgumentOutOfRangeException(nameof(regionIndex));
 
+        // Shared anatomy geometry is the single source of truth for spotting and
+        // aiming. Use the live posed primitive centre so prone targets are not
+        // represented by an imaginary standing-height point above their silhouette.
+        if (bodies != null &&
+            profile is UnitAnatomyProfile anatomy &&
+            anatomy.HasSharedShapes &&
+            !anatomy.IsInternalNode(regionIndex) &&
+            TryGetBodyShape(
+                units, unitIndex, profile, regionIndex, bodies,
+                out _, out Vector3 shapeCenter, out Vector3 shapeScale,
+                out float shapeRotation, out BodyPrimitive primitive, out _))
+        {
+            // Aim at the observer-facing side of the live primitive, not a point
+            // floating above the root or hidden behind the target's own silhouette.
+            return GetVisibleSurfacePoint(
+                source, shapeCenter, shapeScale, shapeRotation, primitive);
+        }
+
         Vector3 position = units.Position[unitIndex];
         Vector3 direction = new(source.X - position.X, source.Y - position.Y, 0f);
         float lengthSquared = direction.LengthSquared();
@@ -422,6 +456,72 @@ public static bool TryFindBindingForPart(
             position.X + direction.X * radius * 0.65f,
             position.Y + direction.Y * radius * 0.65f,
             position.Z + height * heightFraction);
+    }
+
+    private static Vector3 Rotate2D(Vector3 value, float angle)
+    {
+        float cosine = MathF.Cos(angle);
+        float sine = MathF.Sin(angle);
+        return new Vector3(
+            value.X * cosine - value.Y * sine,
+            value.X * sine + value.Y * cosine,
+            value.Z);
+    }
+
+    private static Vector3 GetVisibleSurfacePoint(
+        Vector3 source,
+        Vector3 center,
+        Vector3 scale,
+        float rotation,
+        BodyPrimitive primitive)
+    {
+        Vector3 towardSource = new(
+            source.X - center.X,
+            source.Y - center.Y,
+            0f);
+        float lengthSquared = towardSource.LengthSquared();
+        towardSource = lengthSquared > 0.000001f
+            ? towardSource / MathF.Sqrt(lengthSquared)
+            : Vector3.UnitX;
+
+        Vector3 localDirection = Rotate2D(towardSource, -rotation);
+        float radiusX = MathF.Max(0.001f, MathF.Abs(scale.X));
+        float radiusY = MathF.Max(0.001f, MathF.Abs(scale.Y));
+        float distance = primitive switch
+        {
+            BodyPrimitive.Circle =>
+                1f / MathF.Sqrt(
+                    localDirection.X * localDirection.X / (radiusX * radiusX) +
+                    localDirection.Y * localDirection.Y / (radiusY * radiusY)),
+            BodyPrimitive.Triangle =>
+                GetTriangleSurfaceDistance(radiusX, radiusY, localDirection.X, localDirection.Y),
+            _ => MathF.Min(
+                radiusX / MathF.Max(0.0001f, MathF.Abs(localDirection.X)),
+                radiusY / MathF.Max(0.0001f, MathF.Abs(localDirection.Y)))
+        };
+
+        const float inset = 0.90f;
+        Vector3 offset = Rotate2D(localDirection * (distance * inset), rotation);
+        return new Vector3(center.X + offset.X, center.Y + offset.Y, center.Z);
+    }
+
+    private static float GetTriangleSurfaceDistance(
+        float halfLength,
+        float halfWidth,
+        float directionX,
+        float directionY)
+    {
+        float distance = halfLength /
+            MathF.Max(0.0001f, MathF.Abs(directionX));
+        float sideDenominator = MathF.Abs(directionY) +
+            halfWidth * directionX / (2f * halfLength);
+        if (sideDenominator > 0.0001f)
+        {
+            float sideDistance = halfWidth / (2f * sideDenominator);
+            distance = MathF.Min(distance, sideDistance);
+        }
+
+        return distance;
     }
 
     public bool TryHitUnit(
@@ -783,6 +883,24 @@ private static Vector3 GetMarkerWorldPosition(
         UnitHitRegionStore? hitRegions,
         UnitBodyStore? bodies)
     {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if (bodies != null &&
+            TryGetBodyShape(
+                units, unitIndex, profile, regionIndex, bodies,
+                out int bodyIndex, out Vector3 shapeCenter, out _, out _, out _, out _))
+        {
+            // Anatomy markers belong to the rendered node. Transform their local
+            // offset through that node's live orientation so eyes and muzzle stay
+            // on the flattened head when a unit lies down or crawls.
+            Vector3 localOffset = marker.LocalOffset;
+            if (units.Posture[unitIndex] == UnitPosture.Lying)
+                localOffset.Z *= 0.55f;
+
+            return shapeCenter + BodyPartTransformMath.TransformPosition(
+                localOffset,
+                bodies.WorldOrientation[bodyIndex]);
+        }
+
         Vector3 position = units.Position[unitIndex];
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
         Vector3 facing = (marker.Roles &
@@ -794,13 +912,29 @@ private static Vector3 GetMarkerWorldPosition(
             ? new Vector3(facing.X / MathF.Sqrt(facingLengthSquared), facing.Y / MathF.Sqrt(facingLengthSquared), 0f)
             : Vector3.UnitX;
 
+        float prone = units.Posture[unitIndex] == UnitPosture.Lying ? 0.17f : 0f;
         float heightFraction = (marker.Roles & UnitAnatomyMarkerRole.Eye) != 0
-            ? 0.82f
+            ? (prone > 0f ? prone : units.Posture[unitIndex] switch
+            {
+                UnitPosture.Crouching => 0.56f,
+                UnitPosture.Sitting => 0.68f,
+                _ => 0.82f
+            })
             : (marker.Roles & UnitAnatomyMarkerRole.Muzzle) != 0
-                ? 0.70f
+                ? (prone > 0f ? prone : units.Posture[unitIndex] switch
+                {
+                    UnitPosture.Crouching => 0.58f,
+                    UnitPosture.Sitting => 0.68f,
+                    _ => 0.70f
+                })
                 : (marker.Roles & UnitAnatomyMarkerRole.Vision) != 0
-                    ? 0.70f
-                    : 0.52f;
+                    ? (prone > 0f ? prone : units.Posture[unitIndex] switch
+                    {
+                        UnitPosture.Crouching => 0.56f,
+                        UnitPosture.Sitting => 0.68f,
+                        _ => 0.70f
+                    })
+                    : (prone > 0f ? prone : 0.52f);
 
         float forwardDistance = MathF.Max(0.01f, units.Radius[unitIndex]) * 0.65f;
         return position + facing * forwardDistance + new Vector3(0f, 0f, height * heightFraction);
@@ -952,7 +1086,10 @@ private static void GetWorldGeometry(
         center = position + new Vector3(0f, 0f, radius);
     }
 
-    private static int CountTargetRegions(UnitHitRegionProfile profile) => 1;
+    private static int CountTargetRegions(UnitHitRegionProfile profile) =>
+        profile is UnitAnatomyProfile anatomy
+            ? anatomy.VisibleRegionCount
+            : profile.RegionCount;
 
 private static bool IsInternalNode(UnitHitRegionProfile profile, int index) =>
         profile is UnitAnatomyProfile anatomy && anatomy.IsInternalNode(index);
