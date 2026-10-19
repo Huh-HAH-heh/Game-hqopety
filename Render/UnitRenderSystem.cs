@@ -1,4 +1,5 @@
 using Core.Combat;
+using Core.AI.Behaviac;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
