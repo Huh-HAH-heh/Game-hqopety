@@ -326,6 +326,7 @@ public sealed class UnitSimulation
         Skills.InitializeUnit(id.Index, definition.Type, Units.FactionTag[id.Index]);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
+        _aiSystem.InitializeUnit(id.Index);
 
         for (int i = 0; i < startingEquipment.Length; i++)
         {
@@ -389,6 +390,7 @@ public sealed class UnitSimulation
 
         _aiSystem.Store.ClearUnit(
             index);
+        _aiSystem.ClearUnit(index);
 
         return Units.Destroy(id);
     }
