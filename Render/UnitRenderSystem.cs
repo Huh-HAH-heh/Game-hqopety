@@ -531,20 +531,6 @@ public void DrawSnapshot(
                     1f);
             }
 
-            // Snapshot rendering runs on the main mass-combat path. Draw the
-            // authored melee weapon here as well, so the isolated duel clearly
-            // reads as knife/sword combat instead of two unarmed silhouettes.
-            if (isAlive && unit.MeleeWeapon.Config != null)
-            {
-                AppendSnapshotWeapon(
-                    _vertices,
-                    unit.MeleeWeapon,
-                    position,
-                    unit.BodyNormal,
-                    tilePixelSize,
-                    false);
-            }
-
             // Marker-only mode draws the full silhouette. When rig mode is on,
             // the anatomical parts replace the marker completely.
             float markerOpacity = showUnitRig ? 0f : 1f;
@@ -1280,133 +1266,6 @@ public void DrawSnapshot(
             GetItemColor(weapon));
     }
 
-    private static void AppendMeleeWeapon(
-        VertexArray vertices,
-        MeleeWeaponConfig weapon,
-        Vector3 position,
-        float dx,
-        float dy,
-        float tilePixelSize)
-    {
-        float angle = MathF.Atan2(dy, dx);
-        float totalLength = MathF.Max(
-            weapon.WorldRenderLength * tilePixelSize,
-            weapon.WorldRenderLength <= 0.35f ? 6f : 9f);
-        float sideX = -dy;
-        float sideY = dx;
-
-        // The grip begins just off the pawn's centre so the weapon reads as held,
-        // rather than as a line piercing the whole unit.
-        float rootX = position.X * tilePixelSize +
-                      dx * tilePixelSize * 0.09f -
-                      dy * tilePixelSize * 0.055f;
-        float rootY = position.Y * tilePixelSize +
-                      dy * tilePixelSize * 0.09f +
-                      dx * tilePixelSize * 0.055f;
-
-        bool blunt = weapon.MeleeDamageType == DamageType.Blunt;
-        float handleLength = MathF.Max(2f, totalLength * (blunt ? 0.28f : 0.20f));
-        float handleWidth = MathF.Max(0.9f, totalLength * (blunt ? 0.10f : 0.065f));
-        float handleCenterX = rootX + dx * handleLength * 0.5f;
-        float handleCenterY = rootY + dy * handleLength * 0.5f;
-
-        if (blunt)
-        {
-            // Shock baton: dark body, visible cyan core and a bright striking cap.
-            AppendOrientedRect(
-                vertices, handleCenterX, handleCenterY,
-                handleWidth, handleLength * 0.5f, angle,
-                new Color(33, 43, 49, 255));
-
-            float shaftLength = totalLength - handleLength * 0.25f;
-            float shaftCenterX = rootX + dx * (handleLength * 0.25f + shaftLength * 0.5f);
-            float shaftCenterY = rootY + dy * (handleLength * 0.25f + shaftLength * 0.5f);
-            AppendOrientedRect(
-                vertices, shaftCenterX, shaftCenterY,
-                MathF.Max(1.1f, handleWidth * 0.58f),
-                shaftLength * 0.5f, angle,
-                new Color(74, 190, 207, 255));
-            AppendOrientedRect(
-                vertices,
-                rootX + dx * (totalLength - 0.7f),
-                rootY + dy * (totalLength - 0.7f),
-                MathF.Max(1.5f, handleWidth * 0.85f),
-                0.8f,
-                angle,
-                new Color(170, 247, 255, 255));
-            return;
-        }
-
-        float bladeLength = totalLength - handleLength;
-        float guardX = rootX + dx * handleLength;
-        float guardY = rootY + dy * handleLength;
-        float bladeWidth = MathF.Max(
-            weapon.WorldRenderLength <= 0.35f ? 1.35f : 1.6f,
-            weapon.WorldRenderWidth * tilePixelSize * 1.8f);
-        float bladeBodyLength = bladeLength * 0.76f;
-        float bladeCenterX = guardX + dx * bladeBodyLength * 0.5f;
-        float bladeCenterY = guardY + dy * bladeBodyLength * 0.5f;
-        Color gripColor = new(91, 68, 49, 255);
-        Color bladeOutline = new(36, 43, 49, 255);
-        Color bladeColor = new(
-            (byte)Math.Clamp(weapon.WorldColorR + 27, 0, 255),
-            (byte)Math.Clamp(weapon.WorldColorG + 27, 0, 255),
-            (byte)Math.Clamp(weapon.WorldColorB + 27, 0, 255),
-            255);
-
-        // Grip, crossguard and edged blade are separate shapes. The blade gets
-        // a dark silhouette plus a bright metal face so it does not alias into a stick.
-        AppendOrientedRect(
-            vertices, handleCenterX, handleCenterY,
-            handleWidth * 0.72f, handleLength * 0.5f, angle, gripColor);
-        AppendOrientedRect(
-            vertices, guardX, guardY,
-            0.7f, MathF.Max(1.7f, totalLength * 0.15f),
-            angle + MathF.PI * 0.5f,
-            new Color(48, 52, 57, 255));
-
-        AppendOrientedRect(
-            vertices, bladeCenterX, bladeCenterY,
-            bladeWidth * 0.5f + 0.45f, bladeBodyLength * 0.5f,
-            angle, bladeOutline);
-        AppendOrientedRect(
-            vertices, bladeCenterX, bladeCenterY,
-            bladeWidth * 0.5f, bladeBodyLength * 0.5f,
-            angle, bladeColor);
-
-        float tipX = guardX + dx * bladeLength;
-        float tipY = guardY + dy * bladeLength;
-        float baseX = guardX + dx * bladeBodyLength;
-        float baseY = guardY + dy * bladeBodyLength;
-        float outlineHalfWidth = bladeWidth * 0.5f + 0.45f;
-        float faceHalfWidth = bladeWidth * 0.36f;
-
-        AppendTriangle(
-            vertices,
-            new Vector2f(baseX + sideX * outlineHalfWidth, baseY + sideY * outlineHalfWidth),
-            new Vector2f(tipX, tipY),
-            new Vector2f(baseX - sideX * outlineHalfWidth, baseY - sideY * outlineHalfWidth),
-            bladeOutline);
-        AppendTriangle(
-            vertices,
-            new Vector2f(baseX + sideX * faceHalfWidth, baseY + sideY * faceHalfWidth),
-            new Vector2f(tipX, tipY),
-            new Vector2f(baseX - sideX * faceHalfWidth, baseY - sideY * faceHalfWidth),
-            bladeColor);
-    }
-
-    private static void AppendTriangle(
-        VertexArray vertices,
-        Vector2f a,
-        Vector2f b,
-        Vector2f c,
-        Color color)
-    {
-        vertices.Append(new Vertex(a, color));
-        vertices.Append(new Vertex(b, color));
-        vertices.Append(new Vertex(c, color));
-    }
-
     private static Color GetItemColor(ItemConfig item) =>
         new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
 
@@ -1520,17 +1379,9 @@ public void DrawSnapshot(
                 }
             }
 
-            if (weapon is MeleeWeaponConfig meleeWeapon)
-            {
-                AppendMeleeWeapon(
-                    vertices,
-                    meleeWeapon,
-                    unitPosition,
-                    weaponX,
-                    weaponY,
-                    tilePixelSize);
+            // Melee gameplay remains active, but melee weapon sprites are intentionally hidden.
+            if (weapon is MeleeWeaponConfig)
                 continue;
-            }
 
             float sideOffset = slot == (int)UnitWeaponSlot.Secondary ? 0.10f : 0f;
             float centerDistance = weapon.WorldRenderLength * 0.43f;
