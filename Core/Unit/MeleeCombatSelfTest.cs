@@ -50,7 +50,9 @@ public static class MeleeCombatSelfTest
                 simulation.Bodies,
                 0.05f);
 
-            if (simulation.MeleeCombat.IsMovementLocked(defender.Index))
+            if (simulation.MeleeCombat.IsMovementLocked(defender.Index) &&
+                simulation.Health.OverallHitPoints[attacker.Index] > 0f &&
+                simulation.Health.OverallHitPoints[defender.Index] > 0f)
             {
                 Vector3 positionBefore = simulation.Units.Position[defender.Index];
                 simulation.Units.Target[defender.Index] = positionBefore + new Vector3(8f, 0f, 0f);
