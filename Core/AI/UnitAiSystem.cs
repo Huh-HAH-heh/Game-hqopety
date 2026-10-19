@@ -18,6 +18,7 @@ public sealed class UnitAiSystem
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
     private const float ProneCrawlFiringDistance = 9f;
+    private const int MaxSearchPatrolLegs = 3;
     private static readonly int MaxAiPlanningParallelism =
         Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
@@ -83,6 +84,26 @@ public sealed class UnitAiSystem
             Environment.GetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI"),
             "0",
             StringComparison.Ordinal);
+    }
+
+    public void InitializeUnit(int unitIndex)
+    {
+        EnsurePlanningCapacity(unitIndex + 1);
+        _searchPatrolLegByUnit[unitIndex] = 0;
+        _flankTargetByUnit[unitIndex] = default;
+        _hasFlankTargetByUnit[unitIndex] = false;
+    }
+
+    public void ClearUnit(int unitIndex)
+    {
+        if ((uint)unitIndex >= (uint)_searchPatrolLegByUnit.Length)
+            return;
+
+        _searchPatrolLegByUnit[unitIndex] = 0;
+        _flankTargetByUnit[unitIndex] = default;
+        _hasFlankTargetByUnit[unitIndex] = false;
+        if ((uint)unitIndex < (uint)_behaviacAgents.Length)
+            _behaviacAgents[unitIndex] = null;
     }
 
     public void Update(
@@ -329,6 +350,13 @@ public sealed class UnitAiSystem
             if (!keepCurrentVisibleTarget && visibleEnemy >= 0)
             {
                 UnitId targetId = units.GetId(visibleEnemy);
+                if (!Store.HasTarget[unit] ||
+                    !Store.Target[unit].Equals(targetId))
+                {
+                    // A fresh enemy contact starts a new, short search leash.
+                    _searchPatrolLegByUnit[unit] = 0;
+                }
+
                 Store.RememberTarget(
                     unit,
                     targetId,
@@ -364,7 +392,8 @@ public sealed class UnitAiSystem
                         Store.ClearGoal(unit);
 
                         int patrolLeg = ++_searchPatrolLegByUnit[unit];
-                        if (TryFindSearchWaypoint(
+                        if (patrolLeg <= MaxSearchPatrolLegs &&
+                            TryFindSearchWaypoint(
                                 units,
                                 worldMap,
                                 unit,
