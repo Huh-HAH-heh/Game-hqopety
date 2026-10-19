@@ -213,6 +213,17 @@ public sealed class UnitAiSystem
                     units, health, inventory, weapons, vision, unit, suppressionState, isAlive);
                 LastBehaviacDecisionBatchMilliseconds +=
                     Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
+
+                // A visible hostile must not be ignored because the tree returns a
+                // stale Patrol intent; low-health retreat and suppression panic still win.
+                if (intent == BehaviacUnitIntent.Patrol &&
+                    _nearestVisibleEnemyByUnit[unit] >= 0 &&
+                    suppressionState != UnitSuppressionState.Panicked &&
+                    !IsLowHealth(health, unit))
+                {
+                    intent = BehaviacUnitIntent.EngageTarget;
+                }
+
                 RecordBehaviacIntent(intent);
             }
 
@@ -682,8 +693,10 @@ public sealed class UnitAiSystem
                     float distanceSquared = dx * dx + dy * dy;
                     float attackDistance = MeleeCombatSystem.GetAttackDistance(
                         unit, target.Index, units, inventory);
-                    float desiredDistance = MathF.Max(0.20f, attackDistance * 0.84f);
-                    float approachThreshold = desiredDistance + 0.12f;
+                    float desiredDistance = MathF.Max(0.20f, attackDistance * 0.94f);
+                    float approachThreshold = MathF.Min(
+                        attackDistance * 0.975f,
+                        desiredDistance + 0.06f);
 
                     if (distanceSquared > approachThreshold * approachThreshold)
                     {
