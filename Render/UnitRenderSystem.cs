@@ -255,7 +255,10 @@ public sealed class UnitRenderSystem : IDisposable
                     _bodyOutlines,
                     screenX,
                     screenY,
-                    markerRadius,
+                    MathF.Max(
+                        0.13f,
+                        MathF.Max(widths[unitIndex], lengths[unitIndex]) * 0.5f) *
+                    tilePixelSize,
                     units.Posture[unitIndex],
                     screenScale);
             }
@@ -549,7 +552,10 @@ public void DrawSnapshot(
                     _bodyOutlines,
                     x,
                     y,
-                    markerRadius,
+                    MathF.Max(
+                        0.13f,
+                        MathF.Max(unit.Width, unit.Length) * 0.5f) *
+                    tilePixelSize,
                     unit.Posture,
                     screenScale);
             }
