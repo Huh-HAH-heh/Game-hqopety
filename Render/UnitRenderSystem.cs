@@ -885,6 +885,7 @@ public void DrawSnapshot(
         {
             1 => new Color(76, 125, 171, 255),
             2 => new Color(167, 76, 80, 255),
+            3 => new Color(186, 146, 49, 255),
             _ => new Color(122, 137, 151, 255)
         };
 
@@ -1217,6 +1218,7 @@ public void DrawSnapshot(
         {
             1 => new Color(107, 158, 198, 125),
             2 => new Color(190, 116, 109, 125),
+            3 => new Color(224, 180, 60, 155),
             _ => new Color(153, 164, 176, 95)
         };
 
@@ -1559,6 +1561,7 @@ public void DrawSnapshot(
             {
                 1 => new Color(54, 157, 255, 245),
                 2 => new Color(255, 65, 70, 245),
+                3 => new Color(255, 190, 45, 250),
                 _ => new Color(171, 183, 196, 190)
             };
 
