@@ -1520,6 +1520,18 @@ public void DrawSnapshot(
                 }
             }
 
+            if (weapon is MeleeWeaponConfig meleeWeapon)
+            {
+                AppendMeleeWeapon(
+                    vertices,
+                    meleeWeapon,
+                    unitPosition,
+                    weaponX,
+                    weaponY,
+                    tilePixelSize);
+                continue;
+            }
+
             float sideOffset = slot == (int)UnitWeaponSlot.Secondary ? 0.10f : 0f;
             float centerDistance = weapon.WorldRenderLength * 0.43f;
             float centerX = unitPosition.X + weaponX * centerDistance - weaponY * sideOffset;
