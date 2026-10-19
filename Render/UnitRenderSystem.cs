@@ -562,8 +562,7 @@ public void DrawSnapshot(
 
             // Posture glyphs replace the old bright rings. Fade them in only
             // when the camera is close enough, and keep them unobtrusive.
-            float postureMarkerOpacity =
-                detailBlend >= 0.65f ? 0.38f * detailBlend : 0f;
+            float postureMarkerOpacity = 0.38f * closeMarkerBlend;
             if (postureMarkerOpacity > 0f)
             {
                 AppendPostureMarker(
