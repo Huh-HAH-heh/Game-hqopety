@@ -35,7 +35,7 @@ public static class CombatSelfTest
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
         RunTest("Pawn stats: RimWorld skills and suppression resistance", TestPawnSkillsAndResistance, ref passed, ref failed);
         RunTest("Posture: prone silhouette and firing", TestPronePostureAndFiring, ref passed, ref failed);
-        RunTest("Targeting: three procedural zones follow posture independently of the rig", TestProneTargetPointsFollowRig, ref passed, ref failed);
+        RunTest("Targeting: three procedural zones follow posture independently of the rig", TestProceduralZonesFollowPosture, ref passed, ref failed);
         RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
@@ -55,7 +55,7 @@ public static class CombatSelfTest
         RunTest("Anatomy: rig editor can add dependent regions", TestAnatomyRigCanAppendDependency, ref passed, ref failed);
         RunTest("Pose: saved postures and walk-cycle motion are applied", TestSavedPosesAndWalkCycleApplied, ref passed, ref failed);
         RunTest("Body rig: 3D rotation projects consistently in all views", TestBodyPartProjectionMath, ref passed, ref failed);
-        RunTest("Ballistics: per-segment hits follow the rendered rig", TestProjectileHitsAuthoredRigSegments, ref passed, ref failed);
+        RunTest("Ballistics: projectile hits use procedural zones, not rig transforms", TestProjectileHitsAuthoredRigSegments, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -1851,14 +1851,22 @@ public static class CombatSelfTest
         stage = 4;
         int visibilityCount = UnitHitSystem.GetVisibilityPointCount(
             simulation.Units, unit.Index, simulation.HitRegions);
-        if (visibilityCount != profile.VisibleRegionCount || visibilityCount < checkedShapes)
+        if (visibilityCount != UnitGameplayZoneSystem.ZoneCount)
             return Fail();
 
         for (int i = 0; i < visibilityCount; i++)
         {
             int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
                 simulation.Units, unit.Index, i, simulation.HitRegions);
-            if (profile.IsInternalNode(regionIndex))
+            if (regionIndex != i)
+                return Fail();
+
+            UnitHitRegionGeometry geometry = UnitHitSystem.GetGameplayDetectionRegionGeometry(
+                simulation.Units, unit.Index, i, simulation.HitRegions);
+            UnitGameplayZoneGeometry expectedZone =
+                UnitGameplayZoneSystem.GetGeometry(simulation.Units, unit.Index, i);
+            if (Vector3.Distance(geometry.Center, expectedZone.Center) > 0.0001f ||
+                MathF.Abs(geometry.Radius - expectedZone.BoundingRadius) > 0.0001f)
                 return Fail();
         }
 
@@ -2067,22 +2075,19 @@ public static class CombatSelfTest
         if (profile is not UnitAnatomyProfile anatomy)
             return false;
 
-        UnitHitSystem hitSystem = new UnitHitSystem();
-        string[] requiredRegions = { "body.middle", "body.upper" };
-        for (int i = 0; i < requiredRegions.Length; i++)
-        {
-            int regionIndex = anatomy.FindRegion(requiredRegions[i]);
-            if (regionIndex < 0)
-                return false;
+        int bodyStart = simulation.Units.BodyStart[target.Index];
+        int bodyCount = simulation.Units.BodyCount[target.Index];
+        for (int i = 0; i < bodyCount; i++)
+            simulation.Bodies.WorldPosition[bodyStart + i] += new Vector3(1000f, 1000f, 1000f);
 
-            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
-                simulation.Units,
-                target.Index,
-                regionIndex,
-                simulation.HitRegions,
-                simulation.Bodies);
-            Vector3 start = geometry.Center - new Vector3(0.25f, 0f, 0f);
-            Vector3 end = geometry.Center + new Vector3(0.25f, 0f, 0f);
+        UnitHitSystem hitSystem = new UnitHitSystem();
+        for (int zoneIndex = 0; zoneIndex < UnitGameplayZoneSystem.ZoneCount; zoneIndex++)
+        {
+            UnitGameplayZone zone = (UnitGameplayZone)zoneIndex;
+            UnitGameplayZoneGeometry geometry =
+                UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, zoneIndex);
+            Vector3 start = geometry.Center - new Vector3(0f, 0f, 1f);
+            Vector3 end = geometry.Center + new Vector3(0f, 0f, 1f);
 
             if (!hitSystem.TryHitUnit(
                     simulation.Units,
@@ -2094,19 +2099,21 @@ public static class CombatSelfTest
                     out UnitHitResult hit,
                     simulation.Bodies,
                     simulation.HitRegions) ||
-                hit.RegionIndex != regionIndex)
+                hit.RegionIndex < 0 ||
+                hit.RegionIndex >= anatomy.RegionCount ||
+                hit.BindingIndex < 0 ||
+                !UnitGameplayZoneSystem.ZoneAllowsPart(zone, hit.Part))
             {
                 Console.Error.WriteLine(
-                    $"[Rig hit test] Expected {requiredRegions[i]} (region {regionIndex}); " +
-                    $"hit={(hit.RegionIndex >= 0 ? anatomy.GetNode(hit.RegionIndex).Id : "none")}.");
+                    $"[Procedural zone test] zone={zone}; hit={(hit.RegionIndex >= 0 ? hit.Part.ToString() : "none")}.");
                 return false;
             }
         }
 
         Vector3 root = simulation.Units.Position[target.Index];
         float height = simulation.Units.Height[target.Index];
-        Vector3 outsideStart = root + new Vector3(0.62f, -0.08f, height * 0.5f);
-        Vector3 outsideEnd = root + new Vector3(0.86f, -0.08f, height * 0.5f);
+        Vector3 outsideStart = root + new Vector3(1.1f, 1.1f, height * 0.5f);
+        Vector3 outsideEnd = root + new Vector3(1.4f, 1.1f, height * 0.5f);
         return !hitSystem.TryHitUnit(
             simulation.Units,
             target.Index,
