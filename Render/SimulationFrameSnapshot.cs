@@ -62,7 +62,9 @@ public readonly record struct RenderUnitState(
     float ViewRange,
     float FieldOfView,
     float MaxHitPoints,
-    int LocationId);
+    int LocationId,
+    bool HasMoveTarget,
+    Vector3 MoveTargetPosition);
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
@@ -444,7 +446,9 @@ public sealed class SimulationFrameSnapshot
                 viewRanges[index],
                 fieldOfViews[index],
                 maxHitPoints[index],
-                locations[index]);
+                locations[index],
+                units.HasTarget[index],
+                units.HasTarget[index] ? units.Target[index] : Vector3.Zero);
 
             bool alive = hp > 0f;
             if (faction == 1)

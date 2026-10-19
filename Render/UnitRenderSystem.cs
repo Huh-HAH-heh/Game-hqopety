@@ -364,7 +364,6 @@ public void DrawSnapshot(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
-        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
@@ -394,24 +393,63 @@ public void DrawSnapshot(
             Vector3 position = unit.Position;
             float x = position.X * tilePixelSize;
             float y = position.Y * tilePixelSize;
+            bool isSelected = selectedUnits != null
+                ? selectedUnits.Contains(new UnitId(unit.Index, unit.Generation))
+                : unit.Index == selectedUnitIndex;
 
-            // Debug geometry is produced from the same immutable frame data
-            // as the unit markers; no live AI store reads happen on the render thread.
-            if (showAiDebug &&
-                unit.Index == selectedUnitIndex &&
-                unit.HitPoints > 0f)
+            // I shows the complete intent of every selected pawn: its hostile
+            // target, movement/cover goal, and a color-coded intent marker.
+            if (showAiDebug && isSelected && unit.HitPoints > 0f)
             {
-                Color debugColor = GetAiColor(unit.AiState);
+                Color intentColor = GetIntentColor(unit.AiIntent, unit.AiState);
+                Color stateColor = GetAiColor(unit.AiState);
+
+                AppendCircleOutline(
+                    _aiDebug,
+                    x,
+                    y,
+                    0.27f * tilePixelSize,
+                    intentColor,
+                    10);
 
                 if (unit.HasTarget)
                 {
+                    float targetX = unit.TargetPosition.X * tilePixelSize;
+                    float targetY = unit.TargetPosition.Y * tilePixelSize;
                     AppendDebugLine(
                         _aiDebug,
                         x,
                         y,
-                        unit.TargetPosition.X * tilePixelSize,
-                        unit.TargetPosition.Y * tilePixelSize,
-                        new Color(debugColor.R, debugColor.G, debugColor.B, 140));
+                        targetX,
+                        targetY,
+                        new Color(intentColor.R, intentColor.G, intentColor.B, 210));
+                    AppendCircleOutline(
+                        _aiDebug,
+                        targetX,
+                        targetY,
+                        0.18f * tilePixelSize,
+                        intentColor,
+                        8);
+                }
+
+                if (unit.HasMoveTarget)
+                {
+                    float moveX = unit.MoveTargetPosition.X * tilePixelSize;
+                    float moveY = unit.MoveTargetPosition.Y * tilePixelSize;
+                    AppendDebugLine(
+                        _aiDebug,
+                        x,
+                        y,
+                        moveX,
+                        moveY,
+                        new Color(stateColor.R, stateColor.G, stateColor.B, 165));
+                    AppendCircleOutline(
+                        _aiDebug,
+                        moveX,
+                        moveY,
+                        0.12f * tilePixelSize,
+                        stateColor,
+                        8);
                 }
 
                 if (unit.HasGoal)
@@ -423,7 +461,7 @@ public void DrawSnapshot(
                         goalX,
                         goalY,
                         0.42f * tilePixelSize,
-                        debugColor,
+                        stateColor,
                         12);
                     AppendDebugLine(
                         _aiDebug,
@@ -431,9 +469,8 @@ public void DrawSnapshot(
                         y,
                         goalX,
                         goalY,
-                        new Color(debugColor.R, debugColor.G, debugColor.B, 110));
+                        new Color(stateColor.R, stateColor.G, stateColor.B, 180));
                 }
-
             }
 
             bool rootInView =
@@ -454,52 +491,6 @@ public void DrawSnapshot(
                     maxY)))
             {
                 continue;
-            }
-
-            // I toggles tactical goal markers. These are hidden at overview
-            // zoom to keep the battlefield readable.
-            bool closeAiOverlay = closeMarkerBlend > 0f;
-            bool showPatrolGoal = unit.AiIntent == BehaviacUnitIntent.Patrol;
-            bool showFlankGoal = unit.AiIntent == BehaviacUnitIntent.FlankTarget ||
-                                 unit.AiState == UnitAiState.Flank;
-            bool showCoverGoal = unit.AiIntent is BehaviacUnitIntent.SeekCover or BehaviacUnitIntent.RetreatToCover ||
-                                 unit.AiState == UnitAiState.SeekCover;
-
-            if (showAiDebug &&
-                closeAiOverlay &&
-                rootInView &&
-                unit.HitPoints > 0f &&
-                unit.HasGoal &&
-                (showPatrolGoal || showFlankGoal || showCoverGoal))
-            {
-                byte markerAlpha = (byte)(closeMarkerBlend * 128f);
-                Color maneuverColor = showPatrolGoal
-                    ? new Color(115, 220, 135, markerAlpha)
-                    : showFlankGoal
-                        ? new Color(235, 105, 255, (byte)(closeMarkerBlend * 150f))
-                        : new Color(70, 175, 255, (byte)(closeMarkerBlend * 145f));
-                float goalX = unit.Goal.X * tilePixelSize;
-                float goalY = unit.Goal.Y * tilePixelSize;
-                float goalRadius = (showPatrolGoal ? 0.30f : showFlankGoal ? 0.48f : 0.38f) * tilePixelSize;
-
-                AppendDebugLine(
-                    _aiDebug,
-                    x,
-                    y,
-                    goalX,
-                    goalY,
-                    new Color(
-                        maneuverColor.R,
-                        maneuverColor.G,
-                        maneuverColor.B,
-                        (byte)(closeMarkerBlend * (showPatrolGoal ? 70f : 85f))));
-                AppendCircleOutline(
-                    _aiDebug,
-                    goalX,
-                    goalY,
-                    goalRadius,
-                    maneuverColor,
-                    12);
             }
 
             bool isAlive = unit.HitPoints > 0f;
@@ -554,10 +545,6 @@ public void DrawSnapshot(
 
             if (!isAlive)
                 continue;
-
-            bool isSelected = selectedUnits != null
-                ? selectedUnits.Contains(new UnitId(unit.Index, unit.Generation))
-                : unit.Index == selectedUnitIndex;
 
             if (isSelected)
             {
@@ -1880,6 +1867,25 @@ private static void AppendSuppressionDebug(
                     color.B,
                     110));
         }
+    }
+
+    private static Color GetIntentColor(
+        BehaviacUnitIntent intent,
+        UnitAiState state)
+    {
+        return intent switch
+        {
+            BehaviacUnitIntent.Dead => new Color(130, 138, 148, 225),
+            BehaviacUnitIntent.SeekCover or BehaviacUnitIntent.RetreatToCover =>
+                new Color(80, 175, 255, 230),
+            BehaviacUnitIntent.FlankTarget => new Color(230, 100, 255, 230),
+            BehaviacUnitIntent.EngageTarget => new Color(255, 125, 85, 230),
+            BehaviacUnitIntent.SuppressiveFire => new Color(255, 190, 70, 230),
+            BehaviacUnitIntent.InvestigateLastKnownTarget => new Color(245, 220, 95, 230),
+            BehaviacUnitIntent.Patrol => new Color(105, 225, 140, 230),
+            BehaviacUnitIntent.ProneEngage => new Color(100, 225, 220, 230),
+            _ => GetAiColor(state)
+        };
     }
 
     private static Color GetAiColor(

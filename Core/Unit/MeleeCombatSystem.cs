@@ -94,6 +94,19 @@ public sealed class MeleeCombatSystem
         }
     }
 
+    /// <summary>Maximum center-to-center distance at which this unit can land a melee strike.</summary>
+    public static float GetAttackDistance(
+        int attacker,
+        int target,
+        UnitStore units,
+        UnitInventoryStore inventory)
+    {
+        float reach = GetProfile(attacker, units, inventory).Reach;
+        return reach +
+            MathF.Max(0f, units.Radius[attacker]) +
+            MathF.Max(0f, units.Radius[target]);
+    }
+
     public void Update(
         UnitStore units,
         UnitAiStore ai,
@@ -134,9 +147,7 @@ public sealed class MeleeCombatSystem
 
             MeleeProfile profile = GetProfile(attacker, units, inventory);
             Vector3 delta = units.Position[target] - units.Position[attacker];
-            float reach = profile.Reach +
-                MathF.Max(0f, units.Radius[attacker]) +
-                MathF.Max(0f, units.Radius[target]);
+            float reach = GetAttackDistance(attacker, target, units, inventory);
 
             if (delta.LengthSquared() > reach * reach || _attackCooldown[attacker] > 0f)
                 continue;
