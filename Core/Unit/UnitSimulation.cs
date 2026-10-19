@@ -140,7 +140,7 @@ public sealed class UnitSimulation
         Suppression.BindSkillStore(Skills);
 
         _weaponSystem =
-            new UnitWeaponSystem(HitRegions, Bodies, Skills);
+            new UnitWeaponSystem(HitRegions, Bodies, Skills, Health);
 
         _projectileSystem =
             new ProjectileSystem();
