@@ -526,7 +526,7 @@ public void DrawSnapshot(
             // Snapshot rendering runs on the main mass-combat path. Draw the
             // authored melee weapon here as well, so the isolated duel clearly
             // reads as knife/sword combat instead of two unarmed silhouettes.
-            if (isAlive && showUnitDetails)
+            if (isAlive && unit.MeleeWeapon.Config != null)
             {
                 AppendSnapshotWeapon(
                     _vertices,
