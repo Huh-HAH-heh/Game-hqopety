@@ -14,7 +14,8 @@ public sealed class UnitMovementSystem
         UnitStore units,
         WorldMap worldMap,
         float deltaTime,
-        UnitHealthStore? health = null)
+        UnitHealthStore? health = null,
+        MeleeCombatSystem? meleeCombat = null)
     {
         if (deltaTime <= 0f || units.ActiveCount == 0)
             return;
@@ -40,6 +41,14 @@ public sealed class UnitMovementSystem
                 hasTarget[unit] = false;
                 velocities[unit] = Vector3.Zero;
                 _navigation.ClearRoute(unit);
+                continue;
+            }
+
+            // Keep the original movement order, but do not move during a landed
+            // melee hit's short stagger window. Navigation can resume afterwards.
+            if (meleeCombat?.IsMovementLocked(unit) == true)
+            {
+                velocities[unit] = Vector3.Zero;
                 continue;
             }
 
