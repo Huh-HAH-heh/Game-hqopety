@@ -9,8 +9,8 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    // Starts at 1,600 active units (800 per faction); F8 cycles 80/400/800 per side.
-    private const int InitialUnitsPerFaction = 800;
+    // Starts at 800 ranged units (400 per faction); F8 cycles 80/400/800 per side.
+    private const int InitialUnitsPerFaction = 400;
     private const int Columns = 40;
     private const float FormationSpacing = 2.5f;
 
@@ -25,6 +25,13 @@ public sealed class LongRangeCombatTestScene
     // Advance far enough for the front ranks to acquire targets while marching.
     private const float AdvanceDistance = 50f;
     private const float VisionStressRange = 85f;
+    private const ushort BaseMaterialId = 1;
+    private const int MeleeDuelUnitsPerSide = 24;
+    private const int MeleeFormationColumns = 6;
+    private const float MeleeFormationSpacing = 1.5f;
+    private const float MeleeBattleOffsetX = 175f;
+    private const float MeleeBattleOffsetY = 130f;
+    private const float MeleeBattleGap = 18f;
 
     private UnitId[] _units =
         new UnitId[InitialUnitsPerFaction * 2];
@@ -32,10 +39,14 @@ public sealed class LongRangeCombatTestScene
     private byte[] _side =
         new byte[InitialUnitsPerFaction * 2];
 
+    private UnitId[] _thirdFactionUnits =
+        new UnitId[MeleeDuelUnitsPerSide];
+
     private bool _initialized;
     private float _elapsed;
     private float _fireTimer;
     private long _hitsAtReset;
+    private long _meleeHitsAtReset;
 
     public bool Initialized =>
         _initialized;
@@ -43,9 +54,14 @@ public sealed class LongRangeCombatTestScene
     public UnitId FirstUnit =>
         _units[0];
 
+    public UnitId FirstMeleeUnit =>
+        _thirdFactionUnits[0];
+
     public int AliveBlue { get; private set; }
 
     public int AliveRed { get; private set; }
+
+    public int AliveThirdFaction { get; private set; }
 
     public int AliveUnits =>
         AliveBlue + AliveRed;
@@ -58,9 +74,11 @@ public sealed class LongRangeCombatTestScene
         {
             BuildTerrain(worldMap);
             SpawnUnits(simulation, worldMap);
+            SpawnThirdFactionUnits(simulation, worldMap);
             _initialized = true;
             // AI/vision are controlled by the user, not reset by scene setup.
             _hitsAtReset = simulation.Projectiles.TotalHits;
+            _meleeHitsAtReset = simulation.MeleeCombat.TotalHits;
         }
         else
         {
@@ -110,6 +128,13 @@ public sealed class LongRangeCombatTestScene
 
         }
 
+        for (int i = 0; i < _thirdFactionUnits.Length; i++)
+        {
+            if (simulation.Units.TryGetIndex(_thirdFactionUnits[i], out _))
+                simulation.Destroy(_thirdFactionUnits[i]);
+            _thirdFactionUnits[i] = default;
+        }
+
         simulation.Projectiles.Clear();
 
         _initialized = false;
@@ -118,6 +143,7 @@ public sealed class LongRangeCombatTestScene
         _hitsAtReset = simulation.Projectiles.TotalHits;
         AliveBlue = 0;
         AliveRed = 0;
+        AliveThirdFaction = 0;
     }
 
     public void Update(
@@ -159,15 +185,15 @@ public sealed class LongRangeCombatTestScene
         UpdateStats(simulation);
 
         return
-            $"FIREFIGHT {TotalUnits} | " +
-            $"Blue {AliveBlue} | " +
-            $"Red {AliveRed} | " +
+            $"FIGHT {TotalUnits + _thirdFactionUnits.Length} total | " +
+            $"Blue {AliveBlue} | Red {AliveRed} | F3 melee {AliveThirdFaction} | " +
             $"Initial center gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
             $"Fire mode {(simulation.AI.Enabled ? "AI" : "scripted volley")} | " +
             $"Vision {(simulation.VisionEnabled ? "ON" : "OFF")} | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Routes {simulation.Navigation.RoutesBuilt} built/{simulation.Navigation.RoutesFailed} failed | " +
-            $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
+            $"Shots hit {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
+            $"Melee hits {simulation.MeleeCombat.TotalHits - _meleeHitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
     }
 
@@ -193,12 +219,12 @@ public sealed class LongRangeCombatTestScene
         int minY =
             Math.Max(
                 4,
-                centerY - (int)(45f * TerrainScale));
+                centerY - (int)(75f * TerrainScale));
 
         int maxY =
             Math.Min(
                 worldMap.MaxTileY - 4,
-                centerY + (int)(45f * TerrainScale));
+                centerY + (int)(75f * TerrainScale));
 
         for (int y = minY;
              y <= maxY;
@@ -413,12 +439,33 @@ public sealed class LongRangeCombatTestScene
             }
         }
 
+        FlattenMeleeArena(worldMap, centerX, centerY);
+
         ClearWater(
             worldMap,
             minX,
             maxX,
             minY,
             maxY);
+    }
+
+    private static void FlattenMeleeArena(
+        WorldMap worldMap,
+        int centerX,
+        int centerY)
+    {
+        // Flat and open so the isolated squad cannot be separated by a random ridge.
+        int minX = Math.Max(1, centerX + 140);
+        int maxX = Math.Min(worldMap.MaxTileX - 1, centerX + 190);
+        int minY = Math.Max(1, centerY + 115);
+        int maxY = Math.Min(worldMap.MaxTileY - 1, centerY + 145);
+        const ushort arenaHeight = 60; // 6 m in 0.1 m terrain layers.
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+                worldMap.SetSolidHeight(x, y, arenaHeight, BaseMaterialId);
+        }
     }
 
     private static bool IsHardCover(
@@ -517,6 +564,17 @@ public sealed class LongRangeCombatTestScene
                         column * FormationSpacing +
                         (row % 2) * FormationSpacing * 0.5f;
 
+                    if (side == 1 &&
+                        local >= UnitsPerFaction - MeleeDuelUnitsPerSide)
+                    {
+                        GetMeleeFormationPosition(
+                            worldMap,
+                            side,
+                            local - (UnitsPerFaction - MeleeDuelUnitsPerSide),
+                            out x,
+                            out y);
+                    }
+
                     SpawnUnit(
                         simulation,
                         worldMap,
@@ -585,8 +643,16 @@ public sealed class LongRangeCombatTestScene
         int unitIndex =
             id.Index;
 
-        // Give each unit a real movement order so the test exercises route planning.
-        SetMarchTarget(simulation, id, worldMap, side, tileX, tileY);
+        bool isMeleeDuelUnit =
+            side == 1 &&
+            index % UnitsPerFaction >= UnitsPerFaction - MeleeDuelUnitsPerSide;
+
+        // Keep the detached squad out of the main firefight until it spots faction 3.
+        if (isMeleeDuelUnit)
+            simulation.SetTarget(id, position);
+        else
+            SetMarchTarget(simulation, id, worldMap, side, tileX, tileY);
+
         simulation.Units.ViewRange[unitIndex] = VisionStressRange;
         simulation.Units.FieldOfView[unitIndex] = 180f;
 
@@ -596,23 +662,28 @@ public sealed class LongRangeCombatTestScene
                 ? UnitPosture.Crouching
                 : UnitPosture.Standing);
 
-        int inventorySlot =
-            simulation.AddInventoryItem(
-                id,
-                WeaponCatalog.AssaultRifle);
+        int inventorySlot = simulation.AddInventoryItem(
+            id,
+            isMeleeDuelUnit
+                ? MeleeWeaponCatalog.CombatKnife
+                : WeaponCatalog.AssaultRifle);
 
         if (inventorySlot >= 0)
         {
-            simulation.EquipWeapon(
-                id,
-                inventorySlot,
-                UnitWeaponSlot.Primary);
+            UnitWeaponSlot weaponSlot = isMeleeDuelUnit
+                ? UnitWeaponSlot.Melee
+                : UnitWeaponSlot.Primary;
 
-            simulation.Weapons.AddReserveAmmo(
-                unitIndex,
-                UnitWeaponSlot.Primary,
-                1_000);
-            ConfigureCombatModes(simulation, unitIndex, index);
+            simulation.EquipWeapon(id, inventorySlot, weaponSlot);
+
+            if (!isMeleeDuelUnit)
+            {
+                simulation.Weapons.AddReserveAmmo(
+                    unitIndex,
+                    UnitWeaponSlot.Primary,
+                    1_000);
+                ConfigureCombatModes(simulation, unitIndex, index);
+            }
         }
 
         simulation.AI.Store.InitializeUnit(
@@ -631,8 +702,8 @@ public sealed class LongRangeCombatTestScene
 
         _elapsed = 0f;
         _fireTimer = 0f;
-        _hitsAtReset =
-            simulation.Projectiles.TotalHits;
+        _hitsAtReset = simulation.Projectiles.TotalHits;
+        _meleeHitsAtReset = simulation.MeleeCombat.TotalHits;
 
         simulation.Projectiles.Clear();
 
@@ -678,6 +749,20 @@ public sealed class LongRangeCombatTestScene
                 column * FormationSpacing +
                 (row % 2) * FormationSpacing * 0.5f;
 
+            bool isMeleeDuelUnit =
+                side == 1 &&
+                local >= UnitsPerFaction - MeleeDuelUnitsPerSide;
+
+            if (isMeleeDuelUnit)
+            {
+                GetMeleeFormationPosition(
+                    worldMap,
+                    side,
+                    local - (UnitsPerFaction - MeleeDuelUnitsPerSide),
+                    out x,
+                    out y);
+            }
+
             int tileX =
                 Math.Clamp(
                     (int)MathF.Floor(x),
@@ -701,7 +786,10 @@ public sealed class LongRangeCombatTestScene
             simulation.Units.Velocity[unit] =
                 Vector3.Zero;
 
-            SetMarchTarget(simulation, _units[i], worldMap, side, tileX, tileY);
+            if (isMeleeDuelUnit)
+                simulation.SetTarget(_units[i], simulation.Units.Position[unit]);
+            else
+                SetMarchTarget(simulation, _units[i], worldMap, side, tileX, tileY);
 
             simulation.Units.MoveSpeed[unit] =
                 UnitCatalog.Get(UnitType.Colonist).MoveSpeed;
@@ -731,13 +819,100 @@ public sealed class LongRangeCombatTestScene
             simulation.Suppression.ClearUnit(
                 unit);
 
-            simulation.AI.Store.InitializeUnit(
-                unit);
-
-            RestoreWeapon(
-                simulation,
-                unit);
+            simulation.AI.Store.InitializeUnit(unit);
+            simulation.AI.InitializeUnit(unit);
+            if (isMeleeDuelUnit)
+                simulation.MeleeCombat.InitializeUnit(unit, _units[i]);
+            else
+                RestoreWeapon(simulation, unit);
         }
+
+        ResetThirdFactionUnits(simulation, worldMap);
+    }
+
+    private void SpawnThirdFactionUnits(
+        UnitSimulation simulation,
+        WorldMap worldMap)
+    {
+        for (int i = 0; i < _thirdFactionUnits.Length; i++)
+        {
+            GetMeleeFormationPosition(worldMap, 2, i, out float x, out float y);
+            int tileX = Math.Clamp((int)MathF.Floor(x), 1, worldMap.MaxTileX - 1);
+            int tileY = Math.Clamp((int)MathF.Floor(y), 1, worldMap.MaxTileY - 1);
+            Vector3 position = new(
+                tileX + 0.5f,
+                tileY + 0.5f,
+                worldMap.GetSurfaceHeight(tileX, tileY));
+            Vector3 direction = Vector3.UnitX;
+            UnitId id = simulation.Spawn(
+                UnitType.Colonist,
+                position,
+                direction,
+                direction,
+                factionTag: 3);
+            _thirdFactionUnits[i] = id;
+
+            int meleeSlot = simulation.AddInventoryItem(id, MeleeWeaponCatalog.LongBlade);
+            if (meleeSlot >= 0)
+                simulation.EquipWeapon(id, meleeSlot, UnitWeaponSlot.Melee);
+
+            simulation.Units.ViewRange[id.Index] = VisionStressRange;
+            simulation.Units.FieldOfView[id.Index] = 180f;
+            simulation.SetPosture(id, UnitPosture.Standing);
+            simulation.SetTarget(id, position);
+        }
+    }
+
+    private void ResetThirdFactionUnits(
+        UnitSimulation simulation,
+        WorldMap worldMap)
+    {
+        for (int i = 0; i < _thirdFactionUnits.Length; i++)
+        {
+            UnitId id = _thirdFactionUnits[i];
+            if (!simulation.Units.TryGetIndex(id, out int unit))
+                continue;
+
+            GetMeleeFormationPosition(worldMap, 2, i, out float x, out float y);
+            int tileX = Math.Clamp((int)MathF.Floor(x), 1, worldMap.MaxTileX - 1);
+            int tileY = Math.Clamp((int)MathF.Floor(y), 1, worldMap.MaxTileY - 1);
+            simulation.Units.Position[unit] = new Vector3(
+                tileX + 0.5f,
+                tileY + 0.5f,
+                worldMap.GetSurfaceHeight(tileX, tileY));
+            simulation.Units.Velocity[unit] = Vector3.Zero;
+            simulation.Units.ViewRange[unit] = VisionStressRange;
+            simulation.Units.FieldOfView[unit] = 180f;
+            simulation.AI.Store.InitializeUnit(unit);
+            simulation.AI.InitializeUnit(unit);
+            simulation.MeleeCombat.InitializeUnit(unit, id);
+            RestoreHealth(simulation, unit);
+            simulation.Suppression.ClearUnit(unit);
+            simulation.SetHeadNormal(id, Vector3.UnitX);
+            simulation.SetPosture(id, UnitPosture.Standing);
+            simulation.SetTarget(id, simulation.Units.Position[unit]);
+        }
+    }
+
+    private static void GetMeleeFormationPosition(
+        WorldMap worldMap,
+        int side,
+        int localIndex,
+        out float x,
+        out float y)
+    {
+        int centerX = worldMap.TileWidth / 2;
+        int centerY = worldMap.TileHeight / 2;
+        int row = localIndex / MeleeFormationColumns;
+        int column = localIndex % MeleeFormationColumns;
+        float leftX = centerX + MeleeBattleOffsetX - MeleeBattleGap;
+
+        x = side == 1
+            ? centerX + MeleeBattleOffsetX + row * MeleeFormationSpacing
+            : leftX - row * MeleeFormationSpacing;
+        y = centerY + MeleeBattleOffsetY -
+            (MeleeFormationColumns - 1) * MeleeFormationSpacing * 0.5f +
+            column * MeleeFormationSpacing;
     }
 
     private static void SetMarchTarget(
@@ -903,6 +1078,7 @@ public sealed class LongRangeCombatTestScene
     {
         int blue = 0;
         int red = 0;
+        int third = 0;
 
         ReadOnlySpan<int> active =
             simulation.Units.ActiveIndices;
@@ -924,9 +1100,15 @@ public sealed class LongRangeCombatTestScene
             {
                 red++;
             }
+            else if (simulation.Units.FactionTag[unit] == 3 &&
+                     simulation.Health.OverallHitPoints[unit] > 0f)
+            {
+                third++;
+            }
         }
 
         AliveBlue = blue;
         AliveRed = red;
+        AliveThirdFaction = third;
     }
 }

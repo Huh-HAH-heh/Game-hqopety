@@ -17,6 +17,7 @@ public sealed class UnitSimulation
     private readonly UnitWeaponSystem _weaponSystem;
     private readonly ProjectileSystem _projectileSystem;
     private readonly UnitAiSystem _aiSystem;
+    private readonly MeleeCombatSystem _meleeCombatSystem;
     private bool[] _deathHandled = Array.Empty<bool>();
     private float[] _baseMoveSpeed = Array.Empty<float>();
 
@@ -56,6 +57,7 @@ public sealed class UnitSimulation
     public double LastMovementUpdateMilliseconds { get; private set; }
     public double LastWeaponUpdateMilliseconds { get; private set; }
     public double LastBodyUpdateMilliseconds { get; private set; }
+    public double LastMeleeUpdateMilliseconds { get; private set; }
     public double LastProjectileUpdateMilliseconds { get; private set; }
     public double LastHealthUpdateMilliseconds { get; private set; }
     public long TotalShotsFired => _weaponSystem.TotalShotsFired;
@@ -78,6 +80,8 @@ public sealed class UnitSimulation
 
     public UnitAiSystem AI =>
         _aiSystem;
+    public MeleeCombatSystem MeleeCombat =>
+        _meleeCombatSystem;
     public VisionSystem Vision =>
         _visionSystem;
 
@@ -136,7 +140,7 @@ public sealed class UnitSimulation
         Suppression.BindSkillStore(Skills);
 
         _weaponSystem =
-            new UnitWeaponSystem(HitRegions, Bodies, Skills);
+            new UnitWeaponSystem(HitRegions, Bodies, Skills, Health);
 
         _projectileSystem =
             new ProjectileSystem();
@@ -151,6 +155,8 @@ public sealed class UnitSimulation
                 unitCapacity,
                 _weaponSystem,
                 Skills);
+
+        _meleeCombatSystem = new MeleeCombatSystem();
     }
 
     public UnitId Spawn(
@@ -327,6 +333,7 @@ public sealed class UnitSimulation
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
         _aiSystem.InitializeUnit(id.Index);
+        _meleeCombatSystem.InitializeUnit(id.Index, id);
 
         for (int i = 0; i < startingEquipment.Length; i++)
         {
@@ -391,6 +398,7 @@ public sealed class UnitSimulation
         _aiSystem.Store.ClearUnit(
             index);
         _aiSystem.ClearUnit(index);
+        _meleeCombatSystem.ClearUnit(index);
 
         return Units.Destroy(id);
     }
@@ -964,6 +972,21 @@ public sealed class UnitSimulation
         phaseStarted = Stopwatch.GetTimestamp();
         _bodySystem.Update(Units, Bodies, deltaTime);
         LastBodyUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        _meleeCombatSystem.Update(
+            Units,
+            _aiSystem.Store,
+            Inventory,
+            Health,
+            _healthSystem,
+            Skills,
+            Suppression,
+            HitRegions,
+            Bodies,
+            deltaTime);
+        LastMeleeUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();

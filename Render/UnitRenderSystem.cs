@@ -523,6 +523,20 @@ public void DrawSnapshot(
                     1f);
             }
 
+            // Snapshot rendering runs on the main mass-combat path. Draw the
+            // authored melee weapon here as well, so the isolated duel clearly
+            // reads as knife/sword combat instead of two unarmed silhouettes.
+            if (isAlive && unit.MeleeWeapon.Config != null)
+            {
+                AppendSnapshotWeapon(
+                    _vertices,
+                    unit.MeleeWeapon,
+                    position,
+                    unit.BodyNormal,
+                    tilePixelSize,
+                    false);
+            }
+
             // Marker-only mode draws the full silhouette. When rig mode is on,
             // the anatomical parts replace the marker completely.
             float markerOpacity = showUnitRig ? 0f : 1f;
@@ -576,6 +590,45 @@ public void DrawSnapshot(
                     y,
                     MathF.Max(selectionRadius, 0.45f) * tilePixelSize);
             }
+        }
+
+        MeleeHitVisual[] meleeHitVisuals = snapshot.MeleeHitVisuals;
+        for (int i = 0; i < meleeHitVisuals.Length; i++)
+        {
+            MeleeHitVisual hit = meleeHitVisuals[i];
+            if (hit.Position.X < minX || hit.Position.X > maxX ||
+                hit.Position.Y < minY || hit.Position.Y > maxY)
+            {
+                continue;
+            }
+
+            float hitX = hit.Position.X * tilePixelSize;
+            float hitY = hit.Position.Y * tilePixelSize;
+            float radius = MathF.Max(2f, tilePixelSize * 0.32f);
+            byte alpha = (byte)Math.Clamp(
+                (int)(255f * hit.Lifetime / 0.24f),
+                0,
+                255);
+            Color flash = hit.FactionTag switch
+            {
+                1 => new Color(95, 190, 255, alpha),
+                2 => new Color(255, 105, 95, alpha),
+                3 => new Color(255, 205, 65, alpha),
+                _ => new Color(240, 240, 240, alpha)
+            };
+
+            // Brief crossed slash at the anatomical impact point; the flash
+            // is published with the immutable frame snapshot, not read live.
+            AppendDebugLine(
+                _statusIcons,
+                hitX - radius, hitY - radius,
+                hitX + radius, hitY + radius,
+                flash);
+            AppendDebugLine(
+                _statusIcons,
+                hitX - radius, hitY + radius,
+                hitX + radius, hitY - radius,
+                flash);
         }
 
         if (showUnitDetails)
@@ -885,6 +938,7 @@ public void DrawSnapshot(
         {
             1 => new Color(76, 125, 171, 255),
             2 => new Color(167, 76, 80, 255),
+            3 => new Color(186, 146, 49, 255),
             _ => new Color(122, 137, 151, 255)
         };
 
@@ -1217,6 +1271,7 @@ public void DrawSnapshot(
         {
             1 => new Color(107, 158, 198, 125),
             2 => new Color(190, 116, 109, 125),
+            3 => new Color(224, 180, 60, 155),
             _ => new Color(153, 164, 176, 95)
         };
 
@@ -1559,6 +1614,7 @@ public void DrawSnapshot(
             {
                 1 => new Color(54, 157, 255, 245),
                 2 => new Color(255, 65, 70, 245),
+                3 => new Color(255, 190, 45, 250),
                 _ => new Color(171, 183, 196, 190)
             };
 

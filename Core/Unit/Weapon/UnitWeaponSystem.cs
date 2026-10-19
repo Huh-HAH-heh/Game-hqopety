@@ -11,15 +11,18 @@ public sealed class UnitWeaponSystem
     private readonly UnitHitRegionStore? _hitRegions;
     private readonly UnitBodyStore? _bodies;
     private readonly UnitSkillStore? _skills;
+    private readonly UnitHealthStore? _health;
 
     public UnitWeaponSystem(
         UnitHitRegionStore? hitRegions = null,
         UnitBodyStore? bodies = null,
-        UnitSkillStore? skills = null)
+        UnitSkillStore? skills = null,
+        UnitHealthStore? health = null)
     {
         _hitRegions = hitRegions;
         _bodies = bodies;
         _skills = skills;
+        _health = health;
     }
 
     public long TotalShotsFired { get; private set; }
@@ -95,6 +98,17 @@ public sealed class UnitWeaponSystem
                         weapon.MagazineSize);
                 }
 
+                UnitCombatCondition condition =
+                    UnitCombatConditionSystem.Calculate(health ?? _health, unit);
+
+                if (weapon.RequiresTwoHands && !condition.CanUseTwoHandedWeapon)
+                {
+                    weapons.ClearAim(unit, weaponSlot);
+                    if (weapons.BurstRemaining[stateIndex] > 0)
+                        weapons.StartBurst(unit, weaponSlot, default, 0, 0f);
+                    continue;
+                }
+
                 if (!weapons.Reloading[stateIndex] &&
                     weapons.Ammo[stateIndex] <= 0 &&
                     weapons.ReserveAmmo[stateIndex] > 0 &&
@@ -103,7 +117,7 @@ public sealed class UnitWeaponSystem
                     weapons.StartReload(
                         unit,
                         weaponSlot,
-                        weapon.ReloadTime);
+                        weapon.ReloadTime * condition.ReloadTimeMultiplier);
                 }
 
                 bool burstReady =
@@ -278,6 +292,13 @@ public sealed class UnitWeaponSystem
         {
             return false;
         }
+
+        UnitCombatCondition combatCondition =
+            UnitCombatConditionSystem.Calculate(_health, unitIndex);
+        if (weapon.RequiresTwoHands && !combatCondition.CanUseTwoHandedWeapon)
+            return false;
+
+        accuracyMultiplier *= combatCondition.AimSpreadMultiplier;
 
         int stateIndex =
             UnitWeaponStore.GetIndex(
