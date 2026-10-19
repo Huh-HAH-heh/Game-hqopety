@@ -1207,65 +1207,6 @@ public void DrawSnapshot(
         AppendDebugLine(vertices, x3, y3, x0, y0, color);
     }
 
-    private static void AppendSnapshotWeapon(
-        VertexArray vertices,
-        RenderWeaponVisual visual,
-        Vector3 position,
-        Vector3 facing,
-        float tilePixelSize,
-        bool secondary)
-    {
-        WeaponConfig? weapon = visual.Config;
-        if (weapon == null)
-            return;
-
-        float dx = facing.X;
-        float dy = facing.Y;
-        float facingLength = MathF.Sqrt(dx * dx + dy * dy);
-        if (facingLength < 0.001f)
-        {
-            dx = 1f;
-            dy = 0f;
-        }
-        else
-        {
-            dx /= facingLength;
-            dy /= facingLength;
-        }
-
-        if (visual.AimIndicatorActive && visual.AimPoint != Vector3.Zero)
-        {
-            float aimX = visual.AimPoint.X - position.X;
-            float aimY = visual.AimPoint.Y - position.Y;
-            float aimLength = MathF.Sqrt(aimX * aimX + aimY * aimY);
-            if (aimLength > 0.001f)
-            {
-                dx = aimX / aimLength;
-                dy = aimY / aimLength;
-            }
-        }
-
-        if (weapon is MeleeWeaponConfig meleeWeapon)
-        {
-            AppendMeleeWeapon(vertices, meleeWeapon, position, dx, dy, tilePixelSize);
-            return;
-        }
-
-        float sideOffset = secondary ? 0.10f : 0f;
-        float centerDistance = weapon.WorldRenderLength * 0.43f;
-        float centerX = position.X + dx * centerDistance - dy * sideOffset;
-        float centerY = position.Y + dy * centerDistance + dx * sideOffset;
-
-        AppendOrientedRect(
-            vertices,
-            centerX * tilePixelSize,
-            centerY * tilePixelSize,
-            MathF.Max(0.025f, weapon.WorldRenderWidth * 0.5f) * tilePixelSize,
-            MathF.Max(0.12f, weapon.WorldRenderLength * 0.5f) * tilePixelSize,
-            MathF.Atan2(dy, dx),
-            GetItemColor(weapon));
-    }
-
     private static Color GetItemColor(ItemConfig item) =>
         new Color(item.WorldColorR, item.WorldColorG, item.WorldColorB);
 
