@@ -618,16 +618,16 @@ public sealed class LongRangeCombatTestScene
                     tileX,
                     tileY));
 
+        bool isMeleeDuelUnit =
+            side == 1 &&
+            index % UnitsPerFaction >= UnitsPerFaction - MeleeDuelUnitsPerSide;
+
+        // The detached red melee squad is on the left of faction 3, so it must
+        // face right into the duel instead of retaining the main red line's heading.
         Vector3 direction =
-            side == 0
-                ? new Vector3(
-                    1f,
-                    0f,
-                    0f)
-                : new Vector3(
-                    -1f,
-                    0f,
-                    0f);
+            side == 0 || isMeleeDuelUnit
+                ? Vector3.UnitX
+                : -Vector3.UnitX;
 
         UnitId id =
             simulation.Spawn(
@@ -642,10 +642,6 @@ public sealed class LongRangeCombatTestScene
 
         int unitIndex =
             id.Index;
-
-        bool isMeleeDuelUnit =
-            side == 1 &&
-            index % UnitsPerFaction >= UnitsPerFaction - MeleeDuelUnitsPerSide;
 
         // Keep the detached squad out of the main firefight until it spots faction 3.
         if (isMeleeDuelUnit)
@@ -802,15 +798,9 @@ public sealed class LongRangeCombatTestScene
 
             simulation.SetHeadNormal(
                 _units[i],
-                side == 0
-                    ? new Vector3(
-                        1f,
-                        0f,
-                        0f)
-                    : new Vector3(
-                        -1f,
-                        0f,
-                        0f));
+                side == 0 || isMeleeDuelUnit
+                    ? Vector3.UnitX
+                    : -Vector3.UnitX);
 
             RestoreHealth(
                 simulation,
@@ -843,7 +833,9 @@ public sealed class LongRangeCombatTestScene
                 tileX + 0.5f,
                 tileY + 0.5f,
                 worldMap.GetSurfaceHeight(tileX, tileY));
-            Vector3 direction = Vector3.UnitX;
+            // Faction 3 is on the right side of the arena; face left toward
+            // the isolated red knife squad so both groups see and approach each other.
+            Vector3 direction = -Vector3.UnitX;
             UnitId id = simulation.Spawn(
                 UnitType.Colonist,
                 position,
@@ -888,7 +880,7 @@ public sealed class LongRangeCombatTestScene
             simulation.MeleeCombat.InitializeUnit(unit, id);
             RestoreHealth(simulation, unit);
             simulation.Suppression.ClearUnit(unit);
-            simulation.SetHeadNormal(id, Vector3.UnitX);
+            simulation.SetHeadNormal(id, -Vector3.UnitX);
             simulation.SetPosture(id, UnitPosture.Standing);
             simulation.SetTarget(id, simulation.Units.Position[unit]);
         }
