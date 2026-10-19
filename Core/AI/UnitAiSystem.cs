@@ -18,7 +18,6 @@ public sealed class UnitAiSystem
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
     private const float ProneCrawlFiringDistance = 9f;
-    private const int MaxSearchPatrolLegs = 3;
     private static readonly int MaxAiPlanningParallelism =
         Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
@@ -392,8 +391,7 @@ public sealed class UnitAiSystem
                         Store.ClearGoal(unit);
 
                         int patrolLeg = ++_searchPatrolLegByUnit[unit];
-                        if (patrolLeg <= MaxSearchPatrolLegs &&
-                            TryFindSearchWaypoint(
+                        if (TryFindSearchWaypoint(
                                 units,
                                 worldMap,
                                 unit,
