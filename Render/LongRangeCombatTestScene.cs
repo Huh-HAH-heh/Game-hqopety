@@ -53,6 +53,9 @@ public sealed class LongRangeCombatTestScene
     public UnitId FirstUnit =>
         _units[0];
 
+    public UnitId FirstMeleeUnit =>
+        _thirdFactionUnits[0];
+
     public int AliveBlue { get; private set; }
 
     public int AliveRed { get; private set; }
