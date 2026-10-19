@@ -120,6 +120,13 @@ public enum UnitWeaponSlot : byte
 
     public sealed class MeleeWeaponConfig : WeaponConfig
     {
+        public DamageType MeleeDamageType = DamageType.Blunt;
+        public float Reach = 1.1f;
+        public float ArmorPenetration = 4f;
+        public float BluntPenetration = 8f;
+        public float CriticalChance = 0.04f;
+        public float ParryChance = 0.08f;
+
         public MeleeWeaponConfig()
         {
             Type = WeaponType.Melee;
