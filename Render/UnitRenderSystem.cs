@@ -239,6 +239,14 @@ public sealed class UnitRenderSystem : IDisposable
                     units.FactionTag[unitIndex],
                     isAlive,
                     markerOpacity);
+            }
+
+            // Posture glyphs replace the old bright rings. Fade them in only
+            // when the camera is close enough, and keep them unobtrusive.
+            float postureMarkerOpacity =
+                detailBlend >= 0.65f ? 0.38f * detailBlend : 0f;
+            if (postureMarkerOpacity > 0f)
+            {
                 AppendPostureMarker(
                     _statusIcons,
                     screenX,
@@ -246,22 +254,10 @@ public sealed class UnitRenderSystem : IDisposable
                     markerRadius,
                     units.Posture[unitIndex],
                     screenScale,
-                    markerOpacity);
+                    postureMarkerOpacity);
             }
 
-            if (isAlive)
-            {
-                AppendPostureOutline(
-                    _bodyOutlines,
-                    screenX,
-                    screenY,
-                    MathF.Max(
-                        0.13f,
-                        MathF.Max(widths[unitIndex], lengths[unitIndex]) * 0.5f) *
-                    tilePixelSize,
-                    units.Posture[unitIndex],
-                    screenScale);
-            }
+            
 
             if (!isAlive)
                 continue;
@@ -550,6 +546,14 @@ public void DrawSnapshot(
                     unit.FactionTag,
                     isAlive,
                     markerOpacity);
+            }
+
+            // Posture glyphs replace the old bright rings. Fade them in only
+            // when the camera is close enough, and keep them unobtrusive.
+            float postureMarkerOpacity =
+                detailBlend >= 0.65f ? 0.38f * detailBlend : 0f;
+            if (postureMarkerOpacity > 0f)
+            {
                 AppendPostureMarker(
                     _statusIcons,
                     x,
@@ -557,22 +561,10 @@ public void DrawSnapshot(
                     markerRadius,
                     unit.Posture,
                     screenScale,
-                    markerOpacity);
+                    postureMarkerOpacity);
             }
 
-            if (isAlive)
-            {
-                AppendPostureOutline(
-                    _bodyOutlines,
-                    x,
-                    y,
-                    MathF.Max(
-                        0.13f,
-                        MathF.Max(unit.Width, unit.Length) * 0.5f) *
-                    tilePixelSize,
-                    unit.Posture,
-                    screenScale);
-            }
+            
 
             if (!isAlive)
                 continue;
@@ -1509,61 +1501,6 @@ public void DrawSnapshot(
                 AppendDebugLine(vertices, centerX - size, centerY,
                     centerX, centerY - size, color);
                 break;
-        }
-    }
-
-    private static void AppendPostureOutline(
-        VertexArray outlines,
-        float x,
-        float y,
-        float markerRadius,
-        UnitPosture posture,
-        float screenScale)
-    {
-        if (posture != UnitPosture.Crouching &&
-            posture != UnitPosture.Lying)
-        {
-            return;
-        }
-
-        float pixel = 1f / MathF.Max(0.001f, screenScale);
-        float radius = markerRadius + pixel * 1.5f;
-        Color color = new Color(232, 239, 246, 225);
-
-        if (posture == UnitPosture.Crouching)
-        {
-            // Concentric outlines create a real thicker contour in SFML's
-            // line-only vertex array without altering the unit marker or rig.
-            for (int layer = 0; layer < 3; layer++)
-            {
-                AppendCircleOutline(
-                    outlines,
-                    x,
-                    y,
-                    radius + pixel * layer,
-                    color,
-                    CircleSegments);
-            }
-
-            return;
-        }
-
-        // Prone: eight clear dashes around the same circular footprint.
-        const int segments = 24;
-        for (int i = 0; i < segments; i++)
-        {
-            if (i % 3 == 2)
-                continue;
-
-            float a0 = i * MathF.Tau / segments;
-            float a1 = (i + 1) * MathF.Tau / segments;
-            AppendDebugLine(
-                outlines,
-                x + MathF.Cos(a0) * radius,
-                y + MathF.Sin(a0) * radius,
-                x + MathF.Cos(a1) * radius,
-                y + MathF.Sin(a1) * radius,
-                color);
         }
     }
 
