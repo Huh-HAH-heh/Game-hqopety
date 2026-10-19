@@ -232,7 +232,11 @@ public sealed class MeleeCombatSystem
         if (critical)
             TotalCriticals++;
 
-        float damage = profile.Damage * (1f + attackerSkill * 0.015f);
+        UnitCombatCondition attackerCondition =
+            UnitCombatConditionSystem.Calculate(health, attacker);
+        float damage = profile.Damage *
+            attackerCondition.MeleeDamageMultiplier *
+            (1f + attackerSkill * 0.015f);
         if (critical)
             damage *= 1.75f;
 
