@@ -730,7 +730,7 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "Ctrl+1-4=assign group 1-4=select Shift+1-4=add Ctrl+Shift+1-4=clear RMB=formation move Y=formation | " +
+            "Ctrl+1-4=assign group 1-4=select Shift+1-4=add Ctrl+Shift+1-4=clear RMB=formation move J=formation Y=reset | " +
             "A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=formation TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
@@ -2259,7 +2259,7 @@ public sealed class GameRenderer
         if (TryHandleControlGroupKey(key))
             return;
 
-        if (key == Keyboard.Key.Y)
+        if (key == Keyboard.Key.J)
         {
             _infantryFormation = (InfantryFormationType)(((int)_infantryFormation + 1) % 3);
             Console.WriteLine($"[INFANTRY] Formation: {InfantryFormation.GetName(_infantryFormation)}");
