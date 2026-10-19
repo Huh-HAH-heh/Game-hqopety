@@ -55,6 +55,7 @@ public sealed class GameRenderer
     private InfantryFormationType _infantryFormation = InfantryFormationType.Line;
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
+    private float _squadPruneTimer;
     private readonly CircleShape _squadMarker = new(0.5f)
     {
         FillColor = new Color(0, 0, 0, 0),
@@ -305,6 +306,16 @@ public sealed class GameRenderer
         if (frameMs > 50f) _framesOver50Ms++;
 
         _titleTimer += MathF.Max(0f, deltaTime);
+        _squadPruneTimer += MathF.Max(0f, deltaTime);
+        if (_squadPruneTimer >= 1f)
+        {
+            _squadPruneTimer = 0f;
+            SimulationFrameSnapshot? squadSnapshot = _simulationThread != null
+                ? Volatile.Read(ref _latestSnapshot)
+                : SimulationFrameSnapshot.Capture(_unitSimulation);
+            if (squadSnapshot != null)
+                PruneSquadState(squadSnapshot);
+        }
 
         if (_perfTimer >= 1f)
         {
@@ -1718,6 +1729,29 @@ public sealed class GameRenderer
         return MathF.Max(
             minimumMarkerRadius,
             MathF.Max(0.13f, footprint * 0.125f));
+    }
+
+    private void PruneSquadState(SimulationFrameSnapshot snapshot)
+    {
+        HashSet<UnitId> living = new();
+        for (int i = 0; i < snapshot.Units.Length; i++)
+        {
+            RenderUnitState unit = snapshot.Units[i];
+            if (unit.HitPoints > 0f)
+                living.Add(new UnitId(unit.Index, unit.Generation));
+        }
+
+        _squadManager.PruneDeadMembers(living);
+        _selectedUnits.RemoveWhere(id => !living.Contains(id));
+        if (!_selectedUnits.Contains(_selectedUnit))
+        {
+            _selectedUnit = default;
+            foreach (UnitId id in _selectedUnits)
+            {
+                _selectedUnit = id;
+                break;
+            }
+        }
     }
 
     private void DrawSquadMarkers(SimulationFrameSnapshot snapshot)
