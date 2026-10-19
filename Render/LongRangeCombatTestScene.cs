@@ -9,7 +9,7 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    // Starts at 800 ranged units (400 per faction); F8 cycles 80/400/800 per side.
+    // Starts with 400 units per faction; 24 red units are isolated for melee. F8 cycles 80/400/800 per side.
     private const int InitialUnitsPerFaction = 400;
     private const int Columns = 40;
     private const float FormationSpacing = 2.5f;
@@ -64,7 +64,7 @@ public sealed class LongRangeCombatTestScene
     public int AliveThirdFaction { get; private set; }
 
     public int AliveUnits =>
-        AliveBlue + AliveRed;
+        AliveBlue + AliveRed + AliveThirdFaction;
 
     public void Start(
         UnitSimulation simulation,
