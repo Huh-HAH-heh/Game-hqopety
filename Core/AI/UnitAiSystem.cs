@@ -216,8 +216,12 @@ public sealed class UnitAiSystem
 
                 // A visible hostile must not be ignored because the tree returns a
                 // stale Patrol intent; low-health retreat and suppression panic still win.
+                bool currentTargetVisible = Store.HasTarget[unit] &&
+                    units.IsAlive(Store.Target[unit]) &&
+                    IsHostile(units, unit, Store.Target[unit].Index) &&
+                    vision.IsRecentlyVisible(unit, Store.Target[unit].Index, units);
                 if (intent == BehaviacUnitIntent.Patrol &&
-                    _nearestVisibleEnemyByUnit[unit] >= 0 &&
+                    (_nearestVisibleEnemyByUnit[unit] >= 0 || currentTargetVisible) &&
                     suppressionState != UnitSuppressionState.Panicked &&
                     !IsLowHealth(health, unit))
                 {
@@ -638,47 +642,37 @@ public sealed class UnitAiSystem
                 (!UseBehaviacDecisionLayer ||
                  intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage))
             {
-                if (UseBehaviacDecisionLayer &&
-                    intent == BehaviacUnitIntent.ProneEngage)
+                // Prone posture is an aiming choice, not an order to crawl to 10 m.
+                // Ranged pawns below approach only if the target is beyond weapon range.
+
+                if (HasRangedWeapon(units, inventory, unit))
                 {
                     Vector3 position = units.Position[unit];
                     Vector3 targetPosition = units.Position[target.Index];
-                    float dx = targetPosition.X - position.X;
-                    float dy = targetPosition.Y - position.Y;
-                    float distanceSquared = dx * dx + dy * dy;
-                    float crawlDistance = ProneCrawlFiringDistance + 1f;
-
-                    // At longer range, stay prone and crawl toward a reachable
-                    // firing ring. Once near the enemy, hold the prone silhouette
-                    // and continue through the normal aim/fire pipeline.
-                    if (distanceSquared > crawlDistance * crawlDistance &&
-                        TryFindProneCrawlWaypoint(
-                            units, worldMap, unit, target.Index, out Vector3 crawlWaypoint))
+                    float range = GetMaxEffectiveRange(inventory, unit);
+                    if (range > 0.1f)
                     {
-                        bool replaceGoal = !Store.HasGoal[unit] ||
-                            ReachedGoal(position, Store.Goal[unit]);
-                        if (Store.HasGoal[unit] && !replaceGoal)
-                        {
-                            float goalDx = Store.Goal[unit].X - crawlWaypoint.X;
-                            float goalDy = Store.Goal[unit].Y - crawlWaypoint.Y;
-                            replaceGoal = goalDx * goalDx + goalDy * goalDy > 9f;
-                        }
+                        float dx = targetPosition.X - position.X;
+                        float dy = targetPosition.Y - position.Y;
+                        float distanceSquared = dx * dx + dy * dy;
+                        float desiredDistance = MathF.Max(3f, range * 0.84f);
+                        float approachThreshold = desiredDistance + MathF.Max(1f, range * 0.03f);
 
-                        if (replaceGoal)
-                            Store.SetGoal(unit, crawlWaypoint);
-
-                        if (Store.HasGoal[unit] &&
-                            !ReachedGoal(position, Store.Goal[unit]))
+                        if (distanceSquared > approachThreshold * approachThreshold)
                         {
-                            ClearAiming(weapons, unit);
-                            units.Target[unit] = Store.Goal[unit];
+                            float distance = MathF.Sqrt(distanceSquared);
+                            float scale = desiredDistance / MathF.Max(0.001f, distance);
+                            units.Target[unit] = new Vector3(
+                                targetPosition.X - dx * scale,
+                                targetPosition.Y - dy * scale,
+                                position.Z);
                             units.HasTarget[unit] = true;
+                            ClearAiming(weapons, unit);
+                            Store.ClearGoal(unit);
                             Store.State[unit] = UnitAiState.Attack;
                             continue;
                         }
                     }
-
-                    Store.ClearGoal(unit);
                 }
 
                 // Melee-only units approach the edge of their attack ring instead
@@ -693,19 +687,15 @@ public sealed class UnitAiSystem
                     float distanceSquared = dx * dx + dy * dy;
                     float attackDistance = MeleeCombatSystem.GetAttackDistance(
                         unit, target.Index, units, inventory);
-                    float desiredDistance = MathF.Max(0.20f, attackDistance * 0.94f);
-                    float approachThreshold = MathF.Min(
-                        attackDistance * 0.975f,
-                        desiredDistance + 0.06f);
 
-                    if (distanceSquared > approachThreshold * approachThreshold)
+                    // Already in striking reach? Stop closing and fight from this
+                    // side instead of circling the defender for a reserved slot.
+                    if (distanceSquared > attackDistance * attackDistance)
                     {
-                        float distance = MathF.Sqrt(distanceSquared);
-                        float scale = desiredDistance / MathF.Max(0.001f, distance);
-                        units.Target[unit] = new Vector3(
-                            targetPosition.X - dx * scale,
-                            targetPosition.Y - dy * scale,
-                            position.Z);
+                        float desiredDistance = MathF.Max(0.20f, attackDistance * 0.94f);
+                        Vector3 engagementPoint = GetMeleeEngagementPoint(
+                            unit, target.Index, targetPosition, desiredDistance);
+                        units.Target[unit] = engagementPoint;
                         units.HasTarget[unit] = true;
                         ClearAiming(weapons, unit);
                         Store.ClearGoal(unit);
@@ -938,20 +928,22 @@ public sealed class UnitAiSystem
         if (hasVisibleTarget &&
             isHealthyEnoughToFlank &&
             HasRangedWeapon(units, inventory, unit) &&
-            unit % 3 == 0)
+            unit % 8 == 0)
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
             bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
                 _flankTargetByUnit[unit].Equals(units.GetId(visibleTargetIndex));
 
-            // Keep a small dedicated flanking cohort, but let it commit before
-            // frontal units collapse into close range. The 12 m floor makes
-            // the maneuver visible in the live mass-combat scenario without
-            // allowing already-engaged units to repeatedly circle one target.
+            // Flanking is a small long-range maneuver, not the default response
+            // to contact. Most shooters should open fire from their current lane.
             float maxFlankRange = MathF.Min(75f, MathF.Max(25f, units.ViewRange[unit] * 0.85f));
+            float effectiveRange = GetMaxEffectiveRange(inventory, unit);
+            bool stillOutsideWeaponRange = effectiveRange > 0.1f &&
+                distanceSquared > effectiveRange * effectiveRange;
             canFlank = !alreadyFlankedThisTarget &&
-                distanceSquared >= 12f * 12f &&
+                stillOutsideWeaponRange &&
+                distanceSquared >= 24f * 24f &&
                 distanceSquared <= maxFlankRange * maxFlankRange;
         }
 
@@ -1402,6 +1394,39 @@ public sealed class UnitAiSystem
 
         // A closer hostile within immediate-contact range beats target stickiness.
         return newDistanceSquared >= currentDistanceSquared;
+    }
+
+    private static Vector3 GetMeleeEngagementPoint(
+        int attacker,
+        int target,
+        Vector3 targetPosition,
+        float distance)
+    {
+        // Golden-angle distribution avoids all pawns sharing the approach axis.
+        const float GoldenAngle = 2.39996323f;
+        float angle = attacker * GoldenAngle + target * 0.61803399f;
+        return new Vector3(
+            targetPosition.X + MathF.Cos(angle) * distance,
+            targetPosition.Y + MathF.Sin(angle) * distance,
+            targetPosition.Z);
+    }
+
+    private static float GetMaxEffectiveRange(
+        UnitInventoryStore inventory,
+        int unit)
+    {
+        float range = 0f;
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            short itemSlot = inventory.GetWeaponEquipment(unit, (UnitWeaponSlot)slot);
+            if (itemSlot >= 0 &&
+                inventory.GetItem(unit, itemSlot) is RangedWeaponConfig weapon)
+            {
+                range = MathF.Max(range, weapon.TotalEffectiveRange);
+            }
+        }
+
+        return range;
     }
 
     private static bool IsHostile(

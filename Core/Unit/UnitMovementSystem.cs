@@ -77,6 +77,9 @@ public sealed class UnitMovementSystem
                     unit, combatTarget, units, inventory);
                 float stopDistance = attackDistance * 0.975f;
 
+                // Stop at contact distance even if navigation still has a waypoint
+                // behind the target. The AI can still assign a different attack slot
+                // next think cycle, but movement never pushes into the opponent.
                 if (combatDelta.X * combatDelta.X + combatDelta.Y * combatDelta.Y <=
                     stopDistance * stopDistance)
                 {
@@ -196,13 +199,13 @@ public sealed class UnitMovementSystem
         WorldMap worldMap,
         UnitHealthStore? health)
     {
-        BuildCollisionGrid(units, worldMap, health);
-        if (_collisionTouchedCount == 0)
-            return;
-
         ReadOnlySpan<int> active = units.ActiveIndices;
-        for (int pass = 0; pass < 2; pass++)
+        for (int pass = 0; pass < 3; pass++)
         {
+            BuildCollisionGrid(units, worldMap, health);
+            if (_collisionTouchedCount == 0)
+                return;
+
             for (int i = 0; i < active.Length; i++)
             {
                 int unit = active[i];
@@ -241,7 +244,7 @@ public sealed class UnitMovementSystem
                             float distanceSquared = dx * dx + dy * dy;
                             float minimumDistance = MathF.Max(
                                 0.04f,
-                                (units.Radius[unit] + units.Radius[other]) * 0.96f);
+                                (units.Radius[unit] + units.Radius[other]) * 1.08f);
 
                             if (distanceSquared >= minimumDistance * minimumDistance)
                             {
