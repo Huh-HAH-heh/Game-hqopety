@@ -13,11 +13,12 @@ public sealed class UnitNavigationSystem
 {
     private const float MaxStepHeight = 1.5f;
     private const float HeightCost = 0.15f;
-    private const int MinRouteBuildsPerUpdate = 16;
-    private const int MaxRouteBuildsPerUpdate = 48;
+    private const int MinRouteBuildsPerUpdate = 2;
+    private const int MaxRouteBuildsPerUpdate = 8;
+    private const int MaxExpandedNodesPerSearch = 16_384;
     private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
-    private const float RouteReuseCostPerUnit = 0.35f;
+    private const float RouteReuseCostPerUnit = 0.10f;
     private const int MovingGoalTolerance = 4;
     private const float WaypointRadius = 0.12f;
     private const int MaxWaypointShortcutCells = 16;
@@ -81,6 +82,8 @@ public sealed class UnitNavigationSystem
     private float[] _navigationEdgeCost = Array.Empty<float>();
     private bool[] _navigationPassable = Array.Empty<bool>();
     private byte[] _navigationNeighbors = Array.Empty<byte>();
+    private int[] _navigationComponent = Array.Empty<int>();
+    private int[] _componentQueue = Array.Empty<int>();
     private long _navigationGridTerrainVersion = long.MinValue;
     private int[] _parent = Array.Empty<int>();
     private int[] _seenStamp = Array.Empty<int>();
@@ -99,7 +102,7 @@ public sealed class UnitNavigationSystem
         NavigationGridBuildMilliseconds = 0d;
         EnsureNavigationGrid(worldMap);
         _routeBuildsRemaining = Math.Clamp(
-            units.ActiveCount / 32,
+            units.ActiveCount / 128,
             MinRouteBuildsPerUpdate,
             MaxRouteBuildsPerUpdate);
         RoutesBuiltThisUpdate = 0;
@@ -399,6 +402,16 @@ public sealed class UnitNavigationSystem
         int start = startX + startY * _width;
         int goal = targetX + targetY * _width;
 
+        // Cheaply reject routes across disconnected terrain islands. Without
+        // this, a failed request can scan all 588k+ map cells just to conclude
+        // that a canyon or blocked passage cannot be crossed.
+        if (footprintRadiusX == 0 &&
+            footprintRadiusY == 0 &&
+            _navigationComponent[start] != _navigationComponent[goal])
+        {
+            return false;
+        }
+
         if (start == goal)
         {
             path = new[] { start };
@@ -413,7 +426,8 @@ public sealed class UnitNavigationSystem
         _fScore[start] = Heuristic(startX, startY, targetX, targetY);
         HeapPush(start);
 
-        while (_heapCount > 0)
+        while (_heapCount > 0 &&
+               _lastSearchCellsExpanded < MaxExpandedNodesPerSearch)
         {
             int current = HeapPop();
             _lastSearchCellsExpanded++;
@@ -1093,6 +1107,8 @@ public sealed class UnitNavigationSystem
         _navigationEdgeCost = new float[_cellCount];
         _navigationPassable = new bool[_cellCount];
         _navigationNeighbors = new byte[_cellCount];
+        _navigationComponent = new int[_cellCount];
+        _componentQueue = new int[_cellCount];
         _navigationGridTerrainVersion = long.MinValue;
         _parent = new int[_cellCount];
         _seenStamp = new int[_cellCount];
@@ -1310,8 +1326,58 @@ public sealed class UnitNavigationSystem
             }
         }
 
+        BuildNavigationComponents();
+
         _navigationGridTerrainVersion = worldMap.TerrainVersion;
         NavigationGridBuildMilliseconds =
             Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+    }
+
+    private void BuildNavigationComponents()
+    {
+        Array.Fill(_navigationComponent, -1);
+        int componentId = 0;
+
+        for (int start = 0; start < _cellCount; start++)
+        {
+            if (!_navigationPassable[start] ||
+                _navigationComponent[start] >= 0)
+            {
+                continue;
+            }
+
+            int head = 0;
+            int tail = 0;
+            _componentQueue[tail++] = start;
+            _navigationComponent[start] = componentId;
+
+            while (head < tail)
+            {
+                int cell = _componentQueue[head++];
+                int x = cell % _width;
+                int y = cell / _width;
+                byte neighbors = _navigationNeighbors[cell];
+
+                for (int direction = 0; direction < DirectionX.Length; direction++)
+                {
+                    if ((neighbors & (1 << direction)) == 0)
+                        continue;
+
+                    int nx = x + DirectionX[direction];
+                    int ny = y + DirectionY[direction];
+                    if (!IsInside(nx, ny))
+                        continue;
+
+                    int next = nx + ny * _width;
+                    if (_navigationComponent[next] >= 0)
+                        continue;
+
+                    _navigationComponent[next] = componentId;
+                    _componentQueue[tail++] = next;
+                }
+            }
+
+            componentId++;
+        }
     }
 }
