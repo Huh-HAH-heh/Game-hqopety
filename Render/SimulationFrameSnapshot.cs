@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Core.Items;
 using Core.Combat;
+using Core.AI.Behaviac;
 using Core.Unit;
 
 namespace RimClone.Render;
