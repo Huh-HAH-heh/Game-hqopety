@@ -35,7 +35,7 @@ public static class CombatSelfTest
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
         RunTest("Pawn stats: RimWorld skills and suppression resistance", TestPawnSkillsAndResistance, ref passed, ref failed);
         RunTest("Posture: prone silhouette and firing", TestPronePostureAndFiring, ref passed, ref failed);
-        RunTest("Targeting: prone visibility and aim points follow the posed rig", TestProneTargetPointsFollowRig, ref passed, ref failed);
+        RunTest("Targeting: three procedural zones follow posture independently of the rig", TestProneTargetPointsFollowRig, ref passed, ref failed);
         RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
@@ -954,74 +954,102 @@ public static class CombatSelfTest
             -Vector3.UnitX,
             factionTag: 2);
 
-        if (simulation.HitRegions.GetProfile(target.Index) is not UnitAnatomyProfile anatomy)
+        simulation.SetPosture(target, UnitPosture.Standing);
+        UnitGameplayZoneGeometry standingHead =
+            UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, (int)UnitGameplayZone.Head);
+        UnitGameplayZoneGeometry standingTorso =
+            UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, (int)UnitGameplayZone.Torso);
+        UnitGameplayZoneGeometry standingLower =
+            UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, (int)UnitGameplayZone.LowerBody);
+
+        if (!(standingHead.Center.Z > standingTorso.Center.Z &&
+              standingTorso.Center.Z > standingLower.Center.Z))
+        {
             return false;
+        }
 
         simulation.SetPosture(target, UnitPosture.Lying);
         simulation.Units.Velocity[target.Index] = new Vector3(0.6f, 0f, 0f);
         new UnitBodySystem().Update(simulation.Units, simulation.Bodies, 0.016f);
-        if (simulation.Units.Posture[target.Index] != UnitPosture.Lying)
-            return false;
 
-        WorldMap map = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 32);
-        simulation.Vision.Update(
-            simulation.Units, map, 0.11f, simulation.Health, simulation.Bodies);
-
-        Vector3 eyeMarker = UnitHitSystem.GetEyePosition(
-            simulation.Units, observer.Index, simulation.Bodies, simulation.HitRegions);
-        if (!UnitHitSystem.TryGetMarkerPoint(
-                simulation.Units, observer.Index, UnitAnatomyMarkerRole.Eye,
-                out Vector3 actualEyeMarker, simulation.HitRegions, simulation.Bodies) ||
-            Vector3.DistanceSquared(eyeMarker, actualEyeMarker) > 0.000001f)
-            return false;
-
-        int visiblePointCount = UnitHitSystem.GetVisibilityPointCount(
-            simulation.Units, target.Index, simulation.HitRegions);
-        if (visiblePointCount < 3)
-            return false;
-
-        Vector3 source = simulation.Units.Position[observer.Index];
+        UnitGameplayZoneGeometry proneHead =
+            UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, (int)UnitGameplayZone.Head);
+        UnitGameplayZoneGeometry proneTorso =
+            UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, (int)UnitGameplayZone.Torso);
+        UnitGameplayZoneGeometry proneLower =
+            UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, (int)UnitGameplayZone.LowerBody);
+        float standingSpan = MathF.Abs(standingHead.Center.X - standingLower.Center.X);
+        float proneSpan = MathF.Abs(proneHead.Center.X - proneLower.Center.X);
         float proneHeightLimit = simulation.Units.Position[target.Index].Z +
             simulation.Units.Height[target.Index] * 0.45f;
 
+        if (simulation.Units.Posture[target.Index] != UnitPosture.Lying ||
+            proneSpan < standingSpan + 0.15f ||
+            proneHead.Center.Z >= proneHeightLimit ||
+            proneTorso.Center.Z >= proneHeightLimit ||
+            proneLower.Center.Z >= proneHeightLimit)
+        {
+            return false;
+        }
+
+        int visiblePointCount = UnitHitSystem.GetVisibilityPointCount(
+            simulation.Units, target.Index, simulation.HitRegions);
+        if (visiblePointCount != UnitGameplayZoneSystem.ZoneCount)
+            return false;
+
+        Vector3 source = simulation.Units.Position[observer.Index];
         for (int i = 0; i < visiblePointCount; i++)
         {
-            int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+            int zoneIndex = UnitHitSystem.GetVisibilityRegionIndex(
                 simulation.Units, target.Index, i, simulation.HitRegions);
-            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
-                simulation.Units, target.Index, regionIndex,
-                simulation.HitRegions, simulation.Bodies);
-            Vector3 aimPoint = UnitHitSystem.GetRegionPoint(
-                simulation.Units, target.Index, regionIndex, source,
-                simulation.HitRegions, UnitAnatomyMarkerRole.Aim, simulation.Bodies);
+            UnitGameplayZoneGeometry zone =
+                UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, zoneIndex);
+            Vector3 point = UnitHitSystem.GetGameplayTargetPoint(
+                simulation.Units, target.Index, zoneIndex, source,
+                simulation.HitRegions, UnitAnatomyMarkerRole.Aim);
 
-            // Target points must land on the live posed primitive, not a synthetic
-            // standing-height point above the prone silhouette.
-            if (!UnitHitSystem.IsPointInsideRegion(
-                    simulation.Units, target.Index, regionIndex, aimPoint,
-                    tolerance: 0.003f, hitRegions: simulation.HitRegions, bodies: simulation.Bodies) ||
-                aimPoint.Z > proneHeightLimit)
+            float dx = point.X - zone.Center.X;
+            float dy = point.Y - zone.Center.Y;
+            float cos = MathF.Cos(zone.Rotation);
+            float sin = MathF.Sin(zone.Rotation);
+            float localForward = dx * cos + dy * sin;
+            float localSide = -dx * sin + dy * cos;
+            float ellipse = localForward * localForward /
+                (zone.HalfForward * zone.HalfForward) +
+                localSide * localSide / (zone.HalfSide * zone.HalfSide);
+
+            if (ellipse > 1.02f ||
+                MathF.Abs(point.Z - zone.Center.Z) > 0.0001f ||
+                point.Z > proneHeightLimit)
             {
                 return false;
             }
         }
 
-        // Direct AI combat checks do not always pass the body store explicitly.
-        // VisionSystem must retain the live store and return a point on the prone rig.
-        VisionCheck check = simulation.Vision.Evaluate(
-            simulation.Units, map, observer.Index, target.Index);
-        if (!check.IsVisible || check.VisibleTargetPoint.Z > proneHeightLimit)
-            return false;
+        // Deliberately move every rendered rig part away from the pawn. Gameplay
+        // collision and detection must still use the procedural proxy zones.
+        int bodyStart = simulation.Units.BodyStart[target.Index];
+        int bodyCount = simulation.Units.BodyCount[target.Index];
+        for (int i = 0; i < bodyCount; i++)
+            simulation.Bodies.WorldPosition[bodyStart + i] += new Vector3(1000f, 1000f, 1000f);
 
-        if ((uint)check.VisiblePoint >= (uint)visiblePointCount)
-            return false;
+        Vector3 torsoCenter = UnitGameplayZoneSystem.GetGeometry(
+            simulation.Units, target.Index, (int)UnitGameplayZone.Torso).Center;
+        bool hit = new UnitHitSystem().TryHitUnit(
+            simulation.Units,
+            target.Index,
+            torsoCenter - new Vector3(0f, 0f, 1f),
+            torsoCenter + new Vector3(0f, 0f, 1f),
+            projectileRadius: 0f,
+            UnitHealthPartId.None,
+            out UnitHitResult hitResult,
+            simulation.Bodies,
+            simulation.HitRegions);
 
-        int visibleRegion = UnitHitSystem.GetVisibilityRegionIndex(
-            simulation.Units, target.Index, check.VisiblePoint, simulation.HitRegions);
-        return check.VisibleTargetPoint.Z <= proneHeightLimit &&
-            UnitHitSystem.IsPointInsideRegion(
-                simulation.Units, target.Index, visibleRegion, check.VisibleTargetPoint,
-                tolerance: 0.003f, hitRegions: simulation.HitRegions, bodies: simulation.Bodies);
+        return hit &&
+            hitResult.RegionIndex >= 0 &&
+            hitResult.BindingIndex >= 0 &&
+            hitResult.Part != UnitHealthPartId.None;
     }
 
     private static bool TestProneCrawlApproach()
