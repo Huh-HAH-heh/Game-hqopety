@@ -1,4 +1,5 @@
 using Core.Combat;
+using Core.AI.Behaviac;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
@@ -77,6 +78,7 @@ public sealed class UnitRenderSystem : IDisposable
             tilePixelSize * screenScale;
 
         float detailBlend = GetUnitDetailBlend(pixelsPerWorldUnit);
+        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
@@ -239,6 +241,13 @@ public sealed class UnitRenderSystem : IDisposable
                     units.FactionTag[unitIndex],
                     isAlive,
                     markerOpacity);
+            }
+
+            // Posture glyphs replace the old bright rings. Fade them in only
+            // when the camera is close enough, and keep them unobtrusive.
+            float postureMarkerOpacity = 0.38f * closeMarkerBlend;
+            if (postureMarkerOpacity > 0f)
+            {
                 AppendPostureMarker(
                     _statusIcons,
                     screenX,
@@ -246,22 +255,10 @@ public sealed class UnitRenderSystem : IDisposable
                     markerRadius,
                     units.Posture[unitIndex],
                     screenScale,
-                    markerOpacity);
+                    postureMarkerOpacity);
             }
 
-            if (isAlive)
-            {
-                AppendPostureOutline(
-                    _bodyOutlines,
-                    screenX,
-                    screenY,
-                    MathF.Max(
-                        0.13f,
-                        MathF.Max(widths[unitIndex], lengths[unitIndex]) * 0.5f) *
-                    tilePixelSize,
-                    units.Posture[unitIndex],
-                    screenScale);
-            }
+            
 
             if (!isAlive)
                 continue;
@@ -373,6 +370,7 @@ public void DrawSnapshot(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
+        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
@@ -464,21 +462,31 @@ public void DrawSnapshot(
                 continue;
             }
 
-            // I toggles the tactical overlay. Draw active flank and cover goals
-            // for every on-screen unit, not just the selected pawn, so the player
-            // can actually see whether the XML policy is producing movement.
+            // I toggles tactical goal markers. These are hidden at overview
+            // zoom to keep the battlefield readable.
+            bool closeAiOverlay = closeMarkerBlend > 0f;
+            bool showPatrolGoal = unit.AiIntent == BehaviacUnitIntent.Patrol;
+            bool showFlankGoal = unit.AiIntent == BehaviacUnitIntent.FlankTarget ||
+                                 unit.AiState == UnitAiState.Flank;
+            bool showCoverGoal = unit.AiIntent is BehaviacUnitIntent.SeekCover or BehaviacUnitIntent.RetreatToCover ||
+                                 unit.AiState == UnitAiState.SeekCover;
+
             if (showAiDebug &&
+                closeAiOverlay &&
                 rootInView &&
                 unit.HitPoints > 0f &&
                 unit.HasGoal &&
-                unit.AiState is UnitAiState.Flank or UnitAiState.SeekCover)
+                (showPatrolGoal || showFlankGoal || showCoverGoal))
             {
-                bool isFlanking = unit.AiState == UnitAiState.Flank;
-                Color maneuverColor = isFlanking
-                    ? new Color(235, 105, 255, 205)
-                    : new Color(70, 175, 255, 195);
+                byte markerAlpha = (byte)(closeMarkerBlend * 128f);
+                Color maneuverColor = showPatrolGoal
+                    ? new Color(115, 220, 135, markerAlpha)
+                    : showFlankGoal
+                        ? new Color(235, 105, 255, (byte)(closeMarkerBlend * 150f))
+                        : new Color(70, 175, 255, (byte)(closeMarkerBlend * 145f));
                 float goalX = unit.Goal.X * tilePixelSize;
                 float goalY = unit.Goal.Y * tilePixelSize;
+                float goalRadius = (showPatrolGoal ? 0.30f : showFlankGoal ? 0.48f : 0.38f) * tilePixelSize;
 
                 AppendDebugLine(
                     _aiDebug,
@@ -490,12 +498,12 @@ public void DrawSnapshot(
                         maneuverColor.R,
                         maneuverColor.G,
                         maneuverColor.B,
-                        150));
+                        (byte)(closeMarkerBlend * (showPatrolGoal ? 70f : 85f))));
                 AppendCircleOutline(
                     _aiDebug,
                     goalX,
                     goalY,
-                    (isFlanking ? 0.62f : 0.48f) * tilePixelSize,
+                    goalRadius,
                     maneuverColor,
                     12);
             }
@@ -550,6 +558,13 @@ public void DrawSnapshot(
                     unit.FactionTag,
                     isAlive,
                     markerOpacity);
+            }
+
+            // Posture glyphs replace the old bright rings. Fade them in only
+            // when the camera is close enough, and keep them unobtrusive.
+            float postureMarkerOpacity = 0.38f * closeMarkerBlend;
+            if (postureMarkerOpacity > 0f)
+            {
                 AppendPostureMarker(
                     _statusIcons,
                     x,
@@ -557,22 +572,10 @@ public void DrawSnapshot(
                     markerRadius,
                     unit.Posture,
                     screenScale,
-                    markerOpacity);
+                    postureMarkerOpacity);
             }
 
-            if (isAlive)
-            {
-                AppendPostureOutline(
-                    _bodyOutlines,
-                    x,
-                    y,
-                    MathF.Max(
-                        0.13f,
-                        MathF.Max(unit.Width, unit.Length) * 0.5f) *
-                    tilePixelSize,
-                    unit.Posture,
-                    screenScale);
-            }
+            
 
             if (!isAlive)
                 continue;
@@ -998,6 +1001,14 @@ public void DrawSnapshot(
         return t * t * (3f - 2f * t);
     }
 
+    private static float GetCloseMarkerBlend(float screenScale)
+    {
+        // screenScale increases as the camera zooms in. Pose and tactical
+        // markers fade in only for a close view, then remain low-opacity.
+        float t = Math.Clamp((screenScale - 1.25f) / 0.55f, 0f, 1f);
+        return t * t * (3f - 2f * t);
+    }
+
     private static bool IsAnyBodyPartInView(
         UnitBodyStore bodies,
         int start,
@@ -1248,6 +1259,12 @@ public void DrawSnapshot(
             }
         }
 
+        if (weapon is MeleeWeaponConfig meleeWeapon)
+        {
+            AppendMeleeWeapon(vertices, meleeWeapon, position, dx, dy, tilePixelSize);
+            return;
+        }
+
         float sideOffset = secondary ? 0.10f : 0f;
         float centerDistance = weapon.WorldRenderLength * 0.43f;
         float centerX = position.X + dx * centerDistance - dy * sideOffset;
@@ -1261,6 +1278,133 @@ public void DrawSnapshot(
             MathF.Max(0.12f, weapon.WorldRenderLength * 0.5f) * tilePixelSize,
             MathF.Atan2(dy, dx),
             GetItemColor(weapon));
+    }
+
+    private static void AppendMeleeWeapon(
+        VertexArray vertices,
+        MeleeWeaponConfig weapon,
+        Vector3 position,
+        float dx,
+        float dy,
+        float tilePixelSize)
+    {
+        float angle = MathF.Atan2(dy, dx);
+        float totalLength = MathF.Max(
+            weapon.WorldRenderLength * tilePixelSize,
+            weapon.WorldRenderLength <= 0.35f ? 6f : 9f);
+        float sideX = -dy;
+        float sideY = dx;
+
+        // The grip begins just off the pawn's centre so the weapon reads as held,
+        // rather than as a line piercing the whole unit.
+        float rootX = position.X * tilePixelSize +
+                      dx * tilePixelSize * 0.09f -
+                      dy * tilePixelSize * 0.055f;
+        float rootY = position.Y * tilePixelSize +
+                      dy * tilePixelSize * 0.09f +
+                      dx * tilePixelSize * 0.055f;
+
+        bool blunt = weapon.MeleeDamageType == DamageType.Blunt;
+        float handleLength = MathF.Max(2f, totalLength * (blunt ? 0.28f : 0.20f));
+        float handleWidth = MathF.Max(0.9f, totalLength * (blunt ? 0.10f : 0.065f));
+        float handleCenterX = rootX + dx * handleLength * 0.5f;
+        float handleCenterY = rootY + dy * handleLength * 0.5f;
+
+        if (blunt)
+        {
+            // Shock baton: dark body, visible cyan core and a bright striking cap.
+            AppendOrientedRect(
+                vertices, handleCenterX, handleCenterY,
+                handleWidth, handleLength * 0.5f, angle,
+                new Color(33, 43, 49, 255));
+
+            float shaftLength = totalLength - handleLength * 0.25f;
+            float shaftCenterX = rootX + dx * (handleLength * 0.25f + shaftLength * 0.5f);
+            float shaftCenterY = rootY + dy * (handleLength * 0.25f + shaftLength * 0.5f);
+            AppendOrientedRect(
+                vertices, shaftCenterX, shaftCenterY,
+                MathF.Max(1.1f, handleWidth * 0.58f),
+                shaftLength * 0.5f, angle,
+                new Color(74, 190, 207, 255));
+            AppendOrientedRect(
+                vertices,
+                rootX + dx * (totalLength - 0.7f),
+                rootY + dy * (totalLength - 0.7f),
+                MathF.Max(1.5f, handleWidth * 0.85f),
+                0.8f,
+                angle,
+                new Color(170, 247, 255, 255));
+            return;
+        }
+
+        float bladeLength = totalLength - handleLength;
+        float guardX = rootX + dx * handleLength;
+        float guardY = rootY + dy * handleLength;
+        float bladeWidth = MathF.Max(
+            weapon.WorldRenderLength <= 0.35f ? 1.35f : 1.6f,
+            weapon.WorldRenderWidth * tilePixelSize * 1.8f);
+        float bladeBodyLength = bladeLength * 0.76f;
+        float bladeCenterX = guardX + dx * bladeBodyLength * 0.5f;
+        float bladeCenterY = guardY + dy * bladeBodyLength * 0.5f;
+        Color gripColor = new(91, 68, 49, 255);
+        Color bladeOutline = new(36, 43, 49, 255);
+        Color bladeColor = new(
+            (byte)Math.Clamp(weapon.WorldColorR + 27, 0, 255),
+            (byte)Math.Clamp(weapon.WorldColorG + 27, 0, 255),
+            (byte)Math.Clamp(weapon.WorldColorB + 27, 0, 255),
+            255);
+
+        // Grip, crossguard and edged blade are separate shapes. The blade gets
+        // a dark silhouette plus a bright metal face so it does not alias into a stick.
+        AppendOrientedRect(
+            vertices, handleCenterX, handleCenterY,
+            handleWidth * 0.72f, handleLength * 0.5f, angle, gripColor);
+        AppendOrientedRect(
+            vertices, guardX, guardY,
+            0.7f, MathF.Max(1.7f, totalLength * 0.15f),
+            angle + MathF.PI * 0.5f,
+            new Color(48, 52, 57, 255));
+
+        AppendOrientedRect(
+            vertices, bladeCenterX, bladeCenterY,
+            bladeWidth * 0.5f + 0.45f, bladeBodyLength * 0.5f,
+            angle, bladeOutline);
+        AppendOrientedRect(
+            vertices, bladeCenterX, bladeCenterY,
+            bladeWidth * 0.5f, bladeBodyLength * 0.5f,
+            angle, bladeColor);
+
+        float tipX = guardX + dx * bladeLength;
+        float tipY = guardY + dy * bladeLength;
+        float baseX = guardX + dx * bladeBodyLength;
+        float baseY = guardY + dy * bladeBodyLength;
+        float outlineHalfWidth = bladeWidth * 0.5f + 0.45f;
+        float faceHalfWidth = bladeWidth * 0.36f;
+
+        AppendTriangle(
+            vertices,
+            new Vector2f(baseX + sideX * outlineHalfWidth, baseY + sideY * outlineHalfWidth),
+            new Vector2f(tipX, tipY),
+            new Vector2f(baseX - sideX * outlineHalfWidth, baseY - sideY * outlineHalfWidth),
+            bladeOutline);
+        AppendTriangle(
+            vertices,
+            new Vector2f(baseX + sideX * faceHalfWidth, baseY + sideY * faceHalfWidth),
+            new Vector2f(tipX, tipY),
+            new Vector2f(baseX - sideX * faceHalfWidth, baseY - sideY * faceHalfWidth),
+            bladeColor);
+    }
+
+    private static void AppendTriangle(
+        VertexArray vertices,
+        Vector2f a,
+        Vector2f b,
+        Vector2f c,
+        Color color)
+    {
+        vertices.Append(new Vertex(a, color));
+        vertices.Append(new Vertex(b, color));
+        vertices.Append(new Vertex(c, color));
     }
 
     private static Color GetItemColor(ItemConfig item) =>
@@ -1374,6 +1518,18 @@ public void DrawSnapshot(
                     weaponX = dx;
                     weaponY = dy;
                 }
+            }
+
+            if (weapon is MeleeWeaponConfig meleeWeapon)
+            {
+                AppendMeleeWeapon(
+                    vertices,
+                    meleeWeapon,
+                    unitPosition,
+                    weaponX,
+                    weaponY,
+                    tilePixelSize);
+                continue;
             }
 
             float sideOffset = slot == (int)UnitWeaponSlot.Secondary ? 0.10f : 0f;
@@ -1509,61 +1665,6 @@ public void DrawSnapshot(
                 AppendDebugLine(vertices, centerX - size, centerY,
                     centerX, centerY - size, color);
                 break;
-        }
-    }
-
-    private static void AppendPostureOutline(
-        VertexArray outlines,
-        float x,
-        float y,
-        float markerRadius,
-        UnitPosture posture,
-        float screenScale)
-    {
-        if (posture != UnitPosture.Crouching &&
-            posture != UnitPosture.Lying)
-        {
-            return;
-        }
-
-        float pixel = 1f / MathF.Max(0.001f, screenScale);
-        float radius = markerRadius + pixel * 1.5f;
-        Color color = new Color(232, 239, 246, 225);
-
-        if (posture == UnitPosture.Crouching)
-        {
-            // Concentric outlines create a real thicker contour in SFML's
-            // line-only vertex array without altering the unit marker or rig.
-            for (int layer = 0; layer < 3; layer++)
-            {
-                AppendCircleOutline(
-                    outlines,
-                    x,
-                    y,
-                    radius + pixel * layer,
-                    color,
-                    CircleSegments);
-            }
-
-            return;
-        }
-
-        // Prone: eight clear dashes around the same circular footprint.
-        const int segments = 24;
-        for (int i = 0; i < segments; i++)
-        {
-            if (i % 3 == 2)
-                continue;
-
-            float a0 = i * MathF.Tau / segments;
-            float a1 = (i + 1) * MathF.Tau / segments;
-            AppendDebugLine(
-                outlines,
-                x + MathF.Cos(a0) * radius,
-                y + MathF.Sin(a0) * radius,
-                x + MathF.Cos(a1) * radius,
-                y + MathF.Sin(a1) * radius,
-                color);
         }
     }
 

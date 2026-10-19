@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Core.Items;
 using Core.Combat;
+using Core.AI.Behaviac;
 using Core.Unit;
 
 namespace RimClone.Render;
@@ -37,6 +38,7 @@ public readonly record struct RenderUnitState(
     float HealthRatio,
     ushort FactionTag,
     UnitAiState AiState,
+    BehaviacUnitIntent AiIntent,
     bool HasTarget,
     Vector3 TargetPosition,
     bool HasGoal,
@@ -270,6 +272,7 @@ public sealed class SimulationFrameSnapshot
         Vector3[] headNormals = units.HeadNormal;
         UnitAiStore aiStore = simulation.AI.Store;
         UnitAiState[] aiStates = aiStore.State;
+        BehaviacUnitIntent[] aiIntents = aiStore.LastIntent;
         UnitInventoryStore inventoryStore = simulation.Inventory;
         UnitSuppressionStore suppressionStore = simulation.Suppression;
         UnitWeaponStore weaponStore = simulation.Weapons;
@@ -283,6 +286,7 @@ public sealed class SimulationFrameSnapshot
                 : 0f;
             ushort faction = factions[index];
             UnitAiState aiState = aiStates[index];
+            BehaviacUnitIntent aiIntent = aiIntents[index];
 
             bool hasApparel = false;
             bool hasPoweredArmor = false;
@@ -326,6 +330,19 @@ public sealed class SimulationFrameSnapshot
 
             bool hasGoal = aiStore.HasGoal[index];
             Vector3 goal = aiStore.Goal[index];
+
+            // Patrol can be advancing toward a scenario-issued movement target
+            // before it has created its own search waypoint. Publish that active
+            // destination as the patrol marker too, rather than leaving the AI
+            // overlay blank while the pawn is visibly moving.
+            if (aiIntent == BehaviacUnitIntent.Patrol &&
+                !hasGoal &&
+                units.HasTarget[index])
+            {
+                hasGoal = true;
+                goal = units.Target[index];
+            }
+
             float suppression = suppressionStore.Value[index];
             UnitSuppressionState suppressionState = suppressionStore.GetState(index);
 
@@ -403,6 +420,7 @@ public sealed class SimulationFrameSnapshot
                 healthRatio,
                 faction,
                 aiState,
+                aiIntent,
                 hasTarget,
                 targetPosition,
                 hasGoal,

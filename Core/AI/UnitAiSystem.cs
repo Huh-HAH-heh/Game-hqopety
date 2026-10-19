@@ -18,7 +18,6 @@ public sealed class UnitAiSystem
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
     private const float ProneCrawlFiringDistance = 9f;
-    private const int MaxSearchPatrolLegs = 3;
     private static readonly int MaxAiPlanningParallelism =
         Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
@@ -392,8 +391,7 @@ public sealed class UnitAiSystem
                         Store.ClearGoal(unit);
 
                         int patrolLeg = ++_searchPatrolLegByUnit[unit];
-                        if (patrolLeg <= MaxSearchPatrolLegs &&
-                            TryFindSearchWaypoint(
+                        if (TryFindSearchWaypoint(
                                 units,
                                 worldMap,
                                 unit,
@@ -895,7 +893,13 @@ public sealed class UnitAiSystem
         bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
 
-        if (hasVisibleTarget && isHealthyEnoughToFlank && unit % 3 == 0)
+        // Flanking is a ranged-fire maneuver. A melee-only unit should
+        // commit toward contact instead of spending its first approach on a
+        // wide side/back waypoint.
+        if (hasVisibleTarget &&
+            isHealthyEnoughToFlank &&
+            HasRangedWeapon(units, inventory, unit) &&
+            unit % 3 == 0)
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
@@ -914,7 +918,8 @@ public sealed class UnitAiSystem
 
         bool isFlanking =
             Store.State[unit] == UnitAiState.Flank &&
-            isHealthyEnoughToFlank;
+            isHealthyEnoughToFlank &&
+            HasRangedWeapon(units, inventory, unit);
 
         float proneUtility = 0f;
         if (hasVisibleTarget &&
