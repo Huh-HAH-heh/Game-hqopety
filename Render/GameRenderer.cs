@@ -51,6 +51,14 @@ public sealed class GameRenderer
 
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
+    private readonly List<UnitId>[] _controlGroups =
+    {
+        new List<UnitId>(),
+        new List<UnitId>(),
+        new List<UnitId>(),
+        new List<UnitId>()
+    };
+    private InfantryFormationType _infantryFormation = InfantryFormationType.Line;
     private bool _isSelectingUnits;
     private bool _isPanningCamera;
     private Vector2i _lastCameraPanPixel;
@@ -722,7 +730,8 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
+            "Ctrl+1-4=assign group 1-4=select Shift+1-4=add Ctrl+Shift+1-4=clear RMB=formation move J=formation Y=reset | " +
+            "A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=formation TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
 
@@ -928,6 +937,199 @@ public sealed class GameRenderer
         _selectedUnits.Clear();
         if (unit.IsValid)
             _selectedUnits.Add(unit);
+    }
+
+    private bool TryHandleControlGroupKey(Keyboard.Key key)
+    {
+        int groupIndex = key switch
+        {
+            Keyboard.Key.Num1 or Keyboard.Key.Numpad1 => 0,
+            Keyboard.Key.Num2 or Keyboard.Key.Numpad2 => 1,
+            Keyboard.Key.Num3 or Keyboard.Key.Numpad3 => 2,
+            Keyboard.Key.Num4 or Keyboard.Key.Numpad4 => 3,
+            _ => -1
+        };
+
+        if (groupIndex < 0)
+            return false;
+
+        bool controlPressed =
+            Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
+            Keyboard.IsKeyPressed(Keyboard.Key.RControl);
+        bool shiftPressed =
+            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+
+        if (controlPressed && shiftPressed)
+        {
+            _controlGroups[groupIndex].Clear();
+            Console.WriteLine($"[INFANTRY] Group {groupIndex + 1} cleared.");
+            return true;
+        }
+
+        if (controlPressed)
+        {
+            SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+            if (snapshot == null || _selectedUnits.Count == 0)
+            {
+                Console.WriteLine($"[INFANTRY] Select units, then Ctrl+{groupIndex + 1} to assign a group.");
+                return true;
+            }
+
+            List<UnitId> assigned = new();
+            RenderUnitState[] units = snapshot.Units;
+            for (int i = 0; i < units.Length; i++)
+            {
+                RenderUnitState unit = units[i];
+                UnitId id = new(unit.Index, unit.Generation);
+                if (unit.HitPoints > 0f && _selectedUnits.Contains(id))
+                    assigned.Add(id);
+            }
+
+            _controlGroups[groupIndex].Clear();
+            _controlGroups[groupIndex].AddRange(assigned);
+            Console.WriteLine($"[INFANTRY] Group {groupIndex + 1}: {_controlGroups[groupIndex].Count} units assigned.");
+            return true;
+        }
+
+        List<UnitId> group = _controlGroups[groupIndex];
+        if (group.Count == 0)
+        {
+            Console.WriteLine($"[INFANTRY] Group {groupIndex + 1} is empty. Select infantry and press Ctrl+{groupIndex + 1}.");
+            return true;
+        }
+
+        SimulationFrameSnapshot? current = GetInputSnapshot();
+        if (current == null)
+            return true;
+
+        HashSet<UnitId> living = new();
+        RenderUnitState[] currentUnits = current.Units;
+        for (int i = 0; i < currentUnits.Length; i++)
+        {
+            RenderUnitState unit = currentUnits[i];
+            if (unit.HitPoints > 0f)
+                living.Add(new UnitId(unit.Index, unit.Generation));
+        }
+
+        if (!shiftPressed)
+            _selectedUnits.Clear();
+
+        for (int i = group.Count - 1; i >= 0; i--)
+        {
+            UnitId id = group[i];
+            if (living.Contains(id))
+                _selectedUnits.Add(id);
+            else
+                group.RemoveAt(i);
+        }
+
+        _selectedUnit = default;
+        foreach (UnitId id in _selectedUnits)
+        {
+            _selectedUnit = id;
+            break;
+        }
+
+        Console.WriteLine(
+            $"[INFANTRY] {(shiftPressed ? "Added" : "Selected")} group {groupIndex + 1}: {_selectedUnits.Count} selected.");
+        return true;
+    }
+
+    private UnitId[] CaptureSelectedUnitIds(SimulationFrameSnapshot snapshot)
+    {
+        List<UnitId> selected = new();
+        RenderUnitState[] units = snapshot.Units;
+        for (int i = 0; i < units.Length; i++)
+        {
+            RenderUnitState unit = units[i];
+            UnitId id = new(unit.Index, unit.Generation);
+            if (unit.HitPoints > 0f && _selectedUnits.Contains(id))
+                selected.Add(id);
+        }
+
+        selected.Sort(static (a, b) => a.Index.CompareTo(b.Index));
+        return selected.ToArray();
+    }
+
+    private void IssueFormationMove(
+        UnitId[] memberIds,
+        Vector3 destination,
+        InfantryFormationType formation)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        List<(UnitId Id, int Index)> members = new(memberIds.Length);
+        float centerX = 0f;
+        float centerY = 0f;
+        float spacing = 1.15f;
+
+        for (int i = 0; i < memberIds.Length; i++)
+        {
+            UnitId id = memberIds[i];
+            if (!units.TryGetIndex(id, out int index) ||
+                _unitSimulation.Health.OverallHitPoints[index] <= 0f)
+            {
+                continue;
+            }
+
+            members.Add((id, index));
+            Vector3 position = units.Position[index];
+            centerX += position.X;
+            centerY += position.Y;
+            spacing = MathF.Max(spacing, units.Radius[index] * 2.25f);
+        }
+
+        if (members.Count == 0)
+            return;
+
+        centerX /= members.Count;
+        centerY /= members.Count;
+
+        float forwardX = destination.X - centerX;
+        float forwardY = destination.Y - centerY;
+        float directionLength = MathF.Sqrt(forwardX * forwardX + forwardY * forwardY);
+        if (directionLength < 0.001f)
+        {
+            forwardX = 1f;
+            forwardY = 0f;
+        }
+        else
+        {
+            forwardX /= directionLength;
+            forwardY /= directionLength;
+        }
+
+        // The clicked point is the virtual leader / formation center. Center the
+        // offsets so half the formation does not end up arbitrarily behind it.
+        Vector2 offsetSum = Vector2.Zero;
+        for (int i = 0; i < members.Count; i++)
+            offsetSum += InfantryFormation.GetOffset(i, members.Count, formation, spacing);
+        Vector2 meanOffset = offsetSum / members.Count;
+
+        float sideX = -forwardY;
+        float sideY = forwardX;
+        for (int i = 0; i < members.Count; i++)
+        {
+            var member = members[i];
+            Vector2 offset = InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset;
+            float x = destination.X + sideX * offset.X - forwardX * offset.Y;
+            float y = destination.Y + sideY * offset.X - forwardY * offset.Y;
+
+            x = Math.Clamp(x, 0.5f, _worldMap.MaxTileX - 0.5f);
+            y = Math.Clamp(y, 0.5f, _worldMap.MaxTileY - 0.5f);
+            int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
+            Vector3 target = new(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
+
+            ai.ClearTarget(member.Index);
+            ai.ClearGoal(member.Index);
+            ai.State[member.Index] = UnitAiState.Search;
+            _unitSimulation.SetTarget(member.Id, target);
+        }
+
+        Console.WriteLine(
+            $"[INFANTRY] Move {members.Count} units in {InfantryFormation.GetName(formation)} formation.");
     }
 
     private SimulationFrameSnapshot? GetInputSnapshot() =>
@@ -1705,6 +1907,28 @@ public sealed class GameRenderer
                                 minimumMarkerRadius,
                                 out contextUnit);
 
+                        // Empty-ground right-click is an RTS move command when
+                        // infantry are selected. Right-clicking a pawn still opens
+                        // the existing context menu.
+                        if (!hasUnit && _selectedUnits.Count > 0 &&
+                            inputSnapshot != null)
+                        {
+                            UnitId[] moveUnits = CaptureSelectedUnitIds(inputSnapshot);
+                            if (moveUnits.Length > 0)
+                            {
+                                Vector3 destination = new(
+                                    worldPosition.X / TerrainTilePixelSize,
+                                    worldPosition.Y / TerrainTilePixelSize,
+                                    0f);
+                                InfantryFormationType formation = _infantryFormation;
+                                _contextMenuOverlay?.Close();
+                                _contextMenuUnit = default;
+                                ExecuteSimulationCommand(() =>
+                                    IssueFormationMove(moveUnits, destination, formation));
+                                return;
+                            }
+                        }
+
                         _contextMenuUnit = hasUnit
                             ? new UnitId(contextUnit.Index, contextUnit.Generation)
                             : default;
@@ -2029,6 +2253,16 @@ public sealed class GameRenderer
                 Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
                 Keyboard.IsKeyPressed(Keyboard.Key.RControl);
             _bodyRigEditorOverlay.HandleKey(key, controlPressed);
+            return;
+        }
+
+        if (TryHandleControlGroupKey(key))
+            return;
+
+        if (key == Keyboard.Key.J)
+        {
+            _infantryFormation = (InfantryFormationType)(((int)_infantryFormation + 1) % 3);
+            Console.WriteLine($"[INFANTRY] Formation: {InfantryFormation.GetName(_infantryFormation)}");
             return;
         }
 
