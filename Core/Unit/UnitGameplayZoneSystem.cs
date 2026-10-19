@@ -23,7 +23,7 @@ public readonly struct UnitGameplayZoneGeometry
     public float HalfSide { get; }
     public float HalfHeight { get; }
     public float Rotation { get; }
-    public float BoundingRadius => MathF.Max(HalfForward, HalfSide);
+    public float BoundingRadius => MathF.Sqrt(HalfForward * HalfForward + HalfSide * HalfSide);
 
     public UnitGameplayZoneGeometry(
         UnitGameplayZone zone,
