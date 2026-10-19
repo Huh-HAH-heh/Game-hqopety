@@ -432,6 +432,26 @@ public void DrawSnapshot(
                         8);
                 }
 
+                if (unit.HasMoveTarget)
+                {
+                    float moveX = unit.MoveTargetPosition.X * tilePixelSize;
+                    float moveY = unit.MoveTargetPosition.Y * tilePixelSize;
+                    AppendDebugLine(
+                        _aiDebug,
+                        x,
+                        y,
+                        moveX,
+                        moveY,
+                        new Color(stateColor.R, stateColor.G, stateColor.B, 165));
+                    AppendCircleOutline(
+                        _aiDebug,
+                        moveX,
+                        moveY,
+                        0.12f * tilePixelSize,
+                        stateColor,
+                        8);
+                }
+
                 if (unit.HasGoal)
                 {
                     float goalX = unit.Goal.X * tilePixelSize;
