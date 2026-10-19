@@ -22,6 +22,7 @@ public static class CombatSelfTest
         RunTest("Ballistics: ballistic coefficient", TestBallisticCoefficient, ref passed, ref failed);
         RunTest("Armor: hard armor stops underpenetrating hit", TestArmorDeflection, ref passed, ref failed);
         RunTest("Armor: penetrating hit passes armor", TestArmorPenetration, ref passed, ref failed);
+        RunTest("Melee: CE-style attacks, weapon defense and ripostes", MeleeCombatSelfTest.Run, ref passed, ref failed);
         RunTest("Weapon: fire mode cycle", TestFireModes, ref passed, ref failed);
         RunTest("Weapon: aim mode cycle", TestAimModes, ref passed, ref failed);
         RunTest("Weapon: target mode cycle", TestTargetModes, ref passed, ref failed);
