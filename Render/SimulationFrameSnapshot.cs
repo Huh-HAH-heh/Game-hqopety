@@ -98,6 +98,7 @@ public sealed class SimulationFrameSnapshot
     public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
     public RenderAimRing[] AimRings { get; init; } = Array.Empty<RenderAimRing>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
+    public MeleeHitVisual[] MeleeHitVisuals { get; init; } = Array.Empty<MeleeHitVisual>();
 
     public int UnitCount => Units.Length;
     public int ActiveProjectiles { get; init; }
@@ -200,6 +201,9 @@ public sealed class SimulationFrameSnapshot
         long captureStarted = Stopwatch.GetTimestamp();
         UnitStore units = simulation.Units;
         ReadOnlySpan<int> active = units.ActiveIndices;
+        ReadOnlySpan<MeleeHitVisual> sourceMeleeHits = simulation.MeleeCombat.Visuals;
+        MeleeHitVisual[] meleeHitVisuals = new MeleeHitVisual[sourceMeleeHits.Length];
+        sourceMeleeHits.CopyTo(meleeHitVisuals);
         RenderUnitState[] unitStates = new RenderUnitState[active.Length];
 
         // Flatten all active rigs into one immutable array for the render thread.
@@ -581,6 +585,7 @@ public sealed class SimulationFrameSnapshot
             Traces = traces,
             AimRings = aimRings.ToArray(),
             Impacts = impacts,
+            MeleeHitVisuals = meleeHitVisuals,
             ActiveProjectiles = projectiles.ActiveCount,
             ProjectileCapacity = projectiles.Capacity,
             TotalShotsFired = simulation.TotalShotsFired,
