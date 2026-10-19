@@ -78,7 +78,6 @@ public sealed class UnitRenderSystem : IDisposable
             tilePixelSize * screenScale;
 
         float detailBlend = GetUnitDetailBlend(pixelsPerWorldUnit);
-        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
@@ -241,13 +240,8 @@ public sealed class UnitRenderSystem : IDisposable
                     units.FactionTag[unitIndex],
                     isAlive,
                     markerOpacity);
-            }
 
-            // Posture glyphs replace the old bright rings. Fade them in only
-            // when the camera is close enough, and keep them unobtrusive.
-            float postureMarkerOpacity = 0.38f * closeMarkerBlend;
-            if (postureMarkerOpacity > 0f)
-            {
+                // Restore the original per-posture glyphs without zoom fading.
                 AppendPostureMarker(
                     _statusIcons,
                     screenX,
@@ -255,7 +249,7 @@ public sealed class UnitRenderSystem : IDisposable
                     markerRadius,
                     units.Posture[unitIndex],
                     screenScale,
-                    postureMarkerOpacity);
+                    markerOpacity);
             }
 
             
@@ -984,14 +978,6 @@ public void DrawSnapshot(
             1f);
 
         // Smoothstep avoids visible banding at the beginning and end of the fade.
-        return t * t * (3f - 2f * t);
-    }
-
-    private static float GetCloseMarkerBlend(float screenScale)
-    {
-        // screenScale increases as the camera zooms in. Pose and tactical
-        // markers fade in only for a close view, then remain low-opacity.
-        float t = Math.Clamp((screenScale - 1.25f) / 0.55f, 0f, 1f);
         return t * t * (3f - 2f * t);
     }
 
