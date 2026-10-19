@@ -752,9 +752,7 @@ private static int FillRegionPoints(
         int written = 0;
         for (int visibleIndex = 0; visibleIndex < required; visibleIndex++)
         {
-            int regionIndex = profile is UnitAnatomyProfile anatomy
-                ? anatomy.GetVisibleRegionIndex(visibleIndex)
-                : visibleIndex;
+            int regionIndex = visibleIndex;
 
             points[written++] = GetGameplayTargetPoint(
                 units, unitIndex, regionIndex, source, hitRegions, markerRole, bodies);
