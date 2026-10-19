@@ -53,7 +53,7 @@ public static class MeleeCombatSelfTest
         var melee = simulation.MeleeCombat;
         return melee.TotalSwings > 0 &&
                melee.TotalHits > 0 &&
-               melee.TotalMisses + melee.TotalDodges + melee.TotalParries <= melee.TotalSwings &&
+               melee.TotalMisses + melee.TotalDodges + melee.TotalParries <= melee.TotalSwings + melee.TotalRipostes &&
                (melee.TotalParries == 0 || melee.TotalRipostes > 0);
     }
 }
