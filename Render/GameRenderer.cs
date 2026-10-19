@@ -262,10 +262,10 @@ public sealed class GameRenderer
             Volatile.Read(ref _massCombatWorldReady))
         {
             _startupMassCombatSelectionApplied = true;
-            UnitId firstUnit = _massCombatTestScene.FirstUnit;
-            if (!_selectedUnit.IsValid && firstUnit.IsValid)
+            UnitId firstUnit = _massCombatTestScene.FirstMeleeUnit;
+            if (firstUnit.IsValid)
                 SetSelectedUnit(firstUnit);
-            _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
+            CenterOnMeleeBattle();
         }
 
         rawDeltaTime = MathF.Max(0f, rawDeltaTime);
@@ -2169,8 +2169,8 @@ public sealed class GameRenderer
             // with the simulation worker stopped rather than racing the map renderer.
             StopSimulationThread();
             _massCombatTestScene.CycleScale(_unitSimulation, _worldMap);
-            SetSelectedUnit(_massCombatTestScene.FirstUnit);
-            _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
+            SetSelectedUnit(_massCombatTestScene.FirstMeleeUnit);
+            CenterOnMeleeBattle();
             Console.WriteLine($"[TEST] {_massCombatTestScene.GetStatus(_unitSimulation)}");
             StartSimulationThread();
             return;
@@ -2614,11 +2614,23 @@ public sealed class GameRenderer
         Volatile.Write(ref _massCombatWorldReady, true);
         _startupMassCombatSelectionApplied = true;
 
-        SetSelectedUnit(_massCombatTestScene.FirstUnit);
+        SetSelectedUnit(_massCombatTestScene.FirstMeleeUnit);
+        CenterOnMeleeBattle();
+    }
 
-        _camera.CenterOnWorld(
-            TerrainTilePixelSize,
-            _worldMap);
+    private void CenterOnMeleeBattle()
+    {
+        UnitId firstMeleeUnit = _massCombatTestScene.FirstMeleeUnit;
+        if (!_unitSimulation.Units.TryGetIndex(firstMeleeUnit, out int unit))
+        {
+            _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
+            return;
+        }
+
+        Vector3 position = _unitSimulation.Units.Position[unit];
+        _camera.CenterOnPosition(new Vector2f(
+            (position.X + 9f) * TerrainTilePixelSize,
+            (position.Y + 3.75f) * TerrainTilePixelSize));
     }
 
     private void CreateVisionTestScene()
