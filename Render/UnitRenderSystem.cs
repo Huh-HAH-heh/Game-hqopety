@@ -238,9 +238,15 @@ public sealed class UnitRenderSystem : IDisposable
                     markerRadius,
                     units.FactionTag[unitIndex],
                     isAlive,
-                    markerOpacity,
+                    markerOpacity);
+                AppendPostureMarker(
+                    _statusIcons,
+                    screenX,
+                    screenY,
+                    markerRadius,
                     units.Posture[unitIndex],
-                    units.BodyNormal[unitIndex]);
+                    screenScale,
+                    markerOpacity);
             }
 
             if (!isAlive)
@@ -515,9 +521,15 @@ public void DrawSnapshot(
                     markerRadius,
                     unit.FactionTag,
                     isAlive,
-                    markerOpacity,
+                    markerOpacity);
+                AppendPostureMarker(
+                    _statusIcons,
+                    x,
+                    y,
+                    markerRadius,
                     unit.Posture,
-                    unit.BodyNormal);
+                    screenScale,
+                    markerOpacity);
             }
 
             if (!isAlive)
@@ -1334,40 +1346,15 @@ public void DrawSnapshot(
         float radius,
         ushort factionTag,
         bool isAlive,
-        float opacity,
-        UnitPosture posture,
-        Vector3 facing)
+        float opacity)
     {
+        // Keep the low-detail body marker stable across every posture. Pose is
+        // communicated by a separate quiet glyph, never by deforming this circle.
         Color color = ApplyOpacity(
             GetBodyPartColor(BodyPartRole.Torso, factionTag, isAlive),
             opacity);
 
         const int segments = 16;
-        if (posture == UnitPosture.Lying)
-        {
-            // Marker-only view must communicate the same prone silhouette as the rig:
-            // an elongated torso aligned to the facing direction, with the head at
-            // the front. Layered ellipses keep it legible at macro zoom.
-            float facingLengthSquared = facing.X * facing.X + facing.Y * facing.Y;
-            float angle = facingLengthSquared > 0.000001f
-                ? MathF.Atan2(facing.Y, facing.X)
-                : 0f;
-            Color outline = ApplyOpacity(new Color(16, 21, 27, 255), opacity);
-            AppendEllipse(vertices, x, y,
-                radius * 1.72f, radius * 0.78f, angle, outline, segments);
-            AppendEllipse(vertices, x, y,
-                radius * 1.53f, radius * 0.61f, angle, color, segments);
-
-            float headX = x + MathF.Cos(angle) * radius * 1.05f;
-            float headY = y + MathF.Sin(angle) * radius * 1.05f;
-            AppendEllipse(vertices, headX, headY,
-                radius * 0.39f, radius * 0.39f, angle, outline, segments);
-            AppendEllipse(vertices, headX, headY,
-                radius * 0.29f, radius * 0.29f, angle, color, segments);
-            return;
-        }
-
-        // Standing and other non-prone postures retain the compact circle marker.
         Vector2f center = new(x, y);
         for (int i = 0; i < segments; i++)
         {
@@ -1383,6 +1370,62 @@ public void DrawSnapshot(
             vertices.Append(new Vertex(center, color));
             vertices.Append(new Vertex(p0, color));
             vertices.Append(new Vertex(p1, color));
+        }
+    }
+
+    private static void AppendPostureMarker(
+        VertexArray vertices,
+        float x,
+        float y,
+        float radius,
+        UnitPosture posture,
+        float screenScale,
+        float opacity)
+    {
+        if (posture == UnitPosture.Standing)
+            return;
+
+        float pixel = 1f / MathF.Max(0.001f, screenScale);
+        float size = MathF.Max(pixel * 1.5f, MathF.Min(radius * 0.42f, pixel * 3f));
+        float centerX = x + radius * 0.82f + size * 0.25f;
+        float centerY = y - radius * 0.82f - size * 0.25f;
+        Color color = ApplyOpacity(new Color(150, 162, 174, 145), opacity);
+
+        // Abstract, deliberately low-contrast marks: a broken trail for prone,
+        // a shallow notch for crouching, and a small diamond for sitting.
+        switch (posture)
+        {
+            case UnitPosture.Lying:
+                AppendDebugLine(vertices,
+                    centerX - size, centerY - size * 0.35f,
+                    centerX - size * 0.48f, centerY - size * 0.35f, color);
+                AppendDebugLine(vertices,
+                    centerX - size * 0.12f, centerY,
+                    centerX + size * 0.38f, centerY, color);
+                AppendDebugLine(vertices,
+                    centerX + size * 0.58f, centerY + size * 0.35f,
+                    centerX + size, centerY + size * 0.35f, color);
+                break;
+
+            case UnitPosture.Crouching:
+                AppendDebugLine(vertices,
+                    centerX - size, centerY - size * 0.25f,
+                    centerX - size * 0.12f, centerY + size * 0.4f, color);
+                AppendDebugLine(vertices,
+                    centerX - size * 0.12f, centerY + size * 0.4f,
+                    centerX + size * 0.72f, centerY - size * 0.25f, color);
+                break;
+
+            case UnitPosture.Sitting:
+                AppendDebugLine(vertices, centerX, centerY - size,
+                    centerX + size, centerY, color);
+                AppendDebugLine(vertices, centerX + size, centerY,
+                    centerX, centerY + size, color);
+                AppendDebugLine(vertices, centerX, centerY + size,
+                    centerX - size, centerY, color);
+                AppendDebugLine(vertices, centerX - size, centerY,
+                    centerX, centerY - size, color);
+                break;
         }
     }
 
