@@ -57,6 +57,7 @@ public sealed class UnitSimulation
     public double LastMovementUpdateMilliseconds { get; private set; }
     public double LastWeaponUpdateMilliseconds { get; private set; }
     public double LastBodyUpdateMilliseconds { get; private set; }
+    public double LastMeleeUpdateMilliseconds { get; private set; }
     public double LastProjectileUpdateMilliseconds { get; private set; }
     public double LastHealthUpdateMilliseconds { get; private set; }
     public long TotalShotsFired => _weaponSystem.TotalShotsFired;
@@ -983,8 +984,10 @@ public sealed class UnitSimulation
             HitRegions,
             Bodies,
             deltaTime);
-        phaseStarted = Stopwatch.GetTimestamp();
+        LastMeleeUpdateMilliseconds =
+            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
+        phaseStarted = Stopwatch.GetTimestamp();
         _projectileSystem.Update(
             Units,
             Bodies,
