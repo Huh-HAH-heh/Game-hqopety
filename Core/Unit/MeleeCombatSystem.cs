@@ -37,6 +37,7 @@ public sealed class MeleeCombatSystem
     private readonly DamageSystem _damageSystem = new();
     private float[] _attackCooldown = Array.Empty<float>();
     private float[] _riposteCooldown = Array.Empty<float>();
+    private float[] _movementLockRemaining = Array.Empty<float>();
     private uint[] _randomState = Array.Empty<uint>();
     private readonly MeleeHitVisual[] _visuals = new MeleeHitVisual[128];
     private int _visualCount;
@@ -52,12 +53,14 @@ public sealed class MeleeCombatSystem
     public long TotalParries { get; private set; }
     public long TotalRipostes { get; private set; }
     public long TotalCriticals { get; private set; }
+    public long TotalStaggers { get; private set; }
 
     public void InitializeUnit(int unitIndex, UnitId id)
     {
         EnsureCapacity(unitIndex + 1);
         _attackCooldown[unitIndex] = 0f;
         _riposteCooldown[unitIndex] = 0f;
+        _movementLockRemaining[unitIndex] = 0f;
         _randomState[unitIndex] = Seed(id);
     }
 
@@ -68,7 +71,27 @@ public sealed class MeleeCombatSystem
 
         _attackCooldown[unitIndex] = 0f;
         _riposteCooldown[unitIndex] = 0f;
+        _movementLockRemaining[unitIndex] = 0f;
         _randomState[unitIndex] = 0u;
+    }
+
+    public bool IsMovementLocked(int unitIndex) =>
+        (uint)unitIndex < (uint)_movementLockRemaining.Length &&
+        _movementLockRemaining[unitIndex] > 0f;
+
+    /// <summary>Advance hit-stagger timers after the movement phase.</summary>
+    public void UpdateMovementLocks(UnitStore units, float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            _movementLockRemaining[unit] =
+                MathF.Max(0f, _movementLockRemaining[unit] - deltaTime);
+        }
     }
 
     public void Update(
@@ -118,8 +141,12 @@ public sealed class MeleeCombatSystem
             if (delta.LengthSquared() > reach * reach || _attackCooldown[attacker] > 0f)
                 continue;
 
-            _attackCooldown[attacker] = profile.AttackInterval;
+            UnitCombatCondition attackerCondition =
+                UnitCombatConditionSystem.Calculate(health, attacker);
+            _attackCooldown[attacker] = profile.AttackInterval *
+                (1f + (1f - attackerCondition.MeleeAccuracyMultiplier) * 0.60f);
             TotalSwings++;
+            skills.GainExperience(attacker, UnitSkill.Melee, 3f);
 
             ResolveStrike(
                 attacker, target, profile, units, inventory, health,
@@ -149,6 +176,10 @@ public sealed class MeleeCombatSystem
         MeleeProfile defenderProfile = GetProfile(target, units, inventory);
         int attackerSkill = skills.GetLevel(attacker, UnitSkill.Melee);
         int defenderSkill = skills.GetLevel(target, UnitSkill.Melee);
+        UnitCombatCondition attackerCondition =
+            UnitCombatConditionSystem.Calculate(health, attacker);
+        UnitCombatCondition defenderCondition =
+            UnitCombatConditionSystem.Calculate(health, target);
 
         if (allowDefense)
         {
@@ -159,30 +190,37 @@ public sealed class MeleeCombatSystem
                 UnitPosture.Sitting => 0.65f,
                 _ => 1f
             };
-            float movementBonus = MathF.Min(0.08f, units.Velocity[target].Length() * 0.02f);
+            float movementBonus = MathF.Min(0.12f, units.Velocity[target].Length() * 0.035f);
             float suppressionPenalty = suppression.Value[target] * 0.012f;
+            float skillDodgeChance = defenderSkill <= 10
+                ? defenderSkill * 0.02f
+                : 0.20f + (defenderSkill - 10) * 0.0175f;
+            float mobility = GetLocomotionIntegrity(health, target);
             float dodgeChance = Math.Clamp(
-                (0.035f + defenderSkill * 0.008f + movementBonus - suppressionPenalty) *
-                postureFactor,
-                0.01f,
-                0.32f);
+                (skillDodgeChance + movementBonus - suppressionPenalty) *
+                postureFactor * mobility,
+                0f,
+                0.80f);
 
             if (NextUnit(target) < dodgeChance)
             {
                 TotalDodges++;
+                skills.GainExperience(target, UnitSkill.Melee, 1.5f);
                 return false;
             }
 
             float parryPassion = GetPassionBonus(skills, target, UnitSkill.Melee);
             float parryChance = Math.Clamp(
-                defenderProfile.ParryChance + defenderSkill * 0.005f +
-                parryPassion - suppressionPenalty,
+                (defenderProfile.ParryChance + defenderSkill * 0.005f +
+                 parryPassion - suppressionPenalty) *
+                defenderCondition.MeleeAccuracyMultiplier,
                 0f,
                 0.48f);
 
             if (NextUnit(target) < parryChance)
             {
                 TotalParries++;
+                skills.GainExperience(target, UnitSkill.Melee, 2f);
                 if (_riposteCooldown[target] <= 0f)
                 {
                     _riposteCooldown[target] = MathF.Max(0.35f, defenderProfile.AttackInterval * 1.2f);
@@ -196,11 +234,9 @@ public sealed class MeleeCombatSystem
                 return false;
             }
 
-            float missChance = Math.Clamp(
-                0.22f - attackerSkill * 0.012f + defenderSkill * 0.003f,
-                0.04f,
-                0.24f);
-            if (NextUnit(attacker) < missChance)
+            float hitChance = GetMeleeHitChance(attackerSkill) *
+                attackerCondition.MeleeAccuracyMultiplier;
+            if (NextUnit(attacker) >= Math.Clamp(hitChance, 0.05f, 0.95f))
             {
                 TotalMisses++;
                 return false;
@@ -243,11 +279,8 @@ public sealed class MeleeCombatSystem
         if (critical)
             TotalCriticals++;
 
-        UnitCombatCondition attackerCondition =
-            UnitCombatConditionSystem.Calculate(health, attacker);
         float damage = profile.Damage *
-            attackerCondition.MeleeDamageMultiplier *
-            (1f + attackerSkill * 0.015f);
+            attackerCondition.MeleeDamageMultiplier;
         if (critical)
             damage *= 1.75f;
 
@@ -281,6 +314,15 @@ public sealed class MeleeCombatSystem
             units, inventory, health, healthSystem, damageEvent, hitRegions, bodies);
 
         TotalHits++;
+        float staggerSeconds = 0.18f +
+            MathF.Min(0.22f, profile.Damage * 0.005f) +
+            (profile.DamageType == DamageType.Blunt ? 0.08f : 0f) +
+            (critical ? 0.08f : 0f);
+        _movementLockRemaining[target] = MathF.Max(
+            _movementLockRemaining[target],
+            Math.Clamp(staggerSeconds, 0.20f, 0.65f));
+        units.Velocity[target] = Vector3.Zero;
+        TotalStaggers++;
         AddVisual(impact, units.FactionTag[attacker]);
         if (result.DamageApplied <= 0.001f)
             TotalBlocked++;
@@ -402,6 +444,43 @@ public sealed class MeleeCombatSystem
         return seed == 0u ? 0xA341316Cu : seed;
     }
 
+    private static float GetMeleeHitChance(int skill)
+    {
+        skill = Math.Clamp(skill, 0, UnitSkillStore.MaxLevel);
+        return skill <= 10
+            ? 0.50f + skill * 0.03f
+            : 0.80f + (skill - 10) * 0.01f;
+    }
+
+    private static float GetLocomotionIntegrity(UnitHealthStore health, int unitIndex)
+    {
+        int start = unitIndex * health.MaxParts;
+        int count = health.PartCount[unitIndex];
+        float current = 0f;
+        float maximum = 0f;
+
+        for (int i = 0; i < count; i++)
+        {
+            int index = start + i;
+            if (health.Part[index] is not (
+                    UnitHealthPartId.LeftLeg or UnitHealthPartId.RightLeg or
+                    UnitHealthPartId.LeftFoot or UnitHealthPartId.RightFoot))
+            {
+                continue;
+            }
+
+            float maxHp = health.MaxHitPoints[index];
+            if (maxHp <= 0f)
+                continue;
+
+            maximum += maxHp;
+            if (health.Present[index])
+                current += Math.Clamp(health.HitPoints[index], 0f, maxHp);
+        }
+
+        return maximum > 0f ? Math.Clamp(current / maximum, 0f, 1f) : 1f;
+    }
+
     private static float GetPassionBonus(
         UnitSkillStore skills,
         int unitIndex,
@@ -421,6 +500,7 @@ public sealed class MeleeCombatSystem
         int capacity = Math.Max(required, Math.Max(16, _attackCooldown.Length * 2));
         Array.Resize(ref _attackCooldown, capacity);
         Array.Resize(ref _riposteCooldown, capacity);
+        Array.Resize(ref _movementLockRemaining, capacity);
         Array.Resize(ref _randomState, capacity);
     }
 

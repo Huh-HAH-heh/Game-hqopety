@@ -1,5 +1,6 @@
 using System.Numerics;
 using Core.Items;
+using Core.Map;
 
 namespace Core.Unit;
 
@@ -31,6 +32,10 @@ public static class MeleeCombatSelfTest
         simulation.MeleeCombat.InitializeUnit(attacker.Index, attacker);
         simulation.MeleeCombat.InitializeUnit(defender.Index, defender);
 
+        bool staggerStopsMovement = false;
+        var movementSystem = new UnitMovementSystem();
+        var worldMap = new WorldMap(regionsX: 10, regionsY: 10, layerCount: 16);
+
         for (int i = 0; i < 600; i++)
         {
             simulation.MeleeCombat.Update(
@@ -45,13 +50,33 @@ public static class MeleeCombatSelfTest
                 simulation.Bodies,
                 0.05f);
 
+            if (simulation.MeleeCombat.IsMovementLocked(defender.Index) &&
+                simulation.Health.OverallHitPoints[attacker.Index] > 0f &&
+                simulation.Health.OverallHitPoints[defender.Index] > 0f)
+            {
+                Vector3 positionBefore = simulation.Units.Position[defender.Index];
+                simulation.Units.Target[defender.Index] = positionBefore + new Vector3(8f, 0f, 0f);
+                simulation.Units.HasTarget[defender.Index] = true;
+                simulation.Units.Velocity[defender.Index] = new Vector3(4f, 0f, 0f);
+                movementSystem.Update(
+                    simulation.Units, worldMap, 0.1f,
+                    simulation.Health, simulation.MeleeCombat);
+
+                staggerStopsMovement =
+                    Vector3.DistanceSquared(
+                        positionBefore, simulation.Units.Position[defender.Index]) < 0.000001f &&
+                    simulation.Units.Velocity[defender.Index] == Vector3.Zero;
+                break;
+            }
+
             if (simulation.Health.OverallHitPoints[attacker.Index] <= 0f ||
                 simulation.Health.OverallHitPoints[defender.Index] <= 0f)
                 break;
         }
 
         var melee = simulation.MeleeCombat;
-        return melee.TotalSwings > 0 &&
+        return staggerStopsMovement &&
+               melee.TotalSwings > 0 &&
                melee.TotalHits > 0 &&
                melee.TotalMisses + melee.TotalDodges + melee.TotalParries <= melee.TotalSwings + melee.TotalRipostes &&
                (melee.TotalParries == 0 || melee.TotalRipostes > 0);
