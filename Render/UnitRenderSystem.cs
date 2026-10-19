@@ -523,6 +523,20 @@ public void DrawSnapshot(
                     1f);
             }
 
+            // Snapshot rendering runs on the main mass-combat path. Draw the
+            // authored melee weapon here as well, so the isolated duel clearly
+            // reads as knife/sword combat instead of two unarmed silhouettes.
+            if (isAlive && showUnitDetails)
+            {
+                AppendSnapshotWeapon(
+                    _vertices,
+                    unit.MeleeWeapon,
+                    position,
+                    unit.BodyNormal,
+                    tilePixelSize,
+                    false);
+            }
+
             // Marker-only mode draws the full silhouette. When rig mode is on,
             // the anatomical parts replace the marker completely.
             float markerOpacity = showUnitRig ? 0f : 1f;
