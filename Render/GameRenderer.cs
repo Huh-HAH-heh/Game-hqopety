@@ -51,15 +51,29 @@ public sealed class GameRenderer
 
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
-    private readonly List<UnitId>[] _controlGroups =
-    {
-        new List<UnitId>(),
-        new List<UnitId>(),
-        new List<UnitId>(),
-        new List<UnitId>()
-    };
+    private readonly InfantrySquadManager _squadManager = new();
     private InfantryFormationType _infantryFormation = InfantryFormationType.Line;
     private bool _isSelectingUnits;
+    private bool _selectionShiftHeld;
+    private readonly CircleShape _squadMarker = new(0.5f)
+    {
+        FillColor = new Color(0, 0, 0, 0),
+        OutlineThickness = 1f
+    };
+    private readonly CircleShape _squadCommanderMarker = new(0.1f)
+    {
+        FillColor = new Color(255, 245, 175),
+        OutlineThickness = 1f
+    };
+    private static readonly Color[] SquadColors =
+    {
+        new Color(70, 190, 255), new Color(255, 155, 65),
+        new Color(110, 225, 125), new Color(225, 115, 255),
+        new Color(255, 225, 80), new Color(70, 230, 210),
+        new Color(255, 105, 130), new Color(175, 205, 255),
+        new Color(210, 195, 145), new Color(150, 235, 90),
+        new Color(255, 190, 220), new Color(165, 170, 255)
+    };
     private bool _isPanningCamera;
     private Vector2i _lastCameraPanPixel;
     private Vector2i _selectionDragStartPixel;
@@ -582,6 +596,11 @@ public sealed class GameRenderer
             _lastProjectileDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
         }
 
+        if (renderSnapshot != null)
+            DrawSquadMarkers(renderSnapshot);
+        else if (_simulationThread == null)
+            DrawSquadMarkers(SimulationFrameSnapshot.Capture(_unitSimulation));
+
         if (_isSelectingUnits && IsSelectionDrag())
             _window.Draw(_selectionBox);
 
@@ -730,8 +749,8 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "Ctrl+1-4=assign group 1-4=select Shift+1-4=add Ctrl+Shift+1-4=clear RMB=formation move J=formation Y=reset | " +
-            "A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=formation TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
+            "LMB drag=create squad click soldier=select squad Shift+click=add/remove K=disband Shift+1-9=bind 1-9=select RMB=move J=formation Y=reset | " +
+            "A=enable AI B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
 
@@ -933,24 +952,43 @@ public sealed class GameRenderer
 
     private void SetSelectedUnit(UnitId unit)
     {
+        if (!unit.IsValid)
+        {
+            _selectedUnit = default;
+            _selectedUnits.Clear();
+            return;
+        }
+
+        int squadId = _squadManager.GetSquadId(unit);
+        if (squadId != 0)
+        {
+            SelectSquad(squadId, false);
+            return;
+        }
+
         _selectedUnit = unit;
         _selectedUnits.Clear();
-        if (unit.IsValid)
-            _selectedUnits.Add(unit);
+        _selectedUnits.Add(unit);
     }
 
-    private bool TryHandleControlGroupKey(Keyboard.Key key)
+    private static int GetNumberKey(Keyboard.Key key) => key switch
     {
-        int groupIndex = key switch
-        {
-            Keyboard.Key.Num1 or Keyboard.Key.Numpad1 => 0,
-            Keyboard.Key.Num2 or Keyboard.Key.Numpad2 => 1,
-            Keyboard.Key.Num3 or Keyboard.Key.Numpad3 => 2,
-            Keyboard.Key.Num4 or Keyboard.Key.Numpad4 => 3,
-            _ => -1
-        };
+        Keyboard.Key.Num1 or Keyboard.Key.Numpad1 => 1,
+        Keyboard.Key.Num2 or Keyboard.Key.Numpad2 => 2,
+        Keyboard.Key.Num3 or Keyboard.Key.Numpad3 => 3,
+        Keyboard.Key.Num4 or Keyboard.Key.Numpad4 => 4,
+        Keyboard.Key.Num5 or Keyboard.Key.Numpad5 => 5,
+        Keyboard.Key.Num6 or Keyboard.Key.Numpad6 => 6,
+        Keyboard.Key.Num7 or Keyboard.Key.Numpad7 => 7,
+        Keyboard.Key.Num8 or Keyboard.Key.Numpad8 => 8,
+        Keyboard.Key.Num9 or Keyboard.Key.Numpad9 => 9,
+        _ => 0
+    };
 
-        if (groupIndex < 0)
+    private bool TryHandleSquadHotkey(Keyboard.Key key)
+    {
+        int number = GetNumberKey(key);
+        if (number == 0)
             return false;
 
         bool controlPressed =
@@ -960,79 +998,103 @@ public sealed class GameRenderer
             Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
             Keyboard.IsKeyPressed(Keyboard.Key.RShift);
 
-        if (controlPressed && shiftPressed)
-        {
-            _controlGroups[groupIndex].Clear();
-            Console.WriteLine($"[INFANTRY] Group {groupIndex + 1} cleared.");
-            return true;
-        }
-
         if (controlPressed)
+            return false;
+
+        if (shiftPressed)
         {
-            SimulationFrameSnapshot? snapshot = GetInputSnapshot();
-            if (snapshot == null || _selectedUnits.Count == 0)
+            int squadId = GetSelectedSquadId();
+            if (squadId == 0)
             {
-                Console.WriteLine($"[INFANTRY] Select units, then Ctrl+{groupIndex + 1} to assign a group.");
-                return true;
+                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+                UnitId[] selected = snapshot == null
+                    ? Array.Empty<UnitId>()
+                    : CaptureSelectedUnitIds(snapshot);
+                if (selected.Length == 0)
+                {
+                    Console.WriteLine("[SQUAD] Select soldiers before assigning a number.");
+                    return true;
+                }
+
+                squadId = _squadManager.Create(selected);
+                SelectSquad(squadId, false);
             }
 
-            List<UnitId> assigned = new();
-            RenderUnitState[] units = snapshot.Units;
-            for (int i = 0; i < units.Length; i++)
-            {
-                RenderUnitState unit = units[i];
-                UnitId id = new(unit.Index, unit.Generation);
-                if (unit.HitPoints > 0f && _selectedUnits.Contains(id))
-                    assigned.Add(id);
-            }
-
-            _controlGroups[groupIndex].Clear();
-            _controlGroups[groupIndex].AddRange(assigned);
-            Console.WriteLine($"[INFANTRY] Group {groupIndex + 1}: {_controlGroups[groupIndex].Count} units assigned.");
+            if (_squadManager.AssignHotkey(number, squadId))
+                Console.WriteLine($"[SQUAD] Squad {squadId} bound to {number}.");
             return true;
         }
 
-        List<UnitId> group = _controlGroups[groupIndex];
-        if (group.Count == 0)
+        int assignedSquadId = _squadManager.GetHotkeySquadId(number);
+        if (assignedSquadId == 0)
+            return false;
+
+        SelectSquad(assignedSquadId, false);
+        return true;
+    }
+
+    private int GetSelectedSquadId()
+    {
+        if (_selectedUnits.Count == 0)
+            return 0;
+
+        int squadId = 0;
+        foreach (UnitId unit in _selectedUnits)
         {
-            Console.WriteLine($"[INFANTRY] Group {groupIndex + 1} is empty. Select infantry and press Ctrl+{groupIndex + 1}.");
-            return true;
+            int current = _squadManager.GetSquadId(unit);
+            if (current == 0 || (squadId != 0 && current != squadId))
+                return 0;
+
+            squadId = current;
         }
 
-        SimulationFrameSnapshot? current = GetInputSnapshot();
-        if (current == null)
-            return true;
+        return squadId;
+    }
 
-        HashSet<UnitId> living = new();
-        RenderUnitState[] currentUnits = current.Units;
-        for (int i = 0; i < currentUnits.Length; i++)
-        {
-            RenderUnitState unit = currentUnits[i];
-            if (unit.HitPoints > 0f)
-                living.Add(new UnitId(unit.Index, unit.Generation));
-        }
+    private void SelectSquad(int squadId, bool append)
+    {
+        InfantrySquad? squad = _squadManager.GetSquad(squadId);
+        if (squad == null)
+            return;
 
-        if (!shiftPressed)
+        if (!append)
             _selectedUnits.Clear();
 
-        for (int i = group.Count - 1; i >= 0; i--)
+        _selectedUnit = squad.Commander;
+        for (int i = 0; i < squad.Members.Count; i++)
         {
-            UnitId id = group[i];
-            if (living.Contains(id))
-                _selectedUnits.Add(id);
-            else
-                group.RemoveAt(i);
+            UnitId member = squad.Members[i];
+            _selectedUnits.Add(member);
+            if (!_selectedUnit.IsValid)
+                _selectedUnit = member;
         }
+    }
 
-        _selectedUnit = default;
-        foreach (UnitId id in _selectedUnits)
-        {
-            _selectedUnit = id;
-            break;
-        }
+    private void CreateSquadFromSelection()
+    {
+        SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+        if (snapshot == null)
+            return;
 
-        Console.WriteLine(
-            $"[INFANTRY] {(shiftPressed ? "Added" : "Selected")} group {groupIndex + 1}: {_selectedUnits.Count} selected.");
+        UnitId[] members = CaptureSelectedUnitIds(snapshot);
+        if (members.Length < 2)
+            return;
+
+        int squadId = _squadManager.Create(members);
+        SelectSquad(squadId, false);
+        Console.WriteLine($"[SQUAD] Created squad {squadId} with {members.Length} soldiers.");
+    }
+
+    private bool TryDisbandSelectedSquads()
+    {
+        if (_selectedUnits.Count == 0)
+            return false;
+
+        int disbanded = _squadManager.DisbandContaining(_selectedUnits);
+        if (disbanded == 0)
+            return false;
+
+        Console.WriteLine($"[SQUAD] Disbanded {disbanded} squad(s). Soldiers remain on the field.");
         return true;
     }
 
@@ -1436,6 +1498,9 @@ public sealed class GameRenderer
     private void BeginWorldSelection(Vector2i mousePixel)
     {
         _isSelectingUnits = true;
+        _selectionShiftHeld =
+            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
         _selectionDragStartPixel = mousePixel;
         _selectionDragCurrentPixel = mousePixel;
         _selectionDragStartWorld =
@@ -1461,14 +1526,14 @@ public sealed class GameRenderer
             MathF.Abs(_selectionDragCurrentWorld.Y - _selectionDragStartWorld.Y));
     }
 
-    private void SelectWorldUnitsInRectangle(Vector2f startPixels, Vector2f endPixels)
+    private void SelectWorldUnitsInRectangle(
+        Vector2f startPixels,
+        Vector2f endPixels,
+        bool shiftHeld = false)
     {
         SimulationFrameSnapshot? snapshot = _simulationThread != null
             ? Volatile.Read(ref _latestSnapshot)
             : SimulationFrameSnapshot.Capture(_unitSimulation);
-
-        _selectedUnits.Clear();
-        _selectedUnit = default;
         if (snapshot == null)
             return;
 
@@ -1479,6 +1544,7 @@ public sealed class GameRenderer
         float pixelsPerUnit = TerrainTilePixelSize *
             _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
         float minimumMarkerRadius = 2f / MathF.Max(1f, pixelsPerUnit);
+        List<UnitId> picked = new();
 
         for (int i = 0; i < snapshot.Units.Length; i++)
         {
@@ -1494,13 +1560,55 @@ public sealed class GameRenderer
             if (dx * dx + dy * dy > radius * radius)
                 continue;
 
-            UnitId id = new(unit.Index, unit.Generation);
-            _selectedUnits.Add(id);
-            _selectedUnit = id;
+            picked.Add(new UnitId(unit.Index, unit.Generation));
+        }
+
+        if (shiftHeld)
+        {
+            int selectedSquadId = GetSelectedSquadId();
+            if (selectedSquadId != 0)
+            {
+                for (int i = 0; i < picked.Count; i++)
+                    _squadManager.AddMember(selectedSquadId, picked[i]);
+
+                SelectSquad(selectedSquadId, false);
+                Console.WriteLine($"[SQUAD] Added selected soldiers to squad {selectedSquadId}.");
+                return;
+            }
+
+            for (int i = 0; i < picked.Count; i++)
+                _selectedUnits.Add(picked[i]);
+
+            if (_selectedUnits.Count > 1)
+                CreateSquadFromSelection();
+            else if (_selectedUnits.Count == 1)
+            {
+                foreach (UnitId id in _selectedUnits)
+                    _selectedUnit = id;
+            }
+
+            return;
+        }
+
+        _selectedUnits.Clear();
+        _selectedUnit = default;
+        for (int i = 0; i < picked.Count; i++)
+        {
+            _selectedUnits.Add(picked[i]);
+            _selectedUnit = picked[i];
+        }
+
+        if (_selectedUnits.Count > 1)
+        {
+            CreateSquadFromSelection();
+        }
+        else if (_selectedUnits.Count == 1)
+        {
+            SetSelectedUnit(_selectedUnit);
         }
     }
 
-    private void SelectWorldUnit(Vector2i mousePixel)
+    private void SelectWorldUnit(Vector2i mousePixel, bool shiftHeld = false)
     {
         Vector2f worldPixels = _window.MapPixelToCoords(mousePixel, _camera.View);
         float worldX = worldPixels.X / TerrainTilePixelSize;
@@ -1518,11 +1626,54 @@ public sealed class GameRenderer
         if (snapshot != null &&
             TryPickWorldUnit(snapshot, worldX, worldY, hitPadding, minimumMarkerRadius, out RenderUnitState unit))
         {
-            SetSelectedUnit(new UnitId(unit.Index, unit.Generation));
+            UnitId id = new(unit.Index, unit.Generation);
+            if (!shiftHeld)
+            {
+                SetSelectedUnit(id);
+                return;
+            }
+
+            int clickedSquadId = _squadManager.GetSquadId(id);
+            int selectedSquadId = GetSelectedSquadId();
+            if (clickedSquadId != 0)
+            {
+                // Shift-click detaches a soldier from its current squad.
+                _squadManager.RemoveMember(id);
+                _selectedUnits.Clear();
+                _selectedUnits.Add(id);
+                _selectedUnit = id;
+                Console.WriteLine($"[SQUAD] Soldier detached from squad {clickedSquadId}.");
+                return;
+            }
+
+            if (selectedSquadId != 0)
+            {
+                _squadManager.AddMember(selectedSquadId, id);
+                SelectSquad(selectedSquadId, false);
+                Console.WriteLine($"[SQUAD] Soldier added to squad {selectedSquadId}.");
+                return;
+            }
+
+            if (!_selectedUnits.Add(id))
+                _selectedUnits.Remove(id);
+
+            _selectedUnit = _selectedUnits.Contains(id) ? id : default;
+            if (!_selectedUnit.IsValid)
+            {
+                foreach (UnitId selected in _selectedUnits)
+                {
+                    _selectedUnit = selected;
+                    break;
+                }
+            }
+
+            if (_selectedUnits.Count > 1)
+                CreateSquadFromSelection();
             return;
         }
 
-        SetSelectedUnit(default);
+        if (!shiftHeld)
+            SetSelectedUnit(default);
     }
 
     private static bool TryPickWorldUnit(
@@ -1567,6 +1718,46 @@ public sealed class GameRenderer
         return MathF.Max(
             minimumMarkerRadius,
             MathF.Max(0.13f, footprint * 0.125f));
+    }
+
+    private void DrawSquadMarkers(SimulationFrameSnapshot snapshot)
+    {
+        RenderUnitState[] units = snapshot.Units;
+        for (int i = 0; i < units.Length; i++)
+        {
+            RenderUnitState unit = units[i];
+            if (unit.HitPoints <= 0f)
+                continue;
+
+            UnitId id = new(unit.Index, unit.Generation);
+            if (!_squadManager.TryGetSquad(id, out InfantrySquad squad))
+                continue;
+
+            Color color = SquadColors[(squad.Id - 1) % SquadColors.Length];
+            float radius = (GetMarkerWorldRadius(unit, 0.15f) + 0.08f) * TerrainTilePixelSize;
+            float x = unit.Position.X * TerrainTilePixelSize;
+            float y = unit.Position.Y * TerrainTilePixelSize;
+
+            _squadMarker.Radius = radius;
+            _squadMarker.Origin = new Vector2f(radius, radius);
+            _squadMarker.Position = new Vector2f(x, y);
+            _squadMarker.OutlineColor = color;
+            _squadMarker.OutlineThickness = MathF.Max(0.65f, TerrainTilePixelSize * 0.045f);
+            _window.Draw(_squadMarker);
+
+            if (squad.Commander != id)
+                continue;
+
+            float commanderRadius = MathF.Max(1.4f, radius * 0.22f);
+            _squadCommanderMarker.Radius = commanderRadius;
+            _squadCommanderMarker.Origin = new Vector2f(commanderRadius, commanderRadius);
+            _squadCommanderMarker.Position = new Vector2f(
+                x + radius * 0.72f,
+                y - radius * 0.72f);
+            _squadCommanderMarker.OutlineColor = color;
+            _squadCommanderMarker.OutlineThickness = MathF.Max(0.45f, TerrainTilePixelSize * 0.025f);
+            _window.Draw(_squadCommanderMarker);
+        }
     }
 
     private void CycleMassCombatSelection()
@@ -2198,11 +2389,12 @@ public sealed class GameRenderer
                 {
                     SelectWorldUnitsInRectangle(
                         _selectionDragStartWorld,
-                        _selectionDragCurrentWorld);
+                        _selectionDragCurrentWorld,
+                        _selectionShiftHeld);
                 }
                 else
                 {
-                    SelectWorldUnit(e.Position);
+                    SelectWorldUnit(e.Position, _selectionShiftHeld);
                 }
             };
 
@@ -2256,7 +2448,10 @@ public sealed class GameRenderer
             return;
         }
 
-        if (TryHandleControlGroupKey(key))
+        if (key == Keyboard.Key.K && TryDisbandSelectedSquads())
+            return;
+
+        if (TryHandleSquadHotkey(key))
             return;
 
         if (key == Keyboard.Key.J)
