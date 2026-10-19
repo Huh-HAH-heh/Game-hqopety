@@ -78,6 +78,7 @@ public sealed class UnitRenderSystem : IDisposable
             tilePixelSize * screenScale;
 
         float detailBlend = GetUnitDetailBlend(pixelsPerWorldUnit);
+        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
@@ -244,8 +245,7 @@ public sealed class UnitRenderSystem : IDisposable
 
             // Posture glyphs replace the old bright rings. Fade them in only
             // when the camera is close enough, and keep them unobtrusive.
-            float postureMarkerOpacity =
-                detailBlend >= 0.65f ? 0.38f * detailBlend : 0f;
+            float postureMarkerOpacity = 0.38f * closeMarkerBlend;
             if (postureMarkerOpacity > 0f)
             {
                 AppendPostureMarker(
@@ -370,6 +370,7 @@ public void DrawSnapshot(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
+        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
@@ -463,7 +464,7 @@ public void DrawSnapshot(
 
             // I toggles tactical goal markers. These are hidden at overview
             // zoom to keep the battlefield readable.
-            bool closeAiOverlay = detailBlend >= 0.65f;
+            bool closeAiOverlay = closeMarkerBlend > 0f;
             bool showPatrolGoal = unit.AiIntent == BehaviacUnitIntent.Patrol;
             bool showFlankGoal = unit.AiIntent == BehaviacUnitIntent.FlankTarget ||
                                  unit.AiState == UnitAiState.Flank;
@@ -477,11 +478,12 @@ public void DrawSnapshot(
                 unit.HasGoal &&
                 (showPatrolGoal || showFlankGoal || showCoverGoal))
             {
+                byte markerAlpha = (byte)(closeMarkerBlend * 128f);
                 Color maneuverColor = showPatrolGoal
-                    ? new Color(115, 220, 135, 128)
+                    ? new Color(115, 220, 135, markerAlpha)
                     : showFlankGoal
-                        ? new Color(235, 105, 255, 150)
-                        : new Color(70, 175, 255, 145);
+                        ? new Color(235, 105, 255, (byte)(closeMarkerBlend * 150f))
+                        : new Color(70, 175, 255, (byte)(closeMarkerBlend * 145f));
                 float goalX = unit.Goal.X * tilePixelSize;
                 float goalY = unit.Goal.Y * tilePixelSize;
                 float goalRadius = (showPatrolGoal ? 0.30f : showFlankGoal ? 0.48f : 0.38f) * tilePixelSize;
@@ -496,7 +498,7 @@ public void DrawSnapshot(
                         maneuverColor.R,
                         maneuverColor.G,
                         maneuverColor.B,
-                        showPatrolGoal ? (byte)70 : (byte)85));
+                        (byte)(closeMarkerBlend * (showPatrolGoal ? 70f : 85f)));
                 AppendCircleOutline(
                     _aiDebug,
                     goalX,
@@ -997,6 +999,14 @@ public void DrawSnapshot(
             1f);
 
         // Smoothstep avoids visible banding at the beginning and end of the fade.
+        return t * t * (3f - 2f * t);
+    }
+
+    private static float GetCloseMarkerBlend(float screenScale)
+    {
+        // screenScale increases as the camera zooms in. Pose and tactical
+        // markers fade in only for a close view, then remain low-opacity.
+        float t = Math.Clamp((screenScale - 1.25f) / 0.55f, 0f, 1f);
         return t * t * (3f - 2f * t);
     }
 
