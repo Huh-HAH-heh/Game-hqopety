@@ -1,4 +1,5 @@
 using System;
+using Core.AI.Behaviac;
 using Core.Items;
 using Core.Unit;
 
@@ -57,6 +58,7 @@ public readonly record struct RenderPawnSkill(
 public sealed class UnitCardDetailsSnapshot
 {
     public UnitId Unit { get; init; }
+    public BehaviacUnitIntent DecisionIntent { get; init; }
     public RenderHealthPart[] HealthParts { get; init; } = Array.Empty<RenderHealthPart>();
     public AnatomyCardEntry[] AnatomyEntries { get; init; } = Array.Empty<AnatomyCardEntry>();
     public RenderInventoryItem[] Inventory { get; init; } = Array.Empty<RenderInventoryItem>();
@@ -208,6 +210,7 @@ public sealed class UnitCardDetailsSnapshot
         return new UnitCardDetailsSnapshot
         {
             Unit = id,
+            DecisionIntent = simulation.AI.Store.LastIntent[unitIndex],
             HealthParts = healthParts,
             AnatomyEntries = anatomyEntries,
             Inventory = inventoryItems,

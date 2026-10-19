@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.AI.Behaviac;
 
 namespace Core.Unit;
 
@@ -16,6 +17,7 @@ public enum UnitAiState : byte
 public sealed class UnitAiStore
 {
     private UnitAiState[] _state;
+    private BehaviacUnitIntent[] _lastIntent;
     private bool[] _hasTarget;
     private UnitId[] _target;
     private Vector3[] _lastSeenPosition;
@@ -31,6 +33,9 @@ public sealed class UnitAiStore
 
     public UnitAiState[] State =>
         _state;
+
+    public BehaviacUnitIntent[] LastIntent =>
+        _lastIntent;
 
     public bool[] HasTarget =>
         _hasTarget;
@@ -69,6 +74,7 @@ public sealed class UnitAiStore
         }
 
         _state = new UnitAiState[initialUnitCapacity];
+        _lastIntent = new BehaviacUnitIntent[initialUnitCapacity];
         _hasTarget = new bool[initialUnitCapacity];
         _target = new UnitId[initialUnitCapacity];
         _lastSeenPosition = new Vector3[initialUnitCapacity];
@@ -86,6 +92,7 @@ public sealed class UnitAiStore
         EnsureCapacity(unitIndex + 1);
 
         _state[unitIndex] = UnitAiState.Idle;
+        _lastIntent[unitIndex] = BehaviacUnitIntent.None;
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
@@ -107,6 +114,7 @@ public sealed class UnitAiStore
         }
 
         _state[unitIndex] = UnitAiState.Idle;
+        _lastIntent[unitIndex] = BehaviacUnitIntent.None;
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
@@ -195,6 +203,10 @@ public sealed class UnitAiStore
 
         Array.Resize(
             ref _state,
+            newCapacity);
+
+        Array.Resize(
+            ref _lastIntent,
             newCapacity);
 
         Array.Resize(

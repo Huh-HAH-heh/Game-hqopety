@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Numerics;
+using Core.AI.Behaviac;
 using Core.Combat;
 using Core.Items;
 using Core.Map;
@@ -27,6 +28,7 @@ public static class CombatSelfTest
         RunTest("Weapon: ammunition selection", TestAmmunitionSelection, ref passed, ref failed);
         RunTest("Weapon: aim warmup delays first shot", TestWeaponAimWarmup, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
+        RunTest("AI: last Behaviac intent resets on unit lifecycle", TestAiIntentLifecycle, ref passed, ref failed);
         RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
         RunTest("Weapon: automatic fire follows weapon cadence", TestAutomaticFireCadence, ref passed, ref failed);
         RunTest("Weapon: single fire requires a new aim", TestSingleFireReAims, ref passed, ref failed);
@@ -2639,6 +2641,20 @@ public static class CombatSelfTest
             Console.SetOut(originalOut);
             CombatDiagnostics.Enabled = wasEnabled;
         }
+    }
+
+    private static bool TestAiIntentLifecycle()
+    {
+        UnitAiStore store = new(1);
+        store.InitializeUnit(0);
+        store.LastIntent[0] = BehaviacUnitIntent.FlankTarget;
+        store.InitializeUnit(0);
+        if (store.LastIntent[0] != BehaviacUnitIntent.None)
+            return false;
+
+        store.LastIntent[0] = BehaviacUnitIntent.RetreatToCover;
+        store.ClearUnit(0);
+        return store.LastIntent[0] == BehaviacUnitIntent.None;
     }
 
     private static bool TestDeadUnitCleanup()

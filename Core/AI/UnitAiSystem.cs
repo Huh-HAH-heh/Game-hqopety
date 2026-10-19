@@ -196,6 +196,8 @@ public sealed class UnitAiSystem
                 RecordBehaviacIntent(intent);
             }
 
+            Store.LastIntent[unit] = intent;
+
             if (!isAlive ||
                 (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.Dead))
             {

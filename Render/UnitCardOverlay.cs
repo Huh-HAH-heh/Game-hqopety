@@ -1,4 +1,5 @@
 using System;
+using Core.AI.Behaviac;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -617,6 +618,12 @@ public sealed class UnitCardOverlay : IDisposable
             _ => unit.FactionTag.ToString()
         });
         Value("Состояние ИИ", FormatAiState(unit.AiState));
+        if (details is not null &&
+            details.Unit.Index == unit.Index &&
+            details.Unit.Generation == unit.Generation)
+        {
+            Value("Последнее решение Behaviac", FormatAiIntent(details.DecisionIntent));
+        }
         Value("Поза", unit.Posture.ToString());
         Value("Общее здоровье", $"{unit.HitPoints:0.0} / {unit.MaxHitPoints:0.0} HP ({unit.HealthRatio * 100f:0.0}%)");
         Value("Учёт здоровья", "Общий HP — запас жизни; HP анатомии — состояние отдельных тканей.");
@@ -835,6 +842,21 @@ public sealed class UnitCardOverlay : IDisposable
 
         Value("Перезарядка оружия", $"{config.ReloadTime:0.00} с");
     }
+
+    private static string FormatAiIntent(BehaviacUnitIntent intent) => intent switch
+    {
+        BehaviacUnitIntent.None => "Нет активного решения",
+        BehaviacUnitIntent.Dead => "Юнит мёртв",
+        BehaviacUnitIntent.SeekCover => "Укрыться от подавления",
+        BehaviacUnitIntent.RetreatToCover => "Отойти в укрытие из-за ранений",
+        BehaviacUnitIntent.FlankTarget => "Обойти видимую цель",
+        BehaviacUnitIntent.EngageTarget => "Атаковать видимую цель",
+        BehaviacUnitIntent.SuppressiveFire => "Подавлять по последней позиции",
+        BehaviacUnitIntent.InvestigateLastKnownTarget => "Проверить последнюю позицию цели",
+        BehaviacUnitIntent.Patrol => "Патрулировать",
+        BehaviacUnitIntent.ProneEngage => "Лечь и атаковать",
+        _ => intent.ToString()
+    };
 
     private static string FormatAiState(UnitAiState state) =>
         state switch
