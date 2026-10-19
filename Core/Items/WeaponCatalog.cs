@@ -139,6 +139,7 @@ public static class WeaponCatalog
         new RangedWeaponConfig
         {
             Name = "Assault Rifle",
+            RequiresTwoHands = true,
             Weight = 4.1f,
             WorldRenderLength = 0.82f,
             WorldRenderWidth = 0.085f,
@@ -211,7 +212,8 @@ public static class WeaponCatalog
     public static readonly RangedWeaponConfig PulseRepeater =
         new RangedWeaponConfig
         {
-            Name = "K-90 kinetic repeater", Technology = WeaponTechnology.KineticRepeater,
+            Name = "K-90 kinetic repeater",
+            RequiresTwoHands = true, Technology = WeaponTechnology.KineticRepeater,
             Weight = 3.0f, WorldRenderLength = 0.78f, WorldRenderWidth = 0.10f,
             WorldColorR = 70, WorldColorG = 125, WorldColorB = 106,
             BaseDamage = 18, BleedChance = 0.32f, FireRate = 0.075f,
@@ -226,7 +228,8 @@ public static class WeaponCatalog
     public static readonly RangedWeaponConfig LaserCarbine =
         new RangedWeaponConfig
         {
-            Name = "L-4 laser carbine", Technology = WeaponTechnology.Laser,
+            Name = "L-4 laser carbine",
+            RequiresTwoHands = true, Technology = WeaponTechnology.Laser,
             Weight = 2.6f, WorldRenderLength = 0.72f, WorldRenderWidth = 0.07f,
             WorldColorR = 58, WorldColorG = 205, WorldColorB = 238,
             BaseDamage = 25, BleedChance = 0f, FireRate = 0.12f,
@@ -241,7 +244,8 @@ public static class WeaponCatalog
     public static readonly RangedWeaponConfig Railgun =
         new RangedWeaponConfig
         {
-            Name = "R-18 magnetic railgun", Technology = WeaponTechnology.Railgun,
+            Name = "R-18 magnetic railgun",
+            RequiresTwoHands = true, Technology = WeaponTechnology.Railgun,
             Weight = 7.2f, WorldRenderLength = 1.02f, WorldRenderWidth = 0.13f,
             WorldColorR = 218, WorldColorG = 160, WorldColorB = 78,
             BaseDamage = 58, BleedChance = 0.42f, FireRate = 1.05f,
