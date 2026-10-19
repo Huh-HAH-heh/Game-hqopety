@@ -330,6 +330,19 @@ public sealed class SimulationFrameSnapshot
 
             bool hasGoal = aiStore.HasGoal[index];
             Vector3 goal = aiStore.Goal[index];
+
+            // Patrol can be advancing toward a scenario-issued movement target
+            // before it has created its own search waypoint. Publish that active
+            // destination as the patrol marker too, rather than leaving the AI
+            // overlay blank while the pawn is visibly moving.
+            if (aiIntent == BehaviacUnitIntent.Patrol &&
+                !hasGoal &&
+                units.HasTarget[index])
+            {
+                hasGoal = true;
+                goal = units.Target[index];
+            }
+
             float suppression = suppressionStore.Value[index];
             UnitSuppressionState suppressionState = suppressionStore.GetState(index);
 
