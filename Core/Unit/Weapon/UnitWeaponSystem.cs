@@ -800,7 +800,6 @@ public sealed class UnitWeaponSystem
         {
             // Anatomy only supplies health bindings and display geometry. Aim selection
             // follows the same three procedural zones used by vision and projectile hits.
-            int pointCount = UnitGameplayZoneSystem.ZoneCount;
             Span<Vector3> points = stackalloc Vector3[UnitGameplayZoneSystem.ZoneCount];
             int written = UnitHitSystem.GetAimPoints(
                 units, targetIndex, source, points, bodies: null, hitRegions: _hitRegions);
