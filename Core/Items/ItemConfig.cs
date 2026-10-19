@@ -168,6 +168,7 @@ public enum UnitWeaponSlot : byte
         public TargetMode DefaultTargetMode = TargetMode.Automatic;
         public float AimTime = 0.2f;
         public float Recoil = 0.1f;
+        public bool RequiresTwoHands;
         public float SnapshotSpreadMultiplier = 2f;
         public float SuppressSpreadMultiplier = 2.5f;
 
