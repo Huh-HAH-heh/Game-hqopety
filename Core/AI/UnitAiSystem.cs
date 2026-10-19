@@ -329,14 +329,11 @@ public sealed class UnitAiSystem
             {
                 UnitId currentTarget = Store.Target[unit];
 
-                if (units.IsAlive(currentTarget) &&
-                    health.OverallHitPoints[currentTarget.Index] > 0f &&
-                    IsHostile(units, unit, currentTarget.Index) &&
-                    vision.IsRecentlyVisible(unit, currentTarget.Index, units))
+                if (ShouldKeepCurrentVisibleTarget(
+                        units, health, vision, unit, currentTarget, visibleEnemy))
                 {
-                    // Keep the current target while it remains in recent LOS memory.
-                    // The rotating vision sample must not make every soldier switch
-                    // targets just because a different enemy was checked this tick.
+                    // Preserve target continuity, except when a nearer close contact
+                    // must interrupt a long-range target.
                     Store.RememberTarget(
                         unit,
                         currentTarget,
@@ -871,13 +868,11 @@ public sealed class UnitAiSystem
         if (Store.HasTarget[unit])
         {
             UnitId currentTarget = Store.Target[unit];
-            if (units.IsAlive(currentTarget) &&
-                health.OverallHitPoints[currentTarget.Index] > 0f &&
-                IsHostile(units, unit, currentTarget.Index) &&
-                vision.IsRecentlyVisible(unit, currentTarget.Index, units))
+            if (ShouldKeepCurrentVisibleTarget(
+                    units, health, vision, unit, currentTarget, visibleTargetIndex))
             {
-                // Don't change an ongoing maneuver just because the rotating vision
-                // sampler found a different enemy in the same tick.
+                // The same close-contact override used by target memory also feeds
+                // Behaviac, so it cannot plan around a distant target this tick.
                 visibleTargetIndex = currentTarget.Index;
             }
         }
@@ -1321,6 +1316,44 @@ public sealed class UnitAiSystem
         }
 
         return false;
+    }
+
+    private static bool ShouldKeepCurrentVisibleTarget(
+        UnitStore units,
+        UnitHealthStore health,
+        VisionSystem vision,
+        int observer,
+        UnitId currentTarget,
+        int newlyVisibleTarget)
+    {
+        if (!units.IsAlive(currentTarget) ||
+            health.OverallHitPoints[currentTarget.Index] <= 0f ||
+            !IsHostile(units, observer, currentTarget.Index) ||
+            !vision.IsRecentlyVisible(observer, currentTarget.Index, units))
+        {
+            return false;
+        }
+
+        if (newlyVisibleTarget < 0 || newlyVisibleTarget == currentTarget.Index)
+            return true;
+
+        Vector3 observerPosition = units.Position[observer];
+        Vector3 newPosition = units.Position[newlyVisibleTarget];
+        float newDx = newPosition.X - observerPosition.X;
+        float newDy = newPosition.Y - observerPosition.Y;
+        float newDistanceSquared = newDx * newDx + newDy * newDy;
+        float closeRange = VisionSystem.CloseAwarenessRange;
+
+        if (newDistanceSquared > closeRange * closeRange)
+            return true;
+
+        Vector3 currentPosition = units.Position[currentTarget.Index];
+        float currentDx = currentPosition.X - observerPosition.X;
+        float currentDy = currentPosition.Y - observerPosition.Y;
+        float currentDistanceSquared = currentDx * currentDx + currentDy * currentDy;
+
+        // A closer hostile within immediate-contact range beats target stickiness.
+        return newDistanceSquared >= currentDistanceSquared;
     }
 
     private static bool IsHostile(
