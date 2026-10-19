@@ -498,7 +498,7 @@ public void DrawSnapshot(
                         maneuverColor.R,
                         maneuverColor.G,
                         maneuverColor.B,
-                        (byte)(closeMarkerBlend * (showPatrolGoal ? 70f : 85f)));
+                        (byte)(closeMarkerBlend * (showPatrolGoal ? 70f : 85f))));
                 AppendCircleOutline(
                     _aiDebug,
                     goalX,
