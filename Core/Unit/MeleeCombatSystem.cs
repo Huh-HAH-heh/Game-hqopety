@@ -94,6 +94,21 @@ public sealed class MeleeCombatSystem
         }
     }
 
+    public static bool IsMeleeOnly(UnitInventoryStore inventory, int unitIndex)
+    {
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            short inventorySlot = inventory.GetWeaponEquipment(unitIndex, (UnitWeaponSlot)slot);
+            if (inventorySlot >= 0 &&
+                inventory.GetItem(unitIndex, inventorySlot) is RangedWeaponConfig)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>Maximum center-to-center distance at which this unit can land a melee strike.</summary>
     public static float GetAttackDistance(
         int attacker,
