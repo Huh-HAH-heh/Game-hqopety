@@ -25,6 +25,7 @@ public sealed class LongRangeCombatTestScene
     // Advance far enough for the front ranks to acquire targets while marching.
     private const float AdvanceDistance = 50f;
     private const float VisionStressRange = 85f;
+    private const ushort BaseMaterialId = 1;
     private const int MeleeDuelUnitsPerSide = 24;
     private const int MeleeFormationColumns = 6;
     private const float MeleeFormationSpacing = 1.5f;
