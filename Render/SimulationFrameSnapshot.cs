@@ -132,6 +132,18 @@ public sealed class SimulationFrameSnapshot
     public long VisionMemoryEntriesScanned { get; init; }
     public double AiMs { get; init; }
     public double AiPlanningMs { get; init; }
+    public bool BehaviacEnabled { get; init; }
+    public bool BehaviacRuntimeReady { get; init; }
+    public int BehaviacDecisionCount { get; init; }
+    public double BehaviacDecisionMs { get; init; }
+    public int BehaviacDeadCount { get; init; }
+    public int BehaviacCoverCount { get; init; }
+    public int BehaviacRetreatCount { get; init; }
+    public int BehaviacFlankCount { get; init; }
+    public int BehaviacEngageCount { get; init; }
+    public int BehaviacSuppressCount { get; init; }
+    public int BehaviacInvestigateCount { get; init; }
+    public int BehaviacPatrolCount { get; init; }
     public double MovementMs { get; init; }
     public double WeaponsMs { get; init; }
     public double BallisticsMs { get; init; }
@@ -591,6 +603,18 @@ public sealed class SimulationFrameSnapshot
             VisionMemoryEntriesScanned = vision.LastVisibilityMemoryEntriesScanned,
             AiMs = simulation.LastAIUpdateMilliseconds,
             AiPlanningMs = simulation.AI.LastPlanningMilliseconds,
+            BehaviacEnabled = simulation.AI.UseBehaviacDecisionLayer,
+            BehaviacRuntimeReady = simulation.AI.BehaviacRuntimeReady,
+            BehaviacDecisionCount = simulation.AI.LastBehaviacDecisions,
+            BehaviacDecisionMs = simulation.AI.LastBehaviacDecisionBatchMilliseconds,
+            BehaviacDeadCount = simulation.AI.LastBehaviacDeadDecisions,
+            BehaviacCoverCount = simulation.AI.LastBehaviacCoverDecisions,
+            BehaviacRetreatCount = simulation.AI.LastBehaviacRetreatDecisions,
+            BehaviacFlankCount = simulation.AI.LastBehaviacFlankDecisions,
+            BehaviacEngageCount = simulation.AI.LastBehaviacEngageDecisions,
+            BehaviacSuppressCount = simulation.AI.LastBehaviacSuppressDecisions,
+            BehaviacInvestigateCount = simulation.AI.LastBehaviacInvestigateDecisions,
+            BehaviacPatrolCount = simulation.AI.LastBehaviacPatrolDecisions,
             MovementMs = simulation.LastMovementUpdateMilliseconds,
             WeaponsMs = simulation.LastWeaponUpdateMilliseconds,
             BallisticsMs = simulation.LastProjectileUpdateMilliseconds,

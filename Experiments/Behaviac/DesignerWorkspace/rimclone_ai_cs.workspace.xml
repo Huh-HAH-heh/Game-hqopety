@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<workspace name="rimclone_ai_cs" metafilename="." folder="behaviors" export="exported" language="cs" promptmergingmeta="true" version="3">
+  <export>
+    <cs>
+      <isexported>False</isexported>
+      <exportfilecount>1</exportfilecount>
+      <folder>../../../Core/AI/Behaviac/Generated</folder>
+    </cs>
+  </export>
+</workspace>

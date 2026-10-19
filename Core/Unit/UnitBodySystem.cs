@@ -6,6 +6,8 @@ namespace Core.Unit;
 
 public sealed class UnitBodySystem
 {
+    private float _animationTime;
+
     public void Update(
         UnitStore units,
         UnitBodyStore bodies,
@@ -14,6 +16,7 @@ public sealed class UnitBodySystem
         if (units.ActiveCount == 0)
             return;
 
+        _animationTime = (_animationTime + Math.Clamp(deltaTime, 0f, 0.1f)) % 1000f;
         float followAlpha = Math.Clamp(deltaTime * 14f, 0f, 1f);
         ReadOnlySpan<int> active = units.ActiveIndices;
 
@@ -88,6 +91,7 @@ public sealed class UnitBodySystem
                 scales,
                 followDistances,
                 followAlpha,
+                _animationTime,
                 Math.Clamp(deltaTime, 0f, 0.05f));
         }
     }
@@ -165,6 +169,7 @@ public sealed class UnitBodySystem
         Vector3[] scales,
         float[] followDistances,
         float followAlpha,
+        float animationTime,
         float deltaTime)
     {
         Vector3 bodyNormal = NormalizeHorizontal(bodyNormals[unit]);
@@ -223,8 +228,41 @@ public sealed class UnitBodySystem
                             localRotationsX[part], localRotationsY[part], localRotations[part])) > 0.0000001f;
                 }
             }
-            // No built-in sit/lie/crouch deformation: absent authored pose data
-            // means the original base-rig transforms remain unchanged.
+            if (posture == UnitPosture.Lying)
+            {
+                // Prone lowers every part centre (including head and organs),
+                // compresses its vertical extent and lengthens the XY outline.
+                float standingHeight = localPosition.Z;
+                localPosition.X += (standingHeight - 0.62f) * 0.28f;
+                localPosition.Y *= 1.12f;
+                localPosition.Z = 0.025f + standingHeight * 0.18f;
+            }
+
+            // WalkCycle motions were present in the rig, but never evaluated.
+            // Keep the animation layered on top of saved pose offsets; the opposing
+            // variants make left/right limbs swing in alternating phases.
+            if (speed > 0.05f)
+            {
+                float gaitAmount = Math.Clamp(speed / 2.8f, 0f, 1f);
+                float gait = MathF.Sin(animationTime * (5.5f + speed * 0.75f)) * gaitAmount;
+                switch (motions[part])
+                {
+                    case BodyPartMotion.WalkCycle:
+                        localEuler.Z += gait * 0.48f;
+                        break;
+                    case BodyPartMotion.WalkCycleOpposite:
+                        localEuler.Z -= gait * 0.48f;
+                        break;
+                    case BodyPartMotion.WalkCycleProfile:
+                        localPosition.Y += gait * 0.025f;
+                        localEuler.Z += gait * 0.34f;
+                        break;
+                    case BodyPartMotion.WalkCycleProfileOpposite:
+                        localPosition.Y -= gait * 0.025f;
+                        localEuler.Z -= gait * 0.34f;
+                        break;
+                }
+            }
 
             Vector3 origin = unitPositions[unit];
             Quaternion positionOrientation = bodyOrientation;
@@ -241,7 +279,8 @@ public sealed class UnitBodySystem
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      parent >= start &&
                      (motions[part] is BodyPartMotion.SpinalChain or BodyPartMotion.PhysicalTail) &&
-                     !hasCustomPoseOffset)
+                     !hasCustomPoseOffset &&
+                     posture != UnitPosture.Lying)
             {
                 UpdateChainLink(
                     part,
@@ -262,7 +301,8 @@ public sealed class UnitBodySystem
             else if (anchors[part] == BodyPartAnchor.Parent &&
                      motions[part] == BodyPartMotion.FollowParent &&
                      parent >= start &&
-                     !hasCustomPoseOffset)
+                     !hasCustomPoseOffset &&
+                     posture != UnitPosture.Lying)
             {
                 UpdateFollower(
                     part,
@@ -315,8 +355,11 @@ public sealed class UnitBodySystem
 
             worldPositions[part] = joint;
             worldOrientations[part] = worldOrientation;
-            worldScales[part] = BodyPartTransformMath.Project(
+            Vector3 projectedScale = BodyPartTransformMath.Project(
                 scales[part], worldOrientation, 0, 1).Scale;
+            if (posture == UnitPosture.Lying)
+                projectedScale.Z *= 0.55f;
+            worldScales[part] = projectedScale;
             worldRotations[part] = worldRotation;
         }
     }

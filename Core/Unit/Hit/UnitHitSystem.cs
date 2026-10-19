@@ -61,7 +61,7 @@ public sealed class UnitHitSystem
         float height = MathF.Max(0.05f, units.Height[unitIndex]);
         float eyeHeight = units.Posture[unitIndex] switch
         {
-            UnitPosture.Lying => 0.38f,
+            UnitPosture.Lying => 0.15f,
             UnitPosture.Crouching => 0.56f,
             UnitPosture.Sitting => 0.68f,
             _ => 0.82f
@@ -189,6 +189,20 @@ public static int GetVisibilityPoints(
         if (!float.IsFinite(tolerance) || tolerance < 0f ||
             !float.IsFinite(point.X) || !float.IsFinite(point.Y) || !float.IsFinite(point.Z))
             return false;
+
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if ((uint)regionIndex >= (uint)profile.RegionCount)
+            return false;
+
+        if (TryGetBodyShape(
+                units, unitIndex, profile, regionIndex, bodies,
+                out _, out Vector3 shapeCenter, out Vector3 shapeScale,
+                out float shapeRotation, out BodyPrimitive primitive, out float shapeHalfHeight))
+        {
+            return IsPointInsidePrimitive(
+                point, shapeCenter, shapeScale, shapeRotation, primitive,
+                shapeHalfHeight, tolerance);
+        }
 
         GetGameplayCollider(units, unitIndex, out Vector3 center, out float radius, out float halfHeight);
         float rx = radius + tolerance;
@@ -426,26 +440,90 @@ public static bool TryFindBindingForPart(
         float sphereRadius = MathF.Max(MathF.Max(0.01f, units.Radius[unitIndex]), height * 0.5f);
         Vector3 center = position + new Vector3(0f, 0f, sphereRadius);
         float padding = MathF.Max(0f, projectileRadius);
-
-        if (!TryIntersectSphere(start, end, center, sphereRadius + padding, out float t))
-        {
-            result = default;
-            return false;
-        }
-
-        Vector3 hitPosition = start + (end - start) * t;
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
-        float heightFraction = Math.Clamp((hitPosition.Z - position.Z) / height, 0f, 1f);
 
-        if (!TrySelectDamageBinding(
-                profile, unitIndex, hitPosition, heightFraction, ignoredPart,
-                out int regionIndex, out int bindingIndex, out UnitHealthPartId part))
+        // Match a projectile against the actual posed rig first. Previously every
+        // anatomical region delegated to one huge unit capsule and then selected a
+        // random tissue from the entire body by height, so limbs/torso/head weren't
+        // actual hit targets.
+        if (bodies != null && profile is UnitAnatomyProfile anatomy &&
+            units.BodyCount[unitIndex] > 0)
+        {
+            int startBody = units.BodyStart[unitIndex];
+            int bodyCount = Math.Min(anatomy.NodeCount, units.BodyCount[unitIndex]);
+            float bestT = float.PositiveInfinity;
+            int bestRegion = -1;
+            int bestBinding = -1;
+            UnitHealthPartId bestPart = UnitHealthPartId.None;
+            Vector3 bestPosition = default;
+
+            for (int regionIndex = 0; regionIndex < bodyCount; regionIndex++)
+            {
+                if (!TryGetBodyShape(
+                        units, unitIndex, profile, regionIndex, bodies,
+                        out _, out Vector3 shapeCenter, out Vector3 shapeScale,
+                        out float shapeRotation, out BodyPrimitive primitive, out float halfHeight))
+                {
+                    continue;
+                }
+
+                if (!TryIntersectPrimitive(
+                        start, end, shapeCenter, shapeScale, shapeRotation,
+                        primitive, halfHeight, padding, out float t) ||
+                    t >= bestT)
+                {
+                    continue;
+                }
+
+                Vector3 hitPosition = start + (end - start) * t;
+                float heightFraction = Math.Clamp(
+                    (hitPosition.Z - position.Z) / height, 0f, 1f);
+
+                if (!TrySelectDamageBinding(
+                        profile, unitIndex, hitPosition, heightFraction, ignoredPart,
+                        out int regionForHit, out int bindingForHit, out UnitHealthPartId part,
+                        forcedRegionIndex: regionIndex))
+                {
+                    continue;
+                }
+
+                bestT = t;
+                bestRegion = regionForHit;
+                bestBinding = bindingForHit;
+                bestPart = part;
+                bestPosition = hitPosition;
+            }
+
+            if (bestRegion >= 0)
+            {
+                result = new UnitHitResult(bestPart, bestPosition, bestT, bestRegion, bestBinding);
+                return true;
+            }
+
+            result = default;
+            return false;
+        }
+
+        // Compatibility fallback for archetypes without a shared authored rig.
+        if (!TryIntersectSphere(start, end, center, sphereRadius + padding, out float fallbackT))
         {
             result = default;
             return false;
         }
 
-        result = new UnitHitResult(part, hitPosition, t, regionIndex, bindingIndex);
+        Vector3 fallbackPosition = start + (end - start) * fallbackT;
+        float fallbackHeightFraction = Math.Clamp(
+            (fallbackPosition.Z - position.Z) / height, 0f, 1f);
+        if (!TrySelectDamageBinding(
+                profile, unitIndex, fallbackPosition, fallbackHeightFraction, ignoredPart,
+                out int fallbackRegion, out int fallbackBinding, out UnitHealthPartId fallbackPart))
+        {
+            result = default;
+            return false;
+        }
+
+        result = new UnitHitResult(
+            fallbackPart, fallbackPosition, fallbackT, fallbackRegion, fallbackBinding);
         return true;
     }
 
@@ -463,9 +541,73 @@ public static bool TryFindBindingForPart(
         UnitBodyStore? bodies = null,
         UnitHitRegionStore? hitRegions = null)
     {
-        // Internal organs are damage targets, not intersectable gameplay volumes.
         result = default;
-        return false;
+        if (unitIndex < 0 || unitIndex >= units.Capacity ||
+            !float.IsFinite(minimumDistance) ||
+            !float.IsFinite(padding) || padding < 0f ||
+            direction.LengthSquared() < 0.000001f ||
+            !TryGetBodyShape(
+                units, unitIndex, GetProfile(units, unitIndex, hitRegions),
+                parentRegionIndex, bodies,
+                out int parentBody, out _, out _, out _, out _, out _))
+        {
+            return false;
+        }
+
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if (profile is not UnitAnatomyProfile anatomy)
+            return false;
+
+        UnitAnatomyNode parentNode = anatomy.GetNode(parentRegionIndex);
+
+        Vector3 rayDirection = Vector3.Normalize(direction);
+        const float maxDistance = 1.5f;
+        Vector3 rayEnd = origin + rayDirection * maxDistance;
+        ReadOnlySpan<UnitAnatomyVolume> volumes = anatomy.Volumes;
+        float bestDistance = float.PositiveInfinity;
+
+        for (int volumeIndex = 0; volumeIndex < volumes.Length; volumeIndex++)
+        {
+            UnitAnatomyVolume volume = volumes[volumeIndex];
+            if (volumeIndex == previousVolumeIndex ||
+                !string.Equals(volume.ParentRegionId, parentNode.Id, StringComparison.Ordinal) ||
+                !string.Equals(volume.EntryBindingId, entryBindingId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!anatomy.TryFindPart(volume.TargetBindingId, out int targetRegion, out int targetBinding) ||
+                targetRegion != parentRegionIndex)
+            {
+                continue;
+            }
+
+            Quaternion parentOrientation = bodies!.WorldOrientation[parentBody];
+            Vector3 center = bodies.WorldPosition[parentBody] +
+                Vector3.Transform(volume.LocalCenter, parentOrientation);
+            float rotation = bodies.WorldRotation[parentBody] + volume.LocalRotation;
+
+            if (!TryIntersectPrimitive(
+                    origin, rayEnd, center, volume.HalfExtents, rotation,
+                    volume.Primitive, volume.HalfExtents.Z, padding, out float t))
+            {
+                continue;
+            }
+
+            float distance = t * maxDistance;
+            if (distance + 0.0001f < minimumDistance ||
+                distance >= bestDistance)
+            {
+                continue;
+            }
+
+            bestDistance = distance;
+            result = new UnitAnatomyVolumeHit(
+                volume, volumeIndex, targetRegion, targetBinding,
+                origin + rayDirection * distance, distance);
+        }
+
+        return bestDistance < float.PositiveInfinity;
     }
 
 private static int FillRegionPoints(
@@ -504,21 +646,30 @@ private static int FillRegionPoints(
         UnitHealthPartId ignoredPart,
         out int regionIndex,
         out int bindingIndex,
-        out UnitHealthPartId part)
+        out UnitHealthPartId part,
+        int forcedRegionIndex = -1)
     {
         regionIndex = -1;
         bindingIndex = -1;
         part = UnitHealthPartId.None;
         float totalWeight = 0f;
 
-        for (int r = 0; r < profile.RegionCount; r++)
+        int firstRegion = forcedRegionIndex >= 0 ? forcedRegionIndex : 0;
+        int lastRegion = forcedRegionIndex >= 0 ? forcedRegionIndex + 1 : profile.RegionCount;
+        if (firstRegion < 0 || lastRegion > profile.RegionCount)
+            return false;
+
+        for (int r = firstRegion; r < lastRegion; r++)
         {
             ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
             for (int b = 0; b < bindings.Length; b++)
             {
                 HitRegionPartBinding binding = bindings[b];
-                if (ignoredPart != UnitHealthPartId.None && binding.Part == ignoredPart)
+                if ((ignoredPart != UnitHealthPartId.None && binding.Part == ignoredPart) ||
+                    (forcedRegionIndex >= 0 && binding.Kind == UnitHealthPartKind.Organ))
+                {
                     continue;
+                }
 
                 float likelihood = GetHeightLikelihood(binding.Part, heightFraction);
                 if (binding.Kind == UnitHealthPartKind.Organ)
@@ -539,14 +690,17 @@ private static int FillRegionPoints(
         hash ^= hash >> 13;
         float roll = (hash / 4294967296f) * totalWeight;
 
-        for (int r = 0; r < profile.RegionCount; r++)
+        for (int r = firstRegion; r < lastRegion; r++)
         {
             ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
             for (int b = 0; b < bindings.Length; b++)
             {
                 HitRegionPartBinding binding = bindings[b];
-                if (ignoredPart != UnitHealthPartId.None && binding.Part == ignoredPart)
+                if ((ignoredPart != UnitHealthPartId.None && binding.Part == ignoredPart) ||
+                    (forcedRegionIndex >= 0 && binding.Kind == UnitHealthPartKind.Organ))
+                {
                     continue;
+                }
 
                 float likelihood = GetHeightLikelihood(binding.Part, heightFraction);
                 if (binding.Kind == UnitHealthPartKind.Organ)
@@ -563,13 +717,17 @@ private static int FillRegionPoints(
             }
         }
 
-        for (int r = profile.RegionCount - 1; r >= 0; r--)
+        for (int r = lastRegion - 1; r >= firstRegion; r--)
         {
             ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
             for (int b = bindings.Length - 1; b >= 0; b--)
             {
-                if (ignoredPart != UnitHealthPartId.None && bindings[b].Part == ignoredPart)
+                if ((ignoredPart != UnitHealthPartId.None && bindings[b].Part == ignoredPart) ||
+                    (forcedRegionIndex >= 0 && bindings[b].Kind == UnitHealthPartKind.Organ))
+                {
                     continue;
+                }
+
                 regionIndex = r;
                 bindingIndex = b;
                 part = bindings[b].Part;
@@ -756,6 +914,14 @@ private static ReadOnlySpan<HitRegionPartBinding> GetBindings(
         UnitHitRegionStore? hitRegions = null,
         UnitBodyStore? bodies = null)
     {
+        if (TryGetBodyShape(
+                units, unitIndex, profile, regionIndex, bodies,
+                out _, out center, out Vector3 scale, out _, out _, out halfHeight))
+        {
+            radius = MathF.Max(MathF.Abs(scale.X), MathF.Abs(scale.Y));
+            return;
+        }
+
         GetGameplayCollider(units, unitIndex, out center, out radius, out halfHeight);
     }
 
@@ -810,7 +976,36 @@ private static bool IsInternalNode(UnitHitRegionProfile profile, int index) =>
         rotation = 0f;
         primitive = BodyPrimitive.Circle;
         halfHeight = 0f;
-        return false;
+
+        if (bodies == null ||
+            profile is not UnitAnatomyProfile anatomy ||
+            (uint)regionIndex >= (uint)anatomy.NodeCount ||
+            anatomy.IsInternalNode(regionIndex))
+        {
+            return false;
+        }
+
+        UnitAnatomyNode node = anatomy.GetNode(regionIndex);
+        if (!node.HasShape)
+            return false;
+
+        int bodyStart = units.BodyStart[unitIndex];
+        int bodyCount = units.BodyCount[unitIndex];
+        if (regionIndex >= bodyCount ||
+            bodyStart < 0 ||
+            bodyStart + regionIndex >= bodies.Count)
+        {
+            return false;
+        }
+
+        bodyIndex = bodyStart + regionIndex;
+        center = bodies.WorldPosition[bodyIndex];
+        scale = Vector3.Abs(bodies.WorldScale[bodyIndex]);
+        rotation = bodies.WorldRotation[bodyIndex];
+        primitive = bodies.Primitive[bodyIndex];
+        halfHeight = MathF.Max(0.001f, scale.Z);
+        return scale.X > 0f && scale.Y > 0f &&
+            float.IsFinite(center.X) && float.IsFinite(center.Y) && float.IsFinite(center.Z);
     }
 
 private static bool TryIntersectPrimitive(
@@ -826,6 +1021,65 @@ private static bool TryIntersectPrimitive(
         TryIntersectPrimitive(
             start, end, center, scale, rotation, primitive,
             halfHeight, padding, out t, out _);
+
+    private static bool IsPointInsidePrimitive(
+        Vector3 point,
+        Vector3 center,
+        Vector3 scale,
+        float rotation,
+        BodyPrimitive primitive,
+        float halfHeight,
+        float padding)
+    {
+        float tolerance = MathF.Max(0f, padding);
+        if (MathF.Abs(point.Z - center.Z) > MathF.Abs(halfHeight) + tolerance)
+            return false;
+
+        float dx = point.X - center.X;
+        float dy = point.Y - center.Y;
+        float cos = MathF.Cos(rotation);
+        float sin = MathF.Sin(rotation);
+        float localX = dx * cos + dy * sin;
+        float localY = -dx * sin + dy * cos;
+        float halfX = MathF.Abs(scale.X) + tolerance;
+        float halfY = MathF.Abs(scale.Y) + tolerance;
+
+        switch (primitive)
+        {
+            case BodyPrimitive.Box:
+            case BodyPrimitive.Line:
+                return MathF.Abs(localX) <= halfX &&
+                    MathF.Abs(localY) <= (primitive == BodyPrimitive.Line
+                        ? MathF.Max(0.008f, halfY)
+                        : halfY);
+
+            case BodyPrimitive.Triangle:
+                return PointInTriangle(
+                    localX, localY,
+                    halfX, 0f,
+                    -halfX, -halfY,
+                    -halfX, halfY);
+
+            default:
+                float x = localX / MathF.Max(0.001f, halfX);
+                float y = localY / MathF.Max(0.001f, halfY);
+                return x * x + y * y <= 1f;
+        }
+    }
+
+    private static bool PointInTriangle(
+        float px, float py,
+        float ax, float ay,
+        float bx, float by,
+        float cx, float cy)
+    {
+        float d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+        float d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+        float d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+        bool hasNegative = d1 < 0f || d2 < 0f || d3 < 0f;
+        bool hasPositive = d1 > 0f || d2 > 0f || d3 > 0f;
+        return !(hasNegative && hasPositive);
+    }
 
     private static bool TryIntersectPrimitive(
         Vector3 start,

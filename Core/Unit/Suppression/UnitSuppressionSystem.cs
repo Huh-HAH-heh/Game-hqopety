@@ -66,7 +66,7 @@ public static class UnitSuppressionSystem
             return;
 
         float proximity = 1f / (0.25f + distance * distance);
-        float amount = danger * factor * proximity * 0.0025f;
+        float amount = danger * factor * proximity * 0.0014f;
         suppression.Add(unitIndex, amount, impactPosition);
     }
 

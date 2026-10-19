@@ -33,6 +33,8 @@ public static class CombatSelfTest
         RunTest("Weapon: burst mode completes the configured burst", TestBurstFireCadence, ref passed, ref failed);
         RunTest("Weapon: suppressive auto fire continues without LOS", TestSuppressiveFireThroughOcclusion, ref passed, ref failed);
         RunTest("Suppression: threshold state", TestSuppression, ref passed, ref failed);
+        RunTest("Pawn stats: RimWorld skills and suppression resistance", TestPawnSkillsAndResistance, ref passed, ref failed);
+        RunTest("Posture: prone silhouette and firing", TestPronePostureAndFiring, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
@@ -49,7 +51,9 @@ public static class CombatSelfTest
         RunTest("Anatomy: colonist nodes share stable tissue IDs", TestColonistUsesAnatomyNodes, ref passed, ref failed);
         RunTest("Anatomy: rig edits preserve tissue IDs and organ volumes", TestAnatomyRigEditsPreserveBindings, ref passed, ref failed);
         RunTest("Anatomy: rig editor can add dependent regions", TestAnatomyRigCanAppendDependency, ref passed, ref failed);
+        RunTest("Pose: saved postures and walk-cycle motion are applied", TestSavedPosesAndWalkCycleApplied, ref passed, ref failed);
         RunTest("Body rig: 3D rotation projects consistently in all views", TestBodyPartProjectionMath, ref passed, ref failed);
+        RunTest("Ballistics: per-segment hits follow the rendered rig", TestProjectileHitsAuthoredRigSegments, ref passed, ref failed);
         RunTest("Vision: extended hit region is detected inside range", TestVisionDetectsRegionInsideRange, ref passed, ref failed);
         RunTest("Targeting: aim modes select hit regions", TestTargetModesAimAtHitRegions, ref passed, ref failed);
         RunTest("Targeting: modes rank arbitrary vertical segments", TestTargetModesRankVerticalSegments, ref passed, ref failed);
@@ -803,7 +807,7 @@ public static class CombatSelfTest
 
         suppression.Add(
             0,
-            1.2f,
+            1.6f,
             Vector3.Zero);
 
         if (suppression.GetState(0) !=
@@ -814,12 +818,122 @@ public static class CombatSelfTest
 
         suppression.Add(
             0,
-            1.5f,
+            3.0f,
             Vector3.Zero);
 
         return suppression.GetState(0) ==
                UnitSuppressionState.Panicked &&
                suppression.GetAccuracyMultiplier(0) > 1f;
+    }
+
+    private static bool TestPawnSkillsAndResistance()
+    {
+        UnitSkillStore skills = new UnitSkillStore(2);
+        skills.InitializeUnit(0, UnitType.Colonist, 1);
+        skills.InitializeUnit(1, UnitType.Colonist, 2);
+
+        if (UnitSkillStore.SkillCount != 12)
+            return false;
+
+        for (int i = 0; i < UnitSkillStore.SkillCount; i++)
+        {
+            UnitSkill skill = (UnitSkill)i;
+            if (skills.GetLevel(0, skill) > UnitSkillStore.MaxLevel ||
+                skills.GetLevel(1, skill) > UnitSkillStore.MaxLevel)
+                return false;
+        }
+
+        skills.SetSkillLevel(0, UnitSkill.Shooting, 2);
+        skills.SetSkillLevel(1, UnitSkill.Shooting, 18);
+        if (skills.GetShootingSpreadMultiplier(1) >= skills.GetShootingSpreadMultiplier(0))
+            return false;
+
+        skills.SetSkillLevel(1, UnitSkill.Medical, 0);
+        skills.SetPassion(1, UnitSkill.Medical, UnitSkillPassion.Major);
+        skills.GainExperience(1, UnitSkill.Medical, 600f);
+        if (skills.GetLevel(1, UnitSkill.Medical) != 1)
+            return false;
+
+        skills.SetSuppressionResistance(0, 0f);
+        skills.SetSuppressionResistance(1, 0.8f);
+        UnitSuppressionStore suppression = new UnitSuppressionStore(2);
+        suppression.BindSkillStore(skills);
+        suppression.InitializeUnit(0);
+        suppression.InitializeUnit(1);
+        suppression.Add(0, 3f, Vector3.Zero);
+        suppression.Add(1, 3f, Vector3.Zero);
+
+        return suppression.Value[0] > suppression.Value[1] &&
+            skills.GetSuppressionResistance(1) > skills.GetSuppressionResistance(0);
+    }
+
+    private static bool TestPronePostureAndFiring()
+    {
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        int inventorySlot = simulation.AddInventoryItem(shooter, WeaponCatalog.AssaultRifle);
+        if (inventorySlot < 0 ||
+            !simulation.EquipWeapon(shooter, inventorySlot, UnitWeaponSlot.Primary))
+            return false;
+
+        int bodyStart = simulation.Units.BodyStart[shooter.Index];
+        int bodyCount = simulation.Units.BodyCount[shooter.Index];
+        int headPart = -1;
+        int torsoPart = -1;
+        float standingMaxZ = float.NegativeInfinity;
+        for (int i = 0; i < bodyCount; i++)
+        {
+            int partIndex = bodyStart + i;
+            string? id = simulation.Bodies.PartId[partIndex];
+            if (id == "body.upper") headPart = partIndex;
+            if (id == "body.middle") torsoPart = partIndex;
+            standingMaxZ = MathF.Max(standingMaxZ, simulation.Bodies.WorldPosition[partIndex].Z);
+        }
+        if (headPart < 0 || torsoPart < 0)
+            return false;
+
+        float standingHeadZ = simulation.Bodies.WorldPosition[headPart].Z;
+        float standingTorsoZ = simulation.Bodies.WorldPosition[torsoPart].Z;
+        float standingMinX = float.PositiveInfinity;
+        float standingMaxX = float.NegativeInfinity;
+        for (int i = 0; i < bodyCount; i++)
+        {
+            float x = simulation.Bodies.WorldPosition[bodyStart + i].X;
+            standingMinX = MathF.Min(standingMinX, x);
+            standingMaxX = MathF.Max(standingMaxX, x);
+        }
+        float standingSpanX = standingMaxX - standingMinX;
+        simulation.SetPosture(shooter, UnitPosture.Lying);
+        WorldMap map = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 16);
+        simulation.Update(map, 0.016f);
+
+        float proneMaxZ = float.NegativeInfinity;
+        float proneMinX = float.PositiveInfinity;
+        float proneMaxX = float.NegativeInfinity;
+        for (int i = 0; i < bodyCount; i++)
+        {
+            Vector3 partPosition = simulation.Bodies.WorldPosition[bodyStart + i];
+            proneMaxZ = MathF.Max(proneMaxZ, partPosition.Z);
+            proneMinX = MathF.Min(proneMinX, partPosition.X);
+            proneMaxX = MathF.Max(proneMaxX, partPosition.X);
+        }
+        float proneSpanX = proneMaxX - proneMinX;
+
+        int weaponIndex = UnitWeaponStore.GetIndex(shooter.Index, UnitWeaponSlot.Primary);
+        simulation.Weapons.Ammo[weaponIndex] = 1;
+        bool fired = simulation.FireWeapon(shooter, UnitWeaponSlot.Primary, Vector3.UnitX);
+
+        return simulation.Units.Posture[shooter.Index] == UnitPosture.Lying &&
+            simulation.Bodies.WorldPosition[headPart].Z < standingHeadZ * 0.45f &&
+            simulation.Bodies.WorldPosition[torsoPart].Z < standingTorsoZ * 0.45f &&
+            proneMaxZ < standingMaxZ * 0.5f &&
+            proneSpanX > standingSpanX + 0.20f &&
+            fired &&
+            simulation.Projectiles.ActiveCount == 1;
     }
 
     private static bool TestAccuracy()
@@ -1456,7 +1570,7 @@ public static class CombatSelfTest
     private static bool TestColonistUsesAnatomyNodes()
     {
         int stage = 1;
-        bool Fail() { Console.Error.WriteLine($"[Anatomy sphere test] Failed stage {stage}."); return false; }
+        bool Fail() { Console.Error.WriteLine($"[Anatomy shape test] Failed stage {stage}."); return false; }
 
         UnitAnatomyProfile profile = UnitAnatomyCatalog.Get(UnitType.Colonist).Anatomy;
         if (profile.RegionCount < 13 || profile.NodeCount < 13 ||
@@ -1492,24 +1606,39 @@ public static class CombatSelfTest
         stage = 3;
         UnitSimulation simulation = new UnitSimulation(4, 64);
         UnitId unit = simulation.Spawn(UnitType.Colonist, new Vector3(10f, 10f, 0.1f));
-        float sphereRadius = MathF.Max(
-            simulation.Units.Radius[unit.Index],
-            simulation.Units.Height[unit.Index] * 0.5f);
-        Vector3 expectedCenter = simulation.Units.Position[unit.Index] +
-            new Vector3(0f, 0f, sphereRadius);
+        int bodyStart = simulation.Units.BodyStart[unit.Index];
+        int checkedShapes = 0;
 
         for (int i = 0; i < profile.RegionCount; i++)
         {
+            UnitAnatomyNode node = profile.GetNode(i);
+            if (!node.HasShape || profile.IsInternalNode(i))
+                continue;
+
             UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
                 simulation.Units, unit.Index, i, simulation.HitRegions, simulation.Bodies);
+            int bodyIndex = bodyStart + i;
+            Vector3 expectedCenter = simulation.Bodies.WorldPosition[bodyIndex];
+            Vector3 expectedScale = Vector3.Abs(simulation.Bodies.WorldScale[bodyIndex]);
+            float expectedRadius = MathF.Max(expectedScale.X, expectedScale.Y);
+            float expectedHalfHeight = expectedScale.Z;
+
             if (Vector3.Distance(geometry.Center, expectedCenter) > 0.001f ||
-                MathF.Abs(geometry.Radius - sphereRadius) > 0.001f ||
-                MathF.Abs(geometry.HalfHeight - sphereRadius) > 0.001f)
+                MathF.Abs(geometry.Radius - expectedRadius) > 0.001f ||
+                MathF.Abs(geometry.HalfHeight - expectedHalfHeight) > 0.001f)
             {
-                Console.Error.WriteLine($"[Anatomy sphere test] region={i} geometry={geometry.Center}/{geometry.Radius}/{geometry.HalfHeight}.");
+                Console.Error.WriteLine(
+                    $"[Anatomy shape test] region={node.Id} " +
+                    $"geometry={geometry.Center}/{geometry.Radius}/{geometry.HalfHeight}; " +
+                    $"rig={expectedCenter}/{expectedRadius}/{expectedHalfHeight}.");
                 return Fail();
             }
+
+            checkedShapes++;
         }
+
+        if (checkedShapes < 13)
+            return Fail();
 
         stage = 4;
         return UnitHitSystem.GetVisibilityPointCount(
@@ -1636,6 +1765,138 @@ public static class CombatSelfTest
         }
 
         return true;
+    }
+
+    private static bool TestSavedPosesAndWalkCycleApplied()
+    {
+        IReadOnlyDictionary<string, UnitBodyPoseTransform>? sittingPose =
+            UnitBodyPoseSettingsStore.GetTransforms(UnitType.Colonist, UnitPosture.Sitting);
+        if (sittingPose == null ||
+            !sittingPose.TryGetValue("body.arm.left.upper", out UnitBodyPoseTransform savedArmPose) ||
+            savedArmPose.LocalEulerRotation.LengthSquared() <= 0.0001f)
+        {
+            Console.Error.WriteLine("[Pose test] Checked-in sitting pose is missing its authored arm transform.");
+            return false;
+        }
+
+        WorldMap map = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 12);
+        for (int y = 0; y < map.TileHeight; y++)
+        {
+            for (int x = 0; x < map.TileWidth; x++)
+                map.SetSolidHeight(x, y, 10, 1);
+        }
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId unit = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(10.5f, 10.5f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+
+        int start = simulation.Units.BodyStart[unit.Index];
+        int bodyCount = simulation.Units.BodyCount[unit.Index];
+        int armPart = -1;
+        int movingPart = -1;
+        for (int i = 0; i < bodyCount; i++)
+        {
+            string? id = simulation.Bodies.PartId[start + i];
+            if (id == "body.arm.left.upper")
+                armPart = start + i;
+            if (id == "body.leg.left.upper")
+                movingPart = start + i;
+        }
+
+        if (armPart < 0 || movingPart < 0)
+            return false;
+
+        float baseArmRotation = simulation.Bodies.WorldRotation[armPart];
+        simulation.SetPosture(unit, UnitPosture.Sitting);
+        simulation.Update(map, 0.016f);
+        float sittingRotation = simulation.Bodies.WorldRotation[armPart];
+        if (MathF.Abs(sittingRotation - baseArmRotation) < 0.05f)
+        {
+            Console.Error.WriteLine(
+                $"[Pose test] Sitting pose didn't move the arm: base={baseArmRotation:0.000}, sitting={sittingRotation:0.000}.");
+            return false;
+        }
+
+        simulation.SetPosture(unit, UnitPosture.Standing);
+        simulation.Update(map, 0.016f);
+        float standingRotation = simulation.Bodies.WorldRotation[armPart];
+        if (MathF.Abs(standingRotation - baseArmRotation) > 0.01f)
+            return false;
+
+        float legRotation = simulation.Bodies.WorldRotation[movingPart];
+        simulation.SetTarget(unit, simulation.Units.Position[unit.Index] + new Vector3(2f, 0f, 0f));
+        simulation.Update(map, 0.016f);
+        float walkingLegRotation = simulation.Bodies.WorldRotation[movingPart];
+
+        return simulation.Units.Velocity[unit.Index].LengthSquared() > 0.0025f &&
+            MathF.Abs(walkingLegRotation - legRotation) > 0.001f;
+    }
+
+    private static bool TestProjectileHitsAuthoredRigSegments()
+    {
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(20f, 20f, 0.1f),
+            Vector3.UnitX,
+            Vector3.UnitX);
+        UnitHitRegionProfile profile = simulation.HitRegions.GetProfile(target.Index)!;
+        if (profile is not UnitAnatomyProfile anatomy)
+            return false;
+
+        UnitHitSystem hitSystem = new UnitHitSystem();
+        string[] requiredRegions = { "body.middle", "body.upper" };
+        for (int i = 0; i < requiredRegions.Length; i++)
+        {
+            int regionIndex = anatomy.FindRegion(requiredRegions[i]);
+            if (regionIndex < 0)
+                return false;
+
+            UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                simulation.Units,
+                target.Index,
+                regionIndex,
+                simulation.HitRegions,
+                simulation.Bodies);
+            Vector3 start = geometry.Center - new Vector3(0.25f, 0f, 0f);
+            Vector3 end = geometry.Center + new Vector3(0.25f, 0f, 0f);
+
+            if (!hitSystem.TryHitUnit(
+                    simulation.Units,
+                    target.Index,
+                    start,
+                    end,
+                    0.002f,
+                    UnitHealthPartId.None,
+                    out UnitHitResult hit,
+                    simulation.Bodies,
+                    simulation.HitRegions) ||
+                hit.RegionIndex != regionIndex)
+            {
+                Console.Error.WriteLine(
+                    $"[Rig hit test] Expected {requiredRegions[i]} (region {regionIndex}); " +
+                    $"hit={(hit.RegionIndex >= 0 ? anatomy.GetNode(hit.RegionIndex).Id : "none")}.");
+                return false;
+            }
+        }
+
+        Vector3 root = simulation.Units.Position[target.Index];
+        float height = simulation.Units.Height[target.Index];
+        Vector3 outsideStart = root + new Vector3(0.62f, -0.08f, height * 0.5f);
+        Vector3 outsideEnd = root + new Vector3(0.86f, -0.08f, height * 0.5f);
+        return !hitSystem.TryHitUnit(
+            simulation.Units,
+            target.Index,
+            outsideStart,
+            outsideEnd,
+            0.002f,
+            UnitHealthPartId.None,
+            out _,
+            simulation.Bodies,
+            simulation.HitRegions);
     }
 
     private static bool TestBodyPartProjectionMath()

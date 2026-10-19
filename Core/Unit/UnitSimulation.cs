@@ -21,6 +21,7 @@ public sealed class UnitSimulation
     private float[] _baseMoveSpeed = Array.Empty<float>();
 
     public UnitStore Units { get; }
+    public UnitSkillStore Skills { get; }
     public UnitNavigationSystem Navigation => _movementSystem.Navigation;
     public UnitBodyStore Bodies { get; }
     public UnitHitRegionStore HitRegions { get; }
@@ -129,11 +130,13 @@ public sealed class UnitSimulation
         Projectiles =
             new ProjectileStore();
 
+        Skills = new UnitSkillStore(unitCapacity);
         Suppression =
             new UnitSuppressionStore(unitCapacity);
+        Suppression.BindSkillStore(Skills);
 
         _weaponSystem =
-            new UnitWeaponSystem(HitRegions, Bodies);
+            new UnitWeaponSystem(HitRegions, Bodies, Skills);
 
         _projectileSystem =
             new ProjectileSystem();
@@ -146,7 +149,8 @@ public sealed class UnitSimulation
         _aiSystem =
             new UnitAiSystem(
                 unitCapacity,
-                _weaponSystem);
+                _weaponSystem,
+                Skills);
     }
 
     public UnitId Spawn(
@@ -319,6 +323,7 @@ public sealed class UnitSimulation
         Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);
         Weapons.InitializeUnit(id.Index);
+        Skills.InitializeUnit(id.Index, definition.Type, Units.FactionTag[id.Index]);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
 
@@ -925,8 +930,14 @@ public sealed class UnitSimulation
             _visionSystem,
             worldMap,
             deltaTime);
-        LastAIUpdateMilliseconds =
+        double aiUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+        // The profiler samples once per second while the AI think cadence is 150 ms.
+        // Keep the last full think-pass duration so it isn't replaced by an idle-frame zero.
+        if (!_aiSystem.Enabled || Units.ActiveCount == 0)
+            LastAIUpdateMilliseconds = 0d;
+        else if (_aiSystem.LastUpdateRanThinkPass)
+            LastAIUpdateMilliseconds = aiUpdateMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();
         _movementSystem.Update(Units, worldMap, deltaTime, Health);
@@ -946,9 +957,10 @@ public sealed class UnitSimulation
         LastWeaponUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
-        // Keep the base anatomy rigid, but move its world transforms with the pawn.
+        // Apply the selected posture, saved pose transforms and articulated motion
+        // before projectile tracing so render and hit geometry use the same rig pose.
         phaseStarted = Stopwatch.GetTimestamp();
-        _bodySystem.UpdateStatic(Units, Bodies);
+        _bodySystem.Update(Units, Bodies, deltaTime);
         LastBodyUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
