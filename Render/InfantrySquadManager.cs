@@ -138,6 +138,19 @@ public sealed class InfantrySquadManager
         return true;
     }
 
+    public void PruneDeadMembers(ISet<UnitId> living)
+    {
+        List<UnitId> dead = new();
+        foreach (KeyValuePair<UnitId, int> pair in _membership)
+        {
+            if (!living.Contains(pair.Key))
+                dead.Add(pair.Key);
+        }
+
+        for (int i = 0; i < dead.Count; i++)
+            RemoveMember(dead[i]);
+    }
+
     public int DisbandContaining(IEnumerable<UnitId> members)
     {
         HashSet<int> ids = new();
