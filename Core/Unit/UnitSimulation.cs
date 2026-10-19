@@ -17,6 +17,7 @@ public sealed class UnitSimulation
     private readonly UnitWeaponSystem _weaponSystem;
     private readonly ProjectileSystem _projectileSystem;
     private readonly UnitAiSystem _aiSystem;
+    private readonly MeleeCombatSystem _meleeCombatSystem;
     private bool[] _deathHandled = Array.Empty<bool>();
     private float[] _baseMoveSpeed = Array.Empty<float>();
 
@@ -78,6 +79,8 @@ public sealed class UnitSimulation
 
     public UnitAiSystem AI =>
         _aiSystem;
+    public MeleeCombatSystem MeleeCombat =>
+        _meleeCombatSystem;
     public VisionSystem Vision =>
         _visionSystem;
 
@@ -151,6 +154,8 @@ public sealed class UnitSimulation
                 unitCapacity,
                 _weaponSystem,
                 Skills);
+
+        _meleeCombatSystem = new MeleeCombatSystem();
     }
 
     public UnitId Spawn(
@@ -326,6 +331,7 @@ public sealed class UnitSimulation
         Skills.InitializeUnit(id.Index, definition.Type, Units.FactionTag[id.Index]);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
+        _meleeCombatSystem.InitializeUnit(id.Index, id);
 
         for (int i = 0; i < startingEquipment.Length; i++)
         {
@@ -389,6 +395,7 @@ public sealed class UnitSimulation
 
         _aiSystem.Store.ClearUnit(
             index);
+        _meleeCombatSystem.ClearUnit(index);
 
         return Units.Destroy(id);
     }
@@ -965,6 +972,19 @@ public sealed class UnitSimulation
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();
+        _meleeCombatSystem.Update(
+            Units,
+            _aiSystem.Store,
+            Inventory,
+            Health,
+            _healthSystem,
+            Skills,
+            Suppression,
+            HitRegions,
+            Bodies,
+            deltaTime);
+        phaseStarted = Stopwatch.GetTimestamp();
+
         _projectileSystem.Update(
             Units,
             Bodies,
