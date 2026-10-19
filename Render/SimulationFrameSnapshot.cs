@@ -37,6 +37,7 @@ public readonly record struct RenderUnitState(
     float HealthRatio,
     ushort FactionTag,
     UnitAiState AiState,
+    BehaviacUnitIntent AiIntent,
     bool HasTarget,
     Vector3 TargetPosition,
     bool HasGoal,
@@ -270,6 +271,7 @@ public sealed class SimulationFrameSnapshot
         Vector3[] headNormals = units.HeadNormal;
         UnitAiStore aiStore = simulation.AI.Store;
         UnitAiState[] aiStates = aiStore.State;
+        BehaviacUnitIntent[] aiIntents = aiStore.LastIntent;
         UnitInventoryStore inventoryStore = simulation.Inventory;
         UnitSuppressionStore suppressionStore = simulation.Suppression;
         UnitWeaponStore weaponStore = simulation.Weapons;
@@ -283,6 +285,7 @@ public sealed class SimulationFrameSnapshot
                 : 0f;
             ushort faction = factions[index];
             UnitAiState aiState = aiStates[index];
+            BehaviacUnitIntent aiIntent = aiIntents[index];
 
             bool hasApparel = false;
             bool hasPoweredArmor = false;
@@ -403,6 +406,7 @@ public sealed class SimulationFrameSnapshot
                 healthRatio,
                 faction,
                 aiState,
+                aiIntent,
                 hasTarget,
                 targetPosition,
                 hasGoal,
