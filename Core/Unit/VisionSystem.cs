@@ -60,6 +60,7 @@ public sealed class VisionSystem
     /// <summary>Hostiles inside this distance can be noticed outside the facing cone.</summary>
     public const float CloseAwarenessRange = 1.5f;
     private const int NearbyCellRadius = (int)CloseAwarenessRange + 1;
+    private const int MaxNearbyHostileCandidates = MaxTargetCandidatesPerObserver / 2;
     private const float CloseAwarenessRangeSquared = CloseAwarenessRange * CloseAwarenessRange;
     private const int CandidateSlots = VisibilitySectorCount * CandidatesPerSector;
     private static readonly int MaxVisionParallelism =
@@ -349,7 +350,7 @@ public sealed class VisionSystem
             observer,
             observerEye,
             units,
-            sampledTargets,
+            sampledTargets[..MaxNearbyHostileCandidates],
             candidateTargetMarks,
             sampleMark);
 
@@ -357,7 +358,7 @@ public sealed class VisionSystem
         // rolling global window without restoring the quadratic all-pairs scan.
         int scanCount = Math.Min(
             activeCount,
-            MaxTargetCandidatesPerObserver + sampledCount);
+            MaxTargetCandidatesPerObserver);
         int scanStart = (int)(
             ((long)observer * TargetObserverOffset +
              (long)_visionUpdateSequence * TargetScanStride) %
@@ -1468,7 +1469,6 @@ public sealed class VisionSystem
                             continue;
                         }
 
-                        candidateTargetMarks[target] = sampleMark;
                         if (!FactionRules.ShouldAttack(
                                 observerFaction,
                                 units.FactionTag[target]))
@@ -1489,6 +1489,9 @@ public sealed class VisionSystem
                             continue;
                         }
 
+                        int evictedTarget = count == targets.Length
+                            ? targets[count - 1]
+                            : -1;
                         int insertAt = Math.Min(count, targets.Length - 1);
                         if (count < targets.Length)
                             count++;
@@ -1503,6 +1506,15 @@ public sealed class VisionSystem
 
                         targets[insertAt] = target;
                         targetDistances[insertAt] = distanceSquared;
+                        candidateTargetMarks[target] = sampleMark;
+
+                        // If a closer hostile displaced the farthest candidate,
+                        // release the displaced target for the rolling global scan.
+                        if (evictedTarget >= 0 &&
+                            candidateTargetMarks[evictedTarget] == sampleMark)
+                        {
+                            candidateTargetMarks[evictedTarget] = 0;
+                        }
                     }
                 }
             }
