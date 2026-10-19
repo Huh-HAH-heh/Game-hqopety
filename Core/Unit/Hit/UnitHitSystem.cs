@@ -98,9 +98,7 @@ public static int GetVisibilityRegionIndex(
         if ((uint)visibleIndex >= (uint)visibleCount)
             throw new ArgumentOutOfRangeException(nameof(visibleIndex));
 
-        return profile is UnitAnatomyProfile anatomy
-            ? anatomy.GetVisibleRegionIndex(visibleIndex)
-            : visibleIndex;
+        return visibleIndex;
     }
 
 public static int GetVisibilityPoints(
@@ -145,6 +143,47 @@ public static int GetVisibilityPoints(
             bodies);
 
         return new UnitHitRegionGeometry(center, radius, halfHeight);
+    }
+
+    /// <summary>Count of gameplay-facing detection zones, independent from anatomy node count.</summary>
+    public static int GetGameplayDetectionRegionCount(UnitHitRegionProfile profile) =>
+        profile is UnitAnatomyProfile
+            ? UnitGameplayZoneSystem.ZoneCount
+            : CountTargetRegions(profile);
+
+    public static UnitHitRegionGeometry GetGameplayDetectionRegionGeometry(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        UnitHitRegionStore? hitRegions = null,
+        UnitBodyStore? bodies = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if (profile is UnitAnatomyProfile)
+        {
+            UnitGameplayZoneGeometry zone = UnitGameplayZoneSystem.GetGeometry(
+                units, unitIndex, regionIndex);
+            return new UnitHitRegionGeometry(zone.Center, zone.BoundingRadius, zone.HalfHeight);
+        }
+
+        return GetRegionGeometry(units, unitIndex, regionIndex, hitRegions, bodies);
+    }
+
+    public static Vector3 GetGameplayTargetPoint(
+        UnitStore units,
+        int unitIndex,
+        int regionIndex,
+        Vector3 source,
+        UnitHitRegionStore? hitRegions = null,
+        UnitAnatomyMarkerRole markerRole = UnitAnatomyMarkerRole.Target,
+        UnitBodyStore? bodies = null)
+    {
+        UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
+        if (profile is UnitAnatomyProfile)
+            return UnitGameplayZoneSystem.GetTargetPoint(units, unitIndex, regionIndex, source);
+
+        return GetRegionPoint(
+            units, unitIndex, regionIndex, source, hitRegions, markerRole, bodies);
     }
 
     public static bool IsPartInProfile(
@@ -542,47 +581,33 @@ public static bool TryFindBindingForPart(
         float padding = MathF.Max(0f, projectileRadius);
         UnitHitRegionProfile profile = GetProfile(units, unitIndex, hitRegions);
 
-        // Match a projectile against the actual posed rig first. Previously every
-        // anatomical region delegated to one huge unit capsule and then selected a
-        // random tissue from the entire body by height, so limbs/torso/head weren't
-        // actual hit targets.
-        if (bodies != null && profile is UnitAnatomyProfile anatomy &&
-            units.BodyCount[unitIndex] > 0)
+        // The world collides with three procedural zones, not the body rig. The
+        // selected zone then distributes damage through the profile's weighted tissue table.
+        if (profile is UnitAnatomyProfile)
         {
-            int startBody = units.BodyStart[unitIndex];
-            int bodyCount = Math.Min(anatomy.NodeCount, units.BodyCount[unitIndex]);
             float bestT = float.PositiveInfinity;
             int bestRegion = -1;
             int bestBinding = -1;
             UnitHealthPartId bestPart = UnitHealthPartId.None;
             Vector3 bestPosition = default;
 
-            for (int regionIndex = 0; regionIndex < bodyCount; regionIndex++)
+            for (int zoneIndex = 0; zoneIndex < UnitGameplayZoneSystem.ZoneCount; zoneIndex++)
             {
-                if (!TryGetBodyShape(
-                        units, unitIndex, profile, regionIndex, bodies,
-                        out _, out Vector3 shapeCenter, out Vector3 shapeScale,
-                        out float shapeRotation, out BodyPrimitive primitive, out float halfHeight))
-                {
-                    continue;
-                }
-
+                UnitGameplayZoneGeometry zone = UnitGameplayZoneSystem.GetGeometry(
+                    units, unitIndex, zoneIndex);
+                Vector3 zoneScale = new(zone.HalfForward, zone.HalfSide, zone.HalfHeight);
                 if (!TryIntersectPrimitive(
-                        start, end, shapeCenter, shapeScale, shapeRotation,
-                        primitive, halfHeight, padding, out float t) ||
+                        start, end, zone.Center, zoneScale, zone.Rotation,
+                        BodyPrimitive.Circle, zone.HalfHeight, padding, out float t) ||
                     t >= bestT)
                 {
                     continue;
                 }
 
                 Vector3 hitPosition = start + (end - start) * t;
-                float heightFraction = Math.Clamp(
-                    (hitPosition.Z - position.Z) / height, 0f, 1f);
-
-                if (!TrySelectDamageBinding(
-                        profile, unitIndex, hitPosition, heightFraction, ignoredPart,
-                        out int regionForHit, out int bindingForHit, out UnitHealthPartId part,
-                        forcedRegionIndex: regionIndex))
+                if (!TrySelectDamageBindingForZone(
+                        profile, unitIndex, zoneIndex, hitPosition, ignoredPart,
+                        out int regionForHit, out int bindingForHit, out UnitHealthPartId part))
                 {
                     continue;
                 }
@@ -731,11 +756,158 @@ private static int FillRegionPoints(
                 ? anatomy.GetVisibleRegionIndex(visibleIndex)
                 : visibleIndex;
 
-            points[written++] = GetRegionPoint(
+            points[written++] = GetGameplayTargetPoint(
                 units, unitIndex, regionIndex, source, hitRegions, markerRole, bodies);
         }
 
         return written;
+    }
+
+    private static bool TrySelectDamageBindingForZone(
+        UnitHitRegionProfile profile,
+        int unitIndex,
+        int zoneIndex,
+        Vector3 point,
+        UnitHealthPartId ignoredPart,
+        out int regionIndex,
+        out int bindingIndex,
+        out UnitHealthPartId part)
+    {
+        regionIndex = -1;
+        bindingIndex = -1;
+        part = UnitHealthPartId.None;
+        UnitGameplayZone zone = (UnitGameplayZone)zoneIndex;
+
+        bool hasSemanticParts = false;
+        bool hasNamedZones = false;
+        for (int r = 0; r < profile.RegionCount; r++)
+        {
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
+            string regionId = profile is UnitAnatomyProfile anatomy
+                ? anatomy.GetNode(r).Id
+                : string.Empty;
+            hasNamedZones |= UnitGameplayZoneSystem.RegionNameMatches(zone, regionId);
+            for (int b = 0; b < bindings.Length; b++)
+                hasSemanticParts |= bindings[b].Part != UnitHealthPartId.WholeBody;
+        }
+
+        float totalWeight = 0f;
+        for (int r = 0; r < profile.RegionCount; r++)
+        {
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
+            string regionId = profile is UnitAnatomyProfile anatomy
+                ? anatomy.GetNode(r).Id
+                : string.Empty;
+            for (int b = 0; b < bindings.Length; b++)
+            {
+                HitRegionPartBinding binding = bindings[b];
+                if (binding.Part == ignoredPart && ignoredPart != UnitHealthPartId.None)
+                    continue;
+                if (!IsZoneBindingEligible(binding, regionId, zone, hasSemanticParts, hasNamedZones))
+                    continue;
+                totalWeight += MathF.Sqrt(MathF.Max(0.01f, binding.Weight)) *
+                    (binding.Kind == UnitHealthPartKind.Organ ? 0.16f : 1f);
+            }
+        }
+
+        bool fallback = totalWeight <= 0f || !float.IsFinite(totalWeight);
+        if (fallback)
+        {
+            for (int r = 0; r < profile.RegionCount; r++)
+            {
+                ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
+                for (int b = 0; b < bindings.Length; b++)
+                {
+                    HitRegionPartBinding binding = bindings[b];
+                    if (binding.Part == ignoredPart && ignoredPart != UnitHealthPartId.None)
+                        continue;
+                    totalWeight += MathF.Sqrt(MathF.Max(0.01f, binding.Weight)) *
+                        (binding.Kind == UnitHealthPartKind.Organ ? 0.16f : 1f);
+                }
+            }
+        }
+
+        if (totalWeight <= 0f || !float.IsFinite(totalWeight))
+            return false;
+
+        uint hash = unchecked((uint)(unitIndex + 1) * 2654435761u);
+        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.X) * 2246822519u);
+        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.Y) * 3266489917u);
+        hash ^= unchecked((uint)BitConverter.SingleToInt32Bits(point.Z) * 668265263u);
+        hash ^= unchecked((uint)(zoneIndex + 1) * 374761393u);
+        hash ^= hash >> 16;
+        hash *= 2246822519u;
+        hash ^= hash >> 13;
+        float roll = (hash / 4294967296f) * totalWeight;
+
+        for (int r = 0; r < profile.RegionCount; r++)
+        {
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
+            string regionId = profile is UnitAnatomyProfile anatomy
+                ? anatomy.GetNode(r).Id
+                : string.Empty;
+            for (int b = 0; b < bindings.Length; b++)
+            {
+                HitRegionPartBinding binding = bindings[b];
+                if (binding.Part == ignoredPart && ignoredPart != UnitHealthPartId.None)
+                    continue;
+                if (!fallback &&
+                    !IsZoneBindingEligible(binding, regionId, zone, hasSemanticParts, hasNamedZones))
+                    continue;
+
+                roll -= MathF.Sqrt(MathF.Max(0.01f, binding.Weight)) *
+                    (binding.Kind == UnitHealthPartKind.Organ ? 0.16f : 1f);
+                if (roll > 0f)
+                    continue;
+
+                regionIndex = r;
+                bindingIndex = b;
+                part = binding.Part;
+                return true;
+            }
+        }
+
+        for (int r = profile.RegionCount - 1; r >= 0; r--)
+        {
+            ReadOnlySpan<HitRegionPartBinding> bindings = GetBindings(profile, r);
+            for (int b = bindings.Length - 1; b >= 0; b--)
+            {
+                HitRegionPartBinding binding = bindings[b];
+                if (binding.Part == ignoredPart && ignoredPart != UnitHealthPartId.None)
+                    continue;
+                if (!fallback)
+                {
+                    string regionId = profile is UnitAnatomyProfile anatomy
+                        ? anatomy.GetNode(r).Id
+                        : string.Empty;
+                    if (!IsZoneBindingEligible(binding, regionId, zone, hasSemanticParts, hasNamedZones))
+                        continue;
+                }
+
+                regionIndex = r;
+                bindingIndex = b;
+                part = binding.Part;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsZoneBindingEligible(
+        HitRegionPartBinding binding,
+        string regionId,
+        UnitGameplayZone zone,
+        bool hasSemanticParts,
+        bool hasNamedZones)
+    {
+        if (binding.Part != UnitHealthPartId.WholeBody)
+            return UnitGameplayZoneSystem.ZoneAllowsPart(zone, binding.Part);
+
+        if (hasNamedZones)
+            return UnitGameplayZoneSystem.RegionNameMatches(zone, regionId);
+
+        return !hasSemanticParts;
     }
 
     private static bool TrySelectDamageBinding(
@@ -1087,8 +1259,8 @@ private static void GetWorldGeometry(
     }
 
     private static int CountTargetRegions(UnitHitRegionProfile profile) =>
-        profile is UnitAnatomyProfile anatomy
-            ? anatomy.VisibleRegionCount
+        profile is UnitAnatomyProfile
+            ? UnitGameplayZoneSystem.ZoneCount
             : profile.RegionCount;
 
 private static bool IsInternalNode(UnitHitRegionProfile profile, int index) =>
