@@ -184,8 +184,11 @@ public sealed class GameRenderer
         // The simulation thread builds the scene after the first frame.
         _terrainStressMode = false;
         _massCombatMode = true;
+
+        // The default camera starts focused on the isolated melee arena, so
+        // begin closer than the old 1,600-unit overview setting.
         for (int i = 0; i < 3; i++)
-            _camera.HandleZoom(-1f);
+            _camera.HandleZoom(1f);
 
         _lastAllocatedBytesSample =
             GC.GetTotalAllocatedBytes(false);
