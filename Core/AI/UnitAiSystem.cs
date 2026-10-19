@@ -682,21 +682,19 @@ public sealed class UnitAiSystem
                 {
                     Vector3 position = units.Position[unit];
                     Vector3 targetPosition = units.Position[target.Index];
+                    float dx = targetPosition.X - position.X;
+                    float dy = targetPosition.Y - position.Y;
+                    float distanceSquared = dx * dx + dy * dy;
                     float attackDistance = MeleeCombatSystem.GetAttackDistance(
                         unit, target.Index, units, inventory);
-                    float desiredDistance = MathF.Max(0.20f, attackDistance * 0.94f);
-                    Vector3 engagementPoint = GetMeleeEngagementPoint(
-                        unit, target.Index, targetPosition, desiredDistance);
-                    float slotDx = engagementPoint.X - position.X;
-                    float slotDy = engagementPoint.Y - position.Y;
-                    float slotDistanceSquared = slotDx * slotDx + slotDy * slotDy;
 
-                    // Give each melee pawn a stable position around the defender.
-                    // Otherwise every pawn approaching from the same direction gets
-                    // almost the same destination and piles into a single point.
-                    const float SlotArrivalRadius = 0.28f;
-                    if (slotDistanceSquared > SlotArrivalRadius * SlotArrivalRadius)
+                    // Already in striking reach? Stop closing and fight from this
+                    // side instead of circling the defender for a reserved slot.
+                    if (distanceSquared > attackDistance * attackDistance)
                     {
+                        float desiredDistance = MathF.Max(0.20f, attackDistance * 0.94f);
+                        Vector3 engagementPoint = GetMeleeEngagementPoint(
+                            unit, target.Index, targetPosition, desiredDistance);
                         units.Target[unit] = engagementPoint;
                         units.HasTarget[unit] = true;
                         ClearAiming(weapons, unit);
