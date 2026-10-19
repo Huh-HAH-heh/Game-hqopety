@@ -592,6 +592,45 @@ public void DrawSnapshot(
             }
         }
 
+        MeleeHitVisual[] meleeHitVisuals = snapshot.MeleeHitVisuals;
+        for (int i = 0; i < meleeHitVisuals.Length; i++)
+        {
+            MeleeHitVisual hit = meleeHitVisuals[i];
+            if (hit.Position.X < minX || hit.Position.X > maxX ||
+                hit.Position.Y < minY || hit.Position.Y > maxY)
+            {
+                continue;
+            }
+
+            float hitX = hit.Position.X * tilePixelSize;
+            float hitY = hit.Position.Y * tilePixelSize;
+            float radius = MathF.Max(2f, tilePixelSize * 0.32f);
+            byte alpha = (byte)Math.Clamp(
+                (int)(255f * hit.Lifetime / 0.24f),
+                0,
+                255);
+            Color flash = hit.FactionTag switch
+            {
+                1 => new Color(95, 190, 255, alpha),
+                2 => new Color(255, 105, 95, alpha),
+                3 => new Color(255, 205, 65, alpha),
+                _ => new Color(240, 240, 240, alpha)
+            };
+
+            // Brief crossed slash at the anatomical impact point; the flash
+            // is published with the immutable frame snapshot, not read live.
+            AppendDebugLine(
+                _statusIcons,
+                hitX - radius, hitY - radius,
+                hitX + radius, hitY + radius,
+                flash);
+            AppendDebugLine(
+                _statusIcons,
+                hitX - radius, hitY + radius,
+                hitX + radius, hitY - radius,
+                flash);
+        }
+
         if (showUnitDetails)
         {
             RenderAimRing[] aimRings = snapshot.AimRings;
