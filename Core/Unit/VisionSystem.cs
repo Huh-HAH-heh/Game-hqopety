@@ -58,7 +58,8 @@ public sealed class VisionSystem
     private const int TargetScanStride = 97;
     private const int TargetObserverOffset = 37;
     private const int NearbyCellRadius = 1;
-    private const float CloseAwarenessRange = 1.5f;
+    /// <summary>Hostiles inside this distance can be noticed outside the facing cone.</summary>
+    public const float CloseAwarenessRange = 1.5f;
     private const float CloseAwarenessRangeSquared = CloseAwarenessRange * CloseAwarenessRange;
     private const int CandidateSlots = VisibilitySectorCount * CandidatesPerSector;
     private static readonly int MaxVisionParallelism =
