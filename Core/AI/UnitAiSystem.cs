@@ -330,7 +330,7 @@ public sealed class UnitAiSystem
                 UnitId currentTarget = Store.Target[unit];
 
                 if (ShouldKeepCurrentVisibleTarget(
-                        units, health, vision, unit, currentTarget, visibleEnemy))
+                        units, health, vision, inventory, unit, currentTarget, visibleEnemy))
                 {
                     // Preserve target continuity, except when a nearer close contact
                     // must interrupt a long-range target.
@@ -670,6 +670,37 @@ public sealed class UnitAiSystem
                     Store.ClearGoal(unit);
                 }
 
+                // Melee-only units approach the edge of their attack ring instead
+                // of chasing the target's center. This gives both fighters a stable
+                // contact distance and lets the melee system strike without overlap.
+                if (!HasRangedWeapon(units, inventory, unit))
+                {
+                    Vector3 position = units.Position[unit];
+                    Vector3 targetPosition = units.Position[target.Index];
+                    float dx = targetPosition.X - position.X;
+                    float dy = targetPosition.Y - position.Y;
+                    float distanceSquared = dx * dx + dy * dy;
+                    float attackDistance = MeleeCombatSystem.GetAttackDistance(
+                        unit, target.Index, units, inventory);
+                    float desiredDistance = MathF.Max(0.20f, attackDistance * 0.84f);
+                    float approachThreshold = desiredDistance + 0.12f;
+
+                    if (distanceSquared > approachThreshold * approachThreshold)
+                    {
+                        float distance = MathF.Sqrt(distanceSquared);
+                        float scale = desiredDistance / MathF.Max(0.001f, distance);
+                        units.Target[unit] = new Vector3(
+                            targetPosition.X - dx * scale,
+                            targetPosition.Y - dy * scale,
+                            position.Z);
+                        units.HasTarget[unit] = true;
+                        ClearAiming(weapons, unit);
+                        Store.ClearGoal(unit);
+                        Store.State[unit] = UnitAiState.Attack;
+                        continue;
+                    }
+                }
+
                 FaceTarget(
                     units,
                     unit,
@@ -869,7 +900,7 @@ public sealed class UnitAiSystem
         {
             UnitId currentTarget = Store.Target[unit];
             if (ShouldKeepCurrentVisibleTarget(
-                    units, health, vision, unit, currentTarget, visibleTargetIndex))
+                    units, health, vision, inventory, unit, currentTarget, visibleTargetIndex))
             {
                 // The same close-contact override used by target memory also feeds
                 // Behaviac, so it cannot plan around a distant target this tick.
@@ -1322,6 +1353,7 @@ public sealed class UnitAiSystem
         UnitStore units,
         UnitHealthStore health,
         VisionSystem vision,
+        UnitInventoryStore inventory,
         int observer,
         UnitId currentTarget,
         int newlyVisibleTarget)
@@ -1342,9 +1374,12 @@ public sealed class UnitAiSystem
         float newDx = newPosition.X - observerPosition.X;
         float newDy = newPosition.Y - observerPosition.Y;
         float newDistanceSquared = newDx * newDx + newDy * newDy;
-        float closeRange = VisionSystem.CloseAwarenessRange;
+        float contactRange = MathF.Max(
+            VisionSystem.CloseAwarenessRange,
+            MeleeCombatSystem.GetAttackDistance(
+                observer, newlyVisibleTarget, units, inventory));
 
-        if (newDistanceSquared > closeRange * closeRange)
+        if (newDistanceSquared > contactRange * contactRange)
             return true;
 
         Vector3 currentPosition = units.Position[currentTarget.Index];
