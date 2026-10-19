@@ -975,6 +975,14 @@ public void DrawSnapshot(
         return t * t * (3f - 2f * t);
     }
 
+    private static float GetCloseMarkerBlend(float screenScale)
+    {
+        // Fade tactical goal overlays with zoom; posture glyphs intentionally
+        // remain independent of zoom so the old pose indication is preserved.
+        float t = Math.Clamp((screenScale - 1.25f) / 0.55f, 0f, 1f);
+        return t * t * (3f - 2f * t);
+    }
+
     private static bool IsAnyBodyPartInView(
         UnitBodyStore bodies,
         int start,
