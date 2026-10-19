@@ -938,7 +938,11 @@ public sealed class UnitAiSystem
             // Flanking is a small long-range maneuver, not the default response
             // to contact. Most shooters should open fire from their current lane.
             float maxFlankRange = MathF.Min(75f, MathF.Max(25f, units.ViewRange[unit] * 0.85f));
+            float effectiveRange = GetMaxEffectiveRange(inventory, unit);
+            bool stillOutsideWeaponRange = effectiveRange > 0.1f &&
+                distanceSquared > effectiveRange * effectiveRange;
             canFlank = !alreadyFlankedThisTarget &&
+                stillOutsideWeaponRange &&
                 distanceSquared >= 24f * 24f &&
                 distanceSquared <= maxFlankRange * maxFlankRange;
         }
