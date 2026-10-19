@@ -257,19 +257,22 @@ public static class UnitGameplayZoneSystem
             return false;
 
         string name = id.ToLowerInvariant();
+        bool lowerSegment =
+            name.Contains("leg") || name.Contains("foot") ||
+            name.Contains("hip") || name.Contains("lower") ||
+            name.Contains("rear") || name.Contains("front");
+
         return zone switch
         {
             UnitGameplayZone.Head =>
                 name.Contains("head") || name.Contains("brain") ||
                 name.Contains("skull") || name.Contains("neck"),
             UnitGameplayZone.Torso =>
-                name.Contains("torso") || name.Contains("body") ||
-                name.Contains("chest") || name.Contains("abdomen") ||
-                name.Contains("middle") || name.Contains("core"),
-            UnitGameplayZone.LowerBody =>
-                name.Contains("leg") || name.Contains("foot") ||
-                name.Contains("hip") || name.Contains("lower") ||
-                name.Contains("rear") || name.Contains("front"),
+                !lowerSegment &&
+                (name.Contains("torso") || name.Contains("body") ||
+                 name.Contains("chest") || name.Contains("abdomen") ||
+                 name.Contains("middle") || name.Contains("core")),
+            UnitGameplayZone.LowerBody => lowerSegment,
             _ => false
         };
     }
