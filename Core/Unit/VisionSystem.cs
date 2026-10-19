@@ -727,7 +727,7 @@ public sealed class VisionSystem
         {
             int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
                 units, targetIndex, i, _hitRegions);
-            Vector3 point = UnitHitSystem.GetRegionPoint(
+            Vector3 point = UnitHitSystem.GetGameplayTargetPoint(
                 units, targetIndex, regionIndex, observerEye, _hitRegions, pointRole, bodies);
             visibilityRegionIndices[i] = regionIndex;
             visibilityPoints[i] = point;
@@ -899,7 +899,7 @@ public sealed class VisionSystem
         {
             int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
                 units, targetIndex, i, _hitRegions);
-            Vector3 point = UnitHitSystem.GetRegionPoint(
+            Vector3 point = UnitHitSystem.GetGameplayTargetPoint(
                 units,
                 targetIndex,
                 regionIndex,
@@ -1270,9 +1270,10 @@ public sealed class VisionSystem
                 UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unit]).BodyType);
             int mark = NextSpatialMark();
 
-            for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
+            int regionCount = UnitHitSystem.GetGameplayDetectionRegionCount(profile);
+            for (int regionIndex = 0; regionIndex < regionCount; regionIndex++)
             {
-                UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                UnitHitRegionGeometry geometry = UnitHitSystem.GetGameplayDetectionRegionGeometry(
                     units,
                     unit,
                     regionIndex,
@@ -1316,9 +1317,10 @@ public sealed class VisionSystem
                 UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unit]).BodyType);
             int mark = NextSpatialMark();
 
-            for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
+            int regionCount = UnitHitSystem.GetGameplayDetectionRegionCount(profile);
+            for (int regionIndex = 0; regionIndex < regionCount; regionIndex++)
             {
-                UnitHitRegionGeometry geometry = UnitHitSystem.GetRegionGeometry(
+                UnitHitRegionGeometry geometry = UnitHitSystem.GetGameplayDetectionRegionGeometry(
                     units,
                     unit,
                     regionIndex,
@@ -1527,7 +1529,7 @@ public sealed class VisionSystem
         {
             int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
                 units, target, i, _hitRegions);
-            Vector3 point = UnitHitSystem.GetRegionPoint(
+            Vector3 point = UnitHitSystem.GetGameplayTargetPoint(
                 units, target, regionIndex, observerEye, _hitRegions,
                 UnitAnatomyMarkerRole.Vision, _bodies);
 
