@@ -711,7 +711,8 @@ public sealed class GameRenderer
         return
             $"RimClone | Units={snapshot.UnitCount} | " +
             $"Projectiles={snapshot.ActiveProjectiles}/{snapshot.ProjectileCapacity} Hits={snapshot.TotalHits} | " +
-            $"Teams 1:{snapshot.BlueAlive} 2:{snapshot.RedAlive} | AI={ai}:{selectedState} | " +
+            $"Teams 1:{snapshot.BlueAlive} 2:{snapshot.RedAlive} F3:{snapshot.ThirdFactionAlive} | " +
+            $"Melee hits/swings={snapshot.MeleeHits}/{snapshot.MeleeSwings} | AI={ai}:{selectedState} | " +
             $"States I={snapshot.IdleCount} A={snapshot.AttackCount} C={snapshot.CoverCount} " +
             $"S={snapshot.SearchCount} D={snapshot.DeadCount} | " +
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
