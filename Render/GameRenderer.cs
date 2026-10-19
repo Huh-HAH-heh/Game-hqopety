@@ -730,7 +730,8 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
+            "Ctrl+1-4=assign group 1-4=select Shift+1-4=add Ctrl+Shift+1-4=clear RMB=formation move Y=formation | " +
+            "A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=formation TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
 
@@ -955,6 +956,16 @@ public sealed class GameRenderer
         bool controlPressed =
             Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
             Keyboard.IsKeyPressed(Keyboard.Key.RControl);
+        bool shiftPressed =
+            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+
+        if (controlPressed && shiftPressed)
+        {
+            _controlGroups[groupIndex].Clear();
+            Console.WriteLine($"[INFANTRY] Group {groupIndex + 1} cleared.");
+            return true;
+        }
 
         if (controlPressed)
         {
@@ -1001,7 +1012,9 @@ public sealed class GameRenderer
                 living.Add(new UnitId(unit.Index, unit.Generation));
         }
 
-        _selectedUnits.Clear();
+        if (!shiftPressed)
+            _selectedUnits.Clear();
+
         for (int i = group.Count - 1; i >= 0; i--)
         {
             UnitId id = group[i];
@@ -1018,7 +1031,8 @@ public sealed class GameRenderer
             break;
         }
 
-        Console.WriteLine($"[INFANTRY] Selected group {groupIndex + 1}: {_selectedUnits.Count} units.");
+        Console.WriteLine(
+            $"[INFANTRY] {(shiftPressed ? "Added" : "Selected")} group {groupIndex + 1}: {_selectedUnits.Count} selected.");
         return true;
     }
 
