@@ -32,7 +32,6 @@ public static class UnitCombatConditionSelfTest
 
             simulation.Health.HitPoints[index] = 0f;
             damagedHand = true;
-            break;
         }
 
         if (!damagedHand)
