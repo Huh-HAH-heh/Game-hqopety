@@ -57,8 +57,9 @@ public sealed class VisionSystem
     private const int MaxTargetCandidatesPerObserver = 64;
     private const int TargetScanStride = 97;
     private const int TargetObserverOffset = 37;
-    private const int MaxNearbyUnitsPerCell = 4;
     private const int NearbyCellRadius = 1;
+    private const float CloseAwarenessRange = 1.5f;
+    private const float CloseAwarenessRangeSquared = CloseAwarenessRange * CloseAwarenessRange;
     private const int CandidateSlots = VisibilitySectorCount * CandidatesPerSector;
     private static readonly int MaxVisionParallelism =
         Math.Max(1, Math.Min(4, Environment.ProcessorCount - 2));
@@ -346,6 +347,7 @@ public sealed class VisionSystem
         int sampledCount = CollectNearbyTargets(
             observer,
             observerEye,
+            units,
             sampledTargets,
             candidateTargetMarks,
             sampleMark);
@@ -375,6 +377,13 @@ public sealed class VisionSystem
                 continue;
 
             candidateTargetMarks[target] = sampleMark;
+            if (!FactionRules.ShouldAttack(
+                    units.FactionTag[observer],
+                    units.FactionTag[target]))
+            {
+                continue;
+            }
+
             sampledTargets[sampledCount++] = target;
         }
 
@@ -757,8 +766,11 @@ public sealed class VisionSystem
             {
                 float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
                 float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
-                if (facingDot < minFacingDot)
+                if (facingDot < minFacingDot &&
+                    distanceSquared > CloseAwarenessRangeSquared)
+                {
                     continue;
+                }
             }
 
             anyRegionInFov = true;
@@ -922,8 +934,11 @@ public sealed class VisionSystem
             {
                 float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
                 float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
-                if (facingDot < minFacingDot)
+                if (facingDot < minFacingDot &&
+                    distanceSquared > CloseAwarenessRangeSquared)
+                {
                     continue;
+                }
             }
 
             targetPoint = point;
@@ -1397,6 +1412,7 @@ public sealed class VisionSystem
     private int CollectNearbyTargets(
         int observer,
         Vector3 position,
+        UnitStore units,
         Span<int> targets,
         int[] candidateTargetMarks,
         int sampleMark)
@@ -1410,7 +1426,13 @@ public sealed class VisionSystem
             return 0;
         }
 
+        // Keep the nearest hostile contacts from nearby cells. Sampling arbitrary
+        // units here used to let nearby friendlies fill the entire candidate budget,
+        // so a hostile one tile away could never reach the visibility test.
         int count = 0;
+        Span<float> targetDistances = stackalloc float[MaxTargetCandidatesPerObserver];
+        Vector3 observerPosition = units.Position[observer];
+        ushort observerFaction = units.FactionTag[observer];
 
         for (int radius = 0; radius <= NearbyCellRadius; radius++)
         {
@@ -1432,28 +1454,13 @@ public sealed class VisionSystem
 
                     int cell = x + y * _spatialWidth;
                     int cellCount = _spatialCellCounts[cell];
-
-                    if (cellCount == 0 || count >= targets.Length)
+                    if (cellCount == 0)
                         continue;
 
-                    int take = Math.Min(
-                        Math.Min(cellCount, MaxNearbyUnitsPerCell),
-                        targets.Length - count);
-
-                    int offset = (int)(
-                        ((long)observer * TargetObserverOffset +
-                         (long)_visionUpdateSequence * TargetScanStride +
-                         cell) % cellCount);
-
                     int cellStart = _spatialCellStarts[cell];
-
-                    for (int i = 0; i < take; i++)
+                    for (int i = 0; i < cellCount; i++)
                     {
-                        int slot = offset + i;
-                        if (slot >= cellCount)
-                            slot -= cellCount;
-
-                        int target = _spatialUnits[cellStart + slot];
+                        int target = _spatialUnits[cellStart + i];
                         if (target == observer ||
                             candidateTargetMarks[target] == sampleMark)
                         {
@@ -1461,7 +1468,40 @@ public sealed class VisionSystem
                         }
 
                         candidateTargetMarks[target] = sampleMark;
-                        targets[count++] = target;
+                        if (!FactionRules.ShouldAttack(
+                                observerFaction,
+                                units.FactionTag[target]))
+                        {
+                            continue;
+                        }
+
+                        Vector3 targetPosition = units.Position[target];
+                        float tx = targetPosition.X - observerPosition.X;
+                        float ty = targetPosition.Y - observerPosition.Y;
+                        float distanceSquared = tx * tx + ty * ty;
+
+                        // A bounded insertion keeps only the nearest candidates,
+                        // without allocations or an all-pairs scan.
+                        if (count == targets.Length &&
+                            distanceSquared >= targetDistances[count - 1])
+                        {
+                            continue;
+                        }
+
+                        int insertAt = Math.Min(count, targets.Length - 1);
+                        if (count < targets.Length)
+                            count++;
+
+                        while (insertAt > 0 &&
+                               targetDistances[insertAt - 1] > distanceSquared)
+                        {
+                            targets[insertAt] = targets[insertAt - 1];
+                            targetDistances[insertAt] = targetDistances[insertAt - 1];
+                            insertAt--;
+                        }
+
+                        targets[insertAt] = target;
+                        targetDistances[insertAt] = distanceSquared;
                     }
                 }
             }
@@ -1544,8 +1584,11 @@ public sealed class VisionSystem
             {
                 float inverseDistance = 1f / MathF.Sqrt(candidateDistanceSquared);
                 float facingDot = (forward.X * dx + forward.Y * dy) * inverseDistance;
-                if (facingDot < minFacingDot)
+                if (facingDot < minFacingDot &&
+                    candidateDistanceSquared > CloseAwarenessRangeSquared)
+                {
                     continue;
+                }
             }
 
             distanceSquared = MathF.Min(distanceSquared, candidateDistanceSquared);
