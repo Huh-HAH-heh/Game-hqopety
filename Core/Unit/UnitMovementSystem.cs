@@ -73,15 +73,14 @@ public sealed class UnitMovementSystem
                 FactionRules.ShouldAttack(units.FactionTag[unit], units.FactionTag[combatTarget]))
             {
                 Vector3 combatDelta = positions[combatTarget] - positions[unit];
-                Vector3 orderDelta = targets[unit] - positions[combatTarget];
-                bool staleCenterOrder = orderDelta.X * orderDelta.X +
-                    orderDelta.Y * orderDelta.Y < 0.25f * 0.25f;
                 float attackDistance = MeleeCombatSystem.GetAttackDistance(
                     unit, combatTarget, units, inventory);
                 float stopDistance = attackDistance * 0.975f;
 
-                if (staleCenterOrder &&
-                    combatDelta.X * combatDelta.X + combatDelta.Y * combatDelta.Y <=
+                // Stop at contact distance even if navigation still has a waypoint
+                // behind the target. The AI can still assign a different attack slot
+                // next think cycle, but movement never pushes into the opponent.
+                if (combatDelta.X * combatDelta.X + combatDelta.Y * combatDelta.Y <=
                     stopDistance * stopDistance)
                 {
                     hasTarget[unit] = false;
