@@ -438,12 +438,33 @@ public sealed class LongRangeCombatTestScene
             }
         }
 
+        FlattenMeleeArena(worldMap, centerX, centerY);
+
         ClearWater(
             worldMap,
             minX,
             maxX,
             minY,
             maxY);
+    }
+
+    private static void FlattenMeleeArena(
+        WorldMap worldMap,
+        int centerX,
+        int centerY)
+    {
+        // Flat and open so the isolated squad cannot be separated by a random ridge.
+        int minX = Math.Max(1, centerX + 140);
+        int maxX = Math.Min(worldMap.MaxTileX - 1, centerX + 190);
+        int minY = Math.Max(1, centerY + 115);
+        int maxY = Math.Min(worldMap.MaxTileY - 1, centerY + 145);
+        const ushort arenaHeight = 60; // 6 m in 0.1 m terrain layers.
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+                worldMap.SetSolidHeight(x, y, arenaHeight, BaseMaterialId);
+        }
     }
 
     private static bool IsHardCover(
