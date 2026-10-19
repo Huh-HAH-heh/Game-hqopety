@@ -364,7 +364,6 @@ public void DrawSnapshot(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
-        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
@@ -526,10 +525,6 @@ public void DrawSnapshot(
 
             if (!isAlive)
                 continue;
-
-            bool isSelected = selectedUnits != null
-                ? selectedUnits.Contains(new UnitId(unit.Index, unit.Generation))
-                : unit.Index == selectedUnitIndex;
 
             if (isSelected)
             {
