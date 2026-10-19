@@ -364,7 +364,6 @@ public void DrawSnapshot(
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
         float detailBlend = GetUnitDetailBlend(tilePixelSize * screenScale);
-        float closeMarkerBlend = GetCloseMarkerBlend(screenScale);
         bool showUnitDetails = detailBlend > 0f;
         bool showRigDetails = showUnitRig;
 
@@ -538,13 +537,8 @@ public void DrawSnapshot(
                     unit.FactionTag,
                     isAlive,
                     markerOpacity);
-            }
 
-            // Posture glyphs replace the old bright rings. Fade them in only
-            // when the camera is close enough, and keep them unobtrusive.
-            float postureMarkerOpacity = 0.38f * closeMarkerBlend;
-            if (postureMarkerOpacity > 0f)
-            {
+                // Restore the original per-posture glyphs without zoom fading.
                 AppendPostureMarker(
                     _statusIcons,
                     x,
@@ -552,7 +546,7 @@ public void DrawSnapshot(
                     markerRadius,
                     unit.Posture,
                     screenScale,
-                    postureMarkerOpacity);
+                    markerOpacity);
             }
 
             
