@@ -460,21 +460,30 @@ public void DrawSnapshot(
                 continue;
             }
 
-            // I toggles the tactical overlay. Draw active flank and cover goals
-            // for every on-screen unit, not just the selected pawn, so the player
-            // can actually see whether the XML policy is producing movement.
+            // I toggles tactical goal markers. These are hidden at overview
+            // zoom to keep the battlefield readable.
+            bool closeAiOverlay = detailBlend >= 0.65f;
+            bool showPatrolGoal = unit.AiIntent == BehaviacUnitIntent.Patrol;
+            bool showFlankGoal = unit.AiIntent == BehaviacUnitIntent.FlankTarget ||
+                                 unit.AiState == UnitAiState.Flank;
+            bool showCoverGoal = unit.AiIntent is BehaviacUnitIntent.SeekCover or BehaviacUnitIntent.RetreatToCover ||
+                                 unit.AiState == UnitAiState.SeekCover;
+
             if (showAiDebug &&
+                closeAiOverlay &&
                 rootInView &&
                 unit.HitPoints > 0f &&
                 unit.HasGoal &&
-                unit.AiState is UnitAiState.Flank or UnitAiState.SeekCover)
+                (showPatrolGoal || showFlankGoal || showCoverGoal))
             {
-                bool isFlanking = unit.AiState == UnitAiState.Flank;
-                Color maneuverColor = isFlanking
-                    ? new Color(235, 105, 255, 205)
-                    : new Color(70, 175, 255, 195);
+                Color maneuverColor = showPatrolGoal
+                    ? new Color(115, 220, 135, 128)
+                    : showFlankGoal
+                        ? new Color(235, 105, 255, 150)
+                        : new Color(70, 175, 255, 145);
                 float goalX = unit.Goal.X * tilePixelSize;
                 float goalY = unit.Goal.Y * tilePixelSize;
+                float goalRadius = (showPatrolGoal ? 0.30f : showFlankGoal ? 0.48f : 0.38f) * tilePixelSize;
 
                 AppendDebugLine(
                     _aiDebug,
@@ -486,12 +495,12 @@ public void DrawSnapshot(
                         maneuverColor.R,
                         maneuverColor.G,
                         maneuverColor.B,
-                        150));
+                        showPatrolGoal ? (byte)70 : (byte)85));
                 AppendCircleOutline(
                     _aiDebug,
                     goalX,
                     goalY,
-                    (isFlanking ? 0.62f : 0.48f) * tilePixelSize,
+                    goalRadius,
                     maneuverColor,
                     12);
             }
