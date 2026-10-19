@@ -5,6 +5,11 @@ using Core.Items;
 
 namespace Core.Unit;
 
+public readonly record struct MeleeHitVisual(
+    Vector3 Position,
+    ushort FactionTag,
+    float Lifetime);
+
 /// <summary>
 /// CE-inspired close-combat loop: weapon reach, skill-based attacks, critical hits,
 /// evasive movement, parries and ripostes. Uses the shared armor and anatomy damage path.
@@ -33,6 +38,11 @@ public sealed class MeleeCombatSystem
     private float[] _attackCooldown = Array.Empty<float>();
     private float[] _riposteCooldown = Array.Empty<float>();
     private uint[] _randomState = Array.Empty<uint>();
+    private readonly MeleeHitVisual[] _visuals = new MeleeHitVisual[128];
+    private int _visualCount;
+
+    public ReadOnlySpan<MeleeHitVisual> Visuals =>
+        _visuals.AsSpan(0, _visualCount);
 
     public long TotalSwings { get; private set; }
     public long TotalHits { get; private set; }
@@ -76,6 +86,7 @@ public sealed class MeleeCombatSystem
         if (deltaTime <= 0f || units.ActiveCount == 0)
             return;
 
+        UpdateVisuals(deltaTime);
         EnsureCapacity(units.Capacity);
         ReadOnlySpan<int> active = units.ActiveIndices;
 
@@ -270,10 +281,49 @@ public sealed class MeleeCombatSystem
             units, inventory, health, healthSystem, damageEvent, hitRegions, bodies);
 
         TotalHits++;
+        AddVisual(impact, units.FactionTag[attacker]);
         if (result.DamageApplied <= 0.001f)
             TotalBlocked++;
 
         return true;
+    }
+
+    private void UpdateVisuals(float deltaTime)
+    {
+        for (int i = 0; i < _visualCount;)
+        {
+            MeleeHitVisual visual = _visuals[i];
+            float lifetime = visual.Lifetime - deltaTime;
+            if (lifetime <= 0f)
+            {
+                _visuals[i] = _visuals[--_visualCount];
+                _visuals[_visualCount] = default;
+                continue;
+            }
+
+            _visuals[i] = visual with { Lifetime = lifetime };
+            i++;
+        }
+    }
+
+    private void AddVisual(Vector3 position, ushort factionTag)
+    {
+        int slot = _visualCount;
+        if (slot == _visuals.Length)
+        {
+            slot = 0;
+            for (int i = 1; i < _visualCount; i++)
+            {
+                if (_visuals[i].Lifetime < _visuals[slot].Lifetime)
+                    slot = i;
+            }
+        }
+        else
+        {
+            _visualCount++;
+        }
+
+        _visuals[slot] = new MeleeHitVisual(position, factionTag, 0.24f);
     }
 
     private bool TryChooseHitBinding(
