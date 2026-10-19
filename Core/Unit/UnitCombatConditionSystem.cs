@@ -148,6 +148,11 @@ public readonly struct UnitCombatCondition
     public float AimSpreadMultiplier { get; }
     public float ReloadTimeMultiplier { get; }
     public float MeleeDamageMultiplier { get; }
+    public float MeleeAccuracyMultiplier => Math.Clamp(
+        0.45f + 0.55f * MathF.Sqrt(
+            Math.Clamp(ArmIntegrity, 0f, 1f) * Math.Clamp(HandIntegrity, 0f, 1f)),
+        0.35f,
+        1f);
     public float ArmIntegrity { get; }
     public float HandIntegrity { get; }
     public bool CanUseTwoHandedWeapon { get; }
