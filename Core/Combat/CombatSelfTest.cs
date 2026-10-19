@@ -938,7 +938,7 @@ public static class CombatSelfTest
             simulation.Projectiles.ActiveCount == 1;
     }
 
-    private static bool TestProneTargetPointsFollowRig()
+    private static bool TestProceduralZonesFollowPosture()
     {
         UnitSimulation simulation = new UnitSimulation(4, 64);
         UnitId observer = simulation.Spawn(
