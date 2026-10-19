@@ -13,8 +13,8 @@ public static class GameBootstrap
 
         WorldMap worldMap =
             new WorldMap(
-                regionsX: 16,
-                regionsY: 16);
+                regionsX: 48,
+                regionsY: 48);
 
         WorldGenerator.Generate(
             worldMap);
