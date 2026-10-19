@@ -2086,8 +2086,10 @@ public static class CombatSelfTest
             UnitGameplayZone zone = (UnitGameplayZone)zoneIndex;
             UnitGameplayZoneGeometry geometry =
                 UnitGameplayZoneSystem.GetGeometry(simulation.Units, target.Index, zoneIndex);
-            Vector3 start = geometry.Center - new Vector3(0f, 0f, 1f);
-            Vector3 end = geometry.Center + new Vector3(0f, 0f, 1f);
+            // Keep the ray at this zone's altitude so overlapping XY footprints
+            // don't correctly intercept it in a lower zone first.
+            Vector3 start = geometry.Center - new Vector3(1f, 0f, 0f);
+            Vector3 end = geometry.Center + new Vector3(1f, 0f, 0f);
 
             if (!hitSystem.TryHitUnit(
                     simulation.Units,
