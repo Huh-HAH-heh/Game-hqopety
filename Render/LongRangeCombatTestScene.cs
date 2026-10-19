@@ -45,6 +45,7 @@ public sealed class LongRangeCombatTestScene
     private float _elapsed;
     private float _fireTimer;
     private long _hitsAtReset;
+    private long _meleeHitsAtReset;
 
     public bool Initialized =>
         _initialized;
@@ -73,6 +74,7 @@ public sealed class LongRangeCombatTestScene
             _initialized = true;
             // AI/vision are controlled by the user, not reset by scene setup.
             _hitsAtReset = simulation.Projectiles.TotalHits;
+            _meleeHitsAtReset = simulation.MeleeCombat.TotalHits;
         }
         else
         {
@@ -179,16 +181,15 @@ public sealed class LongRangeCombatTestScene
         UpdateStats(simulation);
 
         return
-            $"FIREFIGHT {TotalUnits} | " +
-            $"Blue {AliveBlue} | " +
-            $"Red {AliveRed} | " +
-            $"Melee faction 3: {AliveThirdFaction} | " +
+            $"FIGHT {TotalUnits + _thirdFactionUnits.Length} total | " +
+            $"Blue {AliveBlue} | Red {AliveRed} | F3 melee {AliveThirdFaction} | " +
             $"Initial center gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
             $"Fire mode {(simulation.AI.Enabled ? "AI" : "scripted volley")} | " +
             $"Vision {(simulation.VisionEnabled ? "ON" : "OFF")} | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Routes {simulation.Navigation.RoutesBuilt} built/{simulation.Navigation.RoutesFailed} failed | " +
-            $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
+            $"Shots hit {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
+            $"Melee hits {simulation.MeleeCombat.TotalHits - _meleeHitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
     }
 
@@ -636,24 +637,28 @@ public sealed class LongRangeCombatTestScene
                 ? UnitPosture.Crouching
                 : UnitPosture.Standing);
 
-        int inventorySlot = isMeleeDuelUnit
-            ? -1
-            : simulation.AddInventoryItem(
-                id,
-                WeaponCatalog.AssaultRifle);
+        int inventorySlot = simulation.AddInventoryItem(
+            id,
+            isMeleeDuelUnit
+                ? MeleeWeaponCatalog.CombatKnife
+                : WeaponCatalog.AssaultRifle);
 
         if (inventorySlot >= 0)
         {
-            simulation.EquipWeapon(
-                id,
-                inventorySlot,
-                UnitWeaponSlot.Primary);
+            UnitWeaponSlot weaponSlot = isMeleeDuelUnit
+                ? UnitWeaponSlot.Melee
+                : UnitWeaponSlot.Primary;
 
-            simulation.Weapons.AddReserveAmmo(
-                unitIndex,
-                UnitWeaponSlot.Primary,
-                1_000);
-            ConfigureCombatModes(simulation, unitIndex, index);
+            simulation.EquipWeapon(id, inventorySlot, weaponSlot);
+
+            if (!isMeleeDuelUnit)
+            {
+                simulation.Weapons.AddReserveAmmo(
+                    unitIndex,
+                    UnitWeaponSlot.Primary,
+                    1_000);
+                ConfigureCombatModes(simulation, unitIndex, index);
+            }
         }
 
         simulation.AI.Store.InitializeUnit(
@@ -672,8 +677,8 @@ public sealed class LongRangeCombatTestScene
 
         _elapsed = 0f;
         _fireTimer = 0f;
-        _hitsAtReset =
-            simulation.Projectiles.TotalHits;
+        _hitsAtReset = simulation.Projectiles.TotalHits;
+        _meleeHitsAtReset = simulation.MeleeCombat.TotalHits;
 
         simulation.Projectiles.Clear();
 
@@ -789,10 +794,11 @@ public sealed class LongRangeCombatTestScene
             simulation.Suppression.ClearUnit(
                 unit);
 
-            simulation.AI.Store.InitializeUnit(
-                unit);
-
-            if (!isMeleeDuelUnit)
+            simulation.AI.Store.InitializeUnit(unit);
+            simulation.AI.InitializeUnit(unit);
+            if (isMeleeDuelUnit)
+                simulation.MeleeCombat.InitializeUnit(unit, _units[i]);
+            else
                 RestoreWeapon(simulation, unit);
         }
 
@@ -820,6 +826,11 @@ public sealed class LongRangeCombatTestScene
                 direction,
                 factionTag: 3);
             _thirdFactionUnits[i] = id;
+
+            int meleeSlot = simulation.AddInventoryItem(id, MeleeWeaponCatalog.LongBlade);
+            if (meleeSlot >= 0)
+                simulation.EquipWeapon(id, meleeSlot, UnitWeaponSlot.Melee);
+
             simulation.Units.ViewRange[id.Index] = VisionStressRange;
             simulation.Units.FieldOfView[id.Index] = 180f;
             simulation.SetPosture(id, UnitPosture.Standing);
@@ -848,8 +859,11 @@ public sealed class LongRangeCombatTestScene
             simulation.Units.ViewRange[unit] = VisionStressRange;
             simulation.Units.FieldOfView[unit] = 180f;
             simulation.AI.Store.InitializeUnit(unit);
+            simulation.AI.InitializeUnit(unit);
+            simulation.MeleeCombat.InitializeUnit(unit, id);
             RestoreHealth(simulation, unit);
             simulation.Suppression.ClearUnit(unit);
+            simulation.SetHeadNormal(id, Vector3.UnitX);
             simulation.SetPosture(id, UnitPosture.Standing);
             simulation.SetTarget(id, simulation.Units.Position[unit]);
         }
@@ -1039,6 +1053,7 @@ public sealed class LongRangeCombatTestScene
     {
         int blue = 0;
         int red = 0;
+        int third = 0;
 
         ReadOnlySpan<int> active =
             simulation.Units.ActiveIndices;
@@ -1063,11 +1078,12 @@ public sealed class LongRangeCombatTestScene
             else if (simulation.Units.FactionTag[unit] == 3 &&
                      simulation.Health.OverallHitPoints[unit] > 0f)
             {
-                AliveThirdFaction++;
+                third++;
             }
         }
 
         AliveBlue = blue;
         AliveRed = red;
+        AliveThirdFaction = third;
     }
 }
