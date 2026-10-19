@@ -241,15 +241,6 @@ public sealed class UnitRenderSystem : IDisposable
                     isAlive,
                     markerOpacity);
 
-                // Restore the original per-posture glyphs without zoom fading.
-                AppendPostureMarker(
-                    _statusIcons,
-                    screenX,
-                    screenY,
-                    markerRadius,
-                    units.Posture[unitIndex],
-                    screenScale,
-                    markerOpacity);
             }
 
             
@@ -530,15 +521,6 @@ public void DrawSnapshot(
                     isAlive,
                     markerOpacity);
 
-                // Restore the original per-posture glyphs without zoom fading.
-                AppendPostureMarker(
-                    _statusIcons,
-                    x,
-                    y,
-                    markerRadius,
-                    unit.Posture,
-                    screenScale,
-                    markerOpacity);
             }
 
             
