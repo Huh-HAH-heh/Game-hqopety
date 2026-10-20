@@ -73,9 +73,7 @@ public sealed class UnitAiSystem
     public int LastBehaviacRetreatDecisions { get; private set; }
     public int LastBehaviacFlankDecisions { get; private set; }
     public int LastBehaviacEngageDecisions { get; private set; }
-    public int LastBehaviacSuppressDecisions { get; private set; }
     public int LastBehaviacInvestigateDecisions { get; private set; }
-    public int LastBehaviacPatrolDecisions { get; private set; }
     public int LastBehaviacMoveOrderDecisions { get; private set; }
     public int LastBehaviacHoldOrderDecisions { get; private set; }
     public int LastBehaviacAttackOrderDecisions { get; private set; }
@@ -164,9 +162,7 @@ public sealed class UnitAiSystem
         LastBehaviacRetreatDecisions = 0;
         LastBehaviacFlankDecisions = 0;
         LastBehaviacEngageDecisions = 0;
-        LastBehaviacSuppressDecisions = 0;
         LastBehaviacInvestigateDecisions = 0;
-        LastBehaviacPatrolDecisions = 0;
         LastBehaviacMoveOrderDecisions = 0;
         LastBehaviacHoldOrderDecisions = 0;
         LastBehaviacAttackOrderDecisions = 0;
@@ -242,20 +238,6 @@ public sealed class UnitAiSystem
                     units, health, inventory, weapons, vision, suppression, unit, suppressionState, isAlive);
                 LastBehaviacDecisionBatchMilliseconds +=
                     Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
-
-                // A visible hostile must not be ignored because the tree returns a
-                // stale Patrol intent; low-health retreat and suppression panic still win.
-                bool currentTargetVisible = Store.HasTarget[unit] &&
-                    units.IsAlive(Store.Target[unit]) &&
-                    IsHostile(units, unit, Store.Target[unit].Index) &&
-                    vision.IsRecentlyVisible(unit, Store.Target[unit].Index, units);
-                if (intent == BehaviacUnitIntent.Patrol &&
-                    (_nearestVisibleEnemyByUnit[unit] >= 0 || currentTargetVisible) &&
-                    suppressionState != UnitSuppressionState.Panicked &&
-                    !IsLowHealth(health, unit))
-                {
-                    intent = BehaviacUnitIntent.EngageTarget;
-                }
 
                 RecordBehaviacIntent(intent);
             }
@@ -457,19 +439,6 @@ public sealed class UnitAiSystem
                     targetId,
                     units.Position[visibleEnemy],
                     TargetMemorySeconds);
-            }
-
-            // The tree can select Patrol only when there is neither a visible
-            // target nor a remembered target. Drop an expired target before the
-            // existing patrol/search path runs.
-            if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.Patrol &&
-                Store.HasTarget[unit] &&
-                Store.TargetMemory[unit] <= 0f)
-            {
-                ClearAiming(weapons, unit);
-                Store.ClearTarget(unit);
-                units.HasTarget[unit] = false;
             }
 
             if (!Store.HasTarget[unit])
@@ -953,14 +922,11 @@ public sealed class UnitAiSystem
                 continue;
             }
 
-            if (Store.TargetMemory[unit] > 0f &&
-                (!UseBehaviacDecisionLayer ||
-                 intent == BehaviacUnitIntent.SuppressiveFire ||
-                 intent == BehaviacUnitIntent.InvestigateLastKnownTarget))
+            // The simplified Behaviac tree no longer invents targets from stale
+            // coordinates. The legacy comparison path keeps its original behavior.
+            if (!UseBehaviacDecisionLayer && Store.TargetMemory[unit] > 0f)
             {
-                if ((!UseBehaviacDecisionLayer ||
-                     intent == BehaviacUnitIntent.SuppressiveFire) &&
-                    HasSuppressFireWeapon(inventory, weapons, unit))
+                if (HasSuppressFireWeapon(inventory, weapons, unit))
                 {
                     Vector3 lastSeenAimPoint = Store.LastSeenAimPoint[unit];
                     if (lastSeenAimPoint == Vector3.Zero)
@@ -1125,12 +1091,9 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.FlankTarget: LastBehaviacFlankDecisions++; break;
             case BehaviacUnitIntent.EngageTarget:
             case BehaviacUnitIntent.ProneEngage: LastBehaviacEngageDecisions++; break;
-            case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
-            case BehaviacUnitIntent.InvestigateLastKnownTarget:
             case BehaviacUnitIntent.InvestigateAudibleContact:
                 LastBehaviacInvestigateDecisions++;
                 break;
-            case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
             case BehaviacUnitIntent.FollowMoveOrder: LastBehaviacMoveOrderDecisions++; break;
             case BehaviacUnitIntent.HoldPosition: LastBehaviacHoldOrderDecisions++; break;
             case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
