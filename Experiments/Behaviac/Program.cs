@@ -90,7 +90,10 @@ internal static class Program
                     BehaviacRuntimeHost.CreateAgent<BehaviacUnitDecisionAgent>("rimclone_unit_decision");
                 agent.SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
                     test.HasVisibleTarget, test.HasRecentTarget, test.IsLowHealth,
-                    test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking, test.ProneCombatUtility, test.IsProne);
+                    test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
+                    test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
+                    test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
+                    test.CombatUtility);
 
                 EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                 BehaviacUnitIntent directIntent = ResolveDirect(test);
@@ -140,7 +143,10 @@ internal static class Program
 
                     agents[unit].SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
                         test.HasVisibleTarget, test.HasRecentTarget, test.IsLowHealth,
-                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking, test.ProneCombatUtility, test.IsProne);
+                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
+                        test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
+                        test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
+                        test.CombatUtility);
                     _ = BehaviacRuntimeHost.Tick(agents[unit]);
                 }
             }
@@ -237,7 +243,25 @@ internal static class Program
         new("recent target without suppressive weapon is investigated", true, false, false, false, true, BehaviacUnitIntent.InvestigateLastKnownTarget),
         new("no target falls back to patrol", true, false, false, false, false, BehaviacUnitIntent.Patrol),
         new("suppression without cover does not force cover intent", true, true, false, true, false, BehaviacUnitIntent.EngageTarget),
-        new("suppression interrupts an ongoing flank", true, true, false, true, false, BehaviacUnitIntent.EngageTarget, true, true)
+        new("suppression interrupts an ongoing flank", true, true, false, true, false, BehaviacUnitIntent.EngageTarget, true, true),
+        new("attack order continues toward the last known objective", true, false, false, false, true,
+            BehaviacUnitIntent.AttackOrder, HasSuppressiveWeapon: true, HasAttackOrder: true),
+        new("attack order engages a newly visible threat", true, false, false, true, false,
+            BehaviacUnitIntent.EngageTarget, HasAttackOrder: true),
+        new("hold order fires without advancing on a visible hostile", true, false, false, true, false,
+            BehaviacUnitIntent.HoldPositionEngage, HasStopOrder: true),
+        new("hold order beats suppressive fire at a lost target", true, false, false, false, true,
+            BehaviacUnitIntent.HoldPosition, HasSuppressiveWeapon: true, HasStopOrder: true),
+        new("hold order can yield to suppression cover", true, true, true, true, false,
+            BehaviacUnitIntent.SeekCover, HasStopOrder: true),
+        new("held low-health unit may retreat when cover exists", true, false, true, true, true,
+            BehaviacUnitIntent.RetreatToCover, HasStopOrder: true, IsLowHealth: true),
+        new("held low-health unit stays held when no cover exists", true, false, false, true, true,
+            BehaviacUnitIntent.HoldPositionEngage, HasStopOrder: true, IsLowHealth: true),
+        new("move task wins when its utility beats visible combat", true, false, false, true, false,
+            BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f, CombatUtility: 0.4f),
+        new("visible combat interrupts a low-utility move task", true, false, false, true, false,
+            BehaviacUnitIntent.EngageTarget, HasMoveOrder: true, MoveOrderUtility: 0.2f, CombatUtility: 0.9f)
     ];
 
     private static BehaviacUnitIntent ResolveDirect(DecisionCase test)
@@ -248,8 +272,20 @@ internal static class Program
         if (test.IsSuppressed && test.HasCover)
             return BehaviacUnitIntent.SeekCover;
 
-        if (test.IsLowHealth && (test.HasVisibleTarget || test.HasRecentTarget))
+        if (test.IsLowHealth && (test.HasVisibleTarget || test.HasRecentTarget) &&
+            (!test.HasStopOrder || test.HasCover))
             return BehaviacUnitIntent.RetreatToCover;
+
+        if (test.HasAttackOrder && !test.HasVisibleTarget)
+            return BehaviacUnitIntent.AttackOrder;
+
+        if (test.HasStopOrder)
+            return test.HasVisibleTarget
+                ? BehaviacUnitIntent.HoldPositionEngage
+                : BehaviacUnitIntent.HoldPosition;
+
+        if (test.HasMoveOrder && test.MoveOrderUtility >= test.CombatUtility)
+            return BehaviacUnitIntent.FollowMoveOrder;
 
         if (test.HasVisibleTarget && !test.IsSuppressed && (test.CanFlank || test.IsFlanking))
             return BehaviacUnitIntent.FlankTarget;
@@ -290,7 +326,12 @@ internal static class Program
         bool IsLowHealth = false,
         bool HasSuppressiveWeapon = false,
         float ProneCombatUtility = 0f,
-        bool IsProne = false);
+        bool IsProne = false,
+        bool HasMoveOrder = false,
+        bool HasStopOrder = false,
+        bool HasAttackOrder = false,
+        float MoveOrderUtility = 0f,
+        float CombatUtility = 0f);
 }
 
 [TypeMetaInfo()]
