@@ -772,7 +772,7 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "LMB drag=create squad click soldier=select soldier squad ring=select squad Shift+click=add/remove K=disband Shift+1-9=bind 1-9=select RMB=move/attack S=hold | " +
+            "LMB drag=create/merge squad squad ring=select squad Shift+click=add/transfer/detach U=group/split K=disband Shift+1-9=bind 1-9=select RMB=move/attack S=hold | " +
             "A=enable AI B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
@@ -1096,9 +1096,21 @@ public sealed class GameRenderer
         if (members.Length < 2)
             return;
 
+        int existingSquadId = GetSelectedSquadId();
+        InfantrySquad? existingSquad = _squadManager.GetSquad(existingSquadId);
+        if (existingSquad != null && existingSquad.Members.Count == members.Length)
+        {
+            // Avoid recreating the exact squad on a repeated drag or shortcut;
+            // that would needlessly discard its commander identity/hotkey.
+            SelectSquad(existingSquadId, false);
+            Console.WriteLine($"[SQUAD] Selection already matches squad {existingSquadId}.");
+            return;
+        }
+
         int squadId = _squadManager.Create(members);
         SelectSquad(squadId, false);
-        Console.WriteLine($"[SQUAD] Created squad {squadId} with {members.Length} soldiers.");
+        Console.WriteLine(
+            $"[SQUAD] Created/merged squad {squadId} with {members.Length} soldiers.");
     }
 
     private bool TryDisbandSelectedSquads()
@@ -1731,9 +1743,23 @@ public sealed class GameRenderer
 
             int clickedSquadId = _squadManager.GetSquadId(id);
             int selectedSquadId = GetSelectedSquadId();
+            if (clickedSquadId != 0 &&
+                selectedSquadId != 0 &&
+                clickedSquadId != selectedSquadId)
+            {
+                // With a squad selected, Shift-clicking a soldier in another squad
+                // transfers that soldier into the selected squad instead of detaching it.
+                _squadManager.AddMember(selectedSquadId, id);
+                SelectSquad(selectedSquadId, false);
+                Console.WriteLine(
+                    $"[SQUAD] Soldier transferred from squad {clickedSquadId} to squad {selectedSquadId}.");
+                return;
+            }
+
             if (clickedSquadId != 0)
             {
-                // Shift-click detaches a soldier from its current squad.
+                // Shift-click a member of the currently selected squad (or with no
+                // squad selected) to detach just that soldier.
                 _squadManager.RemoveMember(id);
                 _selectedUnits.Clear();
                 _selectedUnits.Add(id);
@@ -2727,6 +2753,12 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.K && TryDisbandSelectedSquads())
             return;
+
+        if (key == Keyboard.Key.U)
+        {
+            CreateSquadFromSelection();
+            return;
+        }
 
         if (TryHandleSquadHotkey(key))
             return;
