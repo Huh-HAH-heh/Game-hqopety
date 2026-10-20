@@ -18,6 +18,7 @@ public sealed class ProjectileSystem
     private readonly DamageSystem _damageSystem = new DamageSystem();
     private int[] _nearMissMarks = Array.Empty<int>();
     private int[] _nearMissCandidates = Array.Empty<int>();
+    private float[] _nearMissCandidateHitTimes = Array.Empty<float>();
     private int _nearMissStamp;
 
     public double LastUpdateMilliseconds { get; private set; }
@@ -63,6 +64,8 @@ public sealed class ProjectileSystem
             Array.Resize(ref _nearMissMarks, units.Capacity);
         if (_nearMissCandidates.Length < units.Capacity)
             Array.Resize(ref _nearMissCandidates, units.Capacity);
+        if (_nearMissCandidateHitTimes.Length < units.Capacity)
+            Array.Resize(ref _nearMissCandidateHitTimes, units.Capacity);
 
         long gridStarted = Stopwatch.GetTimestamp();
         _unitGrid.Build(units, bodies, health, hitRegions);
@@ -420,16 +423,16 @@ public sealed class ProjectileSystem
                 float globalT = intersectsUnit
                     ? segmentStart + (segmentEnd - segmentStart) * localHit.T
                     : 2f;
-                bool hitBeforeTerrain = intersectsUnit && globalT < terrainT;
-
-                // Resolve near misses after candidate collection so both a terrain
-                // impact and the earliest unit hit can truncate the real path.
+                // Collect eligible candidates now, but defer the distance query
+                // until the earliest actual collision in this cell is known.
                 if (!alreadyNearMissed &&
-                    !hitBeforeTerrain &&
                     (projectiles.FactionTag[projectileIndex] == 0 ||
                      units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex]))
                 {
-                    _nearMissCandidates[nearMissCandidateCount++] = unitIndex;
+                    _nearMissCandidates[nearMissCandidateCount] = unitIndex;
+                    _nearMissCandidateHitTimes[nearMissCandidateCount] =
+                        intersectsUnit ? globalT : 2f;
+                    nearMissCandidateCount++;
                 }
 
                 if (!intersectsUnit)
@@ -459,7 +462,8 @@ public sealed class ProjectileSystem
             for (int n = 0; n < nearMissCandidateCount; n++)
             {
                 int nearMissUnit = _nearMissCandidates[n];
-                if (_nearMissMarks[nearMissUnit] == nearMissStamp)
+                if (_nearMissMarks[nearMissUnit] == nearMissStamp ||
+                    _nearMissCandidateHitTimes[n] <= nearMissEndT)
                     continue;
 
                 if (!UnitSuppressionSystem.AddNearMiss(
