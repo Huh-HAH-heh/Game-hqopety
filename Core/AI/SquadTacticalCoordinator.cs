@@ -122,6 +122,26 @@ public sealed class SquadTacticalCoordinator
             return _membership.TryGetValue(member, out int currentSquad) && currentSquad == squadId;
     }
 
+    public bool HasExpiredObservation(int squadId, UnitId target, float now)
+    {
+        if (squadId <= 0 || !target.IsValid || !float.IsFinite(now)) return true;
+        lock (_gate)
+        {
+            if (!_squads.TryGetValue(squadId, out SquadState? squad)) return true;
+            bool found = false;
+            float latest = float.NegativeInfinity;
+            foreach (Observation observation in squad.Observations.Values)
+            {
+                if (!observation.Target.Equals(target)) continue;
+                found = true;
+                latest = MathF.Max(latest, observation.PublishedAt);
+            }
+
+            // Preserve explicit player objectives that have never been locally observed.
+            return found && now - latest >= ContactLifetimeSeconds;
+        }
+    }
+
     /// <summary>Remove a unit from squad coordination and invalidate reports or claims tied to it.</summary>
     public void InvalidateUnit(UnitId unit)
     {
