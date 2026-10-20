@@ -93,7 +93,15 @@ internal static class Program
             ("distant combat utility", UnitTacticalUtility.EvaluateVisibleCombat(24.01f, true), 0.54f),
             ("exposed prone firing utility at minimum distance", UnitTacticalUtility.EvaluateProneFiring(9f, true, 1f), 0.35f),
             ("exposed distant prone firing utility", UnitTacticalUtility.EvaluateProneFiring(34f, true, 1f), 1f),
-            ("cover lowers prone-position advantage", UnitTacticalUtility.EvaluateProneFiring(34f, false, 1f), 0.80f)
+            ("cover lowers prone-position advantage", UnitTacticalUtility.EvaluateProneFiring(34f, false, 1f), 0.80f),
+            ("missing cover makes cover action infeasible", UnitTacticalUtility.EvaluateCover(5.8f, false, false, false, false), 0f),
+            ("immediate danger overrides utility trade-off", UnitTacticalUtility.EvaluateCover(0f, true, true, false, false), 1f),
+            ("panic makes available cover the top action", UnitTacticalUtility.EvaluateCover(5.8f, true, false, true, false), 1f),
+            ("mild suppression gives cover a low score", UnitTacticalUtility.EvaluateCover(1.8f, true, false, false, false), 0.18f),
+            ("flank gains utility when far outside weapon range", UnitTacticalUtility.EvaluateFlanking(45f, 18f, true), 0.62833333f),
+            ("infeasible flank has no utility", UnitTacticalUtility.EvaluateFlanking(45f, 18f, false), 0f),
+            ("investigation rewards credible nearby contact", UnitTacticalUtility.EvaluateInvestigation(0.8f, 20f), 0.740625f),
+            ("weak distant sound is not worth investigating", UnitTacticalUtility.EvaluateInvestigation(0.16f, 64f), 0.02f)
         ];
 
         bool passedAll = true;
@@ -373,7 +381,8 @@ internal static class Program
                     test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                     test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                     test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                    test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted);
+                    test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted,
+                    test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
 
                 EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                 BehaviacUnitIntent directIntent = ResolveDirect(test);
@@ -428,7 +437,8 @@ internal static class Program
                         test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted);
+                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted,
+                    test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
                     _ = BehaviacRuntimeHost.Tick(agents[unit]);
                 }
             }
@@ -466,7 +476,8 @@ internal static class Program
                         test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted);
+                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted,
+                    test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
@@ -516,13 +527,18 @@ internal static class Program
     private static DecisionCase[] GetDecisionCases() =>
     [
         new("dead overrides every other fact", false, true, true, true, true, BehaviacUnitIntent.Dead, true, true),
-        new("cover seeking overrides visible target and flank", true, true, true, true, true, BehaviacUnitIntent.SeekCover, true, false),
+        new("cover seeking overrides visible target and flank", true, true, true, true, true,
+            BehaviacUnitIntent.SeekCover, true, false, CombatUtility: 0.90f, CoverUtility: 1f),
         new("low health prioritizes retreat over combat", true, false, false, true, true, BehaviacUnitIntent.RetreatToCover, true, false, true, false),
-        new("flanker selects a flank maneuver", true, false, false, true, false, BehaviacUnitIntent.FlankTarget, true, false),
-        new("ongoing flank survives closing distance", true, false, false, true, false, BehaviacUnitIntent.FlankTarget, false, true),
+        new("flanker wins when its utility beats firing", true, false, false, true, false,
+            BehaviacUnitIntent.FlankTarget, true, false, CombatUtility: 0.54f, FlankUtility: 0.75f),
+        new("ongoing flank survives closing distance", true, false, false, true, false,
+            BehaviacUnitIntent.FlankTarget, false, true, CombatUtility: 0.95f, FlankUtility: 0f),
         new("ordinary unit engages visible target", true, false, false, true, false, BehaviacUnitIntent.EngageTarget),
-        new("exposed unit chooses a prone firing position", true, false, false, true, false, BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.75f),
-        new("low prone utility keeps a normal firing posture", true, false, false, true, false, BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.40f),
+        new("prone position wins against low-value firing", true, false, false, true, false,
+            BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.75f, CombatUtility: 0.54f),
+        new("prone loses when standing fire has better utility", true, false, false, true, false,
+            BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.60f, CombatUtility: 0.84f),
         new("already-prone unit keeps crawling as the target closes", true, false, false, true, false, BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.10f, IsProne: true),
         new("lost target with suppressive weapon uses fire support", true, false, false, false, true, BehaviacUnitIntent.SuppressiveFire, false, false, false, true),
         new("recent target without suppressive weapon is investigated", true, false, false, false, true, BehaviacUnitIntent.InvestigateLastKnownTarget),
@@ -538,7 +554,7 @@ internal static class Program
         new("hold order beats suppressive fire at a lost target", true, false, false, false, true,
             BehaviacUnitIntent.HoldPosition, HasSuppressiveWeapon: true, HasStopOrder: true),
         new("hold order can yield to suppression cover", true, true, true, true, false,
-            BehaviacUnitIntent.SeekCover, HasStopOrder: true),
+            BehaviacUnitIntent.SeekCover, HasStopOrder: true, CombatUtility: 0.68f, CoverUtility: 0.84f),
         new("held low-health unit may retreat when cover exists", true, false, true, true, true,
             BehaviacUnitIntent.RetreatToCover, HasStopOrder: true, IsLowHealth: true),
         new("held low-health unit stays held when no cover exists", true, false, false, true, true,
@@ -548,16 +564,19 @@ internal static class Program
         new("visible combat interrupts a low-utility move task", true, false, false, true, false,
             BehaviacUnitIntent.EngageTarget, HasMoveOrder: true, MoveOrderUtility: 0.2f, CombatUtility: 0.9f),
         new("unknown sound with awareness is investigated", true, false, false, false, false,
-            BehaviacUnitIntent.InvestigateAudibleContact, HasAudibleContact: true, IsAlerted: true),
+            BehaviacUnitIntent.InvestigateAudibleContact, HasAudibleContact: true, IsAlerted: true,
+            InvestigationUtility: 0.70f),
         new("faint sound without alertness does not trigger investigation", true, false, false, false, false,
-            BehaviacUnitIntent.Patrol, HasAudibleContact: true),
+            BehaviacUnitIntent.Patrol, HasAudibleContact: true, InvestigationUtility: 0.70f),
         new("move order outranks an uncertain sound", true, false, false, false, false,
             BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f,
-            HasAudibleContact: true, IsAlerted: true),
+            HasAudibleContact: true, IsAlerted: true, InvestigationUtility: 0.70f),
         new("hold order outranks an uncertain sound", true, false, false, false, false,
-            BehaviacUnitIntent.HoldPosition, HasStopOrder: true, HasAudibleContact: true, IsAlerted: true),
+            BehaviacUnitIntent.HoldPosition, HasStopOrder: true, HasAudibleContact: true, IsAlerted: true,
+            InvestigationUtility: 0.70f),
         new("identified last-known contact outranks an uncertain sound", true, false, false, false, true,
-            BehaviacUnitIntent.InvestigateLastKnownTarget, HasAudibleContact: true, IsAlerted: true),
+            BehaviacUnitIntent.InvestigateLastKnownTarget, HasAudibleContact: true, IsAlerted: true,
+            InvestigationUtility: 0.70f),
         new("immediate danger selects cover when an option exists", true, false, true, false, false,
             BehaviacUnitIntent.SeekCover, HasImmediateDanger: true),
         new("immediate danger without a cover option does not invent a cover goal", true, false, false, false, false,
@@ -569,8 +588,12 @@ internal static class Program
         if (!test.IsAlive)
             return BehaviacUnitIntent.Dead;
 
-        if (test.HasCover && (test.IsSuppressed || test.HasImmediateDanger))
+        if (test.HasCover &&
+            (test.HasImmediateDanger ||
+             (test.IsSuppressed && test.CoverUtility > test.CombatUtility)))
+        {
             return BehaviacUnitIntent.SeekCover;
+        }
 
         if (test.IsLowHealth && (test.HasVisibleTarget || test.HasRecentTarget) &&
             (!test.HasStopOrder || test.HasCover))
@@ -587,16 +610,23 @@ internal static class Program
         if (test.HasMoveOrder && test.MoveOrderUtility >= test.CombatUtility)
             return BehaviacUnitIntent.FollowMoveOrder;
 
-        if (test.HasVisibleTarget && !test.IsSuppressed && (test.CanFlank || test.IsFlanking))
+        bool flankWins = test.CanFlank &&
+            test.FlankUtility > test.CombatUtility + UnitTacticalUtility.FlankUtilityAdvantage;
+        if (test.HasVisibleTarget && !test.IsSuppressed &&
+            (test.IsFlanking || flankWins))
+        {
             return BehaviacUnitIntent.FlankTarget;
+        }
 
         if (test.HasVisibleTarget)
         {
             if (!test.IsSuppressed &&
                 !test.IsLowHealth &&
-                !test.CanFlank &&
                 !test.IsFlanking &&
-                (test.ProneCombatUtility >= 0.60f || test.IsProne))
+                (test.IsProne ||
+                 (test.ProneCombatUtility >= 0.60f &&
+                  test.ProneCombatUtility > test.CombatUtility &&
+                  !flankWins)))
             {
                 return BehaviacUnitIntent.ProneEngage;
             }
@@ -610,8 +640,11 @@ internal static class Program
         if (test.HasRecentTarget)
             return BehaviacUnitIntent.InvestigateLastKnownTarget;
 
-        if (test.IsAlerted && test.HasAudibleContact && !test.IsSuppressed && !test.IsLowHealth)
+        if (test.IsAlerted && test.HasAudibleContact && !test.IsSuppressed && !test.IsLowHealth &&
+            test.InvestigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility)
+        {
             return BehaviacUnitIntent.InvestigateAudibleContact;
+        }
 
         return BehaviacUnitIntent.Patrol;
     }
@@ -637,7 +670,10 @@ internal static class Program
         float CombatUtility = 0f,
         bool HasAudibleContact = false,
         bool HasImmediateDanger = false,
-        bool IsAlerted = false);
+        bool IsAlerted = false,
+        float CoverUtility = 0f,
+        float FlankUtility = 0f,
+        float InvestigationUtility = 0f);
 }
 
 [TypeMetaInfo()]

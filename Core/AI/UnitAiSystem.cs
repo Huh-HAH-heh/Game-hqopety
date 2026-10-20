@@ -1261,6 +1261,8 @@ public sealed class UnitAiSystem
         bool hasSuppressiveWeapon = HasSuppressFireWeapon(inventory, weapons, unit);
         bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
+        float flankDistance = 0f;
+        float flankEffectiveRange = 0f;
 
         // Flanking is a ranged-fire maneuver. A melee-only unit should
         // commit toward contact instead of spending its first approach on a
@@ -1272,6 +1274,7 @@ public sealed class UnitAiSystem
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
+            flankDistance = MathF.Sqrt(distanceSquared);
             bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
                 _flankTargetByUnit[unit].Equals(units.GetId(visibleTargetIndex));
 
@@ -1279,6 +1282,7 @@ public sealed class UnitAiSystem
             // to contact. Most shooters should open fire from their current lane.
             float maxFlankRange = MathF.Min(75f, MathF.Max(25f, units.ViewRange[unit] * 0.85f));
             float effectiveRange = GetMaxEffectiveRange(inventory, unit);
+            flankEffectiveRange = effectiveRange;
             bool stillOutsideWeaponRange = effectiveRange > 0.1f &&
                 distanceSquared > effectiveRange * effectiveRange;
             canFlank = !alreadyFlankedThisTarget &&
@@ -1291,6 +1295,10 @@ public sealed class UnitAiSystem
             Store.State[unit] == UnitAiState.Flank &&
             isHealthyEnoughToFlank &&
             HasRangedWeapon(units, inventory, unit);
+        float flankUtility = UnitTacticalUtility.EvaluateFlanking(
+            flankDistance,
+            flankEffectiveRange,
+            canFlank);
 
         float proneUtility = 0f;
         if (hasVisibleTarget &&
@@ -1319,8 +1327,33 @@ public sealed class UnitAiSystem
                !ReachedGoal(units.Position[unit], _suppressionCoverByUnit[unit])) ||
               (hasCoverGoal && !ReachedGoal(units.Position[unit], Store.Goal[unit]));
 
-        bool hasAudibleContact = Hearing?.HasInvestigableContact(unit) == true;
+        bool hasAudibleContact = false;
+        float investigationUtility = 0f;
+        if (Hearing != null &&
+            Hearing.TryGetBestInvestigableContact(unit, out TacticalContact audibleContact))
+        {
+            Vector3 contactDelta = audibleContact.EstimatedPosition - units.Position[unit];
+            float contactDistance = MathF.Sqrt(
+                contactDelta.X * contactDelta.X +
+                contactDelta.Y * contactDelta.Y);
+            float confidence = audibleContact.GetEffectiveConfidence(
+                Hearing.CurrentTimeSeconds,
+                2.5f);
+            investigationUtility = UnitTacticalUtility.EvaluateInvestigation(
+                confidence,
+                contactDistance);
+            hasAudibleContact =
+                investigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility;
+        }
+
         bool hasImmediateDanger = suppression.IsInImmediateDanger(unit);
+        float coverUtility = UnitTacticalUtility.EvaluateCover(
+            suppression.Value[unit],
+            hasCover,
+            hasImmediateDanger,
+            suppressionState == UnitSuppressionState.Panicked,
+            isLowHealth);
+
         agent.SetFacts(
             isAlive,
             isSuppressed,
@@ -1340,7 +1373,10 @@ public sealed class UnitAiSystem
             combatUtility,
             hasAudibleContact,
             hasImmediateDanger,
-            isAlerted);
+            isAlerted,
+            coverUtility,
+            flankUtility,
+            investigationUtility);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)

@@ -72,6 +72,12 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public float MoveOrderUtility { get; private set; }
     [MemberMetaInfo("Combat utility", "Utility score for responding to current hostile contact (0 to 1).", true)]
     public float CombatUtility { get; private set; }
+    [MemberMetaInfo("Cover utility", "Utility of the available cover action (0 to 1).", true)]
+    public float CoverUtility { get; private set; }
+    [MemberMetaInfo("Flank utility", "Utility of the available flank maneuver (0 to 1).", true)]
+    public float FlankUtility { get; private set; }
+    [MemberMetaInfo("Investigation utility", "Utility of investigating an uncertain sound contact (0 to 1).", true)]
+    public float InvestigationUtility { get; private set; }
 
     public void SetFacts(
         bool isAlive,
@@ -92,7 +98,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         float combatUtility = 0f,
         bool hasAudibleContact = false,
         bool isInImmediateDanger = false,
-        bool isAlerted = false)
+        bool isAlerted = false,
+        float coverUtility = 0f,
+        float flankUtility = 0f,
+        float investigationUtility = 0f)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -119,6 +128,15 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         CombatUtility = float.IsFinite(combatUtility)
             ? System.Math.Clamp(combatUtility, 0f, 1f)
             : 0f;
+        CoverUtility = float.IsFinite(coverUtility)
+            ? System.Math.Clamp(coverUtility, 0f, 1f)
+            : 0f;
+        FlankUtility = float.IsFinite(flankUtility)
+            ? System.Math.Clamp(flankUtility, 0f, 1f)
+            : 0f;
+        InvestigationUtility = float.IsFinite(investigationUtility)
+            ? System.Math.Clamp(investigationUtility, 0f, 1f)
+            : 0f;
         Intent = BehaviacUnitIntent.None;
     }
 
@@ -127,7 +145,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldSeekCover", "Check whether suppression cover should take priority.")]
     public bool ShouldSeekCover() =>
-        IsAlive && HasCover && (IsSuppressed || IsInImmediateDanger);
+        IsAlive && HasCover &&
+        (IsInImmediateDanger || (IsSuppressed && CoverUtility > CombatUtility));
 
     [MethodMetaInfo("ShouldExecuteAttackOrder", "Continue the attack task toward its last known contact only when no hostile is visible.")]
     public bool ShouldExecuteAttackOrder() =>
@@ -153,7 +172,12 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldTakePronePosition", "Prefer a prone firing position when distance and exposure justify it.")]
     public bool ShouldTakePronePosition() =>
         IsAlive && HasVisibleTarget && !IsSuppressed && !IsLowHealth &&
-        !CanFlank && !IsFlanking && (ProneCombatUtility >= 0.60f || IsProne);
+        !IsFlanking &&
+        (IsProne ||
+         (ProneCombatUtility >= 0.60f &&
+          ProneCombatUtility > CombatUtility &&
+          (!CanFlank ||
+           FlankUtility <= CombatUtility + Core.Unit.UnitTacticalUtility.FlankUtilityAdvantage)));
 
     [MethodMetaInfo("ShouldEngageVisibleTarget", "Check whether a visible target should be engaged.")]
     public bool ShouldEngageVisibleTarget() =>
@@ -165,7 +189,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldFlankVisibleTarget", "Check whether the current target should be flanked.")]
     public bool ShouldFlankVisibleTarget() =>
-        IsAlive && !IsSuppressed && HasVisibleTarget && (CanFlank || IsFlanking);
+        IsAlive && !IsSuppressed && HasVisibleTarget &&
+        (IsFlanking ||
+         (CanFlank &&
+          FlankUtility > CombatUtility + Core.Unit.UnitTacticalUtility.FlankUtilityAdvantage));
 
     [MethodMetaInfo("ShouldInvestigateLastKnownTarget", "Check whether last known target position should be investigated.")]
     public bool ShouldInvestigateLastKnownTarget() =>
@@ -174,7 +201,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldInvestigateAudibleContact", "Investigate a credible sound only when no stronger tactical response is active.")]
     public bool ShouldInvestigateAudibleContact() =>
         IsAlive && IsAlerted && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
-        !IsSuppressed && !IsLowHealth;
+        !IsSuppressed && !IsLowHealth &&
+        InvestigationUtility >= Core.Unit.UnitTacticalUtility.MinimumInvestigationUtility;
 
     [MethodMetaInfo("SelectDead", "Return the dead-unit intent.")]
     public EBTStatus SelectDead() =>

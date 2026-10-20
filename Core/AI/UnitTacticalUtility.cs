@@ -14,6 +14,12 @@ public static class UnitTacticalUtility
     private const float MoveOrderDistanceBonus = 0.30f;
     private const float SuppressionMovePenalty = 0.12f;
     private const float LowHealthMovePenalty = 0.10f;
+    private const float CoverSuppressedThreshold = 1.8f;
+    private const float CoverPanickedThreshold = 5.8f;
+    private const float InvestigationDistanceForMaxPenalty = 64f;
+
+    public const float FlankUtilityAdvantage = 0.08f;
+    public const float MinimumInvestigationUtility = 0.24f;
 
     public static float EvaluateMoveOrder(
         float distance,
@@ -51,6 +57,89 @@ public static class UnitTacticalUtility
             return 0.68f;
 
         return 0.54f;
+    }
+
+    public static float EvaluateCover(
+        float suppression,
+        bool hasCover,
+        bool immediateDanger,
+        bool panicked,
+        bool lowHealth)
+    {
+        if (!hasCover)
+            return 0f;
+
+        if (immediateDanger || panicked)
+            return 1f;
+
+        if (!float.IsFinite(suppression))
+            suppression = 0f;
+
+        float pressure = Math.Clamp(
+            (suppression - CoverSuppressedThreshold) /
+            (CoverPanickedThreshold - CoverSuppressedThreshold),
+            0f,
+            1f);
+
+        return Math.Clamp(
+            0.18f +
+            pressure * 0.66f +
+            (lowHealth ? 0.16f : 0f),
+            0f,
+            1f);
+    }
+
+    public static float EvaluateFlanking(
+        float distance,
+        float effectiveRange,
+        bool feasible)
+    {
+        if (!feasible ||
+            !float.IsFinite(distance) ||
+            !float.IsFinite(effectiveRange) ||
+            distance < 0f ||
+            effectiveRange <= 0f)
+        {
+            return 0f;
+        }
+
+        float rangeDeficit = Math.Clamp(
+            (distance - effectiveRange) / MathF.Max(effectiveRange, 1f),
+            0f,
+            1f);
+        float distanceAdvantage = Math.Clamp(
+            (distance - 24f) / 36f,
+            0f,
+            1f);
+
+        return Math.Clamp(
+            0.32f +
+            rangeDeficit * 0.18f +
+            distanceAdvantage * 0.22f,
+            0f,
+            1f);
+    }
+
+    public static float EvaluateInvestigation(float confidence, float distance)
+    {
+        if (!float.IsFinite(confidence) ||
+            !float.IsFinite(distance) ||
+            distance < 0f)
+        {
+            return 0f;
+        }
+
+        float distancePenalty = Math.Clamp(
+            distance / InvestigationDistanceForMaxPenalty,
+            0f,
+            1f) * 0.35f;
+
+        return Math.Clamp(
+            0.25f +
+            Math.Clamp(confidence, 0f, 1f) * 0.75f -
+            distancePenalty,
+            0f,
+            1f);
     }
 
     public static float EvaluateProneFiring(
