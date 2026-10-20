@@ -85,10 +85,12 @@ public static class UnitTacticalUtility
             0f,
             1f);
 
+        // Cover should become a competitive choice as suppression rises,
+        // including in close combat, but not at the first low suppression tick.
         return Math.Clamp(
-            0.18f +
-            pressure * 0.66f +
-            (lowHealth ? 0.16f : 0f),
+            0.22f +
+            pressure * 0.78f +
+            (lowHealth ? 0.12f : 0f),
             0f,
             1f);
     }
