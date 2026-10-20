@@ -126,7 +126,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldHoldPosition", "Check whether to hold position when there is no visible target.")]
     public bool ShouldHoldPosition() =>
-        IsAlive && HasStopOrder && !HasVisibleTarget && !IsSuppressed && !IsLowHealth;
+        IsAlive && HasStopOrder && !HasVisibleTarget && !IsSuppressed;
 
     [MethodMetaInfo("ShouldHoldPositionAndEngage", "Check whether to fire at a visible enemy without advancing.")]
     public bool ShouldHoldPositionAndEngage() =>
