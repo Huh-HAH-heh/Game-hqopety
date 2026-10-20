@@ -37,8 +37,6 @@ public sealed class GameRenderer
         public float SumX;
         public float SumY;
         public int Count;
-        public RenderUnitState Commander;
-        public bool HasCommander;
     }
 
     private const float TileSize = 16f;
@@ -70,11 +68,6 @@ public sealed class GameRenderer
     private readonly CircleShape _squadMarker = new(0.5f)
     {
         FillColor = new Color(0, 0, 0, 0),
-        OutlineThickness = 1f
-    };
-    private readonly CircleShape _squadCommanderMarker = new(0.1f)
-    {
-        FillColor = new Color(255, 245, 175),
         OutlineThickness = 1f
     };
     private readonly Dictionary<int, SquadMarkerAccumulator> _squadMarkerCenters = new();
@@ -111,6 +104,7 @@ public sealed class GameRenderer
     private readonly List<UnitCardEntry> _unitCards = new();
     private readonly ConcurrentDictionary<long, UnitCardEntry> _unitCardRequests = new();
     private UnitId _contextMenuUnit;
+    private Vector3 _contextMenuDestination;
     private GameMenuActionType? _draggingMenuSlider;
     private GameMenuPage _menuPage;
     private int _selectedResolutionIndex;
@@ -683,7 +677,8 @@ public sealed class GameRenderer
             _contextMenuOverlay?.Draw(
                 _window,
                 _window.Size.X,
-                _window.Size.Y);
+                _window.Size.Y,
+                new Vector2i((int)uiMouseCoordinates.X, (int)uiMouseCoordinates.Y));
 
             if (_unitCards.Count > 0)
             {
@@ -772,7 +767,7 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "LMB drag=create/merge squad squad ring=select squad Shift+click=add/transfer/detach U=group/split K=disband Shift+1-9=bind 1-9=select RMB=move/attack S=hold | " +
+            "LMB drag=select units; RMB=menu; squad ring=select squad; menu=Create/Send/Attack; Shift+click=add/transfer/detach; Shift+1-9=bind; 1-9=select; K=disband; J=formation; S=hold | " +
             "A=enable AI B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
@@ -1019,21 +1014,11 @@ public sealed class GameRenderer
 
         if (shiftPressed)
         {
-            int squadId = GetSelectedSquadId();
+            int squadId = GetFullySelectedSquadId();
             if (squadId == 0)
             {
-                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
-                UnitId[] selected = snapshot == null
-                    ? Array.Empty<UnitId>()
-                    : CaptureSelectedUnitIds(snapshot);
-                if (selected.Length == 0)
-                {
-                    Console.WriteLine("[SQUAD] Select soldiers before assigning a number.");
-                    return true;
-                }
-
-                squadId = _squadManager.Create(selected);
-                SelectSquad(squadId, false);
+                Console.WriteLine("[SQUAD] Create a squad from the RMB context menu, then select it before binding a number.");
+                return true;
             }
 
             if (_squadManager.AssignHotkey(number, squadId))
@@ -1067,6 +1052,25 @@ public sealed class GameRenderer
         return squadId;
     }
 
+    private int GetFullySelectedSquadId()
+    {
+        int squadId = GetSelectedSquadId();
+        if (squadId == 0)
+            return 0;
+
+        InfantrySquad? squad = _squadManager.GetSquad(squadId);
+        if (squad == null || squad.Members.Count != _selectedUnits.Count)
+            return 0;
+
+        for (int i = 0; i < squad.Members.Count; i++)
+        {
+            if (!_selectedUnits.Contains(squad.Members[i]))
+                return 0;
+        }
+
+        return squadId;
+    }
+
     private void SelectSquad(int squadId, bool append)
     {
         InfantrySquad? squad = _squadManager.GetSquad(squadId);
@@ -1074,16 +1078,13 @@ public sealed class GameRenderer
             return;
 
         if (!append)
-            _selectedUnits.Clear();
-
-        _selectedUnit = squad.Commander;
-        for (int i = 0; i < squad.Members.Count; i++)
         {
-            UnitId member = squad.Members[i];
-            _selectedUnits.Add(member);
-            if (!_selectedUnit.IsValid)
-                _selectedUnit = member;
+            _selectedUnits.Clear();
+            _selectedUnit = default;
         }
+
+        for (int i = 0; i < squad.Members.Count; i++)
+            _selectedUnits.Add(squad.Members[i]);
     }
 
     private void CreateSquadFromSelection()
@@ -1100,8 +1101,7 @@ public sealed class GameRenderer
         InfantrySquad? existingSquad = _squadManager.GetSquad(existingSquadId);
         if (existingSquad != null && existingSquad.Members.Count == members.Length)
         {
-            // Avoid recreating the exact squad on a repeated drag or shortcut;
-            // that would needlessly discard its commander identity/hotkey.
+            // Avoid recreating the exact squad; that would discard its hotkey.
             SelectSquad(existingSquadId, false);
             Console.WriteLine($"[SQUAD] Selection already matches squad {existingSquadId}.");
             return;
@@ -1687,9 +1687,7 @@ public sealed class GameRenderer
             for (int i = 0; i < picked.Count; i++)
                 _selectedUnits.Add(picked[i]);
 
-            if (_selectedUnits.Count > 1)
-                CreateSquadFromSelection();
-            else if (_selectedUnits.Count == 1)
+            if (_selectedUnits.Count == 1)
             {
                 foreach (UnitId id in _selectedUnits)
                     _selectedUnit = id;
@@ -1706,11 +1704,7 @@ public sealed class GameRenderer
             _selectedUnit = picked[i];
         }
 
-        if (_selectedUnits.Count > 1)
-        {
-            CreateSquadFromSelection();
-        }
-        else if (_selectedUnits.Count == 1)
+        if (_selectedUnits.Count == 1)
         {
             SetSelectedUnit(_selectedUnit);
         }
@@ -1789,8 +1783,6 @@ public sealed class GameRenderer
                 }
             }
 
-            if (_selectedUnits.Count > 1)
-                CreateSquadFromSelection();
             return;
         }
 
@@ -1809,8 +1801,8 @@ public sealed class GameRenderer
                 foreach (UnitId member in squad.Members)
                     _selectedUnits.Add(member);
 
-                if (!_selectedUnit.IsValid || !_selectedUnits.Contains(_selectedUnit))
-                    _selectedUnit = squad.Commander;
+                if (!_selectedUnits.Contains(_selectedUnit))
+                    _selectedUnit = default;
             }
 
             return;
@@ -1890,15 +1882,11 @@ public sealed class GameRenderer
     private bool TryGetSquadCenter(
         SimulationFrameSnapshot snapshot,
         InfantrySquad squad,
-        out Vector2f center,
-        out RenderUnitState commander,
-        out bool hasCommander)
+        out Vector2f center)
     {
         float sumX = 0f;
         float sumY = 0f;
         int count = 0;
-        commander = default;
-        hasCommander = false;
 
         RenderUnitState[] units = snapshot.Units;
         for (int i = 0; i < units.Length; i++)
@@ -1914,12 +1902,6 @@ public sealed class GameRenderer
             sumX += unit.Position.X;
             sumY += unit.Position.Y;
             count++;
-
-            if (id == squad.Commander)
-            {
-                commander = unit;
-                hasCommander = true;
-            }
         }
 
         if (count == 0)
@@ -1947,7 +1929,7 @@ public sealed class GameRenderer
         // directly under the ring still wins the normal unit-picking test first.
         foreach (InfantrySquad squad in _squadManager.Squads)
         {
-            if (!TryGetSquadCenter(snapshot, squad, out Vector2f center, out _, out _))
+            if (!TryGetSquadCenter(snapshot, squad, out Vector2f center))
                 continue;
 
             float dx = (worldX - center.X) * scale;
@@ -1969,7 +1951,6 @@ public sealed class GameRenderer
         float renderScale = MathF.Max(
             0.01f,
             _window.Size.X / MathF.Max(1f, _camera.View.Size.X));
-        float commanderRadius = 2.5f / renderScale;
 
         // Aggregate all living soldiers in one pass; drawing cost stays O(units + squads).
         _squadMarkerCenters.Clear();
@@ -1990,11 +1971,6 @@ public sealed class GameRenderer
             center.SumX += unit.Position.X;
             center.SumY += unit.Position.Y;
             center.Count++;
-            if (id == squad.Commander)
-            {
-                center.Commander = unit;
-                center.HasCommander = true;
-            }
             _squadMarkerCenters[squad.Id] = center;
         }
 
@@ -2029,18 +2005,6 @@ public sealed class GameRenderer
             _squadMarker.OutlineThickness = (selected ? 2.5f : 1.5f) / renderScale;
             _window.Draw(_squadMarker);
 
-            if (!center.HasCommander)
-                continue;
-
-            _squadCommanderMarker.Radius = commanderRadius;
-            _squadCommanderMarker.Origin = new Vector2f(commanderRadius, commanderRadius);
-            _squadCommanderMarker.Position = new Vector2f(
-                center.Commander.Position.X * TerrainTilePixelSize,
-                center.Commander.Position.Y * TerrainTilePixelSize);
-            _squadCommanderMarker.FillColor = new Color(255, 245, 175);
-            _squadCommanderMarker.OutlineColor = color;
-            _squadCommanderMarker.OutlineThickness = 0.8f / renderScale;
-            _window.Draw(_squadCommanderMarker);
         }
     }
 
@@ -2382,46 +2346,33 @@ public sealed class GameRenderer
                                 minimumMarkerRadius,
                                 out contextUnit);
 
-                        // Right-clicking a hostile is an attack task; soldiers can
-                        // switch to the nearest visible threat through Behaviac.
-                        if (hasUnit &&
-                            _selectedUnits.Count > 0 &&
+                        UnitId[] selectedIds = inputSnapshot == null
+                            ? Array.Empty<UnitId>()
+                            : CaptureSelectedUnitIds(inputSnapshot);
+                        int selectedSquadId = GetFullySelectedSquadId();
+                        bool canCreateSquad = selectedIds.Length >= 2 && selectedSquadId == 0;
+                        bool canSendSquad = selectedSquadId != 0;
+                        bool canAttackTarget = hasUnit &&
+                            selectedIds.Length > 0 &&
                             inputSnapshot != null &&
-                            IsHostileToSelection(inputSnapshot, contextUnit))
-                        {
-                            UnitId[] attackUnits = CaptureSelectedUnitIds(inputSnapshot);
-                            if (attackUnits.Length > 0)
-                            {
-                                UnitId attackTarget = new(contextUnit.Index, contextUnit.Generation);
-                                _contextMenuOverlay?.Close();
-                                _contextMenuUnit = default;
-                                ExecuteSimulationCommand(() =>
-                                    IssueAttackOrder(attackUnits, attackTarget));
-                                return;
-                            }
-                        }
+                            IsHostileToSelection(inputSnapshot, contextUnit);
 
-                        // Empty-ground right-click is an RTS move task when
-                        // infantry are selected. Both move and attack overwrite
-                        // the previous high-level task.
-                        if (!hasUnit && _selectedUnits.Count > 0 &&
-                            inputSnapshot != null)
-                        {
-                            UnitId[] moveUnits = CaptureSelectedUnitIds(inputSnapshot);
-                            if (moveUnits.Length > 0)
-                            {
-                                Vector3 destination = new(
-                                    worldPosition.X / TerrainTilePixelSize,
-                                    worldPosition.Y / TerrainTilePixelSize,
-                                    0f);
-                                InfantryFormationType formation = _infantryFormation;
-                                _contextMenuOverlay?.Close();
-                                _contextMenuUnit = default;
-                                ExecuteSimulationCommand(() =>
-                                    IssueMoveOrder(moveUnits, destination, formation));
-                                return;
-                            }
-                        }
+                        float destinationX = Math.Clamp(
+                            worldPosition.X / TerrainTilePixelSize,
+                            0.5f,
+                            _worldMap.MaxTileX - 0.5f);
+                        float destinationY = Math.Clamp(
+                            worldPosition.Y / TerrainTilePixelSize,
+                            0.5f,
+                            _worldMap.MaxTileY - 0.5f);
+                        int destinationTileX = Math.Clamp(
+                            (int)MathF.Floor(destinationX), 0, _worldMap.MaxTileX);
+                        int destinationTileY = Math.Clamp(
+                            (int)MathF.Floor(destinationY), 0, _worldMap.MaxTileY);
+                        _contextMenuDestination = new Vector3(
+                            destinationX,
+                            destinationY,
+                            _worldMap.GetSurfaceHeight(destinationTileX, destinationTileY));
 
                         _contextMenuUnit = hasUnit
                             ? new UnitId(contextUnit.Index, contextUnit.Generation)
@@ -2432,7 +2383,10 @@ public sealed class GameRenderer
                             _window.Size.X,
                             _window.Size.Y,
                             hasUnit,
-                            _selectedUnits.Count > 1);
+                            selectedIds.Length > 1,
+                            canCreateSquad,
+                            canSendSquad,
+                            canAttackTarget);
 
                         if (!_contextMenuOverlay.IsOpen)
                             _contextMenuUnit = default;
@@ -2494,38 +2448,81 @@ public sealed class GameRenderer
                 {
                     bool menuHandled = _contextMenuOverlay.HandleClick(
                         uiPosition,
-                        out bool openUnitCard,
-                        out bool openUnitAnatomy,
-                        out bool openSelectionOverview,
-                        out bool giveFood,
-                        out bool giveWater);
+                        out ContextMenuActionType contextAction);
 
                     if (menuHandled)
                     {
                         UnitId contextUnit = _contextMenuUnit;
+                        Vector3 destination = _contextMenuDestination;
                         _contextMenuUnit = default;
-                        if (openUnitCard && contextUnit.IsValid)
+
+                        switch (contextAction)
                         {
-                            OpenUnitCard(contextUnit);
-                        }
-                        else if (openUnitAnatomy && contextUnit.IsValid)
-                        {
-                            OpenUnitAnatomyCard(contextUnit);
-                        }
-                        else if (openSelectionOverview)
-                        {
-                            OpenSelectionOverview();
-                        }
-                        else if (giveFood && contextUnit.IsValid)
-                        {
-                            ExecuteSimulationCommand(() =>
-                                _unitSimulation.ConsumeFood(
-                                    contextUnit, 700f, 25f, 90f, 20f, 12f));
-                        }
-                        else if (giveWater && contextUnit.IsValid)
-                        {
-                            ExecuteSimulationCommand(() =>
-                                _unitSimulation.DrinkWater(contextUnit, 0.5f));
+                            case ContextMenuActionType.OpenUnitCard:
+                                if (contextUnit.IsValid)
+                                    OpenUnitCard(contextUnit);
+                                break;
+
+                            case ContextMenuActionType.OpenUnitAnatomy:
+                                if (contextUnit.IsValid)
+                                    OpenUnitAnatomyCard(contextUnit);
+                                break;
+
+                            case ContextMenuActionType.OpenSelectionOverview:
+                                OpenSelectionOverview();
+                                break;
+
+                            case ContextMenuActionType.GiveFood:
+                                if (contextUnit.IsValid)
+                                {
+                                    ExecuteSimulationCommand(() =>
+                                        _unitSimulation.ConsumeFood(
+                                            contextUnit, 700f, 25f, 90f, 20f, 12f));
+                                }
+                                break;
+
+                            case ContextMenuActionType.GiveWater:
+                                if (contextUnit.IsValid)
+                                {
+                                    ExecuteSimulationCommand(() =>
+                                        _unitSimulation.DrinkWater(contextUnit, 0.5f));
+                                }
+                                break;
+
+                            case ContextMenuActionType.CreateSquad:
+                                CreateSquadFromSelection();
+                                break;
+
+                            case ContextMenuActionType.SendSquad:
+                            {
+                                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+                                UnitId[] moveUnits = snapshot == null
+                                    ? Array.Empty<UnitId>()
+                                    : CaptureSelectedUnitIds(snapshot);
+                                if (moveUnits.Length > 0 &&
+                                    GetFullySelectedSquadId() != 0)
+                                {
+                                    InfantryFormationType formation = _infantryFormation;
+                                    ExecuteSimulationCommand(() =>
+                                        IssueMoveOrder(moveUnits, destination, formation));
+                                }
+                                break;
+                            }
+
+                            case ContextMenuActionType.AttackTarget:
+                            {
+                                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+                                UnitId[] attackUnits = snapshot == null
+                                    ? Array.Empty<UnitId>()
+                                    : CaptureSelectedUnitIds(snapshot);
+                                if (contextUnit.IsValid && attackUnits.Length > 0)
+                                {
+                                    UnitId attackTarget = contextUnit;
+                                    ExecuteSimulationCommand(() =>
+                                        IssueAttackOrder(attackUnits, attackTarget));
+                                }
+                                break;
+                            }
                         }
 
                         return;
@@ -2753,12 +2750,6 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.K && TryDisbandSelectedSquads())
             return;
-
-        if (key == Keyboard.Key.U)
-        {
-            CreateSquadFromSelection();
-            return;
-        }
 
         if (TryHandleSquadHotkey(key))
             return;
