@@ -411,9 +411,7 @@ public sealed class GameRenderer
             int btCover = snapshot?.BehaviacCoverCount ?? _unitSimulation.AI.LastBehaviacCoverDecisions;
             int btRetreat = snapshot?.BehaviacRetreatCount ?? _unitSimulation.AI.LastBehaviacRetreatDecisions;
             int btEngage = snapshot?.BehaviacEngageCount ?? _unitSimulation.AI.LastBehaviacEngageDecisions;
-            int btSupport = snapshot?.BehaviacSuppressCount ?? _unitSimulation.AI.LastBehaviacSuppressDecisions;
             int btInvestigate = snapshot?.BehaviacInvestigateCount ?? _unitSimulation.AI.LastBehaviacInvestigateDecisions;
-            int btPatrol = snapshot?.BehaviacPatrolCount ?? _unitSimulation.AI.LastBehaviacPatrolDecisions;
             double moveMs = snapshot?.MovementMs ?? _unitSimulation.LastMovementUpdateMilliseconds;
             double weaponsMs = snapshot?.WeaponsMs ?? _unitSimulation.LastWeaponUpdateMilliseconds;
             double ballisticsMs = snapshot?.BallisticsMs ?? _unitSimulation.LastProjectileUpdateMilliseconds;
@@ -442,7 +440,7 @@ public sealed class GameRenderer
                 $"Units={activeUnits} SimPaused={_simulationPaused} Sim={simMs:0.0}ms " +
                 $"Vision={visionMetrics} AI={aiMs:0.0}ms Plan={aiPlanningMs:0.0}ms Move={moveMs:0.0}ms " +
                 $"BT={(btEnabled ? (btReady ? "ON" : "INIT") : "OFF")} {btDecisions} decisions/{btDecisionMs:0.00}ms " +
-                $"F={btFlank} C={btCover} R={btRetreat} E={btEngage} Sup={btSupport} Inv={btInvestigate} Pat={btPatrol} " +
+                $"F={btFlank} C={btCover} R={btRetreat} E={btEngage} Inv={btInvestigate} " +
                 $"Weapons={weaponsMs:0.0}ms Ballistics={ballisticsMs:0.0}ms Grid={gridMs:0.0}ms " +
                 $"P={pVisited} TraceCells={traceCells} UnitCandidates={unitCandidates} " +
                 $"Shots/s={shotsPerSecond:0} Rounds/s={roundsPerSecond:0} " +
