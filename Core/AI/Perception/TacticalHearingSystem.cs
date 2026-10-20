@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Core.Map;
 using Core.Unit;
 
 namespace Core.AI.Perception;
@@ -72,7 +73,9 @@ public sealed class TacticalHearingSystem
         UnitHealthStore health,
         UnitSuppressionStore response,
         float nowSeconds,
-        float deltaTime)
+        float deltaTime,
+        WorldMap? worldMap = null,
+        VisionSystem? vision = null)
     {
         ArgumentNullException.ThrowIfNull(units);
         ArgumentNullException.ThrowIfNull(health);
@@ -85,7 +88,7 @@ public sealed class TacticalHearingSystem
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f)
             return;
         CollectFootsteps(units, health, deltaTime, nowSeconds);
-        DeliverPulses(units, health, response, nowSeconds);
+        DeliverPulses(units, health, response, nowSeconds, worldMap, vision);
         _pendingPulses.Clear();
     }
 
@@ -214,7 +217,9 @@ public sealed class TacticalHearingSystem
         UnitStore units,
         UnitHealthStore health,
         UnitSuppressionStore response,
-        float nowSeconds)
+        float nowSeconds,
+        WorldMap? worldMap,
+        VisionSystem? vision)
     {
         ReadOnlySpan<int> active = units.ActiveIndices;
         for (int pulseIndex = 0; pulseIndex < _pendingPulses.Count; pulseIndex++)
@@ -270,15 +275,21 @@ public sealed class TacticalHearingSystem
                     _ => 0.18f
                 };
                 response.AddAlertness(observer, alertFactor * confidence, estimate);
-                ApplyImmediateDangerResponse(response, observer, pulse.Type, distance, pulse.Range, confidence, estimate);
+                ApplyImmediateDangerResponse(
+                    response, units, vision, worldMap, observer, pulse.Type,
+                    pulse.Position, distance, pulse.Range, confidence, estimate);
             }
         }
     }
 
     private static void ApplyImmediateDangerResponse(
         UnitSuppressionStore response,
+        UnitStore units,
+        VisionSystem? vision,
+        WorldMap? worldMap,
         int observer,
         TacticalStimulusType type,
+        Vector3 sourcePosition,
         float distance,
         float eventRange,
         float confidence,
@@ -312,9 +323,30 @@ public sealed class TacticalHearingSystem
         if (distance > dangerRadius || confidence < minimumConfidence)
             return;
 
-        // Existing cover reduces the urgency of reacting to nearby impacts/blasts.
+        bool hasDirectExposure = true;
+        if (type is TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion &&
+            vision != null && worldMap != null)
+        {
+            Vector3 eyePosition = vision.GetEyePosition(units, observer);
+            hasDirectExposure = vision.HasLineOfSight(
+                worldMap, eyePosition, sourcePosition, out _);
+        }
+
+        // A wall that stops a round protects units behind it from the impact.
+        // The report still raises alertness, but does not force a cover reaction.
+        if (type == TacticalStimulusType.CoverImpact && !hasDirectExposure)
+            return;
+
+        // A blast can still be heard behind terrain, but its immediate pressure is lower.
+        if (type == TacticalStimulusType.Explosion && !hasDirectExposure)
+            duration *= 0.25f;
+
+        // Existing cover status further reduces urgency once a protected position is reached.
         if ((uint)observer < (uint)response.InCover.Length && response.InCover[observer])
             duration *= 0.60f;
+
+        if (duration < 0.16f)
+            return;
 
         response.MarkImmediateDanger(observer, duration, estimatedSource);
     }
