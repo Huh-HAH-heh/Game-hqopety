@@ -149,9 +149,7 @@ public sealed class SimulationFrameSnapshot
     public int BehaviacRetreatCount { get; init; }
     public int BehaviacFlankCount { get; init; }
     public int BehaviacEngageCount { get; init; }
-    public int BehaviacSuppressCount { get; init; }
     public int BehaviacInvestigateCount { get; init; }
-    public int BehaviacPatrolCount { get; init; }
     public double MovementMs { get; init; }
     public double WeaponsMs { get; init; }
     public double BallisticsMs { get; init; }
@@ -650,9 +648,7 @@ public sealed class SimulationFrameSnapshot
             BehaviacRetreatCount = simulation.AI.LastBehaviacRetreatDecisions,
             BehaviacFlankCount = simulation.AI.LastBehaviacFlankDecisions,
             BehaviacEngageCount = simulation.AI.LastBehaviacEngageDecisions,
-            BehaviacSuppressCount = simulation.AI.LastBehaviacSuppressDecisions,
             BehaviacInvestigateCount = simulation.AI.LastBehaviacInvestigateDecisions,
-            BehaviacPatrolCount = simulation.AI.LastBehaviacPatrolDecisions,
             MovementMs = simulation.LastMovementUpdateMilliseconds,
             WeaponsMs = simulation.LastWeaponUpdateMilliseconds,
             BallisticsMs = simulation.LastProjectileUpdateMilliseconds,
