@@ -160,8 +160,8 @@ public sealed class SquadTacticalCoordinator
             List<(int SquadId, UnitId Target)> expiredFlankClaims = new();
             foreach (KeyValuePair<(int SquadId, UnitId Target), FlankClaim> pair in _flankClaims)
                 if (pair.Value.ExpiresAt <= now ||
-                    !_membership.TryGetValue(pair.Value.Owner, out int squadId) ||
-                    squadId != pair.Key.SquadId)
+                    !_membership.TryGetValue(pair.Value.Owner, out int flankOwnerSquad) ||
+                    flankOwnerSquad != pair.Key.SquadId)
                     expiredFlankClaims.Add(pair.Key);
             for (int i = 0; i < expiredFlankClaims.Count; i++) _flankClaims.Remove(expiredFlankClaims[i]);
         }
