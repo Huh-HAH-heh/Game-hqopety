@@ -59,6 +59,9 @@ public sealed class UnitAiSystem
 
     public void SynchronizeSquadMemberships(IReadOnlyList<SquadMembershipSnapshot> squads) =>
         _squadCoordinator.SynchronizeMemberships(squads);
+
+    public void InvalidateSquadUnit(UnitId unit) =>
+        _squadCoordinator.InvalidateUnit(unit);
     public double LastPlanningMilliseconds { get; private set; }
 
     public bool BehaviacRuntimeReady => _behaviacInitialized;
