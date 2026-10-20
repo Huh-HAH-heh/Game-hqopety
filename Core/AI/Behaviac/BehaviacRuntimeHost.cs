@@ -99,6 +99,8 @@ public static class BehaviacRuntimeHost
             self => self.ShouldReturnDead());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldSeekCover),
             self => self.ShouldSeekCover());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldPanicFallback),
+            self => self.ShouldPanicFallback());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldRetreatToCover),
             self => self.ShouldRetreatToCover());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldExecuteAttackOrder),
@@ -122,6 +124,8 @@ public static class BehaviacRuntimeHost
             self => self.SelectDead());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectSeekCover),
             self => self.SelectSeekCover());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectPanic),
+            self => self.SelectPanic());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectRetreatToCover),
             self => self.SelectRetreatToCover());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectMoveOrder),
