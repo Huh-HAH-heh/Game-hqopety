@@ -772,7 +772,7 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "LMB drag=create squad click soldier=select soldier squad ring=select squad Shift+click=add/remove K=disband Shift+1-9=bind 1-9=select RMB=move | " +
+            "LMB drag=create squad click soldier=select soldier squad ring=select squad Shift+click=add/remove K=disband Shift+1-9=bind 1-9=select RMB=move/attack S=hold | " +
             "A=enable AI B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
@@ -1203,6 +1203,91 @@ public sealed class GameRenderer
 
         Console.WriteLine(
             $"[SQUAD] Issued {InfantryFormation.GetName(formation)} move task to {members.Count} soldiers.");
+    }
+
+    private void IssueAttackOrder(UnitId[] memberIds, UnitId targetId)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        if (!units.TryGetIndex(targetId, out int targetIndex) ||
+            _unitSimulation.Health.OverallHitPoints[targetIndex] <= 0f)
+        {
+            return;
+        }
+
+        Vector3 destination = units.Position[targetIndex];
+        int assigned = 0;
+        for (int i = 0; i < memberIds.Length; i++)
+        {
+            UnitId id = memberIds[i];
+            if (!units.TryGetIndex(id, out int unitIndex) ||
+                _unitSimulation.Health.OverallHitPoints[unitIndex] <= 0f ||
+                !FactionRules.ShouldAttack(
+                    units.FactionTag[unitIndex],
+                    units.FactionTag[targetIndex]))
+            {
+                continue;
+            }
+
+            // This is a high-level task only. Behaviac chooses when to advance,
+            // engage, take cover, and switch to another visible nearby threat.
+            ai.SetPlayerOrder(
+                unitIndex,
+                UnitAiOrderType.Attack,
+                destination,
+                targetId);
+            assigned++;
+        }
+
+        Console.WriteLine(
+            $"[SQUAD] Attack task replaced previous orders for {assigned} soldiers; nearest-threat switching enabled.");
+    }
+
+    private void IssueHoldOrder(UnitId[] memberIds)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        int assigned = 0;
+
+        for (int i = 0; i < memberIds.Length; i++)
+        {
+            if (!units.TryGetIndex(memberIds[i], out int unitIndex) ||
+                _unitSimulation.Health.OverallHitPoints[unitIndex] <= 0f)
+            {
+                continue;
+            }
+
+            ai.SetPlayerOrder(
+                unitIndex,
+                UnitAiOrderType.Stop,
+                units.Position[unitIndex]);
+            assigned++;
+        }
+
+        Console.WriteLine(
+            $"[SQUAD] Hold-position task replaced previous orders for {assigned} soldiers.");
+    }
+
+    private bool IsHostileToSelection(
+        SimulationFrameSnapshot snapshot,
+        RenderUnitState target)
+    {
+        if (target.HitPoints <= 0f)
+            return false;
+
+        foreach (UnitId selectedId in _selectedUnits)
+        {
+            if (!TryFindRenderUnit(snapshot, selectedId, out RenderUnitState selected) ||
+                selected.HitPoints <= 0f)
+            {
+                continue;
+            }
+
+            if (FactionRules.ShouldAttack(selected.FactionTag, target.FactionTag))
+                return true;
+        }
+
+        return false;
     }
 
     private SimulationFrameSnapshot? GetInputSnapshot() =>
@@ -2271,9 +2356,28 @@ public sealed class GameRenderer
                                 minimumMarkerRadius,
                                 out contextUnit);
 
-                        // Empty-ground right-click is an RTS move command when
-                        // infantry are selected. Right-clicking a pawn still opens
-                        // the existing context menu.
+                        // Right-clicking a hostile is an attack task; soldiers can
+                        // switch to the nearest visible threat through Behaviac.
+                        if (hasUnit &&
+                            _selectedUnits.Count > 0 &&
+                            inputSnapshot != null &&
+                            IsHostileToSelection(inputSnapshot, contextUnit))
+                        {
+                            UnitId[] attackUnits = CaptureSelectedUnitIds(inputSnapshot);
+                            if (attackUnits.Length > 0)
+                            {
+                                UnitId attackTarget = new(contextUnit.Index, contextUnit.Generation);
+                                _contextMenuOverlay?.Close();
+                                _contextMenuUnit = default;
+                                ExecuteSimulationCommand(() =>
+                                    IssueAttackOrder(attackUnits, attackTarget));
+                                return;
+                            }
+                        }
+
+                        // Empty-ground right-click is an RTS move task when
+                        // infantry are selected. Both move and attack overwrite
+                        // the previous high-level task.
                         if (!hasUnit && _selectedUnits.Count > 0 &&
                             inputSnapshot != null)
                         {
@@ -2631,6 +2735,22 @@ public sealed class GameRenderer
         {
             _infantryFormation = (InfantryFormationType)(((int)_infantryFormation + 1) % 3);
             Console.WriteLine($"[INFANTRY] Formation: {InfantryFormation.GetName(_infantryFormation)}");
+            return;
+        }
+
+        if (key == Keyboard.Key.S)
+        {
+            SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+            if (snapshot != null)
+            {
+                UnitId[] holdUnits = CaptureSelectedUnitIds(snapshot);
+                if (holdUnits.Length > 0)
+                {
+                    ExecuteSimulationCommand(() =>
+                        IssueHoldOrder(holdUnits));
+                }
+            }
+
             return;
         }
 
