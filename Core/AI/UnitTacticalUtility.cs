@@ -162,8 +162,10 @@ public static class UnitTacticalUtility
         if (!float.IsFinite(healthRatio))
             healthRatio = 0f;
 
+        // Prone is reserved for very long, exposed shots; it should not
+        // compete with standing fire during ordinary rifle engagements.
         float distanceAdvantage = Math.Clamp(
-            (distanceToTarget - 18f) / 24f,
+            (distanceToTarget - 70f) / 70f,
             0f,
             1f);
         float exposureAdvantage = exposed ? 1f : 0.2f;
