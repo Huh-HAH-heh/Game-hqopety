@@ -10,13 +10,13 @@ public enum BehaviacUnitIntent : byte
     RetreatToCover = 3,
     FlankTarget = 4,
     EngageTarget = 5,
-    ProneEngage = 9,
-    FollowMoveOrder = 10,
-    HoldPosition = 11,
-    AttackOrder = 12,
-    HoldPositionEngage = 13,
-    InvestigateAudibleContact = 14,
-    Panic = 16
+    ProneEngage = 6,
+    FollowMoveOrder = 7,
+    HoldPosition = 8,
+    AttackOrder = 9,
+    HoldPositionEngage = 10,
+    InvestigateAudibleContact = 11,
+    Panic = 12
 }
 
 /// <summary>
