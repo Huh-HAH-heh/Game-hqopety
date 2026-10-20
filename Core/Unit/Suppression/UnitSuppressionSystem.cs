@@ -94,18 +94,19 @@ public static class UnitSuppressionSystem
             return false;
 
         float proximity = 1f / (0.25f + distance * distance);
-        float amount = danger * factor * proximity * 0.0014f;
+        float amount = danger * factor * proximity * 0.0012f;
         suppression.Add(unitIndex, amount, impactPosition);
 
-        // Only a physically close projectile causes immediate-danger behavior.
-        // Stronger rounds and higher suppression factors keep that reaction active longer.
+        // A very close round may cause a brief flinch; repeated passes build
+        // suppression gradually instead of forcing a full second of cover-seeking.
         float distanceWeight = 1f / (1f + distance * distance);
         float dangerWeight = Math.Clamp(danger / 35f, 0.35f, 1.4f);
         float weaponWeight = Math.Clamp(factor, 0f, 1.25f);
+        float resistanceMultiplier = 1f - suppression.GetSuppressionResistance(unitIndex) * 0.55f;
         float dangerDuration = Math.Clamp(
-            0.18f + 0.70f * distanceWeight * dangerWeight * weaponWeight,
-            0.18f,
-            1.0f);
+            (0.10f + 0.36f * distanceWeight * dangerWeight * weaponWeight) * resistanceMultiplier,
+            0.10f,
+            0.55f);
 
         if (suppression.InCover[unitIndex])
             dangerDuration *= 0.60f;
