@@ -125,52 +125,12 @@
         </node>
       </node>
     </node>
-    <node class="Sequence" id="17">
-      <node class="Condition" id="18">
-        <property Operator="Equal" />
-        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldSuppressLastKnownTarget()" />
-        <property Opr="const bool true" />
-      </node>
-      <node class="Action" id="19">
-        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectSuppressiveFire()" />
-        <property ResultOption="BT_INVALID" />
-      </node>
-    </node>
-    <node class="Sequence" id="20">
-      <node class="Condition" id="21">
-        <property Operator="Equal" />
-        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateLastKnownTarget()" />
-        <property Opr="const bool true" />
-      </node>
-      <node class="Action" id="22">
-        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectInvestigateLastKnownTarget()" />
-        <property ResultOption="BT_INVALID" />
-      </node>
-    </node>
-    <node class="Sequence" id="39">
-      <node class="Condition" id="40">
-        <property Operator="Equal" />
-        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateAudibleContact()" />
-        <property Opr="const bool true" />
-      </node>
-      <node class="Action" id="41">
-        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectInvestigateAudibleContact()" />
-        <property ResultOption="BT_INVALID" />
-      </node>
-    </node>
-    <node class="Sequence" id="42">
-      <node class="Condition" id="43">
-        <property Operator="Equal" />
-        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateSquadContact()" />
-        <property Opr="const bool true" />
-      </node>
-      <node class="Action" id="44">
-        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectInvestigateSquadContact()" />
-        <property ResultOption="BT_INVALID" />
-      </node>
-    </node>
+    
+    
+    
+    
     <node class="Action" id="23">
-      <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectPatrol()" />
+      <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectHoldPosition()" />
       <property ResultOption="BT_INVALID" />
     </node>
   </node>
