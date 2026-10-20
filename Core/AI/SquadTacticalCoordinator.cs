@@ -31,6 +31,7 @@ public sealed class SquadTacticalCoordinator
     private readonly Dictionary<int, SquadState> _squads = new();
     private readonly Dictionary<UnitId, int> _membership = new();
     private readonly Dictionary<UnitId, ReceivedContact> _received = new();
+    private readonly Dictionary<long, InvestigationClaim> _claims = new();
     private readonly List<PendingReport> _pending = new();
     private long _nextSequence = 1;
 
@@ -74,6 +75,12 @@ public sealed class SquadTacticalCoordinator
             }
             _membership.Clear();
             foreach (KeyValuePair<UnitId, int> pair in nextMembership) _membership.Add(pair.Key, pair.Value);
+            List<long> staleClaims = new();
+            foreach (KeyValuePair<long, InvestigationClaim> pair in _claims)
+                if (!_membership.TryGetValue(pair.Value.Owner, out int squadId) ||
+                    squadId != pair.Value.SquadId)
+                    staleClaims.Add(pair.Key);
+            for (int i = 0; i < staleClaims.Count; i++) _claims.Remove(staleClaims[i]);
             _pending.RemoveAll(report => !_squads.ContainsKey(report.SquadId) ||
                 !_membership.TryGetValue(report.Reporter, out int squadId) || squadId != report.SquadId);
         }
@@ -131,6 +138,14 @@ public sealed class SquadTacticalCoordinator
                 if (now - pair.Value.ReceivedAt >= ContactLifetimeSeconds || !_membership.ContainsKey(pair.Key))
                     expired.Add(pair.Key);
             for (int i = 0; i < expired.Count; i++) _received.Remove(expired[i]);
+
+            List<long> expiredClaims = new();
+            foreach (KeyValuePair<long, InvestigationClaim> pair in _claims)
+                if (pair.Value.ExpiresAt <= now ||
+                    !_membership.TryGetValue(pair.Value.Owner, out int squadId) ||
+                    squadId != pair.Value.SquadId)
+                    expiredClaims.Add(pair.Key);
+            for (int i = 0; i < expiredClaims.Count; i++) _claims.Remove(expiredClaims[i]);
         }
     }
 
@@ -142,11 +157,35 @@ public sealed class SquadTacticalCoordinator
         {
             if (!_received.TryGetValue(receiver, out ReceivedContact? value) ||
                 value.InvestigatedSequence == value.Sequence) return false;
+            if (_claims.TryGetValue(value.Sequence, out InvestigationClaim claim) &&
+                !claim.Owner.Equals(receiver)) return false;
             float age = MathF.Max(0f, now - value.ReceivedAt);
             if (age >= ContactLifetimeSeconds) return false;
             float confidence = value.InitialConfidence * MathF.Pow(0.5f, age / ContactConfidenceHalfLifeSeconds);
             if (confidence < MinimumContactConfidence) return false;
             contact = new SquadTacticalContact(value.Sequence, value.Position, value.ErrorRadius, confidence, value.Reporter);
+            return true;
+        }
+    }
+
+    public bool TryClaimInvestigation(UnitId receiver, long sequence, float now)
+    {
+        if (!float.IsFinite(now)) return false;
+        lock (_gate)
+        {
+            if (!_received.TryGetValue(receiver, out ReceivedContact? value) ||
+                value.Sequence != sequence ||
+                value.InvestigatedSequence == sequence ||
+                !_membership.TryGetValue(receiver, out int squadId))
+                return false;
+
+            if (_claims.TryGetValue(sequence, out InvestigationClaim existing))
+                return existing.Owner.Equals(receiver);
+
+            _claims[sequence] = new InvestigationClaim(
+                receiver,
+                squadId,
+                MathF.Min(value.ReceivedAt + ContactLifetimeSeconds, now + ContactLifetimeSeconds));
             return true;
         }
     }
@@ -169,6 +208,7 @@ public sealed class SquadTacticalCoordinator
     private readonly record struct Observation(UnitId Target, Vector3 Position, float PublishedAt);
     private readonly record struct PendingReport(int SquadId, UnitId Reporter, long Sequence, Vector3 Position,
         float DeliverAt, float ErrorRadius, float Confidence);
+    private readonly record struct InvestigationClaim(UnitId Owner, int SquadId, float ExpiresAt);
     private sealed class ReceivedContact
     {
         public long Sequence { get; }

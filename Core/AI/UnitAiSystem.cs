@@ -1135,6 +1135,7 @@ public sealed class UnitAiSystem
         UnitId receiver = units.GetId(unit);
         if (!_squadCoordinator.TryGetContact(
                 receiver, _tacticalTimeSeconds, out SquadTacticalContact contact) ||
+            !_squadCoordinator.TryClaimInvestigation(receiver, contact.Sequence, _tacticalTimeSeconds) ||
             !_squadCoordinator.MarkInvestigated(receiver, contact.Sequence))
             return false;
 
