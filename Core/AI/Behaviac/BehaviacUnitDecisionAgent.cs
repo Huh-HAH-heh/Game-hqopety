@@ -116,25 +116,26 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool ShouldSeekCover() =>
         IsAlive && IsSuppressed && HasCover;
 
-    [MethodMetaInfo("ShouldExecuteAttackOrder", "Check whether an explicit player attack task is still valid.")]
+    [MethodMetaInfo("ShouldExecuteAttackOrder", "Continue the attack task toward its last known contact only when no hostile is visible.")]
     public bool ShouldExecuteAttackOrder() =>
-        IsAlive && HasAttackOrder;
+        IsAlive && HasAttackOrder && !HasVisibleTarget;
 
     [MethodMetaInfo("ShouldFollowMoveOrder", "Compare movement-task utility with immediate combat utility.")]
     public bool ShouldFollowMoveOrder() =>
         IsAlive && HasMoveOrder && MoveOrderUtility >= CombatUtility;
 
-    [MethodMetaInfo("ShouldHoldPosition", "Check whether to hold position when there is no visible target.")]
+    [MethodMetaInfo("ShouldHoldPosition", "Keep the assigned position when no hostile is visible; cover priorities remain above this branch.")]
     public bool ShouldHoldPosition() =>
-        IsAlive && HasStopOrder && !HasVisibleTarget && !IsSuppressed;
+        IsAlive && HasStopOrder && !HasVisibleTarget;
 
-    [MethodMetaInfo("ShouldHoldPositionAndEngage", "Check whether to fire at a visible enemy without advancing.")]
+    [MethodMetaInfo("ShouldHoldPositionAndEngage", "Fire at a visible hostile without advancing unless a higher-priority cover action is selected.")]
     public bool ShouldHoldPositionAndEngage() =>
-        IsAlive && HasStopOrder && HasVisibleTarget && !IsSuppressed && !IsLowHealth;
+        IsAlive && HasStopOrder && HasVisibleTarget;
 
-    [MethodMetaInfo("ShouldRetreatToCover", "Check whether low health requires retreat.")]
+    [MethodMetaInfo("ShouldRetreatToCover", "Check whether low health requires cover; when holding, only interrupt the position if a cover goal is available.")]
     public bool ShouldRetreatToCover() =>
-        IsAlive && IsLowHealth && (HasVisibleTarget || HasRecentTarget);
+        IsAlive && IsLowHealth && (HasVisibleTarget || HasRecentTarget) &&
+        (!HasStopOrder || HasCover);
 
     [MethodMetaInfo("ShouldTakePronePosition", "Prefer a prone firing position when distance and exposure justify it.")]
     public bool ShouldTakePronePosition() =>
@@ -173,11 +174,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public EBTStatus SelectHoldPosition() =>
         SelectIntent(BehaviacUnitIntent.HoldPosition);
 
-    [MethodMetaInfo("SelectAttackOrder", "Return the player attack-target intent.")]
+    [MethodMetaInfo("SelectAttackOrder", "Resume the attack task toward its last known position while no hostile is visible.")]
     public EBTStatus SelectAttackOrder() =>
-        SelectIntent(HasVisibleTarget
-            ? BehaviacUnitIntent.EngageTarget
-            : BehaviacUnitIntent.AttackOrder);
+        SelectIntent(BehaviacUnitIntent.AttackOrder);
 
     [MethodMetaInfo("SelectHoldPositionEngage", "Return the stationary combat intent.")]
     public EBTStatus SelectHoldPositionEngage() =>
