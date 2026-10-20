@@ -665,8 +665,53 @@ public sealed class UnitAiSystem
                  intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage or
                      BehaviacUnitIntent.HoldPositionEngage))
             {
-                // Prone posture is an aiming choice, not an order to crawl to 10 m.
-                // Ranged pawns below approach only if the target is beyond weapon range.
+                // A prone soldier crawls slowly toward a low firing position at
+                // about nine metres. A hold order selects HoldPositionEngage instead,
+                // so the crawl never overrides an explicit hold task.
+                if (intent == BehaviacUnitIntent.ProneEngage)
+                {
+                    Vector3 pronePosition = units.Position[unit];
+                    Vector3 proneTarget = units.Position[target.Index];
+                    Vector2 proneDelta = new(
+                        proneTarget.X - pronePosition.X,
+                        proneTarget.Y - pronePosition.Y);
+                    float proneDistanceSquared = proneDelta.LengthSquared();
+                    float crawlDistanceSquared =
+                        ProneCrawlFiringDistance * ProneCrawlFiringDistance;
+
+                    if (proneDistanceSquared > crawlDistanceSquared)
+                    {
+                        if (!Store.HasGoal[unit] ||
+                            Store.State[unit] != UnitAiState.Attack ||
+                            ReachedGoal(pronePosition, Store.Goal[unit]))
+                        {
+                            Store.ClearGoal(unit);
+                            if (TryFindProneCrawlWaypoint(
+                                    units,
+                                    worldMap,
+                                    unit,
+                                    target.Index,
+                                    out Vector3 crawlWaypoint))
+                            {
+                                Store.SetGoal(unit, crawlWaypoint);
+                            }
+                        }
+
+                        if (Store.HasGoal[unit] &&
+                            !ReachedGoal(pronePosition, Store.Goal[unit]))
+                        {
+                            ClearAiming(weapons, unit);
+                            units.Target[unit] = Store.Goal[unit];
+                            units.HasTarget[unit] = true;
+                            Store.State[unit] = UnitAiState.Attack;
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        Store.ClearGoal(unit);
+                    }
+                }
 
                 if (intent != BehaviacUnitIntent.HoldPositionEngage &&
                     HasRangedWeapon(units, inventory, unit))
