@@ -13,7 +13,11 @@ public enum BehaviacUnitIntent : byte
     SuppressiveFire = 6,
     InvestigateLastKnownTarget = 7,
     Patrol = 8,
-    ProneEngage = 9
+    ProneEngage = 9,
+    FollowMoveOrder = 10,
+    HoldPosition = 11,
+    AttackOrder = 12,
+    HoldPositionEngage = 13
 }
 
 /// <summary>
@@ -51,6 +55,17 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MemberMetaInfo("Selected intent", "The tactical intent returned by the behavior tree.", true)]
     public BehaviacUnitIntent Intent { get; private set; }
 
+    [MemberMetaInfo("Has move order", "Whether the player assigned a movement task.", true)]
+    public bool HasMoveOrder { get; private set; }
+    [MemberMetaInfo("Has stop order", "Whether the player assigned a hold-position task.", true)]
+    public bool HasStopOrder { get; private set; }
+    [MemberMetaInfo("Has attack order", "Whether the player assigned an attack-target task.", true)]
+    public bool HasAttackOrder { get; private set; }
+    [MemberMetaInfo("Move-order utility", "Utility score for continuing the player's move task (0 to 1).", true)]
+    public float MoveOrderUtility { get; private set; }
+    [MemberMetaInfo("Combat utility", "Utility score for responding to current hostile contact (0 to 1).", true)]
+    public float CombatUtility { get; private set; }
+
     public void SetFacts(
         bool isAlive,
         bool isSuppressed,
@@ -62,7 +77,12 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool canFlank,
         bool isFlanking,
         float proneCombatUtility = 0f,
-        bool isProne = false)
+        bool isProne = false,
+        bool hasMoveOrder = false,
+        bool hasStopOrder = false,
+        bool hasAttackOrder = false,
+        float moveOrderUtility = 0f,
+        float combatUtility = 0f)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -77,6 +97,15 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         ProneCombatUtility = float.IsFinite(proneCombatUtility)
             ? System.Math.Clamp(proneCombatUtility, 0f, 1f)
             : 0f;
+        HasMoveOrder = hasMoveOrder;
+        HasStopOrder = hasStopOrder;
+        HasAttackOrder = hasAttackOrder;
+        MoveOrderUtility = float.IsFinite(moveOrderUtility)
+            ? System.Math.Clamp(moveOrderUtility, 0f, 1f)
+            : 0f;
+        CombatUtility = float.IsFinite(combatUtility)
+            ? System.Math.Clamp(combatUtility, 0f, 1f)
+            : 0f;
         Intent = BehaviacUnitIntent.None;
     }
 
@@ -86,6 +115,22 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldSeekCover", "Check whether suppression cover should take priority.")]
     public bool ShouldSeekCover() =>
         IsAlive && IsSuppressed && HasCover;
+
+    [MethodMetaInfo("ShouldExecuteAttackOrder", "Check whether an explicit player attack task is still valid.")]
+    public bool ShouldExecuteAttackOrder() =>
+        IsAlive && HasAttackOrder;
+
+    [MethodMetaInfo("ShouldFollowMoveOrder", "Compare movement-task utility with immediate combat utility.")]
+    public bool ShouldFollowMoveOrder() =>
+        IsAlive && HasMoveOrder && MoveOrderUtility >= CombatUtility;
+
+    [MethodMetaInfo("ShouldHoldPosition", "Check whether to hold position when there is no visible target.")]
+    public bool ShouldHoldPosition() =>
+        IsAlive && HasStopOrder && !HasVisibleTarget && !IsSuppressed && !IsLowHealth;
+
+    [MethodMetaInfo("ShouldHoldPositionAndEngage", "Check whether to fire at a visible enemy without advancing.")]
+    public bool ShouldHoldPositionAndEngage() =>
+        IsAlive && HasStopOrder && HasVisibleTarget && !IsSuppressed && !IsLowHealth;
 
     [MethodMetaInfo("ShouldRetreatToCover", "Check whether low health requires retreat.")]
     public bool ShouldRetreatToCover() =>
@@ -119,6 +164,22 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("SelectSeekCover", "Return the suppression-cover intent.")]
     public EBTStatus SelectSeekCover() =>
         SelectIntent(BehaviacUnitIntent.SeekCover);
+
+    [MethodMetaInfo("SelectMoveOrder", "Return the player movement-task intent.")]
+    public EBTStatus SelectMoveOrder() =>
+        SelectIntent(BehaviacUnitIntent.FollowMoveOrder);
+
+    [MethodMetaInfo("SelectHoldPosition", "Return the hold-position intent.")]
+    public EBTStatus SelectHoldPosition() =>
+        SelectIntent(BehaviacUnitIntent.HoldPosition);
+
+    [MethodMetaInfo("SelectAttackOrder", "Return the player attack-target intent.")]
+    public EBTStatus SelectAttackOrder() =>
+        SelectIntent(BehaviacUnitIntent.AttackOrder);
+
+    [MethodMetaInfo("SelectHoldPositionEngage", "Return the stationary combat intent.")]
+    public EBTStatus SelectHoldPositionEngage() =>
+        SelectIntent(BehaviacUnitIntent.HoldPositionEngage);
 
     [MethodMetaInfo("SelectRetreatToCover", "Return the low-health retreat intent.")]
     public EBTStatus SelectRetreatToCover() =>
