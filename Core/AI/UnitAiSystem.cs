@@ -588,17 +588,19 @@ public sealed class UnitAiSystem
                     // same expensive search on every 150 ms AI tick.
                     Store.SuppressionCoverRetry[unit] = 1f;
 
-                    if (TryFindCover(
-                            units,
-                            vision,
-                            worldMap,
-                            unit,
-                            target.Index,
-                            out Vector3 cover))
+                    if (_hasSuppressionCoverByUnit[unit])
                     {
-                        Store.SetGoal(
-                            unit,
-                            cover);
+                        Store.SetGoal(unit, _suppressionCoverByUnit[unit]);
+                    }
+                    else if (TryFindCover(
+                                 units,
+                                 vision,
+                                 worldMap,
+                                 unit,
+                                 target.Index,
+                                 out Vector3 cover))
+                    {
+                        Store.SetGoal(unit, cover);
                     }
                     else
                     {
@@ -1263,11 +1265,18 @@ public sealed class UnitAiSystem
                 1f);
         }
 
+        bool hasCoverGoal = Store.HasGoal[unit] &&
+            Store.State[unit] == UnitAiState.SeekCover;
+        bool hasCover = suppressionState == UnitSuppressionState.Panicked
+            ? _hasSuppressionCoverByUnit[unit] || hasCoverGoal
+            : (_hasSuppressionCoverByUnit[unit] &&
+               !ReachedGoal(units.Position[unit], _suppressionCoverByUnit[unit])) ||
+              (hasCoverGoal && !ReachedGoal(units.Position[unit], Store.Goal[unit]));
+
         agent.SetFacts(
             isAlive,
             isSuppressed,
-            _hasSuppressionCoverByUnit[unit] ||
-                (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover),
+            hasCover,
             hasVisibleTarget,
             Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f,
             isLowHealth,
@@ -1575,8 +1584,9 @@ public sealed class UnitAiSystem
         if (Store.SuppressionCoverRetry[unit] > thinkDelta && !threatChanged)
             return;
 
+        Vector3 cover;
         bool foundCover = lowHealthHoldNeedsCover
-            ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, out Vector3 cover)
+            ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, out cover)
             : TryFindSuppressionCover(units, vision, worldMap, unit, threat, out cover);
 
         Store.SuppressionRetrySource[unit] = threat;
