@@ -931,7 +931,7 @@ public sealed class UnitSimulation
 
         if (float.IsFinite(deltaTime) && deltaTime > 0f)
             _simulationTimeSeconds += deltaTime;
-        _hearingSystem.Update(Units, Health, Suppression, _simulationTimeSeconds, deltaTime);
+        _hearingSystem.Update(Units, Health, Suppression, _simulationTimeSeconds, deltaTime, worldMap, _visionSystem);
 
         long phaseStarted = Stopwatch.GetTimestamp();
         Suppression.Update(Units, deltaTime);
