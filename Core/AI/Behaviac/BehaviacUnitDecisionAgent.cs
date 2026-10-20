@@ -19,7 +19,6 @@ public enum BehaviacUnitIntent : byte
     AttackOrder = 12,
     HoldPositionEngage = 13,
     InvestigateAudibleContact = 14,
-    InvestigateSquadContact = 15,
     Panic = 16
 }
 
@@ -84,11 +83,6 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public float FlankUtility { get; private set; }
     [MemberMetaInfo("Investigation utility", "Utility of investigating an uncertain sound contact (0 to 1).", true)]
     public float InvestigationUtility { get; private set; }
-    [MemberMetaInfo("Squad contact", "Whether a delayed, uncertain location report was received from a squad mate.", true)]
-    public bool HasSquadContact { get; private set; }
-    [MemberMetaInfo("Squad contact utility", "Utility score for investigating the reported area (0 to 1).", true)]
-    public float SquadContactUtility { get; private set; }
-
     public void SetFacts(
         bool isAlive,
         bool isSuppressed,
@@ -112,8 +106,6 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         float coverUtility = 0f,
         float flankUtility = 0f,
         float investigationUtility = 0f,
-        bool hasSquadContact = false,
-        float squadContactUtility = 0f,
         bool isPanicked = false,
         bool wasSeekingCover = false,
         bool wasFollowingMoveOrder = false)
@@ -154,10 +146,6 @@ public sealed class BehaviacUnitDecisionAgent : Agent
             : 0f;
         InvestigationUtility = float.IsFinite(investigationUtility)
             ? System.Math.Clamp(investigationUtility, 0f, 1f)
-            : 0f;
-        HasSquadContact = hasSquadContact;
-        SquadContactUtility = float.IsFinite(squadContactUtility)
-            ? System.Math.Clamp(squadContactUtility, 0f, 1f)
             : 0f;
         Intent = BehaviacUnitIntent.None;
     }
@@ -243,13 +231,6 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         !IsSuppressed && !IsLowHealth &&
         InvestigationUtility >= Core.Unit.UnitTacticalUtility.MinimumInvestigationUtility;
 
-    [MethodMetaInfo("ShouldInvestigateSquadContact", "Investigate a delayed and uncertain position reported by a squad mate, without treating it as an identified target.")]
-    public bool ShouldInvestigateSquadContact() =>
-        IsAlive && HasSquadContact && !HasVisibleTarget && !HasRecentTarget &&
-        !IsSuppressed && !IsLowHealth &&
-        !HasMoveOrder && !HasStopOrder && !HasAttackOrder &&
-        SquadContactUtility >= Core.Unit.UnitTacticalUtility.MinimumSquadContactUtility;
-
     [MethodMetaInfo("SelectDead", "Return the dead-unit intent.")]
     public EBTStatus SelectDead() =>
         SelectIntent(BehaviacUnitIntent.Dead);
@@ -305,10 +286,6 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("SelectInvestigateAudibleContact", "Move to an uncertain sound area without treating it as an identified enemy.")]
     public EBTStatus SelectInvestigateAudibleContact() =>
         SelectIntent(BehaviacUnitIntent.InvestigateAudibleContact);
-
-    [MethodMetaInfo("SelectInvestigateSquadContact", "Move to a squad-reported area without identifying or firing at a hidden unit.")]
-    public EBTStatus SelectInvestigateSquadContact() =>
-        SelectIntent(BehaviacUnitIntent.InvestigateSquadContact);
 
     [MethodMetaInfo("SelectPatrol", "Return the patrol intent.")]
     public EBTStatus SelectPatrol() =>
