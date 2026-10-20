@@ -175,7 +175,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("SelectAttackOrder", "Return the player attack-target intent.")]
     public EBTStatus SelectAttackOrder() =>
-        SelectIntent(BehaviacUnitIntent.AttackOrder);
+        SelectIntent(HasVisibleTarget
+            ? BehaviacUnitIntent.EngageTarget
+            : BehaviacUnitIntent.AttackOrder);
 
     [MethodMetaInfo("SelectHoldPositionEngage", "Return the stationary combat intent.")]
     public EBTStatus SelectHoldPositionEngage() =>
