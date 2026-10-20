@@ -20,6 +20,7 @@ public static class UnitTacticalUtility
 
     public const float FlankUtilityAdvantage = 0.08f;
     public const float MinimumInvestigationUtility = 0.24f;
+    public const float MinimumSquadContactUtility = 0.30f;
 
     public static float EvaluateMoveOrder(
         float distance,
