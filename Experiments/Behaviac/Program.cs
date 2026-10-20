@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using behaviac;
 using Core.AI.Behaviac;
+using Core.AI.Perception;
 using Core.Unit;
 
 internal static class Program
@@ -108,10 +109,150 @@ internal static class Program
         return passedAll;
     }
 
+    private static bool RunTacticalContactMemoryTests()
+    {
+        bool passedAll = true;
+        int checks = 0;
+
+        void Check(string name, bool passed)
+        {
+            checks++;
+            passedAll &= passed;
+            Console.WriteLine($"Tactical contact test: {(passed ? "PASS" : "FAIL")}; {name}");
+        }
+
+        UnitId target = new(11, 2);
+        var memory = new TacticalContactMemory();
+        TacticalContact? visible = memory.ObserveVisual(
+            target,
+            new System.Numerics.Vector3(10f, 20f, 0f),
+            0.1f,
+            memoryLifetimeSeconds: 5f,
+            positionErrorRadius: 0.25f);
+
+        Check("visual observation stores an identified, confirmed contact",
+            visible != null &&
+            visible.Kind == TacticalContactKind.VisualConfirmed &&
+            visible.SubjectUnit.HasValue &&
+            visible.SubjectUnit.Value.Equals(target) &&
+            visible.PositionErrorRadius == 0.25f);
+
+        memory.AdvanceTime(0.41f);
+        Check("old visual confirmation downgrades to last-known",
+            memory.TryGetContact(target, out TacticalContact lastKnown) &&
+            lastKnown.Kind == TacticalContactKind.LastKnown);
+
+        float effectiveConfidence = lastKnown.GetEffectiveConfidence(2.1f, 2f);
+        Check("confidence decays from event time with the configured half-life",
+            MathF.Abs(effectiveConfidence - 0.5f) < 0.002f);
+
+        bool markedLost = memory.MarkVisualLost(target, 0.5f, 4f);
+        bool markedLostAgain = memory.MarkVisualLost(target, 0.6f, 4f);
+        Check("visual-loss transition extends memory once and is idempotent",
+            markedLost &&
+            !markedLostAgain &&
+            memory.TryGetContact(target, out TacticalContact afterLoss) &&
+            afterLoss.Kind == TacticalContactKind.LastKnown &&
+            MathF.Abs(afterLoss.ExpiresAtSeconds - 4.5f) < 0.001f);
+
+        memory.AdvanceTime(4.51f);
+        Check("expired contacts are removed",
+            !memory.TryGetContact(target, out _) && memory.Contacts.Count == 0);
+
+        var audioMemory = new TacticalContactMemory();
+        var firstShot = new TacticalStimulus(
+            TacticalStimulusType.Gunshot,
+            new System.Numerics.Vector3(50f, 50f, 0f),
+            1f,
+            intensity: 0.8f,
+            positionErrorRadius: 8f,
+            confidence: 0.45f);
+        TacticalContact? suspected = audioMemory.Record(firstShot, 1f, 5f);
+
+        var nearbyShot = new TacticalStimulus(
+            TacticalStimulusType.Gunshot,
+            new System.Numerics.Vector3(55f, 50f, 0f),
+            1.2f,
+            intensity: 0.7f,
+            positionErrorRadius: 8f,
+            confidence: 0.4f);
+        TacticalContact? merged = audioMemory.Record(nearbyShot, 1.2f, 5f);
+
+        Check("unknown stimuli create and merge an uncertain contact",
+            suspected != null &&
+            merged != null &&
+            suspected.ContactId == merged.ContactId &&
+            merged.Kind == TacticalContactKind.Suspected &&
+            !merged.SubjectUnit.HasValue &&
+            MathF.Abs(merged.EstimatedPosition.X - 55f) < 0.001f &&
+            MathF.Abs(merged.Confidence - 0.45f) < 0.001f &&
+            audioMemory.Contacts.Count == 1);
+
+        var distantShot = new TacticalStimulus(
+            TacticalStimulusType.Gunshot,
+            new System.Numerics.Vector3(100f, 100f, 0f),
+            1.3f,
+            positionErrorRadius: 3f,
+            confidence: 0.5f);
+        audioMemory.Record(distantShot, 1.3f, 5f);
+        Check("spatially separate unknown events remain separate contacts",
+            audioMemory.Contacts.Count == 2);
+
+        UnitId reporter = new(4, 1);
+        UnitId reportedTarget = new(8, 3);
+        var reportMemory = new TacticalContactMemory();
+        var report = new TacticalStimulus(
+            TacticalStimulusType.AllyContactReport,
+            new System.Numerics.Vector3(80f, 80f, 0f),
+            3f,
+            intensity: 0.7f,
+            positionErrorRadius: 6f,
+            confidence: 0.6f,
+            subjectUnit: reportedTarget,
+            reporterUnit: reporter);
+        TacticalContact? reported = reportMemory.Record(report, 3.2f, 5f);
+        Check("ally reports preserve subject identity without claiming direct sight",
+            reported != null &&
+            reported.Kind == TacticalContactKind.Reported &&
+            reported.SubjectUnit.HasValue &&
+            reported.SubjectUnit.Value.Equals(reportedTarget) &&
+            reported.ReporterUnit.HasValue &&
+            reported.ReporterUnit.Value.Equals(reporter));
+
+        var clamped = new TacticalStimulus(
+            TacticalStimulusType.Footstep,
+            System.Numerics.Vector3.Zero,
+            0f,
+            intensity: 2f,
+            confidence: -1f);
+        Check("stimulus intensity and confidence are clamped",
+            clamped.Intensity == 1f && clamped.Confidence == 0f);
+
+        var staleMemory = new TacticalContactMemory();
+        var staleEvent = new TacticalStimulus(
+            TacticalStimulusType.Gunshot,
+            System.Numerics.Vector3.Zero,
+            1f,
+            confidence: 0.8f);
+        TacticalContact? stale = staleMemory.Record(staleEvent, 10f, 4f);
+        Check("delayed, expired events cannot revive stale knowledge",
+            stale == null && staleMemory.Contacts.Count == 0);
+
+        audioMemory.Forget(new UnitId(99, 1));
+        audioMemory.Clear();
+        Check("contact memory clear resets its contacts and simulation clock",
+            audioMemory.Contacts.Count == 0 && audioMemory.CurrentTimeSeconds == 0f);
+
+        Console.WriteLine(
+            $"Tactical contact memory tests: {(passedAll ? "PASS" : "FAIL")}; {checks} cases");
+        return passedAll;
+    }
+
     private static int RunDecisionTests()
     {
         DecisionCase[] cases = GetDecisionCases();
         bool allPassed = RunTacticalUtilityTests();
+        allPassed &= RunTacticalContactMemoryTests();
 
         try
         {
