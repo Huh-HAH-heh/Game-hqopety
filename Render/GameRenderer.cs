@@ -1302,7 +1302,58 @@ public sealed class GameRenderer
             int advancingCount = splitRoles
                 ? Math.Max(1, (candidates.Count + 2) / 3)
                 : candidates.Count;
+            int supportCount = candidates.Count - advancingCount;
+            float forwardX = 1f;
+            float forwardY = 0f;
+            float sideX = 0f;
+            float sideY = 1f;
+            float supportCenterX = 0f;
+            float supportCenterY = 0f;
+            float spacing = 2f;
 
+            if (splitRoles)
+            {
+                float squadCenterX = 0f;
+                float squadCenterY = 0f;
+                float maxSupportRadius = 0f;
+
+                for (int i = 0; i < candidates.Count; i++)
+                {
+                    Vector3 position = units.Position[candidates[i].Index];
+                    squadCenterX += position.X;
+                    squadCenterY += position.Y;
+                    if (i >= advancingCount)
+                    {
+                        supportCenterX += position.X;
+                        supportCenterY += position.Y;
+                        maxSupportRadius = MathF.Max(maxSupportRadius, units.Radius[candidates[i].Index]);
+                    }
+                }
+
+                squadCenterX /= candidates.Count;
+                squadCenterY /= candidates.Count;
+                supportCenterX /= supportCount;
+                supportCenterY /= supportCount;
+
+                float dx = destination.X - squadCenterX;
+                float dy = destination.Y - squadCenterY;
+                float length = MathF.Sqrt(dx * dx + dy * dy);
+                if (length > 0.001f)
+                {
+                    forwardX = dx / length;
+                    forwardY = dy / length;
+                }
+
+                sideX = -forwardY;
+                sideY = forwardX;
+                spacing = MathF.Max(2f, maxSupportRadius * 2.5f);
+
+                // Keep support behind the assault line instead of sending it toward the target.
+                supportCenterX -= forwardX * 2f;
+                supportCenterY -= forwardY * 2f;
+            }
+
+            HashSet<(int X, int Y)> occupiedSupportTiles = new();
             for (int i = 0; i < candidates.Count; i++)
             {
                 (UnitId Id, int Index, float DistanceSquared) candidate = candidates[i];
@@ -1314,8 +1365,26 @@ public sealed class GameRenderer
                 }
                 else
                 {
-                    // Stop is a fire-support task: hold position, but engage personally visible threats.
-                    ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Stop, units.Position[candidate.Index]);
+                    int supportSlot = i - advancingCount;
+                    float lateral = (supportSlot - (supportCount - 1) * 0.5f) * spacing;
+                    Vector3 desiredSupportPosition = new(
+                        supportCenterX + sideX * lateral,
+                        supportCenterY + sideY * lateral,
+                        units.Position[candidate.Index].Z);
+
+                    if (splitRoles && TryFindFireSupportPosition(
+                            desiredSupportPosition, forwardX, forwardY, sideX, sideY,
+                            occupiedSupportTiles, out Vector3 firePosition))
+                    {
+                        // Reposition into a spread support line; Move becomes Stop upon arrival.
+                        ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Move, firePosition);
+                    }
+                    else
+                    {
+                        // Fallback keeps the unit useful even if no clear support slot exists.
+                        ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Stop, units.Position[candidate.Index]);
+                    }
+
                     supporting++;
                 }
             }
@@ -1323,6 +1392,59 @@ public sealed class GameRenderer
 
         Console.WriteLine(
             $"[SQUAD] Attack task: {advancing} advancing, {supporting} fire-support; partial selections retain normal Attack behavior.");
+    }
+
+    private bool TryFindFireSupportPosition(
+        Vector3 desired,
+        float forwardX,
+        float forwardY,
+        float sideX,
+        float sideY,
+        HashSet<(int X, int Y)> reservedTiles,
+        out Vector3 position)
+    {
+        position = default;
+        for (int backoffStep = 0; backoffStep < 4; backoffStep++)
+        {
+            float backoff = backoffStep * 2f;
+            for (int lateralStep = 0; lateralStep < 5; lateralStep++)
+            {
+                float lateral = lateralStep switch
+                {
+                    0 => 0f,
+                    1 => 1.5f,
+                    2 => -1.5f,
+                    3 => 3f,
+                    _ => -3f
+                };
+
+                float x = desired.X - forwardX * backoff + sideX * lateral;
+                float y = desired.Y - forwardY * backoff + sideY * lateral;
+                if (x < 1f || y < 1f ||
+                    x >= _worldMap.TileWidth - 1f ||
+                    y >= _worldMap.TileHeight - 1f)
+                {
+                    continue;
+                }
+
+                int tileX = (int)MathF.Floor(x);
+                int tileY = (int)MathF.Floor(y);
+                if (_worldMap.IsNavigationBlocked(tileX, tileY) ||
+                    reservedTiles.Contains((tileX, tileY)))
+                {
+                    continue;
+                }
+
+                reservedTiles.Add((tileX, tileY));
+                position = new Vector3(
+                    tileX + 0.5f,
+                    tileY + 0.5f,
+                    _worldMap.GetSurfaceHeight(tileX, tileY));
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void IssueHoldOrder(UnitId[] memberIds)
