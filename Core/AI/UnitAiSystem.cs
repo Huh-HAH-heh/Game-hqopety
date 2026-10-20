@@ -310,7 +310,7 @@ public sealed class UnitAiSystem
             if (UseBehaviacDecisionLayer &&
                 suppressionState != UnitSuppressionState.Panicked &&
                 TryExecutePlayerOrderIntent(
-                    units, health, inventory, weapons, vision, unit, intent))
+                    units, health, inventory, weapons, vision, worldMap, unit, intent))
             {
                 continue;
             }
@@ -570,6 +570,17 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index,
                     units);
+            VisionCheck currentTargetShotCheck = default;
+            bool hasCurrentTargetShotCheck = false;
+            if (targetVisible)
+            {
+                // Do not move into a firing ring around a remembered/stale contact.
+                // Confirm the target can still actually be seen from this position.
+                currentTargetShotCheck = vision.Evaluate(
+                    units, worldMap, unit, target.Index);
+                hasCurrentTargetShotCheck = true;
+                targetVisible = currentTargetShotCheck.IsVisible;
+            }
 
             if (!targetVisible)
             {
@@ -872,11 +883,9 @@ public sealed class UnitAiSystem
                 units.Target[unit] = units.Position[unit];
                 units.HasTarget[unit] = false;
 
-                VisionCheck shotCheck = vision.Evaluate(
-                    units,
-                    worldMap,
-                    unit,
-                    target.Index);
+                VisionCheck shotCheck = hasCurrentTargetShotCheck
+                    ? currentTargetShotCheck
+                    : vision.Evaluate(units, worldMap, unit, target.Index);
 
                 // Visibility lists are refreshed less often than movement. Recheck
                 // before pulling the trigger so a stale target cannot cause wall fire.
@@ -994,32 +1003,11 @@ public sealed class UnitAiSystem
                 }
                 else
                 {
-                    Vector3 lastSeenPosition = Store.LastSeenPosition[unit];
-                    if (HasRangedWeapon(units, inventory, unit))
-                    {
-                        float range = GetMaxEffectiveRange(inventory, unit);
-                        if (range > 0.1f &&
-                            TryGetRangedEngagementMoveTarget(
-                                units.Position[unit], lastSeenPosition, range, unit, target.Index,
-                                out Vector3 engagementPosition))
-                        {
-                            units.Target[unit] = engagementPosition;
-                            units.HasTarget[unit] = true;
-                        }
-                        else
-                        {
-                            // Hold at an effective firing distance rather than walking
-                            // blindly into the last known enemy position.
-                            units.Target[unit] = units.Position[unit];
-                            units.HasTarget[unit] = false;
-                        }
-                    }
-                    else
-                    {
-                        units.Target[unit] = lastSeenPosition;
-                        units.HasTarget[unit] = true;
-                    }
-
+                    // The target is no longer visible. Only a deliberate Attack-unit
+                    // order may continue toward its last seen position; ordinary AI
+                    // will hold rather than keep a firing distance from empty ground.
+                    units.Target[unit] = units.Position[unit];
+                    units.HasTarget[unit] = false;
                     Store.State[unit] = UnitAiState.Search;
                 }
 
@@ -1074,6 +1062,7 @@ public sealed class UnitAiSystem
         UnitInventoryStore inventory,
         UnitWeaponStore weapons,
         VisionSystem vision,
+        WorldMap worldMap,
         int unit,
         BehaviacUnitIntent intent)
     {
@@ -1152,31 +1141,17 @@ public sealed class UnitAiSystem
         }
 
         Vector3 destination = store.PlayerOrderPosition[unit];
-        bool targetVisible = hasLiveTarget && vision.IsRecentlyVisible(unit, target.Index, units);
+        bool targetVisible = hasLiveTarget &&
+            vision.IsRecentlyVisible(unit, target.Index, units) &&
+            vision.Evaluate(units, worldMap, unit, target.Index).IsVisible;
         if (targetVisible)
         {
             destination = units.Position[target.Index];
             store.SetPlayerOrder(unit, UnitAiOrderType.Attack, destination, target);
             store.RememberTarget(unit, target, destination, TargetMemorySeconds);
         }
-        else if (HasRangedWeapon(units, inventory, unit))
-        {
-            float range = GetMaxEffectiveRange(inventory, unit);
-            if (range > 0.1f &&
-                TryGetRangedEngagementMoveTarget(
-                    units.Position[unit], destination, range, unit,
-                    target.IsValid ? target.Index : -1,
-                    out Vector3 engagementPosition))
-            {
-                destination = engagementPosition;
-            }
-            else
-            {
-                // The enemy's last known position is an objective to observe,
-                // not a destination for a blind charge into melee distance.
-                destination = units.Position[unit];
-            }
-        }
+        // Otherwise keep the last actually observed destination. Do not calculate
+        // a stand-off position around a unit that may have moved out of sight.
 
         if (ReachedGoal(units.Position[unit], destination))
         {
@@ -1663,6 +1638,10 @@ public sealed class UnitAiSystem
         float range = float.IsFinite(effectiveRange) && effectiveRange > 0.1f
             ? effectiveRange
             : 32f;
+        float currentDistance = MathF.Sqrt(MathF.Max(0f, lengthSquared));
+        float minStandoff = MathF.Max(12f, range * 0.45f);
+        float maxStandoff = MathF.Max(minStandoff, MathF.Min(140f, range * 0.80f));
+        float standoff = Math.Clamp(currentDistance, minStandoff, maxStandoff);
         float preferredSide = (unit & 1) == 0 ? 1f : -1f;
 
         // Move around the target on a firing ring. Do not send the flanker
@@ -1677,8 +1656,6 @@ public sealed class UnitAiSystem
                 4 or 5 => MathF.PI * 0.25f,
                 _ => MathF.PI * 0.60f
             }) * side;
-            float radiusScale = candidate < 4 ? 0.88f : candidate < 6 ? 0.84f : 0.92f;
-            float standoff = MathF.Max(4f, range * radiusScale);
             float angle = baseAngle + angleOffset;
             float x = target.X + MathF.Cos(angle) * standoff;
             float y = target.Y + MathF.Sin(angle) * standoff;
@@ -2030,9 +2007,9 @@ public sealed class UnitAiSystem
         if (!float.IsFinite(effectiveRange) || effectiveRange <= 0.1f)
             return false;
 
-        float desiredDistance = MathF.Max(3f, effectiveRange * 0.88f);
-        float tooFarDistance = desiredDistance + MathF.Max(1f, effectiveRange * 0.03f);
-        float tooCloseDistance = MathF.Max(2f, effectiveRange * 0.78f);
+        float desiredDistance = MathF.Max(3f, effectiveRange * 0.72f);
+        float tooFarDistance = desiredDistance + MathF.Max(1f, effectiveRange * 0.05f);
+        float tooCloseDistance = MathF.Max(2f, effectiveRange * 0.63f);
 
         float dx = targetPosition.X - unitPosition.X;
         float dy = targetPosition.Y - unitPosition.Y;
