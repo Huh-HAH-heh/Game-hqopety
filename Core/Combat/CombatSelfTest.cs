@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Numerics;
 using Core.AI.Behaviac;
+using Core.AI.Perception;
 using Core.Combat;
 using Core.Items;
 using Core.Map;
@@ -29,6 +30,7 @@ public static class CombatSelfTest
         RunTest("Weapon: target mode cycle", TestTargetModes, ref passed, ref failed);
         RunTest("Weapon: ammunition selection", TestAmmunitionSelection, ref passed, ref failed);
         RunTest("Weapon: aim warmup delays first shot", TestWeaponAimWarmup, ref passed, ref failed);
+        RunTest("Perception: real gunshot creates anonymous contact and triggers audible investigation", TacticalHearingSelfTest.Run, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("AI: last Behaviac intent resets on unit lifecycle", TestAiIntentLifecycle, ref passed, ref failed);
         RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
