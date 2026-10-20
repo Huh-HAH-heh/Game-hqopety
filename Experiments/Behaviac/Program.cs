@@ -198,6 +198,36 @@ internal static class Program
         Check("spatially separate unknown events remain separate contacts",
             audioMemory.Contacts.Count == 2);
 
+        var resolvingMemory = new TacticalContactMemory();
+        TacticalContact? audioContact = resolvingMemory.Record(
+            new TacticalStimulus(
+                TacticalStimulusType.Gunshot,
+                new System.Numerics.Vector3(40f, 40f, 0f),
+                1f,
+                positionErrorRadius: 10f,
+                confidence: 0.4f),
+            1f,
+            5f);
+        UnitId resolvedTarget = new(6, 2);
+        TacticalContact? resolvedContact = resolvingMemory.Record(
+            new TacticalStimulus(
+                TacticalStimulusType.AllyContactReport,
+                new System.Numerics.Vector3(44f, 43f, 0f),
+                1.2f,
+                positionErrorRadius: 2f,
+                confidence: 0.7f,
+                subjectUnit: resolvedTarget),
+            1.2f,
+            5f);
+        Check("identified report can resolve an earlier uncertain sound contact",
+            audioContact != null &&
+            resolvedContact != null &&
+            audioContact.ContactId == resolvedContact.ContactId &&
+            resolvedContact.SubjectUnit.HasValue &&
+            resolvedContact.SubjectUnit.Value.Equals(resolvedTarget) &&
+            resolvedContact.Kind == TacticalContactKind.Reported &&
+            resolvingMemory.Contacts.Count == 1);
+
         UnitId reporter = new(4, 1);
         UnitId reportedTarget = new(8, 3);
         var reportMemory = new TacticalContactMemory();
