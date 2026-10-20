@@ -128,17 +128,11 @@ public sealed class SquadTacticalCoordinator
         lock (_gate)
         {
             if (!_squads.TryGetValue(squadId, out SquadState? squad)) return true;
-            bool found = false;
-            float latest = float.NegativeInfinity;
-            foreach (Observation observation in squad.Observations.Values)
-            {
-                if (!observation.Target.Equals(target)) continue;
-                found = true;
-                latest = MathF.Max(latest, observation.PublishedAt);
-            }
-
-            // Preserve explicit player objectives that have never been locally observed.
-            return found && now - latest >= ContactLifetimeSeconds;
+            // Keep per-target history separate from each observer's current target;
+            // otherwise seeing a different enemy would erase the stale-contact timer.
+            // Explicit objectives that have never been observed remain valid.
+            return squad.TargetLastSeen.TryGetValue(target, out float lastSeen) &&
+                now - lastSeen >= ContactLifetimeSeconds;
         }
     }
 
@@ -162,6 +156,7 @@ public sealed class SquadTacticalCoordinator
                     if (pair.Key.Equals(unit) || pair.Value.Target.Equals(unit))
                         staleObservers.Add(pair.Key);
                 for (int i = 0; i < staleObservers.Count; i++) squad.Observations.Remove(staleObservers[i]);
+                squad.TargetLastSeen.Remove(unit);
             }
 
             HashSet<long> invalidSequences = new();
@@ -210,6 +205,7 @@ public sealed class SquadTacticalCoordinator
             }
             if (!publish) return;
             squad.Observations[observer] = new Observation(target, position, now);
+            squad.TargetLastSeen[target] = now;
             _pending.Add(new PendingReport(squadId, observer, target, _nextSequence++, position,
                 now + ReportDelaySeconds, ErrorRadius, InitialConfidence));
         }
@@ -351,6 +347,7 @@ public sealed class SquadTacticalCoordinator
     {
         public readonly List<UnitId> Members = new();
         public readonly Dictionary<UnitId, Observation> Observations = new();
+        public readonly Dictionary<UnitId, float> TargetLastSeen = new();
     }
     private readonly record struct Observation(UnitId Target, Vector3 Position, float PublishedAt);
     private readonly record struct PendingReport(int SquadId, UnitId Reporter, UnitId Target, long Sequence, Vector3 Position,
