@@ -101,6 +101,14 @@ public static class BehaviacRuntimeHost
             self => self.ShouldSeekCover());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldRetreatToCover),
             self => self.ShouldRetreatToCover());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldExecuteAttackOrder),
+            self => self.ShouldExecuteAttackOrder());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldFollowMoveOrder),
+            self => self.ShouldFollowMoveOrder());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldHoldPosition),
+            self => self.ShouldHoldPosition());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldHoldPositionAndEngage),
+            self => self.ShouldHoldPositionAndEngage());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldFlankVisibleTarget),
             self => self.ShouldFlankVisibleTarget());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldTakePronePosition),
@@ -118,6 +126,14 @@ public static class BehaviacRuntimeHost
             self => self.SelectSeekCover());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectRetreatToCover),
             self => self.SelectRetreatToCover());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectMoveOrder),
+            self => self.SelectMoveOrder());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectHoldPosition),
+            self => self.SelectHoldPosition());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectAttackOrder),
+            self => self.SelectAttackOrder());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectHoldPositionEngage),
+            self => self.SelectHoldPositionEngage());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectFlankTarget),
             self => self.SelectFlankTarget());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectProneEngage),
