@@ -78,10 +78,20 @@ public static class TacticalHearingSelfTest
             simulation.Update(worldMap, 0.05f);
         }
 
+        Vector3 goal = simulation.AI.Store.Goal[listener.Index];
+        Vector2 goalDelta = new(
+            goal.X - contact.EstimatedPosition.X,
+            goal.Y - contact.EstimatedPosition.Y);
+        float maxSearchOffset = MathF.Max(
+            1f,
+            contact.PositionErrorRadius * 0.15f) + 0.1f;
+
         return simulation.AI.Store.LastIntent[listener.Index] ==
                    BehaviacUnitIntent.InvestigateAudibleContact &&
                simulation.AI.Store.HasGoal[listener.Index] &&
                simulation.AI.Store.State[listener.Index] == UnitAiState.Search &&
-               !simulation.AI.Store.HasTarget[listener.Index];
+               simulation.Units.HasTarget[listener.Index] &&
+               !simulation.AI.Store.HasTarget[listener.Index] &&
+               goalDelta.LengthSquared() <= maxSearchOffset * maxSearchOffset;
     }
 }
