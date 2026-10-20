@@ -19,7 +19,8 @@ public enum BehaviacUnitIntent : byte
     AttackOrder = 12,
     HoldPositionEngage = 13,
     InvestigateAudibleContact = 14,
-    InvestigateSquadContact = 15
+    InvestigateSquadContact = 15,
+    Panic = 16
 }
 
 /// <summary>
@@ -33,6 +34,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool IsAlive { get; private set; }
     [MemberMetaInfo("Suppressed", "Whether suppression or panic is active.", true)]
     public bool IsSuppressed { get; private set; }
+    [MemberMetaInfo("Panicked", "Whether the unit is in a full panic state.", true)]
+    public bool IsPanicked { get; private set; }
     [MemberMetaInfo("Has cover", "Whether a valid cover goal is available.", true)]
     public bool HasCover { get; private set; }
     [MemberMetaInfo("Visible target", "Whether a hostile target is currently visible.", true)]
@@ -108,10 +111,12 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         float flankUtility = 0f,
         float investigationUtility = 0f,
         bool hasSquadContact = false,
-        float squadContactUtility = 0f)
+        float squadContactUtility = 0f,
+        bool isPanicked = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
+        IsPanicked = isPanicked;
         HasCover = hasCover;
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
@@ -160,6 +165,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         (IsInImmediateDanger || (IsSuppressed && CoverUtility > CombatUtility));
 
     [MethodMetaInfo("ShouldExecuteAttackOrder", "Continue the attack task toward its last known contact only when no hostile is visible.")]
+    public bool ShouldPanicFallback() =>
+        IsAlive && IsPanicked && !HasCover;
+
     public bool ShouldExecuteAttackOrder() =>
         IsAlive && HasAttackOrder && !HasVisibleTarget;
 
@@ -229,6 +237,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("SelectSeekCover", "Return the suppression-cover intent.")]
     public EBTStatus SelectSeekCover() =>
         SelectIntent(BehaviacUnitIntent.SeekCover);
+
+    [MethodMetaInfo("SelectPanic", "Stop attacking and take a low profile when panic strikes and no cover is reachable.")]
+    public EBTStatus SelectPanic() =>
+        SelectIntent(BehaviacUnitIntent.Panic);
 
     [MethodMetaInfo("SelectMoveOrder", "Return the player movement-task intent.")]
     public EBTStatus SelectMoveOrder() =>
