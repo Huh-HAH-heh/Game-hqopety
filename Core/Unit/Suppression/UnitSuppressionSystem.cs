@@ -14,12 +14,13 @@ public static class UnitSuppressionSystem
         float danger,
         float factor)
     {
-        float distance = DistanceToSegment2D(
+        float distance = DistanceToSegment(
             unitPosition,
             segmentStart,
             segmentEnd);
 
-        return ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
+        Vector3 threatPosition = (segmentStart + segmentEnd) * 0.5f;
+        return ApplyNearMiss(suppression, unitIndex, distance, threatPosition, danger, factor);
     }
 
     public static bool AddNearMiss(
@@ -44,7 +45,7 @@ public static class UnitSuppressionSystem
                 regionIndex,
                 hitRegions);
 
-            float centerDistance = DistanceToSegment2D(
+            float centerDistance = DistanceToSegment(
                 region.Center,
                 segmentStart,
                 segmentEnd);
@@ -62,46 +63,49 @@ public static class UnitSuppressionSystem
         float danger,
         float factor)
     {
-        if (distance > 1.5f)
+        if (!float.IsFinite(distance) || distance > 1.5f ||
+            !float.IsFinite(danger) || danger <= 0f ||
+            !float.IsFinite(factor) || factor <= 0f)
             return false;
 
         float proximity = 1f / (0.25f + distance * distance);
         float amount = danger * factor * proximity * 0.0014f;
         suppression.Add(unitIndex, amount, impactPosition);
+
+        // Only a physically close projectile causes immediate-danger behavior.
+        // Stronger rounds and higher suppression factors keep that reaction active longer.
+        float distanceWeight = 1f / (1f + distance * distance);
+        float dangerWeight = Math.Clamp(danger / 35f, 0.35f, 1.4f);
+        float weaponWeight = Math.Clamp(factor, 0f, 1.25f);
+        float dangerDuration = Math.Clamp(
+            0.18f + 0.70f * distanceWeight * dangerWeight * weaponWeight,
+            0.18f,
+            1.0f);
+
+        if (suppression.InCover[unitIndex])
+            dangerDuration *= 0.60f;
+
+        suppression.MarkImmediateDanger(unitIndex, dangerDuration, impactPosition);
         return true;
     }
 
-    private static float DistanceToSegment2D(
+    private static float DistanceToSegment(
         Vector3 point,
         Vector3 start,
         Vector3 end)
     {
-        Vector2 p =
-            new Vector2(point.X, point.Y);
-
-        Vector2 a =
-            new Vector2(start.X, start.Y);
-
-        Vector2 b =
-            new Vector2(end.X, end.Y);
-
-        Vector2 ab = b - a;
-        float lengthSquared = ab.LengthSquared();
+        Vector3 segment = end - start;
+        float lengthSquared = segment.LengthSquared();
 
         if (lengthSquared <= 0.000001f)
-            return (p - a).Length();
+            return (point - start).Length();
 
-        float t =
-            Vector2.Dot(
-                p - a,
-                ab) /
-            lengthSquared;
+        float t = Math.Clamp(
+            Vector3.Dot(point - start, segment) / lengthSquared,
+            0f,
+            1f);
 
-        t = Math.Clamp(t, 0f, 1f);
-
-        Vector2 closest =
-            a + ab * t;
-
-        return (p - closest).Length();
+        Vector3 closest = start + segment * t;
+        return (point - closest).Length();
     }
 }
