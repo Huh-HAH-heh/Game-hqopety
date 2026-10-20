@@ -1868,15 +1868,8 @@ public sealed class GameRenderer
 
         _squadManager.PruneDeadMembers(living);
         _selectedUnits.RemoveWhere(id => !living.Contains(id));
-        if (!_selectedUnits.Contains(_selectedUnit))
-        {
+        if (_selectedUnit.IsValid && !_selectedUnits.Contains(_selectedUnit))
             _selectedUnit = default;
-            foreach (UnitId id in _selectedUnits)
-            {
-                _selectedUnit = id;
-                break;
-            }
-        }
     }
 
     private bool TryGetSquadCenter(
