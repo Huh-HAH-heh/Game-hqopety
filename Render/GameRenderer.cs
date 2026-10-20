@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Threading;
+using Core.AI;
 using Core.Items;
 using Core.Combat;
 using Core.Map;
@@ -1108,6 +1109,7 @@ public sealed class GameRenderer
         }
 
         int squadId = _squadManager.Create(members);
+        SyncSquadTactics();
         SelectSquad(squadId, false);
         Console.WriteLine(
             $"[SQUAD] Created/merged squad {squadId} with {members.Length} soldiers.");
@@ -1122,6 +1124,7 @@ public sealed class GameRenderer
         if (disbanded == 0)
             return false;
 
+        SyncSquadTactics();
         Console.WriteLine($"[SQUAD] Disbanded {disbanded} squad(s). Soldiers remain on the field.");
         return true;
     }
@@ -1679,6 +1682,7 @@ public sealed class GameRenderer
                 for (int i = 0; i < picked.Count; i++)
                     _squadManager.AddMember(selectedSquadId, picked[i]);
 
+                SyncSquadTactics();
                 SelectSquad(selectedSquadId, false);
                 Console.WriteLine($"[SQUAD] Added selected soldiers to squad {selectedSquadId}.");
                 return;
@@ -1744,6 +1748,7 @@ public sealed class GameRenderer
                 // With a squad selected, Shift-clicking a soldier in another squad
                 // transfers that soldier into the selected squad instead of detaching it.
                 _squadManager.AddMember(selectedSquadId, id);
+                SyncSquadTactics();
                 SelectSquad(selectedSquadId, false);
                 Console.WriteLine(
                     $"[SQUAD] Soldier transferred from squad {clickedSquadId} to squad {selectedSquadId}.");
@@ -1755,6 +1760,7 @@ public sealed class GameRenderer
                 // Shift-click a member of the currently selected squad (or with no
                 // squad selected) to detach just that soldier.
                 _squadManager.RemoveMember(id);
+                SyncSquadTactics();
                 _selectedUnits.Clear();
                 _selectedUnits.Add(id);
                 _selectedUnit = id;
@@ -1765,6 +1771,7 @@ public sealed class GameRenderer
             if (selectedSquadId != 0)
             {
                 _squadManager.AddMember(selectedSquadId, id);
+                SyncSquadTactics();
                 SelectSquad(selectedSquadId, false);
                 Console.WriteLine($"[SQUAD] Soldier added to squad {selectedSquadId}.");
                 return;
@@ -1856,6 +1863,14 @@ public sealed class GameRenderer
             MathF.Max(0.13f, footprint * 0.125f));
     }
 
+    private void SyncSquadTactics()
+    {
+        List<SquadMembershipSnapshot> squads = new(_squadManager.Squads.Count);
+        foreach (InfantrySquad squad in _squadManager.Squads)
+            squads.Add(new SquadMembershipSnapshot(squad.Id, squad.Members.ToArray()));
+        _unitSimulation.AI.SynchronizeSquadMemberships(squads);
+    }
+
     private void PruneSquadState(SimulationFrameSnapshot snapshot)
     {
         HashSet<UnitId> living = new();
@@ -1867,6 +1882,7 @@ public sealed class GameRenderer
         }
 
         _squadManager.PruneDeadMembers(living);
+        SyncSquadTactics();
         _selectedUnits.RemoveWhere(id => !living.Contains(id));
         if (_selectedUnit.IsValid && !_selectedUnits.Contains(_selectedUnit))
             _selectedUnit = default;

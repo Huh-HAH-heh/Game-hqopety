@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Threading.Tasks;
+using Core.AI;
 using Core.AI.Behaviac;
 using Core.AI.Perception;
 using Core.Combat;
@@ -39,6 +41,8 @@ public sealed class UnitAiSystem
     private readonly UnitWeaponSystem _weaponSystem;
     private readonly UnitSkillStore? _skills;
     private float _thinkTimer;
+    private float _tacticalTimeSeconds;
+    private readonly SquadTacticalCoordinator _squadCoordinator = new();
 
     public bool Enabled { get; set; }
     public bool LastUpdateRanThinkPass { get; private set; }
@@ -51,6 +55,10 @@ public sealed class UnitAiSystem
 
     public TacticalHearingSystem? Hearing { get; set; }
     public UnitAiStore Store { get; }
+    public SquadTacticalCoordinator SquadCoordinator => _squadCoordinator;
+
+    public void SynchronizeSquadMemberships(IReadOnlyList<SquadMembershipSnapshot> squads) =>
+        _squadCoordinator.SynchronizeMemberships(squads);
     public double LastPlanningMilliseconds { get; private set; }
 
     public bool BehaviacRuntimeReady => _behaviacInitialized;
@@ -188,6 +196,20 @@ public sealed class UnitAiSystem
                     _activeUnitScratch[i], thinkDelta);
             }
         }
+
+        _tacticalTimeSeconds += thinkDelta;
+        for (int i = 0; i < activeCount; i++)
+        {
+            int unit = _activeUnitScratch[i];
+            int visibleTarget = _nearestVisibleEnemyByUnit[unit];
+            if (visibleTarget < 0)
+                continue;
+
+            _squadCoordinator.ObserveVisibleContact(
+                units.GetId(unit), units.GetId(visibleTarget),
+                units.Position[visibleTarget], _tacticalTimeSeconds);
+        }
+        _squadCoordinator.Advance(_tacticalTimeSeconds);
 
         LastPlanningMilliseconds =
             Stopwatch.GetElapsedTime(planningStarted).TotalMilliseconds;
@@ -383,6 +405,13 @@ public sealed class UnitAiSystem
             if (UseBehaviacDecisionLayer &&
                 intent == BehaviacUnitIntent.InvestigateAudibleContact &&
                 TryExecuteAudibleInvestigation(units, weapons, worldMap, unit))
+            {
+                continue;
+            }
+
+            if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.InvestigateSquadContact &&
+                TryExecuteSquadContactInvestigation(units, weapons, worldMap, unit))
             {
                 continue;
             }
@@ -1086,6 +1115,7 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
             case BehaviacUnitIntent.InvestigateLastKnownTarget:
             case BehaviacUnitIntent.InvestigateAudibleContact:
+            case BehaviacUnitIntent.InvestigateSquadContact:
                 LastBehaviacInvestigateDecisions++;
                 break;
             case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
@@ -1094,6 +1124,37 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
             case BehaviacUnitIntent.HoldPositionEngage: LastBehaviacHoldAndEngageDecisions++; break;
         }
+    }
+
+    private bool TryExecuteSquadContactInvestigation(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        WorldMap worldMap,
+        int unit)
+    {
+        UnitId receiver = units.GetId(unit);
+        if (!_squadCoordinator.TryGetContact(
+                receiver, _tacticalTimeSeconds, out SquadTacticalContact contact) ||
+            !_squadCoordinator.MarkInvestigated(receiver, contact.Sequence))
+            return false;
+
+        Vector3 estimate = contact.EstimatedPosition;
+        float angle = (contact.Sequence * 2.39996323f + unit * 0.75487767f) % MathF.Tau;
+        float searchOffset = Math.Clamp(contact.PositionErrorRadius * 0.22f, 0.75f, 5f);
+        float x = Math.Clamp(estimate.X + MathF.Cos(angle) * searchOffset, 0.5f, worldMap.MaxTileX - 0.5f);
+        float y = Math.Clamp(estimate.Y + MathF.Sin(angle) * searchOffset, 0.5f, worldMap.MaxTileY - 0.5f);
+        int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
+        Vector3 searchPoint = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
+
+        // A squad report is an area to investigate, never an identified combat target.
+        ClearAiming(weapons, unit);
+        Store.ClearTarget(unit);
+        Store.SetGoal(unit, searchPoint);
+        units.Target[unit] = searchPoint;
+        units.HasTarget[unit] = true;
+        Store.State[unit] = UnitAiState.Search;
+        return true;
     }
 
     private bool TryExecuteAudibleInvestigation(
@@ -1346,6 +1407,19 @@ public sealed class UnitAiSystem
                 investigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility;
         }
 
+        bool hasSquadContact = false;
+        float squadContactUtility = 0f;
+        if (_squadCoordinator.TryGetContact(
+                units.GetId(unit), _tacticalTimeSeconds, out SquadTacticalContact squadContact))
+        {
+            Vector3 squadDelta = squadContact.EstimatedPosition - units.Position[unit];
+            float squadDistance = MathF.Sqrt(
+                squadDelta.X * squadDelta.X + squadDelta.Y * squadDelta.Y);
+            squadContactUtility = UnitTacticalUtility.EvaluateInvestigation(
+                squadContact.Confidence, squadDistance);
+            hasSquadContact = squadContactUtility >= UnitTacticalUtility.MinimumSquadContactUtility;
+        }
+
         bool hasImmediateDanger = suppression.IsInImmediateDanger(unit);
         float coverUtility = UnitTacticalUtility.EvaluateCover(
             suppression.Value[unit],
@@ -1376,7 +1450,9 @@ public sealed class UnitAiSystem
             isAlerted,
             coverUtility,
             flankUtility,
-            investigationUtility);
+            investigationUtility,
+            hasSquadContact,
+            squadContactUtility);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)

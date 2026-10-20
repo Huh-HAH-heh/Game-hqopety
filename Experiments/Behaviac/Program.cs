@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using behaviac;
+using Core.AI;
 using Core.AI.Behaviac;
 using Core.AI.Perception;
 using Core.Unit;
@@ -360,12 +361,60 @@ internal static class Program
         return passedAll;
     }
 
+    private static bool RunSquadTacticalCoordinatorTests()
+    {
+        bool passedAll = true;
+        int checks = 0;
+        void Check(string name, bool passed)
+        {
+            checks++;
+            passedAll &= passed;
+            Console.WriteLine($"Squad tactical relay test: {(passed ? "PASS" : "FAIL")}; {name}");
+        }
+
+        UnitId reporter = new(1, 1), wingman = new(2, 1), other = new(3, 1), target = new(10, 1);
+        var coordinator = new SquadTacticalCoordinator();
+        coordinator.SynchronizeMemberships([
+            new SquadMembershipSnapshot(1, new[] { reporter, wingman }),
+            new SquadMembershipSnapshot(2, new[] { other })
+        ]);
+        coordinator.ObserveVisibleContact(reporter, target, new System.Numerics.Vector3(24f, 30f, 0f), 1f);
+        coordinator.Advance(1.54f);
+        Check("report waits for delivery delay", !coordinator.TryGetContact(wingman, 1.54f, out _));
+        coordinator.Advance(1.56f);
+        bool received = coordinator.TryGetContact(wingman, 1.56f, out SquadTacticalContact contact);
+        Check("report reaches squad member only", received &&
+            !coordinator.TryGetContact(reporter, 1.56f, out _) &&
+            !coordinator.TryGetContact(other, 1.56f, out _));
+        float dx = received ? contact.EstimatedPosition.X - 24f : 0f;
+        float dy = received ? contact.EstimatedPosition.Y - 30f : 0f;
+        Check("position is uncertain and does not expose a target id", received &&
+            dx * dx + dy * dy > 0.1f && contact.PositionErrorRadius > 0f && contact.Confidence > 0f);
+        Check("handled report is not investigated repeatedly", received &&
+            coordinator.MarkInvestigated(wingman, contact.Sequence) &&
+            !coordinator.TryGetContact(wingman, 1.56f, out _));
+        coordinator.ObserveVisibleContact(reporter, target, new System.Numerics.Vector3(29f, 30f, 0f), 2f);
+        coordinator.Advance(2.56f);
+        bool refreshed = coordinator.TryGetContact(wingman, 2.56f, out SquadTacticalContact next);
+        Check("new observation produces a newer report", refreshed && next.Sequence > contact.Sequence);
+        coordinator.SynchronizeMemberships([
+            new SquadMembershipSnapshot(1, new[] { reporter }),
+            new SquadMembershipSnapshot(2, new[] { other })
+        ]);
+        Check("detached member loses shared contact", !coordinator.TryGetContact(wingman, 2.56f, out _));
+        coordinator.Advance(7f);
+        Check("contacts eventually expire", !coordinator.TryGetContact(wingman, 7f, out _));
+        Console.WriteLine($"Squad tactical relay tests: {(passedAll ? "PASS" : "FAIL")}; {checks} cases");
+        return passedAll;
+    }
+
     private static int RunDecisionTests()
     {
         DecisionCase[] cases = GetDecisionCases();
         bool allPassed = RunTacticalUtilityTests();
         allPassed &= RunTacticalContactMemoryTests();
         allPassed &= RunSuppressionResponseTests();
+        allPassed &= RunSquadTacticalCoordinatorTests();
 
         try
         {
@@ -382,7 +431,8 @@ internal static class Program
                     test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                     test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
                     test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted,
-                    test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
+                    test.CoverUtility, test.FlankUtility, test.InvestigationUtility,
+                        test.HasSquadContact, test.SquadContactUtility);
 
                 EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                 BehaviacUnitIntent directIntent = ResolveDirect(test);
@@ -438,7 +488,8 @@ internal static class Program
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
                         test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted,
-                        test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
+                        test.CoverUtility, test.FlankUtility, test.InvestigationUtility,
+                        test.HasSquadContact, test.SquadContactUtility);
                     _ = BehaviacRuntimeHost.Tick(agents[unit]);
                 }
             }
@@ -477,7 +528,8 @@ internal static class Program
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
                         test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted,
-                        test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
+                        test.CoverUtility, test.FlankUtility, test.InvestigationUtility,
+                        test.HasSquadContact, test.SquadContactUtility);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
@@ -568,6 +620,10 @@ internal static class Program
             InvestigationUtility: 0.70f),
         new("faint sound without alertness does not trigger investigation", true, false, false, false, false,
             BehaviacUnitIntent.Patrol, HasAudibleContact: true, InvestigationUtility: 0.70f),
+        new("squad contact is investigated after delay", true, false, false, false, false,
+            BehaviacUnitIntent.InvestigateSquadContact, HasSquadContact: true, SquadContactUtility: 0.70f),
+        new("weak squad report is ignored", true, false, false, false, false,
+            BehaviacUnitIntent.Patrol, HasSquadContact: true, SquadContactUtility: 0.10f),
         new("move order outranks an uncertain sound", true, false, false, false, false,
             BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f,
             HasAudibleContact: true, IsAlerted: true, InvestigationUtility: 0.70f),
@@ -646,6 +702,14 @@ internal static class Program
             return BehaviacUnitIntent.InvestigateAudibleContact;
         }
 
+        if (test.HasSquadContact && !test.HasVisibleTarget && !test.HasRecentTarget &&
+            !test.IsSuppressed && !test.IsLowHealth &&
+            !test.HasMoveOrder && !test.HasStopOrder && !test.HasAttackOrder &&
+            test.SquadContactUtility >= UnitTacticalUtility.MinimumSquadContactUtility)
+        {
+            return BehaviacUnitIntent.InvestigateSquadContact;
+        }
+
         return BehaviacUnitIntent.Patrol;
     }
 
@@ -673,7 +737,9 @@ internal static class Program
         bool IsAlerted = false,
         float CoverUtility = 0f,
         float FlankUtility = 0f,
-        float InvestigationUtility = 0f);
+        float InvestigationUtility = 0f,
+        bool HasSquadContact = false,
+        float SquadContactUtility = 0f);
 }
 
 [TypeMetaInfo()]
