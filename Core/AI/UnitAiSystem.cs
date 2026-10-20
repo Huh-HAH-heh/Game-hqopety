@@ -352,18 +352,9 @@ public sealed class UnitAiSystem
                 }
             }
 
+            // Attack orders are objectives, not hard target locks. Keep the
+            // nearest visible hostile selected so soldiers can switch threats.
             int visibleEnemy = _nearestVisibleEnemyByUnit[unit];
-            if (Store.PlayerOrderType[unit] == UnitAiOrderType.Attack)
-            {
-                UnitId commandedTarget = Store.PlayerOrderTarget[unit];
-                if (units.IsAlive(commandedTarget) &&
-                    health.OverallHitPoints[commandedTarget.Index] > 0f &&
-                    IsHostile(units, unit, commandedTarget.Index) &&
-                    vision.IsRecentlyVisible(unit, commandedTarget.Index, units))
-                {
-                    visibleEnemy = commandedTarget.Index;
-                }
-            }
 
             bool keepCurrentVisibleTarget = false;
 
@@ -934,25 +925,38 @@ public sealed class UnitAiSystem
             return true;
         }
 
+        if (intent == BehaviacUnitIntent.HoldPositionEngage)
+        {
+            // Let the regular combat code aim/fire, but remove movement intent
+            // and stale waypoints before it runs.
+            store.ClearGoal(unit);
+            units.Target[unit] = units.Position[unit];
+            units.HasTarget[unit] = false;
+            store.State[unit] = UnitAiState.Attack;
+            return false;
+        }
+
         if (intent != BehaviacUnitIntent.AttackOrder)
             return false;
 
         UnitId target = store.PlayerOrderTarget[unit];
-        if (!units.IsAlive(target) ||
-            health.OverallHitPoints[target.Index] <= 0f ||
-            !IsHostile(units, unit, target.Index))
+        bool hasLiveTarget = target.IsValid &&
+            units.IsAlive(target) &&
+            health.OverallHitPoints[target.Index] > 0f &&
+            IsHostile(units, unit, target.Index);
+        if (!hasLiveTarget && target.IsValid)
         {
-            store.ClearPlayerOrder(unit);
-            store.ClearTarget(unit);
-            store.ClearGoal(unit);
-            units.HasTarget[unit] = false;
-            store.State[unit] = UnitAiState.Idle;
-            ClearAiming(weapons, unit);
-            return true;
+            // Preserve the order destination even when its current enemy dies
+            // or becomes invalid; a nearby visible threat may replace it.
+            store.SetPlayerOrder(
+                unit,
+                UnitAiOrderType.Attack,
+                store.PlayerOrderPosition[unit]);
+            target = default;
         }
 
         Vector3 destination = store.PlayerOrderPosition[unit];
-        if (vision.IsRecentlyVisible(unit, target.Index, units))
+        if (hasLiveTarget && vision.IsRecentlyVisible(unit, target.Index, units))
         {
             destination = units.Position[target.Index];
             store.SetPlayerOrder(unit, UnitAiOrderType.Attack, destination, target);
@@ -1033,13 +1037,19 @@ public sealed class UnitAiSystem
         bool hasAttackOrder = orderType == UnitAiOrderType.Attack;
         UnitId attackTarget = Store.PlayerOrderTarget[unit];
         if (hasAttackOrder &&
+            attackTarget.IsValid &&
             (!units.IsAlive(attackTarget) ||
              health.OverallHitPoints[attackTarget.Index] <= 0f ||
              !IsHostile(units, unit, attackTarget.Index)))
         {
-            Store.ClearPlayerOrder(unit);
-            orderType = UnitAiOrderType.None;
-            hasAttackOrder = false;
+            // The original target dying must not cancel the attack task.
+            // Keep its last-known position as the objective and let a new
+            // visible hostile replace the target below.
+            Store.SetPlayerOrder(
+                unit,
+                UnitAiOrderType.Attack,
+                Store.PlayerOrderPosition[unit]);
+            attackTarget = default;
         }
 
         if (orderType == UnitAiOrderType.Move &&
@@ -1053,16 +1063,34 @@ public sealed class UnitAiSystem
         int visibleTargetIndex = _nearestVisibleEnemyByUnit[unit];
         if (hasAttackOrder)
         {
-            // An explicit attack task fixes target selection until it is completed
-            // or invalidated. It remains a last-known-position task without LOS.
-            visibleTargetIndex = vision.IsRecentlyVisible(unit, attackTarget.Index, units)
-                ? attackTarget.Index
-                : -1;
+            // If the spatial visibility sample temporarily omits the current task
+            // target, retain it only while LOS memory still confirms it visible.
+            if (visibleTargetIndex < 0 &&
+                attackTarget.IsValid &&
+                units.IsAlive(attackTarget) &&
+                health.OverallHitPoints[attackTarget.Index] > 0f &&
+                IsHostile(units, unit, attackTarget.Index) &&
+                vision.IsRecentlyVisible(unit, attackTarget.Index, units))
+            {
+                visibleTargetIndex = attackTarget.Index;
+            }
+
             if (visibleTargetIndex >= 0)
             {
+                // Switching target also updates the attack task's last-known
+                // location, so it can continue searching if LOS is lost again.
+                UnitId nearestTarget = units.GetId(visibleTargetIndex);
                 Vector3 targetPosition = units.Position[visibleTargetIndex];
-                Store.SetPlayerOrder(unit, UnitAiOrderType.Attack, targetPosition, attackTarget);
-                Store.RememberTarget(unit, attackTarget, targetPosition, TargetMemorySeconds);
+                Store.SetPlayerOrder(
+                    unit,
+                    UnitAiOrderType.Attack,
+                    targetPosition,
+                    nearestTarget);
+                Store.RememberTarget(
+                    unit,
+                    nearestTarget,
+                    targetPosition,
+                    TargetMemorySeconds);
             }
         }
 
