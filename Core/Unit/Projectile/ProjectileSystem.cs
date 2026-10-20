@@ -741,7 +741,7 @@ public sealed class ProjectileSystem
     {
         if (_nearMissStamp == int.MaxValue)
         {
-            Array.Clear(_nearMissMarks);
+            Array.Clear(_nearMissMarks, 0, _nearMissMarks.Length);
             _nearMissStamp = 1;
         }
         else
