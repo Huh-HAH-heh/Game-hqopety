@@ -310,7 +310,7 @@ public sealed class UnitAiSystem
             if (UseBehaviacDecisionLayer &&
                 suppressionState != UnitSuppressionState.Panicked &&
                 TryExecutePlayerOrderIntent(
-                    units, health, weapons, vision, unit, intent))
+                    units, health, inventory, weapons, vision, unit, intent))
             {
                 continue;
             }
@@ -720,6 +720,7 @@ public sealed class UnitAiSystem
                             worldMap,
                             unit,
                             target.Index,
+                            GetMaxEffectiveRange(inventory, unit),
                             out Vector3 flankWaypoint))
                     {
                         Store.SetGoal(unit, flankWaypoint);
@@ -820,17 +821,11 @@ public sealed class UnitAiSystem
                         float dx = targetPosition.X - position.X;
                         float dy = targetPosition.Y - position.Y;
                         float distanceSquared = dx * dx + dy * dy;
-                        float desiredDistance = MathF.Max(3f, range * 0.84f);
-                        float approachThreshold = desiredDistance + MathF.Max(1f, range * 0.03f);
-
-                        if (distanceSquared > approachThreshold * approachThreshold)
+                        if (TryGetRangedEngagementMoveTarget(
+                                position, targetPosition, range, unit, target.Index,
+                                out Vector3 engagementPosition))
                         {
-                            float distance = MathF.Sqrt(distanceSquared);
-                            float scale = desiredDistance / MathF.Max(0.001f, distance);
-                            units.Target[unit] = new Vector3(
-                                targetPosition.X - dx * scale,
-                                targetPosition.Y - dy * scale,
-                                position.Z);
+                            units.Target[unit] = engagementPosition;
                             units.HasTarget[unit] = true;
                             ClearAiming(weapons, unit);
                             Store.ClearGoal(unit);
@@ -1002,8 +997,32 @@ public sealed class UnitAiSystem
                 }
                 else
                 {
-                    units.Target[unit] = Store.LastSeenPosition[unit];
-                    units.HasTarget[unit] = true;
+                    Vector3 lastSeenPosition = Store.LastSeenPosition[unit];
+                    if (HasRangedWeapon(units, inventory, unit))
+                    {
+                        float range = GetMaxEffectiveRange(inventory, unit);
+                        if (range > 0.1f &&
+                            TryGetRangedEngagementMoveTarget(
+                                units.Position[unit], lastSeenPosition, range, unit, target.Index,
+                                out Vector3 engagementPosition))
+                        {
+                            units.Target[unit] = engagementPosition;
+                            units.HasTarget[unit] = true;
+                        }
+                        else
+                        {
+                            // Hold at an effective firing distance rather than walking
+                            // blindly into the last known enemy position.
+                            units.Target[unit] = units.Position[unit];
+                            units.HasTarget[unit] = false;
+                        }
+                    }
+                    else
+                    {
+                        units.Target[unit] = lastSeenPosition;
+                        units.HasTarget[unit] = true;
+                    }
+
                     Store.State[unit] = UnitAiState.Search;
                 }
 
@@ -1055,6 +1074,7 @@ public sealed class UnitAiSystem
     private bool TryExecutePlayerOrderIntent(
         UnitStore units,
         UnitHealthStore health,
+        UnitInventoryStore inventory,
         UnitWeaponStore weapons,
         VisionSystem vision,
         int unit,
@@ -1135,11 +1155,30 @@ public sealed class UnitAiSystem
         }
 
         Vector3 destination = store.PlayerOrderPosition[unit];
-        if (hasLiveTarget && vision.IsRecentlyVisible(unit, target.Index, units))
+        bool targetVisible = hasLiveTarget && vision.IsRecentlyVisible(unit, target.Index, units);
+        if (targetVisible)
         {
             destination = units.Position[target.Index];
             store.SetPlayerOrder(unit, UnitAiOrderType.Attack, destination, target);
             store.RememberTarget(unit, target, destination, TargetMemorySeconds);
+        }
+        else if (HasRangedWeapon(units, inventory, unit))
+        {
+            float range = GetMaxEffectiveRange(inventory, unit);
+            if (range > 0.1f &&
+                TryGetRangedEngagementMoveTarget(
+                    units.Position[unit], destination, range, unit,
+                    target.IsValid ? target.Index : -1,
+                    out Vector3 engagementPosition))
+            {
+                destination = engagementPosition;
+            }
+            else
+            {
+                // The enemy's last known position is an objective to observe,
+                // not a destination for a blind charge into melee distance.
+                destination = units.Position[unit];
+            }
         }
 
         if (ReachedGoal(units.Position[unit], destination))
@@ -1400,7 +1439,7 @@ public sealed class UnitAiSystem
         if (hasVisibleTarget &&
             isHealthyEnoughToFlank &&
             HasRangedWeapon(units, inventory, unit) &&
-            unit % 8 == 0)
+            unit % 4 == 0)
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
@@ -1408,17 +1447,18 @@ public sealed class UnitAiSystem
             bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
                 _flankTargetByUnit[unit].Equals(units.GetId(visibleTargetIndex));
 
-            // Flanking is a small long-range maneuver, not the default response
-            // to contact. Most shooters should open fire from their current lane.
-            float maxFlankRange = MathF.Min(75f, MathF.Max(25f, units.ViewRange[unit] * 0.85f));
+            // A flank changes the angle of approach while staying within a useful
+            // engagement radius; it does not require the target to be out of weapon range.
+            float maxFlankRange = MathF.Min(140f, MathF.Max(45f, units.ViewRange[unit] * 0.90f));
             float effectiveRange = GetMaxEffectiveRange(inventory, unit);
             flankEffectiveRange = effectiveRange;
-            bool stillOutsideWeaponRange = effectiveRange > 0.1f &&
-                distanceSquared > effectiveRange * effectiveRange;
+            float minFlankRange = MathF.Max(
+                24f,
+                MathF.Min(effectiveRange * 0.45f, maxFlankRange * 0.55f));
             canFlank = !alreadyFlankedThisTarget &&
-                stillOutsideWeaponRange &&
-                distanceSquared >= 24f * 24f &&
-                distanceSquared <= maxFlankRange * maxFlankRange;
+                effectiveRange > 0.1f &&
+                flankDistance >= minFlankRange &&
+                flankDistance <= maxFlankRange;
         }
 
         bool isFlanking =
@@ -1611,34 +1651,45 @@ public sealed class UnitAiSystem
         WorldMap worldMap,
         int unit,
         int targetIndex,
+        float effectiveRange,
         out Vector3 waypoint)
     {
         waypoint = Vector3.Zero;
         Vector3 position = units.Position[unit];
         Vector3 target = units.Position[targetIndex];
-        Vector2 towardTarget = new(target.X - position.X, target.Y - position.Y);
-        float lengthSquared = towardTarget.LengthSquared();
-        if (lengthSquared < 1f)
-            return false;
+        Vector2 awayFromTarget = new(position.X - target.X, position.Y - target.Y);
+        float lengthSquared = awayFromTarget.LengthSquared();
+        float baseAngle = lengthSquared > 0.01f
+            ? MathF.Atan2(awayFromTarget.Y, awayFromTarget.X)
+            : (unit + 1) * 2.39996323f + (targetIndex + 1) * 0.61803399f;
 
-        Vector2 forward = Vector2.Normalize(towardTarget);
-        Vector2 side = new(-forward.Y, forward.X);
+        float range = float.IsFinite(effectiveRange) && effectiveRange > 0.1f
+            ? effectiveRange
+            : 32f;
         float preferredSide = (unit & 1) == 0 ? 1f : -1f;
 
-        // Try both sides and a shallower side-step if the preferred point is blocked.
-        // This reduces stalls near walls while keeping the maneuver deterministic.
-        for (int candidate = 0; candidate < 4; candidate++)
+        // Move around the target on a firing ring. Do not send the flanker
+        // directly to a close backoff point where they would collide with the enemy.
+        for (int candidate = 0; candidate < 8; candidate++)
         {
-            float sideSign = candidate % 2 == 0 ? preferredSide : -preferredSide;
-            float backoff = candidate < 2 ? 8f : 16f;
-            float lateral = candidate < 2 ? 12f : 18f;
-            float targetX = target.X - forward.X * backoff + side.X * lateral * sideSign;
-            float targetY = target.Y - forward.Y * backoff + side.Y * lateral * sideSign;
-            targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
-            targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+            float side = candidate % 2 == 0 ? preferredSide : -preferredSide;
+            float angleOffset = candidate switch
+            {
+                0 or 1 => MathF.PI * 0.35f,
+                2 or 3 => MathF.PI * 0.48f,
+                4 or 5 => MathF.PI * 0.25f,
+                _ => MathF.PI * 0.60f
+            } * side;
+            float radiusScale = candidate < 4 ? 0.88f : candidate < 6 ? 0.84f : 0.92f;
+            float standoff = MathF.Max(4f, range * radiusScale);
+            float angle = baseAngle + angleOffset;
+            float x = target.X + MathF.Cos(angle) * standoff;
+            float y = target.Y + MathF.Sin(angle) * standoff;
+            x = Math.Clamp(x, 2f, worldMap.MaxTileX - 2f);
+            y = Math.Clamp(y, 2f, worldMap.MaxTileY - 2f);
 
-            int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
-            int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
+            int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
             if (worldMap.IsNavigationBlocked(tileX, tileY))
                 continue;
 
@@ -1649,7 +1700,7 @@ public sealed class UnitAiSystem
             Vector2 toWaypoint = new(
                 candidateWaypoint.X - position.X,
                 candidateWaypoint.Y - position.Y);
-            if (toWaypoint.LengthSquared() <= 4f)
+            if (toWaypoint.LengthSquared() <= 9f)
                 continue;
 
             waypoint = candidateWaypoint;
@@ -1968,6 +2019,55 @@ public sealed class UnitAiSystem
             targetPosition.X + MathF.Cos(angle) * distance,
             targetPosition.Y + MathF.Sin(angle) * distance,
             targetPosition.Z);
+    }
+
+    private static bool TryGetRangedEngagementMoveTarget(
+        Vector3 unitPosition,
+        Vector3 targetPosition,
+        float effectiveRange,
+        int unit,
+        int targetIndex,
+        out Vector3 destination)
+    {
+        destination = unitPosition;
+        if (!float.IsFinite(effectiveRange) || effectiveRange <= 0.1f)
+            return false;
+
+        float desiredDistance = MathF.Max(3f, effectiveRange * 0.88f);
+        float tooFarDistance = desiredDistance + MathF.Max(1f, effectiveRange * 0.03f);
+        float tooCloseDistance = MathF.Max(2f, effectiveRange * 0.78f);
+
+        float dx = targetPosition.X - unitPosition.X;
+        float dy = targetPosition.Y - unitPosition.Y;
+        float distanceSquared = dx * dx + dy * dy;
+
+        if (distanceSquared <= tooFarDistance * tooFarDistance &&
+            distanceSquared >= tooCloseDistance * tooCloseDistance)
+        {
+            return false;
+        }
+
+        float distance;
+        if (distanceSquared > 0.0001f)
+        {
+            distance = MathF.Sqrt(distanceSquared);
+            dx /= distance;
+            dy /= distance;
+        }
+        else
+        {
+            // Stable separation direction for exact overlaps.
+            float angle = (unit + 1) * 2.39996323f +
+                (targetIndex + 2) * 0.61803399f;
+            dx = MathF.Cos(angle);
+            dy = MathF.Sin(angle);
+        }
+
+        destination = new Vector3(
+            targetPosition.X - dx * desiredDistance,
+            targetPosition.Y - dy * desiredDistance,
+            unitPosition.Z);
+        return true;
     }
 
     private static float GetMaxEffectiveRange(
