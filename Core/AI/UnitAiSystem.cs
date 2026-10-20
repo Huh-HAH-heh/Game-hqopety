@@ -310,7 +310,7 @@ public sealed class UnitAiSystem
             if (UseBehaviacDecisionLayer &&
                 suppressionState != UnitSuppressionState.Panicked &&
                 TryExecutePlayerOrderIntent(
-                    units, health, inventory, weapons, vision, worldMap, unit, intent))
+                    units, health, weapons, vision, worldMap, unit, intent))
             {
                 continue;
             }
@@ -887,8 +887,8 @@ public sealed class UnitAiSystem
                     ? currentTargetShotCheck
                     : vision.Evaluate(units, worldMap, unit, target.Index);
 
-                // Visibility lists are refreshed less often than movement. Recheck
-                // before pulling the trigger so a stale target cannot cause wall fire.
+                // This direct visibility check ran before positioning. Never fire
+                // based only on a stale visibility-memory entry.
                 if (!shotCheck.IsVisible)
                 {
                     // Forget stale LOS immediately. Suppressive weapons may
@@ -1003,9 +1003,8 @@ public sealed class UnitAiSystem
                 }
                 else
                 {
-                    // The target is no longer visible. Only a deliberate Attack-unit
-                    // order may continue toward its last seen position; ordinary AI
-                    // will hold rather than keep a firing distance from empty ground.
+                    // No direct target is visible. Stop the ordinary combat loop
+                    // instead of preserving a firing ring around stale coordinates.
                     units.Target[unit] = units.Position[unit];
                     units.HasTarget[unit] = false;
                     Store.State[unit] = UnitAiState.Search;
@@ -1059,7 +1058,6 @@ public sealed class UnitAiSystem
     private bool TryExecutePlayerOrderIntent(
         UnitStore units,
         UnitHealthStore health,
-        UnitInventoryStore inventory,
         UnitWeaponStore weapons,
         VisionSystem vision,
         WorldMap worldMap,
