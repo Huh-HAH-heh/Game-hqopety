@@ -10,9 +10,6 @@ public enum BehaviacUnitIntent : byte
     RetreatToCover = 3,
     FlankTarget = 4,
     EngageTarget = 5,
-    SuppressiveFire = 6,
-    InvestigateLastKnownTarget = 7,
-    Patrol = 8,
     ProneEngage = 9,
     FollowMoveOrder = 10,
     HoldPosition = 11,
@@ -210,20 +207,12 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool ShouldEngageVisibleTarget() =>
         IsAlive && HasVisibleTarget;
 
-    [MethodMetaInfo("ShouldSuppressLastKnownTarget", "Check whether a suppressed target should be fired at.")]
-    public bool ShouldSuppressLastKnownTarget() =>
-        IsAlive && !HasVisibleTarget && HasRecentTarget && HasSuppressiveWeapon;
-
     [MethodMetaInfo("ShouldFlankVisibleTarget", "Check whether the current target should be flanked.")]
     public bool ShouldFlankVisibleTarget() =>
         IsAlive && !IsSuppressed && HasVisibleTarget &&
         (IsFlanking ||
          (CanFlank &&
           FlankUtility > CombatUtility + Core.Unit.UnitTacticalUtility.FlankUtilityAdvantage));
-
-    [MethodMetaInfo("ShouldInvestigateLastKnownTarget", "Check whether last known target position should be investigated.")]
-    public bool ShouldInvestigateLastKnownTarget() =>
-        IsAlive && HasRecentTarget;
 
     [MethodMetaInfo("ShouldInvestigateAudibleContact", "Investigate a credible sound only when no stronger tactical response is active.")]
     public bool ShouldInvestigateAudibleContact() =>
@@ -275,21 +264,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public EBTStatus SelectEngageTarget() =>
         SelectIntent(BehaviacUnitIntent.EngageTarget);
 
-    [MethodMetaInfo("SelectSuppressiveFire", "Return the suppressive-fire intent.")]
-    public EBTStatus SelectSuppressiveFire() =>
-        SelectIntent(BehaviacUnitIntent.SuppressiveFire);
-
-    [MethodMetaInfo("SelectInvestigateLastKnownTarget", "Return the investigate intent.")]
-    public EBTStatus SelectInvestigateLastKnownTarget() =>
-        SelectIntent(BehaviacUnitIntent.InvestigateLastKnownTarget);
-
     [MethodMetaInfo("SelectInvestigateAudibleContact", "Move to an uncertain sound area without treating it as an identified enemy.")]
     public EBTStatus SelectInvestigateAudibleContact() =>
         SelectIntent(BehaviacUnitIntent.InvestigateAudibleContact);
-
-    [MethodMetaInfo("SelectPatrol", "Return the patrol intent.")]
-    public EBTStatus SelectPatrol() =>
-        SelectIntent(BehaviacUnitIntent.Patrol);
 
     private EBTStatus SelectIntent(BehaviacUnitIntent intent)
     {
