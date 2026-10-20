@@ -168,7 +168,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldSeekCover", "Check whether suppression cover should take priority.")]
     public bool ShouldSeekCover() =>
         IsAlive && HasCover &&
-        (IsInImmediateDanger ||
+        (IsPanicked || IsInImmediateDanger ||
          (IsSuppressed &&
           (WasSeekingCover
               ? CoverUtility + Core.Unit.UnitTacticalUtility.CoverContinuationHysteresis >= CombatUtility
