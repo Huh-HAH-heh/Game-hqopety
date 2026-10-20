@@ -217,6 +217,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldInvestigateAudibleContact", "Investigate a credible sound only when no stronger tactical response is active.")]
     public bool ShouldInvestigateAudibleContact() =>
         IsAlive && IsAlerted && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
+        !HasMoveOrder && !HasStopOrder && !HasAttackOrder &&
         !IsSuppressed && !IsLowHealth &&
         InvestigationUtility >= Core.Unit.UnitTacticalUtility.MinimumInvestigationUtility;
 
