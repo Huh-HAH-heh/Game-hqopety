@@ -1480,7 +1480,9 @@ public sealed class UnitAiSystem
             investigationUtility,
             hasSquadContact,
             squadContactUtility,
-            suppressionState == UnitSuppressionState.Panicked);
+            suppressionState == UnitSuppressionState.Panicked,
+            Store.State[unit] == UnitAiState.SeekCover && Store.HasGoal[unit],
+            Store.LastIntent[unit] == BehaviacUnitIntent.FollowMoveOrder);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
