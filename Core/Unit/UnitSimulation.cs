@@ -1,5 +1,6 @@
 using Core.Items;
 using Core.Map;
+using Core.AI.Perception;
 using System;
 using System.Diagnostics;
 using System.Numerics;
@@ -18,6 +19,8 @@ public sealed class UnitSimulation
     private readonly ProjectileSystem _projectileSystem;
     private readonly UnitAiSystem _aiSystem;
     private readonly MeleeCombatSystem _meleeCombatSystem;
+    private readonly TacticalHearingSystem _hearingSystem;
+    private float _simulationTimeSeconds;
     private bool[] _deathHandled = Array.Empty<bool>();
     private float[] _baseMoveSpeed = Array.Empty<float>();
 
@@ -138,9 +141,11 @@ public sealed class UnitSimulation
         Suppression =
             new UnitSuppressionStore(unitCapacity);
         Suppression.BindSkillStore(Skills);
+        _hearingSystem = new TacticalHearingSystem(unitCapacity);
 
         _weaponSystem =
             new UnitWeaponSystem(HitRegions, Bodies, Skills, Health);
+        _weaponSystem.ShotFired += _hearingSystem.EmitGunshot;
 
         _projectileSystem =
             new ProjectileSystem();
@@ -155,6 +160,7 @@ public sealed class UnitSimulation
                 unitCapacity,
                 _weaponSystem,
                 Skills);
+        _aiSystem.Hearing = _hearingSystem;
 
         _meleeCombatSystem = new MeleeCombatSystem();
     }
@@ -329,6 +335,7 @@ public sealed class UnitSimulation
         Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);
         Weapons.InitializeUnit(id.Index);
+        _hearingSystem.InitializeUnit(id.Index);
         Skills.InitializeUnit(id.Index, definition.Type, Units.FactionTag[id.Index]);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
@@ -369,6 +376,7 @@ public sealed class UnitSimulation
 
         _movementSystem.Navigation.ClearRoute(index);
         _visionSystem.ClearUnit(index);
+        _hearingSystem.ClearUnit(index);
         _deathHandled[index] = false;
 
         BodyHandle body =
@@ -911,6 +919,10 @@ public sealed class UnitSimulation
     {
         long totalStarted = Stopwatch.GetTimestamp();
         EnsureDeathCapacity();
+
+        if (float.IsFinite(deltaTime) && deltaTime > 0f)
+            _simulationTimeSeconds += deltaTime;
+        _hearingSystem.Update(Units, Health, _simulationTimeSeconds, deltaTime);
 
         long phaseStarted = Stopwatch.GetTimestamp();
         Suppression.Update(Units, deltaTime);

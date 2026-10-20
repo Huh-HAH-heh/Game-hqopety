@@ -25,6 +25,8 @@ public sealed class UnitWeaponSystem
         _health = health;
     }
 
+    public event Action<UnitId, Vector3, ushort>? ShotFired;
+
     public long TotalShotsFired { get; private set; }
     public long TotalRoundsConsumed { get; private set; }
     public long TotalProjectilesSpawned { get; private set; }
@@ -447,6 +449,7 @@ public sealed class UnitWeaponSystem
         weapons.Ammo[stateIndex]--;
 
         TotalShotsFired++;
+        ShotFired?.Invoke(shooter, units.Position[unitIndex], units.FactionTag[unitIndex]);
         _skills?.GainExperience(unitIndex, UnitSkill.Shooting, 8f);
         TotalRoundsConsumed++;
         TotalProjectilesSpawned += pelletCount;

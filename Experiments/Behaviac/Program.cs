@@ -270,6 +270,23 @@ internal static class Program
 
         audioMemory.Forget(new UnitId(99, 1));
         audioMemory.Clear();
+        var investigationMemory = new TacticalContactMemory();
+        TacticalContact? investigationContact = investigationMemory.Record(
+            new TacticalStimulus(
+                TacticalStimulusType.Gunshot,
+                new System.Numerics.Vector3(12f, 15f, 0f),
+                1f,
+                positionErrorRadius: 6f,
+                confidence: 0.8f),
+            1f,
+            4f);
+        bool markedInvestigated = investigationContact != null &&
+            investigationMemory.MarkInvestigated(investigationContact.ContactId);
+        Check("a handled contact is not immediately investigated again",
+            markedInvestigated &&
+            investigationContact!.IsInvestigated &&
+            !investigationMemory.MarkInvestigated(long.MaxValue));
+
         Check("contact memory clear resets its contacts and simulation clock",
             audioMemory.Contacts.Count == 0 && audioMemory.CurrentTimeSeconds == 0f);
 
@@ -298,7 +315,7 @@ internal static class Program
                     test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                     test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                     test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                    test.CombatUtility);
+                    test.CombatUtility, test.HasAudibleContact);
 
                 EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                 BehaviacUnitIntent directIntent = ResolveDirect(test);
@@ -353,7 +370,7 @@ internal static class Program
                         test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                        test.CombatUtility);
+                        test.CombatUtility, test.HasAudibleContact);
                     _ = BehaviacRuntimeHost.Tick(agents[unit]);
                 }
             }
@@ -391,7 +408,7 @@ internal static class Program
                         test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                        test.CombatUtility);
+                        test.CombatUtility, test.HasAudibleContact);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
@@ -471,7 +488,16 @@ internal static class Program
         new("move task wins when its utility beats visible combat", true, false, false, true, false,
             BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f, CombatUtility: 0.4f),
         new("visible combat interrupts a low-utility move task", true, false, false, true, false,
-            BehaviacUnitIntent.EngageTarget, HasMoveOrder: true, MoveOrderUtility: 0.2f, CombatUtility: 0.9f)
+            BehaviacUnitIntent.EngageTarget, HasMoveOrder: true, MoveOrderUtility: 0.2f, CombatUtility: 0.9f),
+        new("unknown sound contact is investigated", true, false, false, false, false,
+            BehaviacUnitIntent.InvestigateAudibleContact, HasAudibleContact: true),
+        new("move order outranks an uncertain sound", true, false, false, false, false,
+            BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f,
+            HasAudibleContact: true),
+        new("hold order outranks an uncertain sound", true, false, false, false, false,
+            BehaviacUnitIntent.HoldPosition, HasStopOrder: true, HasAudibleContact: true),
+        new("identified last-known contact outranks an uncertain sound", true, false, false, false, true,
+            BehaviacUnitIntent.InvestigateLastKnownTarget, HasAudibleContact: true)
     ];
 
     private static BehaviacUnitIntent ResolveDirect(DecisionCase test)
@@ -520,6 +546,9 @@ internal static class Program
         if (test.HasRecentTarget)
             return BehaviacUnitIntent.InvestigateLastKnownTarget;
 
+        if (test.HasAudibleContact && !test.IsSuppressed && !test.IsLowHealth)
+            return BehaviacUnitIntent.InvestigateAudibleContact;
+
         return BehaviacUnitIntent.Patrol;
     }
 
@@ -541,7 +570,8 @@ internal static class Program
         bool HasStopOrder = false,
         bool HasAttackOrder = false,
         float MoveOrderUtility = 0f,
-        float CombatUtility = 0f);
+        float CombatUtility = 0f,
+        bool HasAudibleContact = false);
 }
 
 [TypeMetaInfo()]

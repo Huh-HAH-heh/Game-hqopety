@@ -17,7 +17,8 @@ public enum BehaviacUnitIntent : byte
     FollowMoveOrder = 10,
     HoldPosition = 11,
     AttackOrder = 12,
-    HoldPositionEngage = 13
+    HoldPositionEngage = 13,
+    InvestigateAudibleContact = 14
 }
 
 /// <summary>
@@ -37,6 +38,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasVisibleTarget { get; private set; }
     [MemberMetaInfo("Recent target", "Whether the last known target memory is valid.", true)]
     public bool HasRecentTarget { get; private set; }
+    [MemberMetaInfo("Audible contact", "Whether an uncertain sound contact is worth investigating.", true)]
+    public bool HasAudibleContact { get; private set; }
     [MemberMetaInfo("Low health", "Whether the unit is below the retreat health threshold.", true)]
     public bool IsLowHealth { get; private set; }
     [MemberMetaInfo("Suppressive weapon", "Whether the current loadout supports suppressive fire.", true)]
@@ -82,13 +85,15 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool hasStopOrder = false,
         bool hasAttackOrder = false,
         float moveOrderUtility = 0f,
-        float combatUtility = 0f)
+        float combatUtility = 0f,
+        bool hasAudibleContact = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
         HasCover = hasCover;
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
+        HasAudibleContact = hasAudibleContact;
         IsLowHealth = isLowHealth;
         HasSuppressiveWeapon = hasSuppressiveWeapon;
         CanFlank = canFlank;
@@ -158,6 +163,11 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool ShouldInvestigateLastKnownTarget() =>
         IsAlive && HasRecentTarget;
 
+    [MethodMetaInfo("ShouldInvestigateAudibleContact", "Investigate a credible sound only when no stronger tactical response is active.")]
+    public bool ShouldInvestigateAudibleContact() =>
+        IsAlive && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
+        !IsSuppressed && !IsLowHealth;
+
     [MethodMetaInfo("SelectDead", "Return the dead-unit intent.")]
     public EBTStatus SelectDead() =>
         SelectIntent(BehaviacUnitIntent.Dead);
@@ -205,6 +215,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("SelectInvestigateLastKnownTarget", "Return the investigate intent.")]
     public EBTStatus SelectInvestigateLastKnownTarget() =>
         SelectIntent(BehaviacUnitIntent.InvestigateLastKnownTarget);
+
+    [MethodMetaInfo("SelectInvestigateAudibleContact", "Move to an uncertain sound area without treating it as an identified enemy.")]
+    public EBTStatus SelectInvestigateAudibleContact() =>
+        SelectIntent(BehaviacUnitIntent.InvestigateAudibleContact);
 
     [MethodMetaInfo("SelectPatrol", "Return the patrol intent.")]
     public EBTStatus SelectPatrol() =>

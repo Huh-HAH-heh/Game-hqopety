@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Threading.Tasks;
 using Core.AI.Behaviac;
+using Core.AI.Perception;
 using Core.Combat;
 using Core.Items;
 using Core.Map;
@@ -48,6 +49,7 @@ public sealed class UnitAiSystem
     /// </summary>
     public bool UseBehaviacDecisionLayer { get; set; }
 
+    public TacticalHearingSystem? Hearing { get; set; }
     public UnitAiStore Store { get; }
     public double LastPlanningMilliseconds { get; private set; }
 
@@ -371,6 +373,13 @@ public sealed class UnitAiSystem
 
                     continue;
                 }
+            }
+
+            if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.InvestigateAudibleContact &&
+                TryExecuteAudibleInvestigation(units, weapons, worldMap, unit))
+            {
+                continue;
             }
 
             // Attack orders are objectives, not hard target locks. Keep the
@@ -1070,13 +1079,45 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.EngageTarget:
             case BehaviacUnitIntent.ProneEngage: LastBehaviacEngageDecisions++; break;
             case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
-            case BehaviacUnitIntent.InvestigateLastKnownTarget: LastBehaviacInvestigateDecisions++; break;
+            case BehaviacUnitIntent.InvestigateLastKnownTarget:
+            case BehaviacUnitIntent.InvestigateAudibleContact:
+                LastBehaviacInvestigateDecisions++;
+                break;
             case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
             case BehaviacUnitIntent.FollowMoveOrder: LastBehaviacMoveOrderDecisions++; break;
             case BehaviacUnitIntent.HoldPosition: LastBehaviacHoldOrderDecisions++; break;
             case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
             case BehaviacUnitIntent.HoldPositionEngage: LastBehaviacHoldAndEngageDecisions++; break;
         }
+    }
+
+    private bool TryExecuteAudibleInvestigation(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        WorldMap worldMap,
+        int unit)
+    {
+        if (Hearing?.TryGetBestInvestigableContact(unit, out TacticalContact contact) != true)
+            return false;
+
+        Vector3 estimate = contact.EstimatedPosition;
+        float angle = ((contact.ContactId * 2.39996323f) + unit * 0.75487767f) % MathF.Tau;
+        float searchOffset = Math.Clamp(contact.PositionErrorRadius * 0.15f, 0.5f, 6f);
+        float x = Math.Clamp(estimate.X + MathF.Cos(angle) * searchOffset, 0.5f, worldMap.MaxTileX - 0.5f);
+        float y = Math.Clamp(estimate.Y + MathF.Sin(angle) * searchOffset, 0.5f, worldMap.MaxTileY - 0.5f);
+        int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
+        Vector3 searchPoint = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
+
+        // Audio is only a search location: it never creates an identified combat target.
+        ClearAiming(weapons, unit);
+        Store.ClearTarget(unit);
+        Store.SetGoal(unit, searchPoint);
+        units.Target[unit] = searchPoint;
+        units.HasTarget[unit] = true;
+        Store.State[unit] = UnitAiState.Search;
+        Hearing.MarkInvestigated(unit, contact.ContactId);
+        return true;
     }
 
     private BehaviacUnitIntent SelectUnitIntent(
@@ -1269,6 +1310,7 @@ public sealed class UnitAiSystem
                !ReachedGoal(units.Position[unit], _suppressionCoverByUnit[unit])) ||
               (hasCoverGoal && !ReachedGoal(units.Position[unit], Store.Goal[unit]));
 
+        bool hasAudibleContact = Hearing?.HasInvestigableContact(unit) == true;
         agent.SetFacts(
             isAlive,
             isSuppressed,
@@ -1285,7 +1327,8 @@ public sealed class UnitAiSystem
             hasStopOrder,
             hasAttackOrder,
             moveOrderUtility,
-            combatUtility);
+            combatUtility,
+            hasAudibleContact);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)

@@ -31,6 +31,7 @@ public sealed class TacticalContact
     public float LastVisualAtSeconds { get; internal set; }
     public float ExpiresAtSeconds { get; internal set; }
     public TacticalStimulusType LastStimulusType { get; internal set; }
+    public bool IsInvestigated { get; internal set; }
     internal bool VisualLossMarked { get; set; }
 
     internal TacticalContact(long contactId, TacticalStimulus stimulus, float receivedAtSeconds, float lifetimeSeconds)
@@ -235,6 +236,18 @@ public sealed class TacticalContactMemory
         return false;
     }
 
+    public bool MarkInvestigated(long contactId)
+    {
+        for (int i = 0; i < _contacts.Count; i++)
+        {
+            if (_contacts[i].ContactId != contactId)
+                continue;
+            _contacts[i].IsInvestigated = true;
+            return true;
+        }
+        return false;
+    }
+
     public bool Forget(UnitId target)
     {
         for (int i = _contacts.Count - 1; i >= 0; i--)
@@ -282,7 +295,9 @@ public sealed class TacticalContactMemory
         {
             TacticalContact contact = _contacts[i];
             if (contact.SubjectUnit.HasValue ||
-                contact.Kind == TacticalContactKind.VisualConfirmed)
+                contact.Kind == TacticalContactKind.VisualConfirmed ||
+                (stimulus.Type != TacticalStimulusType.AllyContactReport &&
+                 contact.LastStimulusType != stimulus.Type))
             {
                 continue;
             }
@@ -313,6 +328,7 @@ public sealed class TacticalContactMemory
         float nowSeconds,
         float memoryLifetimeSeconds)
     {
+        bool newerEvidence = stimulus.OccurredAtSeconds > contact.LastEventAtSeconds;
         TacticalContactKind incomingKind = TacticalContact.ResolveKind(stimulus);
         bool recentlyVisual = contact.Kind == TacticalContactKind.VisualConfirmed &&
             nowSeconds - contact.LastVisualAtSeconds < VisualConfirmationGraceSeconds;
@@ -338,6 +354,8 @@ public sealed class TacticalContactMemory
             contact.ExpiresAtSeconds,
             stimulus.OccurredAtSeconds + memoryLifetimeSeconds);
         contact.LastStimulusType = stimulus.Type;
+        if (newerEvidence)
+            contact.IsInvestigated = false;
 
         if (stimulus.Type == TacticalStimulusType.VisualContact)
         {
