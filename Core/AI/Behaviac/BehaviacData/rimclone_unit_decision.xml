@@ -35,6 +35,39 @@
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
+    <node class="Sequence" id="27">
+      <node class="Condition" id="28">
+        <property Operator="Equal" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldExecuteAttackOrder()" />
+        <property Opr="const bool true" />
+      </node>
+      <node class="Action" id="29">
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectAttackOrder()" />
+        <property ResultOption="BT_INVALID" />
+      </node>
+    </node>
+    <node class="Sequence" id="30">
+      <node class="Condition" id="31">
+        <property Operator="Equal" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldHoldPositionAndEngage()" />
+        <property Opr="const bool true" />
+      </node>
+      <node class="Action" id="32">
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectHoldPositionEngage()" />
+        <property ResultOption="BT_INVALID" />
+      </node>
+    </node>
+    <node class="Sequence" id="33">
+      <node class="Condition" id="34">
+        <property Operator="Equal" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldFollowMoveOrder()" />
+        <property Opr="const bool true" />
+      </node>
+      <node class="Action" id="35">
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectMoveOrder()" />
+        <property ResultOption="BT_INVALID" />
+      </node>
+    </node>
     <node class="Sequence" id="10">
       <node class="Condition" id="11">
         <property Operator="Equal" />
@@ -78,6 +111,17 @@
       </node>
       <node class="Action" id="19">
         <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectSuppressiveFire()" />
+        <property ResultOption="BT_INVALID" />
+      </node>
+    </node>
+    <node class="Sequence" id="36">
+      <node class="Condition" id="37">
+        <property Operator="Equal" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldHoldPosition()" />
+        <property Opr="const bool true" />
+      </node>
+      <node class="Action" id="38">
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectHoldPosition()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
