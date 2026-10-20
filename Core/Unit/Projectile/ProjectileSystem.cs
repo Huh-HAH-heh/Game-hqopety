@@ -17,6 +17,7 @@ public sealed class ProjectileSystem
     private readonly UnitHitSystem _hitSystem = new UnitHitSystem();
     private readonly DamageSystem _damageSystem = new DamageSystem();
     private int[] _nearMissMarks = Array.Empty<int>();
+    private int[] _nearMissCandidates = Array.Empty<int>();
     private int _nearMissStamp;
 
     public double LastUpdateMilliseconds { get; private set; }
@@ -60,6 +61,8 @@ public sealed class ProjectileSystem
         _unitGrid.Ensure(worldMap, units.Capacity);
         if (_nearMissMarks.Length < units.Capacity)
             Array.Resize(ref _nearMissMarks, units.Capacity);
+        if (_nearMissCandidates.Length < units.Capacity)
+            Array.Resize(ref _nearMissCandidates, units.Capacity);
 
         long gridStarted = Stopwatch.GetTimestamp();
         _unitGrid.Build(units, bodies, health, hitRegions);
@@ -359,9 +362,7 @@ public sealed class ProjectileSystem
                 (end - start) *
                 segmentEnd;
 
-            // Do not count the untraveled part of a trace after it hits terrain.
-            float nearMissEndT = MathF.Min(segmentEnd, terrainT);
-            Vector3 nearMissEnd = start + (end - start) * nearMissEndT;
+            int nearMissCandidateCount = 0;
 
             while (node >= 0)
             {
@@ -421,37 +422,14 @@ public sealed class ProjectileSystem
                     : 2f;
                 bool hitBeforeTerrain = intersectsUnit && globalT < terrainT;
 
-                // A broad-phase candidate can intersect only the part of the
-                // segment beyond a wall. That is not a hit; still test its
-                // distance to the actually travelled prefix for a real near miss.
+                // Resolve near misses after candidate collection so both a terrain
+                // impact and the earliest unit hit can truncate the real path.
                 if (!alreadyNearMissed &&
                     !hitBeforeTerrain &&
                     (projectiles.FactionTag[projectileIndex] == 0 ||
                      units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex]))
                 {
-                    if (UnitSuppressionSystem.AddNearMiss(
-                            suppression,
-                            units,
-                            hitRegions,
-                            unitIndex,
-                            subStart,
-                            nearMissEnd,
-                            projectiles.BaseDamage[projectileIndex] +
-                            projectiles.Energy[projectileIndex] * 0.005f,
-                            projectiles.SuppressionFactor[projectileIndex],
-                            worldMap,
-                            vision))
-                    {
-                        _nearMissMarks[unitIndex] = nearMissStamp;
-                        Vector3 dangerPoint = (subStart + nearMissEnd) * 0.5f;
-                        DangerStimulus?.Invoke(
-                            projectiles.Owner[projectileIndex],
-                            projectiles.FactionTag[projectileIndex],
-                            TacticalStimulusType.NearMiss,
-                            dangerPoint,
-                            0.95f,
-                            28f);
-                    }
+                    _nearMissCandidates[nearMissCandidateCount++] = unitIndex;
                 }
 
                 if (!intersectsUnit)
@@ -472,6 +450,41 @@ public sealed class ProjectileSystem
                         globalT,
                         localHit.RegionIndex,
                         localHit.BindingIndex);
+            }
+
+            // Only the actually travelled segment can produce a near miss:
+            // a terrain impact or the first unit collision ends this trace piece.
+            float nearMissEndT = MathF.Min(segmentEnd, MathF.Min(terrainT, unitT));
+            Vector3 nearMissEnd = start + (end - start) * nearMissEndT;
+            for (int n = 0; n < nearMissCandidateCount; n++)
+            {
+                int nearMissUnit = _nearMissCandidates[n];
+                if (_nearMissMarks[nearMissUnit] == nearMissStamp)
+                    continue;
+
+                if (!UnitSuppressionSystem.AddNearMiss(
+                        suppression,
+                        units,
+                        hitRegions,
+                        nearMissUnit,
+                        subStart,
+                        nearMissEnd,
+                        projectiles.BaseDamage[projectileIndex] +
+                        projectiles.Energy[projectileIndex] * 0.005f,
+                        projectiles.SuppressionFactor[projectileIndex],
+                        worldMap,
+                        vision))
+                    continue;
+
+                _nearMissMarks[nearMissUnit] = nearMissStamp;
+                Vector3 dangerPoint = (subStart + nearMissEnd) * 0.5f;
+                DangerStimulus?.Invoke(
+                    projectiles.Owner[projectileIndex],
+                    projectiles.FactionTag[projectileIndex],
+                    TacticalStimulusType.NearMiss,
+                    dangerPoint,
+                    0.95f,
+                    28f);
             }
 
             if (terrainT > 1f &&
