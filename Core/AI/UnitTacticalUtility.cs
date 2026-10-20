@@ -19,6 +19,9 @@ public static class UnitTacticalUtility
     private const float InvestigationDistanceForMaxPenalty = 64f;
 
     public const float FlankUtilityAdvantage = 0.08f;
+    public const float CoverSwitchHysteresis = 0.08f;
+    public const float CoverContinuationHysteresis = 0.12f;
+    public const float MoveOrderSwitchHysteresis = 0.10f;
     public const float MinimumInvestigationUtility = 0.24f;
     public const float MinimumSquadContactUtility = 0.30f;
 
