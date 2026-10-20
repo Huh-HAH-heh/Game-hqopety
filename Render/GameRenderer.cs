@@ -1132,51 +1132,77 @@ public sealed class GameRenderer
 
     private void IssueMoveOrder(
         UnitId[] memberIds,
-        Vector3 destination)
+        Vector3 destination,
+        InfantryFormationType formation)
     {
         UnitStore units = _unitSimulation.Units;
         UnitAiStore ai = _unitSimulation.AI.Store;
-        List<int> members = new(memberIds.Length);
+        List<(UnitId Id, int Index)> members = new(memberIds.Length);
+        float centerX = 0f;
+        float centerY = 0f;
         float spacing = 1.15f;
 
         for (int i = 0; i < memberIds.Length; i++)
         {
-            if (!units.TryGetIndex(memberIds[i], out int index) ||
+            UnitId id = memberIds[i];
+            if (!units.TryGetIndex(id, out int index) ||
                 _unitSimulation.Health.OverallHitPoints[index] <= 0f)
             {
                 continue;
             }
 
-            members.Add(index);
+            members.Add((id, index));
+            Vector3 position = units.Position[index];
+            centerX += position.X;
+            centerY += position.Y;
             spacing = MathF.Max(spacing, units.Radius[index] * 2.25f);
         }
 
         if (members.Count == 0)
             return;
 
-        // Spread destinations to avoid sending every soldier to exactly one point.
-        // These are task destinations only; the AI decides how each unit executes them.
-        int columns = Math.Max(1, (int)MathF.Ceiling(MathF.Sqrt(members.Count)));
-        int rows = (members.Count + columns - 1) / columns;
-        float centerColumn = (columns - 1) * 0.5f;
-        float centerRow = (rows - 1) * 0.5f;
+        centerX /= members.Count;
+        centerY /= members.Count;
 
+        float forwardX = destination.X - centerX;
+        float forwardY = destination.Y - centerY;
+        float directionLength = MathF.Sqrt(forwardX * forwardX + forwardY * forwardY);
+        if (directionLength < 0.001f)
+        {
+            forwardX = 1f;
+            forwardY = 0f;
+        }
+        else
+        {
+            forwardX /= directionLength;
+            forwardY /= directionLength;
+        }
+
+        // Formation slots are destinations for AI tasks, not direct movement calls.
+        Vector2 offsetSum = Vector2.Zero;
+        for (int i = 0; i < members.Count; i++)
+            offsetSum += InfantryFormation.GetOffset(i, members.Count, formation, spacing);
+        Vector2 meanOffset = offsetSum / members.Count;
+
+        float sideX = -forwardY;
+        float sideY = forwardX;
         for (int i = 0; i < members.Count; i++)
         {
-            int column = i % columns;
-            int row = i / columns;
-            float x = Math.Clamp(destination.X + (column - centerColumn) * spacing,
-                0.5f, _worldMap.MaxTileX - 0.5f);
-            float y = Math.Clamp(destination.Y + (row - centerRow) * spacing,
-                0.5f, _worldMap.MaxTileY - 0.5f);
+            var member = members[i];
+            Vector2 offset = InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset;
+            float x = destination.X + sideX * offset.X - forwardX * offset.Y;
+            float y = destination.Y + sideY * offset.X - forwardY * offset.Y;
+            x = Math.Clamp(x, 0.5f, _worldMap.MaxTileX - 0.5f);
+            y = Math.Clamp(y, 0.5f, _worldMap.MaxTileY - 0.5f);
+
             int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
             int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
             Vector3 target = new(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
-
-            ai.SetPlayerOrder(members[i], UnitAiOrderType.Move, target);
+            ai.SetPlayerOrder(member.Index, UnitAiOrderType.Move, target);
         }
 
-        Console.WriteLine($"[SQUAD] Issued move task to {members.Count} soldiers.");
+        Console.WriteLine(
+            $"[SQUAD] Issued {InfantryFormation.GetName(formation)} move task to {members.Count} soldiers.");
     }
 
     private SimulationFrameSnapshot? GetInputSnapshot() =>
@@ -2258,10 +2284,11 @@ public sealed class GameRenderer
                                     worldPosition.X / TerrainTilePixelSize,
                                     worldPosition.Y / TerrainTilePixelSize,
                                     0f);
+                                InfantryFormationType formation = _infantryFormation;
                                 _contextMenuOverlay?.Close();
                                 _contextMenuUnit = default;
                                 ExecuteSimulationCommand(() =>
-                                    IssueMoveOrder(moveUnits, destination));
+                                    IssueMoveOrder(moveUnits, destination, formation));
                                 return;
                             }
                         }
