@@ -31,6 +31,7 @@ public sealed class TacticalContact
     public float LastVisualAtSeconds { get; internal set; }
     public float ExpiresAtSeconds { get; internal set; }
     public TacticalStimulusType LastStimulusType { get; internal set; }
+    internal bool VisualLossMarked { get; set; }
 
     internal TacticalContact(long contactId, TacticalStimulus stimulus, float receivedAtSeconds, float lifetimeSeconds)
     {
@@ -86,7 +87,6 @@ public sealed class TacticalContactMemory
     public const float VisualConfirmationGraceSeconds = 0.30f;
 
     private const float UnknownContactMergeRadiusFloor = 1.5f;
-    private const float MinimumConfidence = 0.01f;
 
     private readonly List<TacticalContact> _contacts = new();
     private float _currentTimeSeconds;
@@ -180,12 +180,17 @@ public sealed class TacticalContactMemory
 
         AdvanceTime(nowSeconds);
         TacticalContact? contact = FindBySubject(target);
-        if (contact == null || contact.Kind != TacticalContactKind.VisualConfirmed)
+        if (contact == null ||
+            contact.LastVisualAtSeconds < 0f ||
+            contact.VisualLossMarked)
+        {
             return false;
+        }
 
         contact.Kind = TacticalContactKind.LastKnown;
         contact.ExpiresAtSeconds = nowSeconds + memoryLifetimeSeconds;
         contact.LastReceivedAtSeconds = nowSeconds;
+        contact.VisualLossMarked = true;
         return true;
     }
 
@@ -335,7 +340,10 @@ public sealed class TacticalContactMemory
         contact.LastStimulusType = stimulus.Type;
 
         if (stimulus.Type == TacticalStimulusType.VisualContact)
+        {
             contact.LastVisualAtSeconds = stimulus.OccurredAtSeconds;
+            contact.VisualLossMarked = false;
+        }
 
         if (stimulus.ReporterUnit.HasValue)
             contact.ReporterUnit = stimulus.ReporterUnit;
