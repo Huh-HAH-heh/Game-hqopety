@@ -295,11 +295,69 @@ internal static class Program
         return passedAll;
     }
 
+    private static bool RunSuppressionResponseTests()
+    {
+        bool passedAll = true;
+        int checks = 0;
+
+        void Check(string name, bool passed)
+        {
+            checks++;
+            passedAll &= passed;
+            Console.WriteLine($"Suppression response test: {(passed ? "PASS" : "FAIL")}; {name}");
+        }
+
+        var skills = new UnitSkillStore(2);
+        skills.SetSuppressionResistance(0, 0f);
+        skills.SetSuppressionResistance(1, 0.95f);
+        var response = new UnitSuppressionStore(2);
+        response.BindSkillStore(skills);
+        response.InitializeUnit(0);
+        response.InitializeUnit(1);
+
+        response.AddAlertness(0, 0.7f, new System.Numerics.Vector3(10f, 10f, 0f));
+        Check("awareness alone does not cause suppression or panic",
+            response.IsAlerted(0) && response.GetState(0) == UnitSuppressionState.Calm &&
+            response.Value[0] == 0f);
+
+        response.Add(0, 3f, new System.Numerics.Vector3(10f, 10f, 0f));
+        response.Add(1, 3f, new System.Numerics.Vector3(10f, 10f, 0f));
+        Check("individual resistance lowers suppression buildup",
+            response.Value[0] > response.Value[1] &&
+            response.GetState(0) == UnitSuppressionState.Suppressed &&
+            response.GetState(1) == UnitSuppressionState.Calm);
+
+        response.Add(0, 6f, new System.Numerics.Vector3(10f, 10f, 0f));
+        Check("panic requires sustained high suppression",
+            response.GetState(0) == UnitSuppressionState.Panicked);
+
+        response.Value[0] = UnitSuppressionStore.PanicRecoveryThreshold + 0.2f;
+        Check("panic uses hysteresis instead of immediately clearing below its entry threshold",
+            response.GetState(0) == UnitSuppressionState.Panicked);
+
+        response.Value[0] = UnitSuppressionStore.SuppressionRecoveryThreshold - 0.1f;
+        Check("response returns from panic to calm after pressure recedes",
+            response.GetState(0) == UnitSuppressionState.Calm);
+
+        response.InitializeUnit(0);
+        response.SetInCover(0, true);
+        response.Add(0, 2f, System.Numerics.Vector3.Zero);
+        float coveredSuppression = response.Value[0];
+        response.SetInCover(0, false);
+        response.Add(0, 2f, System.Numerics.Vector3.Zero);
+        Check("being in cover reduces suppression buildup",
+            coveredSuppression < response.Value[0]);
+
+        Console.WriteLine($"Suppression response tests: {(passedAll ? "PASS" : "FAIL")}; {checks} cases");
+        return passedAll;
+    }
+
     private static int RunDecisionTests()
     {
         DecisionCase[] cases = GetDecisionCases();
         bool allPassed = RunTacticalUtilityTests();
         allPassed &= RunTacticalContactMemoryTests();
+        allPassed &= RunSuppressionResponseTests();
 
         try
         {
@@ -315,7 +373,7 @@ internal static class Program
                     test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                     test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                     test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                    test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger);
+                    test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted);
 
                 EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                 BehaviacUnitIntent directIntent = ResolveDirect(test);
@@ -370,7 +428,7 @@ internal static class Program
                         test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger);
+                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted);
                     _ = BehaviacRuntimeHost.Tick(agents[unit]);
                 }
             }
@@ -408,7 +466,7 @@ internal static class Program
                         test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger);
+                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
@@ -489,15 +547,17 @@ internal static class Program
             BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f, CombatUtility: 0.4f),
         new("visible combat interrupts a low-utility move task", true, false, false, true, false,
             BehaviacUnitIntent.EngageTarget, HasMoveOrder: true, MoveOrderUtility: 0.2f, CombatUtility: 0.9f),
-        new("unknown sound contact is investigated", true, false, false, false, false,
-            BehaviacUnitIntent.InvestigateAudibleContact, HasAudibleContact: true),
+        new("unknown sound with awareness is investigated", true, false, false, false, false,
+            BehaviacUnitIntent.InvestigateAudibleContact, HasAudibleContact: true, IsAlerted: true),
+        new("faint sound without alertness does not trigger investigation", true, false, false, false, false,
+            BehaviacUnitIntent.Patrol, HasAudibleContact: true),
         new("move order outranks an uncertain sound", true, false, false, false, false,
             BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f,
-            HasAudibleContact: true),
+            HasAudibleContact: true, IsAlerted: true),
         new("hold order outranks an uncertain sound", true, false, false, false, false,
-            BehaviacUnitIntent.HoldPosition, HasStopOrder: true, HasAudibleContact: true),
+            BehaviacUnitIntent.HoldPosition, HasStopOrder: true, HasAudibleContact: true, IsAlerted: true),
         new("identified last-known contact outranks an uncertain sound", true, false, false, false, true,
-            BehaviacUnitIntent.InvestigateLastKnownTarget, HasAudibleContact: true),
+            BehaviacUnitIntent.InvestigateLastKnownTarget, HasAudibleContact: true, IsAlerted: true),
         new("immediate danger selects cover when an option exists", true, false, true, false, false,
             BehaviacUnitIntent.SeekCover, HasImmediateDanger: true),
         new("immediate danger without a cover option does not invent a cover goal", true, false, false, false, false,
@@ -550,7 +610,7 @@ internal static class Program
         if (test.HasRecentTarget)
             return BehaviacUnitIntent.InvestigateLastKnownTarget;
 
-        if (test.HasAudibleContact && !test.IsSuppressed && !test.IsLowHealth)
+        if (test.IsAlerted && test.HasAudibleContact && !test.IsSuppressed && !test.IsLowHealth)
             return BehaviacUnitIntent.InvestigateAudibleContact;
 
         return BehaviacUnitIntent.Patrol;
@@ -576,7 +636,8 @@ internal static class Program
         float MoveOrderUtility = 0f,
         float CombatUtility = 0f,
         bool HasAudibleContact = false,
-        bool HasImmediateDanger = false);
+        bool HasImmediateDanger = false,
+        bool IsAlerted = false);
 }
 
 [TypeMetaInfo()]

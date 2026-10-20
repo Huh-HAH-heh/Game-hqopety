@@ -38,6 +38,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasVisibleTarget { get; private set; }
     [MemberMetaInfo("Recent target", "Whether the last known target memory is valid.", true)]
     public bool HasRecentTarget { get; private set; }
+    [MemberMetaInfo("Alerted", "Threat awareness independent of suppression or panic.", true)]
+    public bool IsAlerted { get; private set; }
     [MemberMetaInfo("Audible contact", "Whether an uncertain sound contact is worth investigating.", true)]
     public bool HasAudibleContact { get; private set; }
     [MemberMetaInfo("Immediate danger", "Whether a close bullet pass, stopped bullet or explosion was recently perceived.", true)]
@@ -89,7 +91,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         float moveOrderUtility = 0f,
         float combatUtility = 0f,
         bool hasAudibleContact = false,
-        bool isInImmediateDanger = false)
+        bool isInImmediateDanger = false,
+        bool isAlerted = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -98,6 +101,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         HasRecentTarget = hasRecentTarget;
         HasAudibleContact = hasAudibleContact;
         IsInImmediateDanger = isInImmediateDanger;
+        IsAlerted = isAlerted;
         IsLowHealth = isLowHealth;
         HasSuppressiveWeapon = hasSuppressiveWeapon;
         CanFlank = canFlank;
@@ -169,7 +173,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldInvestigateAudibleContact", "Investigate a credible sound only when no stronger tactical response is active.")]
     public bool ShouldInvestigateAudibleContact() =>
-        IsAlive && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
+        IsAlive && IsAlerted && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
         !IsSuppressed && !IsLowHealth;
 
     [MethodMetaInfo("SelectDead", "Return the dead-unit intent.")]

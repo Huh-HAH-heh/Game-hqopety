@@ -208,6 +208,11 @@ public sealed class UnitAiSystem
                     0f,
                     Store.SuppressionCoverRetry[unit] - thinkDelta);
 
+            bool reachedSuppressionCover = Store.State[unit] == UnitAiState.SeekCover &&
+                Store.HasGoal[unit] &&
+                ReachedGoal(units.Position[unit], Store.Goal[unit]);
+            suppression.SetInCover(unit, reachedSuppressionCover);
+
             UnitSuppressionState suppressionState =
                 suppression.GetState(unit);
 
@@ -220,7 +225,7 @@ public sealed class UnitAiSystem
             {
                 long decisionStarted = Stopwatch.GetTimestamp();
                 intent = SelectUnitIntent(
-                    units, health, inventory, weapons, vision, unit, suppressionState, isAlive);
+                    units, health, inventory, weapons, vision, suppression, unit, suppressionState, isAlive);
                 LastBehaviacDecisionBatchMilliseconds +=
                     Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
 
@@ -300,7 +305,7 @@ public sealed class UnitAiSystem
             if (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.ProneEngage)
                 units.Posture[unit] = UnitPosture.Lying;
             else if (suppressionState == UnitSuppressionState.Panicked)
-                units.Posture[unit] = UnitPosture.Lying;
+                units.Posture[unit] = moving ? UnitPosture.Crouching : UnitPosture.Lying;
             else if (moving && units.Posture[unit] == UnitPosture.Lying)
             {
                 // Keep a prone movement order low; UnitBodySystem animates it as a crawl.
@@ -1126,6 +1131,7 @@ public sealed class UnitAiSystem
         UnitInventoryStore inventory,
         UnitWeaponStore weapons,
         VisionSystem vision,
+        UnitSuppressionStore suppression,
         int unit,
         UnitSuppressionState suppressionState,
         bool isAlive)
@@ -1221,6 +1227,9 @@ public sealed class UnitAiSystem
         }
 
         bool hasVisibleTarget = visibleTargetIndex >= 0;
+        if (hasVisibleTarget)
+            suppression.RefreshAlertness(unit, 0.82f, units.Position[visibleTargetIndex]);
+        bool isAlerted = suppression.IsAlerted(unit);
         bool hasMoveOrder = orderType == UnitAiOrderType.Move;
         bool hasStopOrder = orderType == UnitAiOrderType.Stop;
 
@@ -1311,7 +1320,7 @@ public sealed class UnitAiSystem
               (hasCoverGoal && !ReachedGoal(units.Position[unit], Store.Goal[unit]));
 
         bool hasAudibleContact = Hearing?.HasInvestigableContact(unit) == true;
-        bool hasImmediateDanger = Hearing?.HasImmediateDangerContact(unit) == true;
+        bool hasImmediateDanger = suppression.IsInImmediateDanger(unit);
         agent.SetFacts(
             isAlive,
             isSuppressed,
@@ -1330,7 +1339,8 @@ public sealed class UnitAiSystem
             moveOrderUtility,
             combatUtility,
             hasAudibleContact,
-            hasImmediateDanger);
+            hasImmediateDanger,
+            isAlerted);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)

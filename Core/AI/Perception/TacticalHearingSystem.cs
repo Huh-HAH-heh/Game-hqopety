@@ -67,7 +67,12 @@ public sealed class TacticalHearingSystem
         EmitDanger(default, sourceFaction, TacticalStimulusType.Explosion,
             position, intensity, audibleRange);
 
-    public void Update(UnitStore units, UnitHealthStore health, float nowSeconds, float deltaTime)
+    public void Update(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitSuppressionStore response,
+        float nowSeconds,
+        float deltaTime)
     {
         ArgumentNullException.ThrowIfNull(units);
         ArgumentNullException.ThrowIfNull(health);
@@ -80,7 +85,7 @@ public sealed class TacticalHearingSystem
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f)
             return;
         CollectFootsteps(units, health, deltaTime, nowSeconds);
-        DeliverPulses(units, health, nowSeconds);
+        DeliverPulses(units, health, response, nowSeconds);
         _pendingPulses.Clear();
     }
 
@@ -205,7 +210,11 @@ public sealed class TacticalHearingSystem
         }
     }
 
-    private void DeliverPulses(UnitStore units, UnitHealthStore health, float nowSeconds)
+    private void DeliverPulses(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitSuppressionStore response,
+        float nowSeconds)
     {
         ReadOnlySpan<int> active = units.ActiveIndices;
         for (int pulseIndex = 0; pulseIndex < _pendingPulses.Count; pulseIndex++)
@@ -250,6 +259,17 @@ public sealed class TacticalHearingSystem
                 memory.Record(new TacticalStimulus(
                     pulse.Type, estimate, pulse.OccurredAtSeconds,
                     pulse.Intensity, error, confidence), nowSeconds, lifetime);
+
+                float alertFactor = pulse.Type switch
+                {
+                    TacticalStimulusType.Gunshot => 0.42f,
+                    TacticalStimulusType.Footstep => 0.24f,
+                    TacticalStimulusType.NearMiss => 0.55f,
+                    TacticalStimulusType.CoverImpact => 0.36f,
+                    TacticalStimulusType.Explosion => 0.70f,
+                    _ => 0.18f
+                };
+                response.AddAlertness(observer, alertFactor * confidence, estimate);
             }
         }
     }
