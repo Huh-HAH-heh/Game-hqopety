@@ -137,6 +137,17 @@
           
           
           
+          <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="60" PrefabName="" PrefabNodeId="-1">
+            <Comment Background="NoColor" Text="Investigate a gunshot or footsteps as an uncertain position, never as a confirmed unit." />
+            <Connector Identifier="GenericChildren">
+              <Node Class="PluginBehaviac.Nodes.Condition" Enable="true" HasOwnPrefabData="false" Id="61" Operator="Equal" Opl="bool Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateAudibleContact()" Opr="const bool true" PrefabName="" PrefabNodeId="-1">
+                <Comment Background="NoColor" Text="Requires sufficient sound confidence, alertness and no stronger target/order." />
+              </Node>
+              <Node Class="PluginBehaviac.Nodes.Action" Enable="true" HasOwnPrefabData="false" Id="62" Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectInvestigateAudibleContact()" PrefabName="" PrefabNodeId="-1" ResultFunctor="&quot;&quot;" ResultOption="BT_INVALID">
+                <Comment Background="NoColor" Text="Move toward the estimated sound location without identifying or firing at a hidden source." />
+              </Node>
+            </Connector>
+          </Node>
           <Node Class="PluginBehaviac.Nodes.Action" Enable="true" HasOwnPrefabData="false" Id="23" Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectHoldPosition()" PrefabName="" PrefabNodeId="-1" ResultFunctor="&quot;&quot;" ResultOption="BT_INVALID">
             <Comment Background="NoColor" Text="No active order or visible enemy: remain in place." />
           </Node>
