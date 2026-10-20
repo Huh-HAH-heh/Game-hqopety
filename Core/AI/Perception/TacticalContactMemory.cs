@@ -121,7 +121,7 @@ public sealed class TacticalContactMemory
             return null;
 
         TacticalContact? contact = FindBySubject(stimulus.SubjectUnit);
-        if (contact == null && !stimulus.SubjectUnit.HasValue)
+        if (contact == null)
             contact = FindNearbyUnknown(stimulus);
 
         if (contact == null)
