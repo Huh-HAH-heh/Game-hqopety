@@ -120,6 +120,13 @@ public sealed class SquadTacticalCoordinator
             return _membership.TryGetValue(member, out int currentSquad) && currentSquad == squadId;
     }
 
+    public bool IsMemberOfAnySquad(UnitId member)
+    {
+        if (!member.IsValid) return false;
+        lock (_gate)
+            return _membership.ContainsKey(member);
+    }
+
     public bool HasExpiredObservation(int squadId, UnitId target, float now)
     {
         if (squadId <= 0 || !target.IsValid || !float.IsFinite(now)) return true;
