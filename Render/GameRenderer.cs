@@ -32,6 +32,15 @@ public sealed class GameRenderer
             RequestKey = requestKey;
         }
     }
+    private struct SquadMarkerAccumulator
+    {
+        public float SumX;
+        public float SumY;
+        public int Count;
+        public RenderUnitState Commander;
+        public bool HasCommander;
+    }
+
     private const float TileSize = 16f;
 
     private const float TerrainTilePixelSize =
@@ -68,6 +77,7 @@ public sealed class GameRenderer
         FillColor = new Color(255, 245, 175),
         OutlineThickness = 1f
     };
+    private readonly Dictionary<int, SquadMarkerAccumulator> _squadMarkerCenters = new();
     private static readonly Color[] SquadColors =
     {
         new Color(70, 190, 255), new Color(255, 155, 65),
@@ -1653,6 +1663,12 @@ public sealed class GameRenderer
             InfantrySquad? squad = _squadManager.GetSquad(squadId);
             if (squad != null)
             {
+                if (!shiftHeld)
+                {
+                    SelectSquad(squadId, false);
+                    return;
+                }
+
                 foreach (UnitId member in squad.Members)
                     _selectedUnits.Add(member);
 
@@ -1816,37 +1832,74 @@ public sealed class GameRenderer
         float renderScale = MathF.Max(
             0.01f,
             _window.Size.X / MathF.Max(1f, _camera.View.Size.X));
-        float radius = SquadMarkerRadiusPixels / renderScale;
-        float outline = 1.5f / renderScale;
         float commanderRadius = 2.5f / renderScale;
+
+        // Aggregate all living soldiers in one pass; drawing cost stays O(units + squads).
+        _squadMarkerCenters.Clear();
+        RenderUnitState[] units = snapshot.Units;
+        for (int i = 0; i < units.Length; i++)
+        {
+            RenderUnitState unit = units[i];
+            if (unit.HitPoints <= 0f)
+                continue;
+
+            UnitId id = new(unit.Index, unit.Generation);
+            if (!_squadManager.TryGetSquad(id, out InfantrySquad squad))
+                continue;
+
+            SquadMarkerAccumulator center = _squadMarkerCenters.TryGetValue(squad.Id, out var current)
+                ? current
+                : default;
+            center.SumX += unit.Position.X;
+            center.SumY += unit.Position.Y;
+            center.Count++;
+            if (id == squad.Commander)
+            {
+                center.Commander = unit;
+                center.HasCommander = true;
+            }
+            _squadMarkerCenters[squad.Id] = center;
+        }
 
         foreach (InfantrySquad squad in _squadManager.Squads)
         {
-            if (!TryGetSquadCenter(
-                    snapshot, squad, out Vector2f center, out RenderUnitState commander, out bool hasCommander))
+            if (!_squadMarkerCenters.TryGetValue(squad.Id, out SquadMarkerAccumulator center) ||
+                center.Count == 0)
             {
                 continue;
             }
 
+            Vector2f position = new(center.SumX / center.Count, center.SumY / center.Count);
             Color color = SquadColors[(squad.Id - 1) % SquadColors.Length];
-            float x = center.X * TerrainTilePixelSize;
-            float y = center.Y * TerrainTilePixelSize;
+            bool selected = false;
+            for (int i = 0; i < squad.Members.Count; i++)
+            {
+                if (_selectedUnits.Contains(squad.Members[i]))
+                {
+                    selected = true;
+                    break;
+                }
+            }
+
+            float x = position.X * TerrainTilePixelSize;
+            float y = position.Y * TerrainTilePixelSize;
+            float radius = SquadMarkerRadiusPixels / renderScale;
 
             _squadMarker.Radius = radius;
             _squadMarker.Origin = new Vector2f(radius, radius);
             _squadMarker.Position = new Vector2f(x, y);
             _squadMarker.OutlineColor = color;
-            _squadMarker.OutlineThickness = outline;
+            _squadMarker.OutlineThickness = (selected ? 2.5f : 1.5f) / renderScale;
             _window.Draw(_squadMarker);
 
-            if (!hasCommander)
+            if (!center.HasCommander)
                 continue;
 
             _squadCommanderMarker.Radius = commanderRadius;
             _squadCommanderMarker.Origin = new Vector2f(commanderRadius, commanderRadius);
             _squadCommanderMarker.Position = new Vector2f(
-                commander.Position.X * TerrainTilePixelSize,
-                commander.Position.Y * TerrainTilePixelSize);
+                center.Commander.Position.X * TerrainTilePixelSize,
+                center.Commander.Position.Y * TerrainTilePixelSize);
             _squadCommanderMarker.FillColor = new Color(255, 245, 175);
             _squadCommanderMarker.OutlineColor = color;
             _squadCommanderMarker.OutlineThickness = 0.8f / renderScale;
