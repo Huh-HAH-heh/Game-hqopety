@@ -202,8 +202,21 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         IsAlive && IsLowHealth && (HasVisibleTarget || HasRecentTarget) &&
         (!HasStopOrder || HasCover);
 
-    [MethodMetaInfo("ShouldTakePronePosition", "Automatic prone firing is disabled; units use ordinary combat movement.")]
-    public bool ShouldTakePronePosition() => false;
+    [MethodMetaInfo("ShouldTakePronePosition", "Use prone firing only at long range when the unit is highly exposed and has a strong tactical advantage.")]
+    public bool ShouldTakePronePosition()
+    {
+        // Crawling is a deliberate long-range tactic, not a default combat posture.
+        // Require a very high score to enter prone; use a lower threshold to exit cleanly.
+        float proneThreshold = IsProne ? 0.90f : 0.96f;
+        float combatMargin = IsProne ? 0f : 0.10f;
+
+        return IsAlive && HasVisibleTarget && !IsSuppressed && !IsLowHealth &&
+            !IsFlanking &&
+            ProneCombatUtility >= proneThreshold &&
+            ProneCombatUtility > CombatUtility + combatMargin &&
+            (!CanFlank ||
+             FlankUtility <= CombatUtility + Core.Unit.UnitTacticalUtility.FlankUtilityAdvantage);
+    }
 
     [MethodMetaInfo("ShouldEngageVisibleTarget", "Check whether a visible target should be engaged.")]
     public bool ShouldEngageVisibleTarget() =>
