@@ -383,6 +383,7 @@ public sealed class UnitSimulation
             return false;
         }
 
+        _aiSystem.InvalidateSquadUnit(id);
         _movementSystem.Navigation.ClearRoute(index);
         _visionSystem.ClearUnit(index);
         _hearingSystem.ClearUnit(index);
@@ -1142,6 +1143,7 @@ public sealed class UnitSimulation
 
         _deathHandled[unitIndex] = true;
         UnitId deadId = Units.GetId(unitIndex);
+        _aiSystem.InvalidateSquadUnit(deadId);
 
         // Do not leave live units' AI or weapon state pointing at the corpse.
         ReadOnlySpan<int> active = Units.ActiveIndices;
