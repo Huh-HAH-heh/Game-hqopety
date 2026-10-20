@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Core.Map;
 
 namespace Core.Unit;
 
@@ -17,9 +18,9 @@ public static class UnitSuppressionSystem
         float distance = DistanceToSegment(
             unitPosition,
             segmentStart,
-            segmentEnd);
+            segmentEnd,
+            out Vector3 threatPosition);
 
-        Vector3 threatPosition = (segmentStart + segmentEnd) * 0.5f;
         return ApplyNearMiss(suppression, unitIndex, distance, threatPosition, danger, factor);
     }
 
@@ -31,12 +32,15 @@ public static class UnitSuppressionSystem
         Vector3 segmentStart,
         Vector3 segmentEnd,
         float danger,
-        float factor)
+        float factor,
+        WorldMap? worldMap = null,
+        VisionSystem? vision = null)
     {
         UnitHitRegionProfile profile = hitRegions?.GetProfile(unitIndex) ??
             UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unitIndex]).BodyType);
 
         float distance = float.PositiveInfinity;
+        Vector3 threatPosition = (segmentStart + segmentEnd) * 0.5f;
         for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
         {
             UnitHitRegionGeometry region = UnitHitSystem.GetRegionGeometry(
@@ -48,11 +52,30 @@ public static class UnitSuppressionSystem
             float centerDistance = DistanceToSegment(
                 region.Center,
                 segmentStart,
-                segmentEnd);
-            distance = MathF.Min(distance, MathF.Max(0f, centerDistance - region.Radius));
+                segmentEnd,
+                out Vector3 closestPoint);
+            float regionDistance = MathF.Max(0f, centerDistance - region.Radius);
+            if (regionDistance >= distance)
+                continue;
+
+            distance = regionDistance;
+            threatPosition = closestPoint;
         }
 
-        Vector3 threatPosition = (segmentStart + segmentEnd) * 0.5f;
+        if (!float.IsFinite(distance) || distance > 1.5f ||
+            !float.IsFinite(danger) || danger <= 0f ||
+            !float.IsFinite(factor) || factor <= 0f)
+            return false;
+
+        // Terrain can shield a nearby unit from a projectile passing on the far side.
+        if (vision != null && worldMap != null &&
+            !vision.HasLineOfSight(
+                worldMap,
+                vision.GetEyePosition(units, unitIndex),
+                threatPosition,
+                out _))
+            return false;
+
         return ApplyNearMiss(suppression, unitIndex, distance, threatPosition, danger, factor);
     }
 
@@ -94,20 +117,30 @@ public static class UnitSuppressionSystem
     private static float DistanceToSegment(
         Vector3 point,
         Vector3 start,
-        Vector3 end)
+        Vector3 end) =>
+        DistanceToSegment(point, start, end, out _);
+
+    private static float DistanceToSegment(
+        Vector3 point,
+        Vector3 start,
+        Vector3 end,
+        out Vector3 closest)
     {
         Vector3 segment = end - start;
         float lengthSquared = segment.LengthSquared();
 
         if (lengthSquared <= 0.000001f)
+        {
+            closest = start;
             return (point - start).Length();
+        }
 
         float t = Math.Clamp(
             Vector3.Dot(point - start, segment) / lengthSquared,
             0f,
             1f);
 
-        Vector3 closest = start + segment * t;
+        closest = start + segment * t;
         return (point - closest).Length();
     }
 }
