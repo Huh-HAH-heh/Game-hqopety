@@ -899,8 +899,8 @@ public sealed class UnitAiSystem
 
         if (intent == BehaviacUnitIntent.FollowMoveOrder)
         {
-            Vector3 destination = store.PlayerOrderPosition[unit];
-            if (ReachedGoal(units.Position[unit], destination))
+            Vector3 moveDestination = store.PlayerOrderPosition[unit];
+            if (ReachedGoal(units.Position[unit], moveDestination))
             {
                 store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
                 store.ClearTarget(unit);
@@ -915,9 +915,9 @@ public sealed class UnitAiSystem
             // Behaviac selected the task; this AI action translates it into the
             // existing navigation goal without bypassing the decision tree.
             store.ClearTarget(unit);
-            store.SetGoal(unit, destination);
+            store.SetGoal(unit, moveDestination);
             ClearAiming(weapons, unit);
-            units.Target[unit] = destination;
+            units.Target[unit] = moveDestination;
             units.HasTarget[unit] = true;
             store.State[unit] = UnitAiState.Search;
             return true;
