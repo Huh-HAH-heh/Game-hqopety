@@ -597,7 +597,8 @@ public sealed class UnitAiSystem
             }
             else if (suppressionState == UnitSuppressionState.Panicked)
             {
-                units.Posture[unit] = UnitPosture.Lying;
+                // Keep a low profile while retreating, but do not force a crawl.
+                units.Posture[unit] = moving ? UnitPosture.Crouching : UnitPosture.Lying;
             }
             else if (moving && units.Posture[unit] == UnitPosture.Lying)
             {
