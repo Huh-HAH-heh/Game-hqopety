@@ -419,7 +419,6 @@ public sealed class ProjectileSystem
                                 projectiles.SuppressionFactor[projectileIndex]))
                         {
                             Vector3 dangerPoint = (subStart + subEnd) * 0.5f;
-                            suppression.MarkImmediateDanger(unitIndex, 0.80f, dangerPoint);
                             DangerStimulus?.Invoke(
                                 projectiles.Owner[projectileIndex],
                                 projectiles.FactionTag[projectileIndex],
