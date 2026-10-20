@@ -818,9 +818,6 @@ public sealed class UnitAiSystem
                     float range = GetMaxEffectiveRange(inventory, unit);
                     if (range > 0.1f)
                     {
-                        float dx = targetPosition.X - position.X;
-                        float dy = targetPosition.Y - position.Y;
-                        float distanceSquared = dx * dx + dy * dy;
                         if (TryGetRangedEngagementMoveTarget(
                                 position, targetPosition, range, unit, target.Index,
                                 out Vector3 engagementPosition))
@@ -1673,13 +1670,13 @@ public sealed class UnitAiSystem
         for (int candidate = 0; candidate < 8; candidate++)
         {
             float side = candidate % 2 == 0 ? preferredSide : -preferredSide;
-            float angleOffset = candidate switch
+            float angleOffset = (candidate switch
             {
                 0 or 1 => MathF.PI * 0.35f,
                 2 or 3 => MathF.PI * 0.48f,
                 4 or 5 => MathF.PI * 0.25f,
                 _ => MathF.PI * 0.60f
-            } * side;
+            }) * side;
             float radiusScale = candidate < 4 ? 0.88f : candidate < 6 ? 0.84f : 0.92f;
             float standoff = MathF.Max(4f, range * radiusScale);
             float angle = baseAngle + angleOffset;
