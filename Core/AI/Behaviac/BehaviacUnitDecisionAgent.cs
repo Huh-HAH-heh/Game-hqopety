@@ -182,9 +182,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool ShouldExecuteAttackOrder() =>
         IsAlive && HasAttackOrder && !HasVisibleTarget;
 
-    [MethodMetaInfo("ShouldFollowMoveOrder", "Compare movement-task utility with immediate combat utility.")]
+    [MethodMetaInfo("ShouldFollowMoveOrder", "Follow a move order unless a hostile is currently visible; the saved order resumes after contact is lost.")]
     public bool ShouldFollowMoveOrder() =>
-        IsAlive && HasMoveOrder &&
+        IsAlive && HasMoveOrder && !HasVisibleTarget &&
         (WasFollowingMoveOrder
             ? MoveOrderUtility + Core.Unit.UnitTacticalUtility.MoveOrderSwitchHysteresis >= CombatUtility
             : MoveOrderUtility >= CombatUtility + Core.Unit.UnitTacticalUtility.MoveOrderSwitchHysteresis);
