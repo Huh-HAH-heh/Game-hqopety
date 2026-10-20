@@ -268,6 +268,13 @@ public sealed class ProjectileSystem
 
         int hitUnitCount = 0;
 
+        // A single projectile may cross several cells containing the same unit.
+        // Apply its near-miss response only once per unit.
+        Span<int> nearMissUnits =
+            stackalloc int[128];
+
+        int nearMissUnitCount = 0;
+
         while (segmentStart < 1f)
         {
             LastTerrainCellsTraced++;
@@ -349,6 +356,10 @@ public sealed class ProjectileSystem
                 (end - start) *
                 segmentEnd;
 
+            // Do not count the untraveled part of a trace after it hits terrain.
+            float nearMissEndT = MathF.Min(segmentEnd, terrainT);
+            Vector3 nearMissEnd = start + (end - start) * nearMissEndT;
+
             while (node >= 0)
             {
                 int unitIndex =
@@ -390,6 +401,16 @@ public sealed class ProjectileSystem
                     continue;
                 }
 
+                bool alreadyNearMissed = false;
+                for (int n = 0; n < nearMissUnitCount; n++)
+                {
+                    if (nearMissUnits[n] != unitIndex)
+                        continue;
+
+                    alreadyNearMissed = true;
+                    break;
+                }
+
                 if (!_hitSystem.TryHitUnit(
                         units,
                         unitIndex,
@@ -403,7 +424,8 @@ public sealed class ProjectileSystem
                         bodies,
                         hitRegions))
                 {
-                    if (projectiles.Owner[projectileIndex].Index != unitIndex &&
+                    if (!alreadyNearMissed &&
+                        !isProjectileOwner &&
                         (projectiles.FactionTag[projectileIndex] == 0 ||
                          units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex]))
                     {
@@ -413,12 +435,15 @@ public sealed class ProjectileSystem
                                 hitRegions,
                                 unitIndex,
                                 subStart,
-                                subEnd,
+                                nearMissEnd,
                                 projectiles.BaseDamage[projectileIndex] +
                                 projectiles.Energy[projectileIndex] * 0.005f,
                                 projectiles.SuppressionFactor[projectileIndex]))
                         {
-                            Vector3 dangerPoint = (subStart + subEnd) * 0.5f;
+                            if (nearMissUnitCount < nearMissUnits.Length)
+                                nearMissUnits[nearMissUnitCount++] = unitIndex;
+
+                            Vector3 dangerPoint = (subStart + nearMissEnd) * 0.5f;
                             DangerStimulus?.Invoke(
                                 projectiles.Owner[projectileIndex],
                                 projectiles.FactionTag[projectileIndex],
