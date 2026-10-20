@@ -3,9 +3,9 @@ using System;
 namespace Core.Unit;
 
 /// <summary>
-/// Pure utility formulas currently used by the hybrid decision layer.
-/// These formulas intentionally preserve the existing behavior; they are
-/// centralized here before the available-action scoring model is expanded.
+/// Shared utility scores and switch margins used by the Behaviac policy tree.
+/// Utilities compare available actions; the decision tree still owns priority
+/// and explicit order semantics.
 /// </summary>
 public static class UnitTacticalUtility
 {
