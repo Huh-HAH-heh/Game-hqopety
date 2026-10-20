@@ -14,10 +14,21 @@ public enum UnitAiState : byte
     Flank = 5
 }
 
+public enum UnitAiOrderType : byte
+{
+    None = 0,
+    Move = 1,
+    Stop = 2,
+    Attack = 3
+}
+
 public sealed class UnitAiStore
 {
     private UnitAiState[] _state;
     private BehaviacUnitIntent[] _lastIntent;
+    private UnitAiOrderType[] _playerOrderType;
+    private Vector3[] _playerOrderPosition;
+    private UnitId[] _playerOrderTarget;
     private bool[] _hasTarget;
     private UnitId[] _target;
     private Vector3[] _lastSeenPosition;
@@ -36,6 +47,15 @@ public sealed class UnitAiStore
 
     public BehaviacUnitIntent[] LastIntent =>
         _lastIntent;
+
+    public UnitAiOrderType[] PlayerOrderType =>
+        _playerOrderType;
+
+    public Vector3[] PlayerOrderPosition =>
+        _playerOrderPosition;
+
+    public UnitId[] PlayerOrderTarget =>
+        _playerOrderTarget;
 
     public bool[] HasTarget =>
         _hasTarget;
@@ -75,6 +95,9 @@ public sealed class UnitAiStore
 
         _state = new UnitAiState[initialUnitCapacity];
         _lastIntent = new BehaviacUnitIntent[initialUnitCapacity];
+        _playerOrderType = new UnitAiOrderType[initialUnitCapacity];
+        _playerOrderPosition = new Vector3[initialUnitCapacity];
+        _playerOrderTarget = new UnitId[initialUnitCapacity];
         _hasTarget = new bool[initialUnitCapacity];
         _target = new UnitId[initialUnitCapacity];
         _lastSeenPosition = new Vector3[initialUnitCapacity];
@@ -93,6 +116,9 @@ public sealed class UnitAiStore
 
         _state[unitIndex] = UnitAiState.Idle;
         _lastIntent[unitIndex] = BehaviacUnitIntent.None;
+        _playerOrderType[unitIndex] = UnitAiOrderType.None;
+        _playerOrderPosition[unitIndex] = Vector3.Zero;
+        _playerOrderTarget[unitIndex] = default;
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
@@ -115,6 +141,9 @@ public sealed class UnitAiStore
 
         _state[unitIndex] = UnitAiState.Idle;
         _lastIntent[unitIndex] = BehaviacUnitIntent.None;
+        _playerOrderType[unitIndex] = UnitAiOrderType.None;
+        _playerOrderPosition[unitIndex] = Vector3.Zero;
+        _playerOrderTarget[unitIndex] = default;
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
@@ -124,6 +153,31 @@ public sealed class UnitAiStore
         _goal[unitIndex] = Vector3.Zero;
         _suppressionCoverRetry[unitIndex] = 0f;
         _suppressionRetrySource[unitIndex] = Vector3.Zero;
+    }
+
+    public void SetPlayerOrder(
+        int unitIndex,
+        UnitAiOrderType order,
+        Vector3 position = default,
+        UnitId target = default)
+    {
+        if (unitIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(unitIndex));
+
+        EnsureCapacity(unitIndex + 1);
+        _playerOrderType[unitIndex] = order;
+        _playerOrderPosition[unitIndex] = position;
+        _playerOrderTarget[unitIndex] = target;
+    }
+
+    public void ClearPlayerOrder(int unitIndex)
+    {
+        if ((uint)unitIndex >= (uint)Capacity)
+            return;
+
+        _playerOrderType[unitIndex] = UnitAiOrderType.None;
+        _playerOrderPosition[unitIndex] = Vector3.Zero;
+        _playerOrderTarget[unitIndex] = default;
     }
 
     public void RememberTarget(
@@ -208,6 +262,10 @@ public sealed class UnitAiStore
         Array.Resize(
             ref _lastIntent,
             newCapacity);
+
+        Array.Resize(ref _playerOrderType, newCapacity);
+        Array.Resize(ref _playerOrderPosition, newCapacity);
+        Array.Resize(ref _playerOrderTarget, newCapacity);
 
         Array.Resize(
             ref _hasTarget,
