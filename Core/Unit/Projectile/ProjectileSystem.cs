@@ -16,6 +16,8 @@ public sealed class ProjectileSystem
     private readonly UnitSpatialGrid _unitGrid = new UnitSpatialGrid();
     private readonly UnitHitSystem _hitSystem = new UnitHitSystem();
     private readonly DamageSystem _damageSystem = new DamageSystem();
+    private int[] _nearMissMarks = Array.Empty<int>();
+    private int _nearMissStamp;
 
     public double LastUpdateMilliseconds { get; private set; }
     public double LastGridBuildMilliseconds { get; private set; }
@@ -55,6 +57,8 @@ public sealed class ProjectileSystem
         LastUnitCandidates = 0;
 
         _unitGrid.Ensure(worldMap, units.Capacity);
+        if (_nearMissMarks.Length < units.Capacity)
+            Array.Resize(ref _nearMissMarks, units.Capacity);
 
         long gridStarted = Stopwatch.GetTimestamp();
         _unitGrid.Build(units, bodies, health, hitRegions);
@@ -268,12 +272,8 @@ public sealed class ProjectileSystem
 
         int hitUnitCount = 0;
 
-        // A single projectile may cross several cells containing the same unit.
-        // Apply its near-miss response only once per unit.
-        Span<int> nearMissUnits =
-            stackalloc int[128];
-
-        int nearMissUnitCount = 0;
+        // Prevent repeated near-miss effects when the same target occupies several grid cells.
+        int nearMissStamp = NextNearMissStamp();
 
         while (segmentStart < 1f)
         {
@@ -401,15 +401,7 @@ public sealed class ProjectileSystem
                     continue;
                 }
 
-                bool alreadyNearMissed = false;
-                for (int n = 0; n < nearMissUnitCount; n++)
-                {
-                    if (nearMissUnits[n] != unitIndex)
-                        continue;
-
-                    alreadyNearMissed = true;
-                    break;
-                }
+                bool alreadyNearMissed = _nearMissMarks[unitIndex] == nearMissStamp;
 
                 if (!_hitSystem.TryHitUnit(
                         units,
@@ -440,9 +432,7 @@ public sealed class ProjectileSystem
                                 projectiles.Energy[projectileIndex] * 0.005f,
                                 projectiles.SuppressionFactor[projectileIndex]))
                         {
-                            if (nearMissUnitCount < nearMissUnits.Length)
-                                nearMissUnits[nearMissUnitCount++] = unitIndex;
-
+                            _nearMissMarks[unitIndex] = nearMissStamp;
                             Vector3 dangerPoint = (subStart + nearMissEnd) * 0.5f;
                             DangerStimulus?.Invoke(
                                 projectiles.Owner[projectileIndex],
@@ -740,6 +730,21 @@ public sealed class ProjectileSystem
         }
 
         return true;
+    }
+
+    private int NextNearMissStamp()
+    {
+        if (_nearMissStamp == int.MaxValue)
+        {
+            Array.Clear(_nearMissMarks);
+            _nearMissStamp = 1;
+        }
+        else
+        {
+            _nearMissStamp++;
+        }
+
+        return _nearMissStamp;
     }
 
     private readonly struct TerrainMaterialInterval
