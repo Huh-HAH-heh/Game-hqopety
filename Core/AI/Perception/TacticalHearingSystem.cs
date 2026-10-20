@@ -331,8 +331,24 @@ public sealed class TacticalHearingSystem
             vision != null && worldMap != null)
         {
             Vector3 eyePosition = vision.GetEyePosition(units, observer);
+            Vector3 exposurePoint = sourcePosition;
+
+            // Terrain impacts are reported at the material entry boundary.
+            // Check the observer-side point just before that boundary, not a
+            // point that is already inside the wall that stopped the projectile.
+            if (type == TacticalStimulusType.CoverImpact)
+            {
+                Vector3 towardObserver = eyePosition - sourcePosition;
+                float distanceSquared = towardObserver.LengthSquared();
+                if (distanceSquared > 0.000001f)
+                {
+                    float backoff = MathF.Min(0.05f, MathF.Sqrt(distanceSquared) * 0.5f);
+                    exposurePoint += towardObserver * (backoff / MathF.Sqrt(distanceSquared));
+                }
+            }
+
             hasDirectExposure = vision.HasLineOfSight(
-                worldMap, eyePosition, sourcePosition, out _);
+                worldMap, eyePosition, exposurePoint, out _);
         }
 
         // A wall that stops a round protects units behind it from the impact.
