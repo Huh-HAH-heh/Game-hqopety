@@ -77,10 +77,29 @@ public sealed class SquadTacticalCoordinator
             }
             _membership.Clear();
             foreach (KeyValuePair<UnitId, int> pair in nextMembership) _membership.Add(pair.Key, pair.Value);
+
+            // A contact is valid only while its reporter and receiver still share a squad.
+            List<UnitId> staleReceived = new();
+            HashSet<long> staleContactSequences = new();
+            foreach (KeyValuePair<UnitId, ReceivedContact> pair in _received)
+            {
+                if (!_membership.TryGetValue(pair.Key, out int receiverSquad) ||
+                    !_membership.TryGetValue(pair.Value.Reporter, out int reporterSquad) ||
+                    receiverSquad != reporterSquad)
+                {
+                    staleReceived.Add(pair.Key);
+                    staleContactSequences.Add(pair.Value.Sequence);
+                }
+            }
+            for (int i = 0; i < staleReceived.Count; i++) _received.Remove(staleReceived[i]);
+
             List<long> staleClaims = new();
             foreach (KeyValuePair<long, InvestigationClaim> pair in _claims)
                 if (!_membership.TryGetValue(pair.Value.Owner, out int squadId) ||
-                    squadId != pair.Value.SquadId)
+                    squadId != pair.Value.SquadId ||
+                    staleContactSequences.Contains(pair.Key) ||
+                    !_received.TryGetValue(pair.Value.Owner, out ReceivedContact? ownerContact) ||
+                    ownerContact.Sequence != pair.Key)
                     staleClaims.Add(pair.Key);
             for (int i = 0; i < staleClaims.Count; i++) _claims.Remove(staleClaims[i]);
 
@@ -93,6 +112,63 @@ public sealed class SquadTacticalCoordinator
 
             _pending.RemoveAll(report => !_squads.ContainsKey(report.SquadId) ||
                 !_membership.TryGetValue(report.Reporter, out int squadId) || squadId != report.SquadId);
+        }
+    }
+
+    public bool IsMemberOfSquad(UnitId member, int squadId)
+    {
+        if (!member.IsValid || squadId <= 0) return false;
+        lock (_gate)
+            return _membership.TryGetValue(member, out int currentSquad) && currentSquad == squadId;
+    }
+
+    /// <summary>Remove a unit from squad coordination and invalidate reports or claims tied to it.</summary>
+    public void InvalidateUnit(UnitId unit)
+    {
+        if (!unit.IsValid) return;
+        lock (_gate)
+        {
+            if (_membership.Remove(unit, out int squadId) &&
+                _squads.TryGetValue(squadId, out SquadState? memberSquad))
+            {
+                memberSquad.Members.Remove(unit);
+                memberSquad.Observations.Remove(unit);
+            }
+
+            foreach (SquadState squad in _squads.Values)
+            {
+                List<UnitId> staleObservers = new();
+                foreach (KeyValuePair<UnitId, Observation> pair in squad.Observations)
+                    if (pair.Key.Equals(unit) || pair.Value.Target.Equals(unit))
+                        staleObservers.Add(pair.Key);
+                for (int i = 0; i < staleObservers.Count; i++) squad.Observations.Remove(staleObservers[i]);
+            }
+
+            HashSet<long> invalidSequences = new();
+            List<UnitId> staleReceivers = new();
+            foreach (KeyValuePair<UnitId, ReceivedContact> pair in _received)
+            {
+                if (pair.Key.Equals(unit) || pair.Value.Reporter.Equals(unit) || pair.Value.Target.Equals(unit))
+                {
+                    staleReceivers.Add(pair.Key);
+                    invalidSequences.Add(pair.Value.Sequence);
+                }
+            }
+            for (int i = 0; i < staleReceivers.Count; i++) _received.Remove(staleReceivers[i]);
+
+            List<long> staleInvestigationClaims = new();
+            foreach (KeyValuePair<long, InvestigationClaim> pair in _claims)
+                if (pair.Value.Owner.Equals(unit) || invalidSequences.Contains(pair.Key))
+                    staleInvestigationClaims.Add(pair.Key);
+            for (int i = 0; i < staleInvestigationClaims.Count; i++) _claims.Remove(staleInvestigationClaims[i]);
+
+            List<(int SquadId, UnitId Target)> staleFlankClaims = new();
+            foreach (KeyValuePair<(int SquadId, UnitId Target), FlankClaim> pair in _flankClaims)
+                if (pair.Value.Owner.Equals(unit) || pair.Key.Target.Equals(unit))
+                    staleFlankClaims.Add(pair.Key);
+            for (int i = 0; i < staleFlankClaims.Count; i++) _flankClaims.Remove(staleFlankClaims[i]);
+
+            _pending.RemoveAll(report => report.Reporter.Equals(unit) || report.Target.Equals(unit));
         }
     }
 
@@ -114,7 +190,7 @@ public sealed class SquadTacticalCoordinator
             }
             if (!publish) return;
             squad.Observations[observer] = new Observation(target, position, now);
-            _pending.Add(new PendingReport(squadId, observer, _nextSequence++, position,
+            _pending.Add(new PendingReport(squadId, observer, target, _nextSequence++, position,
                 now + ReportDelaySeconds, ErrorRadius, InitialConfidence));
         }
     }
@@ -140,7 +216,7 @@ public sealed class SquadTacticalCoordinator
                     float offset = MathF.Min(report.ErrorRadius * 0.35f, 2.5f);
                     Vector3 estimate = report.Position + new Vector3(MathF.Cos(angle) * offset, MathF.Sin(angle) * offset, 0f);
                     _received[receiver] = new ReceivedContact(report.Sequence, estimate, report.ErrorRadius,
-                        report.Confidence, now, report.Reporter);
+                        report.Confidence, now, report.Reporter, report.Target);
                 }
             }
             List<UnitId> expired = new();
@@ -257,7 +333,7 @@ public sealed class SquadTacticalCoordinator
         public readonly Dictionary<UnitId, Observation> Observations = new();
     }
     private readonly record struct Observation(UnitId Target, Vector3 Position, float PublishedAt);
-    private readonly record struct PendingReport(int SquadId, UnitId Reporter, long Sequence, Vector3 Position,
+    private readonly record struct PendingReport(int SquadId, UnitId Reporter, UnitId Target, long Sequence, Vector3 Position,
         float DeliverAt, float ErrorRadius, float Confidence);
     private readonly record struct InvestigationClaim(UnitId Owner, int SquadId, float ExpiresAt);
     private readonly record struct FlankClaim(UnitId Owner, float ExpiresAt);
@@ -269,8 +345,9 @@ public sealed class SquadTacticalCoordinator
         public float InitialConfidence { get; }
         public float ReceivedAt { get; }
         public UnitId Reporter { get; }
+        public UnitId Target { get; }
         public long InvestigatedSequence { get; set; }
-        public ReceivedContact(long sequence, Vector3 position, float errorRadius, float confidence, float receivedAt, UnitId reporter)
-        { Sequence = sequence; Position = position; ErrorRadius = errorRadius; InitialConfidence = confidence; ReceivedAt = receivedAt; Reporter = reporter; }
+        public ReceivedContact(long sequence, Vector3 position, float errorRadius, float confidence, float receivedAt, UnitId reporter, UnitId target)
+        { Sequence = sequence; Position = position; ErrorRadius = errorRadius; InitialConfidence = confidence; ReceivedAt = receivedAt; Reporter = reporter; Target = target; }
     }
 }
