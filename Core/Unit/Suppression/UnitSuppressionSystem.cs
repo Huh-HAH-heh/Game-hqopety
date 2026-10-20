@@ -52,7 +52,8 @@ public static class UnitSuppressionSystem
             distance = MathF.Min(distance, MathF.Max(0f, centerDistance - region.Radius));
         }
 
-        return ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
+        Vector3 threatPosition = (segmentStart + segmentEnd) * 0.5f;
+        return ApplyNearMiss(suppression, unitIndex, distance, threatPosition, danger, factor);
     }
 
     private static bool ApplyNearMiss(
@@ -63,7 +64,8 @@ public static class UnitSuppressionSystem
         float danger,
         float factor)
     {
-        if (!float.IsFinite(distance) || distance > 1.5f ||
+        if ((uint)unitIndex >= (uint)suppression.Capacity ||
+            !float.IsFinite(distance) || distance > 1.5f ||
             !float.IsFinite(danger) || danger <= 0f ||
             !float.IsFinite(factor) || factor <= 0f)
             return false;
