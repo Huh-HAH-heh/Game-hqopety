@@ -1134,7 +1134,6 @@ public sealed class UnitAiSystem
         {
             case BehaviacUnitIntent.Dead: LastBehaviacDeadDecisions++; break;
             case BehaviacUnitIntent.SeekCover: LastBehaviacCoverDecisions++; break;
-            case BehaviacUnitIntent.Panic: LastBehaviacCoverDecisions++; break;
             case BehaviacUnitIntent.RetreatToCover: LastBehaviacRetreatDecisions++; break;
             case BehaviacUnitIntent.FlankTarget: LastBehaviacFlankDecisions++; break;
             case BehaviacUnitIntent.EngageTarget:
