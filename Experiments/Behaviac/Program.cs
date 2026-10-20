@@ -181,7 +181,10 @@ internal static class Program
                     BehaviacUnitDecisionAgent agent = agents[unit];
                     agent.SetFacts(test.IsAlive, test.IsSuppressed, test.HasCover,
                         test.HasVisibleTarget, test.HasRecentTarget, test.IsLowHealth,
-                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking, test.ProneCombatUtility, test.IsProne);
+                        test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
+                        test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
+                        test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
+                        test.CombatUtility);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
