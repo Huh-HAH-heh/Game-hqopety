@@ -285,6 +285,23 @@ public sealed class UnitAiSystem
             }
 
             if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.Panic &&
+                suppressionState == UnitSuppressionState.Panicked)
+            {
+                // If no cover can be reached, panic interrupts firing and movement
+                // orders; retain target memory so the soldier can recover and re-engage.
+                ClearAiming(weapons, unit);
+                for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+                    weapons.StartBurst(unit, (UnitWeaponSlot)slot, default, 0, 0f);
+                Store.ClearGoal(unit);
+                units.Target[unit] = units.Position[unit];
+                units.HasTarget[unit] = false;
+                units.Posture[unit] = UnitPosture.Lying;
+                Store.State[unit] = UnitAiState.Idle;
+                continue;
+            }
+
+            if (UseBehaviacDecisionLayer &&
                 suppressionState != UnitSuppressionState.Panicked &&
                 TryExecutePlayerOrderIntent(
                     units, health, weapons, vision, unit, intent))
@@ -1117,6 +1134,7 @@ public sealed class UnitAiSystem
         {
             case BehaviacUnitIntent.Dead: LastBehaviacDeadDecisions++; break;
             case BehaviacUnitIntent.SeekCover: LastBehaviacCoverDecisions++; break;
+            case BehaviacUnitIntent.Panic: LastBehaviacCoverDecisions++; break;
             case BehaviacUnitIntent.RetreatToCover: LastBehaviacRetreatDecisions++; break;
             case BehaviacUnitIntent.FlankTarget: LastBehaviacFlankDecisions++; break;
             case BehaviacUnitIntent.EngageTarget:
@@ -1462,7 +1480,8 @@ public sealed class UnitAiSystem
             flankUtility,
             investigationUtility,
             hasSquadContact,
-            squadContactUtility);
+            squadContactUtility,
+            suppressionState == UnitSuppressionState.Panicked);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
@@ -1986,7 +2005,7 @@ public sealed class UnitAiSystem
         UnitSuppressionStore suppression,
         int unit)
     {
-        return Math.Clamp(suppression.GetAccuracyMultiplier(unit), 1f, 1.55f);
+        return Math.Clamp(suppression.GetAccuracyMultiplier(unit), 1f, 1.40f);
     }
 
     private bool TryFireAnyRangedWeapon(
