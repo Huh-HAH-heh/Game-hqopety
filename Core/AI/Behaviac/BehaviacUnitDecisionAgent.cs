@@ -164,11 +164,11 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         IsAlive && HasCover &&
         (IsInImmediateDanger || (IsSuppressed && CoverUtility > CombatUtility));
 
-    [MethodMetaInfo("ShouldExecuteAttackOrder", "Continue the attack task toward its last known contact only when no hostile is visible.")]
     [MethodMetaInfo("ShouldPanicFallback", "Interrupt combat when a panicked unit has no valid cover destination.")]
     public bool ShouldPanicFallback() =>
         IsAlive && IsPanicked && !HasCover;
 
+    [MethodMetaInfo("ShouldExecuteAttackOrder", "Continue the attack task toward its last known contact only when no hostile is visible.")]
     public bool ShouldExecuteAttackOrder() =>
         IsAlive && HasAttackOrder && !HasVisibleTarget;
 
