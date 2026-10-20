@@ -264,6 +264,27 @@ public sealed class UnitAiSystem
             }
 
             if (UseBehaviacDecisionLayer &&
+                suppressionState != UnitSuppressionState.Panicked &&
+                intent == BehaviacUnitIntent.SeekCover)
+            {
+                // A non-panicked but suppressed/low-health unit may still seek
+                // cover under a Hold order. Move to the planned cover, then let
+                // the tree resume HoldPositionEngage once it is reached.
+                if (!Store.HasGoal[unit] && _hasSuppressionCoverByUnit[unit])
+                    Store.SetGoal(unit, _suppressionCoverByUnit[unit]);
+
+                if (Store.HasGoal[unit] &&
+                    !ReachedGoal(units.Position[unit], Store.Goal[unit]))
+                {
+                    ClearAiming(weapons, unit);
+                    units.Target[unit] = Store.Goal[unit];
+                    units.HasTarget[unit] = true;
+                    Store.State[unit] = UnitAiState.SeekCover;
+                    continue;
+                }
+            }
+
+            if (UseBehaviacDecisionLayer &&
                 intent != BehaviacUnitIntent.FlankTarget &&
                 Store.State[unit] == UnitAiState.Flank)
             {
@@ -1527,13 +1548,23 @@ public sealed class UnitAiSystem
             FindNearestVisibleEnemy(units, health, vision, unit);
 
         UnitSuppressionState state = suppression.GetState(unit);
-        if (state != UnitSuppressionState.Panicked ||
-            (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover))
-        {
+        if (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover)
             return;
-        }
+
+        int visibleEnemy = _nearestVisibleEnemyByUnit[unit];
+        bool isPanicked = state == UnitSuppressionState.Panicked;
+        bool isHeld = Store.PlayerOrderType[unit] == UnitAiOrderType.Stop;
+        bool lowHealthHoldNeedsCover = isHeld &&
+            IsLowHealth(health, unit) &&
+            visibleEnemy >= 0;
+        bool suppressedHoldNeedsCover = isHeld &&
+            state == UnitSuppressionState.Suppressed;
+        if (!isPanicked && !lowHealthHoldNeedsCover && !suppressedHoldNeedsCover)
+            return;
 
         Vector3 threat = suppression.Source[unit];
+        if (lowHealthHoldNeedsCover)
+            threat = units.Position[visibleEnemy];
         Vector3 previousSource = Store.SuppressionRetrySource[unit];
         float sourceDx = threat.X - previousSource.X;
         float sourceDy = threat.Y - previousSource.Y;
@@ -1544,11 +1575,21 @@ public sealed class UnitAiSystem
         if (Store.SuppressionCoverRetry[unit] > thinkDelta && !threatChanged)
             return;
 
-        if (TryFindSuppressionCover(
-                units, vision, worldMap, unit, threat, out Vector3 cover))
+        bool foundCover = lowHealthHoldNeedsCover
+            ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, out Vector3 cover)
+            : TryFindSuppressionCover(units, vision, worldMap, unit, threat, out cover);
+
+        Store.SuppressionRetrySource[unit] = threat;
+        if (foundCover)
         {
             _suppressionCoverByUnit[unit] = cover;
             _hasSuppressionCoverByUnit[unit] = true;
+        }
+        else if (!isPanicked)
+        {
+            // Suppressed Hold units should not redo a costly failed cover scan
+            // every AI tick; retry after the existing short cooldown.
+            Store.SuppressionCoverRetry[unit] = 1f;
         }
     }
 
