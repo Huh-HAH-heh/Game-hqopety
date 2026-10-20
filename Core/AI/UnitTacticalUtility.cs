@@ -114,14 +114,17 @@ public static class UnitTacticalUtility
             0f,
             1f);
         float distanceAdvantage = Math.Clamp(
-            (distance - 24f) / 36f,
+            (distance - 30f) / 50f,
             0f,
             1f);
 
+        // At a safe engagement distance, some healthy riflemen should value
+        // a different firing angle enough to flank; close-range contact still
+        // favors immediate fire over a wide detour.
         return Math.Clamp(
-            0.32f +
-            rangeDeficit * 0.18f +
-            distanceAdvantage * 0.22f,
+            0.40f +
+            rangeDeficit * 0.15f +
+            distanceAdvantage * 0.45f,
             0f,
             1f);
     }
