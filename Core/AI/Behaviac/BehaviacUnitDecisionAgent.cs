@@ -38,6 +38,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool IsPanicked { get; private set; }
     [MemberMetaInfo("Has cover", "Whether a valid cover goal is available.", true)]
     public bool HasCover { get; private set; }
+    public bool WasSeekingCover { get; private set; }
+    public bool WasFollowingMoveOrder { get; private set; }
     [MemberMetaInfo("Visible target", "Whether a hostile target is currently visible.", true)]
     public bool HasVisibleTarget { get; private set; }
     [MemberMetaInfo("Recent target", "Whether the last known target memory is valid.", true)]
@@ -112,11 +114,15 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         float investigationUtility = 0f,
         bool hasSquadContact = false,
         float squadContactUtility = 0f,
-        bool isPanicked = false)
+        bool isPanicked = false,
+        bool wasSeekingCover = false,
+        bool wasFollowingMoveOrder = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
         IsPanicked = isPanicked;
+        WasSeekingCover = wasSeekingCover;
+        WasFollowingMoveOrder = wasFollowingMoveOrder;
         HasCover = hasCover;
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
@@ -162,7 +168,11 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldSeekCover", "Check whether suppression cover should take priority.")]
     public bool ShouldSeekCover() =>
         IsAlive && HasCover &&
-        (IsInImmediateDanger || (IsSuppressed && CoverUtility > CombatUtility));
+        (IsInImmediateDanger ||
+         (IsSuppressed &&
+          (WasSeekingCover
+              ? CoverUtility + Core.Unit.UnitTacticalUtility.CoverContinuationHysteresis >= CombatUtility
+              : CoverUtility > CombatUtility + Core.Unit.UnitTacticalUtility.CoverSwitchHysteresis)));
 
     [MethodMetaInfo("ShouldPanicFallback", "Interrupt combat when a panicked unit has no valid cover destination.")]
     public bool ShouldPanicFallback() =>
@@ -174,7 +184,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldFollowMoveOrder", "Compare movement-task utility with immediate combat utility.")]
     public bool ShouldFollowMoveOrder() =>
-        IsAlive && HasMoveOrder && MoveOrderUtility >= CombatUtility;
+        IsAlive && HasMoveOrder &&
+        (WasFollowingMoveOrder
+            ? MoveOrderUtility + Core.Unit.UnitTacticalUtility.MoveOrderSwitchHysteresis >= CombatUtility
+            : MoveOrderUtility >= CombatUtility + Core.Unit.UnitTacticalUtility.MoveOrderSwitchHysteresis);
 
     [MethodMetaInfo("ShouldHoldPosition", "Keep the assigned position when no hostile is visible; cover priorities remain above this branch.")]
     public bool ShouldHoldPosition() =>
