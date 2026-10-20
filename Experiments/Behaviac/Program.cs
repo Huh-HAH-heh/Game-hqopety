@@ -438,7 +438,7 @@ internal static class Program
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
                         test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted,
-                    test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
+                        test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
                     _ = BehaviacRuntimeHost.Tick(agents[unit]);
                 }
             }
@@ -477,7 +477,7 @@ internal static class Program
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
                         test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger, test.IsAlerted,
-                    test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
+                        test.CoverUtility, test.FlankUtility, test.InvestigationUtility);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
