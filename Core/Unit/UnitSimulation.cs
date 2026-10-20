@@ -1023,7 +1023,8 @@ public sealed class UnitSimulation
             Projectiles,
             Suppression,
             worldMap,
-            deltaTime);
+            deltaTime,
+            _visionSystem);
         LastProjectileUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
