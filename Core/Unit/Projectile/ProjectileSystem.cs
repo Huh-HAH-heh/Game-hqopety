@@ -37,7 +37,8 @@ public sealed class ProjectileSystem
         ProjectileStore projectiles,
         UnitSuppressionStore suppression,
         WorldMap worldMap,
-        float deltaTime)
+        float deltaTime,
+        VisionSystem? vision = null)
     {
         projectiles.UpdateImpactEffects(deltaTime);
 
@@ -136,6 +137,7 @@ public sealed class ProjectileSystem
                     projectiles,
                     suppression,
                     worldMap,
+                    vision,
                     projectileIndex,
                     start,
                     end);
@@ -179,6 +181,7 @@ public sealed class ProjectileSystem
         ProjectileStore projectiles,
         UnitSuppressionStore suppression,
         WorldMap worldMap,
+        VisionSystem? vision,
         int projectileIndex,
         Vector3 start,
         Vector3 end)
@@ -430,7 +433,9 @@ public sealed class ProjectileSystem
                                 nearMissEnd,
                                 projectiles.BaseDamage[projectileIndex] +
                                 projectiles.Energy[projectileIndex] * 0.005f,
-                                projectiles.SuppressionFactor[projectileIndex]))
+                                projectiles.SuppressionFactor[projectileIndex],
+                                worldMap,
+                                vision))
                         {
                             _nearMissMarks[unitIndex] = nearMissStamp;
                             Vector3 dangerPoint = (subStart + nearMissEnd) * 0.5f;
