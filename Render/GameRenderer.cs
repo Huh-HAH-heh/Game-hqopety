@@ -56,6 +56,8 @@ public sealed class GameRenderer
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
     private float _squadPruneTimer;
+    private const float SquadMarkerRadiusPixels = 12f;
+    private const float SquadMarkerHitTolerancePixels = 4f;
     private readonly CircleShape _squadMarker = new(0.5f)
     {
         FillColor = new Color(0, 0, 0, 0),
@@ -760,7 +762,7 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "LMB drag=create squad click soldier=select squad Shift+click=add/remove K=disband Shift+1-9=bind 1-9=select RMB=move J=formation Y=reset | " +
+            "LMB drag=create squad click soldier=select soldier squad ring=select squad Shift+click=add/remove K=disband Shift+1-9=bind 1-9=select RMB=move | " +
             "A=enable AI B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
@@ -967,13 +969,6 @@ public sealed class GameRenderer
         {
             _selectedUnit = default;
             _selectedUnits.Clear();
-            return;
-        }
-
-        int squadId = _squadManager.GetSquadId(unit);
-        if (squadId != 0)
-        {
-            SelectSquad(squadId, false);
             return;
         }
 
@@ -1652,6 +1647,22 @@ public sealed class GameRenderer
             return;
         }
 
+        if (snapshot != null &&
+            TryPickSquadMarker(snapshot, worldX, worldY, pixelsPerUnit, out int squadId))
+        {
+            InfantrySquad? squad = _squadManager.GetSquad(squadId);
+            if (squad != null)
+            {
+                foreach (UnitId member in squad.Members)
+                    _selectedUnits.Add(member);
+
+                if (!_selectedUnit.IsValid || !_selectedUnits.Contains(_selectedUnit))
+                    _selectedUnit = squad.Commander;
+            }
+
+            return;
+        }
+
         if (!shiftHeld)
             SetSelectedUnit(default);
     }
@@ -1723,8 +1734,19 @@ public sealed class GameRenderer
         }
     }
 
-    private void DrawSquadMarkers(SimulationFrameSnapshot snapshot)
+    private bool TryGetSquadCenter(
+        SimulationFrameSnapshot snapshot,
+        InfantrySquad squad,
+        out Vector2f center,
+        out RenderUnitState commander,
+        out bool hasCommander)
     {
+        float sumX = 0f;
+        float sumY = 0f;
+        int count = 0;
+        commander = default;
+        hasCommander = false;
+
         RenderUnitState[] units = snapshot.Units;
         for (int i = 0; i < units.Length; i++)
         {
@@ -1733,32 +1755,101 @@ public sealed class GameRenderer
                 continue;
 
             UnitId id = new(unit.Index, unit.Generation);
-            if (!_squadManager.TryGetSquad(id, out InfantrySquad squad))
+            if (_squadManager.GetSquadId(id) != squad.Id)
                 continue;
 
+            sumX += unit.Position.X;
+            sumY += unit.Position.Y;
+            count++;
+
+            if (id == squad.Commander)
+            {
+                commander = unit;
+                hasCommander = true;
+            }
+        }
+
+        if (count == 0)
+        {
+            center = default;
+            return false;
+        }
+
+        center = new Vector2f(sumX / count, sumY / count);
+        return true;
+    }
+
+    private bool TryPickSquadMarker(
+        SimulationFrameSnapshot snapshot,
+        float worldX,
+        float worldY,
+        float pixelsPerUnit,
+        out int selectedSquadId)
+    {
+        selectedSquadId = 0;
+        float bestError = float.MaxValue;
+        float scale = MathF.Max(1f, pixelsPerUnit);
+
+        // Pick the visible ring outline rather than its whole interior. A soldier
+        // directly under the ring still wins the normal unit-picking test first.
+        foreach (InfantrySquad squad in _squadManager.Squads)
+        {
+            if (!TryGetSquadCenter(snapshot, squad, out Vector2f center, out _, out _))
+                continue;
+
+            float dx = (worldX - center.X) * scale;
+            float dy = (worldY - center.Y) * scale;
+            float distance = MathF.Sqrt(dx * dx + dy * dy);
+            float error = MathF.Abs(distance - SquadMarkerRadiusPixels);
+            if (error > SquadMarkerHitTolerancePixels || error >= bestError)
+                continue;
+
+            bestError = error;
+            selectedSquadId = squad.Id;
+        }
+
+        return selectedSquadId != 0;
+    }
+
+    private void DrawSquadMarkers(SimulationFrameSnapshot snapshot)
+    {
+        float renderScale = MathF.Max(
+            0.01f,
+            _window.Size.X / MathF.Max(1f, _camera.View.Size.X));
+        float radius = SquadMarkerRadiusPixels / renderScale;
+        float outline = 1.5f / renderScale;
+        float commanderRadius = 2.5f / renderScale;
+
+        foreach (InfantrySquad squad in _squadManager.Squads)
+        {
+            if (!TryGetSquadCenter(
+                    snapshot, squad, out Vector2f center, out RenderUnitState commander, out bool hasCommander))
+            {
+                continue;
+            }
+
             Color color = SquadColors[(squad.Id - 1) % SquadColors.Length];
-            float radius = (GetMarkerWorldRadius(unit, 0.15f) + 0.08f) * TerrainTilePixelSize;
-            float x = unit.Position.X * TerrainTilePixelSize;
-            float y = unit.Position.Y * TerrainTilePixelSize;
+            float x = center.X * TerrainTilePixelSize;
+            float y = center.Y * TerrainTilePixelSize;
 
             _squadMarker.Radius = radius;
             _squadMarker.Origin = new Vector2f(radius, radius);
             _squadMarker.Position = new Vector2f(x, y);
             _squadMarker.OutlineColor = color;
-            _squadMarker.OutlineThickness = MathF.Max(0.65f, TerrainTilePixelSize * 0.045f);
+            _squadMarker.OutlineThickness = outline;
             _window.Draw(_squadMarker);
 
-            if (squad.Commander != id)
+            if (!hasCommander)
                 continue;
 
-            float commanderRadius = MathF.Max(1.4f, radius * 0.22f);
             _squadCommanderMarker.Radius = commanderRadius;
             _squadCommanderMarker.Origin = new Vector2f(commanderRadius, commanderRadius);
             _squadCommanderMarker.Position = new Vector2f(
-                x + radius * 0.72f,
-                y - radius * 0.72f);
+                commander.Position.X * TerrainTilePixelSize,
+                commander.Position.Y * TerrainTilePixelSize);
+            _squadCommanderMarker.FillColor = new Color(255, 245, 175);
             _squadCommanderMarker.OutlineColor = color;
-            _squadCommanderMarker.OutlineThickness = MathF.Max(0.45f, TerrainTilePixelSize * 0.025f);
+            _squadCommanderMarker.OutlineThickness = 0.8f / renderScale;
             _window.Draw(_squadCommanderMarker);
         }
     }
