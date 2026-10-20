@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using behaviac;
 using Core.AI.Behaviac;
+using Core.Unit;
 
 internal static class Program
 {
@@ -74,10 +75,43 @@ internal static class Program
         }
     }
 
+    private static bool RunTacticalUtilityTests()
+    {
+        (string Name, float Actual, float Expected)[] tests =
+        [
+            ("move utility at destination", UnitTacticalUtility.EvaluateMoveOrder(0f, false, false), 0.50f),
+            ("move utility reaches distance cap", UnitTacticalUtility.EvaluateMoveOrder(24f, false, false), 0.80f),
+            ("move utility remains capped at long distance", UnitTacticalUtility.EvaluateMoveOrder(100f, false, false), 0.80f),
+            ("suppression penalizes movement intent", UnitTacticalUtility.EvaluateMoveOrder(24f, true, false), 0.68f),
+            ("low health penalizes movement intent", UnitTacticalUtility.EvaluateMoveOrder(24f, false, true), 0.70f),
+            ("suppression and low health stack", UnitTacticalUtility.EvaluateMoveOrder(24f, true, true), 0.58f),
+            ("no visible target means no immediate combat utility", UnitTacticalUtility.EvaluateVisibleCombat(5f, false), 0f),
+            ("close combat utility", UnitTacticalUtility.EvaluateVisibleCombat(6f, true), 0.96f),
+            ("medium combat utility upper boundary", UnitTacticalUtility.EvaluateVisibleCombat(12f, true), 0.84f),
+            ("long combat utility upper boundary", UnitTacticalUtility.EvaluateVisibleCombat(24f, true), 0.68f),
+            ("distant combat utility", UnitTacticalUtility.EvaluateVisibleCombat(24.01f, true), 0.54f),
+            ("exposed prone firing utility at minimum distance", UnitTacticalUtility.EvaluateProneFiring(9f, true, 1f), 0.35f),
+            ("exposed distant prone firing utility", UnitTacticalUtility.EvaluateProneFiring(34f, true, 1f), 1f),
+            ("cover lowers prone-position advantage", UnitTacticalUtility.EvaluateProneFiring(34f, false, 1f), 0.80f)
+        ];
+
+        bool passedAll = true;
+        foreach ((string name, float actual, float expected) in tests)
+        {
+            bool passed = MathF.Abs(actual - expected) <= 0.0001f;
+            passedAll &= passed;
+            Console.WriteLine(
+                $"Tactical utility test: {(passed ? "PASS" : "FAIL")}; " +
+                $"{name}; actual={actual:F3}; expected={expected:F3}");
+        }
+
+        return passedAll;
+    }
+
     private static int RunDecisionTests()
     {
         DecisionCase[] cases = GetDecisionCases();
-        bool allPassed = true;
+        bool allPassed = RunTacticalUtilityTests();
 
         try
         {
@@ -109,7 +143,9 @@ internal static class Program
             }
 
             BehaviacRuntimeHost.Shutdown();
-            Console.WriteLine($"Behaviac decision tests: {(allPassed ? "PASS" : "FAIL")}; {cases.Length} cases");
+            Console.WriteLine(
+                $"Behaviac decision tests: {(allPassed ? "PASS" : "FAIL")}; " +
+                $"{cases.Length} tree cases + tactical utility formula tests");
             return allPassed ? 0 : 1;
         }
         catch (Exception exception)
