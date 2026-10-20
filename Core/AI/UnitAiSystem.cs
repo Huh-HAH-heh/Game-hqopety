@@ -201,17 +201,6 @@ public sealed class UnitAiSystem
         }
 
         _tacticalTimeSeconds += thinkDelta;
-        for (int i = 0; i < activeCount; i++)
-        {
-            int unit = _activeUnitScratch[i];
-            int visibleTarget = _nearestVisibleEnemyByUnit[unit];
-            if (visibleTarget < 0)
-                continue;
-
-            _squadCoordinator.ObserveVisibleContact(
-                units.GetId(unit), units.GetId(visibleTarget),
-                units.Position[visibleTarget], _tacticalTimeSeconds);
-        }
         _squadCoordinator.Advance(_tacticalTimeSeconds);
 
         LastPlanningMilliseconds =
@@ -244,9 +233,6 @@ public sealed class UnitAiSystem
             bool isAlive =
                 health.OverallMaxHitPoints[unit] > 0f &&
                 health.OverallHitPoints[unit] > 0f;
-
-            if (isAlive)
-                InvalidateStaleSquadSupportOrder(units, health, weapons, unit);
 
             BehaviacUnitIntent intent = BehaviacUnitIntent.None;
             if (UseBehaviacDecisionLayer)
@@ -424,13 +410,6 @@ public sealed class UnitAiSystem
             if (UseBehaviacDecisionLayer &&
                 intent == BehaviacUnitIntent.InvestigateAudibleContact &&
                 TryExecuteAudibleInvestigation(units, weapons, worldMap, unit))
-            {
-                continue;
-            }
-
-            if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.InvestigateSquadContact &&
-                TryExecuteSquadContactInvestigation(units, weapons, worldMap, unit))
             {
                 continue;
             }
@@ -1022,39 +1001,6 @@ public sealed class UnitAiSystem
         }
     }
 
-    private void InvalidateStaleSquadSupportOrder(
-        UnitStore units,
-        UnitHealthStore health,
-        UnitWeaponStore weapons,
-        int unit)
-    {
-        if (!Store.HasSquadSupportOrder(unit))
-            return;
-
-        UnitId supportTarget = Store.SquadSupportTarget[unit];
-        int supportSquadId = Store.SquadSupportSquadId[unit];
-        bool targetIsValid = supportTarget.IsValid &&
-            units.IsAlive(supportTarget) &&
-            health.OverallHitPoints[supportTarget.Index] > 0f &&
-            IsHostile(units, unit, supportTarget.Index);
-
-        if (targetIsValid &&
-            _squadCoordinator.IsMemberOfSquad(units.GetId(unit), supportSquadId) &&
-            !_squadCoordinator.HasExpiredObservation(supportSquadId, supportTarget, _tacticalTimeSeconds))
-        {
-            return;
-        }
-
-        // A support slot belongs to one squad attack task. Don't keep marching to
-        // an obsolete slot after the target dies/goes stale or this soldier leaves.
-        Store.ClearPlayerOrder(unit);
-        Store.ClearTarget(unit);
-        Store.ClearGoal(unit);
-        ClearAiming(weapons, unit);
-        units.Target[unit] = units.Position[unit];
-        units.HasTarget[unit] = false;
-    }
-
     private bool TryExecutePlayerOrderIntent(
         UnitStore units,
         UnitHealthStore health,
@@ -1071,12 +1017,7 @@ public sealed class UnitAiSystem
             Vector3 moveDestination = store.PlayerOrderPosition[unit];
             if (ReachedGoal(units.Position[unit], moveDestination))
             {
-                UnitId supportTarget = store.SquadSupportTarget[unit];
-                int supportSquadId = store.SquadSupportSquadId[unit];
-                if (supportTarget.IsValid && supportSquadId > 0)
-                    store.SetSquadSupportOrder(unit, UnitAiOrderType.Stop, units.Position[unit], supportTarget, supportSquadId);
-                else
-                    store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
+                store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
                 store.ClearTarget(unit);
                 store.ClearGoal(unit);
                 ClearAiming(weapons, unit);
@@ -1187,7 +1128,6 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
             case BehaviacUnitIntent.InvestigateLastKnownTarget:
             case BehaviacUnitIntent.InvestigateAudibleContact:
-            case BehaviacUnitIntent.InvestigateSquadContact:
                 LastBehaviacInvestigateDecisions++;
                 break;
             case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
@@ -1196,38 +1136,6 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
             case BehaviacUnitIntent.HoldPositionEngage: LastBehaviacHoldAndEngageDecisions++; break;
         }
-    }
-
-    private bool TryExecuteSquadContactInvestigation(
-        UnitStore units,
-        UnitWeaponStore weapons,
-        WorldMap worldMap,
-        int unit)
-    {
-        UnitId receiver = units.GetId(unit);
-        if (!_squadCoordinator.TryGetContact(
-                receiver, _tacticalTimeSeconds, out SquadTacticalContact contact) ||
-            !_squadCoordinator.TryClaimInvestigation(receiver, contact.Sequence, _tacticalTimeSeconds) ||
-            !_squadCoordinator.MarkInvestigated(receiver, contact.Sequence))
-            return false;
-
-        Vector3 estimate = contact.EstimatedPosition;
-        float angle = (contact.Sequence * 2.39996323f + unit * 0.75487767f) % MathF.Tau;
-        float searchOffset = Math.Clamp(contact.PositionErrorRadius * 0.22f, 0.75f, 5f);
-        float x = Math.Clamp(estimate.X + MathF.Cos(angle) * searchOffset, 0.5f, worldMap.MaxTileX - 0.5f);
-        float y = Math.Clamp(estimate.Y + MathF.Sin(angle) * searchOffset, 0.5f, worldMap.MaxTileY - 0.5f);
-        int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
-        int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
-        Vector3 searchPoint = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
-
-        // A squad report is an area to investigate, never an identified combat target.
-        ClearAiming(weapons, unit);
-        Store.ClearTarget(unit);
-        Store.SetGoal(unit, searchPoint);
-        units.Target[unit] = searchPoint;
-        units.HasTarget[unit] = true;
-        Store.State[unit] = UnitAiState.Search;
-        return true;
     }
 
     private bool TryExecuteAudibleInvestigation(
@@ -1309,12 +1217,7 @@ public sealed class UnitAiSystem
         if (orderType == UnitAiOrderType.Move &&
             ReachedGoal(units.Position[unit], Store.PlayerOrderPosition[unit]))
         {
-            UnitId supportTarget = Store.SquadSupportTarget[unit];
-            int supportSquadId = Store.SquadSupportSquadId[unit];
-            if (supportTarget.IsValid && supportSquadId > 0)
-                Store.SetSquadSupportOrder(unit, UnitAiOrderType.Stop, units.Position[unit], supportTarget, supportSquadId);
-            else
-                Store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
+            Store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
             Store.ClearGoal(unit);
             orderType = UnitAiOrderType.Stop;
         }
@@ -1486,19 +1389,6 @@ public sealed class UnitAiSystem
                 investigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility;
         }
 
-        bool hasSquadContact = false;
-        float squadContactUtility = 0f;
-        if (_squadCoordinator.TryGetContact(
-                units.GetId(unit), _tacticalTimeSeconds, out SquadTacticalContact squadContact))
-        {
-            Vector3 squadDelta = squadContact.EstimatedPosition - units.Position[unit];
-            float squadDistance = MathF.Sqrt(
-                squadDelta.X * squadDelta.X + squadDelta.Y * squadDelta.Y);
-            squadContactUtility = UnitTacticalUtility.EvaluateInvestigation(
-                squadContact.Confidence, squadDistance);
-            hasSquadContact = squadContactUtility >= UnitTacticalUtility.MinimumSquadContactUtility;
-        }
-
         bool hasImmediateDanger = suppression.IsInImmediateDanger(unit);
         float coverUtility = UnitTacticalUtility.EvaluateCover(
             suppression.Value[unit],
@@ -1530,8 +1420,6 @@ public sealed class UnitAiSystem
             coverUtility,
             flankUtility,
             investigationUtility,
-            hasSquadContact,
-            squadContactUtility,
             suppressionState == UnitSuppressionState.Panicked,
             Store.State[unit] == UnitAiState.SeekCover && Store.HasGoal[unit],
             Store.LastIntent[unit] == BehaviacUnitIntent.FollowMoveOrder);
