@@ -1263,7 +1263,6 @@ public sealed class UnitAiSystem
             ? health.OverallHitPoints[unit] / health.OverallMaxHitPoints[unit]
             : 0f;
         bool isLowHealth = healthRatio < LowHealthThreshold;
-        bool hasSuppressiveWeapon = HasSuppressFireWeapon(inventory, weapons, unit);
         bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
         float flankDistance = 0f;
@@ -1367,7 +1366,6 @@ public sealed class UnitAiSystem
             hasVisibleTarget,
             Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f,
             isLowHealth,
-            hasSuppressiveWeapon,
             canFlank,
             isFlanking,
             proneUtility,
