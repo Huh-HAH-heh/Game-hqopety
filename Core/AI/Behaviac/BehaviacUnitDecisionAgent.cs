@@ -202,20 +202,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         IsAlive && IsLowHealth && (HasVisibleTarget || HasRecentTarget) &&
         (!HasStopOrder || HasCover);
 
-    [MethodMetaInfo("ShouldTakePronePosition", "Prefer a prone firing position when distance and exposure justify it.")]
-    public bool ShouldTakePronePosition()
-    {
-        // Enter prone less often; allow a lower exit threshold to avoid posture flicker.
-        float proneThreshold = IsProne ? 0.72f : 0.82f;
-        float combatMargin = IsProne ? -0.02f : 0.06f;
-
-        return IsAlive && HasVisibleTarget && !IsSuppressed && !IsLowHealth &&
-            !IsFlanking &&
-            ProneCombatUtility >= proneThreshold &&
-            ProneCombatUtility > CombatUtility + combatMargin &&
-            (!CanFlank ||
-             FlankUtility <= CombatUtility + Core.Unit.UnitTacticalUtility.FlankUtilityAdvantage);
-    }
+    [MethodMetaInfo("ShouldTakePronePosition", "Automatic prone firing is disabled; units use ordinary combat movement.")]
+    public bool ShouldTakePronePosition() => false;
 
     [MethodMetaInfo("ShouldEngageVisibleTarget", "Check whether a visible target should be engaged.")]
     public bool ShouldEngageVisibleTarget() =>
