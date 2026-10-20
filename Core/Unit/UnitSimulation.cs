@@ -91,6 +91,8 @@ public sealed class UnitSimulation
 
     public UnitAiSystem AI =>
         _aiSystem;
+    internal TacticalHearingSystem HearingSystem =>
+        _hearingSystem;
     public MeleeCombatSystem MeleeCombat =>
         _meleeCombatSystem;
     public VisionSystem Vision =>
