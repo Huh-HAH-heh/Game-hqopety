@@ -303,12 +303,12 @@ public sealed class TacticalHearingSystem
             case TacticalStimulusType.NearMiss:
                 dangerRadius = 5f;
                 minimumConfidence = 0.20f;
-                duration = 0.55f + 0.35f * confidence;
+                duration = 0.25f + 0.25f * confidence;
                 break;
             case TacticalStimulusType.CoverImpact:
                 dangerRadius = 8f;
                 minimumConfidence = 0.24f;
-                duration = 0.25f + 0.45f * confidence;
+                duration = 0.16f + 0.30f * confidence;
                 break;
             case TacticalStimulusType.Explosion:
                 dangerRadius = Math.Clamp(eventRange * 0.30f, 10f, 24f);
@@ -343,6 +343,11 @@ public sealed class TacticalHearingSystem
         // A blast can still be heard behind terrain, but its immediate pressure is lower.
         if (type == TacticalStimulusType.Explosion && !hasDirectExposure)
             duration *= 0.25f;
+
+        // Suppression resistance reduces flinch-driven reactions to close rounds
+        // and nearby impacts; it does not make a true blast physically harmless.
+        if (type is TacticalStimulusType.NearMiss or TacticalStimulusType.CoverImpact)
+            duration *= 1f - response.GetSuppressionResistance(observer) * 0.45f;
 
         // Existing cover status further reduces urgency once a protected position is reached.
         if ((uint)observer < (uint)response.InCover.Length && response.InCover[observer])
