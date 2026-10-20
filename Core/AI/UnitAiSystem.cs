@@ -242,6 +242,9 @@ public sealed class UnitAiSystem
                 health.OverallMaxHitPoints[unit] > 0f &&
                 health.OverallHitPoints[unit] > 0f;
 
+            if (isAlive)
+                InvalidateStaleSquadSupportOrder(units, health, weapons, unit);
+
             BehaviacUnitIntent intent = BehaviacUnitIntent.None;
             if (UseBehaviacDecisionLayer)
             {
@@ -1020,6 +1023,39 @@ public sealed class UnitAiSystem
         }
     }
 
+    private void InvalidateStaleSquadSupportOrder(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitWeaponStore weapons,
+        int unit)
+    {
+        if (!Store.HasSquadSupportOrder(unit))
+            return;
+
+        UnitId supportTarget = Store.SquadSupportTarget[unit];
+        int supportSquadId = Store.SquadSupportSquadId[unit];
+        bool targetIsValid = supportTarget.IsValid &&
+            units.IsAlive(supportTarget) &&
+            health.OverallHitPoints[supportTarget.Index] > 0f &&
+            IsHostile(units, unit, supportTarget.Index);
+
+        if (targetIsValid &&
+            _squadCoordinator.IsMemberOfSquad(units.GetId(unit), supportSquadId) &&
+            !_squadCoordinator.HasExpiredObservation(supportSquadId, supportTarget, _tacticalTimeSeconds))
+        {
+            return;
+        }
+
+        // A support slot belongs to one squad attack task. Don't keep marching to
+        // an obsolete slot after the target dies/goes stale or this soldier leaves.
+        Store.ClearPlayerOrder(unit);
+        Store.ClearTarget(unit);
+        Store.ClearGoal(unit);
+        ClearAiming(weapons, unit);
+        units.Target[unit] = units.Position[unit];
+        units.HasTarget[unit] = false;
+    }
+
     private bool TryExecutePlayerOrderIntent(
         UnitStore units,
         UnitHealthStore health,
@@ -1035,7 +1071,12 @@ public sealed class UnitAiSystem
             Vector3 moveDestination = store.PlayerOrderPosition[unit];
             if (ReachedGoal(units.Position[unit], moveDestination))
             {
-                store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
+                UnitId supportTarget = store.SquadSupportTarget[unit];
+                int supportSquadId = store.SquadSupportSquadId[unit];
+                if (supportTarget.IsValid && supportSquadId > 0)
+                    store.SetSquadSupportOrder(unit, UnitAiOrderType.Stop, units.Position[unit], supportTarget, supportSquadId);
+                else
+                    store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
                 store.ClearTarget(unit);
                 store.ClearGoal(unit);
                 ClearAiming(weapons, unit);
