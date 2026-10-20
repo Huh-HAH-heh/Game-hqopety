@@ -256,6 +256,7 @@ public sealed class UnitAiSystem
             }
 
             if (UseBehaviacDecisionLayer &&
+                suppressionState != UnitSuppressionState.Panicked &&
                 TryExecutePlayerOrderIntent(
                     units, health, weapons, vision, unit, intent))
             {
