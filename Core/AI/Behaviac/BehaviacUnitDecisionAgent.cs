@@ -40,6 +40,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasRecentTarget { get; private set; }
     [MemberMetaInfo("Audible contact", "Whether an uncertain sound contact is worth investigating.", true)]
     public bool HasAudibleContact { get; private set; }
+    [MemberMetaInfo("Immediate danger", "Whether a close bullet pass, stopped bullet or explosion was recently perceived.", true)]
+    public bool IsInImmediateDanger { get; private set; }
     [MemberMetaInfo("Low health", "Whether the unit is below the retreat health threshold.", true)]
     public bool IsLowHealth { get; private set; }
     [MemberMetaInfo("Suppressive weapon", "Whether the current loadout supports suppressive fire.", true)]
@@ -86,7 +88,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool hasAttackOrder = false,
         float moveOrderUtility = 0f,
         float combatUtility = 0f,
-        bool hasAudibleContact = false)
+        bool hasAudibleContact = false,
+        bool isInImmediateDanger = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -94,6 +97,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
         HasAudibleContact = hasAudibleContact;
+        IsInImmediateDanger = isInImmediateDanger;
         IsLowHealth = isLowHealth;
         HasSuppressiveWeapon = hasSuppressiveWeapon;
         CanFlank = canFlank;
@@ -119,7 +123,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldSeekCover", "Check whether suppression cover should take priority.")]
     public bool ShouldSeekCover() =>
-        IsAlive && IsSuppressed && HasCover;
+        IsAlive && HasCover && (IsSuppressed || IsInImmediateDanger);
 
     [MethodMetaInfo("ShouldExecuteAttackOrder", "Continue the attack task toward its last known contact only when no hostile is visible.")]
     public bool ShouldExecuteAttackOrder() =>

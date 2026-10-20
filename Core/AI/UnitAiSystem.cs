@@ -1311,6 +1311,7 @@ public sealed class UnitAiSystem
               (hasCoverGoal && !ReachedGoal(units.Position[unit], Store.Goal[unit]));
 
         bool hasAudibleContact = Hearing?.HasInvestigableContact(unit) == true;
+        bool hasImmediateDanger = Hearing?.HasImmediateDangerContact(unit) == true;
         agent.SetFacts(
             isAlive,
             isSuppressed,
@@ -1328,7 +1329,8 @@ public sealed class UnitAiSystem
             hasAttackOrder,
             moveOrderUtility,
             combatUtility,
-            hasAudibleContact);
+            hasAudibleContact,
+            hasImmediateDanger);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)

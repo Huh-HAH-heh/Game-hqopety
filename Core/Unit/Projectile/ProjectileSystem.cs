@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
 using Core.Combat;
+using Core.AI.Perception;
 
 namespace Core.Unit;
 
@@ -21,6 +22,8 @@ public sealed class ProjectileSystem
     public int LastProjectilesVisited { get; private set; }
     public int LastTerrainCellsTraced { get; private set; }
     public int LastUnitCandidates { get; private set; }
+
+    public event Action<UnitId, ushort, TacticalStimulusType, Vector3, float, float>? DangerStimulus;
 
     public void Update(
         UnitStore units,
@@ -404,16 +407,25 @@ public sealed class ProjectileSystem
                         (projectiles.FactionTag[projectileIndex] == 0 ||
                          units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex]))
                     {
-                        UnitSuppressionSystem.AddNearMiss(
-                            suppression,
-                            units,
-                            hitRegions,
-                            unitIndex,
-                            subStart,
-                            subEnd,
-                            projectiles.BaseDamage[projectileIndex] +
-                            projectiles.Energy[projectileIndex] * 0.005f,
-                            projectiles.SuppressionFactor[projectileIndex]);
+                        if (UnitSuppressionSystem.AddNearMiss(
+                                suppression,
+                                units,
+                                hitRegions,
+                                unitIndex,
+                                subStart,
+                                subEnd,
+                                projectiles.BaseDamage[projectileIndex] +
+                                projectiles.Energy[projectileIndex] * 0.005f,
+                                projectiles.SuppressionFactor[projectileIndex]))
+                        {
+                            DangerStimulus?.Invoke(
+                                projectiles.Owner[projectileIndex],
+                                projectiles.FactionTag[projectileIndex],
+                                TacticalStimulusType.NearMiss,
+                                (subStart + subEnd) * 0.5f,
+                                0.95f,
+                                28f);
+                        }
                     }
 
                     continue;
@@ -497,6 +509,14 @@ public sealed class ProjectileSystem
                         end,
                         out bool continues))
                 {
+                    DangerStimulus?.Invoke(
+                        projectiles.Owner[projectileIndex],
+                        projectiles.FactionTag[projectileIndex],
+                        TacticalStimulusType.CoverImpact,
+                        start + (end - start) * terrainT,
+                        0.80f,
+                        42f);
+
                     if (CombatDiagnostics.Enabled)
                     {
                         CombatDiagnostics.WriteLine(
@@ -512,7 +532,16 @@ public sealed class ProjectileSystem
                 }
 
                 if (!continues)
+                {
+                    DangerStimulus?.Invoke(
+                        projectiles.Owner[projectileIndex],
+                        projectiles.FactionTag[projectileIndex],
+                        TacticalStimulusType.CoverImpact,
+                        start + (end - start) * terrainT,
+                        0.80f,
+                        42f);
                     return false;
+                }
 
                 segmentStart =
                     MathF.Max(

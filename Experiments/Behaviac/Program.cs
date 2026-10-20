@@ -315,7 +315,7 @@ internal static class Program
                     test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                     test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                     test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                    test.CombatUtility, test.HasAudibleContact);
+                    test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger);
 
                 EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                 BehaviacUnitIntent directIntent = ResolveDirect(test);
@@ -370,7 +370,7 @@ internal static class Program
                         test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                        test.CombatUtility, test.HasAudibleContact);
+                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger);
                     _ = BehaviacRuntimeHost.Tick(agents[unit]);
                 }
             }
@@ -408,7 +408,7 @@ internal static class Program
                         test.HasSuppressiveWeapon, test.CanFlank, test.IsFlanking,
                         test.ProneCombatUtility, test.IsProne, test.HasMoveOrder,
                         test.HasStopOrder, test.HasAttackOrder, test.MoveOrderUtility,
-                        test.CombatUtility, test.HasAudibleContact);
+                        test.CombatUtility, test.HasAudibleContact, test.HasImmediateDanger);
 
                     EBTStatus status = BehaviacRuntimeHost.Tick(agent);
                     behaviacChecksum += (int)agent.Intent;
@@ -497,7 +497,11 @@ internal static class Program
         new("hold order outranks an uncertain sound", true, false, false, false, false,
             BehaviacUnitIntent.HoldPosition, HasStopOrder: true, HasAudibleContact: true),
         new("identified last-known contact outranks an uncertain sound", true, false, false, false, true,
-            BehaviacUnitIntent.InvestigateLastKnownTarget, HasAudibleContact: true)
+            BehaviacUnitIntent.InvestigateLastKnownTarget, HasAudibleContact: true),
+        new("immediate danger selects cover when an option exists", true, false, true, false, false,
+            BehaviacUnitIntent.SeekCover, HasImmediateDanger: true),
+        new("immediate danger without a cover option does not invent a cover goal", true, false, false, false, false,
+            BehaviacUnitIntent.Patrol, HasImmediateDanger: true)
     ];
 
     private static BehaviacUnitIntent ResolveDirect(DecisionCase test)
@@ -505,7 +509,7 @@ internal static class Program
         if (!test.IsAlive)
             return BehaviacUnitIntent.Dead;
 
-        if (test.IsSuppressed && test.HasCover)
+        if (test.HasCover && (test.IsSuppressed || test.HasImmediateDanger))
             return BehaviacUnitIntent.SeekCover;
 
         if (test.IsLowHealth && (test.HasVisibleTarget || test.HasRecentTarget) &&
@@ -571,7 +575,8 @@ internal static class Program
         bool HasAttackOrder = false,
         float MoveOrderUtility = 0f,
         float CombatUtility = 0f,
-        bool HasAudibleContact = false);
+        bool HasAudibleContact = false,
+        bool HasImmediateDanger = false);
 }
 
 [TypeMetaInfo()]

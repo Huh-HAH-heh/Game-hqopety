@@ -30,14 +30,42 @@ public sealed class TacticalHearingSystem
         _footstepCooldown = new float[initialUnitCapacity];
     }
 
-    public void EmitGunshot(UnitId shooter, Vector3 position, ushort factionTag)
+    public void EmitGunshot(UnitId shooter, Vector3 position, ushort factionTag) =>
+        EmitDanger(shooter, factionTag, TacticalStimulusType.Gunshot, position, 1f, GunshotRange);
+
+    public void EmitDanger(
+        UnitId sourceUnit,
+        ushort sourceFaction,
+        TacticalStimulusType type,
+        Vector3 position,
+        float intensity,
+        float audibleRange)
     {
-        if (!shooter.IsValid || !IsFinite(position))
+        if (!IsFinite(position) ||
+            !float.IsFinite(intensity) ||
+            !float.IsFinite(audibleRange) ||
+            intensity <= 0f ||
+            audibleRange <= 0f ||
+            type is not (TacticalStimulusType.Gunshot or TacticalStimulusType.NearMiss or
+                TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion))
             return;
+
         _pendingPulses.Add(new SoundPulse(
-            _nextPulseId++, shooter, factionTag, position,
-            TacticalStimulusType.Gunshot, CurrentTimeSeconds, 1f, GunshotRange));
+            _nextPulseId++, sourceUnit, sourceFaction, position, type,
+            CurrentTimeSeconds, Math.Clamp(intensity, 0f, 1f), audibleRange));
     }
+
+    /// <summary>
+    /// Entry point for future blast producers. The current weapon model does not
+    /// yet implement explosive ammunition or radius-based blast damage.
+    /// </summary>
+    public void EmitExplosion(
+        Vector3 position,
+        ushort sourceFaction = 0,
+        float intensity = 1f,
+        float audibleRange = 80f) =>
+        EmitDanger(default, sourceFaction, TacticalStimulusType.Explosion,
+            position, intensity, audibleRange);
 
     public void Update(UnitStore units, UnitHealthStore health, float nowSeconds, float deltaTime)
     {
@@ -107,6 +135,36 @@ public sealed class TacticalHearingSystem
         return bestScore > 0f;
     }
 
+    public bool HasImmediateDangerContact(int observerIndex) =>
+        TryGetBestImmediateDangerContact(observerIndex, out _);
+
+    public bool TryGetBestImmediateDangerContact(int observerIndex, out TacticalContact contact)
+    {
+        contact = null!;
+        if ((uint)observerIndex >= (uint)_memories.Length ||
+            _memories[observerIndex] is not TacticalContactMemory memory)
+            return false;
+
+        float bestScore = 0f;
+        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            TacticalContact candidate = contacts[i];
+            if (candidate.IsInvestigated ||
+                candidate.ExpiresAtSeconds <= CurrentTimeSeconds ||
+                candidate.LastStimulusType is not (TacticalStimulusType.NearMiss or
+                    TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion))
+                continue;
+
+            float confidence = candidate.GetEffectiveConfidence(CurrentTimeSeconds, ConfidenceHalfLifeSeconds);
+            if (confidence < 0.14f || confidence <= bestScore)
+                continue;
+            bestScore = confidence;
+            contact = candidate;
+        }
+        return bestScore > 0f;
+    }
+
     public bool MarkInvestigated(int observerIndex, long contactId)
     {
         if ((uint)observerIndex >= (uint)_memories.Length ||
@@ -153,9 +211,15 @@ public sealed class TacticalHearingSystem
         for (int pulseIndex = 0; pulseIndex < _pendingPulses.Count; pulseIndex++)
         {
             SoundPulse pulse = _pendingPulses[pulseIndex];
-            float lifetime = pulse.Type == TacticalStimulusType.Footstep
-                ? FootstepMemorySeconds
-                : GunshotMemorySeconds;
+            float lifetime = pulse.Type switch
+            {
+                TacticalStimulusType.Footstep => FootstepMemorySeconds,
+                TacticalStimulusType.Gunshot => GunshotMemorySeconds,
+                TacticalStimulusType.NearMiss => 5f,
+                TacticalStimulusType.CoverImpact => 6f,
+                TacticalStimulusType.Explosion => 10f,
+                _ => 4f
+            };
             if (nowSeconds - pulse.OccurredAtSeconds >= lifetime)
                 continue;
             for (int i = 0; i < active.Length; i++)

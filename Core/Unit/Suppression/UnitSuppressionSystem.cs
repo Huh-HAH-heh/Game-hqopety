@@ -5,7 +5,7 @@ namespace Core.Unit;
 
 public static class UnitSuppressionSystem
 {
-    public static void AddNearMiss(
+    public static bool AddNearMiss(
         UnitSuppressionStore suppression,
         int unitIndex,
         Vector3 unitPosition,
@@ -19,10 +19,10 @@ public static class UnitSuppressionSystem
             segmentStart,
             segmentEnd);
 
-        ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
+        return ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
     }
 
-    public static void AddNearMiss(
+    public static bool AddNearMiss(
         UnitSuppressionStore suppression,
         UnitStore units,
         UnitHitRegionStore? hitRegions,
@@ -51,10 +51,10 @@ public static class UnitSuppressionSystem
             distance = MathF.Min(distance, MathF.Max(0f, centerDistance - region.Radius));
         }
 
-        ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
+        return ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
     }
 
-    private static void ApplyNearMiss(
+    private static bool ApplyNearMiss(
         UnitSuppressionStore suppression,
         int unitIndex,
         float distance,
@@ -63,11 +63,12 @@ public static class UnitSuppressionSystem
         float factor)
     {
         if (distance > 1.5f)
-            return;
+            return false;
 
         float proximity = 1f / (0.25f + distance * distance);
         float amount = danger * factor * proximity * 0.0014f;
         suppression.Add(unitIndex, amount, impactPosition);
+        return true;
     }
 
     private static float DistanceToSegment2D(

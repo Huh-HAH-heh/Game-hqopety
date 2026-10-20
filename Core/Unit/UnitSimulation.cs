@@ -72,6 +72,14 @@ public sealed class UnitSimulation
     {
         _weaponSystem.BeginMetricsFrame();
     }
+
+    /// <summary>Reports an explosion to nearby units when a blast producer supplies the event.</summary>
+    public void ReportExplosion(
+        Vector3 position,
+        ushort sourceFaction = 0,
+        float intensity = 1f,
+        float audibleRange = 80f) =>
+        _hearingSystem.EmitExplosion(position, sourceFaction, intensity, audibleRange);
     public double LastProjectileGridBuildMilliseconds =>
         _projectileSystem.LastGridBuildMilliseconds;
     public int LastProjectilesVisited =>
@@ -149,6 +157,7 @@ public sealed class UnitSimulation
 
         _projectileSystem =
             new ProjectileSystem();
+        _projectileSystem.DangerStimulus += _hearingSystem.EmitDanger;
 
         _visionSystem =
             new VisionSystem(
