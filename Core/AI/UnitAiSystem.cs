@@ -63,6 +63,10 @@ public sealed class UnitAiSystem
     public int LastBehaviacSuppressDecisions { get; private set; }
     public int LastBehaviacInvestigateDecisions { get; private set; }
     public int LastBehaviacPatrolDecisions { get; private set; }
+    public int LastBehaviacMoveOrderDecisions { get; private set; }
+    public int LastBehaviacHoldOrderDecisions { get; private set; }
+    public int LastBehaviacAttackOrderDecisions { get; private set; }
+    public int LastBehaviacHoldAndEngageDecisions { get; private set; }
 
     public UnitAiSystem(
         int initialUnitCapacity = 1024,
@@ -150,6 +154,10 @@ public sealed class UnitAiSystem
         LastBehaviacSuppressDecisions = 0;
         LastBehaviacInvestigateDecisions = 0;
         LastBehaviacPatrolDecisions = 0;
+        LastBehaviacMoveOrderDecisions = 0;
+        LastBehaviacHoldOrderDecisions = 0;
+        LastBehaviacAttackOrderDecisions = 0;
+        LastBehaviacHoldAndEngageDecisions = 0;
 
         Store.EnsureCapacity(
             units.Capacity);
@@ -986,6 +994,10 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
             case BehaviacUnitIntent.InvestigateLastKnownTarget: LastBehaviacInvestigateDecisions++; break;
             case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
+            case BehaviacUnitIntent.FollowMoveOrder: LastBehaviacMoveOrderDecisions++; break;
+            case BehaviacUnitIntent.HoldPosition: LastBehaviacHoldOrderDecisions++; break;
+            case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
+            case BehaviacUnitIntent.HoldPositionEngage: LastBehaviacHoldAndEngageDecisions++; break;
         }
     }
 
@@ -1074,7 +1086,7 @@ public sealed class UnitAiSystem
         {
             Vector3 moveDelta = Store.PlayerOrderPosition[unit] - units.Position[unit];
             float moveDistance = MathF.Sqrt(moveDelta.X * moveDelta.X + moveDelta.Y * moveDelta.Y);
-            moveOrderUtility = 0.55f + 0.30f * Math.Clamp(moveDistance / 24f, 0f, 1f);
+            moveOrderUtility = 0.50f + 0.30f * Math.Clamp(moveDistance / 24f, 0f, 1f);
         }
 
         float combatUtility = 0f;
