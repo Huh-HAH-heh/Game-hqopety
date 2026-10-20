@@ -57,6 +57,17 @@
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
+    <node class="Sequence" id="36">
+      <node class="Condition" id="37">
+        <property Operator="Equal" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldHoldPosition()" />
+        <property Opr="const bool true" />
+      </node>
+      <node class="Action" id="38">
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectHoldPosition()" />
+        <property ResultOption="BT_INVALID" />
+      </node>
+    </node>
     <node class="Sequence" id="33">
       <node class="Condition" id="34">
         <property Operator="Equal" />
@@ -111,17 +122,6 @@
       </node>
       <node class="Action" id="19">
         <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectSuppressiveFire()" />
-        <property ResultOption="BT_INVALID" />
-      </node>
-    </node>
-    <node class="Sequence" id="36">
-      <node class="Condition" id="37">
-        <property Operator="Equal" />
-        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldHoldPosition()" />
-        <property Opr="const bool true" />
-      </node>
-      <node class="Action" id="38">
-        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectHoldPosition()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
