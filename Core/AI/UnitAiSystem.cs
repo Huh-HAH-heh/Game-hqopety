@@ -1436,7 +1436,7 @@ public sealed class UnitAiSystem
         if (hasVisibleTarget &&
             isHealthyEnoughToFlank &&
             HasRangedWeapon(units, inventory, unit) &&
-            unit % 4 == 0)
+            (unit % 4 == 0 || _squadCoordinator.IsMemberOfAnySquad(units.GetId(unit))))
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
