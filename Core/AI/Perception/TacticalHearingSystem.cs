@@ -277,7 +277,7 @@ public sealed class TacticalHearingSystem
                 response.AddAlertness(observer, alertFactor * confidence, estimate);
                 ApplyImmediateDangerResponse(
                     response, units, vision, worldMap, observer, pulse.Type,
-                    pulse.Position, distance, pulse.Range, confidence, estimate);
+                    pulse.Position, pulse.Range, confidence, estimate);
             }
         }
     }
@@ -290,7 +290,6 @@ public sealed class TacticalHearingSystem
         int observer,
         TacticalStimulusType type,
         Vector3 sourcePosition,
-        float distance,
         float eventRange,
         float confidence,
         Vector3 estimatedSource)
@@ -320,7 +319,11 @@ public sealed class TacticalHearingSystem
                 return;
         }
 
-        if (distance > dangerRadius || confidence < minimumConfidence)
+        // Sound can travel vertically, but danger radius is physical 3D proximity.
+        float dangerDistance = Vector3.Distance(units.Position[observer], sourcePosition);
+        if (!float.IsFinite(dangerDistance) ||
+            dangerDistance > dangerRadius ||
+            confidence < minimumConfidence)
             return;
 
         bool hasDirectExposure = true;
