@@ -797,7 +797,8 @@ public sealed class UnitAiSystem
                             weapons,
                             unit);
                 }
-                else if (!HasRangedWeapon(
+                else if (intent != BehaviacUnitIntent.HoldPositionEngage &&
+                         !HasRangedWeapon(
                              units,
                              inventory,
                              unit))
