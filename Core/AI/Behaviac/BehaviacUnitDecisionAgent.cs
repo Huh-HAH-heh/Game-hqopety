@@ -48,8 +48,6 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool IsInImmediateDanger { get; private set; }
     [MemberMetaInfo("Low health", "Whether the unit is below the retreat health threshold.", true)]
     public bool IsLowHealth { get; private set; }
-    [MemberMetaInfo("Suppressive weapon", "Whether the current loadout supports suppressive fire.", true)]
-    public bool HasSuppressiveWeapon { get; private set; }
     [MemberMetaInfo("Can flank", "Whether this unit has been assigned a flank opportunity.", true)]
     public bool CanFlank { get; private set; }
     [MemberMetaInfo("Is flanking", "Whether this unit is already executing a flank maneuver.", true)]
@@ -87,7 +85,6 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool hasVisibleTarget,
         bool hasRecentTarget,
         bool isLowHealth,
-        bool hasSuppressiveWeapon,
         bool canFlank,
         bool isFlanking,
         float proneCombatUtility = 0f,
@@ -119,7 +116,6 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         IsInImmediateDanger = isInImmediateDanger;
         IsAlerted = isAlerted;
         IsLowHealth = isLowHealth;
-        HasSuppressiveWeapon = hasSuppressiveWeapon;
         CanFlank = canFlank;
         IsFlanking = isFlanking;
         IsProne = isProne;
