@@ -1231,7 +1231,11 @@ public sealed class GameRenderer
         }
 
         Vector3 destination = units.Position[targetIndex];
-        int assigned = 0;
+        HashSet<UnitId> selected = new(memberIds);
+        Dictionary<int, List<(UnitId Id, int Index, float DistanceSquared)>> squadCandidates = new();
+        int advancing = 0;
+        int supporting = 0;
+
         for (int i = 0; i < memberIds.Length; i++)
         {
             UnitId id = memberIds[i];
@@ -1244,18 +1248,81 @@ public sealed class GameRenderer
                 continue;
             }
 
-            // This is a high-level task only. Behaviac chooses when to advance,
-            // engage, take cover, and switch to another visible nearby threat.
-            ai.SetPlayerOrder(
-                unitIndex,
-                UnitAiOrderType.Attack,
-                destination,
-                targetId);
-            assigned++;
+            int squadId = _squadManager.GetSquadId(id);
+            if (squadId <= 0)
+            {
+                ai.SetPlayerOrder(unitIndex, UnitAiOrderType.Attack, destination, targetId);
+                advancing++;
+                continue;
+            }
+
+            Vector3 position = units.Position[unitIndex];
+            float dx = position.X - destination.X;
+            float dy = position.Y - destination.Y;
+            if (!squadCandidates.TryGetValue(squadId, out List<(UnitId Id, int Index, float DistanceSquared)>? candidates))
+                squadCandidates[squadId] = candidates = new List<(UnitId Id, int Index, float DistanceSquared)>();
+            candidates.Add((id, unitIndex, dx * dx + dy * dy));
+        }
+
+        foreach (KeyValuePair<int, List<(UnitId Id, int Index, float DistanceSquared)>> pair in squadCandidates)
+        {
+            List<(UnitId Id, int Index, float DistanceSquared)> candidates = pair.Value;
+            InfantrySquad? squad = _squadManager.GetSquad(pair.Key);
+            bool wholeSquadSelected = squad != null;
+            int livingSquadMembers = 0;
+
+            if (squad != null)
+            {
+                for (int i = 0; i < squad.Members.Count; i++)
+                {
+                    UnitId member = squad.Members[i];
+                    if (!units.TryGetIndex(member, out int memberIndex) ||
+                        _unitSimulation.Health.OverallHitPoints[memberIndex] <= 0f)
+                    {
+                        continue;
+                    }
+
+                    livingSquadMembers++;
+                    if (!selected.Contains(member))
+                        wholeSquadSelected = false;
+                }
+            }
+
+            // Keep ordinary Attack behavior for an individual or partial selection.
+            bool splitRoles = wholeSquadSelected &&
+                livingSquadMembers > 1 &&
+                candidates.Count == livingSquadMembers;
+
+            candidates.Sort(static (a, b) =>
+            {
+                int distanceOrder = a.DistanceSquared.CompareTo(b.DistanceSquared);
+                return distanceOrder != 0 ? distanceOrder : a.Id.Index.CompareTo(b.Id.Index);
+            });
+
+            int advancingCount = splitRoles
+                ? Math.Max(1, (candidates.Count + 2) / 3)
+                : candidates.Count;
+
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                (UnitId Id, int Index, float DistanceSquared) candidate = candidates[i];
+                if (i < advancingCount)
+                {
+                    // The point group advances; Behaviac still chooses local reactions and targets.
+                    ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Attack, destination, targetId);
+                    advancing++;
+                }
+                else
+                {
+                    // Stop is a fire-support task: hold position, but engage personally visible threats.
+                    ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Stop, units.Position[candidate.Index]);
+                    supporting++;
+                }
+            }
         }
 
         Console.WriteLine(
-            $"[SQUAD] Attack task replaced previous orders for {assigned} soldiers; nearest-threat switching enabled.");
+            $"[SQUAD] Attack task: {advancing} advancing, {supporting} fire-support; partial selections retain normal Attack behavior.");
     }
 
     private void IssueHoldOrder(UnitId[] memberIds)
