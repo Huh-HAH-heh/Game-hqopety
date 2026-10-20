@@ -581,6 +581,15 @@ public sealed class UnitAiSystem
                 }
 
                 if (!Store.HasGoal[unit] &&
+                    _hasSuppressionCoverByUnit[unit])
+                {
+                    // PrepareUnitPlan may have found cover after the retry
+                    // cooldown because the threat moved; consume that candidate
+                    // even when the cooldown is still active.
+                    Store.SetGoal(unit, _suppressionCoverByUnit[unit]);
+                }
+
+                if (!Store.HasGoal[unit] &&
                     Store.SuppressionCoverRetry[unit] <= 0f)
                 {
                     // A failed low-health cover search also costs up to 32 LOS
@@ -588,17 +597,13 @@ public sealed class UnitAiSystem
                     // same expensive search on every 150 ms AI tick.
                     Store.SuppressionCoverRetry[unit] = 1f;
 
-                    if (_hasSuppressionCoverByUnit[unit])
-                    {
-                        Store.SetGoal(unit, _suppressionCoverByUnit[unit]);
-                    }
-                    else if (TryFindCover(
-                                 units,
-                                 vision,
-                                 worldMap,
-                                 unit,
-                                 target.Index,
-                                 out Vector3 cover))
+                    if (TryFindCover(
+                            units,
+                            vision,
+                            worldMap,
+                            unit,
+                            target.Index,
+                            out Vector3 cover))
                     {
                         Store.SetGoal(unit, cover);
                     }
@@ -1589,7 +1594,9 @@ public sealed class UnitAiSystem
             ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, out cover)
             : TryFindSuppressionCover(units, vision, worldMap, unit, threat, out cover);
 
-        Store.SuppressionRetrySource[unit] = threat;
+        if (!isPanicked)
+            Store.SuppressionRetrySource[unit] = threat;
+
         if (foundCover)
         {
             _suppressionCoverByUnit[unit] = cover;
