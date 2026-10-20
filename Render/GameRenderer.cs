@@ -1374,7 +1374,8 @@ public sealed class GameRenderer
 
                     if (splitRoles && TryFindFireSupportPosition(
                             desiredSupportPosition, forwardX, forwardY, sideX, sideY,
-                            occupiedSupportTiles, out Vector3 firePosition))
+                            occupiedSupportTiles, destination, units.Height[candidate.Index],
+                            units.Height[targetIndex], out Vector3 firePosition))
                     {
                         // Reposition into a spread support line; Move becomes Stop upon arrival.
                         ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Move, firePosition);
@@ -1401,9 +1402,16 @@ public sealed class GameRenderer
         float sideX,
         float sideY,
         HashSet<(int X, int Y)> reservedTiles,
+        Vector3 targetPosition,
+        float observerHeight,
+        float targetHeight,
         out Vector3 position)
     {
         position = default;
+        Vector3 fallbackPosition = default;
+        int fallbackX = -1;
+        int fallbackY = -1;
+
         for (int backoffStep = 0; backoffStep < 4; backoffStep++)
         {
             float backoff = backoffStep * 2f;
@@ -1435,13 +1443,42 @@ public sealed class GameRenderer
                     continue;
                 }
 
-                reservedTiles.Add((tileX, tileY));
-                position = new Vector3(
+                Vector3 candidate = new(
                     tileX + 0.5f,
                     tileY + 0.5f,
                     _worldMap.GetSurfaceHeight(tileX, tileY));
+
+                if (fallbackX < 0)
+                {
+                    fallbackPosition = candidate;
+                    fallbackX = tileX;
+                    fallbackY = tileY;
+                }
+
+                Vector3 observerEye = candidate + new Vector3(
+                    0f, 0f, MathF.Max(0.05f, observerHeight));
+                Vector3 targetEye = targetPosition + new Vector3(
+                    0f, 0f, MathF.Max(0.05f, targetHeight));
+
+                if (!_unitSimulation.Vision.HasLineOfSight(
+                        _worldMap, observerEye, targetEye, out _))
+                {
+                    continue;
+                }
+
+                reservedTiles.Add((tileX, tileY));
+                position = candidate;
                 return true;
             }
+        }
+
+        // Prefer an open firing lane, but don't strand support if every candidate
+        // is blocked from sight: use the nearest reachable slot as a fallback.
+        if (fallbackX >= 0)
+        {
+            reservedTiles.Add((fallbackX, fallbackY));
+            position = fallbackPosition;
+            return true;
         }
 
         return false;
