@@ -1780,18 +1780,17 @@ public sealed class UnitAiSystem
             ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, out cover)
             : TryFindSuppressionCover(units, vision, worldMap, unit, threat, out cover);
 
-        if (!isPanicked)
-            Store.SuppressionRetrySource[unit] = threat;
+        Store.SuppressionRetrySource[unit] = threat;
 
         if (foundCover)
         {
             _suppressionCoverByUnit[unit] = cover;
             _hasSuppressionCoverByUnit[unit] = true;
         }
-        else if (!isPanicked)
+        else
         {
-            // Suppressed Hold units should not redo a costly failed cover scan
-            // every AI tick; retry after the existing short cooldown.
+            // A failed search is expensive for both suppressed and panicked units.
+            // Retry after one second, unless the threat moves substantially.
             Store.SuppressionCoverRetry[unit] = 1f;
         }
     }
