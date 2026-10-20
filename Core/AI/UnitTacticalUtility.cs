@@ -23,7 +23,6 @@ public static class UnitTacticalUtility
     public const float CoverContinuationHysteresis = 0.12f;
     public const float MoveOrderSwitchHysteresis = 0.10f;
     public const float MinimumInvestigationUtility = 0.24f;
-    public const float MinimumSquadContactUtility = 0.30f;
 
     public static float EvaluateMoveOrder(
         float distance,
