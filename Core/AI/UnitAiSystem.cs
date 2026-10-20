@@ -678,6 +678,15 @@ public sealed class UnitAiSystem
 
             if (UseBehaviacDecisionLayer &&
                 targetVisible &&
+                intent == BehaviacUnitIntent.FlankTarget &&
+                !_squadCoordinator.TryClaimFlank(units.GetId(unit), target, _tacticalTimeSeconds))
+            {
+                // One soldier handles the flank; the rest retain their local combat decisions.
+                intent = BehaviacUnitIntent.EngageTarget;
+            }
+
+            if (UseBehaviacDecisionLayer &&
+                targetVisible &&
                 intent == BehaviacUnitIntent.FlankTarget)
             {
                 bool targetChanged = !_hasFlankTargetByUnit[unit] ||

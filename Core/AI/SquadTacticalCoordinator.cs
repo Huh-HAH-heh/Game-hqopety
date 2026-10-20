@@ -23,6 +23,7 @@ public sealed class SquadTacticalCoordinator
     public const float ContactConfidenceHalfLifeSeconds = 2.2f;
     public const float MinimumContactConfidence = 0.12f;
     private const float RefreshSeconds = 0.90f;
+    private const float FlankClaimLifetimeSeconds = 1.0f;
     private const float SignificantMovement = 3f;
     private const float InitialConfidence = 0.68f;
     private const float ErrorRadius = 6f;
@@ -32,6 +33,7 @@ public sealed class SquadTacticalCoordinator
     private readonly Dictionary<UnitId, int> _membership = new();
     private readonly Dictionary<UnitId, ReceivedContact> _received = new();
     private readonly Dictionary<long, InvestigationClaim> _claims = new();
+    private readonly Dictionary<(int SquadId, UnitId Target), FlankClaim> _flankClaims = new();
     private readonly List<PendingReport> _pending = new();
     private long _nextSequence = 1;
 
@@ -81,6 +83,14 @@ public sealed class SquadTacticalCoordinator
                     squadId != pair.Value.SquadId)
                     staleClaims.Add(pair.Key);
             for (int i = 0; i < staleClaims.Count; i++) _claims.Remove(staleClaims[i]);
+
+            List<(int SquadId, UnitId Target)> staleFlankClaims = new();
+            foreach (KeyValuePair<(int SquadId, UnitId Target), FlankClaim> pair in _flankClaims)
+                if (!_membership.TryGetValue(pair.Value.Owner, out int ownerSquad) ||
+                    ownerSquad != pair.Key.SquadId)
+                    staleFlankClaims.Add(pair.Key);
+            for (int i = 0; i < staleFlankClaims.Count; i++) _flankClaims.Remove(staleFlankClaims[i]);
+
             _pending.RemoveAll(report => !_squads.ContainsKey(report.SquadId) ||
                 !_membership.TryGetValue(report.Reporter, out int squadId) || squadId != report.SquadId);
         }
@@ -146,6 +156,14 @@ public sealed class SquadTacticalCoordinator
                     squadId != pair.Value.SquadId)
                     expiredClaims.Add(pair.Key);
             for (int i = 0; i < expiredClaims.Count; i++) _claims.Remove(expiredClaims[i]);
+
+            List<(int SquadId, UnitId Target)> expiredFlankClaims = new();
+            foreach (KeyValuePair<(int SquadId, UnitId Target), FlankClaim> pair in _flankClaims)
+                if (pair.Value.ExpiresAt <= now ||
+                    !_membership.TryGetValue(pair.Value.Owner, out int squadId) ||
+                    squadId != pair.Key.SquadId)
+                    expiredFlankClaims.Add(pair.Key);
+            for (int i = 0; i < expiredFlankClaims.Count; i++) _flankClaims.Remove(expiredFlankClaims[i]);
         }
     }
 
@@ -190,6 +208,39 @@ public sealed class SquadTacticalCoordinator
         }
     }
 
+    public bool TryClaimFlank(UnitId member, UnitId target, float now)
+    {
+        if (!member.IsValid || !target.IsValid || !float.IsFinite(now)) return false;
+        lock (_gate)
+        {
+            // Units outside a squad keep the existing individual flank behavior.
+            if (!_membership.TryGetValue(member, out int squadId)) return true;
+
+            var key = (SquadId: squadId, Target: target);
+            if (_flankClaims.TryGetValue(key, out FlankClaim claim))
+            {
+                if (claim.ExpiresAt <= now ||
+                    !_membership.TryGetValue(claim.Owner, out int ownerSquad) ||
+                    ownerSquad != squadId)
+                {
+                    _flankClaims.Remove(key);
+                }
+                else if (claim.Owner.Equals(member))
+                {
+                    _flankClaims[key] = new FlankClaim(member, now + FlankClaimLifetimeSeconds);
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            _flankClaims[key] = new FlankClaim(member, now + FlankClaimLifetimeSeconds);
+            return true;
+        }
+    }
+
     public bool MarkInvestigated(UnitId receiver, long sequence)
     {
         lock (_gate)
@@ -209,6 +260,7 @@ public sealed class SquadTacticalCoordinator
     private readonly record struct PendingReport(int SquadId, UnitId Reporter, long Sequence, Vector3 Position,
         float DeliverAt, float ErrorRadius, float Confidence);
     private readonly record struct InvestigationClaim(UnitId Owner, int SquadId, float ExpiresAt);
+    private readonly record struct FlankClaim(UnitId Owner, float ExpiresAt);
     private sealed class ReceivedContact
     {
         public long Sequence { get; }
