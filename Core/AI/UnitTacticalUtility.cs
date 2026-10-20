@@ -160,7 +160,7 @@ public static class UnitTacticalUtility
             healthRatio = 0f;
 
         float distanceAdvantage = Math.Clamp(
-            (distanceToTarget - 9f) / 25f,
+            (distanceToTarget - 18f) / 24f,
             0f,
             1f);
         float exposureAdvantage = exposed ? 1f : 0.2f;
