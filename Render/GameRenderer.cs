@@ -1382,8 +1382,11 @@ public sealed class GameRenderer
                     }
                     else
                     {
-                        // Fallback keeps the unit useful even if no clear support slot exists.
-                        ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Stop, units.Position[candidate.Index]);
+                        // No valid firing lane: hold here, but retain the objective only
+                        // for lifecycle cleanup. Combat still uses this soldier's own vision.
+                        ai.SetSquadSupportOrder(
+                            candidate.Index, UnitAiOrderType.Stop,
+                            units.Position[candidate.Index], targetId, pair.Key);
                     }
 
                     supporting++;
