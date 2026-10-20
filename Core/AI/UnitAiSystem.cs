@@ -1106,6 +1106,11 @@ public sealed class UnitAiSystem
             ? health.OverallHitPoints[unit] / health.OverallMaxHitPoints[unit]
             : 0f;
         bool isLowHealth = healthRatio < LowHealthThreshold;
+        if (hasMoveOrder && isSuppressed)
+            moveOrderUtility = MathF.Max(0f, moveOrderUtility - 0.12f);
+        if (hasMoveOrder && isLowHealth)
+            moveOrderUtility = MathF.Max(0f, moveOrderUtility - 0.10f);
+
         bool hasSuppressiveWeapon = HasSuppressFireWeapon(inventory, weapons, unit);
         bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
