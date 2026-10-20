@@ -1231,15 +1231,14 @@ public sealed class GameRenderer
         }
 
         Vector3 destination = units.Position[targetIndex];
-        HashSet<UnitId> selected = new(memberIds);
-        Dictionary<int, List<(UnitId Id, int Index, float DistanceSquared)>> squadCandidates = new();
-        int advancing = 0;
-        int supporting = 0;
+        int assigned = 0;
 
+        // A squad attack is a shared objective, not a split assault/support formation.
+        // Every selected soldier receives a normal Attack order and keeps their own
+        // perception, target selection, movement and cover decisions.
         for (int i = 0; i < memberIds.Length; i++)
         {
-            UnitId id = memberIds[i];
-            if (!units.TryGetIndex(id, out int unitIndex) ||
+            if (!units.TryGetIndex(memberIds[i], out int unitIndex) ||
                 _unitSimulation.Health.OverallHitPoints[unitIndex] <= 0f ||
                 !FactionRules.ShouldAttack(
                     units.FactionTag[unitIndex],
@@ -1248,225 +1247,12 @@ public sealed class GameRenderer
                 continue;
             }
 
-            int squadId = _squadManager.GetSquadId(id);
-            if (squadId <= 0)
-            {
-                ai.SetPlayerOrder(unitIndex, UnitAiOrderType.Attack, destination, targetId);
-                advancing++;
-                continue;
-            }
-
-            Vector3 position = units.Position[unitIndex];
-            float dx = position.X - destination.X;
-            float dy = position.Y - destination.Y;
-            if (!squadCandidates.TryGetValue(squadId, out List<(UnitId Id, int Index, float DistanceSquared)>? candidates))
-                squadCandidates[squadId] = candidates = new List<(UnitId Id, int Index, float DistanceSquared)>();
-            candidates.Add((id, unitIndex, dx * dx + dy * dy));
-        }
-
-        foreach (KeyValuePair<int, List<(UnitId Id, int Index, float DistanceSquared)>> pair in squadCandidates)
-        {
-            List<(UnitId Id, int Index, float DistanceSquared)> candidates = pair.Value;
-            InfantrySquad? squad = _squadManager.GetSquad(pair.Key);
-            bool wholeSquadSelected = squad != null;
-            int livingSquadMembers = 0;
-
-            if (squad != null)
-            {
-                for (int i = 0; i < squad.Members.Count; i++)
-                {
-                    UnitId member = squad.Members[i];
-                    if (!units.TryGetIndex(member, out int memberIndex) ||
-                        _unitSimulation.Health.OverallHitPoints[memberIndex] <= 0f)
-                    {
-                        continue;
-                    }
-
-                    livingSquadMembers++;
-                    if (!selected.Contains(member))
-                        wholeSquadSelected = false;
-                }
-            }
-
-            // Keep ordinary Attack behavior for an individual or partial selection.
-            bool splitRoles = wholeSquadSelected &&
-                livingSquadMembers > 1 &&
-                candidates.Count == livingSquadMembers;
-
-            candidates.Sort(static (a, b) =>
-            {
-                int distanceOrder = a.DistanceSquared.CompareTo(b.DistanceSquared);
-                return distanceOrder != 0 ? distanceOrder : a.Id.Index.CompareTo(b.Id.Index);
-            });
-
-            int advancingCount = splitRoles
-                ? Math.Max(1, (candidates.Count + 2) / 3)
-                : candidates.Count;
-            int supportCount = candidates.Count - advancingCount;
-            float forwardX = 1f;
-            float forwardY = 0f;
-            float sideX = 0f;
-            float sideY = 1f;
-            float supportCenterX = 0f;
-            float supportCenterY = 0f;
-            float spacing = 2f;
-
-            if (splitRoles)
-            {
-                float squadCenterX = 0f;
-                float squadCenterY = 0f;
-                float maxSupportRadius = 0f;
-
-                for (int i = 0; i < candidates.Count; i++)
-                {
-                    Vector3 position = units.Position[candidates[i].Index];
-                    squadCenterX += position.X;
-                    squadCenterY += position.Y;
-                    if (i >= advancingCount)
-                    {
-                        supportCenterX += position.X;
-                        supportCenterY += position.Y;
-                        maxSupportRadius = MathF.Max(maxSupportRadius, units.Radius[candidates[i].Index]);
-                    }
-                }
-
-                squadCenterX /= candidates.Count;
-                squadCenterY /= candidates.Count;
-                supportCenterX /= supportCount;
-                supportCenterY /= supportCount;
-
-                float dx = destination.X - squadCenterX;
-                float dy = destination.Y - squadCenterY;
-                float length = MathF.Sqrt(dx * dx + dy * dy);
-                if (length > 0.001f)
-                {
-                    forwardX = dx / length;
-                    forwardY = dy / length;
-                }
-
-                sideX = -forwardY;
-                sideY = forwardX;
-                spacing = MathF.Max(2f, maxSupportRadius * 2.5f);
-
-                // Keep support behind the assault line instead of sending it toward the target.
-                supportCenterX -= forwardX * 2f;
-                supportCenterY -= forwardY * 2f;
-            }
-
-            HashSet<(int X, int Y)> occupiedSupportTiles = new();
-            for (int i = 0; i < candidates.Count; i++)
-            {
-                (UnitId Id, int Index, float DistanceSquared) candidate = candidates[i];
-                if (i < advancingCount)
-                {
-                    // The point group advances; Behaviac still chooses local reactions and targets.
-                    ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Attack, destination, targetId);
-                    advancing++;
-                }
-                else
-                {
-                    int supportSlot = i - advancingCount;
-                    float lateral = (supportSlot - (supportCount - 1) * 0.5f) * spacing;
-                    Vector3 desiredSupportPosition = new(
-                        supportCenterX + sideX * lateral,
-                        supportCenterY + sideY * lateral,
-                        units.Position[candidate.Index].Z);
-
-                    if (splitRoles && TryFindFireSupportPosition(
-                            desiredSupportPosition, forwardX, forwardY, sideX, sideY,
-                            occupiedSupportTiles, destination, units.Height[candidate.Index],
-                            units.Height[targetIndex], out Vector3 firePosition))
-                    {
-                        // The role follows this squad's attack task and expires with its target/contact.
-                        ai.SetSquadSupportOrder(candidate.Index, UnitAiOrderType.Move, firePosition, targetId, pair.Key);
-                    }
-                    else
-                    {
-                        // No valid firing lane: hold here, but retain the objective only
-                        // for lifecycle cleanup. Combat still uses this soldier's own vision.
-                        ai.SetSquadSupportOrder(
-                            candidate.Index, UnitAiOrderType.Stop,
-                            units.Position[candidate.Index], targetId, pair.Key);
-                    }
-
-                    supporting++;
-                }
-            }
+            ai.SetPlayerOrder(unitIndex, UnitAiOrderType.Attack, destination, targetId);
+            assigned++;
         }
 
         Console.WriteLine(
-            $"[SQUAD] Attack task: {advancing} advancing, {supporting} fire-support; partial selections retain normal Attack behavior.");
-    }
-
-    private bool TryFindFireSupportPosition(
-        Vector3 desired,
-        float forwardX,
-        float forwardY,
-        float sideX,
-        float sideY,
-        HashSet<(int X, int Y)> reservedTiles,
-        Vector3 targetPosition,
-        float observerHeight,
-        float targetHeight,
-        out Vector3 position)
-    {
-        position = default;
-        for (int backoffStep = 0; backoffStep < 4; backoffStep++)
-        {
-            float backoff = backoffStep * 2f;
-            for (int lateralStep = 0; lateralStep < 5; lateralStep++)
-            {
-                float lateral = lateralStep switch
-                {
-                    0 => 0f,
-                    1 => 1.5f,
-                    2 => -1.5f,
-                    3 => 3f,
-                    _ => -3f
-                };
-
-                float x = desired.X - forwardX * backoff + sideX * lateral;
-                float y = desired.Y - forwardY * backoff + sideY * lateral;
-                if (x < 1f || y < 1f ||
-                    x >= _worldMap.TileWidth - 1f ||
-                    y >= _worldMap.TileHeight - 1f)
-                {
-                    continue;
-                }
-
-                int tileX = (int)MathF.Floor(x);
-                int tileY = (int)MathF.Floor(y);
-                if (_worldMap.IsNavigationBlocked(tileX, tileY) ||
-                    reservedTiles.Contains((tileX, tileY)))
-                {
-                    continue;
-                }
-
-                Vector3 candidate = new(
-                    tileX + 0.5f,
-                    tileY + 0.5f,
-                    _worldMap.GetSurfaceHeight(tileX, tileY));
-
-                Vector3 observerEye = candidate + new Vector3(
-                    0f, 0f, MathF.Max(0.05f, observerHeight));
-                Vector3 targetEye = targetPosition + new Vector3(
-                    0f, 0f, MathF.Max(0.05f, targetHeight));
-
-                if (!_unitSimulation.Vision.HasLineOfSight(
-                        _worldMap, observerEye, targetEye, out _))
-                {
-                    continue;
-                }
-
-                reservedTiles.Add((tileX, tileY));
-                position = candidate;
-                return true;
-            }
-        }
-
-        // Never label a blocked tile as a firing-support slot. Caller will hold
-        // the soldier's current position and let its own perception drive combat.
-        return false;
+            $"[SQUAD] Attack task: {assigned} soldiers assigned a normal Attack order.");
     }
 
     private void IssueHoldOrder(UnitId[] memberIds)
