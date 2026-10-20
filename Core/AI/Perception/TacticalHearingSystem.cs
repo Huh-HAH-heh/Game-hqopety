@@ -324,7 +324,7 @@ public sealed class TacticalHearingSystem
             return;
 
         bool hasDirectExposure = true;
-        if (type is TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion &&
+        if ((type is TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion) &&
             vision != null && worldMap != null)
         {
             Vector3 eyePosition = vision.GetEyePosition(units, observer);
