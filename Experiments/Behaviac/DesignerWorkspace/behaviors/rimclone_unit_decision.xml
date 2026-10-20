@@ -62,7 +62,7 @@
               </Node>
             </Connector>
           </Node>
-                    <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="30" PrefabName="" PrefabNodeId="-1">
+          <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="30" PrefabName="" PrefabNodeId="-1">
             <Comment Background="NoColor" Text="Hold the assigned position while engaging visible targets." />
             <Connector Identifier="GenericChildren">
               <Node Class="PluginBehaviac.Nodes.Condition" Enable="true" HasOwnPrefabData="false" Id="31" Operator="Equal" Opl="bool Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldHoldPositionAndEngage()" Opr="const bool true" PrefabName="" PrefabNodeId="-1">
@@ -73,7 +73,7 @@
               </Node>
             </Connector>
           </Node>
-                    <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="36" PrefabName="" PrefabNodeId="-1">
+          <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="36" PrefabName="" PrefabNodeId="-1">
             <Comment Background="NoColor" Text="Keep the assigned position when no target is visible." />
             <Connector Identifier="GenericChildren">
               <Node Class="PluginBehaviac.Nodes.Condition" Enable="true" HasOwnPrefabData="false" Id="37" Operator="Equal" Opl="bool Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldHoldPosition()" Opr="const bool true" PrefabName="" PrefabNodeId="-1">
@@ -84,7 +84,7 @@
               </Node>
             </Connector>
           </Node>
-                    <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="33" PrefabName="" PrefabNodeId="-1">
+          <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="33" PrefabName="" PrefabNodeId="-1">
             <Comment Background="NoColor" Text="Continue the movement order unless combat or danger has higher utility." />
             <Connector Identifier="GenericChildren">
               <Node Class="PluginBehaviac.Nodes.Condition" Enable="true" HasOwnPrefabData="false" Id="34" Operator="Equal" Opl="bool Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldFollowMoveOrder()" Opr="const bool true" PrefabName="" PrefabNodeId="-1">
@@ -166,7 +166,7 @@
               </Node>
             </Connector>
           </Node>
-          <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="42 PrefabName="" PrefabNodeId="-1">
+          <Node Class="PluginBehaviac.Nodes.Sequence" Enable="true" HasOwnPrefabData="false" Id="42" PrefabName="" PrefabNodeId="-1">
             <Comment Background="NoColor" Text="Investigate an uncertain last-known position shared by a squad mate." />
             <Connector Identifier="GenericChildren">
               <Node Class="PluginBehaviac.Nodes.Condition" Enable="true" HasOwnPrefabData="false" Id="43" Operator="Equal" Opl="bool Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateSquadContact()" Opr="const bool true" PrefabName="" PrefabNodeId="-1">
