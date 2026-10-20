@@ -14,8 +14,8 @@ public static class UnitTacticalUtility
     private const float MoveOrderDistanceBonus = 0.30f;
     private const float SuppressionMovePenalty = 0.12f;
     private const float LowHealthMovePenalty = 0.10f;
-    private const float CoverSuppressedThreshold = 1.8f;
-    private const float CoverPanickedThreshold = 5.8f;
+    private const float CoverSuppressedThreshold = UnitSuppressionStore.SuppressedThreshold;
+    private const float CoverPanickedThreshold = UnitSuppressionStore.PanickedThreshold;
     private const float InvestigationDistanceForMaxPenalty = 64f;
 
     public const float FlankUtilityAdvantage = 0.08f;
