@@ -1188,7 +1188,10 @@ public sealed class UnitAiSystem
         {
             Vector3 moveDelta = Store.PlayerOrderPosition[unit] - units.Position[unit];
             float moveDistance = MathF.Sqrt(moveDelta.X * moveDelta.X + moveDelta.Y * moveDelta.Y);
-            moveOrderUtility = 0.50f + 0.30f * Math.Clamp(moveDistance / 24f, 0f, 1f);
+            moveOrderUtility = UnitTacticalUtility.EvaluateMoveOrder(
+                moveDistance,
+                suppressionState is UnitSuppressionState.Panicked or UnitSuppressionState.Suppressed,
+                IsLowHealth(health, unit));
         }
 
         float combatUtility = 0f;
@@ -1196,10 +1199,7 @@ public sealed class UnitAiSystem
         {
             Vector3 enemyDelta = units.Position[visibleTargetIndex] - units.Position[unit];
             float enemyDistance = MathF.Sqrt(enemyDelta.X * enemyDelta.X + enemyDelta.Y * enemyDelta.Y);
-            combatUtility = enemyDistance <= 6f ? 0.96f
-                : enemyDistance <= 12f ? 0.84f
-                : enemyDistance <= 24f ? 0.68f
-                : 0.54f;
+            combatUtility = UnitTacticalUtility.EvaluateVisibleCombat(enemyDistance, true);
         }
 
         bool isSuppressed =
@@ -1208,11 +1208,6 @@ public sealed class UnitAiSystem
             ? health.OverallHitPoints[unit] / health.OverallMaxHitPoints[unit]
             : 0f;
         bool isLowHealth = healthRatio < LowHealthThreshold;
-        if (hasMoveOrder && isSuppressed)
-            moveOrderUtility = MathF.Max(0f, moveOrderUtility - 0.12f);
-        if (hasMoveOrder && isLowHealth)
-            moveOrderUtility = MathF.Max(0f, moveOrderUtility - 0.10f);
-
         bool hasSuppressiveWeapon = HasSuppressFireWeapon(inventory, weapons, unit);
         bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
@@ -1258,16 +1253,12 @@ public sealed class UnitAiSystem
             Vector3 targetDelta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distance = MathF.Sqrt(
                 targetDelta.X * targetDelta.X + targetDelta.Y * targetDelta.Y);
-            float distanceAdvantage = Math.Clamp((distance - 9f) / 25f, 0f, 1f);
             bool exposed = !_hasSuppressionCoverByUnit[unit] &&
                 !(Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover);
-            float exposureAdvantage = exposed ? 1f : 0.2f;
-            proneUtility = Math.Clamp(
-                distanceAdvantage * 0.65f +
-                exposureAdvantage * 0.25f +
-                healthRatio * 0.10f,
-                0f,
-                1f);
+            proneUtility = UnitTacticalUtility.EvaluateProneFiring(
+                distance,
+                exposed,
+                healthRatio);
         }
 
         bool hasCoverGoal = Store.HasGoal[unit] &&
