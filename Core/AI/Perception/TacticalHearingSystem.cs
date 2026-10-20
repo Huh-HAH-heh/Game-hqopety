@@ -270,8 +270,53 @@ public sealed class TacticalHearingSystem
                     _ => 0.18f
                 };
                 response.AddAlertness(observer, alertFactor * confidence, estimate);
+                ApplyImmediateDangerResponse(response, observer, pulse.Type, distance, pulse.Range, confidence, estimate);
             }
         }
+    }
+
+    private static void ApplyImmediateDangerResponse(
+        UnitSuppressionStore response,
+        int observer,
+        TacticalStimulusType type,
+        float distance,
+        float eventRange,
+        float confidence,
+        Vector3 estimatedSource)
+    {
+        float dangerRadius;
+        float minimumConfidence;
+        float duration;
+
+        switch (type)
+        {
+            case TacticalStimulusType.NearMiss:
+                dangerRadius = 5f;
+                minimumConfidence = 0.20f;
+                duration = 0.55f + 0.35f * confidence;
+                break;
+            case TacticalStimulusType.CoverImpact:
+                dangerRadius = 8f;
+                minimumConfidence = 0.24f;
+                duration = 0.25f + 0.45f * confidence;
+                break;
+            case TacticalStimulusType.Explosion:
+                dangerRadius = Math.Clamp(eventRange * 0.30f, 10f, 24f);
+                minimumConfidence = 0.18f;
+                duration = 0.45f + 0.85f * confidence;
+                break;
+            default:
+                return;
+        }
+
+        if (distance > dangerRadius || confidence < minimumConfidence)
+            return;
+
+        // Existing cover reduces the urgency of reacting to nearby impacts/blasts.
+        if ((uint)observer < (uint)response.InCover.Length && response.InCover[observer])
+            duration *= 0.60f;
+
+        response.MarkImmediateDanger(observer, duration, estimatedSource);
     }
 
     private static Vector3 EstimatePosition(SoundPulse pulse, int observer, float error, float attenuation)
