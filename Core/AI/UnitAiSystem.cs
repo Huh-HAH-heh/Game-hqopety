@@ -351,10 +351,6 @@ public sealed class UnitAiSystem
                 units.Posture[unit] = UnitPosture.Lying;
             else if (suppressionState == UnitSuppressionState.Panicked)
                 units.Posture[unit] = moving ? UnitPosture.Crouching : UnitPosture.Lying;
-            else if (moving && units.Posture[unit] == UnitPosture.Lying)
-            {
-                // Keep a prone movement order low; UnitBodySystem animates it as a crawl.
-            }
             else if (moving)
                 units.Posture[unit] = UnitPosture.Standing;
             else if (suppressionState == UnitSuppressionState.Suppressed)
@@ -599,10 +595,6 @@ public sealed class UnitAiSystem
             {
                 // Keep a low profile while retreating, but do not force a crawl.
                 units.Posture[unit] = moving ? UnitPosture.Crouching : UnitPosture.Lying;
-            }
-            else if (moving && units.Posture[unit] == UnitPosture.Lying)
-            {
-                // Do not stand up mid-crawl merely because movement is active.
             }
             else if (moving)
             {
