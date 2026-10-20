@@ -241,8 +241,16 @@ public sealed class UnitAiSystem
                 ClearAiming(weapons, unit);
                 units.HasTarget[unit] = false;
                 Store.ClearGoal(unit);
+                Store.ClearPlayerOrder(unit);
                 Store.State[unit] = UnitAiState.Dead;
                 units.Posture[unit] = UnitPosture.Lying;
+                continue;
+            }
+
+            if (UseBehaviacDecisionLayer &&
+                TryExecutePlayerOrderIntent(
+                    units, health, weapons, vision, unit, intent))
+            {
                 continue;
             }
 
@@ -335,12 +343,26 @@ public sealed class UnitAiSystem
                 }
             }
 
-            int visibleEnemy =
-                _nearestVisibleEnemyByUnit[unit];
+            int visibleEnemy = _nearestVisibleEnemyByUnit[unit];
+            if (Store.PlayerOrderType[unit] == UnitAiOrderType.Attack)
+            {
+                UnitId commandedTarget = Store.PlayerOrderTarget[unit];
+                if (units.IsAlive(commandedTarget) &&
+                    health.OverallHitPoints[commandedTarget.Index] > 0f &&
+                    IsHostile(units, unit, commandedTarget.Index) &&
+                    vision.IsRecentlyVisible(unit, commandedTarget.Index, units))
+                {
+                    visibleEnemy = commandedTarget.Index;
+                }
+            }
 
             bool keepCurrentVisibleTarget = false;
 
-            if (Store.HasTarget[unit])
+            if (Store.HasTarget[unit] &&
+                !(Store.PlayerOrderType[unit] == UnitAiOrderType.Attack &&
+                  units.IsAlive(Store.PlayerOrderTarget[unit]) &&
+                  health.OverallHitPoints[Store.PlayerOrderTarget[unit].Index] > 0f &&
+                  IsHostile(units, unit, Store.PlayerOrderTarget[unit].Index)))
             {
                 UnitId currentTarget = Store.Target[unit];
 
@@ -640,12 +662,14 @@ public sealed class UnitAiSystem
 
             if (targetVisible &&
                 (!UseBehaviacDecisionLayer ||
-                 intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage))
+                 intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage or
+                     BehaviacUnitIntent.HoldPositionEngage))
             {
                 // Prone posture is an aiming choice, not an order to crawl to 10 m.
                 // Ranged pawns below approach only if the target is beyond weapon range.
 
-                if (HasRangedWeapon(units, inventory, unit))
+                if (intent != BehaviacUnitIntent.HoldPositionEngage &&
+                    HasRangedWeapon(units, inventory, unit))
                 {
                     Vector3 position = units.Position[unit];
                     Vector3 targetPosition = units.Position[target.Index];
@@ -678,7 +702,8 @@ public sealed class UnitAiSystem
                 // Melee-only units approach the edge of their attack ring instead
                 // of chasing the target's center. This gives both fighters a stable
                 // contact distance and lets the melee system strike without overlap.
-                if (!HasRangedWeapon(units, inventory, unit))
+                if (intent != BehaviacUnitIntent.HoldPositionEngage &&
+                    !HasRangedWeapon(units, inventory, unit))
                 {
                     Vector3 position = units.Position[unit];
                     Vector3 targetPosition = units.Position[target.Index];
@@ -852,6 +877,98 @@ public sealed class UnitAiSystem
         }
     }
 
+    private bool TryExecutePlayerOrderIntent(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitWeaponStore weapons,
+        VisionSystem vision,
+        int unit,
+        BehaviacUnitIntent intent)
+    {
+        UnitAiStore store = Store;
+
+        if (intent == BehaviacUnitIntent.FollowMoveOrder)
+        {
+            Vector3 destination = store.PlayerOrderPosition[unit];
+            if (ReachedGoal(units.Position[unit], destination))
+            {
+                store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
+                store.ClearTarget(unit);
+                store.ClearGoal(unit);
+                ClearAiming(weapons, unit);
+                units.Target[unit] = units.Position[unit];
+                units.HasTarget[unit] = false;
+                store.State[unit] = UnitAiState.Idle;
+                return true;
+            }
+
+            // Behaviac selected the task; this AI action translates it into the
+            // existing navigation goal without bypassing the decision tree.
+            store.ClearTarget(unit);
+            store.SetGoal(unit, destination);
+            ClearAiming(weapons, unit);
+            units.Target[unit] = destination;
+            units.HasTarget[unit] = true;
+            store.State[unit] = UnitAiState.Search;
+            return true;
+        }
+
+        if (intent == BehaviacUnitIntent.HoldPosition)
+        {
+            store.ClearTarget(unit);
+            store.ClearGoal(unit);
+            ClearAiming(weapons, unit);
+            units.Target[unit] = units.Position[unit];
+            units.HasTarget[unit] = false;
+            store.State[unit] = UnitAiState.Idle;
+            return true;
+        }
+
+        if (intent != BehaviacUnitIntent.AttackOrder)
+            return false;
+
+        UnitId target = store.PlayerOrderTarget[unit];
+        if (!units.IsAlive(target) ||
+            health.OverallHitPoints[target.Index] <= 0f ||
+            !IsHostile(units, unit, target.Index))
+        {
+            store.ClearPlayerOrder(unit);
+            store.ClearTarget(unit);
+            store.ClearGoal(unit);
+            units.HasTarget[unit] = false;
+            store.State[unit] = UnitAiState.Idle;
+            ClearAiming(weapons, unit);
+            return true;
+        }
+
+        Vector3 destination = store.PlayerOrderPosition[unit];
+        if (vision.IsRecentlyVisible(unit, target.Index, units))
+        {
+            destination = units.Position[target.Index];
+            store.SetPlayerOrder(unit, UnitAiOrderType.Attack, destination, target);
+            store.RememberTarget(unit, target, destination, TargetMemorySeconds);
+        }
+
+        if (ReachedGoal(units.Position[unit], destination))
+        {
+            store.ClearTarget(unit);
+            store.ClearGoal(unit);
+            ClearAiming(weapons, unit);
+            units.Target[unit] = units.Position[unit];
+            units.HasTarget[unit] = false;
+            store.State[unit] = UnitAiState.Search;
+            return true;
+        }
+
+        store.ClearTarget(unit);
+        store.SetGoal(unit, destination);
+        ClearAiming(weapons, unit);
+        units.Target[unit] = destination;
+        units.HasTarget[unit] = true;
+        store.State[unit] = UnitAiState.Search;
+        return true;
+    }
+
     private void RecordBehaviacIntent(BehaviacUnitIntent intent)
     {
         LastBehaviacDecisions++;
@@ -898,8 +1015,44 @@ public sealed class UnitAiSystem
             _behaviacAgents[unit] = agent;
         }
 
+        UnitAiOrderType orderType = Store.PlayerOrderType[unit];
+        bool hasAttackOrder = orderType == UnitAiOrderType.Attack;
+        UnitId attackTarget = Store.PlayerOrderTarget[unit];
+        if (hasAttackOrder &&
+            (!units.IsAlive(attackTarget) ||
+             health.OverallHitPoints[attackTarget.Index] <= 0f ||
+             !IsHostile(units, unit, attackTarget.Index)))
+        {
+            Store.ClearPlayerOrder(unit);
+            orderType = UnitAiOrderType.None;
+            hasAttackOrder = false;
+        }
+
+        if (orderType == UnitAiOrderType.Move &&
+            ReachedGoal(units.Position[unit], Store.PlayerOrderPosition[unit]))
+        {
+            Store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
+            Store.ClearGoal(unit);
+            orderType = UnitAiOrderType.Stop;
+        }
+
         int visibleTargetIndex = _nearestVisibleEnemyByUnit[unit];
-        if (Store.HasTarget[unit])
+        if (hasAttackOrder)
+        {
+            // An explicit attack task fixes target selection until it is completed
+            // or invalidated. It remains a last-known-position task without LOS.
+            visibleTargetIndex = vision.IsRecentlyVisible(unit, attackTarget.Index, units)
+                ? attackTarget.Index
+                : -1;
+            if (visibleTargetIndex >= 0)
+            {
+                Vector3 targetPosition = units.Position[visibleTargetIndex];
+                Store.SetPlayerOrder(unit, UnitAiOrderType.Attack, targetPosition, attackTarget);
+                Store.RememberTarget(unit, attackTarget, targetPosition, TargetMemorySeconds);
+            }
+        }
+
+        if (!hasAttackOrder && Store.HasTarget[unit])
         {
             UnitId currentTarget = Store.Target[unit];
             if (ShouldKeepCurrentVisibleTarget(
@@ -912,6 +1065,28 @@ public sealed class UnitAiSystem
         }
 
         bool hasVisibleTarget = visibleTargetIndex >= 0;
+        bool hasMoveOrder = orderType == UnitAiOrderType.Move;
+        bool hasStopOrder = orderType == UnitAiOrderType.Stop;
+
+        float moveOrderUtility = 0f;
+        if (hasMoveOrder)
+        {
+            Vector3 moveDelta = Store.PlayerOrderPosition[unit] - units.Position[unit];
+            float moveDistance = MathF.Sqrt(moveDelta.X * moveDelta.X + moveDelta.Y * moveDelta.Y);
+            moveOrderUtility = 0.55f + 0.30f * Math.Clamp(moveDistance / 24f, 0f, 1f);
+        }
+
+        float combatUtility = 0f;
+        if (hasVisibleTarget)
+        {
+            Vector3 enemyDelta = units.Position[visibleTargetIndex] - units.Position[unit];
+            float enemyDistance = MathF.Sqrt(enemyDelta.X * enemyDelta.X + enemyDelta.Y * enemyDelta.Y);
+            combatUtility = enemyDistance <= 6f ? 0.96f
+                : enemyDistance <= 12f ? 0.84f
+                : enemyDistance <= 24f ? 0.68f
+                : 0.54f;
+        }
+
         bool isSuppressed =
             suppressionState is UnitSuppressionState.Panicked or UnitSuppressionState.Suppressed;
         float healthRatio = health.OverallMaxHitPoints[unit] > 0f
@@ -987,7 +1162,12 @@ public sealed class UnitAiSystem
             canFlank,
             isFlanking,
             proneUtility,
-            units.Posture[unit] == UnitPosture.Lying);
+            units.Posture[unit] == UnitPosture.Lying,
+            hasMoveOrder,
+            hasStopOrder,
+            hasAttackOrder,
+            moveOrderUtility,
+            combatUtility);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
