@@ -12,13 +12,13 @@ public enum UnitSuppressionState : byte
 
 public sealed class UnitSuppressionStore
 {
-    public const float SuppressedThreshold = 1.8f;
-    public const float SuppressionRecoveryThreshold = 0.95f;
-    public const float PanickedThreshold = 5.8f;
-    public const float PanicRecoveryThreshold = 2.4f;
+    public const float SuppressedThreshold = 2.0f;
+    public const float SuppressionRecoveryThreshold = 1.0f;
+    public const float PanickedThreshold = 7.0f;
+    public const float PanicRecoveryThreshold = 3.2f;
     public const float AlertnessThreshold = 0.16f;
 
-    private const float SuppressionDecayPerSecond = 0.80f;
+    private const float SuppressionDecayPerSecond = 0.95f;
     private const float AlertnessDecayPerSecond = 0.18f;
     private const float CoverSuppressionMultiplier = 0.55f;
 
@@ -95,7 +95,7 @@ public sealed class UnitSuppressionStore
             !float.IsFinite(amount) || amount <= 0f)
             return;
 
-        float resistance = _skills?.GetSuppressionResistance(unitIndex) ?? 0f;
+        float resistance = GetSuppressionResistance(unitIndex);
         float resistanceMultiplier = Math.Clamp(1f - resistance * 0.80f, 0.18f, 1f);
         float coverMultiplier = _inCover[unitIndex] ? CoverSuppressionMultiplier : 1f;
         _value[unitIndex] = MathF.Min(
@@ -132,6 +132,11 @@ public sealed class UnitSuppressionStore
 
     public float GetAlertness(int unitIndex) =>
         (uint)unitIndex < (uint)Capacity ? _alertness[unitIndex] : 0f;
+
+    public float GetSuppressionResistance(int unitIndex) =>
+        (uint)unitIndex < (uint)Capacity
+            ? Math.Clamp(_skills?.GetSuppressionResistance(unitIndex) ?? 0f, 0f, 1f)
+            : 0f;
 
     public bool IsAlerted(int unitIndex) =>
         GetAlertness(unitIndex) >= AlertnessThreshold;
@@ -202,12 +207,13 @@ public sealed class UnitSuppressionStore
     public float GetAccuracyMultiplier(int unitIndex)
     {
         float value = (uint)unitIndex < (uint)Capacity ? _value[unitIndex] : 0f;
-        return 1f + MathF.Min(0.55f, value * 0.12f);
+        // Suppression degrades accuracy, but should not drown out skill and posture.
+        return 1f + MathF.Min(0.40f, value * 0.075f);
     }
 
     private void UpdateResponseState(int unitIndex)
     {
-        float resistance = Math.Clamp(_skills?.GetSuppressionResistance(unitIndex) ?? 0f, 0f, 1f);
+        float resistance = GetSuppressionResistance(unitIndex);
         float panicEnter = PanickedThreshold + resistance * 1.8f;
         float panicExit = PanicRecoveryThreshold + resistance * 0.45f;
 
