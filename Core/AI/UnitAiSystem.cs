@@ -1307,7 +1307,12 @@ public sealed class UnitAiSystem
         if (orderType == UnitAiOrderType.Move &&
             ReachedGoal(units.Position[unit], Store.PlayerOrderPosition[unit]))
         {
-            Store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
+            UnitId supportTarget = Store.SquadSupportTarget[unit];
+            int supportSquadId = Store.SquadSupportSquadId[unit];
+            if (supportTarget.IsValid && supportSquadId > 0)
+                Store.SetSquadSupportOrder(unit, UnitAiOrderType.Stop, units.Position[unit], supportTarget, supportSquadId);
+            else
+                Store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
             Store.ClearGoal(unit);
             orderType = UnitAiOrderType.Stop;
         }
