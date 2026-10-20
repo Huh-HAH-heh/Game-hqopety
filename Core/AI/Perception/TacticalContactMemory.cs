@@ -80,8 +80,8 @@ public sealed class TacticalContact
 }
 
 /// <summary>
-/// Contact memory for one observer. Sensors feed observations into this store;
-/// tactical decisions can query it later. It is not connected to the live AI yet.
+/// Contact memory for one observer. Sensors feed uncertain evidence into this store;
+/// tactical decisions may use it without treating an audio-only contact as visual confirmation.
 /// </summary>
 public sealed class TacticalContactMemory
 {
