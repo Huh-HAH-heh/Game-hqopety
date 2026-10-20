@@ -29,6 +29,8 @@ public sealed class UnitAiStore
     private UnitAiOrderType[] _playerOrderType;
     private Vector3[] _playerOrderPosition;
     private UnitId[] _playerOrderTarget;
+    private UnitId[] _squadSupportTarget;
+    private int[] _squadSupportSquadId;
     private bool[] _hasTarget;
     private UnitId[] _target;
     private Vector3[] _lastSeenPosition;
@@ -56,6 +58,17 @@ public sealed class UnitAiStore
 
     public UnitId[] PlayerOrderTarget =>
         _playerOrderTarget;
+
+    public UnitId[] SquadSupportTarget =>
+        _squadSupportTarget;
+
+    public int[] SquadSupportSquadId =>
+        _squadSupportSquadId;
+
+    public bool HasSquadSupportOrder(int unitIndex) =>
+        (uint)unitIndex < (uint)Capacity &&
+        _squadSupportTarget[unitIndex].IsValid &&
+        _squadSupportSquadId[unitIndex] > 0;
 
     public bool[] HasTarget =>
         _hasTarget;
@@ -98,6 +111,8 @@ public sealed class UnitAiStore
         _playerOrderType = new UnitAiOrderType[initialUnitCapacity];
         _playerOrderPosition = new Vector3[initialUnitCapacity];
         _playerOrderTarget = new UnitId[initialUnitCapacity];
+        _squadSupportTarget = new UnitId[initialUnitCapacity];
+        _squadSupportSquadId = new int[initialUnitCapacity];
         _hasTarget = new bool[initialUnitCapacity];
         _target = new UnitId[initialUnitCapacity];
         _lastSeenPosition = new Vector3[initialUnitCapacity];
@@ -119,6 +134,8 @@ public sealed class UnitAiStore
         _playerOrderType[unitIndex] = UnitAiOrderType.None;
         _playerOrderPosition[unitIndex] = Vector3.Zero;
         _playerOrderTarget[unitIndex] = default;
+        _squadSupportTarget[unitIndex] = default;
+        _squadSupportSquadId[unitIndex] = 0;
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
@@ -144,6 +161,8 @@ public sealed class UnitAiStore
         _playerOrderType[unitIndex] = UnitAiOrderType.None;
         _playerOrderPosition[unitIndex] = Vector3.Zero;
         _playerOrderTarget[unitIndex] = default;
+        _squadSupportTarget[unitIndex] = default;
+        _squadSupportSquadId[unitIndex] = 0;
         _hasTarget[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
@@ -168,6 +187,23 @@ public sealed class UnitAiStore
         _playerOrderType[unitIndex] = order;
         _playerOrderPosition[unitIndex] = position;
         _playerOrderTarget[unitIndex] = target;
+        _squadSupportTarget[unitIndex] = default;
+        _squadSupportSquadId[unitIndex] = 0;
+    }
+
+    public void SetSquadSupportOrder(
+        int unitIndex,
+        UnitAiOrderType order,
+        Vector3 position,
+        UnitId target,
+        int squadId)
+    {
+        SetPlayerOrder(unitIndex, order, position);
+        if (!target.IsValid || squadId <= 0)
+            return;
+
+        _squadSupportTarget[unitIndex] = target;
+        _squadSupportSquadId[unitIndex] = squadId;
     }
 
     public void ClearPlayerOrder(int unitIndex)
@@ -178,6 +214,8 @@ public sealed class UnitAiStore
         _playerOrderType[unitIndex] = UnitAiOrderType.None;
         _playerOrderPosition[unitIndex] = Vector3.Zero;
         _playerOrderTarget[unitIndex] = default;
+        _squadSupportTarget[unitIndex] = default;
+        _squadSupportSquadId[unitIndex] = 0;
     }
 
     public void RememberTarget(
@@ -266,6 +304,8 @@ public sealed class UnitAiStore
         Array.Resize(ref _playerOrderType, newCapacity);
         Array.Resize(ref _playerOrderPosition, newCapacity);
         Array.Resize(ref _playerOrderTarget, newCapacity);
+        Array.Resize(ref _squadSupportTarget, newCapacity);
+        Array.Resize(ref _squadSupportSquadId, newCapacity);
 
         Array.Resize(
             ref _hasTarget,
