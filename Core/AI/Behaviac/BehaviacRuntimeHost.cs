@@ -105,6 +105,10 @@ public static class BehaviacRuntimeHost
             self => self.ShouldRetreatToCover());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldExecuteAttackOrder),
             self => self.ShouldExecuteAttackOrder());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldSuppressiveFire),
+            self => self.ShouldSuppressiveFire());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldInvestigateLastKnownTarget),
+            self => self.ShouldInvestigateLastKnownTarget());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldFollowMoveOrder),
             self => self.ShouldFollowMoveOrder());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldHoldPosition),
@@ -126,6 +130,12 @@ public static class BehaviacRuntimeHost
             self => self.SelectSeekCover());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectPanic),
             self => self.SelectPanic());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectSuppressiveFire),
+            self => self.SelectSuppressiveFire());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectInvestigateLastKnownTarget),
+            self => self.SelectInvestigateLastKnownTarget());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectPatrol),
+            self => self.SelectPatrol());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectRetreatToCover),
             self => self.SelectRetreatToCover());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectMoveOrder),
