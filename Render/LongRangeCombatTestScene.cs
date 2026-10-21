@@ -22,10 +22,9 @@ public sealed class LongRangeCombatTestScene
     private const float CombatDistance = 200f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
-    // The line-to-line gap is wider than vision after only 25 m of advance.
-    // Advance far enough for the front ranks to acquire targets while marching.
+    // Long-range stress setup: evaluate target acquisition across the initial 200 m gap.
     private const float AdvanceDistance = 50f;
-    private const float VisionStressRange = 85f;
+    private const float VisionStressRange = 200f;
     private const ushort BaseMaterialId = 1;
     private const int MeleeDuelUnitsPerSide = 24;
     private const int MeleeFormationColumns = 6;
