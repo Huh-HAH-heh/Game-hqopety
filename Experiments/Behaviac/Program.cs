@@ -98,8 +98,8 @@ internal static class Program
             ("missing cover makes cover action infeasible", UnitTacticalUtility.EvaluateCover(5.8f, false, false, false, false), 0f),
             ("immediate danger overrides utility trade-off", UnitTacticalUtility.EvaluateCover(0f, true, true, false, false), 1f),
             ("panic makes available cover the top action", UnitTacticalUtility.EvaluateCover(5.8f, true, false, true, false), 1f),
-            ("mild suppression gives cover a low score", UnitTacticalUtility.EvaluateCover(1.8f, true, false, false, false), 0.22f),
-            ("flank gains utility when far outside weapon range", UnitTacticalUtility.EvaluateFlanking(45f, 18f, true), 0.685f),
+            ("mild suppression gives cover a low score", UnitTacticalUtility.EvaluateCover(1.8f, true, false, false, false), 0.18f),
+            ("flank gains utility when far outside weapon range", UnitTacticalUtility.EvaluateFlanking(45f, 18f, true), 0.628125f),
             ("infeasible flank has no utility", UnitTacticalUtility.EvaluateFlanking(45f, 18f, false), 0f),
             ("investigation rewards credible nearby contact", UnitTacticalUtility.EvaluateInvestigation(0.8f, 20f), 0.740625f),
             ("weak distant sound is not worth investigating", UnitTacticalUtility.EvaluateInvestigation(0.16f, 64f), 0.02f)
@@ -571,8 +571,8 @@ internal static class Program
             BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.99f, CombatUtility: 0.54f),
         new("prone loses when standing fire has better utility", true, false, false, true, false,
             BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.60f, CombatUtility: 0.84f),
-        new("already-prone unit exits prone when its utility falls below the exit threshold", true, false, false, true, false,
-            BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.10f, IsProne: true),
+        new("already-prone unit stays prone while target remains visible", true, false, false, true, false,
+            BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.10f, IsProne: true),
         new("lost target with suppressive weapon uses fire support", true, false, false, false, true,
             BehaviacUnitIntent.SuppressiveFire, HasSuppressiveWeapon: true),
         new("recent target without suppressive weapon is investigated", true, false, false, false, true, BehaviacUnitIntent.InvestigateLastKnownTarget),
@@ -677,16 +677,15 @@ internal static class Program
 
         if (test.HasVisibleTarget)
         {
-            float proneThreshold = test.IsProne ? 0.90f : 0.96f;
-            float proneCombatMargin = test.IsProne ? 0f : 0.10f;
             bool shouldRemainProne =
                 !test.IsSuppressed &&
                 !test.IsLowHealth &&
                 !test.IsFlanking &&
-                test.ProneCombatUtility >= proneThreshold &&
-                test.ProneCombatUtility > test.CombatUtility + proneCombatMargin &&
-                (!test.CanFlank ||
-                 test.FlankUtility <= test.CombatUtility + UnitTacticalUtility.FlankUtilityAdvantage);
+                (test.IsProne ||
+                 (test.ProneCombatUtility >= 0.60f &&
+                  test.ProneCombatUtility > test.CombatUtility &&
+                  (!test.CanFlank ||
+                   test.FlankUtility <= test.CombatUtility + UnitTacticalUtility.FlankUtilityAdvantage)));
 
             return shouldRemainProne
                 ? BehaviacUnitIntent.ProneEngage
