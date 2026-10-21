@@ -23,6 +23,7 @@ public sealed class UnitSimulation
     private float _simulationTimeSeconds;
     private bool[] _deathHandled = Array.Empty<bool>();
     private float[] _baseMoveSpeed = Array.Empty<float>();
+    private long _lastPublishedVisionUpdateCount;
 
     public UnitStore Units { get; }
     public UnitSkillStore Skills { get; }
@@ -947,6 +948,7 @@ public sealed class UnitSimulation
         {
             phaseStarted = Stopwatch.GetTimestamp();
             _visionSystem.Update(Units, worldMap, deltaTime, Health, Bodies);
+            PublishVisualPerception();
             LastVisionCallMilliseconds =
                 Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
         }
@@ -1044,6 +1046,56 @@ public sealed class UnitSimulation
         ProcessDeadUnits();
         LastSimulationUpdateMilliseconds =
             Stopwatch.GetElapsedTime(totalStarted).TotalMilliseconds;
+    }
+
+    /// <summary>
+    /// Bridges the legacy binary visibility result into the shared perception contract.
+    /// Only targets freshly checked in the latest VisionSystem pass are published;
+    /// its longer visibility cache is not treated as a current observation.
+    /// </summary>
+    private void PublishVisualPerception()
+    {
+        if (_visionSystem.UpdateCount == _lastPublishedVisionUpdateCount)
+            return;
+
+        _lastPublishedVisionUpdateCount = _visionSystem.UpdateCount;
+        float nowSeconds = _simulationTimeSeconds;
+        ReadOnlySpan<int> active = Units.ActiveIndices;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int observer = active[i];
+            if (Health.OverallHitPoints[observer] <= 0f)
+                continue;
+
+            ReadOnlySpan<int> visibleTargets = _visionSystem.GetVisibleTargets(observer);
+            for (int j = 0; j < visibleTargets.Length; j++)
+            {
+                int target = visibleTargets[j];
+                if ((uint)target >= (uint)Units.Capacity ||
+                    target == observer ||
+                    Health.OverallHitPoints[target] <= 0f ||
+                    !_visionSystem.WasVisibleOnLatestUpdate(observer, target))
+                    continue;
+
+                PerceptionMemory.RecordObservation(
+                    observer,
+                    new PerceptionObservation(
+                        PerceptionSense.Visual,
+                        TacticalStimulusType.VisualContact,
+                        Units.Position[target],
+                        positionErrorRadius: 0.25f,
+                        intensity: 1f,
+                        detectionConfidence: 1f,
+                        identificationConfidence: 1f,
+                        detectionLevel: PerceptionDetectionLevel.Detected,
+                        identificationLevel: PerceptionIdentificationLevel.Identified,
+                        occurredAtSeconds: nowSeconds,
+                        receivedAtSeconds: nowSeconds,
+                        expiresAtSeconds: nowSeconds + 3f,
+                        identifiedSubject: Units.GetId(target)));
+            }
+        }
     }
 
     private void EnsureDeathCapacity()

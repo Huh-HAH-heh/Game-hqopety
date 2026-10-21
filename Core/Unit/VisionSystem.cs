@@ -527,6 +527,23 @@ public sealed class VisionSystem
         _observerActiveCandidatesScanned[observer] = activeCandidatesScanned;
     }
 
+    /// <summary>
+    /// True only when the target passed geometry/LOS checks in the most recent
+    /// actual vision update. Unlike IsRecentlyVisible, this does not use the
+    /// historical visibility grace window.
+    /// </summary>
+    public bool WasVisibleOnLatestUpdate(int observerIndex, int targetIndex)
+    {
+        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
+            (uint)targetIndex >= (uint)_visibilityCapacity ||
+            observerIndex == targetIndex ||
+            _visionUpdateSequence <= 0)
+            return false;
+
+        return _lastVisibleUpdate[observerIndex * _visibilityCapacity + targetIndex] ==
+            _visionUpdateSequence;
+    }
+
     public bool IsRecentlyVisible(
         int observerIndex,
         int targetIndex,

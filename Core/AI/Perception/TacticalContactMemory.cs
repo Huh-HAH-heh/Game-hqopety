@@ -14,8 +14,8 @@ public enum TacticalContactKind : byte
 }
 
 /// <summary>
-/// One unit's current knowledge of a possible hostile or threat source.
-/// It deliberately stores estimates, not authoritative world state.
+/// One observer's fused knowledge about a possible source. Its position and confidence
+/// are derived from evidence; this object is never the authoritative unit state.
 /// </summary>
 public sealed class TacticalContact
 {
@@ -26,7 +26,8 @@ public sealed class TacticalContact
     public Vector3 EstimatedPosition { get; internal set; }
     public float PositionErrorRadius { get; internal set; }
     public float Confidence => GetCombinedConfidence(LastReceivedAtSeconds, 1f, applyAgeDecay: false);
-    public IReadOnlyList<PerceptionEvidence> Evidence => _evidence;
+    public IReadOnlyList<PerceptionObservation> Observations => _observations;
+    public IReadOnlyList<PerceptionObservation> Evidence => _observations;
     public float LastEventAtSeconds { get; internal set; }
     public float LastReceivedAtSeconds { get; internal set; }
     public float LastVisualAtSeconds { get; internal set; }
@@ -36,75 +37,59 @@ public sealed class TacticalContact
     internal bool VisualLossMarked { get; set; }
 
     private const int MaxEvidencePerSense = 4;
-    private readonly List<PerceptionEvidence> _evidence = new();
+    private readonly List<PerceptionObservation> _observations = new();
 
-    internal TacticalContact(long contactId, TacticalStimulus stimulus, float receivedAtSeconds, float lifetimeSeconds)
+    internal TacticalContact(long contactId, PerceptionObservation observation)
     {
         ContactId = contactId;
-        Kind = ResolveKind(stimulus);
-        SubjectUnit = stimulus.SubjectUnit;
-        ReporterUnit = stimulus.ReporterUnit;
-        EstimatedPosition = stimulus.Position;
-        PositionErrorRadius = stimulus.PositionErrorRadius;
-        LastEventAtSeconds = stimulus.OccurredAtSeconds;
-        LastReceivedAtSeconds = receivedAtSeconds;
-        LastVisualAtSeconds = stimulus.Type == TacticalStimulusType.VisualContact
-            ? stimulus.OccurredAtSeconds
+        Kind = ResolveKind(observation);
+        SubjectUnit = observation.IdentifiedSubject;
+        ReporterUnit = observation.ReporterUnit;
+        EstimatedPosition = observation.EstimatedPosition;
+        PositionErrorRadius = observation.PositionErrorRadius;
+        LastEventAtSeconds = observation.OccurredAtSeconds;
+        LastReceivedAtSeconds = observation.ReceivedAtSeconds;
+        LastVisualAtSeconds = IsFreshVisual(observation)
+            ? observation.OccurredAtSeconds
             : -1f;
-        ExpiresAtSeconds = stimulus.OccurredAtSeconds + lifetimeSeconds;
-        LastStimulusType = stimulus.Type;
-        RecordEvidence(stimulus, receivedAtSeconds, lifetimeSeconds);
+        ExpiresAtSeconds = observation.ExpiresAtSeconds;
+        LastStimulusType = observation.StimulusType;
+        RecordObservation(observation);
     }
 
     /// <summary>
-    /// Adds evidence from one sensory channel. Repeated observations from the
-    /// same sense do not multiply confidence; separate senses can corroborate it.
-    /// Each sense keeps a small time window so stale strong evidence cannot
-    /// permanently suppress fresher, weaker observations.
+    /// Keeps a small recent sample per sense. Repeated signals cannot inflate confidence
+    /// without bound; different senses remain available to corroborate one anonymous track.
     /// </summary>
-    internal void RecordEvidence(
-        TacticalStimulus stimulus,
-        float receivedAtSeconds,
-        float lifetimeSeconds)
+    internal void RecordObservation(PerceptionObservation observation)
     {
-        for (int i = _evidence.Count - 1; i >= 0; i--)
+        for (int i = _observations.Count - 1; i >= 0; i--)
         {
-            if (_evidence[i].ExpiresAtSeconds <= receivedAtSeconds)
-                _evidence.RemoveAt(i);
+            if (_observations[i].ExpiresAtSeconds <= observation.ReceivedAtSeconds)
+                _observations.RemoveAt(i);
         }
 
         int senseCount = 0;
         int oldestIndex = -1;
         float oldestTime = float.PositiveInfinity;
-        for (int i = 0; i < _evidence.Count; i++)
+        for (int i = 0; i < _observations.Count; i++)
         {
-            PerceptionEvidence evidence = _evidence[i];
-            if (evidence.Sense != stimulus.Sense)
+            PerceptionObservation existing = _observations[i];
+            if (existing.Sense != observation.Sense)
                 continue;
 
             senseCount++;
-            if (evidence.OccurredAtSeconds < oldestTime)
+            if (existing.OccurredAtSeconds < oldestTime)
             {
-                oldestTime = evidence.OccurredAtSeconds;
+                oldestTime = existing.OccurredAtSeconds;
                 oldestIndex = i;
             }
         }
 
         if (senseCount >= MaxEvidencePerSense && oldestIndex >= 0)
-            _evidence.RemoveAt(oldestIndex);
+            _observations.RemoveAt(oldestIndex);
 
-        _evidence.Add(new PerceptionEvidence(
-            stimulus.Sense,
-            stimulus.Type,
-            stimulus.Position,
-            stimulus.PositionErrorRadius,
-            stimulus.Intensity,
-            stimulus.Confidence,
-            stimulus.OccurredAtSeconds,
-            receivedAtSeconds,
-            stimulus.OccurredAtSeconds + lifetimeSeconds,
-            stimulus.SubjectUnit,
-            stimulus.ReporterUnit));
+        _observations.Add(observation);
     }
 
     private float GetCombinedConfidence(
@@ -118,34 +103,34 @@ public sealed class TacticalContact
             (!float.IsFinite(halfLifeSeconds) || halfLifeSeconds <= 0f))
             throw new ArgumentOutOfRangeException(nameof(halfLifeSeconds));
 
-        Span<PerceptionSense> senses = _evidence.Count <= 64
-            ? stackalloc PerceptionSense[_evidence.Count]
-            : new PerceptionSense[_evidence.Count];
-        Span<float> strongestBySense = _evidence.Count <= 64
-            ? stackalloc float[_evidence.Count]
-            : new float[_evidence.Count];
+        Span<PerceptionSense> senses = _observations.Count <= 64
+            ? stackalloc PerceptionSense[_observations.Count]
+            : new PerceptionSense[_observations.Count];
+        Span<float> strongestBySense = _observations.Count <= 64
+            ? stackalloc float[_observations.Count]
+            : new float[_observations.Count];
         int senseCount = 0;
 
-        for (int i = 0; i < _evidence.Count; i++)
+        for (int i = 0; i < _observations.Count; i++)
         {
-            PerceptionEvidence evidence = _evidence[i];
-            if (evidence.ExpiresAtSeconds <= nowSeconds)
+            PerceptionObservation observation = _observations[i];
+            if (observation.ExpiresAtSeconds <= nowSeconds)
                 continue;
 
-            float confidence = evidence.Confidence;
+            float confidence = observation.DetectionConfidence;
             if (applyAgeDecay)
             {
-                float age = MathF.Max(0f, nowSeconds - evidence.OccurredAtSeconds);
+                float age = MathF.Max(0f, nowSeconds - observation.OccurredAtSeconds);
                 confidence *= MathF.Exp(-0.69314718f * age / halfLifeSeconds);
             }
 
             int senseSlot = 0;
-            while (senseSlot < senseCount && senses[senseSlot] != evidence.Sense)
+            while (senseSlot < senseCount && senses[senseSlot] != observation.Sense)
                 senseSlot++;
 
             if (senseSlot == senseCount)
             {
-                senses[senseCount] = evidence.Sense;
+                senses[senseCount] = observation.Sense;
                 strongestBySense[senseCount] = confidence;
                 senseCount++;
             }
@@ -155,8 +140,8 @@ public sealed class TacticalContact
             }
         }
 
-        // Independent modalities corroborate one contact using confidence union.
-        // Multiple samples from one modality contribute only its strongest live evidence.
+        // Each channel contributes at most its strongest live observation.
+        // Independent channels corroborate through confidence union.
         float remainingUncertainty = 1f;
         for (int i = 0; i < senseCount; i++)
             remainingUncertainty *= 1f - Math.Clamp(strongestBySense[i], 0f, 1f);
@@ -164,41 +149,117 @@ public sealed class TacticalContact
         return Math.Clamp(1f - remainingUncertainty, 0f, 1f);
     }
 
-    /// <summary>
-    /// Confidence discounted by the age of the underlying evidence.
-    /// This is a read-only estimate; it does not mutate stored confidence.
-    /// </summary>
-    public float GetEffectiveConfidence(float nowSeconds, float halfLifeSeconds)
+    public PerceptionDetectionLevel GetDetectionLevel(float nowSeconds)
     {
-        if (!float.IsFinite(nowSeconds) || nowSeconds < 0f)
-            throw new ArgumentOutOfRangeException(nameof(nowSeconds));
+        ValidateTime(nowSeconds, nameof(nowSeconds));
+        PerceptionDetectionLevel level = PerceptionDetectionLevel.Unnoticed;
+        for (int i = 0; i < _observations.Count; i++)
+        {
+            PerceptionObservation observation = _observations[i];
+            if (observation.ExpiresAtSeconds > nowSeconds && observation.DetectionLevel > level)
+                level = observation.DetectionLevel;
+        }
+        return level;
+    }
+
+    public PerceptionIdentificationLevel GetIdentificationLevel(float nowSeconds)
+    {
+        ValidateTime(nowSeconds, nameof(nowSeconds));
+        if (SubjectUnit.HasValue && ExpiresAtSeconds > nowSeconds)
+            return PerceptionIdentificationLevel.Identified;
+
+        PerceptionIdentificationLevel level = PerceptionIdentificationLevel.Unknown;
+        for (int i = 0; i < _observations.Count; i++)
+        {
+            PerceptionObservation observation = _observations[i];
+            if (observation.ExpiresAtSeconds > nowSeconds && observation.IdentificationLevel > level)
+                level = observation.IdentificationLevel;
+        }
+        return level;
+    }
+
+    public float GetEffectiveConfidence(float nowSeconds, float halfLifeSeconds) =>
+        GetCombinedConfidence(nowSeconds, halfLifeSeconds, applyAgeDecay: true);
+
+    /// <summary>Identity evidence decays independently from confidence that a signal was detected.</summary>
+    public float GetEffectiveIdentificationConfidence(float nowSeconds, float halfLifeSeconds)
+    {
+        ValidateTime(nowSeconds, nameof(nowSeconds));
         if (!float.IsFinite(halfLifeSeconds) || halfLifeSeconds <= 0f)
             throw new ArgumentOutOfRangeException(nameof(halfLifeSeconds));
 
-        return GetCombinedConfidence(nowSeconds, halfLifeSeconds, applyAgeDecay: true);
+        Span<PerceptionSense> senses = _observations.Count <= 64
+            ? stackalloc PerceptionSense[_observations.Count]
+            : new PerceptionSense[_observations.Count];
+        Span<float> strongestBySense = _observations.Count <= 64
+            ? stackalloc float[_observations.Count]
+            : new float[_observations.Count];
+        int senseCount = 0;
+
+        for (int i = 0; i < _observations.Count; i++)
+        {
+            PerceptionObservation observation = _observations[i];
+            if (observation.ExpiresAtSeconds <= nowSeconds ||
+                observation.IdentificationConfidence <= 0f)
+                continue;
+
+            float age = MathF.Max(0f, nowSeconds - observation.OccurredAtSeconds);
+            float confidence = observation.IdentificationConfidence *
+                MathF.Exp(-0.69314718f * age / halfLifeSeconds);
+            int slot = 0;
+            while (slot < senseCount && senses[slot] != observation.Sense)
+                slot++;
+
+            if (slot == senseCount)
+            {
+                senses[senseCount] = observation.Sense;
+                strongestBySense[senseCount] = confidence;
+                senseCount++;
+            }
+            else if (confidence > strongestBySense[slot])
+            {
+                strongestBySense[slot] = confidence;
+            }
+        }
+
+        float remainingUncertainty = 1f;
+        for (int i = 0; i < senseCount; i++)
+            remainingUncertainty *= 1f - Math.Clamp(strongestBySense[i], 0f, 1f);
+        return Math.Clamp(1f - remainingUncertainty, 0f, 1f);
     }
 
-    internal static TacticalContactKind ResolveKind(TacticalStimulus stimulus)
+    internal static TacticalContactKind ResolveKind(PerceptionObservation observation)
     {
-        if (stimulus.Type == TacticalStimulusType.VisualContact)
+        if (IsFreshVisual(observation))
             return TacticalContactKind.VisualConfirmed;
-        if (stimulus.Type == TacticalStimulusType.AllyContactReport)
+        if (observation.StimulusType == TacticalStimulusType.AllyContactReport)
             return TacticalContactKind.Reported;
-        return stimulus.SubjectUnit.HasValue
+        return observation.IdentifiedSubject.HasValue
             ? TacticalContactKind.LastKnown
             : TacticalContactKind.Suspected;
+    }
+
+    private static bool IsFreshVisual(PerceptionObservation observation) =>
+        observation.Sense == PerceptionSense.Visual &&
+        observation.DetectionLevel == PerceptionDetectionLevel.Detected &&
+        observation.IdentifiedSubject.HasValue;
+
+    private static void ValidateTime(float value, string parameterName)
+    {
+        if (!float.IsFinite(value) || value < 0f)
+            throw new ArgumentOutOfRangeException(parameterName);
     }
 }
 
 /// <summary>
-/// Contact memory for one observer. Sensors feed uncertain evidence into this store;
-/// tactical decisions may use it without treating an audio-only contact as visual confirmation.
+/// Per-observer fusion memory shared by every sensory channel.
 /// </summary>
 public sealed class TacticalContactMemory
 {
     public const float VisualConfirmationGraceSeconds = 0.30f;
 
     private const float UnknownContactMergeRadiusFloor = 1.5f;
+    private const float CrossSenseMergeWindowSeconds = 1.25f;
 
     private readonly List<TacticalContact> _contacts = new();
     private float _currentTimeSeconds;
@@ -207,47 +268,77 @@ public sealed class TacticalContactMemory
     public IReadOnlyList<TacticalContact> Contacts => _contacts;
     public float CurrentTimeSeconds => _currentTimeSeconds;
 
-    /// <summary>
-    /// Records an observation/event at the time it reaches this observer.
-    /// Old events are not allowed to revive already-stale knowledge.
-    /// Lifetime is measured from event occurrence, not receipt.
-    /// </summary>
+    /// <summary>Compatibility bridge for event producers; the memory stores observations.</summary>
     public TacticalContact? Record(
         TacticalStimulus stimulus,
         float nowSeconds,
-        float memoryLifetimeSeconds)
+        float memoryLifetimeSeconds) =>
+        Record(PerceptionObservation.FromStimulus(stimulus, nowSeconds, memoryLifetimeSeconds));
+
+    /// <summary>
+    /// Records one sensor result. A correlated contact ID is an explicit track association,
+    /// allowing a later sensor to identify a previously anonymous contact without guessing
+    /// identity from position alone.
+    /// </summary>
+    public TacticalContact? Record(
+        PerceptionObservation observation,
+        long? correlatedContactId = null)
     {
-        ArgumentNullException.ThrowIfNull(stimulus);
-        ValidateTime(nowSeconds, nameof(nowSeconds));
+        float nowSeconds = observation.ReceivedAtSeconds;
+        ValidateTime(nowSeconds, nameof(observation));
         if (nowSeconds < _currentTimeSeconds)
-            throw new ArgumentOutOfRangeException(nameof(nowSeconds), "Contact memory time cannot move backwards.");
-        if (stimulus.OccurredAtSeconds > nowSeconds)
-            throw new ArgumentOutOfRangeException(nameof(stimulus), "A stimulus cannot occur after it is received.");
-        if (!float.IsFinite(memoryLifetimeSeconds) || memoryLifetimeSeconds <= 0f)
-            throw new ArgumentOutOfRangeException(nameof(memoryLifetimeSeconds));
+            throw new ArgumentOutOfRangeException(nameof(observation),
+                "Contact memory time cannot move backwards.");
+        if (observation.OccurredAtSeconds > nowSeconds)
+            throw new ArgumentOutOfRangeException(nameof(observation),
+                "An observation cannot occur after it is received.");
 
         AdvanceTime(nowSeconds);
-
-        float expiresAt = stimulus.OccurredAtSeconds + memoryLifetimeSeconds;
-        if (!float.IsFinite(expiresAt) || expiresAt <= nowSeconds)
+        if (observation.ExpiresAtSeconds <= nowSeconds)
             return null;
 
-        TacticalContact? contact = FindBySubject(stimulus.SubjectUnit);
-        if (contact == null)
-            contact = FindNearbyUnknown(stimulus);
+        TacticalContact? correlated = correlatedContactId.HasValue
+            ? FindByContactId(correlatedContactId.Value)
+            : null;
+        if (correlatedContactId.HasValue && correlated == null)
+            return null;
+        if (correlated?.SubjectUnit is UnitId correlatedSubject &&
+            observation.IdentifiedSubject is UnitId incomingSubject &&
+            !correlatedSubject.Equals(incomingSubject))
+            return null;
+
+        TacticalContact? contact = observation.IdentifiedSubject.HasValue
+            ? FindBySubject(observation.IdentifiedSubject)
+            : null;
+
+        if (contact != null && correlated != null && contact != correlated)
+        {
+            MergeInto(contact, correlated);
+            _contacts.Remove(correlated);
+        }
+        else
+        {
+            contact ??= correlated;
+        }
+
+        if (contact?.SubjectUnit is UnitId existingSubject &&
+            observation.IdentifiedSubject is UnitId incomingSubject &&
+            !existingSubject.Equals(incomingSubject))
+        {
+            return null;
+        }
+
+        if (contact == null && !observation.IdentifiedSubject.HasValue)
+            contact = FindNearbyUnknown(observation);
 
         if (contact == null)
         {
-            contact = new TacticalContact(
-                _nextContactId++,
-                stimulus,
-                nowSeconds,
-                memoryLifetimeSeconds);
+            contact = new TacticalContact(_nextContactId++, observation);
             _contacts.Add(contact);
             return contact;
         }
 
-        UpdateContact(contact, stimulus, nowSeconds, memoryLifetimeSeconds);
+        UpdateContact(contact, observation);
         return contact;
     }
 
@@ -273,10 +364,7 @@ public sealed class TacticalContactMemory
         return Record(stimulus, nowSeconds, memoryLifetimeSeconds);
     }
 
-    /// <summary>
-    /// Converts a visible target into a last-known contact without pretending
-    /// the unit is still visible. Confidence continues to age from its evidence.
-    /// </summary>
+    /// <summary>Downgrades an identified visual contact without inventing a new position.</summary>
     public bool MarkVisualLost(
         UnitId target,
         float nowSeconds,
@@ -286,7 +374,8 @@ public sealed class TacticalContactMemory
             return false;
         ValidateTime(nowSeconds, nameof(nowSeconds));
         if (nowSeconds < _currentTimeSeconds)
-            throw new ArgumentOutOfRangeException(nameof(nowSeconds), "Contact memory time cannot move backwards.");
+            throw new ArgumentOutOfRangeException(nameof(nowSeconds),
+                "Contact memory time cannot move backwards.");
         if (!float.IsFinite(memoryLifetimeSeconds) || memoryLifetimeSeconds <= 0f)
             throw new ArgumentOutOfRangeException(nameof(memoryLifetimeSeconds));
 
@@ -306,15 +395,12 @@ public sealed class TacticalContactMemory
         return true;
     }
 
-    /// <summary>
-    /// Advances simulated time, downgrades stale visual certainty, and removes
-    /// expired knowledge. It never changes authoritative unit/world state.
-    /// </summary>
     public void AdvanceTime(float nowSeconds)
     {
         ValidateTime(nowSeconds, nameof(nowSeconds));
         if (nowSeconds < _currentTimeSeconds)
-            throw new ArgumentOutOfRangeException(nameof(nowSeconds), "Contact memory time cannot move backwards.");
+            throw new ArgumentOutOfRangeException(nameof(nowSeconds),
+                "Contact memory time cannot move backwards.");
 
         _currentTimeSeconds = nowSeconds;
         for (int i = _contacts.Count - 1; i >= 0; i--)
@@ -349,14 +435,11 @@ public sealed class TacticalContactMemory
 
     public bool MarkInvestigated(long contactId)
     {
-        for (int i = 0; i < _contacts.Count; i++)
-        {
-            if (_contacts[i].ContactId != contactId)
-                continue;
-            _contacts[i].IsInvestigated = true;
-            return true;
-        }
-        return false;
+        TacticalContact? contact = FindByContactId(contactId);
+        if (contact == null)
+            return false;
+        contact.IsInvestigated = true;
+        return true;
     }
 
     public bool Forget(UnitId target)
@@ -380,6 +463,16 @@ public sealed class TacticalContactMemory
         _nextContactId = 1;
     }
 
+    private TacticalContact? FindByContactId(long contactId)
+    {
+        for (int i = 0; i < _contacts.Count; i++)
+        {
+            if (_contacts[i].ContactId == contactId)
+                return _contacts[i];
+        }
+        return null;
+    }
+
     private TacticalContact? FindBySubject(UnitId? subject)
     {
         if (!subject.HasValue || !subject.Value.IsValid)
@@ -397,7 +490,7 @@ public sealed class TacticalContactMemory
         return null;
     }
 
-    private TacticalContact? FindNearbyUnknown(TacticalStimulus stimulus)
+    private TacticalContact? FindNearbyUnknown(PerceptionObservation observation)
     {
         TacticalContact? nearest = null;
         float nearestDistanceSquared = float.MaxValue;
@@ -406,25 +499,42 @@ public sealed class TacticalContactMemory
         {
             TacticalContact contact = _contacts[i];
             if (contact.SubjectUnit.HasValue ||
-                contact.Kind == TacticalContactKind.VisualConfirmed ||
-                (stimulus.Type != TacticalStimulusType.AllyContactReport &&
-                 contact.LastStimulusType != stimulus.Type))
+                MathF.Abs(contact.LastEventAtSeconds - observation.OccurredAtSeconds) >
+                    CrossSenseMergeWindowSeconds)
             {
                 continue;
             }
 
-            float dx = contact.EstimatedPosition.X - stimulus.Position.X;
-            float dy = contact.EstimatedPosition.Y - stimulus.Position.Y;
-            float distanceSquared = dx * dx + dy * dy;
+            bool hasSameSense = false;
+            float latestSameSenseTime = float.NegativeInfinity;
+            TacticalStimulusType latestSameSenseType = TacticalStimulusType.Unknown;
+            for (int j = 0; j < contact.Observations.Count; j++)
+            {
+                PerceptionObservation prior = contact.Observations[j];
+                if (prior.Sense != observation.Sense)
+                    continue;
+                hasSameSense = true;
+                if (prior.OccurredAtSeconds >= latestSameSenseTime)
+                {
+                    latestSameSenseTime = prior.OccurredAtSeconds;
+                    latestSameSenseType = prior.StimulusType;
+                }
+            }
+
+            // Same-sense signals are grouped only when they describe the same event type.
+            // Different senses may corroborate an anonymous contact in the same time/space window.
+            if (hasSameSense && latestSameSenseType != observation.StimulusType)
+                continue;
+
+            Vector3 delta = contact.EstimatedPosition - observation.EstimatedPosition;
+            float distanceSquared = delta.LengthSquared();
             float mergeRadius = MathF.Max(
                 UnknownContactMergeRadiusFloor,
-                contact.PositionErrorRadius + stimulus.PositionErrorRadius);
+                contact.PositionErrorRadius + observation.PositionErrorRadius);
 
             if (distanceSquared > mergeRadius * mergeRadius ||
                 distanceSquared >= nearestDistanceSquared)
-            {
                 continue;
-            }
 
             nearest = contact;
             nearestDistanceSquared = distanceSquared;
@@ -433,52 +543,76 @@ public sealed class TacticalContactMemory
         return nearest;
     }
 
-    private static void UpdateContact(
-        TacticalContact contact,
-        TacticalStimulus stimulus,
-        float nowSeconds,
-        float memoryLifetimeSeconds)
+    private static void UpdateContact(TacticalContact contact, PerceptionObservation observation)
     {
-        bool newerEvidence = stimulus.OccurredAtSeconds > contact.LastEventAtSeconds;
-        TacticalContactKind incomingKind = TacticalContact.ResolveKind(stimulus);
+        bool newerEvidence = observation.OccurredAtSeconds > contact.LastEventAtSeconds;
+        TacticalContactKind incomingKind = TacticalContact.ResolveKind(observation);
         bool recentlyVisual = contact.Kind == TacticalContactKind.VisualConfirmed &&
-            nowSeconds - contact.LastVisualAtSeconds < VisualConfirmationGraceSeconds;
+            observation.ReceivedAtSeconds - contact.LastVisualAtSeconds < VisualConfirmationGraceSeconds;
+        bool freshVisual = observation.Sense == PerceptionSense.Visual &&
+            observation.DetectionLevel == PerceptionDetectionLevel.Detected &&
+            observation.IdentifiedSubject.HasValue;
 
-        if (stimulus.Type == TacticalStimulusType.VisualContact)
+        if (freshVisual)
             contact.Kind = TacticalContactKind.VisualConfirmed;
         else if (!recentlyVisual)
             contact.Kind = incomingKind;
 
-        // Prefer the more precise estimate. Confidence is not allowed to inflate
-        // from a stream of repeated low-confidence events.
-        if (stimulus.PositionErrorRadius <= contact.PositionErrorRadius ||
-            stimulus.Confidence > contact.Confidence)
+        if (observation.PositionErrorRadius <= contact.PositionErrorRadius ||
+            observation.DetectionConfidence > contact.Confidence)
         {
-            contact.EstimatedPosition = stimulus.Position;
-            contact.PositionErrorRadius = stimulus.PositionErrorRadius;
+            contact.EstimatedPosition = observation.EstimatedPosition;
+            contact.PositionErrorRadius = observation.PositionErrorRadius;
         }
 
-        contact.LastEventAtSeconds = MathF.Max(contact.LastEventAtSeconds, stimulus.OccurredAtSeconds);
-        contact.LastReceivedAtSeconds = nowSeconds;
+        contact.LastEventAtSeconds = MathF.Max(
+            contact.LastEventAtSeconds, observation.OccurredAtSeconds);
+        contact.LastReceivedAtSeconds = observation.ReceivedAtSeconds;
         contact.ExpiresAtSeconds = MathF.Max(
-            contact.ExpiresAtSeconds,
-            stimulus.OccurredAtSeconds + memoryLifetimeSeconds);
-        contact.LastStimulusType = stimulus.Type;
-        contact.RecordEvidence(stimulus, nowSeconds, memoryLifetimeSeconds);
+            contact.ExpiresAtSeconds, observation.ExpiresAtSeconds);
+        contact.LastStimulusType = observation.StimulusType;
+        contact.RecordObservation(observation);
         if (newerEvidence)
             contact.IsInvestigated = false;
 
-        if (stimulus.Type == TacticalStimulusType.VisualContact)
+        if (freshVisual)
         {
-            contact.LastVisualAtSeconds = stimulus.OccurredAtSeconds;
+            contact.LastVisualAtSeconds = observation.OccurredAtSeconds;
             contact.VisualLossMarked = false;
         }
 
-        if (stimulus.ReporterUnit.HasValue)
-            contact.ReporterUnit = stimulus.ReporterUnit;
+        if (observation.ReporterUnit.HasValue)
+            contact.ReporterUnit = observation.ReporterUnit;
+        if (observation.IdentifiedSubject.HasValue)
+            contact.SubjectUnit = observation.IdentifiedSubject;
+    }
 
-        if (stimulus.SubjectUnit.HasValue)
-            contact.SubjectUnit = stimulus.SubjectUnit;
+    private static void MergeInto(TacticalContact destination, TacticalContact source)
+    {
+        for (int i = 0; i < source.Observations.Count; i++)
+            destination.RecordObservation(source.Observations[i]);
+
+        if (source.LastEventAtSeconds > destination.LastEventAtSeconds)
+        {
+            destination.EstimatedPosition = source.EstimatedPosition;
+            destination.PositionErrorRadius = source.PositionErrorRadius;
+            destination.LastEventAtSeconds = source.LastEventAtSeconds;
+            destination.LastStimulusType = source.LastStimulusType;
+            if (source.LastVisualAtSeconds > destination.LastVisualAtSeconds)
+            {
+                destination.LastVisualAtSeconds = source.LastVisualAtSeconds;
+                destination.Kind = source.Kind;
+                destination.VisualLossMarked = source.VisualLossMarked;
+            }
+        }
+
+        destination.LastReceivedAtSeconds = MathF.Max(
+            destination.LastReceivedAtSeconds, source.LastReceivedAtSeconds);
+        destination.ExpiresAtSeconds = MathF.Max(
+            destination.ExpiresAtSeconds, source.ExpiresAtSeconds);
+        destination.ReporterUnit ??= source.ReporterUnit;
+        destination.SubjectUnit ??= source.SubjectUnit;
+        destination.IsInvestigated &= source.IsInvestigated;
     }
 
     private static void ValidateTime(float value, string parameterName)

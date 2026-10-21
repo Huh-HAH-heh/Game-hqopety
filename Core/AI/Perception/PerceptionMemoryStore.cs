@@ -4,9 +4,9 @@ namespace Core.AI.Perception;
 
 /// <summary>
 /// Shared per-observer memory for every perception channel.
-/// Sensors submit uncertain evidence here; they do not own separate knowledge stores.
+/// Sensors publish observations here; no sensor or AI system owns a parallel contact list.
 /// </summary>
-public sealed class PerceptionMemoryStore
+public sealed class PerceptionMemoryStore : IPerceptionObservationSink
 {
     private TacticalContactMemory?[] _memories;
 
@@ -17,7 +17,6 @@ public sealed class PerceptionMemoryStore
     {
         if (initialUnitCapacity <= 0)
             throw new ArgumentOutOfRangeException(nameof(initialUnitCapacity));
-
         _memories = new TacticalContactMemory?[initialUnitCapacity];
     }
 
@@ -50,11 +49,14 @@ public sealed class PerceptionMemoryStore
     {
         if (observerIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(observerIndex));
-
         EnsureCapacity(observerIndex + 1);
         return _memories[observerIndex] ??= new TacticalContactMemory();
     }
 
+    /// <summary>
+    /// Compatibility bridge for existing event producers. The common store keeps
+    /// only PerceptionObservation objects, irrespective of the producer type.
+    /// </summary>
     public TacticalContact? Record(
         int observerIndex,
         TacticalStimulus stimulus,
@@ -66,18 +68,35 @@ public sealed class PerceptionMemoryStore
         if (nowSeconds < CurrentTimeSeconds)
             throw new ArgumentOutOfRangeException(nameof(nowSeconds),
                 "Perception memory time cannot move backwards.");
-        if (nowSeconds > CurrentTimeSeconds)
-            AdvanceTime(nowSeconds);
 
-        return GetOrCreateMemory(observerIndex)
-            .Record(stimulus, nowSeconds, memoryLifetimeSeconds);
+        return RecordObservation(
+            observerIndex,
+            PerceptionObservation.FromStimulus(stimulus, nowSeconds, memoryLifetimeSeconds));
+    }
+
+    public TacticalContact? RecordObservation(
+        int observerIndex,
+        PerceptionObservation observation,
+        long? correlatedContactId = null)
+    {
+        if (observerIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(observerIndex));
+
+        float receivedAtSeconds = observation.ReceivedAtSeconds;
+        ValidateTime(receivedAtSeconds);
+        if (receivedAtSeconds < CurrentTimeSeconds)
+            throw new ArgumentOutOfRangeException(nameof(observation),
+                "Observation receipt time cannot be older than the shared perception clock.");
+        if (receivedAtSeconds > CurrentTimeSeconds)
+            AdvanceTime(receivedAtSeconds);
+
+        return GetOrCreateMemory(observerIndex).Record(observation, correlatedContactId);
     }
 
     public void InitializeUnit(int unitIndex)
     {
         if (unitIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(unitIndex));
-
         EnsureCapacity(unitIndex + 1);
         _memories[unitIndex]?.Clear();
         _memories[unitIndex] = null;
