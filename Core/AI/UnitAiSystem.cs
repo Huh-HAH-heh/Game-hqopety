@@ -1742,6 +1742,7 @@ public sealed class UnitAiSystem
             if (contact.Kind != TacticalContactKind.VisualConfirmed ||
                 !contact.SubjectUnit.HasValue ||
                 !TryGetFreshVisualContact(observer, contact.SubjectUnit.Value, out Vector3 observedPosition) ||
+                !vision.IsRecentlyVisible(observer, contact.SubjectUnit.Value.Index, units) ||
                 !units.TryGetIndex(contact.SubjectUnit.Value, out int target) ||
                 target == observer ||
                 health.OverallHitPoints[target] <= 0f ||
@@ -1792,8 +1793,16 @@ public sealed class UnitAiSystem
         return bestTarget;
     }
 
-    private bool HasFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition) =>
-        _perceptionMemory == null || TryGetFreshVisualContact(observer, target, out estimatedPosition);
+    private bool HasFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition)
+    {
+        if (_perceptionMemory == null)
+        {
+            estimatedPosition = Vector3.Zero;
+            return true;
+        }
+
+        return TryGetFreshVisualContact(observer, target, out estimatedPosition);
+    }
 
     internal bool TryGetFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition)
     {
