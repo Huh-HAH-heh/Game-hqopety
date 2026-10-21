@@ -57,6 +57,17 @@
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
+    <node class="Sequence" id="70">
+      <node class="Condition" id="71">
+        <property Operator="Equal" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldSuppressiveFire()" />
+        <property Opr="const bool true" />
+      </node>
+      <node class="Action" id="72">
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectSuppressiveFire()" />
+        <property ResultOption="BT_INVALID" />
+      </node>
+    </node>
     <node class="Sequence" id="30">
       <node class="Condition" id="31">
         <property Operator="Equal" />
@@ -129,6 +140,17 @@
     
     
     
+    <node class="Sequence" id="80">
+      <node class="Condition" id="81">
+        <property Operator="Equal" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateLastKnownTarget()" />
+        <property Opr="const bool true" />
+      </node>
+      <node class="Action" id="82">
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectInvestigateLastKnownTarget()" />
+        <property ResultOption="BT_INVALID" />
+      </node>
+    </node>
     <node class="Sequence" id="60">
       <node class="Condition" id="61">
         <property Operator="Equal" />
@@ -141,7 +163,7 @@
       </node>
     </node>
     <node class="Action" id="23">
-      <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectHoldPosition()" />
+      <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectPatrol()" />
       <property ResultOption="BT_INVALID" />
     </node>
   </node>

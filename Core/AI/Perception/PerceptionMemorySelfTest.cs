@@ -228,6 +228,65 @@ public static class PerceptionMemorySelfTest
         return false;
     }
 
+    public static bool BehaviacInvestigatesLastKnownPositionWithoutCurrentTargetKnowledge()
+    {
+        var world = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
+        var simulation = new UnitSimulation(4, 64) { VisionEnabled = true };
+        UnitId observer = simulation.Spawn(
+            UnitType.Colonist, new Vector3(10f, 10f, 0.1f),
+            Vector3.UnitX, Vector3.UnitX, factionTag: 1);
+        UnitId target = simulation.Spawn(
+            UnitType.Colonist, new Vector3(12f, 10f, 0.1f),
+            -Vector3.UnitX, -Vector3.UnitX, factionTag: 2);
+        Vector3 lastSeen = simulation.Units.Position[target.Index];
+
+        simulation.PerceptionMemory.RecordObservation(observer.Index, Observation(
+            PerceptionSense.Visual,
+            TacticalStimulusType.VisualContact,
+            lastSeen,
+            occurredAt: 0.1f,
+            receivedAt: 0.1f,
+            confidence: 1f,
+            positionError: 0.25f,
+            subject: target));
+        simulation.PerceptionMemory.AdvanceTime(0.6f);
+        simulation.AI.Store.RememberTarget(observer.Index, target, lastSeen, 3f);
+        simulation.AI.UseBehaviacDecisionLayer = true;
+        simulation.AI.Enabled = true;
+
+        simulation.AI.Update(
+            simulation.Units, simulation.Health, simulation.Inventory,
+            simulation.Weapons, simulation.Projectiles, simulation.Suppression,
+            simulation.Vision, world, 0.16f);
+
+        Vector3 goal = simulation.AI.Store.Goal[observer.Index];
+        return simulation.AI.Store.LastIntent[observer.Index] ==
+                   BehaviacUnitIntent.InvestigateLastKnownTarget &&
+               !simulation.AI.Store.HasTarget[observer.Index] &&
+               simulation.AI.Store.HasGoal[observer.Index] &&
+               simulation.AI.Store.State[observer.Index] == UnitAiState.Search &&
+               MathF.Abs(goal.X - lastSeen.X) < 0.05f &&
+               MathF.Abs(goal.Y - lastSeen.Y) < 0.05f;
+    }
+
+    public static bool BehaviacFallsBackToPatrolWithoutAContact()
+    {
+        var world = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
+        var simulation = new UnitSimulation(4, 64);
+        UnitId observer = simulation.Spawn(
+            UnitType.Colonist, new Vector3(10f, 10f, 0.1f), factionTag: 1);
+        simulation.AI.UseBehaviacDecisionLayer = true;
+        simulation.AI.Enabled = true;
+
+        simulation.AI.Update(
+            simulation.Units, simulation.Health, simulation.Inventory,
+            simulation.Weapons, simulation.Projectiles, simulation.Suppression,
+            simulation.Vision, world, 0.16f);
+
+        return simulation.AI.Store.LastIntent[observer.Index] == BehaviacUnitIntent.Patrol &&
+               simulation.AI.Store.State[observer.Index] == UnitAiState.Search;
+    }
+
     public static bool AiVisualContactGateExpiresAfterSightIsLost()
     {
         if (!TryCreateVisionScenario(out WorldMap world, out UnitSimulation simulation,

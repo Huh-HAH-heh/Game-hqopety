@@ -43,6 +43,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasVisibleTarget { get; private set; }
     [MemberMetaInfo("Recent target", "Whether the last known target memory is valid.", true)]
     public bool HasRecentTarget { get; private set; }
+    [MemberMetaInfo("Suppressive weapon ready", "Whether a weapon is configured for suppressive fire.", true)]
+    public bool HasSuppressiveWeapon { get; private set; }
     [MemberMetaInfo("Alerted", "Threat awareness independent of suppression or panic.", true)]
     public bool IsAlerted { get; private set; }
     [MemberMetaInfo("Audible contact", "Whether an uncertain sound contact is worth investigating.", true)]
@@ -105,7 +107,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         float investigationUtility = 0f,
         bool isPanicked = false,
         bool wasSeekingCover = false,
-        bool wasFollowingMoveOrder = false)
+        bool wasFollowingMoveOrder = false,
+        bool hasSuppressiveWeapon = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -115,6 +118,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         HasCover = hasCover;
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
+        HasSuppressiveWeapon = hasSuppressiveWeapon;
         HasAudibleContact = hasAudibleContact;
         IsInImmediateDanger = isInImmediateDanger;
         IsAlerted = isAlerted;
@@ -165,6 +169,18 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("ShouldExecuteAttackOrder", "Continue the attack task toward its last known contact only when no hostile is visible.")]
     public bool ShouldExecuteAttackOrder() =>
         IsAlive && HasAttackOrder && !HasVisibleTarget;
+
+    [MethodMetaInfo("ShouldSuppressiveFire", "Fire only at the last observed aim point when the target is no longer visually confirmed and a suppressive weapon is ready.")]
+    public bool ShouldSuppressiveFire() =>
+        IsAlive && HasRecentTarget && !HasVisibleTarget &&
+        HasSuppressiveWeapon && !IsPanicked && !IsSuppressed &&
+        !IsLowHealth && !HasMoveOrder && !HasAttackOrder;
+
+    [MethodMetaInfo("ShouldInvestigateLastKnownTarget", "Search the last observed position without treating it as a currently visible target.")]
+    public bool ShouldInvestigateLastKnownTarget() =>
+        IsAlive && HasRecentTarget && !HasVisibleTarget &&
+        !IsSuppressed && !IsLowHealth &&
+        !HasMoveOrder && !HasStopOrder && !HasAttackOrder;
 
     [MethodMetaInfo("ShouldFollowMoveOrder", "Follow a move order unless a hostile is currently visible; the saved order resumes after contact is lost.")]
     public bool ShouldFollowMoveOrder() =>
@@ -231,6 +247,18 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("SelectPanic", "Stop attacking and take a low profile when panic strikes and no cover is reachable.")]
     public EBTStatus SelectPanic() =>
         SelectIntent(BehaviacUnitIntent.Panic);
+
+    [MethodMetaInfo("SelectSuppressiveFire", "Fire at a last-known aim point with a suppressive weapon.")]
+    public EBTStatus SelectSuppressiveFire() =>
+        SelectIntent(BehaviacUnitIntent.SuppressiveFire);
+
+    [MethodMetaInfo("SelectInvestigateLastKnownTarget", "Move to the last observed position and search rather than assuming the target remains there.")]
+    public EBTStatus SelectInvestigateLastKnownTarget() =>
+        SelectIntent(BehaviacUnitIntent.InvestigateLastKnownTarget);
+
+    [MethodMetaInfo("SelectPatrol", "Continue autonomous search when there is no stronger known task or contact.")]
+    public EBTStatus SelectPatrol() =>
+        SelectIntent(BehaviacUnitIntent.Patrol);
 
     [MethodMetaInfo("SelectMoveOrder", "Return the player movement-task intent.")]
     public EBTStatus SelectMoveOrder() =>

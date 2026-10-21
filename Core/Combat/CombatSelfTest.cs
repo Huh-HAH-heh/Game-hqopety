@@ -41,6 +41,8 @@ public static class CombatSelfTest
         RunTest("Perception: vision publishes fresh sightings to shared memory", PerceptionMemorySelfTest.VisionPublishesFreshSightingsToSharedMemory, ref passed, ref failed);
         RunTest("Perception: visibility cache does not refresh a lost contact", PerceptionMemorySelfTest.CachedVisibilityDoesNotRefreshLostContact, ref passed, ref failed);
         RunTest("AI: target eligibility expires when fresh visual contact is lost", PerceptionMemorySelfTest.AiVisualContactGateExpiresAfterSightIsLost, ref passed, ref failed);
+        RunTest("Behaviac: lost visual target causes search at last known position", PerceptionMemorySelfTest.BehaviacInvestigatesLastKnownPositionWithoutCurrentTargetKnowledge, ref passed, ref failed);
+        RunTest("Behaviac: no contact selects patrol instead of hold-position fallback", PerceptionMemorySelfTest.BehaviacFallsBackToPatrolWithoutAContact, ref passed, ref failed);
         RunTest("Perception: real gunshot creates anonymous contact and triggers audible investigation", TacticalHearingSelfTest.Run, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("AI: last Behaviac intent resets on unit lifecycle", TestAiIntentLifecycle, ref passed, ref failed);

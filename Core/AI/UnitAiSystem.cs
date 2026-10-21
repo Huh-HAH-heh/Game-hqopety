@@ -393,6 +393,21 @@ public sealed class UnitAiSystem
             }
 
             if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.SuppressiveFire &&
+                TryExecuteSuppressiveFire(
+                    units, health, inventory, weapons, projectiles, suppression, unit))
+            {
+                continue;
+            }
+
+            if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
+                TryExecuteLastKnownInvestigation(units, weapons, worldMap, unit))
+            {
+                continue;
+            }
+
+            if (UseBehaviacDecisionLayer &&
                 intent == BehaviacUnitIntent.InvestigateAudibleContact &&
                 TryExecuteAudibleInvestigation(units, weapons, worldMap, unit))
             {
@@ -1097,6 +1112,7 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.EngageTarget:
             case BehaviacUnitIntent.ProneEngage: LastBehaviacEngageDecisions++; break;
             case BehaviacUnitIntent.InvestigateAudibleContact:
+            case BehaviacUnitIntent.InvestigateLastKnownTarget:
                 LastBehaviacInvestigateDecisions++;
                 break;
             case BehaviacUnitIntent.FollowMoveOrder: LastBehaviacMoveOrderDecisions++; break;
@@ -1104,6 +1120,83 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
             case BehaviacUnitIntent.HoldPositionEngage: LastBehaviacHoldAndEngageDecisions++; break;
         }
+    }
+
+    private bool TryExecuteLastKnownInvestigation(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        WorldMap worldMap,
+        int unit)
+    {
+        if (!Store.HasTarget[unit] || Store.TargetMemory[unit] <= 0f)
+            return false;
+
+        Vector3 estimate = Store.LastSeenPosition[unit];
+        if (!float.IsFinite(estimate.X) ||
+            !float.IsFinite(estimate.Y) ||
+            !float.IsFinite(estimate.Z) ||
+            estimate == Vector3.Zero)
+            return false;
+
+        float x = Math.Clamp(estimate.X, 0.5f, worldMap.MaxTileX - 0.5f);
+        float y = Math.Clamp(estimate.Y, 0.5f, worldMap.MaxTileY - 0.5f);
+        int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
+        Vector3 searchPoint = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
+
+        // Capture the estimate before clearing the identified target. The destination
+        // is a search location, never a live pointer to the target's current position.
+        Store.ClearTarget(unit);
+        ClearAiming(weapons, unit);
+        Store.SetGoal(unit, searchPoint);
+        units.Target[unit] = searchPoint;
+        units.HasTarget[unit] = true;
+        Store.State[unit] = UnitAiState.Search;
+        return true;
+    }
+
+    private bool TryExecuteSuppressiveFire(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        ProjectileStore projectiles,
+        UnitSuppressionStore suppression,
+        int unit)
+    {
+        if (!Store.HasTarget[unit] ||
+            Store.TargetMemory[unit] <= 0f ||
+            !units.IsAlive(Store.Target[unit]) ||
+            health.OverallHitPoints[Store.Target[unit].Index] <= 0f ||
+            !HasSuppressFireWeapon(inventory, weapons, unit))
+            return false;
+
+        Vector3 aimPoint = Store.LastSeenAimPoint[unit];
+        if (aimPoint == Vector3.Zero)
+            aimPoint = Store.LastSeenPosition[unit];
+        if (!float.IsFinite(aimPoint.X) ||
+            !float.IsFinite(aimPoint.Y) ||
+            !float.IsFinite(aimPoint.Z) ||
+            aimPoint == Vector3.Zero)
+            return false;
+
+        ClearNonSuppressiveAiming(weapons, inventory, unit);
+        if (!TryFireSuppressiveWeapons(
+                units,
+                inventory,
+                weapons,
+                projectiles,
+                unit,
+                Store.Target[unit],
+                aimPoint,
+                GetSpreadMultiplier(units, suppression, unit)))
+            return false;
+
+        Store.ClearGoal(unit);
+        units.Target[unit] = units.Position[unit];
+        units.HasTarget[unit] = false;
+        Store.State[unit] = UnitAiState.Attack;
+        return true;
     }
 
     private bool TryExecuteAudibleInvestigation(
@@ -1392,7 +1485,8 @@ public sealed class UnitAiSystem
             investigationUtility,
             suppressionState == UnitSuppressionState.Panicked,
             Store.State[unit] == UnitAiState.SeekCover && Store.HasGoal[unit],
-            Store.LastIntent[unit] == BehaviacUnitIntent.FollowMoveOrder);
+            Store.LastIntent[unit] == BehaviacUnitIntent.FollowMoveOrder,
+            HasSuppressFireWeapon(inventory, weapons, unit));
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
