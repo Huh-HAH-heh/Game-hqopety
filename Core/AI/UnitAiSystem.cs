@@ -40,6 +40,7 @@ public sealed class UnitAiSystem
 
     private readonly UnitWeaponSystem _weaponSystem;
     private readonly UnitSkillStore? _skills;
+    private readonly PerceptionMemoryStore? _perceptionMemory;
     private float _thinkTimer;
     private float _tacticalTimeSeconds;
     private readonly SquadTacticalCoordinator _squadCoordinator = new();
@@ -82,7 +83,8 @@ public sealed class UnitAiSystem
     public UnitAiSystem(
         int initialUnitCapacity = 1024,
         UnitWeaponSystem? weaponSystem = null,
-        UnitSkillStore? skills = null)
+        UnitSkillStore? skills = null,
+        PerceptionMemoryStore? perceptionMemory = null)
     {
         Store =
             new UnitAiStore(
@@ -91,6 +93,7 @@ public sealed class UnitAiSystem
         _weaponSystem =
             weaponSystem ?? new UnitWeaponSystem();
         _skills = skills;
+        _perceptionMemory = perceptionMemory;
 
         // Keep the Behaviac tree, actions, and tactical utility scores in source,
         // but execute them only when explicitly enabled for an experiment.
@@ -418,7 +421,7 @@ public sealed class UnitAiSystem
                     Store.RememberTarget(
                         unit,
                         currentTarget,
-                        units.Position[currentTarget.Index],
+                        GetObservedTargetPosition(units, unit, currentTarget.Index),
                         TargetMemorySeconds);
                     keepCurrentVisibleTarget = true;
                 }
@@ -437,7 +440,7 @@ public sealed class UnitAiSystem
                 Store.RememberTarget(
                     unit,
                     targetId,
-                    units.Position[visibleEnemy],
+                    GetObservedTargetPosition(units, unit, visibleEnemy),
                     TargetMemorySeconds);
             }
 
@@ -514,6 +517,7 @@ public sealed class UnitAiSystem
             }
 
             bool targetVisible =
+                HasFreshVisualContact(unit, target, out _) &&
                 vision.IsRecentlyVisible(
                     unit,
                     target.Index,
@@ -1047,6 +1051,7 @@ public sealed class UnitAiSystem
 
         Vector3 destination = store.PlayerOrderPosition[unit];
         bool targetVisible = hasLiveTarget &&
+            HasFreshVisualContact(unit, target, out _) &&
             vision.IsRecentlyVisible(unit, target.Index, units) &&
             vision.Evaluate(units, worldMap, unit, target.Index).IsVisible;
         if (targetVisible)
@@ -1195,6 +1200,7 @@ public sealed class UnitAiSystem
                 units.IsAlive(attackTarget) &&
                 health.OverallHitPoints[attackTarget.Index] > 0f &&
                 IsHostile(units, unit, attackTarget.Index) &&
+                HasFreshVisualContact(unit, attackTarget, out _) &&
                 vision.IsRecentlyVisible(unit, attackTarget.Index, units))
             {
                 visibleTargetIndex = attackTarget.Index;
@@ -1205,7 +1211,7 @@ public sealed class UnitAiSystem
                 // Switching target also updates the attack task's last-known
                 // location, so it can continue searching if LOS is lost again.
                 UnitId nearestTarget = units.GetId(visibleTargetIndex);
-                Vector3 targetPosition = units.Position[visibleTargetIndex];
+                Vector3 targetPosition = GetObservedTargetPosition(units, unit, visibleTargetIndex);
                 Store.SetPlayerOrder(
                     unit,
                     UnitAiOrderType.Attack,
@@ -1232,8 +1238,11 @@ public sealed class UnitAiSystem
         }
 
         bool hasVisibleTarget = visibleTargetIndex >= 0;
+        Vector3 visibleTargetPosition = hasVisibleTarget
+            ? GetObservedTargetPosition(units, unit, visibleTargetIndex)
+            : Vector3.Zero;
         if (hasVisibleTarget)
-            suppression.RefreshAlertness(unit, 0.82f, units.Position[visibleTargetIndex]);
+            suppression.RefreshAlertness(unit, 0.82f, visibleTargetPosition);
         bool isAlerted = suppression.IsAlerted(unit);
         bool hasMoveOrder = orderType == UnitAiOrderType.Move;
         bool hasStopOrder = orderType == UnitAiOrderType.Stop;
@@ -1252,7 +1261,7 @@ public sealed class UnitAiSystem
         float combatUtility = 0f;
         if (hasVisibleTarget)
         {
-            Vector3 enemyDelta = units.Position[visibleTargetIndex] - units.Position[unit];
+            Vector3 enemyDelta = visibleTargetPosition - units.Position[unit];
             float enemyDistance = MathF.Sqrt(enemyDelta.X * enemyDelta.X + enemyDelta.Y * enemyDelta.Y);
             combatUtility = UnitTacticalUtility.EvaluateVisibleCombat(enemyDistance, true);
         }
@@ -1276,7 +1285,7 @@ public sealed class UnitAiSystem
             HasRangedWeapon(units, inventory, unit) &&
             (unit % 4 == 0 || _squadCoordinator.IsMemberOfAnySquad(units.GetId(unit))))
         {
-            Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
+            Vector3 delta = visibleTargetPosition - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
             flankDistance = MathF.Sqrt(distanceSquared);
             bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
@@ -1313,7 +1322,7 @@ public sealed class UnitAiSystem
             !canFlank &&
             !isFlanking)
         {
-            Vector3 targetDelta = units.Position[visibleTargetIndex] - units.Position[unit];
+            Vector3 targetDelta = visibleTargetPosition - units.Position[unit];
             float distance = MathF.Sqrt(
                 targetDelta.X * targetDelta.X + targetDelta.Y * targetDelta.Y);
             bool exposed = !_hasSuppressionCoverByUnit[unit] &&
@@ -1711,63 +1720,112 @@ public sealed class UnitAiSystem
         }
     }
 
-    private static int FindNearestVisibleEnemy(
+    private int FindNearestVisibleEnemy(
         UnitStore units,
         UnitHealthStore health,
         VisionSystem vision,
         int observer)
     {
-        ReadOnlySpan<int> visible =
-            vision.GetVisibleTargets(
-                observer);
+        if (_perceptionMemory == null)
+            return FindNearestVisibleEnemyFromVision(units, health, vision, observer);
+        if (!_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory))
+            return -1;
 
-        ushort observerFaction =
-            units.FactionTag[observer];
-
-        Vector3 position =
-            units.Position[observer];
-
+        Vector3 observerPosition = units.Position[observer];
+        float bestDistanceSquared = float.PositiveInfinity;
         int bestTarget = -1;
-        float bestDistanceSquared =
-            float.PositiveInfinity;
+        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
 
-        for (int i = 0;
-             i < visible.Length;
-             i++)
+        for (int i = 0; i < contacts.Count; i++)
         {
-            int target = visible[i];
-
-            if ((uint)target >= (uint)units.Capacity ||
+            TacticalContact contact = contacts[i];
+            if (contact.Kind != TacticalContactKind.VisualConfirmed ||
+                !contact.SubjectUnit.HasValue ||
+                !TryGetFreshVisualContact(observer, contact.SubjectUnit.Value, out Vector3 observedPosition) ||
+                !units.TryGetIndex(contact.SubjectUnit.Value, out int target) ||
+                target == observer ||
                 health.OverallHitPoints[target] <= 0f ||
-                !FactionRules.ShouldAttack(
-                    observerFaction,
-                    units.FactionTag[target]))
-            {
+                !IsHostile(units, observer, target))
                 continue;
-            }
 
-            Vector3 delta =
-                units.Position[target] -
-                position;
-
-            float distanceSquared =
-                delta.X * delta.X +
-                delta.Y * delta.Y;
-
-            if (distanceSquared >=
-                bestDistanceSquared)
-            {
+            Vector3 delta = observedPosition - observerPosition;
+            float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
+            if (distanceSquared >= bestDistanceSquared)
                 continue;
-            }
 
-            bestDistanceSquared =
-                distanceSquared;
-
-            bestTarget =
-                target;
+            bestDistanceSquared = distanceSquared;
+            bestTarget = target;
         }
 
         return bestTarget;
+    }
+
+    private static int FindNearestVisibleEnemyFromVision(
+        UnitStore units,
+        UnitHealthStore health,
+        VisionSystem vision,
+        int observer)
+    {
+        ReadOnlySpan<int> visible = vision.GetVisibleTargets(observer);
+        ushort observerFaction = units.FactionTag[observer];
+        Vector3 position = units.Position[observer];
+        int bestTarget = -1;
+        float bestDistanceSquared = float.PositiveInfinity;
+
+        for (int i = 0; i < visible.Length; i++)
+        {
+            int target = visible[i];
+            if ((uint)target >= (uint)units.Capacity ||
+                health.OverallHitPoints[target] <= 0f ||
+                !FactionRules.ShouldAttack(observerFaction, units.FactionTag[target]))
+                continue;
+
+            Vector3 delta = units.Position[target] - position;
+            float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
+            if (distanceSquared >= bestDistanceSquared)
+                continue;
+
+            bestDistanceSquared = distanceSquared;
+            bestTarget = target;
+        }
+
+        return bestTarget;
+    }
+
+    private bool HasFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition) =>
+        _perceptionMemory == null || TryGetFreshVisualContact(observer, target, out estimatedPosition);
+
+    internal bool TryGetFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition)
+    {
+        estimatedPosition = Vector3.Zero;
+        if (_perceptionMemory == null ||
+            !target.IsValid ||
+            !_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory) ||
+            !memory.TryGetContact(target, out TacticalContact contact) ||
+            contact.Kind != TacticalContactKind.VisualConfirmed ||
+            contact.SubjectUnit is not UnitId subject ||
+            !subject.Equals(target) ||
+            contact.LastVisualAtSeconds < 0f)
+            return false;
+
+        float visualAge = _perceptionMemory.CurrentTimeSeconds - contact.LastVisualAtSeconds;
+        if (!float.IsFinite(visualAge) ||
+            visualAge < 0f ||
+            visualAge >= TacticalContactMemory.VisualConfirmationGraceSeconds)
+            return false;
+
+        estimatedPosition = contact.EstimatedPosition;
+        return true;
+    }
+
+    private Vector3 GetObservedTargetPosition(UnitStore units, int observer, int targetIndex)
+    {
+        if (_perceptionMemory == null)
+            return units.Position[targetIndex];
+
+        return TryGetFreshVisualContact(observer, units.GetId(targetIndex), out Vector3 estimatedPosition)
+            ? estimatedPosition
+            : Vector3.Zero;
     }
 
     private static bool IsTargetVisible(
@@ -1785,7 +1843,7 @@ public sealed class UnitAiSystem
         return false;
     }
 
-    private static bool ShouldKeepCurrentVisibleTarget(
+    private bool ShouldKeepCurrentVisibleTarget(
         UnitStore units,
         UnitHealthStore health,
         VisionSystem vision,
@@ -1797,6 +1855,7 @@ public sealed class UnitAiSystem
         if (!units.IsAlive(currentTarget) ||
             health.OverallHitPoints[currentTarget.Index] <= 0f ||
             !IsHostile(units, observer, currentTarget.Index) ||
+            !HasFreshVisualContact(observer, currentTarget, out _) ||
             !vision.IsRecentlyVisible(observer, currentTarget.Index, units))
         {
             return false;
@@ -1806,7 +1865,7 @@ public sealed class UnitAiSystem
             return true;
 
         Vector3 observerPosition = units.Position[observer];
-        Vector3 newPosition = units.Position[newlyVisibleTarget];
+        Vector3 newPosition = GetObservedTargetPosition(units, observer, newlyVisibleTarget);
         float newDx = newPosition.X - observerPosition.X;
         float newDy = newPosition.Y - observerPosition.Y;
         float newDistanceSquared = newDx * newDx + newDy * newDy;
@@ -1818,7 +1877,7 @@ public sealed class UnitAiSystem
         if (newDistanceSquared > contactRange * contactRange)
             return true;
 
-        Vector3 currentPosition = units.Position[currentTarget.Index];
+        Vector3 currentPosition = GetObservedTargetPosition(units, observer, currentTarget.Index);
         float currentDx = currentPosition.X - observerPosition.X;
         float currentDy = currentPosition.Y - observerPosition.Y;
         float currentDistanceSquared = currentDx * currentDx + currentDy * currentDy;

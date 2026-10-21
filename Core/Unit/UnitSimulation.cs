@@ -173,7 +173,8 @@ public sealed class UnitSimulation
             new UnitAiSystem(
                 unitCapacity,
                 _weaponSystem,
-                Skills);
+                Skills,
+                PerceptionMemory);
         _aiSystem.Hearing = _hearingSystem;
 
         _meleeCombatSystem = new MeleeCombatSystem();

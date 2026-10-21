@@ -204,9 +204,9 @@ public sealed class GameRenderer
 
         // Combat event logging stays disabled to keep the console readable.
 
-        // Autonomous unit AI is intentionally disabled while its design is rebuilt.
-        // Keep simulation, vision, combat and the AI implementation itself available.
-        _unitSimulation.AI.Enabled = false;
+        // Use the shared per-unit perception memory for autonomous decisions from startup.
+        // A toggles autonomy for profiling; perception, vision and combat remain active.
+        _unitSimulation.AI.Enabled = true;
         _unitSimulation.VisionEnabled = true;
         _showVisionDebug = false;
 
@@ -3078,9 +3078,12 @@ public sealed class GameRenderer
         {
             ExecuteSimulationCommand(() =>
             {
-                _unitSimulation.AI.Enabled = false;
+                bool enabled = !_unitSimulation.AI.Enabled;
+                _unitSimulation.AI.Enabled = enabled;
                 _unitSimulation.VisionEnabled = true;
-                Console.WriteLine("[AI] Autonomous AI remains disabled for systematic redesign; vision enabled.");
+                Console.WriteLine(enabled
+                    ? "[AI] Autonomous AI enabled; targets require fresh visual contacts. Press A to pause."
+                    : "[AI] Autonomous AI paused; perception, vision and combat remain active. Press A to resume.");
             });
             return;
         }
@@ -3574,6 +3577,8 @@ public sealed class GameRenderer
             _showVisionDebug = false;
         }
 
+        _unitSimulation.VisionEnabled = true;
+        _unitSimulation.AI.Enabled = true;
         _massCombatTestScene.Start(
             _unitSimulation,
             _worldMap);

@@ -228,6 +228,24 @@ public static class PerceptionMemorySelfTest
         return false;
     }
 
+    public static bool AiVisualContactGateExpiresAfterSightIsLost()
+    {
+        if (!TryCreateVisionScenario(out WorldMap world, out UnitSimulation simulation,
+                out UnitId observer, out UnitId target))
+            return false;
+
+        simulation.Update(world, 0.11f);
+        if (!simulation.AI.TryGetFreshVisualContact(observer.Index, target, out Vector3 estimate) ||
+            Vector3.Distance(estimate, simulation.Units.Position[target.Index]) > 0.05f)
+            return false;
+
+        simulation.SetHeadNormal(observer, -Vector3.UnitX);
+        for (int i = 0; i < 4; i++)
+            simulation.Update(world, 0.11f);
+
+        return !simulation.AI.TryGetFreshVisualContact(observer.Index, target, out _);
+    }
+
     public static bool CachedVisibilityDoesNotRefreshLostContact()
     {
         if (!TryCreateVisionScenario(out WorldMap world, out UnitSimulation simulation,
