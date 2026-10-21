@@ -35,7 +35,7 @@
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
-    <node class="Sequence" id="7">    <node class="Sequence" id="7">
+    <node class="Sequence" id="7">
       <node class="Condition" id="8">
         <property Operator="Equal" />
         <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldRetreatToCover()" />
@@ -90,7 +90,7 @@
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
-    <node class="Sequence" id="10">    <node class="Sequence" id="10">
+    <node class="Sequence" id="10">
       <node class="Condition" id="11">
         <property Operator="Equal" />
         <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldEngageVisibleTarget()" />
@@ -158,7 +158,7 @@
         <property ResultOption="BT_INVALID" />
       </node>
     </node>
-    <node class="Action" id="23">    <node class="Action" id="23">
+    <node class="Action" id="23">
       <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectPatrol()" />
       <property ResultOption="BT_INVALID" />
     </node>
