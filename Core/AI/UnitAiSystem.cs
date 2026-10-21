@@ -1691,8 +1691,9 @@ public sealed class UnitAiSystem
         float currentDy = currentPosition.Y - observerPosition.Y;
         float currentDistanceSquared = currentDx * currentDx + currentDy * currentDy;
 
-        // A closer hostile within immediate-contact range beats target stickiness.
-        return newDistanceSquared >= currentDistanceSquared;
+        // Switch only for a meaningfully closer immediate threat. Tiny distance changes
+        // between rotating sensor samples must not continually replace the active target.
+        return newDistanceSquared >= currentDistanceSquared * 0.64f;
     }
 
     private static Vector3 GetMeleeEngagementPoint(
