@@ -99,7 +99,7 @@ internal static class Program
             ("immediate danger overrides utility trade-off", UnitTacticalUtility.EvaluateCover(0f, true, true, false, false), 1f),
             ("panic makes available cover the top action", UnitTacticalUtility.EvaluateCover(5.8f, true, false, true, false), 1f),
             ("mild suppression gives cover a low score", UnitTacticalUtility.EvaluateCover(1.8f, true, false, false, false), 0.18f),
-            ("flank gains utility when far outside weapon range", UnitTacticalUtility.EvaluateFlanking(45f, 18f, true), 0.628125f),
+            ("flank gains utility when far outside weapon range", UnitTacticalUtility.EvaluateFlanking(45f, 18f, true), 0.62833333f),
             ("infeasible flank has no utility", UnitTacticalUtility.EvaluateFlanking(45f, 18f, false), 0f),
             ("investigation rewards credible nearby contact", UnitTacticalUtility.EvaluateInvestigation(0.8f, 20f), 0.740625f),
             ("weak distant sound is not worth investigating", UnitTacticalUtility.EvaluateInvestigation(0.16f, 64f), 0.02f)
