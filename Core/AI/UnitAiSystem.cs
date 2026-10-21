@@ -299,6 +299,13 @@ public sealed class UnitAiSystem
 
             Store.LastIntent[unit] = intent;
 
+            if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
+                TryExecuteLastKnownInvestigation(units, weapons, worldMap, unit))
+            {
+                continue;
+            }
+
             if (!isAlive ||
                 (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.Dead))
             {
@@ -1191,6 +1198,38 @@ public sealed class UnitAiSystem
         Store.ClearTarget(unit);
         Store.SetGoal(unit, searchPoint);
         units.Target[unit] = searchPoint;
+        units.HasTarget[unit] = true;
+        Store.State[unit] = UnitAiState.Search;
+        return true;
+    }
+
+    private bool TryExecuteLastKnownInvestigation(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        WorldMap worldMap,
+        int unit)
+    {
+        if (!Store.HasTarget[unit] || Store.TargetMemory[unit] <= 0f)
+            return false;
+
+        Vector3 estimate = Store.LastSeenPosition[unit];
+        if (!float.IsFinite(estimate.X) ||
+            !float.IsFinite(estimate.Y) ||
+            !float.IsFinite(estimate.Z) ||
+            estimate == Vector3.Zero)
+            return false;
+
+        float x = Math.Clamp(estimate.X, 0.5f, worldMap.MaxTileX - 0.5f);
+        float y = Math.Clamp(estimate.Y, 0.5f, worldMap.MaxTileY - 0.5f);
+        int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
+        Vector3 destination = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
+
+        Store.ClearTarget(unit);
+        Store.ClearGoal(unit);
+        ClearAiming(weapons, unit);
+        Store.SetGoal(unit, destination);
+        units.Target[unit] = destination;
         units.HasTarget[unit] = true;
         Store.State[unit] = UnitAiState.Search;
         return true;

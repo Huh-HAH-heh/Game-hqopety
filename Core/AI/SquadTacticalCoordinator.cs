@@ -242,6 +242,25 @@ public sealed class SquadTacticalCoordinator
         }
     }
 
+    public bool IsMemberOfSquad(UnitId member, int squadId)
+    {
+        if (!member.IsValid || squadId <= 0)
+            return false;
+
+        lock (_gate)
+            return _membership.TryGetValue(member, out int currentSquad) &&
+                currentSquad == squadId;
+    }
+
+    public bool IsMemberOfAnySquad(UnitId member)
+    {
+        if (!member.IsValid)
+            return false;
+
+        lock (_gate)
+            return _membership.ContainsKey(member);
+    }
+
     public bool TryClaimFlank(UnitId member, UnitId target, float now)
     {
         if (!member.IsValid || !target.IsValid || !float.IsFinite(now)) return false;
