@@ -35,6 +35,7 @@ public sealed class UnitSimulation
     public UnitWeaponStore Weapons { get; }
     public ProjectileStore Projectiles { get; }
     public UnitSuppressionStore Suppression { get; }
+    public PerceptionMemoryStore PerceptionMemory { get; }
 
     private bool _visionEnabled = true;
 
@@ -151,7 +152,8 @@ public sealed class UnitSimulation
         Suppression =
             new UnitSuppressionStore(unitCapacity);
         Suppression.BindSkillStore(Skills);
-        _hearingSystem = new TacticalHearingSystem(unitCapacity);
+        PerceptionMemory = new PerceptionMemoryStore(unitCapacity);
+        _hearingSystem = new TacticalHearingSystem(unitCapacity, PerceptionMemory);
 
         _weaponSystem =
             new UnitWeaponSystem(HitRegions, Bodies, Skills, Health);
