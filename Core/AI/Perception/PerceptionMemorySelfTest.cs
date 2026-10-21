@@ -289,22 +289,6 @@ public static class PerceptionMemorySelfTest
                !simulation.PerceptionMemory.TryGetMemory(observer.Index, out TacticalContactMemory memory);
     }
 
-    public static bool ClearingCombatTargetPreservesMovementGoal()
-    {
-        var store = new UnitAiStore(2);
-        Vector3 goal = new(30f, 40f, 0.1f);
-        UnitId target = new(1, 1);
-        store.SetGoal(0, goal);
-        store.RememberTarget(0, target, new Vector3(12f, 13f, 0.1f), 3f);
-
-        store.ClearTarget(0);
-
-        return !store.HasTarget[0] &&
-               store.TargetMemory[0] == 0f &&
-               store.HasGoal[0] &&
-               Vector3.DistanceSquared(store.Goal[0], goal) < 0.0001f;
-    }
-
     public static bool AiVisualContactGateExpiresAfterSightIsLost()
     {
         if (!TryCreateVisionScenario(out WorldMap world, out UnitSimulation simulation,

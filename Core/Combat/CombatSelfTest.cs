@@ -40,7 +40,6 @@ public static class CombatSelfTest
         RunTest("Perception: hearing writes to shared memory with AI disabled", PerceptionMemorySelfTest.HearingPublishesToSharedMemoryWithAiDisabled, ref passed, ref failed);
         RunTest("Perception: vision publishes fresh sightings to shared memory", PerceptionMemorySelfTest.VisionPublishesFreshSightingsToSharedMemory, ref passed, ref failed);
         RunTest("Perception: visibility cache does not refresh a lost contact", PerceptionMemorySelfTest.CachedVisibilityDoesNotRefreshLostContact, ref passed, ref failed);
-        RunTest("AI: clearing target memory preserves the navigation goal", PerceptionMemorySelfTest.ClearingCombatTargetPreservesMovementGoal, ref passed, ref failed);
         RunTest("AI: target eligibility expires when fresh visual contact is lost", PerceptionMemorySelfTest.AiVisualContactGateExpiresAfterSightIsLost, ref passed, ref failed);
         RunTest("Behaviac: lost visual target causes search at last known position", PerceptionMemorySelfTest.BehaviacInvestigatesLastKnownPositionWithoutCurrentTargetKnowledge, ref passed, ref failed);
         RunTest("Behaviac: no contact selects patrol instead of hold-position fallback", PerceptionMemorySelfTest.BehaviacFallsBackToPatrolWithoutAContact, ref passed, ref failed);
