@@ -450,6 +450,7 @@ public sealed class UnitAiSystem
             {
                 ClearAiming(weapons, unit);
                 Store.ClearTarget(unit);
+                Store.ClearGoal(unit);
                 units.HasTarget[unit] = false;
             }
 
