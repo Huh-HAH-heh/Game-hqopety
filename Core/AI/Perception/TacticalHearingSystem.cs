@@ -12,7 +12,7 @@ namespace Core.AI.Perception;
 /// </summary>
 public sealed class TacticalHearingSystem
 {
-    private const float GunshotRange = 90f;
+    private const float GunshotRange = 180f;
     private const float GunshotMemorySeconds = 8f;
     private const float FootstepMemorySeconds = 3f;
     private const float ConfidenceHalfLifeSeconds = 2.5f;
