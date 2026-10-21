@@ -48,8 +48,8 @@ public sealed class UnitAiSystem
     public bool LastUpdateRanThinkPass { get; private set; }
 
     /// <summary>
-    /// Uses Behaviac for high-level unit intent selection.
-    /// Enabled by default on this experiment branch; set RIMCLONE_USE_BEHAVIAC_AI=0 for legacy AI.
+    /// Optional Behaviac high-level intent selection. Disabled by default; set
+    /// RIMCLONE_USE_BEHAVIAC_AI=1 to opt in. The legacy AI remains active when disabled.
     /// </summary>
     public bool UseBehaviacDecisionLayer { get; set; }
 
@@ -92,11 +92,11 @@ public sealed class UnitAiSystem
             weaponSystem ?? new UnitWeaponSystem();
         _skills = skills;
 
-        // New branch uses Behaviac by default. Set RIMCLONE_USE_BEHAVIAC_AI=0
-        // to compare against the legacy decision path.
-        UseBehaviacDecisionLayer = !string.Equals(
+        // Keep the Behaviac tree, actions, and tactical utility scores in source,
+        // but execute them only when explicitly enabled for an experiment.
+        UseBehaviacDecisionLayer = string.Equals(
             Environment.GetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI"),
-            "0",
+            "1",
             StringComparison.Ordinal);
     }
 
