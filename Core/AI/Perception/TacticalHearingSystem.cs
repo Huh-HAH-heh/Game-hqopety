@@ -18,16 +18,20 @@ public sealed class TacticalHearingSystem
     private const float ConfidenceHalfLifeSeconds = 2.5f;
     private const float MinimumContactConfidence = 0.12f;
     private readonly List<SoundPulse> _pendingPulses = new();
-    private TacticalContactMemory?[] _memories;
+    private readonly PerceptionMemoryStore _memoryStore;
     private float[] _footstepCooldown;
     private long _nextPulseId = 1;
-    public float CurrentTimeSeconds { get; private set; }
+    public float CurrentTimeSeconds => _memoryStore.CurrentTimeSeconds;
 
-    public TacticalHearingSystem(int initialUnitCapacity = 1024)
+    public TacticalHearingSystem(
+        int initialUnitCapacity = 1024,
+        PerceptionMemoryStore? memoryStore = null)
     {
         if (initialUnitCapacity <= 0)
             throw new ArgumentOutOfRangeException(nameof(initialUnitCapacity));
-        _memories = new TacticalContactMemory?[initialUnitCapacity];
+
+        _memoryStore = memoryStore ?? new PerceptionMemoryStore(initialUnitCapacity);
+        _memoryStore.EnsureCapacity(initialUnitCapacity);
         _footstepCooldown = new float[initialUnitCapacity];
     }
 
@@ -82,9 +86,7 @@ public sealed class TacticalHearingSystem
         if (!float.IsFinite(nowSeconds) || nowSeconds < CurrentTimeSeconds)
             throw new ArgumentOutOfRangeException(nameof(nowSeconds));
         EnsureCapacity(units.Capacity);
-        CurrentTimeSeconds = nowSeconds;
-        for (int i = 0; i < _memories.Length; i++)
-            _memories[i]?.AdvanceTime(nowSeconds);
+        _memoryStore.AdvanceTime(nowSeconds);
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f)
             return;
         CollectFootsteps(units, health, deltaTime, nowSeconds);
@@ -97,18 +99,15 @@ public sealed class TacticalHearingSystem
         if (unitIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(unitIndex));
         EnsureCapacity(unitIndex + 1);
-        _memories[unitIndex]?.Clear();
-        _memories[unitIndex] = null;
+        _memoryStore.InitializeUnit(unitIndex);
         _footstepCooldown[unitIndex] = 0f;
     }
 
     public void ClearUnit(int unitIndex)
     {
-        if ((uint)unitIndex >= (uint)_memories.Length)
-            return;
-        _memories[unitIndex]?.Clear();
-        _memories[unitIndex] = null;
-        _footstepCooldown[unitIndex] = 0f;
+        _memoryStore.ClearUnit(unitIndex);
+        if ((uint)unitIndex < (uint)_footstepCooldown.Length)
+            _footstepCooldown[unitIndex] = 0f;
     }
 
     public bool HasInvestigableContact(int observerIndex) =>
@@ -117,8 +116,7 @@ public sealed class TacticalHearingSystem
     public bool TryGetBestInvestigableContact(int observerIndex, out TacticalContact contact)
     {
         contact = null!;
-        if ((uint)observerIndex >= (uint)_memories.Length ||
-            _memories[observerIndex] is not TacticalContactMemory memory)
+        if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
             return false;
         float bestScore = 0f;
         IReadOnlyList<TacticalContact> contacts = memory.Contacts;
@@ -149,8 +147,7 @@ public sealed class TacticalHearingSystem
     public bool TryGetBestImmediateDangerContact(int observerIndex, out TacticalContact contact)
     {
         contact = null!;
-        if ((uint)observerIndex >= (uint)_memories.Length ||
-            _memories[observerIndex] is not TacticalContactMemory memory)
+        if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
             return false;
 
         float bestScore = 0f;
@@ -175,8 +172,7 @@ public sealed class TacticalHearingSystem
 
     public bool MarkInvestigated(int observerIndex, long contactId)
     {
-        if ((uint)observerIndex >= (uint)_memories.Length ||
-            _memories[observerIndex] is not TacticalContactMemory memory)
+        if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
             return false;
         return memory.MarkInvestigated(contactId);
     }
@@ -260,10 +256,13 @@ public sealed class TacticalHearingSystem
                     ? 1.5f + distance * 0.20f
                     : 4f + distance * 0.22f;
                 Vector3 estimate = EstimatePosition(pulse, observer, error, attenuation);
-                TacticalContactMemory memory = _memories[observer] ??= new TacticalContactMemory();
-                memory.Record(new TacticalStimulus(
-                    pulse.Type, estimate, pulse.OccurredAtSeconds,
-                    pulse.Intensity, error, confidence), nowSeconds, lifetime);
+                _memoryStore.Record(
+                    observer,
+                    new TacticalStimulus(
+                        pulse.Type, estimate, pulse.OccurredAtSeconds,
+                        pulse.Intensity, error, confidence),
+                    nowSeconds,
+                    lifetime);
 
                 float alertFactor = pulse.Type switch
                 {
@@ -391,11 +390,9 @@ public sealed class TacticalHearingSystem
 
     private void EnsureCapacity(int required)
     {
-        if (required <= _memories.Length)
-            return;
-        int capacity = Math.Max(required, _memories.Length * 2);
-        Array.Resize(ref _memories, capacity);
-        Array.Resize(ref _footstepCooldown, capacity);
+        _memoryStore.EnsureCapacity(required);
+        if (_footstepCooldown.Length < required)
+            Array.Resize(ref _footstepCooldown, Math.Max(required, _footstepCooldown.Length * 2));
     }
 
     private static bool IsFinite(Vector3 value) =>
