@@ -3,9 +3,9 @@ using System;
 namespace Core.Unit;
 
 /// <summary>
-/// Shared utility scores and switch margins used by the Behaviac policy tree.
-/// Utilities compare available actions; the decision tree still owns priority
-/// and explicit order semantics.
+/// Pure utility formulas currently used by the hybrid decision layer.
+/// These formulas intentionally preserve the existing behavior; they are
+/// centralized here before the available-action scoring model is expanded.
 /// </summary>
 public static class UnitTacticalUtility
 {
@@ -14,15 +14,13 @@ public static class UnitTacticalUtility
     private const float MoveOrderDistanceBonus = 0.30f;
     private const float SuppressionMovePenalty = 0.12f;
     private const float LowHealthMovePenalty = 0.10f;
-    private const float CoverSuppressedThreshold = UnitSuppressionStore.SuppressedThreshold;
-    private const float CoverPanickedThreshold = UnitSuppressionStore.PanickedThreshold;
+    private const float CoverSuppressedThreshold = 1.8f;
+    private const float CoverPanickedThreshold = 5.8f;
     private const float InvestigationDistanceForMaxPenalty = 64f;
 
     public const float FlankUtilityAdvantage = 0.08f;
-    public const float CoverSwitchHysteresis = 0.08f;
-    public const float CoverContinuationHysteresis = 0.12f;
-    public const float MoveOrderSwitchHysteresis = 0.10f;
     public const float MinimumInvestigationUtility = 0.24f;
+    public const float MinimumSquadContactUtility = 0.30f;
 
     public static float EvaluateMoveOrder(
         float distance,
@@ -84,12 +82,10 @@ public static class UnitTacticalUtility
             0f,
             1f);
 
-        // Cover should become a competitive choice as suppression rises,
-        // including in close combat, but not at the first low suppression tick.
         return Math.Clamp(
-            0.22f +
-            pressure * 0.78f +
-            (lowHealth ? 0.12f : 0f),
+            0.18f +
+            pressure * 0.66f +
+            (lowHealth ? 0.16f : 0f),
             0f,
             1f);
     }
@@ -113,17 +109,14 @@ public static class UnitTacticalUtility
             0f,
             1f);
         float distanceAdvantage = Math.Clamp(
-            (distance - 30f) / 50f,
+            (distance - 24f) / 36f,
             0f,
             1f);
 
-        // At a safe engagement distance, some healthy riflemen should value
-        // a different firing angle enough to flank; close-range contact still
-        // favors immediate fire over a wide detour.
         return Math.Clamp(
-            0.40f +
-            rangeDeficit * 0.15f +
-            distanceAdvantage * 0.45f,
+            0.32f +
+            rangeDeficit * 0.18f +
+            distanceAdvantage * 0.22f,
             0f,
             1f);
     }
@@ -161,10 +154,8 @@ public static class UnitTacticalUtility
         if (!float.IsFinite(healthRatio))
             healthRatio = 0f;
 
-        // Prone is reserved for very long, exposed shots; it should not
-        // compete with standing fire during ordinary rifle engagements.
         float distanceAdvantage = Math.Clamp(
-            (distanceToTarget - 70f) / 70f,
+            (distanceToTarget - 9f) / 25f,
             0f,
             1f);
         float exposureAdvantage = exposed ? 1f : 0.2f;
