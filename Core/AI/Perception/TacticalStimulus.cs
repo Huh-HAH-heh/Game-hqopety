@@ -30,6 +30,7 @@ public enum TacticalStimulusType : byte
 public sealed class TacticalStimulus
 {
     public TacticalStimulusType Type { get; }
+    public PerceptionSense Sense { get; }
     public Vector3 Position { get; }
     public float OccurredAtSeconds { get; }
     public float Intensity { get; }
@@ -46,10 +47,13 @@ public sealed class TacticalStimulus
         float positionErrorRadius = 0f,
         float confidence = 1f,
         UnitId? subjectUnit = null,
-        UnitId? reporterUnit = null)
+        UnitId? reporterUnit = null,
+        PerceptionSense? sense = null)
     {
         if (!Enum.IsDefined(type) || type == TacticalStimulusType.Unknown)
             throw new ArgumentOutOfRangeException(nameof(type), "A concrete stimulus type is required.");
+        if (sense.HasValue && !Enum.IsDefined(sense.Value))
+            throw new ArgumentOutOfRangeException(nameof(sense));
         if (!IsFinite(position))
             throw new ArgumentOutOfRangeException(nameof(position), "Stimulus position must be finite.");
         if (!float.IsFinite(occurredAtSeconds) || occurredAtSeconds < 0f)
@@ -67,6 +71,7 @@ public sealed class TacticalStimulus
         }
 
         Type = type;
+        Sense = sense ?? ResolveSense(type);
         Position = position;
         OccurredAtSeconds = occurredAtSeconds;
         Intensity = Math.Clamp(intensity, 0f, 1f);
@@ -75,6 +80,19 @@ public sealed class TacticalStimulus
         SubjectUnit = ValidOrNull(subjectUnit);
         ReporterUnit = ValidOrNull(reporterUnit);
     }
+
+    private static PerceptionSense ResolveSense(TacticalStimulusType type) =>
+        type switch
+        {
+            TacticalStimulusType.VisualContact => PerceptionSense.Visual,
+            TacticalStimulusType.Gunshot or
+            TacticalStimulusType.Footstep or
+            TacticalStimulusType.Explosion or
+            TacticalStimulusType.NearMiss or
+            TacticalStimulusType.CoverImpact => PerceptionSense.Auditory,
+            TacticalStimulusType.AllyContactReport => PerceptionSense.Communication,
+            _ => PerceptionSense.Unknown
+        };
 
     private static UnitId? ValidOrNull(UnitId? id) =>
         id.HasValue && id.Value.IsValid ? id : null;
