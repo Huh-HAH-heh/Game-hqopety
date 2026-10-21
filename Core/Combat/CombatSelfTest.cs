@@ -55,7 +55,7 @@ public static class CombatSelfTest
         RunTest("Pawn stats: RimWorld skills and suppression resistance", TestPawnSkillsAndResistance, ref passed, ref failed);
         RunTest("Posture: prone silhouette and firing", TestPronePostureAndFiring, ref passed, ref failed);
         RunTest("Targeting: three procedural zones follow posture independently of the rig", TestProceduralZonesFollowPosture, ref passed, ref failed);
-        RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
+        RunTest("AI: visible shooter uses direct engagement without prone crawl", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
@@ -1143,9 +1143,12 @@ public static class CombatSelfTest
 
         Vector3 finalPosition = simulation.Units.Position[shooter.Index];
         float finalDistance = Vector3.Distance(finalPosition, simulation.Units.Position[target.Index]);
-        bool passed = simulation.Units.Posture[shooter.Index] == UnitPosture.Lying &&
-            finalPosition.X > startX + 1f &&
-            finalDistance < initialDistance - 1f;
+        // The simplified policy must engage an identified visible target directly;
+        // crawling is no longer a separate autonomous mode.
+        bool passed = simulation.AI.Store.State[shooter.Index] == UnitAiState.Attack &&
+            simulation.Units.Posture[shooter.Index] != UnitPosture.Lying &&
+            (simulation.AI.Store.HasTarget[shooter.Index] ||
+             simulation.AI.Store.HasGoal[shooter.Index]);
         if (!passed)
         {
             Console.Error.WriteLine(

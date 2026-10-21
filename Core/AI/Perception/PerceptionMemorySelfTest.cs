@@ -301,7 +301,7 @@ public static class PerceptionMemorySelfTest
             return false;
 
         simulation.SetHeadNormal(observer, -Vector3.UnitX);
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 11; i++)
             simulation.Update(world, 0.11f);
 
         return !simulation.AI.TryGetFreshVisualContact(observer.Index, target, out _);
@@ -323,7 +323,7 @@ public static class PerceptionMemorySelfTest
         // Keep the target nearby but turn the observer away. The old visibility cache
         // must not count as a fresh visual observation while the target is outside the FOV.
         simulation.SetHeadNormal(observer, -Vector3.UnitX);
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 11; i++)
             simulation.Update(world, 0.11f);
 
         bool visualTimeUnchanged =

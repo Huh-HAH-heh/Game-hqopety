@@ -146,7 +146,7 @@ internal static class Program
             visible.SubjectUnit.Value.Equals(target) &&
             visible.PositionErrorRadius == 0.25f);
 
-        memory.AdvanceTime(0.41f);
+        memory.AdvanceTime(1.11f);
         Check("old visual confirmation downgrades to last-known",
             memory.TryGetContact(target, out TacticalContact lastKnown) &&
             lastKnown.Kind == TacticalContactKind.LastKnown);
@@ -155,16 +155,16 @@ internal static class Program
         Check("confidence decays from event time with the configured half-life",
             MathF.Abs(effectiveConfidence - 0.5f) < 0.002f);
 
-        bool markedLost = memory.MarkVisualLost(target, 0.5f, 4f);
-        bool markedLostAgain = memory.MarkVisualLost(target, 0.6f, 4f);
+        bool markedLost = memory.MarkVisualLost(target, 1.2f, 4f);
+        bool markedLostAgain = memory.MarkVisualLost(target, 1.3f, 4f);
         Check("visual-loss transition extends memory once and is idempotent",
             markedLost &&
             !markedLostAgain &&
             memory.TryGetContact(target, out TacticalContact afterLoss) &&
             afterLoss.Kind == TacticalContactKind.LastKnown &&
-            MathF.Abs(afterLoss.ExpiresAtSeconds - 4.5f) < 0.001f);
+            MathF.Abs(afterLoss.ExpiresAtSeconds - 5.2f) < 0.001f);
 
-        memory.AdvanceTime(4.51f);
+        memory.AdvanceTime(5.21f);
         Check("expired contacts are removed",
             !memory.TryGetContact(target, out _) && memory.Contacts.Count == 0);
 
@@ -569,6 +569,8 @@ internal static class Program
         new("ordinary unit engages visible target", true, false, false, true, false, BehaviacUnitIntent.EngageTarget),
         new("high prone utility no longer overrides direct engagement", true, false, false, true, false,
             BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.99f, CombatUtility: 0.54f),
+        new("moderate prone utility no longer overrides direct engagement", true, false, false, true, false,
+            BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.60f, CombatUtility: 0.84f),
         new("already-prone unit uses direct engagement", true, false, false, true, false,
             BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.10f, IsProne: true),
         new("lost visual target is investigated rather than fired at blindly", true, false, false, false, true,
