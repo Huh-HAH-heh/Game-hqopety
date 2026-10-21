@@ -566,11 +566,11 @@ internal static class Program
         new("ongoing flank survives closing distance", true, false, false, true, false,
             BehaviacUnitIntent.FlankTarget, false, true, CombatUtility: 0.95f, FlankUtility: 0f),
         new("ordinary unit engages visible target", true, false, false, true, false, BehaviacUnitIntent.EngageTarget),
-        new("prone position wins against low-value firing", true, false, false, true, false,
-            BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.75f, CombatUtility: 0.54f),
+        new("prone position wins when its utility exceeds the entry threshold", true, false, false, true, false,
+            BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.99f, CombatUtility: 0.54f),
         new("prone loses when standing fire has better utility", true, false, false, true, false,
             BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.60f, CombatUtility: 0.84f),
-        new("already-prone unit keeps crawling as the target closes", true, false, false, true, false, BehaviacUnitIntent.ProneEngage, ProneCombatUtility: 0.10f, IsProne: true),
+        new("already-prone unit exits prone when its utility falls below the exit threshold", true, false, false, true, false, BehaviacUnitIntent.EngageTarget, ProneCombatUtility: 0.10f, IsProne: true),
         new("lost target with suppressive weapon uses fire support", true, false, false, false, true, BehaviacUnitIntent.SuppressiveFire, false, false, false, true),
         new("recent target without suppressive weapon is investigated", true, false, false, false, true, BehaviacUnitIntent.InvestigateLastKnownTarget),
         new("no target falls back to patrol", true, false, false, false, false, BehaviacUnitIntent.Patrol),
@@ -678,18 +678,20 @@ internal static class Program
 
         if (test.HasVisibleTarget)
         {
-            if (!test.IsSuppressed &&
+            float proneThreshold = test.IsProne ? 0.90f : 0.96f;
+            float proneCombatMargin = test.IsProne ? 0f : 0.10f;
+            bool shouldRemainProne =
+                !test.IsSuppressed &&
                 !test.IsLowHealth &&
                 !test.IsFlanking &&
-                (test.IsProne ||
-                 (test.ProneCombatUtility >= 0.60f &&
-                  test.ProneCombatUtility > test.CombatUtility &&
-                  !flankWins)))
-            {
-                return BehaviacUnitIntent.ProneEngage;
-            }
+                test.ProneCombatUtility >= proneThreshold &&
+                test.ProneCombatUtility > test.CombatUtility + proneCombatMargin &&
+                (!test.CanFlank ||
+                 test.FlankUtility <= test.CombatUtility + UnitTacticalUtility.FlankUtilityAdvantage);
 
-            return BehaviacUnitIntent.EngageTarget;
+            return shouldRemainProne
+                ? BehaviacUnitIntent.ProneEngage
+                : BehaviacUnitIntent.EngageTarget;
         }
 
         if (test.HasRecentTarget && test.HasSuppressiveWeapon)

@@ -285,7 +285,8 @@ public static class PerceptionMemorySelfTest
             simulation.Vision, world, 0.16f);
 
         return simulation.AI.Store.LastIntent[observer.Index] == BehaviacUnitIntent.Patrol &&
-               simulation.AI.Store.State[observer.Index] == UnitAiState.Search;
+               !simulation.AI.Store.HasTarget[observer.Index] &&
+               !simulation.PerceptionMemory.TryGetMemory(observer.Index, out TacticalContactMemory memory);
     }
 
     public static bool AiVisualContactGateExpiresAfterSightIsLost()
