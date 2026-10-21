@@ -93,13 +93,13 @@ internal static class Program
             ("long combat utility upper boundary", UnitTacticalUtility.EvaluateVisibleCombat(24f, true), 0.68f),
             ("distant combat utility", UnitTacticalUtility.EvaluateVisibleCombat(24.01f, true), 0.54f),
             ("exposed prone firing utility at minimum distance", UnitTacticalUtility.EvaluateProneFiring(9f, true, 1f), 0.35f),
-            ("exposed distant prone firing utility", UnitTacticalUtility.EvaluateProneFiring(34f, true, 1f), 1f),
-            ("cover lowers prone-position advantage", UnitTacticalUtility.EvaluateProneFiring(34f, false, 1f), 0.80f),
+            ("exposed distant prone firing utility", UnitTacticalUtility.EvaluateProneFiring(140f, true, 1f), 1f),
+            ("cover lowers prone-position advantage at long range", UnitTacticalUtility.EvaluateProneFiring(140f, false, 1f), 0.80f),
             ("missing cover makes cover action infeasible", UnitTacticalUtility.EvaluateCover(5.8f, false, false, false, false), 0f),
             ("immediate danger overrides utility trade-off", UnitTacticalUtility.EvaluateCover(0f, true, true, false, false), 1f),
             ("panic makes available cover the top action", UnitTacticalUtility.EvaluateCover(5.8f, true, false, true, false), 1f),
-            ("mild suppression gives cover a low score", UnitTacticalUtility.EvaluateCover(1.8f, true, false, false, false), 0.18f),
-            ("flank gains utility when far outside weapon range", UnitTacticalUtility.EvaluateFlanking(45f, 18f, true), 0.62833333f),
+            ("mild suppression gives cover a low score", UnitTacticalUtility.EvaluateCover(1.8f, true, false, false, false), 0.22f),
+            ("flank gains utility when far outside weapon range", UnitTacticalUtility.EvaluateFlanking(45f, 18f, true), 0.685f),
             ("infeasible flank has no utility", UnitTacticalUtility.EvaluateFlanking(45f, 18f, false), 0f),
             ("investigation rewards credible nearby contact", UnitTacticalUtility.EvaluateInvestigation(0.8f, 20f), 0.740625f),
             ("weak distant sound is not worth investigating", UnitTacticalUtility.EvaluateInvestigation(0.16f, 64f), 0.02f)
@@ -228,14 +228,15 @@ internal static class Program
                 subjectUnit: resolvedTarget),
             1.2f,
             5f);
-        Check("identified report can resolve an earlier uncertain sound contact",
+        Check("identified report does not guess the identity of an earlier uncertain sound",
             audioContact != null &&
             resolvedContact != null &&
-            audioContact.ContactId == resolvedContact.ContactId &&
+            audioContact.ContactId != resolvedContact.ContactId &&
+            !audioContact.SubjectUnit.HasValue &&
             resolvedContact.SubjectUnit.HasValue &&
             resolvedContact.SubjectUnit.Value.Equals(resolvedTarget) &&
             resolvedContact.Kind == TacticalContactKind.Reported &&
-            resolvingMemory.Contacts.Count == 1);
+            resolvingMemory.Contacts.Count == 2);
 
         UnitId reporter = new(4, 1);
         UnitId reportedTarget = new(8, 3);
