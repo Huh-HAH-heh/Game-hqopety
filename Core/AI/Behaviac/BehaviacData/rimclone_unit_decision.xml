@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Editable Behaviac XML policy tree for RimClone units. -->
-<behavior name="rimclone_unit_decision" agenttype="Core::AI::Behaviac::BehaviacUnitDecisionAgent" version="6">
+<behavior name="rimclone_unit_decision" agenttype="Core::AI::Behaviac::BehaviacUnitDecisionAgent" version="5">
   <node class="Selector" id="0">
     <node class="Sequence" id="1">
       <node class="Condition" id="2">
