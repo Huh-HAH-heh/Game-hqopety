@@ -16,7 +16,10 @@ public enum BehaviacUnitIntent : byte
     AttackOrder = 9,
     HoldPositionEngage = 10,
     InvestigateAudibleContact = 11,
-    Panic = 12
+    Panic = 12,
+    InvestigateLastKnownTarget = 13,
+    SuppressiveFire = 14,
+    Patrol = 15
 }
 
 /// <summary>
