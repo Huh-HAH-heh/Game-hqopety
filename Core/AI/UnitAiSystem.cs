@@ -1,8 +1,8 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using Core.AI;
 using Core.AI.Behaviac;
 using Core.AI.Perception;
@@ -20,6 +20,7 @@ public sealed class UnitAiSystem
     private const float CoverSearchRadius = 8f;
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
+    private const float ProneCrawlFiringDistance = 9f;
     private static readonly int MaxAiPlanningParallelism =
         Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
@@ -33,27 +34,29 @@ public sealed class UnitAiSystem
     private Vector3[] _suppressionCoverByUnit = Array.Empty<Vector3>();
     private bool[] _hasSuppressionCoverByUnit = Array.Empty<bool>();
     private BehaviacUnitDecisionAgent?[] _behaviacAgents = Array.Empty<BehaviacUnitDecisionAgent?>();
-
+    private UnitId[] _flankTargetByUnit = Array.Empty<UnitId>();
+    private bool[] _hasFlankTargetByUnit = Array.Empty<bool>();
     private bool _behaviacInitialized;
 
     private readonly UnitWeaponSystem _weaponSystem;
     private readonly UnitSkillStore? _skills;
     private readonly PerceptionMemoryStore? _perceptionMemory;
+    private readonly SquadTacticalCoordinator _squadCoordinator = new();
     private float _thinkTimer;
     private float _tacticalTimeSeconds;
-    private readonly SquadTacticalCoordinator _squadCoordinator = new();
 
     public bool Enabled { get; set; }
     public bool LastUpdateRanThinkPass { get; private set; }
 
     /// <summary>
-    /// Optional Behaviac high-level intent selection. Disabled by default; set
-    /// RIMCLONE_USE_BEHAVIAC_AI=1 to opt in. The legacy AI remains active when disabled.
+    /// Uses Behaviac for high-level unit intent selection.
+    /// Enabled by default on this experiment branch; set RIMCLONE_USE_BEHAVIAC_AI=0 for legacy AI.
     /// </summary>
     public bool UseBehaviacDecisionLayer { get; set; }
 
-    public TacticalHearingSystem? Hearing { get; set; }
     public UnitAiStore Store { get; }
+    public double LastPlanningMilliseconds { get; private set; }
+    public TacticalHearingSystem? Hearing { get; set; }
     public SquadTacticalCoordinator SquadCoordinator => _squadCoordinator;
 
     public void SynchronizeSquadMemberships(IReadOnlyList<SquadMembershipSnapshot> squads) =>
@@ -61,7 +64,12 @@ public sealed class UnitAiSystem
 
     public void InvalidateSquadUnit(UnitId unit) =>
         _squadCoordinator.InvalidateUnit(unit);
-    public double LastPlanningMilliseconds { get; private set; }
+
+    public int LastBehaviacMoveOrderDecisions { get; private set; }
+    public int LastBehaviacHoldOrderDecisions { get; private set; }
+    public int LastBehaviacAttackOrderDecisions { get; private set; }
+    public int LastBehaviacHoldAndEngageDecisions { get; private set; }
+    public int LastBehaviacPanicDecisions { get; private set; }
 
     public bool BehaviacRuntimeReady => _behaviacInitialized;
     public long TotalBehaviacDecisions { get; private set; }
@@ -72,11 +80,9 @@ public sealed class UnitAiSystem
     public int LastBehaviacRetreatDecisions { get; private set; }
     public int LastBehaviacFlankDecisions { get; private set; }
     public int LastBehaviacEngageDecisions { get; private set; }
+    public int LastBehaviacSuppressDecisions { get; private set; }
     public int LastBehaviacInvestigateDecisions { get; private set; }
-    public int LastBehaviacMoveOrderDecisions { get; private set; }
-    public int LastBehaviacHoldOrderDecisions { get; private set; }
-    public int LastBehaviacAttackOrderDecisions { get; private set; }
-    public int LastBehaviacHoldAndEngageDecisions { get; private set; }
+    public int LastBehaviacPatrolDecisions { get; private set; }
 
     public UnitAiSystem(
         int initialUnitCapacity = 1024,
@@ -93,11 +99,11 @@ public sealed class UnitAiSystem
         _skills = skills;
         _perceptionMemory = perceptionMemory;
 
-        // Keep the Behaviac tree, actions, and tactical utility scores in source,
-        // but execute them only when explicitly enabled for an experiment.
-        UseBehaviacDecisionLayer = string.Equals(
+        // New branch uses Behaviac by default. Set RIMCLONE_USE_BEHAVIAC_AI=0
+        // to compare against the legacy decision path.
+        UseBehaviacDecisionLayer = !string.Equals(
             Environment.GetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI"),
-            "1",
+            "0",
             StringComparison.Ordinal);
     }
 
@@ -105,6 +111,8 @@ public sealed class UnitAiSystem
     {
         EnsurePlanningCapacity(unitIndex + 1);
         _searchPatrolLegByUnit[unitIndex] = 0;
+        _flankTargetByUnit[unitIndex] = default;
+        _hasFlankTargetByUnit[unitIndex] = false;
     }
 
     public void ClearUnit(int unitIndex)
@@ -113,6 +121,8 @@ public sealed class UnitAiSystem
             return;
 
         _searchPatrolLegByUnit[unitIndex] = 0;
+        _flankTargetByUnit[unitIndex] = default;
+        _hasFlankTargetByUnit[unitIndex] = false;
         if ((uint)unitIndex < (uint)_behaviacAgents.Length)
             _behaviacAgents[unitIndex] = null;
     }
@@ -147,6 +157,8 @@ public sealed class UnitAiSystem
             _thinkTimer;
 
         _thinkTimer = 0f;
+        _tacticalTimeSeconds += thinkDelta;
+        _squadCoordinator.Advance(_tacticalTimeSeconds);
         LastUpdateRanThinkPass = true;
 
         // Preserve these results between think ticks so the one-second
@@ -159,11 +171,14 @@ public sealed class UnitAiSystem
         LastBehaviacRetreatDecisions = 0;
         LastBehaviacFlankDecisions = 0;
         LastBehaviacEngageDecisions = 0;
+        LastBehaviacSuppressDecisions = 0;
         LastBehaviacInvestigateDecisions = 0;
+        LastBehaviacPatrolDecisions = 0;
         LastBehaviacMoveOrderDecisions = 0;
         LastBehaviacHoldOrderDecisions = 0;
         LastBehaviacAttackOrderDecisions = 0;
         LastBehaviacHoldAndEngageDecisions = 0;
+        LastBehaviacPanicDecisions = 0;
 
         Store.EnsureCapacity(
             units.Capacity);
@@ -193,9 +208,6 @@ public sealed class UnitAiSystem
             }
         }
 
-        _tacticalTimeSeconds += thinkDelta;
-        _squadCoordinator.Advance(_tacticalTimeSeconds);
-
         LastPlanningMilliseconds =
             Stopwatch.GetElapsedTime(planningStarted).TotalMilliseconds;
 
@@ -215,11 +227,6 @@ public sealed class UnitAiSystem
                     0f,
                     Store.SuppressionCoverRetry[unit] - thinkDelta);
 
-            bool reachedSuppressionCover = Store.State[unit] == UnitAiState.SeekCover &&
-                Store.HasGoal[unit] &&
-                ReachedGoal(units.Position[unit], Store.Goal[unit]);
-            suppression.SetInCover(unit, reachedSuppressionCover);
-
             UnitSuppressionState suppressionState =
                 suppression.GetState(unit);
 
@@ -236,6 +243,20 @@ public sealed class UnitAiSystem
                 LastBehaviacDecisionBatchMilliseconds +=
                     Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
 
+                // A visible hostile must not be ignored because the tree returns a
+                // stale Patrol intent; low-health retreat and suppression panic still win.
+                bool currentTargetVisible = Store.HasTarget[unit] &&
+                    units.IsAlive(Store.Target[unit]) &&
+                    IsHostile(units, unit, Store.Target[unit].Index) &&
+                    vision.IsRecentlyVisible(unit, Store.Target[unit].Index, units);
+                if (intent == BehaviacUnitIntent.Patrol &&
+                    (_nearestVisibleEnemyByUnit[unit] >= 0 || currentTargetVisible) &&
+                    suppressionState != UnitSuppressionState.Panicked &&
+                    !IsLowHealth(health, unit))
+                {
+                    intent = BehaviacUnitIntent.EngageTarget;
+                }
+
                 RecordBehaviacIntent(intent);
             }
 
@@ -244,58 +265,49 @@ public sealed class UnitAiSystem
             if (!isAlive ||
                 (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.Dead))
             {
+                _hasFlankTargetByUnit[unit] = false;
+                _flankTargetByUnit[unit] = default;
                 ClearAiming(weapons, unit);
                 units.HasTarget[unit] = false;
                 Store.ClearGoal(unit);
-                Store.ClearPlayerOrder(unit);
                 Store.State[unit] = UnitAiState.Dead;
                 units.Posture[unit] = UnitPosture.Lying;
                 continue;
             }
 
             if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.Panic &&
-                suppressionState == UnitSuppressionState.Panicked)
-            {
-                // If no cover can be reached, panic interrupts firing and movement
-                // orders; retain target memory so the soldier can recover and re-engage.
-                ClearAiming(weapons, unit);
-                for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
-                    weapons.StartBurst(unit, (UnitWeaponSlot)slot, default, 0, 0f);
-                Store.ClearGoal(unit);
-                units.Target[unit] = units.Position[unit];
-                units.HasTarget[unit] = false;
-                units.Posture[unit] = UnitPosture.Lying;
-                Store.State[unit] = UnitAiState.Idle;
-                continue;
-            }
-
-            if (UseBehaviacDecisionLayer &&
-                suppressionState != UnitSuppressionState.Panicked &&
-                TryExecutePlayerOrderIntent(
-                    units, health, weapons, vision, worldMap, unit, intent))
+                intent == BehaviacUnitIntent.InvestigateAudibleContact &&
+                TryExecuteAudibleInvestigation(units, weapons, worldMap, unit))
             {
                 continue;
             }
 
             if (UseBehaviacDecisionLayer &&
-                suppressionState != UnitSuppressionState.Panicked &&
-                intent == BehaviacUnitIntent.SeekCover)
+                Store.PlayerOrderType[unit] != UnitAiOrderType.None)
             {
-                // A non-panicked but suppressed/low-health unit may still seek
-                // cover under a Hold order. Move to the planned cover, then let
-                // the tree resume HoldPositionEngage once it is reached.
-                if (!Store.HasGoal[unit] && _hasSuppressionCoverByUnit[unit])
-                    Store.SetGoal(unit, _suppressionCoverByUnit[unit]);
-
-                if (Store.HasGoal[unit] &&
-                    !ReachedGoal(units.Position[unit], Store.Goal[unit]))
-                {
-                    ClearAiming(weapons, unit);
-                    units.Target[unit] = Store.Goal[unit];
-                    units.HasTarget[unit] = true;
-                    Store.State[unit] = UnitAiState.SeekCover;
+                if (TryExecutePlayerOrderIntent(units, health, weapons, vision, worldMap, unit, intent))
                     continue;
+
+                if (Store.PlayerOrderType[unit] == UnitAiOrderType.Attack &&
+                    Store.HasTarget[unit])
+                {
+                    if (intent == BehaviacUnitIntent.AttackOrder)
+                        intent = BehaviacUnitIntent.EngageTarget;
+                    Store.LastIntent[unit] = intent;
+                }
+            }
+
+            if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.FlankTarget)
+            {
+                UnitId flankTarget = _nearestVisibleEnemyByUnit[unit] >= 0
+                    ? units.GetId(_nearestVisibleEnemyByUnit[unit])
+                    : Store.HasTarget[unit] ? Store.Target[unit] : default;
+                if (!flankTarget.IsValid ||
+                    !_squadCoordinator.TryClaimFlank(units.GetId(unit), flankTarget, _tacticalTimeSeconds))
+                {
+                    intent = BehaviacUnitIntent.EngageTarget;
+                    Store.LastIntent[unit] = intent;
                 }
             }
 
@@ -313,7 +325,11 @@ public sealed class UnitAiSystem
             if (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.ProneEngage)
                 units.Posture[unit] = UnitPosture.Lying;
             else if (suppressionState == UnitSuppressionState.Panicked)
-                units.Posture[unit] = moving ? UnitPosture.Crouching : UnitPosture.Lying;
+                units.Posture[unit] = UnitPosture.Lying;
+            else if (moving && units.Posture[unit] == UnitPosture.Lying)
+            {
+                // Keep a prone movement order low; UnitBodySystem animates it as a crawl.
+            }
             else if (moving)
                 units.Posture[unit] = UnitPosture.Standing;
             else if (suppressionState == UnitSuppressionState.Suppressed)
@@ -384,31 +400,12 @@ public sealed class UnitAiSystem
                 }
             }
 
-            if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
-                TryExecuteLastKnownInvestigation(units, weapons, worldMap, unit))
-            {
-                continue;
-            }
-
-            if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.InvestigateAudibleContact &&
-                TryExecuteAudibleInvestigation(units, weapons, worldMap, unit))
-            {
-                continue;
-            }
-
-            // Attack orders are objectives, not hard target locks. Keep the
-            // nearest visible hostile selected so soldiers can switch threats.
-            int visibleEnemy = _nearestVisibleEnemyByUnit[unit];
+            int visibleEnemy =
+                _nearestVisibleEnemyByUnit[unit];
 
             bool keepCurrentVisibleTarget = false;
 
-            if (Store.HasTarget[unit] &&
-                !(Store.PlayerOrderType[unit] == UnitAiOrderType.Attack &&
-                  units.IsAlive(Store.PlayerOrderTarget[unit]) &&
-                  health.OverallHitPoints[Store.PlayerOrderTarget[unit].Index] > 0f &&
-                  IsHostile(units, unit, Store.PlayerOrderTarget[unit].Index)))
+            if (Store.HasTarget[unit])
             {
                 UnitId currentTarget = Store.Target[unit];
 
@@ -420,7 +417,7 @@ public sealed class UnitAiSystem
                     Store.RememberTarget(
                         unit,
                         currentTarget,
-                        GetObservedTargetPosition(units, unit, currentTarget.Index),
+                        units.Position[currentTarget.Index],
                         TargetMemorySeconds);
                     keepCurrentVisibleTarget = true;
                 }
@@ -439,8 +436,21 @@ public sealed class UnitAiSystem
                 Store.RememberTarget(
                     unit,
                     targetId,
-                    GetObservedTargetPosition(units, unit, visibleEnemy),
+                    units.Position[visibleEnemy],
                     TargetMemorySeconds);
+            }
+
+            // The tree can select Patrol only when there is neither a visible
+            // target nor a remembered target. Drop an expired target before the
+            // existing patrol/search path runs.
+            if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.Patrol &&
+                Store.HasTarget[unit] &&
+                Store.TargetMemory[unit] <= 0f)
+            {
+                ClearAiming(weapons, unit);
+                Store.ClearTarget(unit);
+                units.HasTarget[unit] = false;
             }
 
             if (!Store.HasTarget[unit])
@@ -522,17 +532,6 @@ public sealed class UnitAiSystem
                     unit,
                     target.Index,
                     units);
-            VisionCheck currentTargetShotCheck = default;
-            bool hasCurrentTargetShotCheck = false;
-            if (targetVisible)
-            {
-                // Do not move into a firing ring around a remembered/stale contact.
-                // Confirm the target can still actually be seen from this position.
-                currentTargetShotCheck = vision.Evaluate(
-                    units, worldMap, unit, target.Index);
-                hasCurrentTargetShotCheck = true;
-                targetVisible = currentTargetShotCheck.IsVisible;
-            }
 
             if (!targetVisible)
             {
@@ -556,8 +555,11 @@ public sealed class UnitAiSystem
             }
             else if (suppressionState == UnitSuppressionState.Panicked)
             {
-                // Keep a low profile while retreating, but do not force a crawl.
-                units.Posture[unit] = moving ? UnitPosture.Crouching : UnitPosture.Lying;
+                units.Posture[unit] = UnitPosture.Lying;
+            }
+            else if (moving && units.Posture[unit] == UnitPosture.Lying)
+            {
+                // Do not stand up mid-crawl merely because movement is active.
             }
             else if (moving)
             {
@@ -603,15 +605,6 @@ public sealed class UnitAiSystem
                 }
 
                 if (!Store.HasGoal[unit] &&
-                    _hasSuppressionCoverByUnit[unit])
-                {
-                    // PrepareUnitPlan may have found cover after the retry
-                    // cooldown because the threat moved; consume that candidate
-                    // even when the cooldown is still active.
-                    Store.SetGoal(unit, _suppressionCoverByUnit[unit]);
-                }
-
-                if (!Store.HasGoal[unit] &&
                     Store.SuppressionCoverRetry[unit] <= 0f)
                 {
                     // A failed low-health cover search also costs up to 32 LOS
@@ -627,7 +620,9 @@ public sealed class UnitAiSystem
                             target.Index,
                             out Vector3 cover))
                     {
-                        Store.SetGoal(unit, cover);
+                        Store.SetGoal(
+                            unit,
+                            cover);
                     }
                     else
                     {
@@ -655,20 +650,68 @@ public sealed class UnitAiSystem
                 }
             }
 
-            // Direct engagement is the only active autonomous attack mode.
-            if (!UseBehaviacDecisionLayer ||
-                intent != BehaviacUnitIntent.EngageTarget ||
-                Store.State[unit] != UnitAiState.Attack ||
-                !Store.HasGoal[unit])
+            if (UseBehaviacDecisionLayer &&
+                targetVisible &&
+                intent == BehaviacUnitIntent.FlankTarget)
+            {
+                bool targetChanged = !_hasFlankTargetByUnit[unit] ||
+                    !_flankTargetByUnit[unit].Equals(target);
+
+                if (Store.State[unit] != UnitAiState.Flank ||
+                    !Store.HasGoal[unit] ||
+                    targetChanged)
+                {
+                    Store.ClearGoal(unit);
+                    _flankTargetByUnit[unit] = target;
+                    _hasFlankTargetByUnit[unit] = true;
+                    if (TryFindFlankWaypoint(
+                            units,
+                            worldMap,
+                            unit,
+                            target.Index,
+                            out Vector3 flankWaypoint))
+                    {
+                        Store.SetGoal(unit, flankWaypoint);
+                    }
+                }
+
+                if (Store.HasGoal[unit] &&
+                    !ReachedGoal(units.Position[unit], Store.Goal[unit]))
+                {
+                    ClearAiming(weapons, unit);
+                    units.Target[unit] = Store.Goal[unit];
+                    units.HasTarget[unit] = true;
+                    Store.State[unit] = UnitAiState.Flank;
+                    continue;
+                }
+
+                // Mark this target as already flanked so the unit doesn't oscillate
+                // between a firing position and another flank waypoint every tick.
+                Store.ClearGoal(unit);
+                Store.State[unit] = UnitAiState.Attack;
+                intent = BehaviacUnitIntent.EngageTarget;
+            }
+            else if (UseBehaviacDecisionLayer &&
+                     targetVisible &&
+                     intent == BehaviacUnitIntent.ProneEngage)
+            {
+                // Replace a patrol/cover destination on the first prone-engage
+                // tick, but retain the crawl goal on subsequent thinking ticks.
+                if (Store.State[unit] != UnitAiState.Attack)
+                    Store.ClearGoal(unit);
+            }
+            else
             {
                 Store.ClearGoal(unit);
             }
 
             if (targetVisible &&
                 (!UseBehaviacDecisionLayer ||
-                 intent is BehaviacUnitIntent.EngageTarget or
+                 intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage or
                      BehaviacUnitIntent.HoldPositionEngage))
             {
+                // Prone posture is an aiming choice, not an order to crawl to 10 m.
+                // Ranged pawns below approach only if the target is beyond weapon range.
 
                 if (intent != BehaviacUnitIntent.HoldPositionEngage &&
                     HasRangedWeapon(units, inventory, unit))
@@ -676,41 +719,28 @@ public sealed class UnitAiSystem
                     Vector3 position = units.Position[unit];
                     Vector3 targetPosition = units.Position[target.Index];
                     float range = GetMaxEffectiveRange(inventory, unit);
-                    if (range > 0.1f &&
-                        TryGetRangedEngagementMoveTarget(
-                            position, targetPosition, range, unit, target.Index,
-                            out Vector3 desiredApproach))
+                    if (range > 0.1f)
                     {
-                        bool sameApproach = Store.State[unit] == UnitAiState.Attack &&
-                            Store.HasGoal[unit] && Store.HasTarget[unit] &&
-                            Store.Target[unit].Equals(target);
-                        bool needNewGoal = !sameApproach ||
-                            Vector3.DistanceSquared(Store.Goal[unit], desiredApproach) > 16f ||
-                            ReachedGoal(position, Store.Goal[unit]);
+                        float dx = targetPosition.X - position.X;
+                        float dy = targetPosition.Y - position.Y;
+                        float distanceSquared = dx * dx + dy * dy;
+                        float desiredDistance = MathF.Max(3f, range * 0.84f);
+                        float approachThreshold = desiredDistance + MathF.Max(1f, range * 0.03f);
 
-                        if (needNewGoal)
+                        if (distanceSquared > approachThreshold * approachThreshold)
                         {
-                            bool changedDestination = !Store.HasGoal[unit] ||
-                                Vector3.DistanceSquared(Store.Goal[unit], desiredApproach) > 1f;
-                            Store.SetGoal(unit, desiredApproach);
-                            Store.RememberTarget(unit, target, targetPosition, TargetMemorySeconds);
-                            if (changedDestination)
-                                ClearAiming(weapons, unit);
-                        }
-
-                        if (Store.HasGoal[unit] && !ReachedGoal(position, Store.Goal[unit]))
-                        {
-                            units.Target[unit] = Store.Goal[unit];
+                            float distance = MathF.Sqrt(distanceSquared);
+                            float scale = desiredDistance / MathF.Max(0.001f, distance);
+                            units.Target[unit] = new Vector3(
+                                targetPosition.X - dx * scale,
+                                targetPosition.Y - dy * scale,
+                                position.Z);
                             units.HasTarget[unit] = true;
+                            ClearAiming(weapons, unit);
+                            Store.ClearGoal(unit);
                             Store.State[unit] = UnitAiState.Attack;
                             continue;
                         }
-
-                        Store.ClearGoal(unit);
-                    }
-                    else if (Store.State[unit] == UnitAiState.Attack && Store.HasGoal[unit])
-                    {
-                        Store.ClearGoal(unit);
                     }
                 }
 
@@ -735,30 +765,13 @@ public sealed class UnitAiSystem
                         float desiredDistance = MathF.Max(0.20f, attackDistance * 0.94f);
                         Vector3 engagementPoint = GetMeleeEngagementPoint(
                             unit, target.Index, targetPosition, desiredDistance);
-                        bool sameApproach = Store.State[unit] == UnitAiState.Attack &&
-                            Store.HasGoal[unit] && Store.HasTarget[unit] &&
-                            Store.Target[unit].Equals(target);
-                        bool needNewGoal = !sameApproach ||
-                            Vector3.DistanceSquared(Store.Goal[unit], engagementPoint) > 2.25f ||
-                            ReachedGoal(position, Store.Goal[unit]);
-
-                        if (needNewGoal)
-                        {
-                            bool changedDestination = !Store.HasGoal[unit] ||
-                                Vector3.DistanceSquared(Store.Goal[unit], engagementPoint) > 0.5f;
-                            Store.SetGoal(unit, engagementPoint);
-                            Store.RememberTarget(unit, target, targetPosition, TargetMemorySeconds);
-                            if (changedDestination)
-                                ClearAiming(weapons, unit);
-                        }
-
-                        units.Target[unit] = Store.Goal[unit];
+                        units.Target[unit] = engagementPoint;
                         units.HasTarget[unit] = true;
+                        ClearAiming(weapons, unit);
+                        Store.ClearGoal(unit);
                         Store.State[unit] = UnitAiState.Attack;
                         continue;
                     }
-
-                    Store.ClearGoal(unit);
                 }
 
                 FaceTarget(
@@ -771,17 +784,29 @@ public sealed class UnitAiSystem
                 units.Target[unit] = units.Position[unit];
                 units.HasTarget[unit] = false;
 
-                VisionCheck shotCheck = hasCurrentTargetShotCheck
-                    ? currentTargetShotCheck
-                    : vision.Evaluate(units, worldMap, unit, target.Index);
+                VisionCheck shotCheck = vision.Evaluate(
+                    units,
+                    worldMap,
+                    unit,
+                    target.Index);
 
-                // This direct visibility check ran before positioning. Never fire
-                // based only on a stale visibility-memory entry.
+                // Visibility lists are refreshed less often than movement. Recheck
+                // before pulling the trigger so a stale target cannot cause wall fire.
                 if (!shotCheck.IsVisible)
                 {
                     // Forget stale LOS immediately. Suppressive weapons may
                     // keep firing at the last known point; the others must stop.
                     vision.ForgetVisibleTarget(unit, target.Index);
+
+                    if (Store.TargetMemory[unit] > 0f &&
+                        HasSuppressFireWeapon(inventory, weapons, unit))
+                    {
+                        ClearNonSuppressiveAiming(weapons, inventory, unit);
+                        units.Target[unit] = units.Position[unit];
+                        units.HasTarget[unit] = false;
+                        Store.State[unit] = UnitAiState.Attack;
+                        continue;
+                    }
 
                     ClearAiming(weapons, unit);
                     Store.ClearTarget(unit);
@@ -818,8 +843,7 @@ public sealed class UnitAiSystem
                             weapons,
                             unit);
                 }
-                else if (intent != BehaviacUnitIntent.HoldPositionEngage &&
-                         !HasRangedWeapon(
+                else if (!HasRangedWeapon(
                              units,
                              inventory,
                              unit))
@@ -853,11 +877,14 @@ public sealed class UnitAiSystem
                 continue;
             }
 
-            // The simplified Behaviac tree no longer invents targets from stale
-            // coordinates. The legacy comparison path keeps its original behavior.
-            if (!UseBehaviacDecisionLayer && Store.TargetMemory[unit] > 0f)
+            if (Store.TargetMemory[unit] > 0f &&
+                (!UseBehaviacDecisionLayer ||
+                 intent == BehaviacUnitIntent.SuppressiveFire ||
+                 intent == BehaviacUnitIntent.InvestigateLastKnownTarget))
             {
-                if (HasSuppressFireWeapon(inventory, weapons, unit))
+                if ((!UseBehaviacDecisionLayer ||
+                     intent == BehaviacUnitIntent.SuppressiveFire) &&
+                    HasSuppressFireWeapon(inventory, weapons, unit))
                 {
                     Vector3 lastSeenAimPoint = Store.LastSeenAimPoint[unit];
                     if (lastSeenAimPoint == Vector3.Zero)
@@ -879,10 +906,8 @@ public sealed class UnitAiSystem
                 }
                 else
                 {
-                    // No direct target is visible. Stop the ordinary combat loop
-                    // instead of preserving a firing ring around stale coordinates.
-                    units.Target[unit] = units.Position[unit];
-                    units.HasTarget[unit] = false;
+                    units.Target[unit] = Store.LastSeenPosition[unit];
+                    units.HasTarget[unit] = true;
                     Store.State[unit] = UnitAiState.Search;
                 }
 
@@ -898,6 +923,7 @@ public sealed class UnitAiSystem
         }
     }
 
+
     private bool TryExecutePlayerOrderIntent(
         UnitStore units,
         UnitHealthStore health,
@@ -908,11 +934,15 @@ public sealed class UnitAiSystem
         BehaviacUnitIntent intent)
     {
         UnitAiStore store = Store;
+        UnitAiOrderType orderType = store.PlayerOrderType[unit];
 
-        if (intent == BehaviacUnitIntent.FollowMoveOrder)
+        if (orderType == UnitAiOrderType.Move)
         {
-            Vector3 moveDestination = store.PlayerOrderPosition[unit];
-            if (ReachedGoal(units.Position[unit], moveDestination))
+            if (intent != BehaviacUnitIntent.FollowMoveOrder)
+                return false;
+
+            Vector3 destination = store.PlayerOrderPosition[unit];
+            if (ReachedGoal(units.Position[unit], destination))
             {
                 store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
                 store.ClearTarget(unit);
@@ -924,23 +954,21 @@ public sealed class UnitAiSystem
                 return true;
             }
 
-            bool alreadyMovingToOrder =
-                !store.HasTarget[unit] &&
+            bool sameDestination = !store.HasTarget[unit] &&
                 store.HasGoal[unit] &&
                 store.State[unit] == UnitAiState.Search &&
-                Vector3.DistanceSquared(store.Goal[unit], moveDestination) <= 0.25f &&
+                Vector3.DistanceSquared(store.Goal[unit], destination) <= 0.25f &&
                 units.HasTarget[unit] &&
-                Vector3.DistanceSquared(units.Target[unit], moveDestination) <= 0.25f;
-
-            if (!alreadyMovingToOrder)
+                Vector3.DistanceSquared(units.Target[unit], destination) <= 0.25f;
+            if (!sameDestination)
             {
                 store.ClearTarget(unit);
-                bool changedDestination = !store.HasGoal[unit] ||
-                    Vector3.DistanceSquared(store.Goal[unit], moveDestination) > 0.25f;
-                store.SetGoal(unit, moveDestination);
-                if (changedDestination)
+                bool changed = !store.HasGoal[unit] ||
+                    Vector3.DistanceSquared(store.Goal[unit], destination) > 0.25f;
+                store.SetGoal(unit, destination);
+                if (changed)
                     ClearAiming(weapons, unit);
-                units.Target[unit] = store.Goal[unit];
+                units.Target[unit] = destination;
                 units.HasTarget[unit] = true;
                 store.State[unit] = UnitAiState.Search;
             }
@@ -948,62 +976,78 @@ public sealed class UnitAiSystem
             return true;
         }
 
-        if (intent == BehaviacUnitIntent.HoldPosition)
+        if (orderType == UnitAiOrderType.Stop)
+        {
+            if (intent == BehaviacUnitIntent.HoldPosition)
+            {
+                store.ClearTarget(unit);
+                store.ClearGoal(unit);
+                ClearAiming(weapons, unit);
+                units.Target[unit] = units.Position[unit];
+                units.HasTarget[unit] = false;
+                store.State[unit] = UnitAiState.Idle;
+                return true;
+            }
+
+            if (intent == BehaviacUnitIntent.HoldPositionEngage)
+            {
+                store.ClearGoal(unit);
+                units.Target[unit] = units.Position[unit];
+                units.HasTarget[unit] = false;
+                store.State[unit] = UnitAiState.Attack;
+            }
+
+            return false;
+        }
+
+        if (orderType != UnitAiOrderType.Attack)
+            return false;
+
+        UnitId assignedTarget = store.PlayerOrderTarget[unit];
+        bool assignedTargetAlive = assignedTarget.IsValid &&
+            units.IsAlive(assignedTarget) &&
+            health.OverallHitPoints[assignedTarget.Index] > 0f &&
+            IsHostile(units, unit, assignedTarget.Index);
+        bool assignedTargetVisible = assignedTargetAlive &&
+            vision.IsRecentlyVisible(unit, assignedTarget.Index, units) &&
+            vision.Evaluate(units, worldMap, unit, assignedTarget.Index).IsVisible;
+
+        if (assignedTargetVisible)
+        {
+            Vector3 position = units.Position[assignedTarget.Index];
+            store.SetPlayerOrder(unit, UnitAiOrderType.Attack, position, assignedTarget);
+            store.RememberTarget(unit, assignedTarget, position, TargetMemorySeconds);
+            return false;
+        }
+
+        int visibleEnemy = _nearestVisibleEnemyByUnit[unit];
+        if (visibleEnemy >= 0 &&
+            health.OverallHitPoints[visibleEnemy] > 0f &&
+            vision.IsRecentlyVisible(unit, visibleEnemy, units) &&
+            vision.Evaluate(units, worldMap, unit, visibleEnemy).IsVisible)
+        {
+            UnitId newTarget = units.GetId(visibleEnemy);
+            Vector3 position = units.Position[visibleEnemy];
+            store.SetPlayerOrder(unit, UnitAiOrderType.Attack, position, newTarget);
+            store.RememberTarget(unit, newTarget, position, TargetMemorySeconds);
+            return false;
+        }
+
+        Vector3 attackDestination = store.PlayerOrderPosition[unit];
+        if (!float.IsFinite(attackDestination.X) ||
+            !float.IsFinite(attackDestination.Y) ||
+            !float.IsFinite(attackDestination.Z) ||
+            attackDestination == Vector3.Zero)
         {
             store.ClearTarget(unit);
             store.ClearGoal(unit);
             ClearAiming(weapons, unit);
-            units.Target[unit] = units.Position[unit];
             units.HasTarget[unit] = false;
-            store.State[unit] = UnitAiState.Idle;
+            store.State[unit] = UnitAiState.Search;
             return true;
         }
 
-        if (intent == BehaviacUnitIntent.HoldPositionEngage)
-        {
-            // Let the regular combat code aim/fire, but remove movement intent
-            // and stale waypoints before it runs.
-            store.ClearGoal(unit);
-            units.Target[unit] = units.Position[unit];
-            units.HasTarget[unit] = false;
-            store.State[unit] = UnitAiState.Attack;
-            return false;
-        }
-
-        if (intent != BehaviacUnitIntent.AttackOrder)
-            return false;
-
-        UnitId target = store.PlayerOrderTarget[unit];
-        bool hasLiveTarget = target.IsValid &&
-            units.IsAlive(target) &&
-            health.OverallHitPoints[target.Index] > 0f &&
-            IsHostile(units, unit, target.Index);
-        if (!hasLiveTarget && target.IsValid)
-        {
-            // Preserve the order destination even when its current enemy dies
-            // or becomes invalid; a nearby visible threat may replace it.
-            store.SetPlayerOrder(
-                unit,
-                UnitAiOrderType.Attack,
-                store.PlayerOrderPosition[unit]);
-            target = default;
-        }
-
-        Vector3 destination = store.PlayerOrderPosition[unit];
-        bool targetVisible = hasLiveTarget &&
-            HasFreshVisualContact(unit, target, out _) &&
-            vision.IsRecentlyVisible(unit, target.Index, units) &&
-            vision.Evaluate(units, worldMap, unit, target.Index).IsVisible;
-        if (targetVisible)
-        {
-            destination = units.Position[target.Index];
-            store.SetPlayerOrder(unit, UnitAiOrderType.Attack, destination, target);
-            store.RememberTarget(unit, target, destination, TargetMemorySeconds);
-        }
-        // Otherwise keep the last actually observed destination. Do not calculate
-        // a stand-off position around a unit that may have moved out of sight.
-
-        if (ReachedGoal(units.Position[unit], destination))
+        if (ReachedGoal(units.Position[unit], attackDestination))
         {
             store.ClearTarget(unit);
             store.ClearGoal(unit);
@@ -1014,84 +1058,25 @@ public sealed class UnitAiSystem
             return true;
         }
 
-        bool alreadyMovingToAttackOrder =
-            !store.HasTarget[unit] &&
+        bool alreadyMoving = !store.HasTarget[unit] &&
             store.HasGoal[unit] &&
             store.State[unit] == UnitAiState.Search &&
-            Vector3.DistanceSquared(store.Goal[unit], destination) <= 0.25f &&
+            Vector3.DistanceSquared(store.Goal[unit], attackDestination) <= 0.25f &&
             units.HasTarget[unit] &&
-            Vector3.DistanceSquared(units.Target[unit], destination) <= 0.25f;
-
-        if (!alreadyMovingToAttackOrder)
+            Vector3.DistanceSquared(units.Target[unit], attackDestination) <= 0.25f;
+        if (!alreadyMoving)
         {
             store.ClearTarget(unit);
-            bool changedDestination = !store.HasGoal[unit] ||
-                Vector3.DistanceSquared(store.Goal[unit], destination) > 0.25f;
-            store.SetGoal(unit, destination);
-            if (changedDestination)
+            bool changed = !store.HasGoal[unit] ||
+                Vector3.DistanceSquared(store.Goal[unit], attackDestination) > 0.25f;
+            store.SetGoal(unit, attackDestination);
+            if (changed)
                 ClearAiming(weapons, unit);
-            units.Target[unit] = store.Goal[unit];
+            units.Target[unit] = attackDestination;
             units.HasTarget[unit] = true;
             store.State[unit] = UnitAiState.Search;
         }
 
-        return true;
-    }
-
-    private void RecordBehaviacIntent(BehaviacUnitIntent intent)
-    {
-        LastBehaviacDecisions++;
-        TotalBehaviacDecisions++;
-
-        switch (intent)
-        {
-            case BehaviacUnitIntent.Dead: LastBehaviacDeadDecisions++; break;
-            case BehaviacUnitIntent.SeekCover: LastBehaviacCoverDecisions++; break;
-            case BehaviacUnitIntent.RetreatToCover: LastBehaviacRetreatDecisions++; break;
-            case BehaviacUnitIntent.FlankTarget: LastBehaviacFlankDecisions++; break;
-            case BehaviacUnitIntent.EngageTarget:
-            case BehaviacUnitIntent.ProneEngage: LastBehaviacEngageDecisions++; break;
-            case BehaviacUnitIntent.InvestigateAudibleContact:
-            case BehaviacUnitIntent.InvestigateLastKnownTarget:
-                LastBehaviacInvestigateDecisions++;
-                break;
-            case BehaviacUnitIntent.FollowMoveOrder: LastBehaviacMoveOrderDecisions++; break;
-            case BehaviacUnitIntent.HoldPosition: LastBehaviacHoldOrderDecisions++; break;
-            case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
-            case BehaviacUnitIntent.HoldPositionEngage: LastBehaviacHoldAndEngageDecisions++; break;
-        }
-    }
-
-    private bool TryExecuteLastKnownInvestigation(
-        UnitStore units,
-        UnitWeaponStore weapons,
-        WorldMap worldMap,
-        int unit)
-    {
-        if (!Store.HasTarget[unit] || Store.TargetMemory[unit] <= 0f)
-            return false;
-
-        Vector3 estimate = Store.LastSeenPosition[unit];
-        if (!float.IsFinite(estimate.X) ||
-            !float.IsFinite(estimate.Y) ||
-            !float.IsFinite(estimate.Z) ||
-            estimate == Vector3.Zero)
-            return false;
-
-        float x = Math.Clamp(estimate.X, 0.5f, worldMap.MaxTileX - 0.5f);
-        float y = Math.Clamp(estimate.Y, 0.5f, worldMap.MaxTileY - 0.5f);
-        int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
-        int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
-        Vector3 searchPoint = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
-
-        // Capture the estimate before clearing the identified target. The destination
-        // is a search location, never a live pointer to the target's current position.
-        Store.ClearTarget(unit);
-        ClearAiming(weapons, unit);
-        Store.SetGoal(unit, searchPoint);
-        units.Target[unit] = searchPoint;
-        units.HasTarget[unit] = true;
-        Store.State[unit] = UnitAiState.Search;
         return true;
     }
 
@@ -1111,17 +1096,65 @@ public sealed class UnitAiSystem
         float y = Math.Clamp(estimate.Y + MathF.Sin(angle) * searchOffset, 0.5f, worldMap.MaxTileY - 0.5f);
         int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
         int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
-        Vector3 searchPoint = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
+        Vector3 destination = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
 
-        // Audio is only a search location: it never creates an identified combat target.
         ClearAiming(weapons, unit);
         Store.ClearTarget(unit);
-        Store.SetGoal(unit, searchPoint);
-        units.Target[unit] = searchPoint;
+        Store.ClearGoal(unit);
+        Store.SetGoal(unit, destination);
+        units.Target[unit] = destination;
         units.HasTarget[unit] = true;
         Store.State[unit] = UnitAiState.Search;
         Hearing.MarkInvestigated(unit, contact.ContactId);
         return true;
+    }
+
+    internal bool TryGetFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition)
+    {
+        estimatedPosition = Vector3.Zero;
+        if (_perceptionMemory == null ||
+            !target.IsValid ||
+            !_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory) ||
+            !memory.TryGetContact(target, out TacticalContact contact) ||
+            contact.Kind != TacticalContactKind.VisualConfirmed ||
+            contact.SubjectUnit is not UnitId subject ||
+            !subject.Equals(target) ||
+            contact.LastVisualAtSeconds < 0f)
+            return false;
+
+        float visualAge = _perceptionMemory.CurrentTimeSeconds - contact.LastVisualAtSeconds;
+        if (!float.IsFinite(visualAge) ||
+            visualAge < 0f ||
+            visualAge >= TacticalContactMemory.VisualConfirmationGraceSeconds)
+            return false;
+
+        estimatedPosition = contact.EstimatedPosition;
+        return true;
+    }
+
+    private void RecordBehaviacIntent(    private void RecordBehaviacIntent(BehaviacUnitIntent intent)
+    {
+        LastBehaviacDecisions++;
+        TotalBehaviacDecisions++;
+
+        switch (intent)
+        {
+            case BehaviacUnitIntent.Dead: LastBehaviacDeadDecisions++; break;
+            case BehaviacUnitIntent.SeekCover: LastBehaviacCoverDecisions++; break;
+            case BehaviacUnitIntent.RetreatToCover: LastBehaviacRetreatDecisions++; break;
+            case BehaviacUnitIntent.FlankTarget: LastBehaviacFlankDecisions++; break;
+            case BehaviacUnitIntent.EngageTarget:
+            case BehaviacUnitIntent.ProneEngage: LastBehaviacEngageDecisions++; break;
+            case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
+            case BehaviacUnitIntent.InvestigateAudibleContact:
+            case BehaviacUnitIntent.InvestigateLastKnownTarget: LastBehaviacInvestigateDecisions++; break;
+            case BehaviacUnitIntent.FollowMoveOrder: LastBehaviacMoveOrderDecisions++; break;
+            case BehaviacUnitIntent.HoldPosition: LastBehaviacHoldOrderDecisions++; break;
+            case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
+            case BehaviacUnitIntent.HoldPositionEngage: LastBehaviacHoldAndEngageDecisions++; break;
+            case BehaviacUnitIntent.Panic: LastBehaviacPanicDecisions++; break;
+            case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
+        }
     }
 
     private BehaviacUnitIntent SelectUnitIntent(
@@ -1152,68 +1185,8 @@ public sealed class UnitAiSystem
             _behaviacAgents[unit] = agent;
         }
 
-        UnitAiOrderType orderType = Store.PlayerOrderType[unit];
-        bool hasAttackOrder = orderType == UnitAiOrderType.Attack;
-        UnitId attackTarget = Store.PlayerOrderTarget[unit];
-        if (hasAttackOrder &&
-            attackTarget.IsValid &&
-            (!units.IsAlive(attackTarget) ||
-             health.OverallHitPoints[attackTarget.Index] <= 0f ||
-             !IsHostile(units, unit, attackTarget.Index)))
-        {
-            // The original target dying must not cancel the attack task.
-            // Keep its last-known position as the objective and let a new
-            // visible hostile replace the target below.
-            Store.SetPlayerOrder(
-                unit,
-                UnitAiOrderType.Attack,
-                Store.PlayerOrderPosition[unit]);
-            attackTarget = default;
-        }
-
-        if (orderType == UnitAiOrderType.Move &&
-            ReachedGoal(units.Position[unit], Store.PlayerOrderPosition[unit]))
-        {
-            Store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
-            Store.ClearGoal(unit);
-            orderType = UnitAiOrderType.Stop;
-        }
-
         int visibleTargetIndex = _nearestVisibleEnemyByUnit[unit];
-        if (hasAttackOrder)
-        {
-            // If the spatial visibility sample temporarily omits the current task
-            // target, retain it only while LOS memory still confirms it visible.
-            if (visibleTargetIndex < 0 &&
-                attackTarget.IsValid &&
-                units.IsAlive(attackTarget) &&
-                health.OverallHitPoints[attackTarget.Index] > 0f &&
-                IsHostile(units, unit, attackTarget.Index) &&
-                vision.IsRecentlyVisible(unit, attackTarget.Index, units))
-            {
-                visibleTargetIndex = attackTarget.Index;
-            }
-
-            if (visibleTargetIndex >= 0)
-            {
-                // Switching target also updates the attack task's last-known
-                // location, so it can continue searching if LOS is lost again.
-                UnitId nearestTarget = units.GetId(visibleTargetIndex);
-                Vector3 targetPosition = GetObservedTargetPosition(units, unit, visibleTargetIndex);
-                Store.SetPlayerOrder(
-                    unit,
-                    UnitAiOrderType.Attack,
-                    targetPosition,
-                    nearestTarget);
-                Store.RememberTarget(
-                    unit,
-                    nearestTarget,
-                    targetPosition,
-                    TargetMemorySeconds);
-            }
-        }
-
-        if (!hasAttackOrder && Store.HasTarget[unit])
+        if (Store.HasTarget[unit])
         {
             UnitId currentTarget = Store.Target[unit];
             if (ShouldKeepCurrentVisibleTarget(
@@ -1226,107 +1199,141 @@ public sealed class UnitAiSystem
         }
 
         bool hasVisibleTarget = visibleTargetIndex >= 0;
-        Vector3 visibleTargetPosition = hasVisibleTarget
-            ? GetObservedTargetPosition(units, unit, visibleTargetIndex)
-            : Vector3.Zero;
-        if (hasVisibleTarget)
-            suppression.RefreshAlertness(unit, 0.82f, visibleTargetPosition);
-        bool isAlerted = suppression.IsAlerted(unit);
-        bool hasMoveOrder = orderType == UnitAiOrderType.Move;
-        bool hasStopOrder = orderType == UnitAiOrderType.Stop;
-
-        float moveOrderUtility = 0f;
-        if (hasMoveOrder)
-        {
-            Vector3 moveDelta = Store.PlayerOrderPosition[unit] - units.Position[unit];
-            float moveDistance = MathF.Sqrt(moveDelta.X * moveDelta.X + moveDelta.Y * moveDelta.Y);
-            moveOrderUtility = UnitTacticalUtility.EvaluateMoveOrder(
-                moveDistance,
-                suppressionState is UnitSuppressionState.Panicked or UnitSuppressionState.Suppressed,
-                IsLowHealth(health, unit));
-        }
-
-        float combatUtility = 0f;
-        if (hasVisibleTarget)
-        {
-            Vector3 enemyDelta = visibleTargetPosition - units.Position[unit];
-            float enemyDistance = MathF.Sqrt(enemyDelta.X * enemyDelta.X + enemyDelta.Y * enemyDelta.Y);
-            combatUtility = UnitTacticalUtility.EvaluateVisibleCombat(enemyDistance, true);
-        }
-
         bool isSuppressed =
             suppressionState is UnitSuppressionState.Panicked or UnitSuppressionState.Suppressed;
         float healthRatio = health.OverallMaxHitPoints[unit] > 0f
             ? health.OverallHitPoints[unit] / health.OverallMaxHitPoints[unit]
             : 0f;
         bool isLowHealth = healthRatio < LowHealthThreshold;
-        // Direct engagement replaces the flank/prone utility contest.
-        const bool canFlank = false;
-        const bool isFlanking = false;
-        const float proneUtility = 0f;
-        const float flankUtility = 0f;
+        bool hasSuppressiveWeapon = HasSuppressFireWeapon(inventory, weapons, unit);
+        bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
+        bool canFlank = false;
 
-        bool hasCoverGoal = Store.HasGoal[unit] &&
-            Store.State[unit] == UnitAiState.SeekCover;
-        bool hasCover = suppressionState == UnitSuppressionState.Panicked
-            ? _hasSuppressionCoverByUnit[unit] || hasCoverGoal
-            : (_hasSuppressionCoverByUnit[unit] &&
-               !ReachedGoal(units.Position[unit], _suppressionCoverByUnit[unit])) ||
-              (hasCoverGoal && !ReachedGoal(units.Position[unit], Store.Goal[unit]));
+        // Flanking is a ranged-fire maneuver. A melee-only unit should
+        // commit toward contact instead of spending its first approach on a
+        // wide side/back waypoint.
+        if (hasVisibleTarget &&
+            isHealthyEnoughToFlank &&
+            HasRangedWeapon(units, inventory, unit) &&
+            unit % 8 == 0)
+        {
+            Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
+            float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
+            bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
+                _flankTargetByUnit[unit].Equals(units.GetId(visibleTargetIndex));
+
+            // Flanking is a small long-range maneuver, not the default response
+            // to contact. Most shooters should open fire from their current lane.
+            float maxFlankRange = MathF.Min(75f, MathF.Max(25f, units.ViewRange[unit] * 0.85f));
+            float effectiveRange = GetMaxEffectiveRange(inventory, unit);
+            bool stillOutsideWeaponRange = effectiveRange > 0.1f &&
+                distanceSquared > effectiveRange * effectiveRange;
+            canFlank = !alreadyFlankedThisTarget &&
+                stillOutsideWeaponRange &&
+                distanceSquared >= 24f * 24f &&
+                distanceSquared <= maxFlankRange * maxFlankRange;
+        }
+
+        bool isFlanking =
+            Store.State[unit] == UnitAiState.Flank &&
+            isHealthyEnoughToFlank &&
+            HasRangedWeapon(units, inventory, unit);
+
+        float proneUtility = 0f;
+        if (hasVisibleTarget &&
+            HasRangedWeapon(units, inventory, unit) &&
+            suppressionState == UnitSuppressionState.Calm &&
+            !isLowHealth &&
+            !canFlank &&
+            !isFlanking)
+        {
+            Vector3 targetDelta = units.Position[visibleTargetIndex] - units.Position[unit];
+            float distance = MathF.Sqrt(
+                targetDelta.X * targetDelta.X + targetDelta.Y * targetDelta.Y);
+            float distanceAdvantage = Math.Clamp((distance - 9f) / 25f, 0f, 1f);
+            bool exposed = !_hasSuppressionCoverByUnit[unit] &&
+                !(Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover);
+            float exposureAdvantage = exposed ? 1f : 0.2f;
+            proneUtility = Math.Clamp(
+                distanceAdvantage * 0.65f +
+                exposureAdvantage * 0.25f +
+                healthRatio * 0.10f,
+                0f,
+                1f);
+        }
+
+        UnitAiOrderType orderType = Store.PlayerOrderType[unit];
+        bool hasMoveOrder = orderType == UnitAiOrderType.Move;
+        bool hasStopOrder = orderType == UnitAiOrderType.Stop;
+        bool hasAttackOrder = orderType == UnitAiOrderType.Attack;
+        Vector3 visibleTargetPosition = hasVisibleTarget
+            ? units.Position[visibleTargetIndex]
+            : Vector3.Zero;
+        float visibleDistance = hasVisibleTarget
+            ? Vector2.Distance(
+                new Vector2(units.Position[unit].X, units.Position[unit].Y),
+                new Vector2(visibleTargetPosition.X, visibleTargetPosition.Y))
+            : 0f;
+        float combatUtility = UnitTacticalUtility.EvaluateVisibleCombat(visibleDistance, hasVisibleTarget);
+
+        float moveOrderUtility = 0f;
+        if (hasMoveOrder)
+        {
+            Vector3 destinationDelta = Store.PlayerOrderPosition[unit] - units.Position[unit];
+            moveOrderUtility = UnitTacticalUtility.EvaluateMoveOrder(
+                MathF.Sqrt(destinationDelta.X * destinationDelta.X + destinationDelta.Y * destinationDelta.Y),
+                isSuppressed,
+                isLowHealth);
+        }
 
         bool hasAudibleContact = false;
         float investigationUtility = 0f;
         if (Hearing != null &&
             Hearing.TryGetBestInvestigableContact(unit, out TacticalContact audibleContact))
         {
-            Vector3 contactDelta = audibleContact.EstimatedPosition - units.Position[unit];
-            float contactDistance = MathF.Sqrt(
-                contactDelta.X * contactDelta.X +
-                contactDelta.Y * contactDelta.Y);
-            float confidence = audibleContact.GetEffectiveConfidence(
-                Hearing.CurrentTimeSeconds,
-                2.5f);
-            investigationUtility = UnitTacticalUtility.EvaluateInvestigation(
-                confidence,
-                contactDistance);
-            hasAudibleContact =
-                investigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility;
+            Vector3 audioDelta = audibleContact.EstimatedPosition - units.Position[unit];
+            float audioDistance = MathF.Sqrt(audioDelta.X * audioDelta.X + audioDelta.Y * audioDelta.Y);
+            float confidence = audibleContact.GetEffectiveConfidence(Hearing.CurrentTimeSeconds, 2.5f);
+            investigationUtility = UnitTacticalUtility.EvaluateInvestigation(confidence, audioDistance);
+            hasAudibleContact = investigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility;
         }
 
         bool hasImmediateDanger = suppression.IsInImmediateDanger(unit);
+        bool isAlerted = suppression.IsAlerted(unit);
+        bool hasCover = _hasSuppressionCoverByUnit[unit] ||
+            (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover);
         float coverUtility = UnitTacticalUtility.EvaluateCover(
-            suppression.Value[unit],
-            hasCover,
-            hasImmediateDanger,
-            suppressionState == UnitSuppressionState.Panicked,
-            isLowHealth);
+            suppression.Value[unit], hasCover, hasImmediateDanger,
+            suppressionState == UnitSuppressionState.Panicked, isLowHealth);
+        float effectiveRange = hasVisibleTarget ? GetMaxEffectiveRange(inventory, unit) : 0f;
+        float flankUtility = UnitTacticalUtility.EvaluateFlanking(visibleDistance, effectiveRange, canFlank);
 
         agent.SetFacts(
-            isAlive,
-            isSuppressed,
-            hasCover,
-            hasVisibleTarget,
-            Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f,
-            isLowHealth,
-            canFlank,
-            isFlanking,
-            proneUtility,
-            units.Posture[unit] == UnitPosture.Lying,
-            hasMoveOrder,
-            hasStopOrder,
-            hasAttackOrder,
-            moveOrderUtility,
-            combatUtility,
-            hasAudibleContact,
-            hasImmediateDanger,
-            isAlerted,
-            coverUtility,
-            flankUtility,
-            investigationUtility,
-            suppressionState == UnitSuppressionState.Panicked,
-            Store.State[unit] == UnitAiState.SeekCover && Store.HasGoal[unit],
-            Store.LastIntent[unit] == BehaviacUnitIntent.FollowMoveOrder,
-            HasSuppressFireWeapon(inventory, weapons, unit));
+            isAlive: isAlive,
+            isSuppressed: isSuppressed,
+            hasCover: hasCover,
+            hasVisibleTarget: hasVisibleTarget,
+            hasRecentTarget: Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f,
+            isLowHealth: isLowHealth,
+            canFlank: canFlank,
+            isFlanking: isFlanking,
+            proneCombatUtility: proneUtility,
+            isProne: units.Posture[unit] == UnitPosture.Lying,
+            hasMoveOrder: hasMoveOrder,
+            hasStopOrder: hasStopOrder,
+            hasAttackOrder: hasAttackOrder,
+            moveOrderUtility: moveOrderUtility,
+            combatUtility: combatUtility,
+            hasAudibleContact: hasAudibleContact,
+            isInImmediateDanger: hasImmediateDanger,
+            isAlerted: isAlerted,
+            coverUtility: coverUtility,
+            flankUtility: flankUtility,
+            investigationUtility: investigationUtility,
+            isPanicked: suppressionState == UnitSuppressionState.Panicked,
+            wasSeekingCover: Store.State[unit] == UnitAiState.SeekCover && Store.HasGoal[unit],
+            wasFollowingMoveOrder: Store.LastIntent[unit] == BehaviacUnitIntent.FollowMoveOrder,
+            hasSuppressiveWeapon: hasSuppressiveWeapon);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
@@ -1336,6 +1343,129 @@ public sealed class UnitAiSystem
         }
 
         return agent.Intent;
+    }
+
+    private static bool TryFindProneCrawlWaypoint(
+        UnitStore units,
+        WorldMap worldMap,
+        int unit,
+        int targetIndex,
+        out Vector3 waypoint)
+    {
+        waypoint = Vector3.Zero;
+        Vector3 position = units.Position[unit];
+        Vector3 target = units.Position[targetIndex];
+        Vector2 awayFromTarget = new(position.X - target.X, position.Y - target.Y);
+        float lengthSquared = awayFromTarget.LengthSquared();
+        if (lengthSquared < 0.01f)
+            return false;
+
+        Vector2 forward = Vector2.Normalize(awayFromTarget);
+        Vector2 side = new(-forward.Y, forward.X);
+
+        // Prefer a direct approach point, then deterministic side steps around
+        // blocked terrain. This gives prone units a real crawl destination while
+        // letting the shared navigation system find the route there.
+        for (int candidate = 0; candidate < 8; candidate++)
+        {
+            float standoff = candidate < 3 ? ProneCrawlFiringDistance : ProneCrawlFiringDistance + 1.5f;
+            float lateral = candidate switch
+            {
+                0 => 0f,
+                1 => 4f,
+                2 => -4f,
+                3 => 6f,
+                4 => -6f,
+                5 => 8f,
+                6 => -8f,
+                _ => 0f
+            };
+
+            float targetX = target.X + forward.X * standoff + side.X * lateral;
+            float targetY = target.Y + forward.Y * standoff + side.Y * lateral;
+            targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
+            targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+
+            int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
+            if (worldMap.IsNavigationBlocked(tileX, tileY))
+                continue;
+
+            Vector3 candidateWaypoint = new(
+                tileX + 0.5f,
+                tileY + 0.5f,
+                worldMap.GetSurfaceHeight(tileX, tileY));
+            Vector2 toWaypoint = new(
+                candidateWaypoint.X - position.X,
+                candidateWaypoint.Y - position.Y);
+            if (toWaypoint.LengthSquared() < 1f)
+                continue;
+
+            Vector2 fromTarget = new(
+                candidateWaypoint.X - target.X,
+                candidateWaypoint.Y - target.Y);
+            if (fromTarget.LengthSquared() <
+                (ProneCrawlFiringDistance - 1f) * (ProneCrawlFiringDistance - 1f))
+                continue;
+
+            waypoint = candidateWaypoint;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryFindFlankWaypoint(
+        UnitStore units,
+        WorldMap worldMap,
+        int unit,
+        int targetIndex,
+        out Vector3 waypoint)
+    {
+        waypoint = Vector3.Zero;
+        Vector3 position = units.Position[unit];
+        Vector3 target = units.Position[targetIndex];
+        Vector2 towardTarget = new(target.X - position.X, target.Y - position.Y);
+        float lengthSquared = towardTarget.LengthSquared();
+        if (lengthSquared < 1f)
+            return false;
+
+        Vector2 forward = Vector2.Normalize(towardTarget);
+        Vector2 side = new(-forward.Y, forward.X);
+        float preferredSide = (unit & 1) == 0 ? 1f : -1f;
+
+        // Try both sides and a shallower side-step if the preferred point is blocked.
+        // This reduces stalls near walls while keeping the maneuver deterministic.
+        for (int candidate = 0; candidate < 4; candidate++)
+        {
+            float sideSign = candidate % 2 == 0 ? preferredSide : -preferredSide;
+            float backoff = candidate < 2 ? 8f : 16f;
+            float lateral = candidate < 2 ? 12f : 18f;
+            float targetX = target.X - forward.X * backoff + side.X * lateral * sideSign;
+            float targetY = target.Y - forward.Y * backoff + side.Y * lateral * sideSign;
+            targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
+            targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
+
+            int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
+            if (worldMap.IsNavigationBlocked(tileX, tileY))
+                continue;
+
+            Vector3 candidateWaypoint = new(
+                tileX + 0.5f,
+                tileY + 0.5f,
+                worldMap.GetSurfaceHeight(tileX, tileY));
+            Vector2 toWaypoint = new(
+                candidateWaypoint.X - position.X,
+                candidateWaypoint.Y - position.Y);
+            if (toWaypoint.LengthSquared() <= 4f)
+                continue;
+
+            waypoint = candidateWaypoint;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryFindSearchWaypoint(
@@ -1443,6 +1573,10 @@ public sealed class UnitAiSystem
             Array.Resize(ref _suppressionCoverByUnit, capacity);
         if (_hasSuppressionCoverByUnit.Length < capacity)
             Array.Resize(ref _hasSuppressionCoverByUnit, capacity);
+        if (_flankTargetByUnit.Length < capacity)
+            Array.Resize(ref _flankTargetByUnit, capacity);
+        if (_hasFlankTargetByUnit.Length < capacity)
+            Array.Resize(ref _hasFlankTargetByUnit, capacity);
     }
 
     private void PrepareUnitPlan(
@@ -1467,23 +1601,13 @@ public sealed class UnitAiSystem
             FindNearestVisibleEnemy(units, health, vision, unit);
 
         UnitSuppressionState state = suppression.GetState(unit);
-        if (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover)
+        if (state != UnitSuppressionState.Panicked ||
+            (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover))
+        {
             return;
-
-        int visibleEnemy = _nearestVisibleEnemyByUnit[unit];
-        bool isPanicked = state == UnitSuppressionState.Panicked;
-        bool isHeld = Store.PlayerOrderType[unit] == UnitAiOrderType.Stop;
-        bool lowHealthHoldNeedsCover = isHeld &&
-            IsLowHealth(health, unit) &&
-            visibleEnemy >= 0;
-        bool suppressedHoldNeedsCover = isHeld &&
-            state == UnitSuppressionState.Suppressed;
-        if (!isPanicked && !lowHealthHoldNeedsCover && !suppressedHoldNeedsCover)
-            return;
+        }
 
         Vector3 threat = suppression.Source[unit];
-        if (lowHealthHoldNeedsCover)
-            threat = units.Position[visibleEnemy];
         Vector3 previousSource = Store.SuppressionRetrySource[unit];
         float sourceDx = threat.X - previousSource.X;
         float sourceDy = threat.Y - previousSource.Y;
@@ -1494,148 +1618,71 @@ public sealed class UnitAiSystem
         if (Store.SuppressionCoverRetry[unit] > thinkDelta && !threatChanged)
             return;
 
-        Vector3 cover;
-        bool foundCover = lowHealthHoldNeedsCover
-            ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, out cover)
-            : TryFindSuppressionCover(units, vision, worldMap, unit, threat, out cover);
-
-        Store.SuppressionRetrySource[unit] = threat;
-
-        if (foundCover)
+        if (TryFindSuppressionCover(
+                units, vision, worldMap, unit, threat, out Vector3 cover))
         {
             _suppressionCoverByUnit[unit] = cover;
             _hasSuppressionCoverByUnit[unit] = true;
         }
-        else
-        {
-            // A failed search is expensive for both suppressed and panicked units.
-            // Retry after one second, unless the threat moves substantially.
-            Store.SuppressionCoverRetry[unit] = 1f;
-        }
     }
 
-    private int FindNearestVisibleEnemy(
+    private static int FindNearestVisibleEnemy(
         UnitStore units,
         UnitHealthStore health,
         VisionSystem vision,
         int observer)
     {
-        if (_perceptionMemory == null)
-            return FindNearestVisibleEnemyFromVision(units, health, vision, observer);
-        if (!_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory))
-            return -1;
+        ReadOnlySpan<int> visible =
+            vision.GetVisibleTargets(
+                observer);
 
-        Vector3 observerPosition = units.Position[observer];
-        float bestDistanceSquared = float.PositiveInfinity;
+        ushort observerFaction =
+            units.FactionTag[observer];
+
+        Vector3 position =
+            units.Position[observer];
+
         int bestTarget = -1;
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        float bestDistanceSquared =
+            float.PositiveInfinity;
 
-        for (int i = 0; i < contacts.Count; i++)
-        {
-            TacticalContact contact = contacts[i];
-            if (contact.Kind != TacticalContactKind.VisualConfirmed ||
-                !contact.SubjectUnit.HasValue ||
-                !TryGetFreshVisualContact(observer, contact.SubjectUnit.Value, out Vector3 observedPosition) ||
-                !vision.IsRecentlyVisible(observer, contact.SubjectUnit.Value.Index, units) ||
-                !units.TryGetIndex(contact.SubjectUnit.Value, out int target) ||
-                target == observer ||
-                health.OverallHitPoints[target] <= 0f ||
-                !IsHostile(units, observer, target))
-                continue;
-
-            Vector3 delta = observedPosition - observerPosition;
-            float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
-            if (distanceSquared >= bestDistanceSquared)
-                continue;
-
-            bestDistanceSquared = distanceSquared;
-            bestTarget = target;
-        }
-
-        return bestTarget;
-    }
-
-    private static int FindNearestVisibleEnemyFromVision(
-        UnitStore units,
-        UnitHealthStore health,
-        VisionSystem vision,
-        int observer)
-    {
-        ReadOnlySpan<int> visible = vision.GetVisibleTargets(observer);
-        ushort observerFaction = units.FactionTag[observer];
-        Vector3 position = units.Position[observer];
-        int bestTarget = -1;
-        float bestDistanceSquared = float.PositiveInfinity;
-
-        for (int i = 0; i < visible.Length; i++)
+        for (int i = 0;
+             i < visible.Length;
+             i++)
         {
             int target = visible[i];
+
             if ((uint)target >= (uint)units.Capacity ||
                 health.OverallHitPoints[target] <= 0f ||
-                !FactionRules.ShouldAttack(observerFaction, units.FactionTag[target]))
+                !FactionRules.ShouldAttack(
+                    observerFaction,
+                    units.FactionTag[target]))
+            {
                 continue;
+            }
 
-            Vector3 delta = units.Position[target] - position;
-            float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
-            if (distanceSquared >= bestDistanceSquared)
+            Vector3 delta =
+                units.Position[target] -
+                position;
+
+            float distanceSquared =
+                delta.X * delta.X +
+                delta.Y * delta.Y;
+
+            if (distanceSquared >=
+                bestDistanceSquared)
+            {
                 continue;
+            }
 
-            bestDistanceSquared = distanceSquared;
-            bestTarget = target;
+            bestDistanceSquared =
+                distanceSquared;
+
+            bestTarget =
+                target;
         }
 
         return bestTarget;
-    }
-
-    private bool HasFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition)
-    {
-        if (_perceptionMemory == null)
-        {
-            estimatedPosition = Vector3.Zero;
-            return true;
-        }
-
-        return TryGetFreshVisualContact(observer, target, out estimatedPosition);
-    }
-
-    internal bool TryGetFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition)
-    {
-        estimatedPosition = Vector3.Zero;
-        if (_perceptionMemory == null ||
-            !target.IsValid ||
-            !_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory) ||
-            !memory.TryGetContact(target, out TacticalContact contact) ||
-            contact.Kind != TacticalContactKind.VisualConfirmed ||
-            contact.SubjectUnit is not UnitId subject ||
-            !subject.Equals(target) ||
-            contact.LastVisualAtSeconds < 0f)
-            return false;
-
-        float visualAge = _perceptionMemory.CurrentTimeSeconds - contact.LastVisualAtSeconds;
-        if (!float.IsFinite(visualAge) ||
-            visualAge < 0f ||
-            visualAge >= TacticalContactMemory.VisualConfirmationGraceSeconds)
-            return false;
-
-        estimatedPosition = contact.EstimatedPosition;
-        return true;
-    }
-
-    private Vector3 GetObservedTargetPosition(UnitStore units, int observer, int targetIndex)
-    {
-        if (_perceptionMemory == null)
-            return units.Position[targetIndex];
-
-        if (_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory) &&
-            memory.TryGetContact(units.GetId(targetIndex), out TacticalContact contact) &&
-            contact.SubjectUnit is UnitId subject &&
-            subject.Equals(units.GetId(targetIndex)) &&
-            contact.LastVisualAtSeconds >= 0f)
-        {
-            return contact.EstimatedPosition;
-        }
-
-        return Vector3.Zero;
     }
 
     private static bool IsTargetVisible(
@@ -1653,7 +1700,7 @@ public sealed class UnitAiSystem
         return false;
     }
 
-    private bool ShouldKeepCurrentVisibleTarget(
+    private static bool ShouldKeepCurrentVisibleTarget(
         UnitStore units,
         UnitHealthStore health,
         VisionSystem vision,
@@ -1674,7 +1721,7 @@ public sealed class UnitAiSystem
             return true;
 
         Vector3 observerPosition = units.Position[observer];
-        Vector3 newPosition = GetObservedTargetPosition(units, observer, newlyVisibleTarget);
+        Vector3 newPosition = units.Position[newlyVisibleTarget];
         float newDx = newPosition.X - observerPosition.X;
         float newDy = newPosition.Y - observerPosition.Y;
         float newDistanceSquared = newDx * newDx + newDy * newDy;
@@ -1686,14 +1733,13 @@ public sealed class UnitAiSystem
         if (newDistanceSquared > contactRange * contactRange)
             return true;
 
-        Vector3 currentPosition = GetObservedTargetPosition(units, observer, currentTarget.Index);
+        Vector3 currentPosition = units.Position[currentTarget.Index];
         float currentDx = currentPosition.X - observerPosition.X;
         float currentDy = currentPosition.Y - observerPosition.Y;
         float currentDistanceSquared = currentDx * currentDx + currentDy * currentDy;
 
-        // Switch only for a meaningfully closer immediate threat. Tiny distance changes
-        // between rotating sensor samples must not continually replace the active target.
-        return newDistanceSquared >= currentDistanceSquared * 0.64f;
+        // A closer hostile within immediate-contact range beats target stickiness.
+        return newDistanceSquared >= currentDistanceSquared;
     }
 
     private static Vector3 GetMeleeEngagementPoint(
@@ -1709,55 +1755,6 @@ public sealed class UnitAiSystem
             targetPosition.X + MathF.Cos(angle) * distance,
             targetPosition.Y + MathF.Sin(angle) * distance,
             targetPosition.Z);
-    }
-
-    private static bool TryGetRangedEngagementMoveTarget(
-        Vector3 unitPosition,
-        Vector3 targetPosition,
-        float effectiveRange,
-        int unit,
-        int targetIndex,
-        out Vector3 destination)
-    {
-        destination = unitPosition;
-        if (!float.IsFinite(effectiveRange) || effectiveRange <= 0.1f)
-            return false;
-
-        float desiredDistance = MathF.Max(3f, effectiveRange * 0.72f);
-        float tooFarDistance = desiredDistance + MathF.Max(1f, effectiveRange * 0.05f);
-        float tooCloseDistance = MathF.Max(2f, effectiveRange * 0.63f);
-
-        float dx = targetPosition.X - unitPosition.X;
-        float dy = targetPosition.Y - unitPosition.Y;
-        float distanceSquared = dx * dx + dy * dy;
-
-        if (distanceSquared <= tooFarDistance * tooFarDistance &&
-            distanceSquared >= tooCloseDistance * tooCloseDistance)
-        {
-            return false;
-        }
-
-        float distance;
-        if (distanceSquared > 0.0001f)
-        {
-            distance = MathF.Sqrt(distanceSquared);
-            dx /= distance;
-            dy /= distance;
-        }
-        else
-        {
-            // Stable separation direction for exact overlaps.
-            float angle = (unit + 1) * 2.39996323f +
-                (targetIndex + 2) * 0.61803399f;
-            dx = MathF.Cos(angle);
-            dy = MathF.Sin(angle);
-        }
-
-        destination = new Vector3(
-            targetPosition.X - dx * desiredDistance,
-            targetPosition.Y - dy * desiredDistance,
-            unitPosition.Z);
-        return true;
     }
 
     private static float GetMaxEffectiveRange(
@@ -1837,7 +1834,7 @@ public sealed class UnitAiSystem
         UnitSuppressionStore suppression,
         int unit)
     {
-        return Math.Clamp(suppression.GetAccuracyMultiplier(unit), 1f, 1.40f);
+        return Math.Clamp(suppression.GetAccuracyMultiplier(unit), 1f, 1.55f);
     }
 
     private bool TryFireAnyRangedWeapon(
