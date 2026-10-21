@@ -283,6 +283,13 @@ public sealed class UnitAiSystem
             }
 
             if (UseBehaviacDecisionLayer &&
+                intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
+                TryExecuteLastKnownInvestigation(units, weapons, worldMap, unit))
+            {
+                continue;
+            }
+
+            if (UseBehaviacDecisionLayer &&
                 Store.PlayerOrderType[unit] != UnitAiOrderType.None)
             {
                 if (TryExecutePlayerOrderIntent(units, health, weapons, vision, worldMap, unit, intent))
@@ -1078,6 +1085,40 @@ public sealed class UnitAiSystem
             store.State[unit] = UnitAiState.Search;
         }
 
+        return true;
+    }
+
+    private bool TryExecuteLastKnownInvestigation(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        WorldMap worldMap,
+        int unit)
+    {
+        if (!Store.HasTarget[unit] || Store.TargetMemory[unit] <= 0f)
+            return false;
+
+        Vector3 estimate = Store.LastSeenPosition[unit];
+        if (!float.IsFinite(estimate.X) ||
+            !float.IsFinite(estimate.Y) ||
+            !float.IsFinite(estimate.Z) ||
+            estimate == Vector3.Zero)
+            return false;
+
+        float x = Math.Clamp(estimate.X, 0.5f, worldMap.MaxTileX - 0.5f);
+        float y = Math.Clamp(estimate.Y, 0.5f, worldMap.MaxTileY - 0.5f);
+        int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
+        Vector3 destination = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
+
+        // An investigation destination is a last-known coordinate, never a live
+        // target pointer. The main combat loop is restored as the default response.
+        Store.ClearTarget(unit);
+        Store.ClearGoal(unit);
+        ClearAiming(weapons, unit);
+        Store.SetGoal(unit, destination);
+        units.Target[unit] = destination;
+        units.HasTarget[unit] = true;
+        Store.State[unit] = UnitAiState.Search;
         return true;
     }
 
