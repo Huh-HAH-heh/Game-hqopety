@@ -58,7 +58,7 @@ public static class UnitAnatomyCatalog
     private const float DefaultProjectilePenetrationLoss = 8f;
 
     private static UnitArchetypeProfile Colonist = new(
-        new UnitDefinition(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 20f, 110f),
+        new UnitDefinition(UnitType.Colonist, UnitBodyType.Colonist, 2.8f, 0.35f, 0.60f, 1.75f, 60f, 110f),
         new UnitAnatomyProfile(
             new UnitAnatomyVolume[]
             {
@@ -298,7 +298,7 @@ public static class UnitAnatomyCatalog
         });
 
     private static readonly UnitArchetypeProfile Greenbob = new(
-        new UnitDefinition(UnitType.Greenbob, UnitBodyType.SmallCreature, 3.2f, 0.40f, 0.40f, 0.40f, 20f, 110f),
+        new UnitDefinition(UnitType.Greenbob, UnitBodyType.SmallCreature, 3.2f, 0.40f, 0.40f, 0.40f, 60f, 110f),
         new UnitAnatomyProfile(
             Node("body", "", Part(V(0f, 0f, 0.20f), V(0.18f, 0.105f, 0.15f),
                 BodyPrimitive.Circle, role: BodyPartRole.Torso), 0.15f,
@@ -505,7 +505,7 @@ public static class UnitAnatomyCatalog
         public float Width { get; set; } = 0.35f;
         public float Length { get; set; } = 0.60f;
         public float Height { get; set; } = 1.75f;
-        public float ViewRange { get; set; } = 20f;
+        public float ViewRange { get; set; } = 60f;
         public float FieldOfView { get; set; } = 110f;
         public float BodyMassKg { get; set; } = 75f;
         public float MuscleMassKg { get; set; } = 30f;
@@ -760,7 +760,7 @@ public static class UnitAnatomyCatalog
         }
 
         return new UnitArchetypeProfile(
-            new UnitDefinition(UnitType.SegmentedMonster, UnitBodyType.SegmentedCreature, 1.4f, 1.0f, 6.0f, 0.45f, 20f, 110f),
+            new UnitDefinition(UnitType.SegmentedMonster, UnitBodyType.SegmentedCreature, 1.4f, 1.0f, 6.0f, 0.45f, 60f, 110f),
             new UnitAnatomyProfile(nodes));
     }
 
