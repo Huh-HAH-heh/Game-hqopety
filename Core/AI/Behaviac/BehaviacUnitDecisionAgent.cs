@@ -174,7 +174,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool ShouldSuppressiveFire() =>
         IsAlive && HasRecentTarget && !HasVisibleTarget &&
         HasSuppressiveWeapon && !IsPanicked && !IsSuppressed &&
-        !IsLowHealth && !HasMoveOrder && !HasAttackOrder;
+        !IsLowHealth && !HasMoveOrder && !HasStopOrder && !HasAttackOrder;
 
     [MethodMetaInfo("ShouldInvestigateLastKnownTarget", "Search the last observed position without treating it as a currently visible target.")]
     public bool ShouldInvestigateLastKnownTarget() =>
