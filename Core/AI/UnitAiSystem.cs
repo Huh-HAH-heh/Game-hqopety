@@ -1306,8 +1306,8 @@ public sealed class UnitAiSystem
         float coverUtility = UnitTacticalUtility.EvaluateCover(
             suppression.Value[unit], hasCover, hasImmediateDanger,
             suppressionState == UnitSuppressionState.Panicked, isLowHealth);
-        float effectiveRange = hasVisibleTarget ? GetMaxEffectiveRange(inventory, unit) : 0f;
-        float flankUtility = UnitTacticalUtility.EvaluateFlanking(visibleDistance, effectiveRange, canFlank);
+        float intentEffectiveRange = hasVisibleTarget ? GetMaxEffectiveRange(inventory, unit) : 0f;
+        float flankUtility = UnitTacticalUtility.EvaluateFlanking(visibleDistance, intentEffectiveRange, canFlank);
 
         agent.SetFacts(
             isAlive: isAlive,
