@@ -30,6 +30,16 @@ public static class CombatSelfTest
         RunTest("Weapon: target mode cycle", TestTargetModes, ref passed, ref failed);
         RunTest("Weapon: ammunition selection", TestAmmunitionSelection, ref passed, ref failed);
         RunTest("Weapon: aim warmup delays first shot", TestWeaponAimWarmup, ref passed, ref failed);
+        RunTest("Perception: detection and identity stay separate", PerceptionMemorySelfTest.DetectionAndIdentityAreSeparate, ref passed, ref failed);
+        RunTest("Perception: independent senses fuse anonymous contacts", PerceptionMemorySelfTest.IndependentSensesFuseAnonymousContact, ref passed, ref failed);
+        RunTest("Perception: repeated same-sense evidence is bounded", PerceptionMemorySelfTest.RepeatedSameSenseEvidenceIsBounded, ref passed, ref failed);
+        RunTest("Perception: explicit correlation can identify an anonymous contact", PerceptionMemorySelfTest.ExplicitCorrelationCanIdentifyAnonymousContact, ref passed, ref failed);
+        RunTest("Perception: conflicting identity cannot hijack a correlated contact", PerceptionMemorySelfTest.ConflictingIdentityCannotHijackCorrelatedContact, ref passed, ref failed);
+        RunTest("Perception: expired observations are rejected", PerceptionMemorySelfTest.ExpiredObservationIsRejected, ref passed, ref failed);
+        RunTest("Perception: confidence decays with evidence age", PerceptionMemorySelfTest.ConfidenceDecaysWithEvidenceAge, ref passed, ref failed);
+        RunTest("Perception: hearing writes to shared memory with AI disabled", PerceptionMemorySelfTest.HearingPublishesToSharedMemoryWithAiDisabled, ref passed, ref failed);
+        RunTest("Perception: vision publishes fresh sightings to shared memory", PerceptionMemorySelfTest.VisionPublishesFreshSightingsToSharedMemory, ref passed, ref failed);
+        RunTest("Perception: visibility cache does not refresh a lost contact", PerceptionMemorySelfTest.CachedVisibilityDoesNotRefreshLostContact, ref passed, ref failed);
         RunTest("Perception: real gunshot creates anonymous contact and triggers audible investigation", TacticalHearingSelfTest.Run, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("AI: last Behaviac intent resets on unit lifecycle", TestAiIntentLifecycle, ref passed, ref failed);

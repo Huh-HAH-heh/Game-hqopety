@@ -303,8 +303,8 @@ public sealed class TacticalContactMemory
         if (correlatedContactId.HasValue && correlated == null)
             return null;
         if (correlated?.SubjectUnit is UnitId correlatedSubject &&
-            observation.IdentifiedSubject is UnitId incomingSubject &&
-            !correlatedSubject.Equals(incomingSubject))
+            observation.IdentifiedSubject is UnitId correlatedIncomingSubject &&
+            !correlatedSubject.Equals(correlatedIncomingSubject))
             return null;
 
         TacticalContact? contact = observation.IdentifiedSubject.HasValue
