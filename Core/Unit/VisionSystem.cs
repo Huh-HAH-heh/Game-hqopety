@@ -53,8 +53,8 @@ public sealed class VisionSystem
     private const float LayerEpsilon = Epsilon * WorldMap.HeightUnitsPerMeter;
     private const int VisibilityMemoryUpdates = 60;
     private const int VisibilitySectorCount = 8;
-    private const int CandidatesPerSector = 2;
-    private const int MaxTargetCandidatesPerObserver = 64;
+    private const int CandidatesPerSector = 3;
+    private const int MaxTargetCandidatesPerObserver = 128;
     private const int TargetScanStride = 97;
     private const int TargetObserverOffset = 37;
     /// <summary>Hostiles inside this distance can be noticed outside the facing cone.</summary>
@@ -64,7 +64,7 @@ public sealed class VisionSystem
     private const float CloseAwarenessRangeSquared = CloseAwarenessRange * CloseAwarenessRange;
     private const int CandidateSlots = VisibilitySectorCount * CandidatesPerSector;
     private static readonly int MaxVisionParallelism =
-        Math.Max(1, Math.Min(4, Environment.ProcessorCount - 2));
+        Math.Max(1, Math.Min(6, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions VisionParallelOptions = new()
     {
         MaxDegreeOfParallelism = MaxVisionParallelism
@@ -306,7 +306,7 @@ public sealed class VisionSystem
         candidateTargets.Fill(-1);
 
         Span<float> candidateDistances = stackalloc float[CandidateSlots];
-        Span<int> rotationDistances = stackalloc int[VisibilitySectorCount];
+        Span<int> rotationDistances = stackalloc int[CandidateSlots];
         Span<int> sampledTargets = stackalloc int[MaxTargetCandidatesPerObserver];
 
         int candidatePairs = 0;
@@ -331,12 +331,11 @@ public sealed class VisionSystem
         float halfFovRadians = units.FieldOfView[observer] * MathF.PI / 360f;
         float minFacingDot = MathF.Cos(halfFovRadians);
 
+        rotationDistances.Fill(int.MaxValue);
         for (int sector = 0; sector < VisibilitySectorCount; sector++)
         {
             int slot = sector * CandidatesPerSector;
             candidateDistances[slot] = float.PositiveInfinity;
-            candidateDistances[slot + 1] = 0f;
-            rotationDistances[sector] = int.MaxValue;
         }
 
         if (markSequence >= int.MaxValue - 1)
@@ -451,10 +450,26 @@ public sealed class VisionSystem
                 ? target - cursor
                 : _visibilityCapacity - cursor + target;
 
-            if (rotationDistance < rotationDistances[sector])
+            // Keep the two earliest targets from the rotating index window in
+            // addition to the nearest target for this direction sector.
+            for (int rotatingCandidate = slot + 1;
+                 rotatingCandidate < slot + CandidatesPerSector;
+                 rotatingCandidate++)
             {
-                rotationDistances[sector] = rotationDistance;
-                candidateTargets[slot + 1] = target;
+                if (rotationDistance >= rotationDistances[rotatingCandidate])
+                    continue;
+
+                for (int shift = slot + CandidatesPerSector - 1;
+                     shift > rotatingCandidate;
+                     shift--)
+                {
+                    rotationDistances[shift] = rotationDistances[shift - 1];
+                    candidateTargets[shift] = candidateTargets[shift - 1];
+                }
+
+                rotationDistances[rotatingCandidate] = rotationDistance;
+                candidateTargets[rotatingCandidate] = target;
+                break;
             }
         }
 
@@ -488,14 +503,21 @@ public sealed class VisionSystem
                 : 0;
         }
 
-        // Rotate the far-target pick independently from the nearest target.
+        // Rotate far-target picks independently from the nearest target.
         for (int sector = 0; sector < VisibilitySectorCount; sector++)
         {
-            int sampledTarget = candidateTargets[sector * CandidatesPerSector + 1];
-            if (sampledTarget >= 0)
+            int slot = sector * CandidatesPerSector;
+            int nearestTarget = candidateTargets[slot];
+
+            for (int offset = 1; offset < CandidatesPerSector; offset++)
             {
+                int sampledTarget = candidateTargets[slot + offset];
+                if (sampledTarget < 0 || sampledTarget == nearestTarget)
+                    continue;
+
                 _sectorTargetCursors[observer * VisibilitySectorCount + sector] =
                     (sampledTarget + 1) % _visibilityCapacity;
+                break;
             }
         }
 
