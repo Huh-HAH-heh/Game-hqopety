@@ -1133,7 +1133,7 @@ public sealed class UnitAiSystem
         return true;
     }
 
-    private void RecordBehaviacIntent(    private void RecordBehaviacIntent(BehaviacUnitIntent intent)
+    private void RecordBehaviacIntent(BehaviacUnitIntent intent)
     {
         LastBehaviacDecisions++;
         TotalBehaviacDecisions++;
