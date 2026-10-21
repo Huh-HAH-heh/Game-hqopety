@@ -54,7 +54,7 @@ public sealed class VisionSystem
     private const int VisibilityMemoryUpdates = 60;
     private const int VisibilitySectorCount = 8;
     private const int CandidatesPerSector = 3;
-    private const int MaxTargetCandidatesPerObserver = 128;
+    private const int MaxTargetCandidatesPerObserver = 64;
     private const int TargetScanStride = 97;
     private const int TargetObserverOffset = 37;
     /// <summary>Hostiles inside this distance can be noticed outside the facing cone.</summary>

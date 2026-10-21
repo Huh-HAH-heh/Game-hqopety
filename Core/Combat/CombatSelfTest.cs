@@ -829,7 +829,7 @@ public static class CombatSelfTest
 
         suppression.Add(
             0,
-            1.6f,
+            2.1f,
             Vector3.Zero);
 
         if (suppression.GetState(0) !=
@@ -840,7 +840,7 @@ public static class CombatSelfTest
 
         suppression.Add(
             0,
-            3.0f,
+            5.0f,
             Vector3.Zero);
 
         return suppression.GetState(0) ==
