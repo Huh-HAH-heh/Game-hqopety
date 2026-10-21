@@ -1229,14 +1229,17 @@ public sealed class GameRenderer
         }
 
         Vector3 destination = units.Position[targetIndex];
-        int assigned = 0;
+        Vector3 targetEye = destination + new Vector3(
+            0f, 0f, MathF.Max(0.05f, units.Height[targetIndex]));
+        HashSet<UnitId> selected = new(memberIds);
+        Dictionary<int, List<(UnitId Id, int Index, float DistanceSquared)>> squadCandidates = new();
+        int advancing = 0;
+        int supporting = 0;
 
-        // A squad attack is a shared objective, not a split assault/support formation.
-        // Every selected soldier receives a normal Attack order and keeps their own
-        // perception, target selection, movement and cover decisions.
         for (int i = 0; i < memberIds.Length; i++)
         {
-            if (!units.TryGetIndex(memberIds[i], out int unitIndex) ||
+            UnitId id = memberIds[i];
+            if (!units.TryGetIndex(id, out int unitIndex) ||
                 _unitSimulation.Health.OverallHitPoints[unitIndex] <= 0f ||
                 !FactionRules.ShouldAttack(
                     units.FactionTag[unitIndex],
@@ -1245,12 +1248,227 @@ public sealed class GameRenderer
                 continue;
             }
 
-            ai.SetPlayerOrder(unitIndex, UnitAiOrderType.Attack, destination, targetId);
-            assigned++;
+            int squadId = _squadManager.GetSquadId(id);
+            if (squadId <= 0)
+            {
+                ai.SetPlayerOrder(unitIndex, UnitAiOrderType.Attack, destination, targetId);
+                advancing++;
+                continue;
+            }
+
+            Vector3 position = units.Position[unitIndex];
+            float dx = position.X - destination.X;
+            float dy = position.Y - destination.Y;
+            if (!squadCandidates.TryGetValue(
+                    squadId,
+                    out List<(UnitId Id, int Index, float DistanceSquared)>? candidates))
+            {
+                candidates = new List<(UnitId Id, int Index, float DistanceSquared)>();
+                squadCandidates.Add(squadId, candidates);
+            }
+
+            candidates.Add((id, unitIndex, dx * dx + dy * dy));
+        }
+
+        foreach (KeyValuePair<int, List<(UnitId Id, int Index, float DistanceSquared)>> pair in squadCandidates)
+        {
+            List<(UnitId Id, int Index, float DistanceSquared)> candidates = pair.Value;
+            InfantrySquad? squad = _squadManager.GetSquad(pair.Key);
+            bool wholeSquadSelected = squad != null;
+            int livingSquadMembers = 0;
+
+            if (squad != null)
+            {
+                for (int i = 0; i < squad.Members.Count; i++)
+                {
+                    UnitId member = squad.Members[i];
+                    if (!units.TryGetIndex(member, out int memberIndex) ||
+                        _unitSimulation.Health.OverallHitPoints[memberIndex] <= 0f)
+                    {
+                        continue;
+                    }
+
+                    livingSquadMembers++;
+                    if (!selected.Contains(member))
+                        wholeSquadSelected = false;
+                }
+            }
+
+            // Keep the previous behavior for an individual or partial squad selection.
+            bool splitRoles = wholeSquadSelected &&
+                livingSquadMembers > 1 &&
+                candidates.Count == livingSquadMembers;
+
+            candidates.Sort(static (a, b) =>
+            {
+                int distanceOrder = a.DistanceSquared.CompareTo(b.DistanceSquared);
+                return distanceOrder != 0 ? distanceOrder : a.Id.Index.CompareTo(b.Id.Index);
+            });
+
+            int advancingCount = splitRoles
+                ? Math.Max(1, (candidates.Count + 2) / 3)
+                : candidates.Count;
+            int supportCount = candidates.Count - advancingCount;
+            float forwardX = 1f;
+            float forwardY = 0f;
+            float sideX = 0f;
+            float sideY = 1f;
+            float supportCenterX = 0f;
+            float supportCenterY = 0f;
+            float spacing = 2f;
+
+            if (splitRoles)
+            {
+                float squadCenterX = 0f;
+                float squadCenterY = 0f;
+                float maxSupportRadius = 0f;
+                for (int i = 0; i < candidates.Count; i++)
+                {
+                    Vector3 position = units.Position[candidates[i].Index];
+                    squadCenterX += position.X;
+                    squadCenterY += position.Y;
+                    if (i >= advancingCount)
+                    {
+                        supportCenterX += position.X;
+                        supportCenterY += position.Y;
+                        maxSupportRadius = MathF.Max(
+                            maxSupportRadius, units.Radius[candidates[i].Index]);
+                    }
+                }
+
+                squadCenterX /= candidates.Count;
+                squadCenterY /= candidates.Count;
+                supportCenterX /= supportCount;
+                supportCenterY /= supportCount;
+
+                float dx = destination.X - squadCenterX;
+                float dy = destination.Y - squadCenterY;
+                float length = MathF.Sqrt(dx * dx + dy * dy);
+                if (length > 0.001f)
+                {
+                    forwardX = dx / length;
+                    forwardY = dy / length;
+                }
+
+                sideX = -forwardY;
+                sideY = forwardX;
+                spacing = MathF.Max(2f, maxSupportRadius * 2.5f);
+                supportCenterX -= forwardX * 2f;
+                supportCenterY -= forwardY * 2f;
+            }
+
+            HashSet<(int X, int Y)> reservedSupportTiles = new();
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                (UnitId Id, int Index, float DistanceSquared) candidate = candidates[i];
+                if (i < advancingCount)
+                {
+                    ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Attack, destination, targetId);
+                    advancing++;
+                    continue;
+                }
+
+                int supportSlot = i - advancingCount;
+                float lateral = (supportSlot - (supportCount - 1) * 0.5f) * spacing;
+                Vector3 desiredSupportPosition = new(
+                    supportCenterX + sideX * lateral,
+                    supportCenterY + sideY * lateral,
+                    units.Position[candidate.Index].Z);
+
+                if (splitRoles && TryFindFireSupportPosition(
+                        desiredSupportPosition,
+                        targetEye,
+                        MathF.Max(0.05f, units.Height[candidate.Index]),
+                        forwardX,
+                        forwardY,
+                        sideX,
+                        sideY,
+                        reservedSupportTiles,
+                        out Vector3 firePosition))
+                {
+                    // Move to the firing line; the existing AI turns Move into Stop on arrival.
+                    ai.SetPlayerOrder(candidate.Index, UnitAiOrderType.Move, firePosition);
+                }
+                else
+                {
+                    // If no suitable slot exists, preserve safety and hold current position.
+                    ai.SetPlayerOrder(
+                        candidate.Index, UnitAiOrderType.Stop, units.Position[candidate.Index]);
+                }
+
+                supporting++;
+            }
         }
 
         Console.WriteLine(
-            $"[SQUAD] Attack task: {assigned} soldiers assigned a normal Attack order.");
+            $"[SQUAD] Attack task: {advancing} advancing, {supporting} fire-support; " +
+            "support prefers positions with line of sight. Partial selections keep normal Attack behavior.");
+    }
+
+    private bool TryFindFireSupportPosition(
+        Vector3 desired,
+        Vector3 targetEye,
+        float observerEyeHeight,
+        float forwardX,
+        float forwardY,
+        float sideX,
+        float sideY,
+        HashSet<(int X, int Y)> reservedTiles,
+        out Vector3 position)
+    {
+        position = default;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            for (int backoffStep = 0; backoffStep < 4; backoffStep++)
+            {
+                float backoff = backoffStep * 2f;
+                for (int lateralStep = 0; lateralStep < 5; lateralStep++)
+                {
+                    float lateral = lateralStep switch
+                    {
+                        0 => 0f,
+                        1 => 1.5f,
+                        2 => -1.5f,
+                        3 => 3f,
+                        _ => -3f
+                    };
+
+                    float x = desired.X - forwardX * backoff + sideX * lateral;
+                    float y = desired.Y - forwardY * backoff + sideY * lateral;
+                    if (x < 1f || y < 1f ||
+                        x >= _worldMap.TileWidth - 1f ||
+                        y >= _worldMap.TileHeight - 1f)
+                    {
+                        continue;
+                    }
+
+                    int tileX = (int)MathF.Floor(x);
+                    int tileY = (int)MathF.Floor(y);
+                    if (_worldMap.IsNavigationBlocked(tileX, tileY) ||
+                        reservedTiles.Contains((tileX, tileY)))
+                    {
+                        continue;
+                    }
+
+                    Vector3 candidate = new(
+                        tileX + 0.5f,
+                        tileY + 0.5f,
+                        _worldMap.GetSurfaceHeight(tileX, tileY));
+                    Vector3 candidateEye = candidate + new Vector3(0f, 0f, observerEyeHeight);
+                    bool hasLineOfSight = _unitSimulation.Vision.HasLineOfSight(
+                        _worldMap, candidateEye, targetEye, out _);
+
+                    if (pass == 0 && !hasLineOfSight)
+                        continue;
+
+                    reservedTiles.Add((tileX, tileY));
+                    position = candidate;
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void IssueHoldOrder(UnitId[] memberIds)
