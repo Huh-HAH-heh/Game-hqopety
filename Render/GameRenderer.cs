@@ -204,9 +204,9 @@ public sealed class GameRenderer
 
         // Combat event logging stays disabled to keep the console readable.
 
-        // The battlefield is a live micro-AI demonstration by default.
-        // A is idempotent: it only enables AI and cannot switch it off.
-        _unitSimulation.AI.Enabled = true;
+        // Autonomous unit AI is intentionally disabled while its design is rebuilt.
+        // Keep simulation, vision, combat and the AI implementation itself available.
+        _unitSimulation.AI.Enabled = false;
         _unitSimulation.VisionEnabled = true;
         _showVisionDebug = false;
 
@@ -767,7 +767,7 @@ public sealed class GameRenderer
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             "LMB drag=select units; RMB=menu; squad ring=select squad; menu=Create/Send/Attack; Shift+click=add/transfer/detach; Shift+1-9=bind; 1-9=select; K=disband; J=formation; S=hold | " +
-            "A=enable AI B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
+            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
 
@@ -3078,14 +3078,9 @@ public sealed class GameRenderer
         {
             ExecuteSimulationCommand(() =>
             {
-                bool wasEnabled = _unitSimulation.AI.Enabled;
-                _unitSimulation.AI.Enabled = true;
+                _unitSimulation.AI.Enabled = false;
                 _unitSimulation.VisionEnabled = true;
-
-                Console.WriteLine(
-                    wasEnabled
-                        ? "[TEST] AI is already enabled; A never disables it."
-                        : "[TEST] AI enabled; vision enabled. A will not turn AI off.");
+                Console.WriteLine("[AI] Autonomous AI remains disabled for systematic redesign; vision enabled.");
             });
             return;
         }
