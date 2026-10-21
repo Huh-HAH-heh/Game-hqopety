@@ -20,7 +20,6 @@ public sealed class UnitAiSystem
     private const float CoverSearchRadius = 8f;
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
-    private const float ProneCrawlFiringDistance = 9f;
     private static readonly int MaxAiPlanningParallelism =
         Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
@@ -34,8 +33,7 @@ public sealed class UnitAiSystem
     private Vector3[] _suppressionCoverByUnit = Array.Empty<Vector3>();
     private bool[] _hasSuppressionCoverByUnit = Array.Empty<bool>();
     private BehaviacUnitDecisionAgent?[] _behaviacAgents = Array.Empty<BehaviacUnitDecisionAgent?>();
-    private UnitId[] _flankTargetByUnit = Array.Empty<UnitId>();
-    private bool[] _hasFlankTargetByUnit = Array.Empty<bool>();
+
     private bool _behaviacInitialized;
 
     private readonly UnitWeaponSystem _weaponSystem;
@@ -107,8 +105,6 @@ public sealed class UnitAiSystem
     {
         EnsurePlanningCapacity(unitIndex + 1);
         _searchPatrolLegByUnit[unitIndex] = 0;
-        _flankTargetByUnit[unitIndex] = default;
-        _hasFlankTargetByUnit[unitIndex] = false;
     }
 
     public void ClearUnit(int unitIndex)
@@ -117,8 +113,6 @@ public sealed class UnitAiSystem
             return;
 
         _searchPatrolLegByUnit[unitIndex] = 0;
-        _flankTargetByUnit[unitIndex] = default;
-        _hasFlankTargetByUnit[unitIndex] = false;
         if ((uint)unitIndex < (uint)_behaviacAgents.Length)
             _behaviacAgents[unitIndex] = null;
     }
@@ -250,8 +244,6 @@ public sealed class UnitAiSystem
             if (!isAlive ||
                 (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.Dead))
             {
-                _hasFlankTargetByUnit[unit] = false;
-                _flankTargetByUnit[unit] = default;
                 ClearAiming(weapons, unit);
                 units.HasTarget[unit] = false;
                 Store.ClearGoal(unit);
@@ -393,14 +385,6 @@ public sealed class UnitAiSystem
             }
 
             if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.SuppressiveFire &&
-                TryExecuteSuppressiveFire(
-                    units, health, inventory, weapons, projectiles, suppression, unit))
-            {
-                continue;
-            }
-
-            if (UseBehaviacDecisionLayer &&
                 intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
                 TryExecuteLastKnownInvestigation(units, weapons, worldMap, unit))
             {
@@ -514,6 +498,7 @@ public sealed class UnitAiSystem
             {
                 ClearAiming(weapons, unit);
                 Store.ClearTarget(unit);
+                Store.ClearGoal(unit);
                 units.HasTarget[unit] = false;
                 Store.State[unit] = UnitAiState.Idle;
                 continue;
@@ -526,13 +511,13 @@ public sealed class UnitAiSystem
             {
                 ClearAiming(weapons, unit);
                 Store.ClearTarget(unit);
+                Store.ClearGoal(unit);
                 units.HasTarget[unit] = false;
                 Store.State[unit] = UnitAiState.Idle;
                 continue;
             }
 
             bool targetVisible =
-                HasFreshVisualContact(unit, target, out _) &&
                 vision.IsRecentlyVisible(
                     unit,
                     target.Index,
@@ -670,123 +655,20 @@ public sealed class UnitAiSystem
                 }
             }
 
-            if (UseBehaviacDecisionLayer &&
-                targetVisible &&
-                intent == BehaviacUnitIntent.FlankTarget &&
-                !_squadCoordinator.TryClaimFlank(units.GetId(unit), target, _tacticalTimeSeconds))
-            {
-                // One soldier handles the flank; the rest retain their local combat decisions.
-                intent = BehaviacUnitIntent.EngageTarget;
-            }
-
-            if (UseBehaviacDecisionLayer &&
-                targetVisible &&
-                intent == BehaviacUnitIntent.FlankTarget)
-            {
-                bool targetChanged = !_hasFlankTargetByUnit[unit] ||
-                    !_flankTargetByUnit[unit].Equals(target);
-
-                if (Store.State[unit] != UnitAiState.Flank ||
-                    !Store.HasGoal[unit] ||
-                    targetChanged)
-                {
-                    Store.ClearGoal(unit);
-                    _flankTargetByUnit[unit] = target;
-                    _hasFlankTargetByUnit[unit] = true;
-                    if (TryFindFlankWaypoint(
-                            units,
-                            worldMap,
-                            unit,
-                            target.Index,
-                            GetMaxEffectiveRange(inventory, unit),
-                            out Vector3 flankWaypoint))
-                    {
-                        Store.SetGoal(unit, flankWaypoint);
-                    }
-                }
-
-                if (Store.HasGoal[unit] &&
-                    !ReachedGoal(units.Position[unit], Store.Goal[unit]))
-                {
-                    ClearAiming(weapons, unit);
-                    units.Target[unit] = Store.Goal[unit];
-                    units.HasTarget[unit] = true;
-                    Store.State[unit] = UnitAiState.Flank;
-                    continue;
-                }
-
-                // Mark this target as already flanked so the unit doesn't oscillate
-                // between a firing position and another flank waypoint every tick.
-                Store.ClearGoal(unit);
-                Store.State[unit] = UnitAiState.Attack;
-                intent = BehaviacUnitIntent.EngageTarget;
-            }
-            else if (UseBehaviacDecisionLayer &&
-                     targetVisible &&
-                     intent == BehaviacUnitIntent.ProneEngage)
-            {
-                // Replace a patrol/cover destination on the first prone-engage
-                // tick, but retain the crawl goal on subsequent thinking ticks.
-                if (Store.State[unit] != UnitAiState.Attack)
-                    Store.ClearGoal(unit);
-            }
-            else
+            // Direct engagement is the only active autonomous attack mode.
+            if (!UseBehaviacDecisionLayer ||
+                intent != BehaviacUnitIntent.EngageTarget ||
+                Store.State[unit] != UnitAiState.Attack ||
+                !Store.HasGoal[unit])
             {
                 Store.ClearGoal(unit);
             }
 
             if (targetVisible &&
                 (!UseBehaviacDecisionLayer ||
-                 intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage or
+                 intent is BehaviacUnitIntent.EngageTarget or
                      BehaviacUnitIntent.HoldPositionEngage))
             {
-                // A prone soldier crawls slowly toward a low firing position at
-                // about nine metres. A hold order selects HoldPositionEngage instead,
-                // so the crawl never overrides an explicit hold task.
-                if (intent == BehaviacUnitIntent.ProneEngage)
-                {
-                    Vector3 pronePosition = units.Position[unit];
-                    Vector3 proneTarget = units.Position[target.Index];
-                    Vector2 proneDelta = new(
-                        proneTarget.X - pronePosition.X,
-                        proneTarget.Y - pronePosition.Y);
-                    float proneDistanceSquared = proneDelta.LengthSquared();
-                    float crawlDistanceSquared =
-                        ProneCrawlFiringDistance * ProneCrawlFiringDistance;
-
-                    if (proneDistanceSquared > crawlDistanceSquared)
-                    {
-                        if (!Store.HasGoal[unit] ||
-                            Store.State[unit] != UnitAiState.Attack ||
-                            ReachedGoal(pronePosition, Store.Goal[unit]))
-                        {
-                            Store.ClearGoal(unit);
-                            if (TryFindProneCrawlWaypoint(
-                                    units,
-                                    worldMap,
-                                    unit,
-                                    target.Index,
-                                    out Vector3 crawlWaypoint))
-                            {
-                                Store.SetGoal(unit, crawlWaypoint);
-                            }
-                        }
-
-                        if (Store.HasGoal[unit] &&
-                            !ReachedGoal(pronePosition, Store.Goal[unit]))
-                        {
-                            ClearAiming(weapons, unit);
-                            units.Target[unit] = Store.Goal[unit];
-                            units.HasTarget[unit] = true;
-                            Store.State[unit] = UnitAiState.Attack;
-                            continue;
-                        }
-                    }
-                    else
-                    {
-                        Store.ClearGoal(unit);
-                    }
-                }
 
                 if (intent != BehaviacUnitIntent.HoldPositionEngage &&
                     HasRangedWeapon(units, inventory, unit))
@@ -794,19 +676,41 @@ public sealed class UnitAiSystem
                     Vector3 position = units.Position[unit];
                     Vector3 targetPosition = units.Position[target.Index];
                     float range = GetMaxEffectiveRange(inventory, unit);
-                    if (range > 0.1f)
+                    if (range > 0.1f &&
+                        TryGetRangedEngagementMoveTarget(
+                            position, targetPosition, range, unit, target.Index,
+                            out Vector3 desiredApproach))
                     {
-                        if (TryGetRangedEngagementMoveTarget(
-                                position, targetPosition, range, unit, target.Index,
-                                out Vector3 engagementPosition))
+                        bool sameApproach = Store.State[unit] == UnitAiState.Attack &&
+                            Store.HasGoal[unit] && Store.HasTarget[unit] &&
+                            Store.Target[unit].Equals(target);
+                        bool needNewGoal = !sameApproach ||
+                            Vector3.DistanceSquared(Store.Goal[unit], desiredApproach) > 16f ||
+                            ReachedGoal(position, Store.Goal[unit]);
+
+                        if (needNewGoal)
                         {
-                            units.Target[unit] = engagementPosition;
+                            bool changedDestination = !Store.HasGoal[unit] ||
+                                Vector3.DistanceSquared(Store.Goal[unit], desiredApproach) > 1f;
+                            Store.SetGoal(unit, desiredApproach);
+                            Store.RememberTarget(unit, target, targetPosition, TargetMemorySeconds);
+                            if (changedDestination)
+                                ClearAiming(weapons, unit);
+                        }
+
+                        if (Store.HasGoal[unit] && !ReachedGoal(position, Store.Goal[unit]))
+                        {
+                            units.Target[unit] = Store.Goal[unit];
                             units.HasTarget[unit] = true;
-                            ClearAiming(weapons, unit);
-                            Store.ClearGoal(unit);
                             Store.State[unit] = UnitAiState.Attack;
                             continue;
                         }
+
+                        Store.ClearGoal(unit);
+                    }
+                    else if (Store.State[unit] == UnitAiState.Attack && Store.HasGoal[unit])
+                    {
+                        Store.ClearGoal(unit);
                     }
                 }
 
@@ -831,13 +735,30 @@ public sealed class UnitAiSystem
                         float desiredDistance = MathF.Max(0.20f, attackDistance * 0.94f);
                         Vector3 engagementPoint = GetMeleeEngagementPoint(
                             unit, target.Index, targetPosition, desiredDistance);
-                        units.Target[unit] = engagementPoint;
+                        bool sameApproach = Store.State[unit] == UnitAiState.Attack &&
+                            Store.HasGoal[unit] && Store.HasTarget[unit] &&
+                            Store.Target[unit].Equals(target);
+                        bool needNewGoal = !sameApproach ||
+                            Vector3.DistanceSquared(Store.Goal[unit], engagementPoint) > 2.25f ||
+                            ReachedGoal(position, Store.Goal[unit]);
+
+                        if (needNewGoal)
+                        {
+                            bool changedDestination = !Store.HasGoal[unit] ||
+                                Vector3.DistanceSquared(Store.Goal[unit], engagementPoint) > 0.5f;
+                            Store.SetGoal(unit, engagementPoint);
+                            Store.RememberTarget(unit, target, targetPosition, TargetMemorySeconds);
+                            if (changedDestination)
+                                ClearAiming(weapons, unit);
+                        }
+
+                        units.Target[unit] = Store.Goal[unit];
                         units.HasTarget[unit] = true;
-                        ClearAiming(weapons, unit);
-                        Store.ClearGoal(unit);
                         Store.State[unit] = UnitAiState.Attack;
                         continue;
                     }
+
+                    Store.ClearGoal(unit);
                 }
 
                 FaceTarget(
@@ -862,18 +783,9 @@ public sealed class UnitAiSystem
                     // keep firing at the last known point; the others must stop.
                     vision.ForgetVisibleTarget(unit, target.Index);
 
-                    if (Store.TargetMemory[unit] > 0f &&
-                        HasSuppressFireWeapon(inventory, weapons, unit))
-                    {
-                        ClearNonSuppressiveAiming(weapons, inventory, unit);
-                        units.Target[unit] = units.Position[unit];
-                        units.HasTarget[unit] = false;
-                        Store.State[unit] = UnitAiState.Attack;
-                        continue;
-                    }
-
                     ClearAiming(weapons, unit);
                     Store.ClearTarget(unit);
+                    Store.ClearGoal(unit);
                     units.HasTarget[unit] = false;
                     Store.State[unit] = UnitAiState.Search;
                     continue;
@@ -1012,14 +924,27 @@ public sealed class UnitAiSystem
                 return true;
             }
 
-            // Behaviac selected the task; this AI action translates it into the
-            // existing navigation goal without bypassing the decision tree.
-            store.ClearTarget(unit);
-            store.SetGoal(unit, moveDestination);
-            ClearAiming(weapons, unit);
-            units.Target[unit] = moveDestination;
-            units.HasTarget[unit] = true;
-            store.State[unit] = UnitAiState.Search;
+            bool alreadyMovingToOrder =
+                !store.HasTarget[unit] &&
+                store.HasGoal[unit] &&
+                store.State[unit] == UnitAiState.Search &&
+                Vector3.DistanceSquared(store.Goal[unit], moveDestination) <= 0.25f &&
+                units.HasTarget[unit] &&
+                Vector3.DistanceSquared(units.Target[unit], moveDestination) <= 0.25f;
+
+            if (!alreadyMovingToOrder)
+            {
+                store.ClearTarget(unit);
+                bool changedDestination = !store.HasGoal[unit] ||
+                    Vector3.DistanceSquared(store.Goal[unit], moveDestination) > 0.25f;
+                store.SetGoal(unit, moveDestination);
+                if (changedDestination)
+                    ClearAiming(weapons, unit);
+                units.Target[unit] = store.Goal[unit];
+                units.HasTarget[unit] = true;
+                store.State[unit] = UnitAiState.Search;
+            }
+
             return true;
         }
 
@@ -1089,12 +1014,27 @@ public sealed class UnitAiSystem
             return true;
         }
 
-        store.ClearTarget(unit);
-        store.SetGoal(unit, destination);
-        ClearAiming(weapons, unit);
-        units.Target[unit] = destination;
-        units.HasTarget[unit] = true;
-        store.State[unit] = UnitAiState.Search;
+        bool alreadyMovingToAttackOrder =
+            !store.HasTarget[unit] &&
+            store.HasGoal[unit] &&
+            store.State[unit] == UnitAiState.Search &&
+            Vector3.DistanceSquared(store.Goal[unit], destination) <= 0.25f &&
+            units.HasTarget[unit] &&
+            Vector3.DistanceSquared(units.Target[unit], destination) <= 0.25f;
+
+        if (!alreadyMovingToAttackOrder)
+        {
+            store.ClearTarget(unit);
+            bool changedDestination = !store.HasGoal[unit] ||
+                Vector3.DistanceSquared(store.Goal[unit], destination) > 0.25f;
+            store.SetGoal(unit, destination);
+            if (changedDestination)
+                ClearAiming(weapons, unit);
+            units.Target[unit] = store.Goal[unit];
+            units.HasTarget[unit] = true;
+            store.State[unit] = UnitAiState.Search;
+        }
+
         return true;
     }
 
@@ -1152,50 +1092,6 @@ public sealed class UnitAiSystem
         units.Target[unit] = searchPoint;
         units.HasTarget[unit] = true;
         Store.State[unit] = UnitAiState.Search;
-        return true;
-    }
-
-    private bool TryExecuteSuppressiveFire(
-        UnitStore units,
-        UnitHealthStore health,
-        UnitInventoryStore inventory,
-        UnitWeaponStore weapons,
-        ProjectileStore projectiles,
-        UnitSuppressionStore suppression,
-        int unit)
-    {
-        if (!Store.HasTarget[unit] ||
-            Store.TargetMemory[unit] <= 0f ||
-            !units.IsAlive(Store.Target[unit]) ||
-            health.OverallHitPoints[Store.Target[unit].Index] <= 0f ||
-            !HasSuppressFireWeapon(inventory, weapons, unit))
-            return false;
-
-        Vector3 aimPoint = Store.LastSeenAimPoint[unit];
-        if (aimPoint == Vector3.Zero)
-            aimPoint = Store.LastSeenPosition[unit];
-        if (!float.IsFinite(aimPoint.X) ||
-            !float.IsFinite(aimPoint.Y) ||
-            !float.IsFinite(aimPoint.Z) ||
-            aimPoint == Vector3.Zero)
-            return false;
-
-        ClearNonSuppressiveAiming(weapons, inventory, unit);
-        if (!TryFireSuppressiveWeapons(
-                units,
-                inventory,
-                weapons,
-                projectiles,
-                unit,
-                Store.Target[unit],
-                aimPoint,
-                GetSpreadMultiplier(units, suppression, unit)))
-            return false;
-
-        Store.ClearGoal(unit);
-        units.Target[unit] = units.Position[unit];
-        units.HasTarget[unit] = false;
-        Store.State[unit] = UnitAiState.Attack;
         return true;
     }
 
@@ -1293,7 +1189,6 @@ public sealed class UnitAiSystem
                 units.IsAlive(attackTarget) &&
                 health.OverallHitPoints[attackTarget.Index] > 0f &&
                 IsHostile(units, unit, attackTarget.Index) &&
-                HasFreshVisualContact(unit, attackTarget, out _) &&
                 vision.IsRecentlyVisible(unit, attackTarget.Index, units))
             {
                 visibleTargetIndex = attackTarget.Index;
@@ -1365,66 +1260,11 @@ public sealed class UnitAiSystem
             ? health.OverallHitPoints[unit] / health.OverallMaxHitPoints[unit]
             : 0f;
         bool isLowHealth = healthRatio < LowHealthThreshold;
-        bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
-        bool canFlank = false;
-        float flankDistance = 0f;
-        float flankEffectiveRange = 0f;
-
-        // Flanking is a ranged-fire maneuver. A melee-only unit should
-        // commit toward contact instead of spending its first approach on a
-        // wide side/back waypoint.
-        if (hasVisibleTarget &&
-            isHealthyEnoughToFlank &&
-            HasRangedWeapon(units, inventory, unit) &&
-            (unit % 4 == 0 || _squadCoordinator.IsMemberOfAnySquad(units.GetId(unit))))
-        {
-            Vector3 delta = visibleTargetPosition - units.Position[unit];
-            float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
-            flankDistance = MathF.Sqrt(distanceSquared);
-            bool alreadyFlankedThisTarget = _hasFlankTargetByUnit[unit] &&
-                _flankTargetByUnit[unit].Equals(units.GetId(visibleTargetIndex));
-
-            // A flank changes the angle of approach while staying within a useful
-            // engagement radius; it does not require the target to be out of weapon range.
-            float maxFlankRange = MathF.Min(140f, MathF.Max(45f, units.ViewRange[unit] * 0.90f));
-            float effectiveRange = GetMaxEffectiveRange(inventory, unit);
-            flankEffectiveRange = effectiveRange;
-            float minFlankRange = MathF.Max(
-                24f,
-                MathF.Min(effectiveRange * 0.45f, maxFlankRange * 0.55f));
-            canFlank = !alreadyFlankedThisTarget &&
-                effectiveRange > 0.1f &&
-                flankDistance >= minFlankRange &&
-                flankDistance <= maxFlankRange;
-        }
-
-        bool isFlanking =
-            Store.State[unit] == UnitAiState.Flank &&
-            isHealthyEnoughToFlank &&
-            HasRangedWeapon(units, inventory, unit);
-        float flankUtility = UnitTacticalUtility.EvaluateFlanking(
-            flankDistance,
-            flankEffectiveRange,
-            canFlank);
-
-        float proneUtility = 0f;
-        if (hasVisibleTarget &&
-            HasRangedWeapon(units, inventory, unit) &&
-            suppressionState == UnitSuppressionState.Calm &&
-            !isLowHealth &&
-            !canFlank &&
-            !isFlanking)
-        {
-            Vector3 targetDelta = visibleTargetPosition - units.Position[unit];
-            float distance = MathF.Sqrt(
-                targetDelta.X * targetDelta.X + targetDelta.Y * targetDelta.Y);
-            bool exposed = !_hasSuppressionCoverByUnit[unit] &&
-                !(Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover);
-            proneUtility = UnitTacticalUtility.EvaluateProneFiring(
-                distance,
-                exposed,
-                healthRatio);
-        }
+        // Direct engagement replaces the flank/prone utility contest.
+        const bool canFlank = false;
+        const bool isFlanking = false;
+        const float proneUtility = 0f;
+        const float flankUtility = 0f;
 
         bool hasCoverGoal = Store.HasGoal[unit] &&
             Store.State[unit] == UnitAiState.SeekCover;
@@ -1496,142 +1336,6 @@ public sealed class UnitAiSystem
         }
 
         return agent.Intent;
-    }
-
-    private static bool TryFindProneCrawlWaypoint(
-        UnitStore units,
-        WorldMap worldMap,
-        int unit,
-        int targetIndex,
-        out Vector3 waypoint)
-    {
-        waypoint = Vector3.Zero;
-        Vector3 position = units.Position[unit];
-        Vector3 target = units.Position[targetIndex];
-        Vector2 awayFromTarget = new(position.X - target.X, position.Y - target.Y);
-        float lengthSquared = awayFromTarget.LengthSquared();
-        if (lengthSquared < 0.01f)
-            return false;
-
-        Vector2 forward = Vector2.Normalize(awayFromTarget);
-        Vector2 side = new(-forward.Y, forward.X);
-
-        // Prefer a direct approach point, then deterministic side steps around
-        // blocked terrain. This gives prone units a real crawl destination while
-        // letting the shared navigation system find the route there.
-        for (int candidate = 0; candidate < 8; candidate++)
-        {
-            float standoff = candidate < 3 ? ProneCrawlFiringDistance : ProneCrawlFiringDistance + 1.5f;
-            float lateral = candidate switch
-            {
-                0 => 0f,
-                1 => 4f,
-                2 => -4f,
-                3 => 6f,
-                4 => -6f,
-                5 => 8f,
-                6 => -8f,
-                _ => 0f
-            };
-
-            float targetX = target.X + forward.X * standoff + side.X * lateral;
-            float targetY = target.Y + forward.Y * standoff + side.Y * lateral;
-            targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
-            targetY = Math.Clamp(targetY, 2f, worldMap.MaxTileY - 2f);
-
-            int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
-            int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
-            if (worldMap.IsNavigationBlocked(tileX, tileY))
-                continue;
-
-            Vector3 candidateWaypoint = new(
-                tileX + 0.5f,
-                tileY + 0.5f,
-                worldMap.GetSurfaceHeight(tileX, tileY));
-            Vector2 toWaypoint = new(
-                candidateWaypoint.X - position.X,
-                candidateWaypoint.Y - position.Y);
-            if (toWaypoint.LengthSquared() < 1f)
-                continue;
-
-            Vector2 fromTarget = new(
-                candidateWaypoint.X - target.X,
-                candidateWaypoint.Y - target.Y);
-            if (fromTarget.LengthSquared() <
-                (ProneCrawlFiringDistance - 1f) * (ProneCrawlFiringDistance - 1f))
-                continue;
-
-            waypoint = candidateWaypoint;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryFindFlankWaypoint(
-        UnitStore units,
-        WorldMap worldMap,
-        int unit,
-        int targetIndex,
-        float effectiveRange,
-        out Vector3 waypoint)
-    {
-        waypoint = Vector3.Zero;
-        Vector3 position = units.Position[unit];
-        Vector3 target = units.Position[targetIndex];
-        Vector2 awayFromTarget = new(position.X - target.X, position.Y - target.Y);
-        float lengthSquared = awayFromTarget.LengthSquared();
-        float baseAngle = lengthSquared > 0.01f
-            ? MathF.Atan2(awayFromTarget.Y, awayFromTarget.X)
-            : (unit + 1) * 2.39996323f + (targetIndex + 1) * 0.61803399f;
-
-        float range = float.IsFinite(effectiveRange) && effectiveRange > 0.1f
-            ? effectiveRange
-            : 32f;
-        float currentDistance = MathF.Sqrt(MathF.Max(0f, lengthSquared));
-        float minStandoff = MathF.Max(12f, range * 0.45f);
-        float maxStandoff = MathF.Max(minStandoff, MathF.Min(140f, range * 0.80f));
-        float standoff = Math.Clamp(currentDistance, minStandoff, maxStandoff);
-        float preferredSide = (unit & 1) == 0 ? 1f : -1f;
-
-        // Move around the target on a firing ring. Do not send the flanker
-        // directly to a close backoff point where they would collide with the enemy.
-        for (int candidate = 0; candidate < 8; candidate++)
-        {
-            float side = candidate % 2 == 0 ? preferredSide : -preferredSide;
-            float angleOffset = (candidate switch
-            {
-                0 or 1 => MathF.PI * 0.35f,
-                2 or 3 => MathF.PI * 0.48f,
-                4 or 5 => MathF.PI * 0.25f,
-                _ => MathF.PI * 0.60f
-            }) * side;
-            float angle = baseAngle + angleOffset;
-            float x = target.X + MathF.Cos(angle) * standoff;
-            float y = target.Y + MathF.Sin(angle) * standoff;
-            x = Math.Clamp(x, 2f, worldMap.MaxTileX - 2f);
-            y = Math.Clamp(y, 2f, worldMap.MaxTileY - 2f);
-
-            int tileX = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
-            int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
-            if (worldMap.IsNavigationBlocked(tileX, tileY))
-                continue;
-
-            Vector3 candidateWaypoint = new(
-                tileX + 0.5f,
-                tileY + 0.5f,
-                worldMap.GetSurfaceHeight(tileX, tileY));
-            Vector2 toWaypoint = new(
-                candidateWaypoint.X - position.X,
-                candidateWaypoint.Y - position.Y);
-            if (toWaypoint.LengthSquared() <= 9f)
-                continue;
-
-            waypoint = candidateWaypoint;
-            return true;
-        }
-
-        return false;
     }
 
     private static bool TryFindSearchWaypoint(
@@ -1739,10 +1443,6 @@ public sealed class UnitAiSystem
             Array.Resize(ref _suppressionCoverByUnit, capacity);
         if (_hasSuppressionCoverByUnit.Length < capacity)
             Array.Resize(ref _hasSuppressionCoverByUnit, capacity);
-        if (_flankTargetByUnit.Length < capacity)
-            Array.Resize(ref _flankTargetByUnit, capacity);
-        if (_hasFlankTargetByUnit.Length < capacity)
-            Array.Resize(ref _hasFlankTargetByUnit, capacity);
     }
 
     private void PrepareUnitPlan(
@@ -1926,9 +1626,16 @@ public sealed class UnitAiSystem
         if (_perceptionMemory == null)
             return units.Position[targetIndex];
 
-        return TryGetFreshVisualContact(observer, units.GetId(targetIndex), out Vector3 estimatedPosition)
-            ? estimatedPosition
-            : Vector3.Zero;
+        if (_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory) &&
+            memory.TryGetContact(units.GetId(targetIndex), out TacticalContact contact) &&
+            contact.SubjectUnit is UnitId subject &&
+            subject.Equals(units.GetId(targetIndex)) &&
+            contact.LastVisualAtSeconds >= 0f)
+        {
+            return contact.EstimatedPosition;
+        }
+
+        return Vector3.Zero;
     }
 
     private static bool IsTargetVisible(
@@ -1958,7 +1665,6 @@ public sealed class UnitAiSystem
         if (!units.IsAlive(currentTarget) ||
             health.OverallHitPoints[currentTarget.Index] <= 0f ||
             !IsHostile(units, observer, currentTarget.Index) ||
-            !HasFreshVisualContact(observer, currentTarget, out _) ||
             !vision.IsRecentlyVisible(observer, currentTarget.Index, units))
         {
             return false;

@@ -105,8 +105,6 @@ public static class BehaviacRuntimeHost
             self => self.ShouldRetreatToCover());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldExecuteAttackOrder),
             self => self.ShouldExecuteAttackOrder());
-        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldSuppressiveFire),
-            self => self.ShouldSuppressiveFire());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldInvestigateLastKnownTarget),
             self => self.ShouldInvestigateLastKnownTarget());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldFollowMoveOrder),
@@ -115,10 +113,6 @@ public static class BehaviacRuntimeHost
             self => self.ShouldHoldPosition());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldHoldPositionAndEngage),
             self => self.ShouldHoldPositionAndEngage());
-        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldFlankVisibleTarget),
-            self => self.ShouldFlankVisibleTarget());
-        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldTakePronePosition),
-            self => self.ShouldTakePronePosition());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldEngageVisibleTarget),
             self => self.ShouldEngageVisibleTarget());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldInvestigateAudibleContact),
@@ -130,8 +124,6 @@ public static class BehaviacRuntimeHost
             self => self.SelectSeekCover());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectPanic),
             self => self.SelectPanic());
-        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectSuppressiveFire),
-            self => self.SelectSuppressiveFire());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectInvestigateLastKnownTarget),
             self => self.SelectInvestigateLastKnownTarget());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectPatrol),
@@ -146,10 +138,6 @@ public static class BehaviacRuntimeHost
             self => self.SelectAttackOrder());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectHoldPositionEngage),
             self => self.SelectHoldPositionEngage());
-        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectFlankTarget),
-            self => self.SelectFlankTarget());
-        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectProneEngage),
-            self => self.SelectProneEngage());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectEngageTarget),
             self => self.SelectEngageTarget());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectInvestigateAudibleContact),

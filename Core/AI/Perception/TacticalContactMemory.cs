@@ -256,7 +256,7 @@ public sealed class TacticalContact
 /// </summary>
 public sealed class TacticalContactMemory
 {
-    public const float VisualConfirmationGraceSeconds = 0.30f;
+    public const float VisualConfirmationGraceSeconds = 1.00f;
 
     private const float UnknownContactMergeRadiusFloor = 1.5f;
     private const float CrossSenseMergeWindowSeconds = 1.25f;

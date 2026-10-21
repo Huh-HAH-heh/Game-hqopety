@@ -226,7 +226,6 @@ public sealed class UnitAiStore
         _target[unitIndex] = default;
         _targetMemory[unitIndex] = 0f;
         _lastSeenAimPoint[unitIndex] = Vector3.Zero;
-        _hasGoal[unitIndex] = false;
     }
 
     public void SetGoal(
