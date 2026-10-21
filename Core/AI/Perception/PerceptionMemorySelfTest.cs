@@ -241,15 +241,25 @@ public static class PerceptionMemorySelfTest
             return false;
 
         float lastVisual = contact.LastVisualAtSeconds;
-        // Move the target beyond view range. The old LOS cache must not create new observations.
-        simulation.Units.Position[target.Index] = new Vector3(40f, 40f, 0.1f);
+        // Keep the target nearby but turn the observer away. The old visibility cache
+        // must not count as a fresh visual observation while the target is outside the FOV.
+        simulation.SetHeadNormal(observer, -Vector3.UnitX);
         for (int i = 0; i < 4; i++)
             simulation.Update(world, 0.11f);
 
-        return MathF.Abs(contact.LastVisualAtSeconds - lastVisual) < 0.0001f &&
-               contact.Kind == TacticalContactKind.LastKnown &&
-               !simulation.Vision.WasVisibleOnLatestUpdate(observer.Index, target.Index) &&
-               !simulation.AI.Enabled;
+        bool visualTimeUnchanged =
+            MathF.Abs(contact.LastVisualAtSeconds - lastVisual) < 0.0001f;
+        bool downgraded = contact.Kind == TacticalContactKind.LastKnown;
+        bool notFresh = !simulation.Vision.WasVisibleOnLatestUpdate(observer.Index, target.Index);
+        bool aiRemainsDisabled = !simulation.AI.Enabled;
+        if (!visualTimeUnchanged || !downgraded || !notFresh || !aiRemainsDisabled)
+        {
+            Console.WriteLine(
+                $"[Perception cache diagnostic] visual={lastVisual:F3}->{contact.LastVisualAtSeconds:F3}; " +
+                $"kind={contact.Kind}; fresh={ !notFresh }; aiEnabled={simulation.AI.Enabled};");
+        }
+
+        return visualTimeUnchanged && downgraded && notFresh && aiRemainsDisabled;
     }
 
     private static bool TryCreateVisionScenario(
