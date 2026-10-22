@@ -71,6 +71,7 @@ public sealed class GameRenderer
     private Vector2i _moveLineStartPixel;
     private UnitId[] _moveLineUnits = Array.Empty<UnitId>();
     private float _moveLineSpacing = 1.15f;
+    private uint _moveLineSeed;
     private float _squadPruneTimer;
     private const float SquadMarkerRadiusPixels = 12f;
     private const float SquadMarkerHitTolerancePixels = 4f;
@@ -1727,6 +1728,10 @@ public sealed class GameRenderer
         _moveLineStartPixel = mousePixel;
         _moveLineUnits = selected;
         _moveLineSpacing = spacing;
+        _moveLineSeed = unchecked(
+            (uint)Environment.TickCount * 0x9E3779B9u ^
+            (uint)mousePixel.X * 0x85EBCA6Bu ^
+            (uint)mousePixel.Y * 0xC2B2AE35u);
         _isPlacingMoveLine = true;
         _isSelectingUnits = false;
         _selectionBox.Size = new Vector2f(0f, 0f);
@@ -1748,32 +1753,58 @@ public sealed class GameRenderer
         int unitCount,
         Vector2 start,
         Vector2 end,
-        float spacing)
+        float spacing,
+        uint seed)
     {
         Vector2 delta = end - start;
         float length = delta.Length();
-        Vector2 direction = length > 0.001f ? delta / length : Vector2.UnitX;
-        Vector2 perpendicular = new(-direction.Y, direction.X);
-        spacing = MathF.Max(0.5f, spacing);
+        if (unitCount <= 1 || length <= 0.001f)
+            return (start + end) * 0.5f;
 
-        // Treat the dragged segment as the real front rank. Every overflow
-        // rank reuses those same evenly spaced slots; do not recenter or
-        // resize the final partial rank.
-        int columns = Math.Clamp(
-            (int)MathF.Floor(length / spacing) + 1,
-            1,
-            Math.Max(1, unitCount));
-        int row = index / columns;
-        int column = index % columns;
+        // Use a shuffled, evenly distributed set of intervals rather than
+        // formation slots. Every pawn is assigned to a different section of
+        // the drag line, so the spread looks irregular without large clumps.
+        uint distributionHash = MixMoveLineHash(seed ^ (uint)unitCount * 0x27D4EB2Du);
+        int offset = (int)(distributionHash % (uint)unitCount);
+        int multiplier = (int)((distributionHash >> 16) % (uint)unitCount);
+        if (multiplier == 0)
+            multiplier = 1;
+        while (GreatestCommonDivisor(multiplier, unitCount) != 1)
+        {
+            multiplier++;
+            if (multiplier >= unitCount)
+                multiplier = 1;
+        }
 
-        float t = columns <= 1
-            ? 0.5f
-            : column / (float)(columns - 1);
-        Vector2 onLine = Vector2.Lerp(start, end, t);
+        int slot = (int)(((long)index * multiplier + offset) % unitCount);
+        uint jitterHash = MixMoveLineHash(seed ^ ((uint)index + 1u) * 0x9E3779B9u);
+        float jitterUnit = (jitterHash & 0x00FFFFFFu) / 16777215f * 2f - 1f;
+        float bucketLength = length / unitCount;
+        float maxJitter = MathF.Min(bucketLength * 0.28f, MathF.Max(0f, spacing) * 0.3f);
+        float alongLine = ((slot + 0.5f) * bucketLength) + jitterUnit * maxJitter;
 
-        // Additional ranks are parallel copies behind the user-drawn line.
-        float rowOffset = -row * spacing;
-        return onLine + perpendicular * rowOffset;
+        return start + delta / length * alongLine;
+    }
+
+    private static uint MixMoveLineHash(uint value)
+    {
+        value ^= value >> 16;
+        value *= 0x7FEB352Du;
+        value ^= value >> 15;
+        value *= 0x846CA68Bu;
+        value ^= value >> 16;
+        return value;
+    }
+
+    private static int GreatestCommonDivisor(int a, int b)
+    {
+        while (b != 0)
+        {
+            int remainder = a % b;
+            a = b;
+            b = remainder;
+        }
+        return Math.Abs(a);
     }
 
     private void DrawMoveLinePreview()
@@ -1803,7 +1834,8 @@ public sealed class GameRenderer
                 _moveLineUnits.Length,
                 start,
                 end,
-                _moveLineSpacing) * TerrainTilePixelSize;
+                _moveLineSpacing,
+                _moveLineSeed) * TerrainTilePixelSize;
             _moveLineSlotMarker.Position = new Vector2f(point.X, point.Y);
             _moveLineSlotMarker.Origin = new Vector2f(4f, 4f);
             _window.Draw(_moveLineSlotMarker);
@@ -2040,7 +2072,8 @@ public sealed class GameRenderer
                 members.Count,
                 start,
                 end,
-                spacing);
+                spacing,
+                _moveLineSeed);
             Vector3 target;
             if (TryFindAvailableMoveCell(point.X, point.Y, reserved, out int tileX, out int tileY))
             {
