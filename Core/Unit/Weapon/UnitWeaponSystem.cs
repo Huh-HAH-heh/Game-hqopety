@@ -60,6 +60,12 @@ public sealed class UnitWeaponSystem
             if (health != null && health.OverallHitPoints[unit] <= 0f)
                 continue;
 
+            if (units.Posture[unit] == UnitPosture.Injured)
+            {
+                weapons.CancelActions(unit);
+                continue;
+            }
+
             for (int slot = 0;
                  slot < UnitInventoryStore.WeaponSlotCount;
                  slot++)
@@ -213,6 +219,7 @@ public sealed class UnitWeaponSystem
         UnitId target)
     {
         return units.IsAlive(target) &&
+               units.Posture[target.Index] != UnitPosture.Injured &&
                (health == null || health.OverallHitPoints[target.Index] > 0f);
     }
 
@@ -259,6 +266,12 @@ public sealed class UnitWeaponSystem
         if (!units.TryGetIndex(
                 shooter,
                 out int unitIndex))
+        {
+            return false;
+        }
+
+        if (units.Posture[unitIndex] == UnitPosture.Injured ||
+            (_health != null && _health.OverallHitPoints[unitIndex] <= 0f))
         {
             return false;
         }
@@ -488,6 +501,12 @@ public sealed class UnitWeaponSystem
             return false;
         }
 
+        if (!IsLivingTarget(units, _health, shooter) ||
+            !IsLivingTarget(units, _health, target))
+        {
+            return false;
+        }
+
         int stateIndex = UnitWeaponStore.GetIndex(shooterIndex, slot);
         RangedWeaponConfig? weapon = GetRangedWeapon(inventory, shooterIndex, slot);
         if (weapon == null)
@@ -653,7 +672,9 @@ public sealed class UnitWeaponSystem
                 out int shooterIndex) ||
             !units.TryGetIndex(
                 target,
-                out int targetIndex))
+                out int targetIndex) ||
+            !IsLivingTarget(units, _health, shooter) ||
+            !IsLivingTarget(units, _health, target))
         {
             return false;
         }
