@@ -812,9 +812,13 @@ public sealed class GameRenderer
                     _unitSimulation.Units.TryGetIndex(_selectedUnit, out int utilityUnitIndex))
                 {
                     UnitAiStore utilityStore = _unitSimulation.AI.Store;
-                    utilityAiContext = utilityStore.UtilityIntentContext[utilityUnitIndex];
-                    utilityAiDecision = utilityStore.UtilityIntentBreakdown[utilityUnitIndex];
-                    hasUtilityAiDebugState = _unitSimulation.AI.Enabled;
+                    hasUtilityAiDebugState = _unitSimulation.AI.Enabled &&
+                        utilityStore.UtilityIntent[utilityUnitIndex] != Core.AI.Behaviac.BehaviacUnitIntent.None;
+                    if (hasUtilityAiDebugState)
+                    {
+                        utilityAiContext = utilityStore.UtilityIntentContext[utilityUnitIndex];
+                        utilityAiDecision = utilityStore.UtilityIntentBreakdown[utilityUnitIndex];
+                    }
                 }
             }
 
