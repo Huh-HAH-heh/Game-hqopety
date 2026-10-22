@@ -219,8 +219,11 @@ public sealed class VisionSystem
         {
             int unit = allActive[i];
 
-            if (health != null && health.OverallHitPoints[unit] <= 0f)
+            if ((health != null && health.OverallHitPoints[unit] <= 0f) ||
+                units.Posture[unit] == UnitPosture.Injured)
+            {
                 continue;
+            }
 
             _aliveUnits[aliveCount++] = unit;
         }
@@ -316,7 +319,8 @@ public sealed class VisionSystem
         int targetEvaluations = 0;
         int activeCandidatesScanned = 0;
 
-        if (health != null && health.OverallHitPoints[observer] <= 0f)
+        if ((health != null && health.OverallHitPoints[observer] <= 0f) ||
+            units.Posture[observer] == UnitPosture.Injured)
         {
             _observerCandidatePairs[observer] = 0;
             _observerLineOfSightChecks[observer] = 0;
@@ -394,6 +398,7 @@ public sealed class VisionSystem
         {
             int target = sampledTargets[sample];
             if (target == observer ||
+                units.Posture[target] == UnitPosture.Injured ||
                 (health != null && health.OverallHitPoints[target] <= 0f))
             {
                 continue;
@@ -568,7 +573,9 @@ public sealed class VisionSystem
             return false;
         }
 
-        if (!FactionRules.ShouldAttack(
+        if (units.Posture[observerIndex] == UnitPosture.Injured ||
+            units.Posture[targetIndex] == UnitPosture.Injured ||
+            !FactionRules.ShouldAttack(
                 units.FactionTag[observerIndex],
                 units.FactionTag[targetIndex]) ||
             !IsWithinRangeAndFov(
