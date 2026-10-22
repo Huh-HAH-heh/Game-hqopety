@@ -74,6 +74,11 @@ public readonly record struct RenderUnitState(
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
+public readonly record struct RenderVisionContact(
+    UnitId Target,
+    Vector3 VisiblePoint,
+    int VisiblePointIndex);
+
 public readonly record struct RenderProjectileTrace(
     Vector3 Start,
     Vector3 End,
@@ -108,6 +113,9 @@ public sealed class SimulationFrameSnapshot
     public RenderBodyPart[] BodyParts { get; init; } = Array.Empty<RenderBodyPart>();
     public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
     public RenderAimRing[] AimRings { get; init; } = Array.Empty<RenderAimRing>();
+    public UnitId VisionDebugObserver { get; init; }
+    public Vector3 VisionDebugObserverEye { get; init; }
+    public RenderVisionContact[] VisionContacts { get; init; } = Array.Empty<RenderVisionContact>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
     public MeleeHitVisual[] MeleeHitVisuals { get; init; } = Array.Empty<MeleeHitVisual>();
 
@@ -205,7 +213,8 @@ public sealed class SimulationFrameSnapshot
     }
 
     public static SimulationFrameSnapshot Capture(
-        UnitSimulation simulation)
+        UnitSimulation simulation,
+        UnitId visionDebugObserver = default)
     {
         long captureStarted = Stopwatch.GetTimestamp();
         UnitStore units = simulation.Units;
@@ -632,6 +641,62 @@ public sealed class SimulationFrameSnapshot
         VisionSystem vision = simulation.Vision;
         UnitNavigationSystem navigation = simulation.Navigation;
 
+        UnitId capturedVisionObserver = default;
+        Vector3 visionObserverEye = Vector3.Zero;
+        RenderVisionContact[] visionContacts = Array.Empty<RenderVisionContact>();
+        if (simulation.VisionEnabled &&
+            visionDebugObserver.IsValid &&
+            units.TryGetIndex(visionDebugObserver, out int visionObserverIndex) &&
+            simulation.Health.OverallHitPoints[visionObserverIndex] > 0f)
+        {
+            capturedVisionObserver = units.GetId(visionObserverIndex);
+            visionObserverEye = vision.GetEyePosition(
+                units,
+                visionObserverIndex,
+                bodyStore);
+            ReadOnlySpan<int> visibleTargets = vision.GetVisibleTargets(visionObserverIndex);
+            List<RenderVisionContact> contacts = new(visibleTargets.Length);
+
+            for (int i = 0; i < visibleTargets.Length; i++)
+            {
+                int targetIndex = visibleTargets[i];
+                if ((uint)targetIndex >= (uint)units.Capacity ||
+                    targetIndex == visionObserverIndex ||
+                    simulation.Health.OverallHitPoints[targetIndex] <= 0f ||
+                    !vision.TryGetLatestVisiblePointIndex(
+                        visionObserverIndex,
+                        targetIndex,
+                        out int visiblePointIndex))
+                {
+                    continue;
+                }
+
+                UnitId targetId = units.GetId(targetIndex);
+                if (!targetId.IsValid)
+                    continue;
+
+                int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
+                    units,
+                    targetIndex,
+                    visiblePointIndex,
+                    hitRegionStore);
+                Vector3 visiblePoint = UnitHitSystem.GetGameplayTargetPoint(
+                    units,
+                    targetIndex,
+                    regionIndex,
+                    visionObserverEye,
+                    hitRegionStore,
+                    UnitAnatomyMarkerRole.Vision,
+                    bodyStore);
+                contacts.Add(new RenderVisionContact(
+                    targetId,
+                    visiblePoint,
+                    visiblePointIndex));
+            }
+
+            visionContacts = contacts.ToArray();
+        }
+
         return new SimulationFrameSnapshot
         {
             Units = unitStates,
@@ -639,6 +704,9 @@ public sealed class SimulationFrameSnapshot
             BodyParts = renderBodyParts,
             Traces = traces,
             AimRings = aimRings.ToArray(),
+            VisionDebugObserver = capturedVisionObserver,
+            VisionDebugObserverEye = visionObserverEye,
+            VisionContacts = visionContacts,
             Impacts = impacts,
             MeleeHitVisuals = meleeHitVisuals,
             ActiveProjectiles = projectiles.ActiveCount,
