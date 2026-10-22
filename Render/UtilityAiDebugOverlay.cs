@@ -147,8 +147,8 @@ public sealed class UtilityAiDebugOverlay : IDisposable
         window.Draw(_bodyLine);
 
         _vitalsLine.DisplayedString =
-            $"Энергия {Percent(context.EnergyRatio)}  Вода {Percent(context.HydrationRatio)}  " +
-            $"Подавление {(context.IsSuppressed ? "ДА" : "нет")}  Паника {(context.IsPanicked ? "ДА" : "нет")}";
+            $"Энерг. {Percent(context.EnergyRatio)} · Вода {Percent(context.HydrationRatio)} · " +
+            $"Подавл. {(context.IsSuppressed ? "ДА" : "нет")} · Паника {(context.IsPanicked ? "ДА" : "нет")}";
         _vitalsLine.Position = new Vector2f(x + 11f, y + 68f);
         _vitalsLine.FillColor = new Color(184, 199, 215, 255);
         window.Draw(_vitalsLine);
@@ -161,10 +161,9 @@ public sealed class UtilityAiDebugOverlay : IDisposable
         window.Draw(_traitsLine);
 
         _contactLine.DisplayedString =
-            $"Контекст: цель {(context.HasVisibleTarget ? "видна" : "не видна")}, " +
-            $"память {(context.HasRecentTarget ? "есть" : "нет")}, " +
-            $"звук {(context.HasAudibleContact ? "есть" : "нет")}, " +
-            $"союзник {(context.HasSquadContact ? "есть" : "нет")}";
+            $"Контакт: зрение {(context.HasVisibleTarget ? "+" : "−")} · память {(context.HasRecentTarget ? "+" : "−")} · " +
+            $"звук {(context.HasAudibleContact ? "+" : "−")} · группа {(context.HasSquadContact ? "+" : "−")} · " +
+            $"опасность {(context.IsInImmediateDanger ? "!" : "—")}";
         _contactLine.Position = new Vector2f(x + 11f, y + 102f);
         _contactLine.FillColor = new Color(157, 178, 199, 255);
         window.Draw(_contactLine);
