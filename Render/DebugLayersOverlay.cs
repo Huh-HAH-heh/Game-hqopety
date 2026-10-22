@@ -149,11 +149,9 @@ public sealed class DebugLayersOverlay : IDisposable
         {
             float rowY = firstRowY + i * RowHeight;
             FloatRect rowBounds = new(
-                _panel.Position.X + 6f,
-                rowY,
-                Width - 12f,
-                RowHeight - 2f);
-            if (!rowBounds.Contains(position.X, position.Y))
+                new Vector2f(_panel.Position.X + 6f, rowY),
+                new Vector2f(Width - 12f, RowHeight - 2f));
+            if (!rowBounds.Contains(new Vector2f(position.X, position.Y)))
                 continue;
 
             toggleLayer((DebugLayerType)i);
