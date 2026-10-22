@@ -1399,7 +1399,8 @@ public sealed class UnitAiSystem
 
         TacticalContact? rememberedEnemyContext = null;
         float lastKnownTargetUtility = 0f;
-        bool hasRecentTarget = Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f;
+        bool hasActiveTargetMemory = Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f;
+        bool hasRecentTarget = hasActiveTargetMemory;
         if (!hasVisibleTarget && !hasAttackOrder && !isInvestigatingContext)
         {
             if (hasRecentTarget &&
@@ -1606,7 +1607,8 @@ public sealed class UnitAiSystem
             hasSquadContact,
             squadContactUtility,
             lastKnownTargetUtility,
-            isInvestigatingContext);
+            isInvestigatingContext,
+            hasActiveTargetMemory);
 
         behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
         if (status != behaviac.EBTStatus.BT_SUCCESS)
