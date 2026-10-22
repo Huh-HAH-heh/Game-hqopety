@@ -241,10 +241,37 @@ public sealed class UnitAiSystem
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
+            if (Store.HasTarget[unit] &&
+                units.TryGetIndex(Store.Target[unit], out int currentTarget) &&
+                units.Posture[currentTarget] == UnitPosture.Injured)
+            {
+                ClearAiming(weapons, unit);
+                Store.ClearTarget(unit);
+                Store.State[unit] = UnitAiState.Search;
+                units.HasTarget[unit] = false;
+                units.Target[unit] = units.Position[unit];
+                units.Velocity[unit] = Vector3.Zero;
+            }
+
             if (units.Posture[unit] == UnitPosture.Injured)
             {
                 _unitThinkElapsedSeconds[unit] = 0f;
                 _unitThinkDeltaSeconds[unit] = 0f;
+                Store.ClearTarget(unit);
+                Store.State[unit] = UnitAiState.Idle;
+                Store.LastIntent[unit] = BehaviacUnitIntent.None;
+                Store.UtilityIntent[unit] = BehaviacUnitIntent.None;
+                Store.UtilityIntentCommitRemainingSeconds[unit] = 0f;
+                Store.UtilityIntentBreakdown[unit] = default;
+                Store.UtilityIntentContext[unit] = default;
+                _hasFlankTargetByUnit[unit] = false;
+                _flankTargetByUnit[unit] = default;
+                _isContextInvestigationGoal[unit] = false;
+                _rememberedEnemyContextByUnit[unit] = null;
+                _cachedRememberedEnemyContextByUnit[unit] = null;
+                units.HasTarget[unit] = false;
+                units.Target[unit] = units.Position[unit];
+                units.Velocity[unit] = Vector3.Zero;
                 continue;
             }
 
