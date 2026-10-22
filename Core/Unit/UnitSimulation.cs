@@ -9,6 +9,8 @@ namespace Core.Unit;
 
 public sealed class UnitSimulation
 {
+    private const float VisualContactMemorySeconds = 8f;
+
     private readonly UnitMovementSystem _movementSystem;
     private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
@@ -1095,7 +1097,7 @@ public sealed class UnitSimulation
                         identificationLevel: PerceptionIdentificationLevel.Identified,
                         occurredAtSeconds: nowSeconds,
                         receivedAtSeconds: nowSeconds,
-                        expiresAtSeconds: nowSeconds + 3f,
+                        expiresAtSeconds: nowSeconds + VisualContactMemorySeconds,
                         identifiedSubject: Units.GetId(target)));
             }
         }
