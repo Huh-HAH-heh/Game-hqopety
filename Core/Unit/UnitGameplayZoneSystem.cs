@@ -117,6 +117,35 @@ public static class UnitGameplayZoneSystem
                     break;
             }
         }
+        else if (posture == UnitPosture.Injured)
+        {
+            // Critical-pain pose: the same three gameplay polygons lie close to
+            // the ground, with a compact torso and separated head/lower-body zones.
+            switch (zone)
+            {
+                case UnitGameplayZone.Head:
+                    forwardOffset = length * 0.40f;
+                    heightFraction = 0.12f;
+                    halfForward = MathF.Max(length * 0.24f, width * 0.20f);
+                    halfSide = MathF.Max(width * 0.32f, radius * 0.30f);
+                    halfHeight = MathF.Max(0.035f, height * 0.07f);
+                    break;
+                case UnitGameplayZone.Torso:
+                    forwardOffset = 0f;
+                    heightFraction = 0.095f;
+                    halfForward = MathF.Max(length * 0.40f, width * 0.42f);
+                    halfSide = MathF.Max(width * 0.46f, radius * 0.43f);
+                    halfHeight = MathF.Max(0.04f, height * 0.075f);
+                    break;
+                default:
+                    forwardOffset = -length * 0.38f;
+                    heightFraction = 0.075f;
+                    halfForward = MathF.Max(length * 0.28f, width * 0.29f);
+                    halfSide = MathF.Max(width * 0.39f, radius * 0.36f);
+                    halfHeight = MathF.Max(0.035f, height * 0.065f);
+                    break;
+            }
+        }
         else
         {
             switch (posture)

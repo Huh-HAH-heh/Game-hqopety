@@ -887,6 +887,7 @@ public sealed class UnitCardOverlay : IDisposable
             UnitAiState.SeekCover => "Укрытие",
             UnitAiState.Search => "Поиск",
             UnitAiState.Dead => "Мёртв",
+            UnitAiState.Injured => "Ранен",
             UnitAiState.Flank => "Фланг",
             _ => state.ToString()
         };

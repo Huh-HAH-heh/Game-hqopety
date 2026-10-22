@@ -1105,6 +1105,13 @@ public sealed class UnitAiSystem
                 continue;
             }
 
+            if (units.Posture[unit] == UnitPosture.Injured)
+            {
+                ResetSimpleCombatUnit(
+                    units, weapons, unit, UnitAiState.Injured, BehaviacUnitIntent.None);
+                continue;
+            }
+
             // No memory hunts, squad contacts, cover, flanking, patrol, or player
             // movement tasks: only a currently visible hostile can create a target.
             int targetIndex = FindNearestVisibleEnemy(units, health, vision, unit);

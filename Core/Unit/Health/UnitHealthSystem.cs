@@ -4,6 +4,9 @@ namespace Core.Unit;
 
 public sealed class UnitHealthSystem
 {
+    private const float CriticalPainThreshold = 75f;
+    private const float FatalPainLoad = 12f;
+
     public void Update(UnitStore units, UnitHealthStore health, float deltaTime)
     {
         ReadOnlySpan<int> active = units.ActiveIndices;
@@ -25,10 +28,7 @@ public sealed class UnitHealthSystem
                 continue;
 
             if (overall[unit] <= 0f || overallMax[unit] <= 0f)
-            {
-                pain[unit] = 0f;
                 continue;
-            }
 
             overall[unit] = Math.Clamp(overall[unit], 0f, overallMax[unit]);
             int start = unit * maxParts;
@@ -66,6 +66,27 @@ public sealed class UnitHealthSystem
                 hitPoints,
                 bleedRate,
                 kinds);
+
+            if (pain[unit] >= 100f)
+            {
+                pain[unit] = 100f;
+                overall[unit] = 0f;
+                units.HasTarget[unit] = false;
+                units.Velocity[unit] = System.Numerics.Vector3.Zero;
+                units.Posture[unit] = UnitPosture.Lying;
+                continue;
+            }
+
+            if (pain[unit] >= CriticalPainThreshold)
+            {
+                units.Posture[unit] = UnitPosture.Injured;
+                units.HasTarget[unit] = false;
+                units.Velocity[unit] = System.Numerics.Vector3.Zero;
+            }
+            else if (units.Posture[unit] == UnitPosture.Injured)
+            {
+                units.Posture[unit] = UnitPosture.Standing;
+            }
         }
     }
 
@@ -105,6 +126,11 @@ public sealed class UnitHealthSystem
             // Active bleeding increases pain on top of direct tissue damage.
             injuryLoad += Math.Clamp(bleedRate[index], 0f, 10f) * 0.08f;
         }
+
+        // Reserve exactly 100 for catastrophic accumulated injury; this lets
+        // the death rule be deterministic instead of relying on float rounding.
+        if (injuryLoad >= FatalPainLoad)
+            return 100f;
 
         // Minor wounds create little pain; multiple severe injuries approach 100.
         return Math.Clamp(

@@ -61,5 +61,6 @@ public enum UnitPosture : byte
     Standing = 0,
     Lying = 1,
     Crouching = 2,
-    Sitting = 3
+    Sitting = 3,
+    Injured = 4
 }

@@ -11,7 +11,8 @@ public enum UnitAiState : byte
     SeekCover = 2,
     Search = 3,
     Dead = 4,
-    Flank = 5
+    Flank = 5,
+    Injured = 6
 }
 
 public enum UnitAiOrderType : byte
