@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using SFML.Graphics;
 using SFML.System;
+using SFML.Window;
 
 namespace RimClone.Render;
 
@@ -118,6 +119,7 @@ public sealed class DebugLayersOverlay : IDisposable
 
     public bool HandleMousePressed(
         Vector2i position,
+        Mouse.Button button,
         uint windowWidth,
         uint windowHeight,
         Action<DebugLayerType> toggleLayer)
@@ -134,9 +136,13 @@ public sealed class DebugLayersOverlay : IDisposable
 
         if (_closeButton.GetGlobalBounds().Contains(position))
         {
-            Close();
+            if (button == Mouse.Button.Left)
+                Close();
             return true;
         }
+
+        if (button != Mouse.Button.Left)
+            return true;
 
         float firstRowY = _panel.Position.Y + HeaderHeight + 3f;
         for (int i = 0; i < LayerCount; i++)
@@ -175,6 +181,7 @@ public sealed class DebugLayersOverlay : IDisposable
         window.Draw(_panel);
         window.Draw(_header);
         window.Draw(_accent);
+        window.Draw(_closeButton);
         if (_title != null)
             window.Draw(_title);
         if (_closeLabel != null)
