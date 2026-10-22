@@ -13,7 +13,7 @@ namespace RimClone.Render;
 /// </summary>
 public sealed class UtilityAiDebugOverlay : IDisposable
 {
-    private const float Width = 384f;
+    private const float Width = 412f;
     private const float Height = 454f;
     private const float HeaderHeight = 28f;
     private const float RowHeight = 21f;
