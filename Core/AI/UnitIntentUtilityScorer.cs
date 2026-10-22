@@ -183,7 +183,7 @@ public static class UnitIntentUtilityScorer
                 engage = 0f;
             }
 
-            if (context.CanFlank && !context.IsSuppressed && !context.IsPanicked)
+            if (context.CanFlank && !context.IsSuppressed && !context.IsPanicked && !hasStopOrder)
             {
                 flank = Clamp01(
                     context.FlankUtility +
@@ -330,6 +330,11 @@ public static class UnitIntentUtilityScorer
         // Continuing an investigation is a valid incumbent, not a fresh target request.
         if (context.IsInvestigatingContext &&
             IsInvestigationIntent(previousIntent) &&
+            !context.HasVisibleTarget &&
+            !context.IsInImmediateDanger &&
+            !context.IsSuppressed &&
+            !context.IsPanicked &&
+            !context.IsLowHealth &&
             !hasAnyPlayerOrder)
         {
             float continuationScore = 0.61f + discipline * 0.035f;
@@ -370,9 +375,8 @@ public static class UnitIntentUtilityScorer
         float bestScore = patrol;
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.EngageTarget, engage);
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.HoldPositionEngage, holdAndEngage);
-        Consider(ref bestIntent, ref bestScore,
-            context.IsLowHealth ? BehaviacUnitIntent.RetreatToCover : BehaviacUnitIntent.SeekCover,
-            context.IsLowHealth ? retreat : cover);
+        Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.SeekCover, cover);
+        Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.RetreatToCover, retreat);
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.FollowMoveOrder, moveOrder);
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.HoldPosition, holdOrder);
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.AttackOrder, attackOrder);
@@ -449,7 +453,7 @@ public static class UnitIntentUtilityScorer
         in UnitIntentUtilityBreakdown scores) =>
         intent switch
         {
-            BehaviacUnitIntent.Dead => 1f,
+            BehaviacUnitIntent.Dead => 0f,
             BehaviacUnitIntent.EngageTarget => scores.EngageScore,
             BehaviacUnitIntent.HoldPositionEngage => scores.HoldAndEngageScore,
             BehaviacUnitIntent.SeekCover => scores.CoverScore,
