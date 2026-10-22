@@ -1875,7 +1875,10 @@ public sealed class GameRenderer
         return members;
     }
 
-    private HashSet<int> BuildReservedMoveCells(List<int> members, UnitStore units)
+    private HashSet<int> BuildReservedMoveCells(
+        List<int> members,
+        UnitStore units,
+        UnitAiStore ai)
     {
         HashSet<int> moving = new(members);
         HashSet<int> reserved = new();
@@ -1888,7 +1891,33 @@ public sealed class GameRenderer
 
             int x = Math.Clamp((int)MathF.Floor(units.Position[unit].X), 0, _worldMap.MaxTileX);
             int y = Math.Clamp((int)MathF.Floor(units.Position[unit].Y), 0, _worldMap.MaxTileY);
-            reserved.Add(x + y * _worldMap.TileWidth);
+            int currentCell = x + y * _worldMap.TileWidth;
+            reserved.Add(currentCell);
+
+            // Also reserve destinations already assigned to units outside this
+            // selection. Otherwise a new large group can be routed into the
+            // landing cells of another group that is still moving there.
+            if (ai.PlayerOrderType[unit] != UnitAiOrderType.Move)
+                continue;
+
+            Vector3 previousDestination = ai.PlayerOrderPosition[unit];
+            int destinationX = Math.Clamp(
+                (int)MathF.Floor(previousDestination.X),
+                0,
+                _worldMap.MaxTileX);
+            int destinationY = Math.Clamp(
+                (int)MathF.Floor(previousDestination.Y),
+                0,
+                _worldMap.MaxTileY);
+            if (_worldMap.IsNavigationBlocked(destinationX, destinationY) ||
+                _worldMap.GetSurfaceLayer(destinationX, destinationY) < 0)
+            {
+                continue;
+            }
+
+            int destinationCell = destinationX + destinationY * _worldMap.TileWidth;
+            if (destinationCell != currentCell)
+                reserved.Add(destinationCell);
         }
         return reserved;
     }
@@ -1966,7 +1995,7 @@ public sealed class GameRenderer
         if (members.Count == 0)
             return;
 
-        HashSet<int> reserved = BuildReservedMoveCells(members, units);
+        HashSet<int> reserved = BuildReservedMoveCells(members, units, ai);
         int assigned = 0;
         for (int i = 0; i < members.Count; i++)
         {
@@ -2072,7 +2101,7 @@ public sealed class GameRenderer
         if (members.Count == 0)
             return;
 
-        HashSet<int> reserved = BuildReservedMoveCells(members, units);
+        HashSet<int> reserved = BuildReservedMoveCells(members, units, ai);
         spacing = MathF.Max(1f, spacing);
         int assigned = 0;
         for (int i = 0; i < members.Count; i++)
