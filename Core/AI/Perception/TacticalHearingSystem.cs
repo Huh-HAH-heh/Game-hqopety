@@ -6,6 +6,10 @@ using Core.Unit;
 
 namespace Core.AI.Perception;
 
+public readonly record struct TacticalSoundDebugEvent(
+    long Sequence, UnitId SourceUnit, Vector3 Position, TacticalStimulusType Type,
+    float OccurredAtSeconds, float Intensity, float AudibleRange);
+
 /// <summary>
 /// Converts loud events and locomotion into uncertain per-observer contacts.
 /// The observer never receives the emitter ID from an audio-only contact.
@@ -17,7 +21,12 @@ public sealed class TacticalHearingSystem
     private const float FootstepMemorySeconds = 3f;
     private const float ConfidenceHalfLifeSeconds = 2.5f;
     private const float MinimumContactConfidence = 0.12f;
+    private const float DebugEventLifetimeSeconds = 2.25f;
+    private const int MaxRecentLoudDebugEvents = 96;
+    private const int MaxRecentFootstepDebugEvents = 48;
     private readonly List<SoundPulse> _pendingPulses = new();
+    private readonly Queue<TacticalSoundDebugEvent> _recentLoudDebugEvents = new();
+    private readonly Queue<TacticalSoundDebugEvent> _recentFootstepDebugEvents = new();
     private readonly PerceptionMemoryStore _memoryStore;
     private float[] _footstepCooldown;
     private long _nextPulseId = 1;
@@ -55,7 +64,7 @@ public sealed class TacticalHearingSystem
                 TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion))
             return;
 
-        _pendingPulses.Add(new SoundPulse(
+        QueuePulse(new SoundPulse(
             _nextPulseId++, sourceUnit, sourceFaction, position, type,
             CurrentTimeSeconds, Math.Clamp(intensity, 0f, 1f), audibleRange));
     }
@@ -71,6 +80,20 @@ public sealed class TacticalHearingSystem
         float audibleRange = 80f) =>
         EmitDanger(default, sourceFaction, TacticalStimulusType.Explosion,
             position, intensity, audibleRange);
+
+    public TacticalSoundDebugEvent[] GetRecentDebugEvents(float nowSeconds)
+    {
+        if (!float.IsFinite(nowSeconds) || nowSeconds < 0f)
+            return Array.Empty<TacticalSoundDebugEvent>();
+
+        PruneDebugEvents(_recentLoudDebugEvents, nowSeconds);
+        PruneDebugEvents(_recentFootstepDebugEvents, nowSeconds);
+        TacticalSoundDebugEvent[] events = new TacticalSoundDebugEvent[
+            _recentLoudDebugEvents.Count + _recentFootstepDebugEvents.Count];
+        _recentLoudDebugEvents.CopyTo(events, 0);
+        _recentFootstepDebugEvents.CopyTo(events, _recentLoudDebugEvents.Count);
+        return events;
+    }
 
     public void Update(
         UnitStore units,
@@ -202,7 +225,7 @@ public sealed class TacticalHearingSystem
                 case UnitPosture.Sitting: intensity = 0.28f; range = 11f; interval = 0.80f; break;
                 default: intensity = 0.55f; range = 20f; interval = 0.50f; break;
             }
-            _pendingPulses.Add(new SoundPulse(
+            QueuePulse(new SoundPulse(
                 _nextPulseId++, units.GetId(unit), units.FactionTag[unit],
                 units.Position[unit], TacticalStimulusType.Footstep, nowSeconds, intensity, range));
             _footstepCooldown[unit] = interval;
@@ -386,6 +409,31 @@ public sealed class TacticalHearingSystem
             pulse.Position.X + MathF.Cos(angle) * offset,
             pulse.Position.Y + MathF.Sin(angle) * offset,
             pulse.Position.Z);
+    }
+
+    private void QueuePulse(SoundPulse pulse)
+    {
+        _pendingPulses.Add(pulse);
+        Queue<TacticalSoundDebugEvent> history = pulse.Type == TacticalStimulusType.Footstep
+            ? _recentFootstepDebugEvents
+            : _recentLoudDebugEvents;
+        int limit = pulse.Type == TacticalStimulusType.Footstep
+            ? MaxRecentFootstepDebugEvents
+            : MaxRecentLoudDebugEvents;
+        while (history.Count >= limit)
+            history.Dequeue();
+        history.Enqueue(new TacticalSoundDebugEvent(
+            pulse.Sequence, pulse.SourceUnit, pulse.Position, pulse.Type,
+            pulse.OccurredAtSeconds, pulse.Intensity, pulse.Range));
+    }
+
+    private static void PruneDebugEvents(
+        Queue<TacticalSoundDebugEvent> events,
+        float nowSeconds)
+    {
+        while (events.Count > 0 &&
+               nowSeconds - events.Peek().OccurredAtSeconds > DebugEventLifetimeSeconds)
+            events.Dequeue();
     }
 
     private void EnsureCapacity(int required)
