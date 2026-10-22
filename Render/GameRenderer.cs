@@ -59,6 +59,8 @@ public sealed class GameRenderer
 
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
+    // Squad creation/assignment is temporarily disabled while individual pawn AI is stabilized.
+    private static readonly bool SquadControlsEnabled = false;
     private readonly InfantrySquadManager _squadManager = new();
     private InfantryFormationType _infantryFormation = InfantryFormationType.Line;
     private bool _isSelectingUnits;
@@ -612,10 +614,13 @@ public sealed class GameRenderer
             _lastProjectileDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
         }
 
-        if (renderSnapshot != null)
-            DrawSquadMarkers(renderSnapshot);
-        else if (_simulationThread == null)
-            DrawSquadMarkers(SimulationFrameSnapshot.Capture(_unitSimulation));
+        if (SquadControlsEnabled)
+        {
+            if (renderSnapshot != null)
+                DrawSquadMarkers(renderSnapshot);
+            else if (_simulationThread == null)
+                DrawSquadMarkers(SimulationFrameSnapshot.Capture(_unitSimulation));
+        }
 
         if (_isSelectingUnits && IsSelectionDrag())
             _window.Draw(_selectionBox);
@@ -766,7 +771,7 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "LMB drag=select units; RMB=menu; squad ring=select squad; menu=Create/Send/Attack; Shift+click=add/transfer/detach; Shift+1-9=bind; 1-9=select; K=disband; J=formation; S=hold | " +
+            "LMB drag=select units; RMB=menu; Shift+click=add selection; Attack=selected units; S=hold | " +
             "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision}";
     }
@@ -997,6 +1002,9 @@ public sealed class GameRenderer
 
     private bool TryHandleSquadHotkey(Keyboard.Key key)
     {
+        if (!SquadControlsEnabled)
+            return false;
+
         int number = GetNumberKey(key);
         if (number == 0)
             return false;
@@ -1088,6 +1096,9 @@ public sealed class GameRenderer
 
     private void CreateSquadFromSelection()
     {
+        if (!SquadControlsEnabled)
+            return;
+
         SimulationFrameSnapshot? snapshot = GetInputSnapshot();
         if (snapshot == null)
             return;
@@ -1115,7 +1126,7 @@ public sealed class GameRenderer
 
     private bool TryDisbandSelectedSquads()
     {
-        if (_selectedUnits.Count == 0)
+        if (!SquadControlsEnabled || _selectedUnits.Count == 0)
             return false;
 
         int disbanded = _squadManager.DisbandContaining(_selectedUnits);
@@ -1674,16 +1685,19 @@ public sealed class GameRenderer
 
         if (shiftHeld)
         {
-            int selectedSquadId = GetSelectedSquadId();
-            if (selectedSquadId != 0)
+            if (SquadControlsEnabled)
             {
-                for (int i = 0; i < picked.Count; i++)
-                    _squadManager.AddMember(selectedSquadId, picked[i]);
+                int selectedSquadId = GetSelectedSquadId();
+                if (selectedSquadId != 0)
+                {
+                    for (int i = 0; i < picked.Count; i++)
+                        _squadManager.AddMember(selectedSquadId, picked[i]);
 
-                SyncSquadTactics();
-                SelectSquad(selectedSquadId, false);
-                Console.WriteLine($"[SQUAD] Added selected soldiers to squad {selectedSquadId}.");
-                return;
+                    SyncSquadTactics();
+                    SelectSquad(selectedSquadId, false);
+                    Console.WriteLine($"[SQUAD] Added selected soldiers to squad {selectedSquadId}.");
+                    return;
+                }
             }
 
             for (int i = 0; i < picked.Count; i++)
@@ -1737,42 +1751,45 @@ public sealed class GameRenderer
                 return;
             }
 
-            int clickedSquadId = _squadManager.GetSquadId(id);
-            int selectedSquadId = GetSelectedSquadId();
-            if (clickedSquadId != 0 &&
-                selectedSquadId != 0 &&
-                clickedSquadId != selectedSquadId)
+            if (SquadControlsEnabled)
             {
-                // With a squad selected, Shift-clicking a soldier in another squad
-                // transfers that soldier into the selected squad instead of detaching it.
-                _squadManager.AddMember(selectedSquadId, id);
-                SyncSquadTactics();
-                SelectSquad(selectedSquadId, false);
-                Console.WriteLine(
-                    $"[SQUAD] Soldier transferred from squad {clickedSquadId} to squad {selectedSquadId}.");
-                return;
-            }
-
-            if (clickedSquadId != 0)
-            {
-                // Shift-click a member of the currently selected squad (or with no
-                // squad selected) to detach just that soldier.
-                _squadManager.RemoveMember(id);
-                SyncSquadTactics();
-                _selectedUnits.Clear();
-                _selectedUnits.Add(id);
-                _selectedUnit = id;
-                Console.WriteLine($"[SQUAD] Soldier detached from squad {clickedSquadId}.");
-                return;
-            }
-
-            if (selectedSquadId != 0)
-            {
-                _squadManager.AddMember(selectedSquadId, id);
-                SyncSquadTactics();
-                SelectSquad(selectedSquadId, false);
-                Console.WriteLine($"[SQUAD] Soldier added to squad {selectedSquadId}.");
-                return;
+                int clickedSquadId = _squadManager.GetSquadId(id);
+                int selectedSquadId = GetSelectedSquadId();
+                if (clickedSquadId != 0 &&
+                    selectedSquadId != 0 &&
+                    clickedSquadId != selectedSquadId)
+                {
+                    // With a squad selected, Shift-clicking a soldier in another squad
+                    // transfers that soldier into the selected squad instead of detaching it.
+                    _squadManager.AddMember(selectedSquadId, id);
+                    SyncSquadTactics();
+                    SelectSquad(selectedSquadId, false);
+                    Console.WriteLine(
+                        $"[SQUAD] Soldier transferred from squad {clickedSquadId} to squad {selectedSquadId}.");
+                    return;
+                }
+    
+                if (clickedSquadId != 0)
+                {
+                    // Shift-click a member of the currently selected squad (or with no
+                    // squad selected) to detach just that soldier.
+                    _squadManager.RemoveMember(id);
+                    SyncSquadTactics();
+                    _selectedUnits.Clear();
+                    _selectedUnits.Add(id);
+                    _selectedUnit = id;
+                    Console.WriteLine($"[SQUAD] Soldier detached from squad {clickedSquadId}.");
+                    return;
+                }
+    
+                if (selectedSquadId != 0)
+                {
+                    _squadManager.AddMember(selectedSquadId, id);
+                    SyncSquadTactics();
+                    SelectSquad(selectedSquadId, false);
+                    Console.WriteLine($"[SQUAD] Soldier added to squad {selectedSquadId}.");
+                    return;
+                }
             }
 
             if (!_selectedUnits.Add(id))
@@ -1791,7 +1808,8 @@ public sealed class GameRenderer
             return;
         }
 
-        if (snapshot != null &&
+        if (SquadControlsEnabled &&
+            snapshot != null &&
             TryPickSquadMarker(snapshot, worldX, worldY, pixelsPerUnit, out int squadId))
         {
             InfantrySquad? squad = _squadManager.GetSquad(squadId);
@@ -2357,8 +2375,9 @@ public sealed class GameRenderer
                             ? Array.Empty<UnitId>()
                             : CaptureSelectedUnitIds(inputSnapshot);
                         int selectedSquadId = GetFullySelectedSquadId();
-                        bool canCreateSquad = selectedIds.Length >= 2 && selectedSquadId == 0;
-                        bool canSendSquad = selectedSquadId != 0;
+                        bool canCreateSquad = SquadControlsEnabled &&
+                            selectedIds.Length >= 2 && selectedSquadId == 0;
+                        bool canSendSquad = SquadControlsEnabled && selectedSquadId != 0;
                         bool canAttackTarget = hasUnit &&
                             selectedIds.Length > 0 &&
                             inputSnapshot != null &&
@@ -2497,11 +2516,14 @@ public sealed class GameRenderer
                                 break;
 
                             case ContextMenuActionType.CreateSquad:
-                                CreateSquadFromSelection();
+                                if (SquadControlsEnabled)
+                                    CreateSquadFromSelection();
                                 break;
 
                             case ContextMenuActionType.SendSquad:
                             {
+                                if (!SquadControlsEnabled)
+                                    break;
                                 SimulationFrameSnapshot? snapshot = GetInputSnapshot();
                                 UnitId[] moveUnits = snapshot == null
                                     ? Array.Empty<UnitId>()
