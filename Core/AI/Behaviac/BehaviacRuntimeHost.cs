@@ -121,6 +121,8 @@ public static class BehaviacRuntimeHost
             self => self.ShouldInvestigateLastKnownTarget());
         RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldInvestigateAudibleContact),
             self => self.ShouldInvestigateAudibleContact());
+        RegisterCondition(meta, nameof(BehaviacUnitDecisionAgent.ShouldInvestigateSquadContact),
+            self => self.ShouldInvestigateSquadContact());
 
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectDead),
             self => self.SelectDead());
@@ -148,6 +150,8 @@ public static class BehaviacRuntimeHost
             self => self.SelectInvestigateLastKnownTarget());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectInvestigateAudibleContact),
             self => self.SelectInvestigateAudibleContact());
+        RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectInvestigateSquadContact),
+            self => self.SelectInvestigateSquadContact());
         RegisterAction(meta, nameof(BehaviacUnitDecisionAgent.SelectPatrol),
             self => self.SelectPatrol());
     }
