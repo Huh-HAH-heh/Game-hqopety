@@ -106,23 +106,6 @@ public sealed class UnitAiSystem
     public int LastBehaviacAttackOrderDecisions => LastUtilityAttackOrderDecisions;
     public int LastBehaviacHoldAndEngageDecisions => LastUtilityHoldAndEngageDecisions;
 
-    // Compatibility aliases for older overlay/snapshot callers.
-    public long TotalBehaviacDecisions => TotalUtilityDecisions;
-    public int LastBehaviacDecisions => LastUtilityDecisions;
-    public double LastBehaviacDecisionBatchMilliseconds => LastUtilityDecisionBatchMilliseconds;
-    public int LastBehaviacDeadDecisions => LastUtilityDeadDecisions;
-    public int LastBehaviacCoverDecisions => LastUtilityCoverDecisions;
-    public int LastBehaviacRetreatDecisions => LastUtilityRetreatDecisions;
-    public int LastBehaviacFlankDecisions => LastUtilityFlankDecisions;
-    public int LastBehaviacEngageDecisions => LastUtilityEngageDecisions;
-    public int LastBehaviacSuppressDecisions => LastUtilitySuppressDecisions;
-    public int LastBehaviacInvestigateDecisions => LastUtilityInvestigateDecisions;
-    public int LastBehaviacPatrolDecisions => LastUtilityPatrolDecisions;
-    public int LastBehaviacMoveOrderDecisions => LastUtilityMoveOrderDecisions;
-    public int LastBehaviacHoldOrderDecisions => LastUtilityHoldOrderDecisions;
-    public int LastBehaviacAttackOrderDecisions => LastUtilityAttackOrderDecisions;
-    public int LastBehaviacHoldAndEngageDecisions => LastUtilityHoldAndEngageDecisions;
-
     public UnitAiSystem(
         int initialUnitCapacity = 1024,
         UnitWeaponSystem? weaponSystem = null,
