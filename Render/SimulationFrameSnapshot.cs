@@ -89,6 +89,23 @@ public readonly record struct RenderAuditoryContact(
     UnitId Observer, Vector3 ObserverPosition, Vector3 EstimatedPosition,
     float ErrorRadius, float Confidence, float AgeSeconds, TacticalStimulusType Type);
 
+public readonly record struct RenderMemoryContact(
+    UnitId Observer,
+    Vector3 ObserverPosition,
+    UnitId? SubjectUnit,
+    ushort SubjectFactionTag,
+    Vector3 EstimatedPosition,
+    float ErrorRadius,
+    float Confidence,
+    float AgeSeconds,
+    float VisualAgeSeconds,
+    TacticalContactKind Kind,
+    TacticalStimulusType Type,
+    bool HasVisualEvidence,
+    bool HasAuditoryEvidence,
+    bool HasCommunicationEvidence,
+    bool IsInvestigated);
+
 public readonly record struct RenderProjectileTrace(
     Vector3 Start,
     Vector3 End,
@@ -128,6 +145,7 @@ public sealed class SimulationFrameSnapshot
     public RenderVisionContact[] VisionContacts { get; init; } = Array.Empty<RenderVisionContact>();
     public RenderSoundPulse[] SoundPulses { get; init; } = Array.Empty<RenderSoundPulse>();
     public RenderAuditoryContact[] SoundContacts { get; init; } = Array.Empty<RenderAuditoryContact>();
+    public RenderMemoryContact[] MemoryContacts { get; init; } = Array.Empty<RenderMemoryContact>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
     public MeleeHitVisual[] MeleeHitVisuals { get; init; } = Array.Empty<MeleeHitVisual>();
 
@@ -324,11 +342,118 @@ public sealed class SimulationFrameSnapshot
         soundContacts = captured.ToArray();
     }
 
+    internal static void CaptureMemoryDebug(
+        UnitSimulation simulation,
+        UnitId observerId,
+        out RenderMemoryContact[] memoryContacts)
+    {
+        memoryContacts = Array.Empty<RenderMemoryContact>();
+        UnitStore units = simulation.Units;
+        if (!observerId.IsValid ||
+            !units.TryGetIndex(observerId, out int observerIndex) ||
+            simulation.Health.OverallHitPoints[observerIndex] <= 0f ||
+            !simulation.PerceptionMemory.TryGetMemory(observerIndex, out TacticalContactMemory memory))
+        {
+            return;
+        }
+
+        float nowSeconds = simulation.PerceptionMemory.CurrentTimeSeconds;
+        ushort observerFaction = units.FactionTag[observerIndex];
+        Vector3 observerPosition = units.Position[observerIndex];
+        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        List<RenderMemoryContact> captured = new(Math.Min(contacts.Count, 32));
+
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            TacticalContact contact = contacts[i];
+            if (contact.ExpiresAtSeconds <= nowSeconds)
+                continue;
+
+            bool hasVisualEvidence = contact.LastVisualAtSeconds >= 0f;
+            bool hasAuditoryEvidence = false;
+            bool hasCommunicationEvidence =
+                contact.LastStimulusType == TacticalStimulusType.AllyContactReport;
+            IReadOnlyList<PerceptionObservation> observations = contact.Observations;
+            for (int observationIndex = 0; observationIndex < observations.Count; observationIndex++)
+            {
+                PerceptionObservation observation = observations[observationIndex];
+                if (observation.ExpiresAtSeconds <= nowSeconds)
+                    continue;
+
+                hasAuditoryEvidence |= observation.Sense == PerceptionSense.Auditory;
+                hasCommunicationEvidence |= observation.Sense == PerceptionSense.Communication ||
+                    observation.StimulusType == TacticalStimulusType.AllyContactReport;
+            }
+
+            ushort subjectFaction = 0;
+            if (contact.SubjectUnit is UnitId subject)
+            {
+                if (!units.TryGetIndex(subject, out int subjectIndex))
+                    continue;
+
+                subjectFaction = units.FactionTag[subjectIndex];
+                if (!FactionRules.ShouldAttack(observerFaction, subjectFaction))
+                    continue;
+            }
+
+            if (!hasVisualEvidence && !hasAuditoryEvidence && !hasCommunicationEvidence)
+                continue;
+
+            float confidence = contact.GetEffectiveConfidence(
+                nowSeconds,
+                hasVisualEvidence ? 4f : 2.5f);
+            if (confidence < 0.06f)
+                continue;
+
+            captured.Add(new RenderMemoryContact(
+                observerId,
+                observerPosition,
+                contact.SubjectUnit,
+                subjectFaction,
+                contact.EstimatedPosition,
+                contact.PositionErrorRadius,
+                confidence,
+                MathF.Max(0f, nowSeconds - contact.LastEventAtSeconds),
+                hasVisualEvidence
+                    ? MathF.Max(0f, nowSeconds - contact.LastVisualAtSeconds)
+                    : -1f,
+                contact.Kind,
+                contact.LastStimulusType,
+                hasVisualEvidence,
+                hasAuditoryEvidence,
+                hasCommunicationEvidence,
+                contact.IsInvestigated));
+        }
+
+        const int MaxMemoryContacts = 32;
+        if (captured.Count > MaxMemoryContacts)
+        {
+            captured.Sort(static (left, right) =>
+            {
+                int leftRank = left.HasVisualEvidence ? 0 : left.HasCommunicationEvidence ? 1 : 2;
+                int rightRank = right.HasVisualEvidence ? 0 : right.HasCommunicationEvidence ? 1 : 2;
+                int byKind = leftRank.CompareTo(rightRank);
+                if (byKind != 0)
+                    return byKind;
+
+                float leftAge = left.HasVisualEvidence ? left.VisualAgeSeconds : left.AgeSeconds;
+                float rightAge = right.HasVisualEvidence ? right.VisualAgeSeconds : right.AgeSeconds;
+                int byAge = leftAge.CompareTo(rightAge);
+                return byAge != 0 ? byAge : right.Confidence.CompareTo(left.Confidence);
+            });
+            captured.RemoveRange(MaxMemoryContacts, captured.Count - MaxMemoryContacts);
+        }
+
+        memoryContacts = captured.ToArray();
+    }
+
     public static SimulationFrameSnapshot Capture(
         UnitSimulation simulation,
         UnitId visionDebugObserver = default,
         WorldMap? visionDebugMap = null,
-        bool includeHearingDebug = false)
+        bool includeHearingDebug = false,
+        bool includeMemoryDebug = false,
+        UnitId memoryDebugObserver = default)
     {
         long captureStarted = Stopwatch.GetTimestamp();
         UnitStore units = simulation.Units;
@@ -817,6 +942,10 @@ public sealed class SimulationFrameSnapshot
         if (includeHearingDebug)
             CaptureHearingDebug(simulation, out soundPulses, out soundContacts);
 
+        RenderMemoryContact[] memoryContacts = Array.Empty<RenderMemoryContact>();
+        if (includeMemoryDebug)
+            CaptureMemoryDebug(simulation, memoryDebugObserver, out memoryContacts);
+
         return new SimulationFrameSnapshot
         {
             Units = unitStates,
@@ -829,6 +958,7 @@ public sealed class SimulationFrameSnapshot
             VisionContacts = visionContacts,
             SoundPulses = soundPulses,
             SoundContacts = soundContacts,
+            MemoryContacts = memoryContacts,
             Impacts = impacts,
             MeleeHitVisuals = meleeHitVisuals,
             ActiveProjectiles = projectiles.ActiveCount,
