@@ -2657,7 +2657,8 @@ public sealed class GameRenderer
                     ref _latestSnapshot,
                     SimulationFrameSnapshot.Capture(
                         _unitSimulation,
-                        _showVisionDebug ? _selectedUnit : default));
+                        _showVisionDebug ? _selectedUnit : default,
+                        _showVisionDebug ? _worldMap : null));
             }
             catch (Exception exception)
             {
