@@ -199,7 +199,9 @@ public static class UnitIntentUtilityScorer
 
             bool canContinueProne = context.IsProne &&
                 !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth &&
-                !context.IsFlanking;
+                !context.IsFlanking &&
+                (!context.CanFlank ||
+                 context.FlankUtility <= context.CombatUtility + UnitTacticalUtility.FlankUtilityAdvantage);
             bool canAdoptProne = context.ProneCombatUtility >= 0.60f &&
                 context.ProneCombatUtility > context.CombatUtility &&
                 !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth &&
@@ -432,8 +434,7 @@ public static class UnitIntentUtilityScorer
             SuggestedScore = bestScore,
             PreviousScore = previousScore,
             Reason = reason,
-            RetainedPreviousIntent = bestIntent == previousIntent &&
-                previousIntent != BehaviacUnitIntent.None
+            RetainedPreviousIntent = reason == UnitIntentDecisionReason.RetainedPreviousIntent
         };
     }
 
