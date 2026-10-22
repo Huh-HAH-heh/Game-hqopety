@@ -1756,21 +1756,22 @@ public sealed class GameRenderer
         Vector2 perpendicular = new(-direction.Y, direction.X);
         spacing = MathF.Max(0.5f, spacing);
 
+        // Treat the dragged segment as the real front rank. Every overflow
+        // rank reuses those same evenly spaced slots; do not recenter or
+        // resize the final partial rank.
         int columns = Math.Clamp(
             (int)MathF.Floor(length / spacing) + 1,
             1,
             Math.Max(1, unitCount));
         int row = index / columns;
         int column = index % columns;
-        int columnsInRow = Math.Min(columns, unitCount - row * columns);
 
-        // Keep a constant world-space distance between neighboring pawns.
-        // A partially filled final rank is centered, not stretched from end to end.
-        float columnOffset = (column - (columnsInRow - 1) * 0.5f) * spacing;
-        Vector2 lineCenter = (start + end) * 0.5f;
-        Vector2 onLine = lineCenter + direction * columnOffset;
+        float t = columns <= 1
+            ? 0.5f
+            : column / (float)(columns - 1);
+        Vector2 onLine = Vector2.Lerp(start, end, t);
 
-        // The dragged segment is the first rank; overflow ranks fill behind it.
+        // Additional ranks are parallel copies behind the user-drawn line.
         float rowOffset = -row * spacing;
         return onLine + perpendicular * rowOffset;
     }
