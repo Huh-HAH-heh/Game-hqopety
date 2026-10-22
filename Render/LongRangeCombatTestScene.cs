@@ -9,7 +9,7 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    // Starts with 400 units per faction; 24 red units are isolated for melee. F8 cycles 80/400/800 per side.
+    // Starts with 400 units per faction; the two isolated squads use the same ranged-combat loop. F8 cycles 80/400/800 per side.
     private const int InitialUnitsPerFaction = 400;
     private const bool EnableScriptedFallbackVolleys = false;
     private const int Columns = 40;
@@ -186,7 +186,7 @@ public sealed class LongRangeCombatTestScene
 
         return
             $"FIGHT {TotalUnits + _thirdFactionUnits.Length} total | " +
-            $"Blue {AliveBlue} | Red {AliveRed} | F3 melee {AliveThirdFaction} | " +
+            $"Blue {AliveBlue} | Red {AliveRed} | F3 squad {AliveThirdFaction} | " +
             $"Initial center gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
             $"Fire mode {(simulation.AI.Enabled ? "AI" : EnableScriptedFallbackVolleys ? "scripted volley" : "disabled")} | " +
             $"Vision {(simulation.VisionEnabled ? "ON" : "OFF")} | " +
@@ -659,26 +659,17 @@ public sealed class LongRangeCombatTestScene
                 ? UnitPosture.Crouching
                 : UnitPosture.Standing);
 
-        int inventorySlot = simulation.AddInventoryItem(
-            id,
-            isMeleeDuelUnit
-                ? MeleeWeaponCatalog.CombatKnife
-                : WeaponCatalog.AssaultRifle);
-
-        if (inventorySlot >= 0)
+        if (isMeleeDuelUnit)
         {
-            UnitWeaponSlot weaponSlot = isMeleeDuelUnit
-                ? UnitWeaponSlot.Melee
-                : UnitWeaponSlot.Primary;
-
-            simulation.EquipWeapon(id, inventorySlot, weaponSlot);
-
-            if (!isMeleeDuelUnit)
+            EnsureRangedWeapon(simulation, id, unitIndex, index);
+        }
+        else
+        {
+            int inventorySlot = simulation.AddInventoryItem(id, WeaponCatalog.AssaultRifle);
+            if (inventorySlot >= 0)
             {
-                simulation.Weapons.AddReserveAmmo(
-                    unitIndex,
-                    UnitWeaponSlot.Primary,
-                    1_000);
+                simulation.EquipWeapon(id, inventorySlot, UnitWeaponSlot.Primary);
+                simulation.Weapons.AddReserveAmmo(unitIndex, UnitWeaponSlot.Primary, 1_000);
                 ConfigureCombatModes(simulation, unitIndex, index);
             }
         }
@@ -813,7 +804,7 @@ public sealed class LongRangeCombatTestScene
             simulation.AI.Store.InitializeUnit(unit);
             simulation.AI.InitializeUnit(unit);
             if (isMeleeDuelUnit)
-                simulation.MeleeCombat.InitializeUnit(unit, _units[i]);
+                EnsureRangedWeapon(simulation, _units[i], unit, i);
             else
                 RestoreWeapon(simulation, unit);
         }
@@ -835,7 +826,7 @@ public sealed class LongRangeCombatTestScene
                 tileY + 0.5f,
                 worldMap.GetSurfaceHeight(tileX, tileY));
             // Faction 3 is on the right side of the arena; face left toward
-            // the isolated red knife squad so both groups see and approach each other.
+            // the isolated red squad so both groups can see and fire at each other.
             Vector3 direction = -Vector3.UnitX;
             UnitId id = simulation.Spawn(
                 UnitType.Colonist,
@@ -845,9 +836,7 @@ public sealed class LongRangeCombatTestScene
                 factionTag: 3);
             _thirdFactionUnits[i] = id;
 
-            int meleeSlot = simulation.AddInventoryItem(id, MeleeWeaponCatalog.LongBlade);
-            if (meleeSlot >= 0)
-                simulation.EquipWeapon(id, meleeSlot, UnitWeaponSlot.Melee);
+            EnsureRangedWeapon(simulation, id, id.Index, TotalUnits + i);
 
             simulation.Units.ViewRange[id.Index] = VisionStressRange;
             simulation.Units.FieldOfView[id.Index] = 180f;
@@ -878,7 +867,7 @@ public sealed class LongRangeCombatTestScene
             simulation.Units.FieldOfView[unit] = 180f;
             simulation.AI.Store.InitializeUnit(unit);
             simulation.AI.InitializeUnit(unit);
-            simulation.MeleeCombat.InitializeUnit(unit, id);
+            EnsureRangedWeapon(simulation, id, unit, TotalUnits + i);
             RestoreHealth(simulation, unit);
             simulation.Suppression.ClearUnit(unit);
             simulation.SetHeadNormal(id, -Vector3.UnitX);
@@ -1005,9 +994,31 @@ public sealed class LongRangeCombatTestScene
         }
     }
 
+    private static void EnsureRangedWeapon(
+        UnitSimulation simulation,
+        UnitId id,
+        int unit,
+        int rosterIndex)
+    {
+        simulation.UnequipWeapon(id, UnitWeaponSlot.Melee);
+
+        short primarySlot = simulation.Inventory.GetWeaponEquipment(
+            unit, UnitWeaponSlot.Primary);
+        if (primarySlot < 0 ||
+            simulation.Inventory.GetItem(unit, primarySlot) is not RangedWeaponConfig)
+        {
+            int addedSlot = simulation.AddInventoryItem(id, WeaponCatalog.AssaultRifle);
+            if (addedSlot >= 0)
+                simulation.EquipWeapon(id, addedSlot, UnitWeaponSlot.Primary);
+        }
+
+        RestoreWeapon(simulation, unit, rosterIndex);
+    }
+
     private static void RestoreWeapon(
         UnitSimulation simulation,
-        int unit)
+        int unit,
+        int? rosterIndex = null)
     {
         short inventorySlot =
             simulation.Inventory.GetWeaponEquipment(
@@ -1033,7 +1044,7 @@ public sealed class LongRangeCombatTestScene
             unit,
             UnitWeaponSlot.Primary,
             1_000);
-        ConfigureCombatModes(simulation, unit, unit);
+        ConfigureCombatModes(simulation, unit, rosterIndex ?? unit);
     }
 
     private static void ConfigureCombatModes(
