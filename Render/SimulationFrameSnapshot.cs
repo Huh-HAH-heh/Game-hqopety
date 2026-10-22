@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Core.Items;
+using Core.AI;
 using Core.Combat;
 using Core.AI.Behaviac;
 using Core.Unit;
@@ -64,7 +65,12 @@ public readonly record struct RenderUnitState(
     float MaxHitPoints,
     int LocationId,
     bool HasMoveTarget,
-    Vector3 MoveTargetPosition);
+    Vector3 MoveTargetPosition,
+    UnitAiOrderType PlayerOrderType,
+    Vector3 PlayerOrderPosition,
+    UnitId PlayerOrderTarget,
+    int OrderPathStart,
+    int OrderPathCount);
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
@@ -98,6 +104,7 @@ public readonly record struct RenderBodyPart(
 public sealed class SimulationFrameSnapshot
 {
     public RenderUnitState[] Units { get; init; } = Array.Empty<RenderUnitState>();
+    public Vector2[] OrderPathPoints { get; init; } = Array.Empty<Vector2>();
     public RenderBodyPart[] BodyParts { get; init; } = Array.Empty<RenderBodyPart>();
     public RenderProjectileTrace[] Traces { get; init; } = Array.Empty<RenderProjectileTrace>();
     public RenderAimRing[] AimRings { get; init; } = Array.Empty<RenderAimRing>();
@@ -280,6 +287,38 @@ public sealed class SimulationFrameSnapshot
         UnitAiStore aiStore = simulation.AI.Store;
         UnitAiState[] aiStates = aiStore.State;
         BehaviacUnitIntent[] aiIntents = aiStore.LastIntent;
+        UnitAiOrderType[] playerOrderTypes = aiStore.PlayerOrderType;
+        Vector3[] playerOrderPositions = aiStore.PlayerOrderPosition;
+        UnitId[] playerOrderTargets = aiStore.PlayerOrderTarget;
+        int[] orderPathStarts = new int[active.Length];
+        int[] orderPathCounts = new int[active.Length];
+        int totalOrderPathPoints = 0;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int index = active[i];
+            orderPathStarts[i] = totalOrderPathPoints;
+            if (playerOrderTypes[index] is UnitAiOrderType.Move or UnitAiOrderType.Attack)
+            {
+                orderPathCounts[i] = Math.Min(
+                    1024,
+                    simulation.Navigation.GetRoutePointCount(index));
+                totalOrderPathPoints += orderPathCounts[i];
+            }
+        }
+
+        Vector2[] orderPathPoints = new Vector2[totalOrderPathPoints];
+        for (int i = 0; i < active.Length; i++)
+        {
+            int count = orderPathCounts[i];
+            if (count > 0)
+            {
+                orderPathCounts[i] = simulation.Navigation.CopyRoutePoints(
+                    active[i],
+                    orderPathPoints.AsSpan(orderPathStarts[i], count));
+            }
+        }
+
         UnitInventoryStore inventoryStore = simulation.Inventory;
         UnitSuppressionStore suppressionStore = simulation.Suppression;
         UnitWeaponStore weaponStore = simulation.Weapons;
@@ -436,7 +475,12 @@ public sealed class SimulationFrameSnapshot
                 maxHitPoints[index],
                 locations[index],
                 units.HasTarget[index],
-                units.HasTarget[index] ? units.Target[index] : Vector3.Zero);
+                units.HasTarget[index] ? units.Target[index] : Vector3.Zero,
+                playerOrderTypes[index],
+                playerOrderPositions[index],
+                playerOrderTargets[index],
+                orderPathStarts[i],
+                orderPathCounts[i]);
 
             bool alive = hp > 0f;
             if (faction == 1)
@@ -591,6 +635,7 @@ public sealed class SimulationFrameSnapshot
         return new SimulationFrameSnapshot
         {
             Units = unitStates,
+            OrderPathPoints = orderPathPoints,
             BodyParts = renderBodyParts,
             Traces = traces,
             AimRings = aimRings.ToArray(),
