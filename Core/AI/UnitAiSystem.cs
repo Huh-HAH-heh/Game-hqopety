@@ -21,6 +21,8 @@ public sealed class UnitAiSystem
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
     private const float ProneCrawlFiringDistance = 9f;
+    private const float RememberedEnemyRefreshInterval = 0.45f;
+    private const float RememberedEnemyMemorySeconds = 8f;
     private static readonly int MaxAiPlanningParallelism =
         Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
@@ -35,6 +37,8 @@ public sealed class UnitAiSystem
     private bool[] _hasSuppressionCoverByUnit = Array.Empty<bool>();
     private BehaviacUnitDecisionAgent?[] _behaviacAgents = Array.Empty<BehaviacUnitDecisionAgent?>();
     private TacticalContact?[] _rememberedEnemyContextByUnit = Array.Empty<TacticalContact?>();
+    private TacticalContact?[] _cachedRememberedEnemyContextByUnit = Array.Empty<TacticalContact?>();
+    private float[] _nextRememberedEnemyQuerySecondsByUnit = Array.Empty<float>();
     private bool[] _isContextInvestigationGoal = Array.Empty<bool>();
     private UnitId[] _flankTargetByUnit = Array.Empty<UnitId>();
     private bool[] _hasFlankTargetByUnit = Array.Empty<bool>();
@@ -103,6 +107,8 @@ public sealed class UnitAiSystem
         EnsurePlanningCapacity(unitIndex + 1);
         _searchPatrolLegByUnit[unitIndex] = 0;
         _rememberedEnemyContextByUnit[unitIndex] = null;
+        _cachedRememberedEnemyContextByUnit[unitIndex] = null;
+        _nextRememberedEnemyQuerySecondsByUnit[unitIndex] = 0f;
         _isContextInvestigationGoal[unitIndex] = false;
         _flankTargetByUnit[unitIndex] = default;
         _hasFlankTargetByUnit[unitIndex] = false;
@@ -116,6 +122,10 @@ public sealed class UnitAiSystem
         _searchPatrolLegByUnit[unitIndex] = 0;
         if ((uint)unitIndex < (uint)_rememberedEnemyContextByUnit.Length)
             _rememberedEnemyContextByUnit[unitIndex] = null;
+        if ((uint)unitIndex < (uint)_cachedRememberedEnemyContextByUnit.Length)
+            _cachedRememberedEnemyContextByUnit[unitIndex] = null;
+        if ((uint)unitIndex < (uint)_nextRememberedEnemyQuerySecondsByUnit.Length)
+            _nextRememberedEnemyQuerySecondsByUnit[unitIndex] = 0f;
         if ((uint)unitIndex < (uint)_isContextInvestigationGoal.Length)
             _isContextInvestigationGoal[unitIndex] = false;
         _flankTargetByUnit[unitIndex] = default;
@@ -1209,6 +1219,9 @@ public sealed class UnitAiSystem
             if (contextContact != null)
             {
                 memory.MarkInvestigated(contextContact.ContactId);
+                if (ReferenceEquals(_cachedRememberedEnemyContextByUnit[unit], contextContact))
+                    _cachedRememberedEnemyContextByUnit[unit] = null;
+                _nextRememberedEnemyQuerySecondsByUnit[unit] = _perceptionMemory.CurrentTimeSeconds;
             }
             else if (storedTarget.IsValid &&
                      memory.TryGetContact(storedTarget, out TacticalContact rememberedTarget) &&
@@ -1408,7 +1421,7 @@ public sealed class UnitAiSystem
                 lastKnownTargetUtility = UnitTacticalUtility.EvaluateInvestigation(
                     0.35f, MathF.Sqrt(dx * dx + dy * dy));
             }
-            else if (!Store.HasGoal[unit] || ReachedGoal(units.Position[unit], Store.Goal[unit]))
+            else
             {
                 if (TryGetBestRememberedHostileContact(
                     units, health, vision, unit, out rememberedEnemyContext))
@@ -1839,6 +1852,10 @@ public sealed class UnitAiSystem
             Array.Resize(ref _hasFlankTargetByUnit, capacity);
         if (_rememberedEnemyContextByUnit.Length < capacity)
             Array.Resize(ref _rememberedEnemyContextByUnit, capacity);
+        if (_cachedRememberedEnemyContextByUnit.Length < capacity)
+            Array.Resize(ref _cachedRememberedEnemyContextByUnit, capacity);
+        if (_nextRememberedEnemyQuerySecondsByUnit.Length < capacity)
+            Array.Resize(ref _nextRememberedEnemyQuerySecondsByUnit, capacity);
         if (_isContextInvestigationGoal.Length < capacity)
             Array.Resize(ref _isContextInvestigationGoal, capacity);
     }
@@ -1924,47 +1941,83 @@ public sealed class UnitAiSystem
         if (_perceptionMemory == null ||
             !_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory))
         {
+            _cachedRememberedEnemyContextByUnit[observer] = null;
             return false;
         }
 
         float now = _perceptionMemory.CurrentTimeSeconds;
+        TacticalContact? cached = _cachedRememberedEnemyContextByUnit[observer];
+        if (cached != null)
+        {
+            if (IsUsableRememberedHostileContact(
+                    units, health, vision, observer, cached, now, out _))
+            {
+                bestContact = cached;
+                return true;
+            }
+
+            _cachedRememberedEnemyContextByUnit[observer] = null;
+        }
+
+        if (now < _nextRememberedEnemyQuerySecondsByUnit[observer])
+            return false;
+        _nextRememberedEnemyQuerySecondsByUnit[observer] = now + RememberedEnemyRefreshInterval;
+
         float bestUtility = UnitTacticalUtility.MinimumInvestigationUtility;
         IReadOnlyList<TacticalContact> contacts = memory.Contacts;
         for (int i = 0; i < contacts.Count; i++)
         {
             TacticalContact candidate = contacts[i];
-            if (candidate.IsInvestigated ||
-                candidate.ExpiresAtSeconds <= now ||
-                candidate.LastVisualAtSeconds < 0f ||
-                candidate.SubjectUnit is not UnitId subject ||
-                !units.TryGetIndex(subject, out int target) ||
-                health.OverallHitPoints[target] <= 0f ||
-                !IsHostile(units, observer, target) ||
-                vision.IsRecentlyVisible(observer, target, units))
+            if (!IsUsableRememberedHostileContact(
+                    units, health, vision, observer, candidate, now, out float utility) ||
+                utility <= bestUtility)
             {
                 continue;
             }
-
-            float age = now - candidate.LastVisualAtSeconds;
-            if (!float.IsFinite(age) || age < 0f || age > 8f)
-                continue;
-
-            float confidence = candidate.GetEffectiveConfidence(now, 4f);
-            if (confidence < 0.12f)
-                continue;
-
-            float dx = candidate.EstimatedPosition.X - units.Position[observer].X;
-            float dy = candidate.EstimatedPosition.Y - units.Position[observer].Y;
-            float distance = MathF.Sqrt(dx * dx + dy * dy);
-            float utility = UnitTacticalUtility.EvaluateInvestigation(confidence, distance);
-            if (utility <= bestUtility)
-                continue;
 
             bestUtility = utility;
             bestContact = candidate;
         }
 
+        _cachedRememberedEnemyContextByUnit[observer] = bestContact;
         return bestContact != null;
+    }
+
+    private static bool IsUsableRememberedHostileContact(
+        UnitStore units,
+        UnitHealthStore health,
+        VisionSystem vision,
+        int observer,
+        TacticalContact contact,
+        float now,
+        out float utility)
+    {
+        utility = 0f;
+        if (contact.IsInvestigated ||
+            contact.ExpiresAtSeconds <= now ||
+            contact.LastVisualAtSeconds < 0f ||
+            contact.SubjectUnit is not UnitId subject ||
+            !units.TryGetIndex(subject, out int target) ||
+            health.OverallHitPoints[target] <= 0f ||
+            !IsHostile(units, observer, target) ||
+            vision.IsRecentlyVisible(observer, target, units))
+        {
+            return false;
+        }
+
+        float age = now - contact.LastVisualAtSeconds;
+        if (!float.IsFinite(age) || age < 0f || age > RememberedEnemyMemorySeconds)
+            return false;
+
+        float confidence = contact.GetEffectiveConfidence(now, 4f);
+        if (confidence < 0.12f)
+            return false;
+
+        float dx = contact.EstimatedPosition.X - units.Position[observer].X;
+        float dy = contact.EstimatedPosition.Y - units.Position[observer].Y;
+        float distance = MathF.Sqrt(dx * dx + dy * dy);
+        utility = UnitTacticalUtility.EvaluateInvestigation(confidence, distance);
+        return utility > UnitTacticalUtility.MinimumInvestigationUtility;
     }
 
     private static int FindNearestVisibleEnemy(
