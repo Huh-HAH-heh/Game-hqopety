@@ -48,11 +48,8 @@ public sealed class UnitAiSystem
     public bool Enabled { get; set; }
     public bool LastUpdateRanThinkPass { get; private set; }
 
-    /// <summary>Only acquire visible hostile targets and fire equipped ranged weapons.</summary>
-    public bool SimpleCombatOnly { get; set; } = true;
-
-    /// <summary>Kept for comparisons when the simple-combat experiment is disabled.</summary>
-    public bool UseBehaviacDecisionLayer { get; set; }
+    /// <summary>Behaviac is the only source of autonomous behavior intents.</summary>
+    public bool UseBehaviacDecisionLayer => true;
 
     public TacticalHearingSystem? Hearing { get; set; }
     public UnitAiStore Store { get; }
@@ -97,9 +94,6 @@ public sealed class UnitAiSystem
         _skills = skills;
         _perceptionMemory = perceptionMemory;
 
-        // This branch intentionally starts with a small, predictable combat loop.
-        // The XML tree remains available in source, but does not drive this experiment.
-        UseBehaviacDecisionLayer = false;
     }
 
     public void InitializeUnit(int unitIndex)
@@ -176,13 +170,6 @@ public sealed class UnitAiSystem
 
         _thinkTimer = 0f;
         LastUpdateRanThinkPass = true;
-
-        if (SimpleCombatOnly)
-        {
-            UpdateSimpleCombatOnly(
-                units, health, inventory, weapons, projectiles, vision, worldMap);
-            return;
-        }
 
         // Preserve these results between think ticks so the one-second
         // performance logger doesn't usually sample a zero-work render frame.
@@ -283,40 +270,6 @@ public sealed class UnitAiSystem
                     units, health, inventory, weapons, vision, suppression, unit, suppressionState, isAlive);
                 LastBehaviacDecisionBatchMilliseconds +=
                     Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
-
-                // A visible hostile must not be ignored because the tree returns a
-                // stale Patrol intent; low-health retreat and suppression panic still win.
-                bool currentTargetVisible = Store.HasTarget[unit] &&
-                    units.IsAlive(Store.Target[unit]) &&
-                    IsHostile(units, unit, Store.Target[unit].Index) &&
-                    vision.IsRecentlyVisible(unit, Store.Target[unit].Index, units);
-                if (intent == BehaviacUnitIntent.Patrol &&
-                    (_nearestVisibleEnemyByUnit[unit] >= 0 || currentTargetVisible) &&
-                    suppressionState != UnitSuppressionState.Panicked &&
-                    !IsLowHealth(health, unit))
-                {
-                    intent = BehaviacUnitIntent.EngageTarget;
-                }
-
-                if (intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
-                    Store.HasTarget[unit] &&
-                    !_squadCoordinator.TryClaimLastKnownTargetInvestigation(
-                        units.GetId(unit), _tacticalTimeSeconds))
-                {
-                    // Another soldier in this squad is already searching the last-known
-                    // position. A visible threat still wins; otherwise let this unit resume
-                    // its own order/search instead of sending the whole squad to one area.
-                    if (_nearestVisibleEnemyByUnit[unit] >= 0 || currentTargetVisible)
-                    {
-                        intent = BehaviacUnitIntent.EngageTarget;
-                    }
-                    else
-                    {
-                        Store.ClearTarget(unit);
-                        units.HasTarget[unit] = false;
-                        intent = BehaviacUnitIntent.Patrol;
-                    }
-                }
 
                 RecordBehaviacIntent(intent);
             }
@@ -1061,228 +1014,6 @@ public sealed class UnitAiSystem
             units.HasTarget[unit] = false;
             Store.State[unit] = UnitAiState.Search;
         }
-    }
-
-    private void UpdateSimpleCombatOnly(
-        UnitStore units,
-        UnitHealthStore health,
-        UnitInventoryStore inventory,
-        UnitWeaponStore weapons,
-        ProjectileStore projectiles,
-        VisionSystem vision,
-        WorldMap worldMap)
-    {
-        LastPlanningMilliseconds = 0d;
-        LastBehaviacDecisions = 0;
-        LastBehaviacDecisionBatchMilliseconds = 0d;
-        LastBehaviacDeadDecisions = 0;
-        LastBehaviacCoverDecisions = 0;
-        LastBehaviacRetreatDecisions = 0;
-        LastBehaviacFlankDecisions = 0;
-        LastBehaviacEngageDecisions = 0;
-        LastBehaviacSuppressDecisions = 0;
-        LastBehaviacInvestigateDecisions = 0;
-        LastBehaviacPatrolDecisions = 0;
-        LastBehaviacMoveOrderDecisions = 0;
-        LastBehaviacHoldOrderDecisions = 0;
-        LastBehaviacAttackOrderDecisions = 0;
-        LastBehaviacHoldAndEngageDecisions = 0;
-
-        Store.EnsureCapacity(units.Capacity);
-        ReadOnlySpan<int> active = units.ActiveIndices;
-
-        for (int i = 0; i < active.Length; i++)
-        {
-            int unit = active[i];
-            bool alive = health.OverallMaxHitPoints[unit] > 0f &&
-                health.OverallHitPoints[unit] > 0f;
-
-            if (!alive)
-            {
-                ResetSimpleCombatUnit(
-                    units, weapons, unit, UnitAiState.Dead, BehaviacUnitIntent.Dead);
-                units.Posture[unit] = UnitPosture.Lying;
-                continue;
-            }
-
-            if (units.Posture[unit] == UnitPosture.Injured)
-            {
-                ResetSimpleCombatUnit(
-                    units, weapons, unit, UnitAiState.Injured, BehaviacUnitIntent.None);
-                continue;
-            }
-
-            bool hasMoveOrder = Store.PlayerOrderType[unit] == UnitAiOrderType.Move;
-            Vector3 moveOrderPosition = hasMoveOrder
-                ? Store.PlayerOrderPosition[unit]
-                : units.Position[unit];
-
-            if (hasMoveOrder)
-            {
-                Vector3 toMoveOrder = moveOrderPosition - units.Position[unit];
-                toMoveOrder.Z = 0f;
-                if (toMoveOrder.LengthSquared() <= 0.04f)
-                {
-                    Store.ClearPlayerOrder(unit);
-                    Store.ClearGoal(unit);
-                    units.HasTarget[unit] = false;
-                    units.Velocity[unit] = Vector3.Zero;
-                    hasMoveOrder = false;
-                }
-                else
-                {
-                    units.Target[unit] = moveOrderPosition;
-                    units.HasTarget[unit] = true;
-                    Store.SetGoal(unit, moveOrderPosition);
-                }
-            }
-
-            // Explicit attack orders retain their selected target marker and focus fire.
-            // The simple AI still refuses to fire at an unseen target.
-            bool hasAttackOrder = Store.PlayerOrderType[unit] == UnitAiOrderType.Attack;
-            int targetIndex = -1;
-            if (hasAttackOrder)
-            {
-                UnitId orderedTarget = Store.PlayerOrderTarget[unit];
-                if (units.TryGetIndex(orderedTarget, out int commandedIndex) &&
-                    health.OverallHitPoints[commandedIndex] > 0f &&
-                    FactionRules.ShouldAttack(
-                        units.FactionTag[unit],
-                        units.FactionTag[commandedIndex]))
-                {
-                    if (vision.IsRecentlyVisible(unit, commandedIndex, units))
-                    {
-                        targetIndex = commandedIndex;
-                    }
-                    else
-                    {
-                        ClearAiming(weapons, unit);
-                        Store.ClearTarget(unit);
-                        Store.ClearGoal(unit);
-                        units.HasTarget[unit] = false;
-                        units.Velocity[unit] = Vector3.Zero;
-                        Store.State[unit] = UnitAiState.Search;
-                        Store.LastIntent[unit] = BehaviacUnitIntent.AttackOrder;
-                        continue;
-                    }
-                }
-                else
-                {
-                    Store.ClearPlayerOrder(unit);
-                    hasAttackOrder = false;
-                }
-            }
-
-            // No memory hunts, squad contacts, cover, flanking or patrol. Without
-            // an explicit target order, combat only engages a currently visible hostile.
-            if (!hasAttackOrder)
-                targetIndex = FindNearestVisibleEnemy(units, health, vision, unit);
-
-            if (targetIndex < 0 ||
-                !vision.IsRecentlyVisible(unit, targetIndex, units) ||
-                !HasRangedWeapon(units, inventory, unit))
-            {
-                if (hasMoveOrder)
-                {
-                    ClearAiming(weapons, unit);
-                    Store.ClearTarget(unit);
-                    Store.SetGoal(unit, moveOrderPosition);
-                    Store.State[unit] = UnitAiState.Idle;
-                    Store.LastIntent[unit] = BehaviacUnitIntent.None;
-                    units.Target[unit] = moveOrderPosition;
-                    units.HasTarget[unit] = true;
-                }
-                else
-                {
-                    ResetSimpleCombatUnit(
-                        units, weapons, unit, UnitAiState.Idle, BehaviacUnitIntent.None);
-                }
-                continue;
-            }
-
-            UnitId target = units.GetId(targetIndex);
-            Vector3 targetPosition = units.Position[targetIndex];
-            Vector3 direction = targetPosition - units.Position[unit];
-            direction.Z = 0f;
-            float directionLengthSquared = direction.LengthSquared();
-            if (directionLengthSquared > 0.000001f)
-            {
-                direction /= MathF.Sqrt(directionLengthSquared);
-                units.BodyNormal[unit] = direction;
-                units.HeadNormal[unit] = direction;
-            }
-
-            Store.RememberTarget(unit, target, targetPosition, TargetMemorySeconds);
-            if (hasMoveOrder)
-            {
-                Store.SetGoal(unit, moveOrderPosition);
-            }
-            else if (hasAttackOrder)
-            {
-                Store.ClearGoal(unit);
-                Store.SetPlayerOrder(unit, UnitAiOrderType.Attack, targetPosition, target);
-            }
-            else
-            {
-                Store.ClearGoal(unit);
-                Store.ClearPlayerOrder(unit);
-            }
-
-            // Combat target and locomotion target are separate: a pawn can fire
-            // at a visible enemy while continuing to its explicit move-line slot.
-            units.Target[unit] = hasMoveOrder ? moveOrderPosition : units.Position[unit];
-            units.HasTarget[unit] = hasMoveOrder;
-            if (!hasMoveOrder)
-                units.Velocity[unit] = Vector3.Zero;
-            Store.State[unit] = UnitAiState.Attack;
-            Store.LastIntent[unit] = BehaviacUnitIntent.EngageTarget;
-
-            // Suppressive fire deliberately bypasses fresh LOS checks. The simple
-            // experiment must only fire when the current target is actually visible.
-            for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
-            {
-                UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
-                short inventorySlot = inventory.GetWeaponEquipment(unit, weaponSlot);
-                if (inventorySlot < 0 ||
-                    inventory.GetItem(unit, inventorySlot) is not RangedWeaponConfig)
-                {
-                    continue;
-                }
-
-                int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
-                if (weapons.CurrentAimMode[stateIndex] == AimMode.SuppressFire)
-                    weapons.CurrentAimMode[stateIndex] = AimMode.Snapshot;
-            }
-
-            TryFireAnyRangedWeapon(
-                units,
-                inventory,
-                weapons,
-                projectiles,
-                unit,
-                target,
-                vision,
-                worldMap,
-                1f);
-        }
-    }
-
-    private void ResetSimpleCombatUnit(
-        UnitStore units,
-        UnitWeaponStore weapons,
-        int unit,
-        UnitAiState state,
-        BehaviacUnitIntent intent)
-    {
-        ClearAiming(weapons, unit);
-        Store.ClearTarget(unit);
-        Store.ClearGoal(unit);
-        Store.ClearPlayerOrder(unit);
-        Store.State[unit] = state;
-        Store.LastIntent[unit] = intent;
-        units.Target[unit] = units.Position[unit];
-        units.HasTarget[unit] = false;
-        units.Velocity[unit] = Vector3.Zero;
     }
 
     private bool TryExecutePlayerOrderIntent(
