@@ -2810,6 +2810,17 @@ public sealed class GameRenderer
                             ? new UnitId(contextUnit.Index, contextUnit.Generation)
                             : default;
 
+                        if (hasUnit && canAttackTarget)
+                        {
+                            UnitId[] attackUnits = selectedIds;
+                            UnitId attackTarget = new(contextUnit.Index, contextUnit.Generation);
+                            _contextMenuUnit = default;
+                            _contextMenuOverlay.Close();
+                            ExecuteSimulationCommand(() =>
+                                IssueAttackOrder(attackUnits, attackTarget));
+                            return;
+                        }
+
                         if (!hasUnit && selectedIds.Length > 0)
                         {
                             if (selectedIds.Length > 1 && TryBeginMoveLine(e.Position))
