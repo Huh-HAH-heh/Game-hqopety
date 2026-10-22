@@ -1,5 +1,6 @@
 using Core.Combat;
 using Core.AI.Behaviac;
+using Core.AI.Perception;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
@@ -54,6 +55,10 @@ public sealed class UnitRenderSystem : IDisposable
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _soundDebug =
+        new VertexArray(
+            PrimitiveType.Lines);
+
     public void Draw(
         RenderWindow window,
         UnitSimulation simulation,
@@ -65,7 +70,8 @@ public sealed class UnitRenderSystem : IDisposable
         bool showAiDebug = true,
         bool hideUnseenTargets = false,
         HashSet<UnitId>? selectedUnits = null,
-        bool showUnitRig = true)
+        bool showUnitRig = true,
+        bool showHearingDebug = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -90,6 +96,7 @@ public sealed class UnitRenderSystem : IDisposable
         _aiming.Clear();
         _visionDebug.Clear();
         _aiDebug.Clear();
+        _soundDebug.Clear();
 
         Vector2f center =
             cameraView.Center;
@@ -327,6 +334,14 @@ public sealed class UnitRenderSystem : IDisposable
                 tilePixelSize);
         }
 
+        if (showHearingDebug)
+        {
+            SimulationFrameSnapshot.CaptureHearingDebug(
+                simulation, out RenderSoundPulse[] soundPulses,
+                out RenderAuditoryContact[] soundContacts);
+            AppendSoundDebug(_soundDebug, soundPulses, soundContacts, cameraView, tilePixelSize);
+        }
+
         if (_visionArea.VertexCount > 0)
         {
             window.Draw(
@@ -366,6 +381,8 @@ public sealed class UnitRenderSystem : IDisposable
             window.Draw(
                 _aiDebug);
         }
+        if (_soundDebug.VertexCount > 0)
+            window.Draw(_soundDebug);
     }
 
 public void DrawSnapshot(
@@ -377,7 +394,8 @@ public void DrawSnapshot(
         bool showAiDebug,
         HashSet<UnitId>? selectedUnits = null,
         bool showUnitRig = true,
-        bool showVisionDebug = false)
+        bool showVisionDebug = false,
+        bool showHearingDebug = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -406,6 +424,7 @@ public void DrawSnapshot(
         _visionArea.Clear();
         _visionDebug.Clear();
         _aiDebug.Clear();
+        _soundDebug.Clear();
 
         RenderUnitState[] units = snapshot.Units;
         RenderBodyPart[] bodyParts = snapshot.BodyParts;
@@ -630,6 +649,9 @@ public void DrawSnapshot(
             }
         }
 
+        if (showHearingDebug)
+            AppendSoundDebug(_soundDebug, snapshot.SoundPulses, snapshot.SoundContacts, cameraView, tilePixelSize);
+
         if (_visionArea.VertexCount > 0)
             window.Draw(_visionArea);
 
@@ -716,6 +738,8 @@ public void DrawSnapshot(
             window.Draw(_visionDebug);
         if (_aiDebug.VertexCount > 0)
             window.Draw(_aiDebug);
+        if (_soundDebug.VertexCount > 0)
+            window.Draw(_soundDebug);
     }
 
     private static int AppendBodyParts(
@@ -2397,6 +2421,101 @@ private static void AppendSuppressionDebug(
             weapon.AimPoint.Y * tilePixelSize,
             new Color(255, 125, 95, 105));
     }
+
+    private static void AppendSoundDebug(
+        VertexArray debug,
+        RenderSoundPulse[] pulses,
+        RenderAuditoryContact[] contacts,
+        View cameraView,
+        float tilePixelSize)
+    {
+        if (tilePixelSize <= 0f)
+            return;
+
+        float minX = (cameraView.Center.X - cameraView.Size.X * 0.5f) / tilePixelSize - 2f;
+        float maxX = (cameraView.Center.X + cameraView.Size.X * 0.5f) / tilePixelSize + 2f;
+        float minY = (cameraView.Center.Y - cameraView.Size.Y * 0.5f) / tilePixelSize - 2f;
+        float maxY = (cameraView.Center.Y + cameraView.Size.Y * 0.5f) / tilePixelSize + 2f;
+
+        for (int i = 0; i < pulses.Length; i++)
+        {
+            RenderSoundPulse pulse = pulses[i];
+            float fade = Math.Clamp(1f - pulse.AgeSeconds / 2.25f, 0f, 1f);
+            if (fade <= 0f || pulse.AudibleRange <= 0f ||
+                pulse.Position.X + pulse.AudibleRange < minX ||
+                pulse.Position.X - pulse.AudibleRange > maxX ||
+                pulse.Position.Y + pulse.AudibleRange < minY ||
+                pulse.Position.Y - pulse.AudibleRange > maxY)
+                continue;
+
+            Color baseColor = GetSoundColor(pulse.Type);
+            float x = pulse.Position.X * tilePixelSize;
+            float y = pulse.Position.Y * tilePixelSize;
+            byte rangeAlpha = (byte)Math.Clamp((int)((8f + pulse.Intensity * 12f) * fade), 0, 24);
+            AppendCircleOutline(
+                debug, x, y, pulse.AudibleRange * tilePixelSize,
+                new Color(baseColor.R, baseColor.G, baseColor.B, rangeAlpha), 32);
+
+            byte sourceAlpha = (byte)Math.Clamp((int)((100f + pulse.Intensity * 125f) * fade), 0, 225);
+            Color sourceColor = new(baseColor.R, baseColor.G, baseColor.B, sourceAlpha);
+            float sourceRadius = tilePixelSize * (0.18f + 0.16f * pulse.Intensity);
+            AppendCircleOutline(debug, x, y, sourceRadius, sourceColor, 12);
+            AppendDebugLine(debug, x - sourceRadius, y, x + sourceRadius, y, sourceColor);
+            AppendDebugLine(debug, x, y - sourceRadius, x, y + sourceRadius, sourceColor);
+        }
+
+        for (int i = 0; i < contacts.Length; i++)
+        {
+            RenderAuditoryContact contact = contacts[i];
+            float confidence = Math.Clamp(contact.Confidence, 0f, 1f);
+            if (confidence < 0.12f)
+                continue;
+
+            Vector3 listener = contact.ObserverPosition;
+            Vector3 estimate = contact.EstimatedPosition;
+            bool listenerNearView = listener.X >= minX && listener.X <= maxX &&
+                listener.Y >= minY && listener.Y <= maxY;
+            float visualError = Math.Clamp(contact.ErrorRadius, 0.3f, 24f);
+            bool estimateNearView = estimate.X + visualError >= minX && estimate.X - visualError <= maxX &&
+                estimate.Y + visualError >= minY && estimate.Y - visualError <= maxY;
+            if (!listenerNearView && !estimateNearView)
+                continue;
+
+            Color soundColor = GetSoundColor(contact.Type);
+            float lx = listener.X * tilePixelSize;
+            float ly = listener.Y * tilePixelSize;
+            float ex = estimate.X * tilePixelSize;
+            float ey = estimate.Y * tilePixelSize;
+            byte linkAlpha = (byte)Math.Clamp((int)(28f + 62f * confidence), 0, 100);
+            AppendDebugLine(debug, lx, ly, ex, ey,
+                new Color(soundColor.R, soundColor.G, soundColor.B, linkAlpha));
+
+            byte listenerAlpha = (byte)Math.Clamp((int)(100f + 120f * confidence), 0, 220);
+            AppendCircleOutline(debug, lx, ly, 0.43f * tilePixelSize,
+                new Color(80, 220, 255, listenerAlpha), 12);
+
+            byte uncertaintyAlpha = (byte)Math.Clamp((int)(10f + 24f * confidence), 0, 36);
+            AppendCircleOutline(debug, ex, ey, visualError * tilePixelSize,
+                new Color(soundColor.R, soundColor.G, soundColor.B, uncertaintyAlpha), 32);
+            byte estimateAlpha = (byte)Math.Clamp((int)(90f + 135f * confidence), 0, 225);
+            Color estimateColor = new(soundColor.R, soundColor.G, soundColor.B, estimateAlpha);
+            float markerRadius = 0.31f * tilePixelSize;
+            AppendCircleOutline(debug, ex, ey, markerRadius, estimateColor, 12);
+            AppendDebugLine(debug, ex - markerRadius, ey, ex + markerRadius, ey, estimateColor);
+            AppendDebugLine(debug, ex, ey - markerRadius, ex, ey + markerRadius, estimateColor);
+        }
+    }
+
+    private static Color GetSoundColor(TacticalStimulusType type) =>
+        type switch
+        {
+            TacticalStimulusType.Footstep => new Color(90, 220, 255, 220),
+            TacticalStimulusType.Gunshot => new Color(255, 160, 70, 220),
+            TacticalStimulusType.NearMiss => new Color(255, 75, 75, 220),
+            TacticalStimulusType.CoverImpact => new Color(215, 220, 230, 220),
+            TacticalStimulusType.Explosion => new Color(225, 105, 255, 220),
+            _ => new Color(175, 190, 205, 220)
+        };
 
     private static Color GetVisionColor(
         VisionState state)
