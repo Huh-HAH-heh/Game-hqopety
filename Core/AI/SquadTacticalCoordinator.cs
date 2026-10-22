@@ -24,6 +24,7 @@ public sealed class SquadTacticalCoordinator
     public const float MinimumContactConfidence = 0.12f;
     private const float RefreshSeconds = 0.90f;
     private const float FlankClaimLifetimeSeconds = 1.0f;
+    private const float LastKnownInvestigationClaimLifetimeSeconds = 3.0f;
     private const float SignificantMovement = 3f;
     private const float InitialConfidence = 0.68f;
     private const float ErrorRadius = 6f;
@@ -34,6 +35,7 @@ public sealed class SquadTacticalCoordinator
     private readonly Dictionary<UnitId, ReceivedContact> _received = new();
     private readonly Dictionary<long, InvestigationClaim> _claims = new();
     private readonly Dictionary<(int SquadId, UnitId Target), FlankClaim> _flankClaims = new();
+    private readonly Dictionary<int, InvestigationClaim> _lastKnownInvestigationClaims = new();
     private readonly List<PendingReport> _pending = new();
     private long _nextSequence = 1;
 
@@ -91,6 +93,17 @@ public sealed class SquadTacticalCoordinator
                     staleFlankClaims.Add(pair.Key);
             for (int i = 0; i < staleFlankClaims.Count; i++) _flankClaims.Remove(staleFlankClaims[i]);
 
+            if (_lastKnownInvestigationClaims.Count > 0)
+            {
+                List<int> staleInvestigations = new();
+                foreach (KeyValuePair<int, InvestigationClaim> pair in _lastKnownInvestigationClaims)
+                    if (!nextMembership.TryGetValue(pair.Value.Owner, out int ownerSquad) ||
+                        ownerSquad != pair.Key)
+                        staleInvestigations.Add(pair.Key);
+                for (int i = 0; i < staleInvestigations.Count; i++)
+                    _lastKnownInvestigationClaims.Remove(staleInvestigations[i]);
+            }
+
             _pending.RemoveAll(report => !_squads.ContainsKey(report.SquadId) ||
                 !_membership.TryGetValue(report.Reporter, out int squadId) || squadId != report.SquadId);
         }
@@ -127,6 +140,16 @@ public sealed class SquadTacticalCoordinator
                     staleFlanks.Add(pair.Key);
             for (int i = 0; i < staleFlanks.Count; i++)
                 _flankClaims.Remove(staleFlanks[i]);
+
+            if (_lastKnownInvestigationClaims.Count > 0)
+            {
+                List<int> staleLastKnownInvestigations = new();
+                foreach (KeyValuePair<int, InvestigationClaim> pair in _lastKnownInvestigationClaims)
+                    if (pair.Value.Owner.Equals(unit))
+                        staleLastKnownInvestigations.Add(pair.Key);
+                for (int i = 0; i < staleLastKnownInvestigations.Count; i++)
+                    _lastKnownInvestigationClaims.Remove(staleLastKnownInvestigations[i]);
+            }
         }
     }
 
@@ -190,6 +213,18 @@ public sealed class SquadTacticalCoordinator
                     squadId != pair.Value.SquadId)
                     expiredClaims.Add(pair.Key);
             for (int i = 0; i < expiredClaims.Count; i++) _claims.Remove(expiredClaims[i]);
+
+            if (_lastKnownInvestigationClaims.Count > 0)
+            {
+                List<int> expiredLastKnownInvestigations = new();
+                foreach (KeyValuePair<int, InvestigationClaim> pair in _lastKnownInvestigationClaims)
+                    if (pair.Value.ExpiresAt <= now ||
+                        !_membership.TryGetValue(pair.Value.Owner, out int ownerSquad) ||
+                        ownerSquad != pair.Key)
+                        expiredLastKnownInvestigations.Add(pair.Key);
+                for (int i = 0; i < expiredLastKnownInvestigations.Count; i++)
+                    _lastKnownInvestigationClaims.Remove(expiredLastKnownInvestigations[i]);
+            }
 
             List<(int SquadId, UnitId Target)> expiredFlankClaims = new();
             foreach (KeyValuePair<(int SquadId, UnitId Target), FlankClaim> pair in _flankClaims)
@@ -259,6 +294,41 @@ public sealed class SquadTacticalCoordinator
 
         lock (_gate)
             return _membership.ContainsKey(member);
+    }
+
+    public bool TryClaimLastKnownTargetInvestigation(UnitId member, float now)
+    {
+        if (!member.IsValid || !float.IsFinite(now)) return false;
+        lock (_gate)
+        {
+            // Unassigned units keep individual investigation behavior. Within a
+            // squad, only one soldier should pursue stale target memory at a time.
+            if (!_membership.TryGetValue(member, out int squadId)) return true;
+
+            if (_lastKnownInvestigationClaims.TryGetValue(squadId, out InvestigationClaim claim))
+            {
+                if (claim.ExpiresAt <= now ||
+                    !_membership.TryGetValue(claim.Owner, out int ownerSquad) ||
+                    ownerSquad != squadId)
+                {
+                    _lastKnownInvestigationClaims.Remove(squadId);
+                }
+                else if (claim.Owner.Equals(member))
+                {
+                    _lastKnownInvestigationClaims[squadId] = new InvestigationClaim(
+                        member, squadId, now + LastKnownInvestigationClaimLifetimeSeconds);
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            _lastKnownInvestigationClaims[squadId] = new InvestigationClaim(
+                member, squadId, now + LastKnownInvestigationClaimLifetimeSeconds);
+            return true;
+        }
     }
 
     public bool TryClaimFlank(UnitId member, UnitId target, float now)
