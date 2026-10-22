@@ -23,6 +23,99 @@ public enum UnitAiOrderType : byte
     Attack = 3
 }
 
+public enum UnitIntentDecisionReason : byte
+{
+    InitialSelection,
+    HighestUtility,
+    RetainedPreviousIntent,
+    EmergencyOverride,
+    PreviousIntentNoLongerValid,
+    Dead
+}
+
+/// <summary>
+/// Compact, allocation-free utility snapshot for later AI visualization.
+/// </summary>
+public readonly record struct UnitIntentUtilityBreakdown
+{
+    public BehaviacUnitIntent SuggestedIntent { get; init; }
+    public float SuggestedScore { get; init; }
+    public BehaviacUnitIntent PreviousIntent { get; init; }
+    public float PreviousScore { get; init; }
+    public UnitIntentDecisionReason Reason { get; init; }
+    public bool RetainedPreviousIntent { get; init; }
+
+    public float EngageScore { get; init; }
+    public float HoldAndEngageScore { get; init; }
+    public float CoverScore { get; init; }
+    public float RetreatScore { get; init; }
+    public float MoveOrderScore { get; init; }
+    public float HoldOrderScore { get; init; }
+    public float AttackOrderScore { get; init; }
+    public float FlankScore { get; init; }
+    public float ProneScore { get; init; }
+    public float SuppressiveFireScore { get; init; }
+    public float LastKnownContactScore { get; init; }
+    public float AudibleContactScore { get; init; }
+    public float SquadContactScore { get; init; }
+    public float PatrolScore { get; init; }
+}
+
+/// <summary>
+/// Immutable, already-collected facts for one pawn. Scoring performs no world queries,
+/// allocations, navigation, or combat operations. Normalized inputs are in 0..1.
+/// </summary>
+public readonly record struct UnitIntentUtilityContext
+{
+    public bool IsAlive { get; init; }
+    public bool HasVisibleTarget { get; init; }
+    public bool HasRecentTarget { get; init; }
+    public bool HasActiveTargetMemory { get; init; }
+    public bool HasCover { get; init; }
+    public bool IsInImmediateDanger { get; init; }
+    public bool IsSuppressed { get; init; }
+    public bool IsPanicked { get; init; }
+    public bool IsLowHealth { get; init; }
+    public bool HasSuppressiveWeapon { get; init; }
+    public bool HasRangedWeapon { get; init; }
+    public bool CanFlank { get; init; }
+    public bool IsFlanking { get; init; }
+    public bool IsProne { get; init; }
+    public bool IsAlerted { get; init; }
+    public bool HasAudibleContact { get; init; }
+    public bool HasSquadContact { get; init; }
+    public bool IsInvestigatingContext { get; init; }
+    public UnitAiOrderType OrderType { get; init; }
+
+    public float HealthRatio { get; init; }
+    public float Pain { get; init; }
+    public float Fatigue { get; init; }
+    public float Stress { get; init; }
+    public float EnergyRatio { get; init; }
+    public float HydrationRatio { get; init; }
+    public float SuppressionResistance { get; init; }
+    public float ShootingSkill { get; init; }
+    public float MeleeSkill { get; init; }
+    public float Caution { get; init; }
+    public float Aggression { get; init; }
+    public float Discipline { get; init; }
+    public float Alertness { get; init; }
+
+    public float MoveOrderUtility { get; init; }
+    public float CombatUtility { get; init; }
+    public float CoverUtility { get; init; }
+    public float FlankUtility { get; init; }
+    public float ProneCombatUtility { get; init; }
+    public float LastKnownTargetUtility { get; init; }
+    public float InvestigationUtility { get; init; }
+    public float SquadContactUtility { get; init; }
+}
+
+/// <summary>
+/// Utility proposals run beside the existing Behaviac selector during migration.
+/// This allows comparison before switching the live decision source in a later stage.
+/// </summary>
+
 public sealed class UnitAiStore
 {
     private UnitAiState[] _state;
