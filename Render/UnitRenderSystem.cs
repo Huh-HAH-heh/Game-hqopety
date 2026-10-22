@@ -514,17 +514,46 @@ public void DrawSnapshot(
             int renderedParts = 0;
             if (showRigDetails)
             {
-                renderedParts = AppendBodyParts(
-                    _vertices,
-                    _bodyOutlines,
-                    bodyParts,
-                    unit.BodyPartStart,
-                    unit.BodyPartCount,
-                    unit.FactionTag,
-                    isAlive,
-                    tilePixelSize,
-                    screenScale,
-                    1f);
+                if (unit.Type == UnitType.Colonist &&
+                    unit.BodyPartCount == UnitGameplayZoneSystem.ZoneCount)
+                {
+                    // These are the three gameplay damage zones, not the
+                    // informational anatomical rig. Shrink only their visuals
+                    // around the root; hit testing continues to use full geometry.
+                    int count = Math.Clamp(unit.BodyPartCount, 0, bodyParts.Length -
+                        Math.Clamp(unit.BodyPartStart, 0, bodyParts.Length));
+                    int start = Math.Clamp(unit.BodyPartStart, 0, bodyParts.Length);
+                    for (int partIndex = start; partIndex < start + count; partIndex++)
+                    {
+                        RenderBodyPart part = bodyParts[partIndex];
+                        AppendBodyPart(
+                            _vertices,
+                            _bodyOutlines,
+                            position + (part.Position - position) * UnitVisualScale,
+                            part.Scale * UnitVisualScale,
+                            part.Rotation,
+                            part.Primitive,
+                            part.Role,
+                            unit.FactionTag,
+                            isAlive,
+                            tilePixelSize,
+                            screenScale);
+                        renderedParts++;
+                    }
+                }
+                else
+                {
+                    renderedParts = AppendBodyParts(
+                        _vertices,
+                        _bodyOutlines,
+                        bodyParts,
+                        unit.BodyPartStart,
+                        unit.BodyPartCount,
+                        unit.FactionTag,
+                        isAlive,
+                        tilePixelSize,
+                        screenScale);
+                }
             }
 
             // Marker-only mode draws the full silhouette. When rig mode is on,
