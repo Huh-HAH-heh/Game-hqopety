@@ -1832,7 +1832,12 @@ public sealed class GameRenderer
         int originX = Math.Clamp((int)MathF.Floor(desiredX), 0, _worldMap.MaxTileX);
         int originY = Math.Clamp((int)MathF.Floor(desiredY), 0, _worldMap.MaxTileY);
 
-        for (int radius = 0; radius <= 16; radius++)
+        int maximumRadius = Math.Clamp(
+            (int)MathF.Ceiling(MathF.Sqrt(reserved.Count + 1)),
+            16,
+            48);
+
+        for (int radius = 0; radius <= maximumRadius; radius++)
         {
             bool found = false;
             float bestScore = float.PositiveInfinity;
@@ -2014,13 +2019,22 @@ public sealed class GameRenderer
         {
             float t = members.Count == 1 ? 0.5f : i / (float)(members.Count - 1);
             Vector2 point = start + line * t;
-            if (!TryFindAvailableMoveCell(point.X, point.Y, reserved, out int tileX, out int tileY))
-                continue;
+            Vector3 target;
+            if (TryFindAvailableMoveCell(point.X, point.Y, reserved, out int tileX, out int tileY))
+            {
+                target = new Vector3(
+                    tileX + 0.5f,
+                    tileY + 0.5f,
+                    _worldMap.GetSurfaceHeight(tileX, tileY));
+            }
+            else
+            {
+                // Preserve the explicit order even if the local search area is full;
+                // navigation will report the blocked destination instead of silently
+                // leaving a selected pawn without an order.
+                target = CreateMoveDestination(point);
+            }
 
-            Vector3 target = new(
-                tileX + 0.5f,
-                tileY + 0.5f,
-                _worldMap.GetSurfaceHeight(tileX, tileY));
             ai.SetPlayerOrder(members[i], UnitAiOrderType.Move, target);
             assigned++;
         }
