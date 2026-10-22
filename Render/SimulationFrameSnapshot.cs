@@ -487,9 +487,13 @@ public sealed class SimulationFrameSnapshot
             units.TryGetIndex(utilityAiDebugObserver, out int utilityDebugIndex))
         {
             UnitAiStore utilityStore = simulation.AI.Store;
-            hasUtilityAiDebugState = true;
-            utilityAiDebugDecision = utilityStore.UtilityIntentBreakdown[utilityDebugIndex];
-            utilityAiDebugContext = utilityStore.UtilityIntentContext[utilityDebugIndex];
+            hasUtilityAiDebugState = simulation.AI.Enabled &&
+                utilityStore.UtilityIntent[utilityDebugIndex] != BehaviacUnitIntent.None;
+            if (hasUtilityAiDebugState)
+            {
+                utilityAiDebugDecision = utilityStore.UtilityIntentBreakdown[utilityDebugIndex];
+                utilityAiDebugContext = utilityStore.UtilityIntentContext[utilityDebugIndex];
+            }
         }
 
         ReadOnlySpan<int> active = units.ActiveIndices;
