@@ -24,6 +24,7 @@ public sealed class UnitHealthStore
 
     private float[] _overallMaxHitPoints;
     private float[] _overallHitPoints;
+    private float[] _pain;
 
     public int Capacity =>
         _partCount.Length;
@@ -61,6 +62,10 @@ public sealed class UnitHealthStore
     public float[] OverallHitPoints =>
         _overallHitPoints;
 
+    /// <summary>Current injury-derived pain, normalized to 0-100.</summary>
+    public float[] Pain =>
+        _pain;
+
     public UnitHealthStore(
         int initialUnitCapacity = DefaultUnitCapacity)
     {
@@ -78,6 +83,8 @@ public sealed class UnitHealthStore
 
         _overallHitPoints =
             new float[initialUnitCapacity];
+
+        _pain = new float[initialUnitCapacity];
 
         int nodeCapacity =
             initialUnitCapacity *
@@ -132,6 +139,7 @@ public sealed class UnitHealthStore
 
         _overallHitPoints[unitIndex] =
             _overallMaxHitPoints[unitIndex];
+        _pain[unitIndex] = 0f;
 
         if (!initializeLegacyBody)
             return;
@@ -311,6 +319,7 @@ public sealed class UnitHealthStore
         _partCount[unitIndex] = 0;
         _overallMaxHitPoints[unitIndex] = 0f;
         _overallHitPoints[unitIndex] = 0f;
+        _pain[unitIndex] = 0f;
     }
 
     public bool TryFindPart(
@@ -382,6 +391,8 @@ public sealed class UnitHealthStore
         Array.Resize(
             ref _overallHitPoints,
             newCapacity);
+
+        Array.Resize(ref _pain, newCapacity);
 
         int oldNodeCapacity =
             oldCapacity *

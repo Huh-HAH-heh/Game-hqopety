@@ -59,6 +59,7 @@ public sealed class UnitCardDetailsSnapshot
 {
     public UnitId Unit { get; init; }
     public BehaviacUnitIntent DecisionIntent { get; init; }
+    public float Pain { get; init; }
     public RenderHealthPart[] HealthParts { get; init; } = Array.Empty<RenderHealthPart>();
     public AnatomyCardEntry[] AnatomyEntries { get; init; } = Array.Empty<AnatomyCardEntry>();
     public RenderInventoryItem[] Inventory { get; init; } = Array.Empty<RenderInventoryItem>();
@@ -211,6 +212,7 @@ public sealed class UnitCardDetailsSnapshot
         {
             Unit = id,
             DecisionIntent = simulation.AI.Store.LastIntent[unitIndex],
+            Pain = health.Pain[unitIndex],
             HealthParts = healthParts,
             AnatomyEntries = anatomyEntries,
             Inventory = inventoryItems,

@@ -9,6 +9,7 @@ public sealed class UnitHealthSystem
         ReadOnlySpan<int> active = units.ActiveIndices;
         float[] overallMax = health.OverallMaxHitPoints;
         float[] overall = health.OverallHitPoints;
+        float[] pain = health.Pain;
         float[] max = health.MaxHitPoints;
         float[] hitPoints = health.HitPoints;
         float[] bleedRate = health.BleedRate;
@@ -20,8 +21,14 @@ public sealed class UnitHealthSystem
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
-            if (unit >= capacity || overall[unit] <= 0f || overallMax[unit] <= 0f)
+            if (unit >= capacity)
                 continue;
+
+            if (overall[unit] <= 0f || overallMax[unit] <= 0f)
+            {
+                pain[unit] = 0f;
+                continue;
+            }
 
             overall[unit] = Math.Clamp(overall[unit], 0f, overallMax[unit]);
             int start = unit * maxParts;
@@ -49,7 +56,61 @@ public sealed class UnitHealthSystem
 
                 hitPoints[index] = Math.Clamp(hitPoints[index], 0f, max[index]);
             }
+
+            pain[unit] = CalculatePain(
+                overall[unit],
+                overallMax[unit],
+                start,
+                count,
+                max,
+                hitPoints,
+                bleedRate,
+                kinds);
         }
+    }
+
+    private static float CalculatePain(
+        float overallHitPoints,
+        float overallMaxHitPoints,
+        int start,
+        int count,
+        float[] maxHitPoints,
+        float[] hitPoints,
+        float[] bleedRate,
+        UnitHealthPartKind[] kinds)
+    {
+        // Overall damage keeps pain meaningful for profiles with very few local tissues.
+        float overallDamage = overallMaxHitPoints > 0f
+            ? 1f - Math.Clamp(overallHitPoints / overallMaxHitPoints, 0f, 1f)
+            : 0f;
+        float injuryLoad = overallDamage * 0.65f;
+
+        for (int part = 0; part < count; part++)
+        {
+            int index = start + part;
+            float maxPartHp = maxHitPoints[index];
+            if (maxPartHp <= 0f)
+                continue;
+
+            float missing = Math.Clamp(
+                (maxPartHp - hitPoints[index]) / maxPartHp,
+                0f,
+                1f);
+            float tissueWeight = kinds[index] == UnitHealthPartKind.Organ
+                ? 1.2f
+                : 1f;
+
+            injuryLoad += missing * tissueWeight;
+
+            // Active bleeding increases pain on top of direct tissue damage.
+            injuryLoad += Math.Clamp(bleedRate[index], 0f, 10f) * 0.08f;
+        }
+
+        // Minor wounds create little pain; multiple severe injuries approach 100.
+        return Math.Clamp(
+            100f * (1f - MathF.Exp(-0.45f * injuryLoad)),
+            0f,
+            100f);
     }
 
     public void AddRegionBleed(

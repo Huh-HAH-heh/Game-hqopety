@@ -626,6 +626,12 @@ public sealed class UnitCardOverlay : IDisposable
         }
         Value("Поза", unit.Posture.ToString());
         Value("Общее здоровье", $"{unit.HitPoints:0.0} / {unit.MaxHitPoints:0.0} HP ({unit.HealthRatio * 100f:0.0}%)");
+        if (details is not null &&
+            details.Unit.Index == unit.Index &&
+            details.Unit.Generation == unit.Generation)
+        {
+            Value("Боль", FormatPain(details.Pain));
+        }
         Value("Учёт здоровья", "Общий HP — запас жизни; HP анатомии — состояние отдельных тканей.");
         if (unit.HitPoints <= 0f)
             Value("Причина смерти", "Общий запас HP исчерпан; локальные HP тканей сохраняются отдельно.");
@@ -841,6 +847,21 @@ public sealed class UnitCardOverlay : IDisposable
         }
 
         Value("Перезарядка оружия", $"{config.ReloadTime:0.00} с");
+    }
+
+    private static string FormatPain(float value)
+    {
+        float pain = Math.Clamp(value, 0f, 100f);
+        string severity = pain switch
+        {
+            < 5f => "нет",
+            < 20f => "слабая",
+            < 45f => "умеренная",
+            < 70f => "сильная",
+            _ => "невыносимая"
+        };
+
+        return $"{pain:0}/100 — {severity}";
     }
 
     private static string FormatAiIntent(BehaviacUnitIntent intent) => intent switch
