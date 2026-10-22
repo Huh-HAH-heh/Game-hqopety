@@ -981,7 +981,8 @@ public sealed class UnitSimulation
         phaseStarted = Stopwatch.GetTimestamp();
         _movementSystem.Update(
             Units, worldMap, deltaTime, Health, _meleeCombatSystem, _aiSystem.Store, Inventory);
-        _meleeCombatSystem.UpdateMovementLocks(Units, deltaTime);
+        if (!_aiSystem.SimpleCombatOnly)
+            _meleeCombatSystem.UpdateMovementLocks(Units, deltaTime);
         LastMovementUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
@@ -1005,20 +1006,27 @@ public sealed class UnitSimulation
         LastBodyUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
-        phaseStarted = Stopwatch.GetTimestamp();
-        _meleeCombatSystem.Update(
-            Units,
-            _aiSystem.Store,
-            Inventory,
-            Health,
-            _healthSystem,
-            Skills,
-            Suppression,
-            HitRegions,
-            Bodies,
-            deltaTime);
-        LastMeleeUpdateMilliseconds =
-            Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+        if (_aiSystem.SimpleCombatOnly)
+        {
+            LastMeleeUpdateMilliseconds = 0d;
+        }
+        else
+        {
+            phaseStarted = Stopwatch.GetTimestamp();
+            _meleeCombatSystem.Update(
+                Units,
+                _aiSystem.Store,
+                Inventory,
+                Health,
+                _healthSystem,
+                Skills,
+                Suppression,
+                HitRegions,
+                Bodies,
+                deltaTime);
+            LastMeleeUpdateMilliseconds =
+                Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+        }
 
         phaseStarted = Stopwatch.GetTimestamp();
         _projectileSystem.Update(

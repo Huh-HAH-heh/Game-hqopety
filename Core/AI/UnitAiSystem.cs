@@ -48,10 +48,10 @@ public sealed class UnitAiSystem
     public bool Enabled { get; set; }
     public bool LastUpdateRanThinkPass { get; private set; }
 
-    /// <summary>
-    /// Uses Behaviac for high-level unit intent selection.
-    /// Enabled by default on this experiment branch; set RIMCLONE_USE_BEHAVIAC_AI=0 for legacy AI.
-    /// </summary>
+    /// <summary>Only acquire visible hostile targets and fire equipped ranged weapons.</summary>
+    public bool SimpleCombatOnly { get; set; } = true;
+
+    /// <summary>Kept for comparisons when the simple-combat experiment is disabled.</summary>
     public bool UseBehaviacDecisionLayer { get; set; }
 
     public TacticalHearingSystem? Hearing { get; set; }
@@ -97,12 +97,9 @@ public sealed class UnitAiSystem
         _skills = skills;
         _perceptionMemory = perceptionMemory;
 
-        // New branch uses Behaviac by default. Set RIMCLONE_USE_BEHAVIAC_AI=0
-        // to compare against the legacy decision path.
-        UseBehaviacDecisionLayer = !string.Equals(
-            Environment.GetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI"),
-            "0",
-            StringComparison.Ordinal);
+        // This branch intentionally starts with a small, predictable combat loop.
+        // The XML tree remains available in source, but does not drive this experiment.
+        UseBehaviacDecisionLayer = false;
     }
 
     public void InitializeUnit(int unitIndex)
@@ -179,6 +176,13 @@ public sealed class UnitAiSystem
 
         _thinkTimer = 0f;
         LastUpdateRanThinkPass = true;
+
+        if (SimpleCombatOnly)
+        {
+            UpdateSimpleCombatOnly(
+                units, health, inventory, weapons, projectiles, vision, worldMap);
+            return;
+        }
 
         // Preserve these results between think ticks so the one-second
         // performance logger doesn't usually sample a zero-work render frame.
@@ -1057,6 +1061,115 @@ public sealed class UnitAiSystem
             units.HasTarget[unit] = false;
             Store.State[unit] = UnitAiState.Search;
         }
+    }
+
+    private void UpdateSimpleCombatOnly(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitInventoryStore inventory,
+        UnitWeaponStore weapons,
+        ProjectileStore projectiles,
+        VisionSystem vision,
+        WorldMap worldMap)
+    {
+        LastPlanningMilliseconds = 0d;
+        LastBehaviacDecisions = 0;
+        LastBehaviacDecisionBatchMilliseconds = 0d;
+        LastBehaviacDeadDecisions = 0;
+        LastBehaviacCoverDecisions = 0;
+        LastBehaviacRetreatDecisions = 0;
+        LastBehaviacFlankDecisions = 0;
+        LastBehaviacEngageDecisions = 0;
+        LastBehaviacSuppressDecisions = 0;
+        LastBehaviacInvestigateDecisions = 0;
+        LastBehaviacPatrolDecisions = 0;
+        LastBehaviacMoveOrderDecisions = 0;
+        LastBehaviacHoldOrderDecisions = 0;
+        LastBehaviacAttackOrderDecisions = 0;
+        LastBehaviacHoldAndEngageDecisions = 0;
+
+        Store.EnsureCapacity(units.Capacity);
+        ReadOnlySpan<int> active = units.ActiveIndices;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            bool alive = health.OverallMaxHitPoints[unit] > 0f &&
+                health.OverallHitPoints[unit] > 0f;
+
+            if (!alive)
+            {
+                ResetSimpleCombatUnit(
+                    units, weapons, unit, UnitAiState.Dead, BehaviacUnitIntent.Dead);
+                units.Posture[unit] = UnitPosture.Lying;
+                continue;
+            }
+
+            // No memory hunts, squad contacts, cover, flanking, patrol, or player
+            // movement tasks: only a currently visible hostile can create a target.
+            int targetIndex = FindNearestVisibleEnemy(units, health, vision, unit);
+            if (targetIndex < 0 ||
+                !vision.IsRecentlyVisible(unit, targetIndex, units) ||
+                !HasRangedWeapon(units, inventory, unit))
+            {
+                ResetSimpleCombatUnit(
+                    units, weapons, unit, UnitAiState.Idle, BehaviacUnitIntent.None);
+                continue;
+            }
+
+            UnitId target = units.GetId(targetIndex);
+            Vector3 targetPosition = units.Position[targetIndex];
+            Vector3 direction = targetPosition - units.Position[unit];
+            direction.Z = 0f;
+            float directionLengthSquared = direction.LengthSquared();
+            if (directionLengthSquared > 0.000001f)
+            {
+                direction /= MathF.Sqrt(directionLengthSquared);
+                units.BodyNormal[unit] = direction;
+                units.HeadNormal[unit] = direction;
+            }
+
+            Store.RememberTarget(unit, target, targetPosition, TargetMemorySeconds);
+            Store.ClearGoal(unit);
+            Store.ClearPlayerOrder(unit);
+
+            // Keep the pawn stationary. Store.HasTarget is only the combat target;
+            // UnitStore.HasTarget is the movement command consumed by navigation.
+            units.Target[unit] = units.Position[unit];
+            units.HasTarget[unit] = false;
+            units.Velocity[unit] = Vector3.Zero;
+            Store.State[unit] = UnitAiState.Attack;
+            Store.LastIntent[unit] = BehaviacUnitIntent.EngageTarget;
+
+            TryFireAnyRangedWeapon(
+                units,
+                inventory,
+                weapons,
+                projectiles,
+                unit,
+                target,
+                vision,
+                worldMap,
+                1f);
+        }
+    }
+
+    private void ResetSimpleCombatUnit(
+        UnitStore units,
+        UnitWeaponStore weapons,
+        int unit,
+        UnitAiState state,
+        BehaviacUnitIntent intent)
+    {
+        ClearAiming(weapons, unit);
+        Store.ClearTarget(unit);
+        Store.ClearGoal(unit);
+        Store.ClearPlayerOrder(unit);
+        Store.State[unit] = state;
+        Store.LastIntent[unit] = intent;
+        units.Target[unit] = units.Position[unit];
+        units.HasTarget[unit] = false;
+        units.Velocity[unit] = Vector3.Zero;
     }
 
     private bool TryExecutePlayerOrderIntent(
