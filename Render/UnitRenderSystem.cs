@@ -165,8 +165,9 @@ public sealed class UnitRenderSystem : IDisposable
 
             // A shooter can be outside the camera while its target is visible.
             // Aim state is simulation data, so collect it before view culling.
-            if (showUnitDetails &&
-                simulation.Health.OverallHitPoints[unitIndex] > 0f)
+            bool aliveForAttackLinks =
+                simulation.Health.OverallHitPoints[unitIndex] > 0f;
+            if (showUnitDetails && aliveForAttackLinks)
             {
                 AppendAimProgress(
                     _aiming,
@@ -174,6 +175,10 @@ public sealed class UnitRenderSystem : IDisposable
                     unitIndex,
                     tilePixelSize,
                     _aimTargetDrawn);
+            }
+
+            if (aliveForAttackLinks)
+            {
                 AppendActiveAttackLinks(
                     _aiming,
                     simulation,
@@ -490,6 +495,10 @@ public void DrawSnapshot(
                 }
             }
 
+            bool isAlive = unit.HitPoints > 0f;
+            if (isAlive)
+                AppendSnapshotAttackLinks(_aiming, unit, x, y, tilePixelSize);
+
             bool rootInView =
                 position.X >= minX && position.X <= maxX &&
                 position.Y >= minY && position.Y <= maxY;
@@ -509,10 +518,6 @@ public void DrawSnapshot(
             {
                 continue;
             }
-
-            bool isAlive = unit.HitPoints > 0f;
-            if (isAlive && showUnitDetails)
-                AppendSnapshotAttackLinks(_aiming, unit, x, y, tilePixelSize);
 
             float markerRadius = GetMarkerRadius(
                 unit.Width,
