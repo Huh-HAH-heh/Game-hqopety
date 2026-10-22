@@ -57,6 +57,7 @@ public readonly record struct UnitIntentUtilityContext
     public bool IsPanicked { get; init; }
     public bool IsLowHealth { get; init; }
     public bool HasSuppressiveWeapon { get; init; }
+    public bool HasRangedWeapon { get; init; }
     public bool CanFlank { get; init; }
     public bool IsFlanking { get; init; }
     public bool IsProne { get; init; }
@@ -159,9 +160,7 @@ public static class UnitIntentUtilityScorer
 
         if (context.HasVisibleTarget)
         {
-            float tacticalSkill = melee > shooting && !context.HasSuppressiveWeapon
-                ? melee
-                : shooting;
+            float tacticalSkill = context.HasRangedWeapon ? shooting : melee;
             engage = Clamp01(
                 0.36f +
                 Clamp01(context.CombatUtility) * 0.43f +
@@ -199,7 +198,8 @@ public static class UnitIntentUtilityScorer
             }
 
             bool canContinueProne = context.IsProne &&
-                !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth;
+                !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth &&
+                !context.IsFlanking;
             bool canAdoptProne = context.ProneCombatUtility >= 0.60f &&
                 context.ProneCombatUtility > context.CombatUtility &&
                 !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth &&

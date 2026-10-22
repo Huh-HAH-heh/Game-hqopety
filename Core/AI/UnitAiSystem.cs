@@ -1494,6 +1494,7 @@ public sealed class UnitAiSystem
             : 0f;
         bool isLowHealth = healthRatio < LowHealthThreshold;
         bool hasSuppressiveWeapon = HasSuppressFireWeapon(inventory, weapons, unit);
+        bool hasRangedWeapon = HasRangedWeapon(units, inventory, unit);
         bool isHealthyEnoughToFlank = !isLowHealth && !isSuppressed;
         bool canFlank = false;
         float flankDistance = 0f;
@@ -1504,7 +1505,7 @@ public sealed class UnitAiSystem
         // wide side/back waypoint.
         if (hasVisibleTarget &&
             isHealthyEnoughToFlank &&
-            HasRangedWeapon(units, inventory, unit) &&
+            hasRangedWeapon &&
             unit % 8 == 0)
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
@@ -1529,7 +1530,7 @@ public sealed class UnitAiSystem
         bool isFlanking =
             Store.State[unit] == UnitAiState.Flank &&
             isHealthyEnoughToFlank &&
-            HasRangedWeapon(units, inventory, unit);
+            hasRangedWeapon;
         float flankUtility = UnitTacticalUtility.EvaluateFlanking(
             flankDistance,
             flankEffectiveRange,
@@ -1537,7 +1538,7 @@ public sealed class UnitAiSystem
 
         float proneUtility = 0f;
         if (hasVisibleTarget &&
-            HasRangedWeapon(units, inventory, unit) &&
+            hasRangedWeapon &&
             suppressionState == UnitSuppressionState.Calm &&
             !isLowHealth &&
             !canFlank &&
@@ -1639,6 +1640,7 @@ public sealed class UnitAiSystem
             IsPanicked = suppressionState == UnitSuppressionState.Panicked,
             IsLowHealth = isLowHealth,
             HasSuppressiveWeapon = hasSuppressiveWeapon,
+            HasRangedWeapon = hasRangedWeapon,
             CanFlank = canFlank,
             IsFlanking = isFlanking,
             IsProne = units.Posture[unit] == UnitPosture.Lying,
