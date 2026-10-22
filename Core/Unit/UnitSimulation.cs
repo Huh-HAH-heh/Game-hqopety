@@ -95,6 +95,8 @@ public sealed class UnitSimulation
         _aiSystem;
     internal TacticalHearingSystem HearingSystem =>
         _hearingSystem;
+    public TacticalSoundDebugEvent[] GetRecentSoundDebugEvents() =>
+        _hearingSystem.GetRecentDebugEvents(PerceptionMemory.CurrentTimeSeconds);
     public MeleeCombatSystem MeleeCombat =>
         _meleeCombatSystem;
     public VisionSystem Vision =>
