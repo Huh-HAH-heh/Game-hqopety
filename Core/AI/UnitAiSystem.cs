@@ -35,14 +35,12 @@ public sealed class UnitAiSystem
     private int[] _searchPatrolLegByUnit = Array.Empty<int>();
     private Vector3[] _suppressionCoverByUnit = Array.Empty<Vector3>();
     private bool[] _hasSuppressionCoverByUnit = Array.Empty<bool>();
-    private BehaviacUnitDecisionAgent?[] _behaviacAgents = Array.Empty<BehaviacUnitDecisionAgent?>();
     private TacticalContact?[] _rememberedEnemyContextByUnit = Array.Empty<TacticalContact?>();
     private TacticalContact?[] _cachedRememberedEnemyContextByUnit = Array.Empty<TacticalContact?>();
     private float[] _nextRememberedEnemyQuerySecondsByUnit = Array.Empty<float>();
     private bool[] _isContextInvestigationGoal = Array.Empty<bool>();
     private UnitId[] _flankTargetByUnit = Array.Empty<UnitId>();
     private bool[] _hasFlankTargetByUnit = Array.Empty<bool>();
-    private bool _behaviacInitialized;
 
     private readonly UnitWeaponSystem _weaponSystem;
     private readonly UnitSkillStore? _skills;
@@ -55,8 +53,12 @@ public sealed class UnitAiSystem
     public bool Enabled { get; set; }
     public bool LastUpdateRanThinkPass { get; private set; }
 
-    /// <summary>Behaviac is the only source of autonomous behavior intents.</summary>
-    public bool UseBehaviacDecisionLayer => true;
+    /// <summary>The utility scorer is the authoritative autonomous intent selector.</summary>
+    public bool UseUtilityDecisionLayer => true;
+    public bool UtilityDecisionReady => true;
+
+    // Compatibility indicators for older diagnostics; the Behaviac runtime is not used by live pawn decisions.
+    public bool UseBehaviacDecisionLayer => false;
 
     public TacticalHearingSystem? Hearing { get; set; }
     public UnitAiStore Store { get; }
@@ -70,8 +72,17 @@ public sealed class UnitAiSystem
         _squadCoordinator.InvalidateUnit(unit);
     public double LastPlanningMilliseconds { get; private set; }
 
-    public bool BehaviacRuntimeReady => _behaviacInitialized;
+    public bool BehaviacRuntimeReady => false;
     public long TotalBehaviacDecisions { get; private set; }
+    public long TotalUtilityDecisions => TotalBehaviacDecisions;
+    public int LastUtilityDecisions => LastBehaviacDecisions;
+    public double LastUtilityDecisionBatchMilliseconds => LastBehaviacDecisionBatchMilliseconds;
+    public int LastUtilityDeadDecisions => LastBehaviacDeadDecisions;
+    public int LastUtilityCoverDecisions => LastBehaviacCoverDecisions;
+    public int LastUtilityRetreatDecisions => LastBehaviacRetreatDecisions;
+    public int LastUtilityFlankDecisions => LastBehaviacFlankDecisions;
+    public int LastUtilityEngageDecisions => LastBehaviacEngageDecisions;
+    public int LastUtilityInvestigateDecisions => LastBehaviacInvestigateDecisions;
     public int LastBehaviacDecisions { get; private set; }
     public double LastBehaviacDecisionBatchMilliseconds { get; private set; }
     public int LastBehaviacDeadDecisions { get; private set; }
@@ -142,8 +153,6 @@ public sealed class UnitAiSystem
             _isContextInvestigationGoal[unitIndex] = false;
         _flankTargetByUnit[unitIndex] = default;
         _hasFlankTargetByUnit[unitIndex] = false;
-        if ((uint)unitIndex < (uint)_behaviacAgents.Length)
-            _behaviacAgents[unitIndex] = null;
         if ((uint)unitIndex < (uint)Store.Capacity)
         {
             Store.UtilityIntent[unitIndex] = BehaviacUnitIntent.None;
@@ -1313,14 +1322,6 @@ public sealed class UnitAiSystem
         UnitSuppressionState suppressionState,
         bool isAlive)
     {
-        if (!_behaviacInitialized)
-        {
-            BehaviacRuntimeHost.InitializeDefaultBehavior();
-            _behaviacInitialized = true;
-        }
-
-        if (_behaviacAgents.Length < units.Capacity)
-            Array.Resize(ref _behaviacAgents, units.Capacity);
         EnsurePlanningCapacity(units.Capacity);
         _rememberedEnemyContextByUnit[unit] = null;
 
@@ -1677,6 +1678,7 @@ public sealed class UnitAiSystem
             Store.UtilityIntent[unit],
             Store.UtilityIntentCommitRemainingSeconds[unit]);
         Store.UtilityIntentBreakdown[unit] = utilityDecision;
+        Store.UtilityIntentContext[unit] = utilityContext;
         if (utilityDecision.SuggestedIntent != Store.UtilityIntent[unit])
         {
             Store.UtilityIntent[unit] = utilityDecision.SuggestedIntent;
@@ -1684,43 +1686,7 @@ public sealed class UnitAiSystem
                 UnitIntentUtilityScorer.GetCommitDuration(Personality.Discipline[unit]);
         }
 
-        agent.SetFacts(
-            isAlive,
-            isSuppressed,
-            hasCover,
-            hasVisibleTarget,
-            hasRecentTarget,
-            isLowHealth,
-            hasSuppressiveWeapon,
-            canFlank,
-            isFlanking,
-            proneUtility,
-            units.Posture[unit] == UnitPosture.Lying,
-            hasMoveOrder,
-            hasStopOrder,
-            hasAttackOrder,
-            moveOrderUtility,
-            combatUtility,
-            hasAudibleContact,
-            hasImmediateDanger,
-            isAlerted,
-            coverUtility,
-            flankUtility,
-            investigationUtility,
-            hasSquadContact,
-            squadContactUtility,
-            lastKnownTargetUtility,
-            isInvestigatingContext,
-            hasActiveTargetMemory);
-
-        behaviac.EBTStatus status = BehaviacRuntimeHost.Tick(agent);
-        if (status != behaviac.EBTStatus.BT_SUCCESS)
-        {
-            throw new InvalidOperationException(
-                $"Behaviac unit decision failed for unit index {unit}: {status}.");
-        }
-
-        return agent.Intent;
+        return utilityDecision.SuggestedIntent;
     }
 
     private static bool TryFindProneCrawlWaypoint(
