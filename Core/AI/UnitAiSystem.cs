@@ -139,7 +139,11 @@ public sealed class UnitAiSystem
         _searchPatrolLegByUnit[unitIndex] = 0;
         _rememberedEnemyContextByUnit[unitIndex] = null;
         _cachedRememberedEnemyContextByUnit[unitIndex] = null;
-        _nextRememberedEnemyQuerySecondsByUnit[unitIndex] = 0f;
+        // Stagger the first ambient-memory scan across three AI ticks. Immediate
+        // vision, danger reactions and player orders still evaluate on every pawn
+        // decision; only the more expensive remembered-contact list scan is spread.
+        _nextRememberedEnemyQuerySecondsByUnit[unitIndex] =
+            _tacticalTimeSeconds + ((unitIndex % 3) + 1) * ThinkInterval;
         _isContextInvestigationGoal[unitIndex] = false;
         _flankTargetByUnit[unitIndex] = default;
         _hasFlankTargetByUnit[unitIndex] = false;
