@@ -241,6 +241,13 @@ public sealed class UnitAiSystem
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
+            if (units.Posture[unit] == UnitPosture.Injured)
+            {
+                _unitThinkElapsedSeconds[unit] = 0f;
+                _unitThinkDeltaSeconds[unit] = 0f;
+                continue;
+            }
+
             float elapsed = _unitThinkElapsedSeconds[unit] + deltaTime;
             _unitThinkElapsedSeconds[unit] = elapsed;
             if (elapsed < ThinkInterval)
@@ -513,8 +520,7 @@ public sealed class UnitAiSystem
 
             if (Store.HasTarget[unit] &&
                 !(Store.PlayerOrderType[unit] == UnitAiOrderType.Attack &&
-                  units.IsAlive(Store.PlayerOrderTarget[unit]) &&
-                  health.OverallHitPoints[Store.PlayerOrderTarget[unit].Index] > 0f &&
+                  IsCombatReadyTarget(units, health, Store.PlayerOrderTarget[unit]) &&
                   IsHostile(units, unit, Store.PlayerOrderTarget[unit].Index)))
             {
                 UnitId currentTarget = Store.Target[unit];
@@ -612,8 +618,7 @@ public sealed class UnitAiSystem
             UnitId target =
                 Store.Target[unit];
 
-            if (!units.IsAlive(target) ||
-                health.OverallHitPoints[target.Index] <= 0f)
+            if (!IsCombatReadyTarget(units, health, target))
             {
                 ClearAiming(weapons, unit);
                 Store.ClearTarget(unit);
@@ -1146,8 +1151,7 @@ public sealed class UnitAiSystem
 
         UnitId target = store.PlayerOrderTarget[unit];
         bool hasLiveTarget = target.IsValid &&
-            units.IsAlive(target) &&
-            health.OverallHitPoints[target.Index] > 0f &&
+            IsCombatReadyTarget(units, health, target) &&
             IsHostile(units, unit, target.Index);
         if (!hasLiveTarget && target.IsValid)
         {
@@ -1364,6 +1368,7 @@ public sealed class UnitAiSystem
             attackTarget.IsValid &&
             (!units.IsAlive(attackTarget) ||
              health.OverallHitPoints[attackTarget.Index] <= 0f ||
+              units.Posture[attackTarget.Index] == UnitPosture.Injured ||
              !IsHostile(units, unit, attackTarget.Index)))
         {
             // The original target dying must not cancel the attack task.
@@ -2149,6 +2154,7 @@ public sealed class UnitAiSystem
 
             if ((uint)target >= (uint)units.Capacity ||
                 health.OverallHitPoints[target] <= 0f ||
+                units.Posture[target] == UnitPosture.Injured ||
                 !FactionRules.ShouldAttack(
                     observerFaction,
                     units.FactionTag[target]))
@@ -2204,8 +2210,7 @@ public sealed class UnitAiSystem
         UnitId currentTarget,
         int newlyVisibleTarget)
     {
-        if (!units.IsAlive(currentTarget) ||
-            health.OverallHitPoints[currentTarget.Index] <= 0f ||
+        if (!IsCombatReadyTarget(units, health, currentTarget) ||
             !IsHostile(units, observer, currentTarget.Index) ||
             !vision.IsRecentlyVisible(observer, currentTarget.Index, units))
         {
@@ -2278,6 +2283,16 @@ public sealed class UnitAiSystem
         return FactionRules.ShouldAttack(
             units.FactionTag[observer],
             units.FactionTag[target]);
+    }
+
+    private static bool IsCombatReadyTarget(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitId target)
+    {
+        return units.IsAlive(target) &&
+            health.OverallHitPoints[target.Index] > 0f &&
+            units.Posture[target.Index] != UnitPosture.Injured;
     }
 
     private static bool IsLowHealth(
