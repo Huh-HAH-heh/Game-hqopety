@@ -79,6 +79,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public float FlankUtility { get; private set; }
     [MemberMetaInfo("Investigation utility", "Utility of investigating an uncertain sound contact (0 to 1).", true)]
     public float InvestigationUtility { get; private set; }
+    [MemberMetaInfo("Last-known enemy utility", "Utility of investigating a remembered visual enemy contact (0 to 1).", true)]
+    public float LastKnownTargetUtility { get; private set; }
+    [MemberMetaInfo("Investigating context", "Whether the unit is already moving toward a remembered contact.", true)]
+    public bool IsInvestigatingContext { get; private set; }
     [MemberMetaInfo("Squad contact", "Whether a delayed, uncertain location report was received from a squad mate.", true)]
     public bool HasSquadContact { get; private set; }
     [MemberMetaInfo("Squad contact utility", "Utility score for investigating the reported area (0 to 1).", true)]
@@ -108,7 +112,9 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         float flankUtility = 0f,
         float investigationUtility = 0f,
         bool hasSquadContact = false,
-        float squadContactUtility = 0f)
+        float squadContactUtility = 0f,
+        float lastKnownTargetUtility = 0f,
+        bool isInvestigatingContext = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -144,6 +150,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         InvestigationUtility = float.IsFinite(investigationUtility)
             ? System.Math.Clamp(investigationUtility, 0f, 1f)
             : 0f;
+        LastKnownTargetUtility = float.IsFinite(lastKnownTargetUtility)
+            ? System.Math.Clamp(lastKnownTargetUtility, 0f, 1f)
+            : 0f;
+        IsInvestigatingContext = isInvestigatingContext;
         HasSquadContact = hasSquadContact;
         SquadContactUtility = float.IsFinite(squadContactUtility)
             ? System.Math.Clamp(squadContactUtility, 0f, 1f)
@@ -207,17 +217,18 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldInvestigateLastKnownTarget", "Check whether last known target position should be investigated.")]
     public bool ShouldInvestigateLastKnownTarget() =>
-        IsAlive && HasRecentTarget;
+        IsAlive && !IsInvestigatingContext && HasRecentTarget &&
+        (!HasAudibleContact || LastKnownTargetUtility >= InvestigationUtility);
 
     [MethodMetaInfo("ShouldInvestigateAudibleContact", "Investigate a credible sound only when no stronger tactical response is active.")]
     public bool ShouldInvestigateAudibleContact() =>
-        IsAlive && IsAlerted && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
+        IsAlive && !IsInvestigatingContext && IsAlerted && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
         !IsSuppressed && !IsLowHealth &&
         InvestigationUtility >= Core.Unit.UnitTacticalUtility.MinimumInvestigationUtility;
 
     [MethodMetaInfo("ShouldInvestigateSquadContact", "Investigate a delayed and uncertain position reported by a squad mate, without treating it as an identified target.")]
     public bool ShouldInvestigateSquadContact() =>
-        IsAlive && HasSquadContact && !HasVisibleTarget && !HasRecentTarget &&
+        IsAlive && !IsInvestigatingContext && HasSquadContact && !HasVisibleTarget && !HasRecentTarget &&
         !IsSuppressed && !IsLowHealth &&
         !HasMoveOrder && !HasStopOrder && !HasAttackOrder &&
         SquadContactUtility >= Core.Unit.UnitTacticalUtility.MinimumSquadContactUtility;
