@@ -31,7 +31,7 @@ public sealed class DebugLayersOverlay : IDisposable
         "Прицеливание — линии к цели",
         "ИИ — цели и маршруты",
         "Подавление — стресс и паника",
-        "Память — враги и звуки"
+        "Память выбранной пешки"
     };
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, Height))
