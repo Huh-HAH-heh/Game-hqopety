@@ -294,6 +294,19 @@ public sealed class UnitAiSystem
                     intent = BehaviacUnitIntent.EngageTarget;
                 }
 
+                if (intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
+                    Store.HasTarget[unit] &&
+                    !_squadCoordinator.TryClaimLastKnownTargetInvestigation(
+                        units.GetId(unit), _tacticalTimeSeconds))
+                {
+                    // Another soldier in this squad is already searching the last-known
+                    // position. Drop this stale contact and let the unit resume its own
+                    // order/search instead of sending the whole squad to the same area.
+                    Store.ClearTarget(unit);
+                    units.HasTarget[unit] = false;
+                    intent = BehaviacUnitIntent.Patrol;
+                }
+
                 RecordBehaviacIntent(intent);
             }
 
