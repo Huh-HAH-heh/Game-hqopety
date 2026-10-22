@@ -252,7 +252,6 @@ public static class PerceptionMemorySelfTest
             subject: target));
         simulation.PerceptionMemory.AdvanceTime(0.6f);
         simulation.AI.Store.RememberTarget(observer.Index, target, lastSeen, 3f);
-        simulation.AI.UseBehaviacDecisionLayer = true;
         simulation.AI.Enabled = true;
 
         simulation.AI.Update(
@@ -276,7 +275,6 @@ public static class PerceptionMemorySelfTest
         var simulation = new UnitSimulation(4, 64);
         UnitId observer = simulation.Spawn(
             UnitType.Colonist, new Vector3(10f, 10f, 0.1f), factionTag: 1);
-        simulation.AI.UseBehaviacDecisionLayer = true;
         simulation.AI.Enabled = true;
 
         simulation.AI.Update(
