@@ -15,8 +15,18 @@ public sealed class UnitMovementSystem
     private int[] _collisionNextUnit = Array.Empty<int>();
     private int _collisionTouchedCount;
     private float _collisionMaxRadius;
+    private readonly int _traceUnitIndex = ReadTraceUnitIndex();
+    private float _traceElapsedSeconds;
 
     public UnitNavigationSystem Navigation => _navigation;
+
+    private static int ReadTraceUnitIndex()
+    {
+        string? value = Environment.GetEnvironmentVariable("RIMCLONE_AI_TRACE_UNIT");
+        return int.TryParse(value, out int unitIndex) && unitIndex >= 0
+            ? unitIndex
+            : -1;
+    }
 
     public void Update(
         UnitStore units,
@@ -31,6 +41,10 @@ public sealed class UnitMovementSystem
             return;
 
         _navigation.BeginUpdate(units, worldMap);
+        _traceElapsedSeconds += deltaTime;
+        bool traceThisUpdate = _traceUnitIndex >= 0 && _traceElapsedSeconds >= 1f;
+        if (traceThisUpdate)
+            _traceElapsedSeconds = 0f;
 
         ReadOnlySpan<int> active = units.ActiveIndices;
         Vector3[] positions = units.Position;
@@ -45,6 +59,7 @@ public sealed class UnitMovementSystem
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
+            bool traceUnit = traceThisUpdate && unit == _traceUnitIndex;
 
             if (health != null && health.OverallHitPoints[unit] <= 0f)
             {
@@ -59,6 +74,8 @@ public sealed class UnitMovementSystem
             if (meleeCombat?.IsMovementLocked(unit) == true)
             {
                 velocities[unit] = Vector3.Zero;
+                TraceUnit(traceUnit, "melee-stagger-lock", units, ai, inventory, hasTarget,
+                    targets, unit, false, default);
                 continue;
             }
 
@@ -85,6 +102,8 @@ public sealed class UnitMovementSystem
                 {
                     hasTarget[unit] = false;
                     velocities[unit] = Vector3.Zero;
+                    TraceUnit(traceUnit, "melee-contact-range", units, ai, inventory, hasTarget,
+                        targets, unit, false, default);
                     _navigation.ClearRoute(unit);
                     continue;
                 }
@@ -93,6 +112,8 @@ public sealed class UnitMovementSystem
             if (!hasTarget[unit])
             {
                 velocities[unit] = Vector3.Zero;
+                TraceUnit(traceUnit, "no-movement-target", units, ai, inventory, hasTarget,
+                    targets, unit, false, default);
                 _navigation.ClearRoute(unit);
                 continue;
             }
@@ -126,6 +147,8 @@ public sealed class UnitMovementSystem
                 positions[unit] = position;
                 velocities[unit] = Vector3.Zero;
                 hasTarget[unit] = false;
+                TraceUnit(traceUnit, "movement-destination-reached", units, ai, inventory,
+                    hasTarget, targets, unit, false, default);
                 _navigation.ClearRoute(unit);
                 continue;
             }
@@ -140,6 +163,8 @@ public sealed class UnitMovementSystem
             {
                 // Keep the order while a route is queued or temporarily unavailable.
                 velocities[unit] = Vector3.Zero;
+                TraceUnit(traceUnit, "no-waypoint", units, ai, inventory, hasTarget,
+                    targets, unit, false, default);
                 continue;
             }
 
@@ -149,6 +174,8 @@ public sealed class UnitMovementSystem
             if (distanceSquared <= 0.0025f)
             {
                 velocities[unit] = Vector3.Zero;
+                TraceUnit(traceUnit, "waypoint-near", units, ai, inventory, hasTarget,
+                    targets, unit, true, waypoint);
                 continue;
             }
 
@@ -163,6 +190,8 @@ public sealed class UnitMovementSystem
             if (step <= 0f)
             {
                 velocities[unit] = Vector3.Zero;
+                TraceUnit(traceUnit, "zero-move-speed", units, ai, inventory, hasTarget,
+                    targets, unit, true, waypoint);
                 continue;
             }
 
@@ -189,9 +218,75 @@ public sealed class UnitMovementSystem
             position.Y = Math.Clamp(position.Y, minY, maxY);
             position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
             positions[unit] = position;
+            TraceUnit(traceUnit, "move-step", units, ai, inventory, hasTarget,
+                targets, unit, true, waypoint);
         }
 
         ResolveUnitOverlaps(units, worldMap, health);
+    }
+
+    private void TraceUnit(
+        bool enabled,
+        string stage,
+        UnitStore units,
+        UnitAiStore? ai,
+        UnitInventoryStore? inventory,
+        bool[] hasMovementTarget,
+        Vector3[] movementTargets,
+        int unit,
+        bool hasWaypoint,
+        Vector2 waypoint)
+    {
+        if (!enabled)
+            return;
+
+        Vector3 position = units.Position[unit];
+        Vector3 velocity = units.Velocity[unit];
+        int trackedTarget = -1;
+        bool hasTrackedTarget = ai != null &&
+            ai.HasTarget[unit] &&
+            units.TryGetIndex(ai.Target[unit], out trackedTarget);
+
+        float targetDistance = float.NaN;
+        float attackReach = float.NaN;
+        string targetId = "none";
+        if (hasTrackedTarget)
+        {
+            Vector3 targetPosition = units.Position[trackedTarget];
+            float dx = targetPosition.X - position.X;
+            float dy = targetPosition.Y - position.Y;
+            targetDistance = MathF.Sqrt(dx * dx + dy * dy);
+            targetId = ai!.Target[unit].ToString();
+            if (inventory != null &&
+                MeleeCombatSystem.IsMeleeOnly(inventory, unit))
+            {
+                attackReach = MeleeCombatSystem.GetAttackDistance(
+                    unit, trackedTarget, units, inventory);
+            }
+        }
+
+        bool hasGoal = ai != null && ai.HasGoal[unit];
+        Vector3 goal = hasGoal ? ai!.Goal[unit] : Vector3.Zero;
+        bool isMeleeOnly = inventory != null && MeleeCombatSystem.IsMeleeOnly(inventory, unit);
+        Vector3 movementTarget = hasMovementTarget[unit] ? movementTargets[unit] : Vector3.Zero;
+        float movementDistance = hasMovementTarget[unit]
+            ? Vector2.Distance(
+                new Vector2(position.X, position.Y),
+                new Vector2(movementTarget.X, movementTarget.Y))
+            : float.NaN;
+
+        Console.WriteLine(
+            $"[AI-NAV] unit={units.GetId(unit)} stage={stage} " +
+            $"state={(ai == null ? "n/a" : ai.State[unit].ToString())} " +
+            $"intent={(ai == null ? "n/a" : ai.LastIntent[unit].ToString())} " +
+            $"posture={units.Posture[unit]} meleeOnly={isMeleeOnly} " +
+            $"pos=({position.X:0.00},{position.Y:0.00},{position.Z:0.00}) " +
+            $"velocity=({velocity.X:0.00},{velocity.Y:0.00}) " +
+            $"aiTarget={targetId} aiDist={targetDistance:0.0} meleeReach={attackReach:0.0} " +
+            $"moveTarget={hasMovementTarget[unit]}:{(hasMovementTarget[unit] ? movementTarget.ToString() : "-")} " +
+            $"moveDist={movementDistance:0.0} goal={hasGoal}:{(hasGoal ? goal.ToString() : "-")} " +
+            $"nav={_navigation.GetLastStatus(unit)} " +
+            $"waypoint={(hasWaypoint ? waypoint.ToString() : "-")}");
     }
 
     private void ResolveUnitOverlaps(

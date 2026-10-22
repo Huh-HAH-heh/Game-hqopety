@@ -5,6 +5,19 @@ using Core.Map;
 
 namespace Core.Unit;
 
+public enum UnitNavigationStatus : byte
+{
+    Unknown = 0,
+    FollowingRoute = 1,
+    WaitingForRouteBudget = 2,
+    CachedFailure = 3,
+    StartBlocked = 4,
+    GoalBlocked = 5,
+    DisconnectedTerrain = 6,
+    PathNotFound = 7,
+    NoUsableWaypoints = 8
+}
+
 /// <summary>
 /// Builds and caches terrain-aware routes. Path requests are throttled so
 /// mass commands do not run hundreds of A* searches in one frame.
@@ -33,6 +46,7 @@ public sealed class UnitNavigationSystem
         MathF.Sqrt(2f);
 
     private int[][] _paths = Array.Empty<int[]>();
+    private UnitNavigationStatus[] _lastStatuses = Array.Empty<UnitNavigationStatus>();
     private int[] _pathCursor = Array.Empty<int>();
     private int[][] _waypoints = Array.Empty<int[]>();
     private int[][] _waypointPathIndices = Array.Empty<int[]>();
@@ -68,6 +82,12 @@ public sealed class UnitNavigationSystem
 
     private int _lastSearchCellsExpanded;
     private long _lastSearchTrafficCellsConsidered;
+    private UnitNavigationStatus _lastBuildFailureStatus = UnitNavigationStatus.PathNotFound;
+
+    public UnitNavigationStatus GetLastStatus(int unitIndex) =>
+        (uint)unitIndex < (uint)_lastStatuses.Length
+            ? _lastStatuses[unitIndex]
+            : UnitNavigationStatus.Unknown;
 
     private int _width;
     private int _height;
@@ -126,6 +146,7 @@ public sealed class UnitNavigationSystem
         EnsureWorkspace(worldMap);
         EnsureRouteTrafficVersion(worldMap);
         EnsureNavigationGrid(worldMap);
+        _lastStatuses[unitIndex] = UnitNavigationStatus.Unknown;
 
         int startX = ClampCell((int)MathF.Floor(position.X), _width);
         int startY = ClampCell((int)MathF.Floor(position.Y), _height);
@@ -266,6 +287,7 @@ public sealed class UnitNavigationSystem
                 }
                 else
                 {
+                    _lastStatuses[unitIndex] = _lastBuildFailureStatus;
                     _paths[unitIndex] = Array.Empty<int>();
                     _pathCursor[unitIndex] = 0;
                     _waypoints[unitIndex] = Array.Empty<int>();
@@ -293,6 +315,9 @@ public sealed class UnitNavigationSystem
             else
             {
                 // Do not follow a stale route while waiting for the pathfinding budget.
+                _lastStatuses[unitIndex] = failedAlready
+                    ? UnitNavigationStatus.CachedFailure
+                    : UnitNavigationStatus.WaitingForRouteBudget;
                 waypoint = default;
                 return false;
             }
@@ -301,6 +326,7 @@ public sealed class UnitNavigationSystem
         if (route.Length == 0 || waypoints.Length == 0 ||
             waypointPathIndices.Length != waypoints.Length)
         {
+            _lastStatuses[unitIndex] = UnitNavigationStatus.NoUsableWaypoints;
             waypoint = default;
             return false;
         }
@@ -341,6 +367,7 @@ public sealed class UnitNavigationSystem
             waypoint = new Vector2(
                 cell % _width + 0.5f,
                 cell / _width + 0.5f);
+            _lastStatuses[unitIndex] = UnitNavigationStatus.FollowingRoute;
             return true;
         }
 
@@ -350,6 +377,7 @@ public sealed class UnitNavigationSystem
             targetY == _routeGoalY[unitIndex])
         {
             waypoint = new Vector2(target.X, target.Y);
+            _lastStatuses[unitIndex] = UnitNavigationStatus.FollowingRoute;
             return true;
         }
 
@@ -367,6 +395,7 @@ public sealed class UnitNavigationSystem
 
         RemoveRouteTraffic(unitIndex);
         _paths[unitIndex] = Array.Empty<int>();
+        _lastStatuses[unitIndex] = UnitNavigationStatus.Unknown;
         _pathCursor[unitIndex] = 0;
         _waypoints[unitIndex] = Array.Empty<int>();
         _waypointPathIndices[unitIndex] = Array.Empty<int>();
@@ -390,12 +419,19 @@ public sealed class UnitNavigationSystem
         path = Array.Empty<int>();
         _lastSearchCellsExpanded = 0;
         _lastSearchTrafficCellsConsidered = 0;
+        _lastBuildFailureStatus = UnitNavigationStatus.PathNotFound;
 
         if (!IsInside(startX, startY) ||
-            !IsInside(targetX, targetY) ||
-            !IsFootprintPassable(worldMap, startX, startY, footprintRadiusX, footprintRadiusY) ||
+            !IsFootprintPassable(worldMap, startX, startY, footprintRadiusX, footprintRadiusY))
+        {
+            _lastBuildFailureStatus = UnitNavigationStatus.StartBlocked;
+            return false;
+        }
+
+        if (!IsInside(targetX, targetY) ||
             !IsFootprintPassable(worldMap, targetX, targetY, footprintRadiusX, footprintRadiusY))
         {
+            _lastBuildFailureStatus = UnitNavigationStatus.GoalBlocked;
             return false;
         }
 
@@ -409,6 +445,7 @@ public sealed class UnitNavigationSystem
             footprintRadiusY == 0 &&
             _navigationComponent[start] != _navigationComponent[goal])
         {
+            _lastBuildFailureStatus = UnitNavigationStatus.DisconnectedTerrain;
             return false;
         }
 
@@ -1048,6 +1085,7 @@ public sealed class UnitNavigationSystem
 
         int newCapacity = Math.Max(capacity, Math.Max(16, _paths.Length * 2));
         Array.Resize(ref _paths, newCapacity);
+        Array.Resize(ref _lastStatuses, newCapacity);
         Array.Resize(ref _pathCursor, newCapacity);
         Array.Resize(ref _waypoints, newCapacity);
         Array.Resize(ref _waypointPathIndices, newCapacity);
