@@ -262,29 +262,23 @@ public sealed class UnitAiSystem
                 health.OverallMaxHitPoints[unit] > 0f &&
                 health.OverallHitPoints[unit] > 0f;
 
-            BehaviacUnitIntent intent = BehaviacUnitIntent.None;
-            if (UseBehaviacDecisionLayer)
-            {
-                long decisionStarted = Stopwatch.GetTimestamp();
-                intent = SelectUnitIntent(
-                    units, health, inventory, weapons, vision, suppression, unit, suppressionState, isAlive);
-                LastBehaviacDecisionBatchMilliseconds +=
-                    Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
-
-                RecordBehaviacIntent(intent);
-            }
+            long decisionStarted = Stopwatch.GetTimestamp();
+            BehaviacUnitIntent intent = SelectUnitIntent(
+                units, health, inventory, weapons, vision, suppression, unit, suppressionState, isAlive);
+            LastBehaviacDecisionBatchMilliseconds +=
+                Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
+            RecordBehaviacIntent(intent);
 
             Store.LastIntent[unit] = intent;
 
-            if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
+            if (intent == BehaviacUnitIntent.InvestigateLastKnownTarget &&
                 TryExecuteLastKnownInvestigation(units, weapons, worldMap, unit))
             {
                 continue;
             }
 
             if (!isAlive ||
-                (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.Dead))
+                (intent == BehaviacUnitIntent.Dead))
             {
                 _hasFlankTargetByUnit[unit] = false;
                 _flankTargetByUnit[unit] = default;
@@ -297,16 +291,14 @@ public sealed class UnitAiSystem
                 continue;
             }
 
-            if (UseBehaviacDecisionLayer &&
-                suppressionState != UnitSuppressionState.Panicked &&
+            if (suppressionState != UnitSuppressionState.Panicked &&
                 TryExecutePlayerOrderIntent(
                     units, health, weapons, vision, unit, intent))
             {
                 continue;
             }
 
-            if (UseBehaviacDecisionLayer &&
-                suppressionState != UnitSuppressionState.Panicked &&
+            if (suppressionState != UnitSuppressionState.Panicked &&
                 intent == BehaviacUnitIntent.SeekCover)
             {
                 // A non-panicked but suppressed/low-health unit may still seek
@@ -326,8 +318,7 @@ public sealed class UnitAiSystem
                 }
             }
 
-            if (UseBehaviacDecisionLayer &&
-                intent != BehaviacUnitIntent.FlankTarget &&
+            if (intent != BehaviacUnitIntent.FlankTarget &&
                 Store.State[unit] == UnitAiState.Flank)
             {
                 // If the tree interrupts a flanking run (lost target, suppression,
@@ -337,7 +328,7 @@ public sealed class UnitAiSystem
             }
 
             bool moving = units.Velocity[unit].LengthSquared() > 0.04f;
-            if (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.ProneEngage)
+            if (intent == BehaviacUnitIntent.ProneEngage)
                 units.Posture[unit] = UnitPosture.Lying;
             else if (suppressionState == UnitSuppressionState.Panicked)
                 units.Posture[unit] = moving ? UnitPosture.Crouching : UnitPosture.Lying;
@@ -399,8 +390,7 @@ public sealed class UnitAiSystem
                 }
 
                 if (Store.HasGoal[unit] &&
-                    (!UseBehaviacDecisionLayer ||
-                     intent == BehaviacUnitIntent.SeekCover))
+                    (intent == BehaviacUnitIntent.SeekCover))
                 {
                     ClearAiming(weapons, unit);
                     units.Target[unit] =
@@ -415,15 +405,13 @@ public sealed class UnitAiSystem
                 }
             }
 
-            if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.InvestigateAudibleContact &&
+            if (intent == BehaviacUnitIntent.InvestigateAudibleContact &&
                 TryExecuteAudibleInvestigation(units, weapons, worldMap, unit))
             {
                 continue;
             }
 
-            if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.InvestigateSquadContact &&
+            if (intent == BehaviacUnitIntent.InvestigateSquadContact &&
                 TryExecuteSquadContactInvestigation(units, weapons, worldMap, unit))
             {
                 continue;
@@ -477,8 +465,7 @@ public sealed class UnitAiSystem
             // The tree can select Patrol only when there is neither a visible
             // target nor a remembered target. Drop an expired target before the
             // existing patrol/search path runs.
-            if (UseBehaviacDecisionLayer &&
-                intent == BehaviacUnitIntent.Patrol &&
+            if (intent == BehaviacUnitIntent.Patrol &&
                 Store.HasTarget[unit] &&
                 Store.TargetMemory[unit] <= 0f)
             {
@@ -580,7 +567,7 @@ public sealed class UnitAiSystem
                     target);
             }
 
-            if (UseBehaviacDecisionLayer && intent == BehaviacUnitIntent.ProneEngage)
+            if (intent == BehaviacUnitIntent.ProneEngage)
             {
                 // Stay prone while crawling to, holding, or firing from the chosen position.
                 units.Posture[unit] = UnitPosture.Lying;
@@ -615,11 +602,9 @@ public sealed class UnitAiSystem
             if (IsLowHealth(
                     health,
                     unit) &&
-                (!UseBehaviacDecisionLayer ||
-                 intent == BehaviacUnitIntent.RetreatToCover))
+                (intent == BehaviacUnitIntent.RetreatToCover))
             {
-                if (UseBehaviacDecisionLayer &&
-                    Store.State[unit] != UnitAiState.SeekCover)
+                if (Store.State[unit] != UnitAiState.SeekCover)
                 {
                     Store.ClearGoal(unit);
                 }
@@ -689,8 +674,7 @@ public sealed class UnitAiSystem
                 }
             }
 
-            if (UseBehaviacDecisionLayer &&
-                targetVisible &&
+            if (targetVisible &&
                 intent == BehaviacUnitIntent.FlankTarget &&
                 !_squadCoordinator.TryClaimFlank(units.GetId(unit), target, _tacticalTimeSeconds))
             {
@@ -698,8 +682,7 @@ public sealed class UnitAiSystem
                 intent = BehaviacUnitIntent.EngageTarget;
             }
 
-            if (UseBehaviacDecisionLayer &&
-                targetVisible &&
+            if (targetVisible &&
                 intent == BehaviacUnitIntent.FlankTarget)
             {
                 bool targetChanged = !_hasFlankTargetByUnit[unit] ||
@@ -739,8 +722,7 @@ public sealed class UnitAiSystem
                 Store.State[unit] = UnitAiState.Attack;
                 intent = BehaviacUnitIntent.EngageTarget;
             }
-            else if (UseBehaviacDecisionLayer &&
-                     targetVisible &&
+            else if (targetVisible &&
                      intent == BehaviacUnitIntent.ProneEngage)
             {
                 // Replace a patrol/cover destination on the first prone-engage
@@ -754,8 +736,7 @@ public sealed class UnitAiSystem
             }
 
             if (targetVisible &&
-                (!UseBehaviacDecisionLayer ||
-                 intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage or
+                (intent is BehaviacUnitIntent.EngageTarget or BehaviacUnitIntent.ProneEngage or
                      BehaviacUnitIntent.HoldPositionEngage))
             {
                 // A prone soldier crawls slowly toward a low firing position at
@@ -971,12 +952,10 @@ public sealed class UnitAiSystem
             }
 
             if (Store.TargetMemory[unit] > 0f &&
-                (!UseBehaviacDecisionLayer ||
-                 intent == BehaviacUnitIntent.SuppressiveFire ||
+                (intent == BehaviacUnitIntent.SuppressiveFire ||
                  intent == BehaviacUnitIntent.InvestigateLastKnownTarget))
             {
-                if ((!UseBehaviacDecisionLayer ||
-                     intent == BehaviacUnitIntent.SuppressiveFire) &&
+                if ((intent == BehaviacUnitIntent.SuppressiveFire) &&
                     HasSuppressFireWeapon(inventory, weapons, unit))
                 {
                     Vector3 lastSeenAimPoint = Store.LastSeenAimPoint[unit];
