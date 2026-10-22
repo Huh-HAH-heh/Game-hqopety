@@ -6,6 +6,7 @@ using Core.Items;
 using Core.AI;
 using Core.Combat;
 using Core.Map;
+using Core.AI.Perception;
 using Core.AI.Behaviac;
 using Core.Unit;
 
@@ -80,6 +81,14 @@ public readonly record struct RenderVisionContact(
     Vector3 VisiblePoint,
     int VisiblePointIndex);
 
+public readonly record struct RenderSoundPulse(
+    Vector3 Position, TacticalStimulusType Type, float AudibleRange,
+    float Intensity, float AgeSeconds);
+
+public readonly record struct RenderAuditoryContact(
+    UnitId Observer, Vector3 ObserverPosition, Vector3 EstimatedPosition,
+    float ErrorRadius, float Confidence, float AgeSeconds, TacticalStimulusType Type);
+
 public readonly record struct RenderProjectileTrace(
     Vector3 Start,
     Vector3 End,
@@ -117,6 +126,8 @@ public sealed class SimulationFrameSnapshot
     public UnitId VisionDebugObserver { get; init; }
     public Vector3 VisionDebugObserverEye { get; init; }
     public RenderVisionContact[] VisionContacts { get; init; } = Array.Empty<RenderVisionContact>();
+    public RenderSoundPulse[] SoundPulses { get; init; } = Array.Empty<RenderSoundPulse>();
+    public RenderAuditoryContact[] SoundContacts { get; init; } = Array.Empty<RenderAuditoryContact>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
     public MeleeHitVisual[] MeleeHitVisuals { get; init; } = Array.Empty<MeleeHitVisual>();
 
@@ -213,10 +224,100 @@ public sealed class SimulationFrameSnapshot
             weapons.Recoil[stateIndex]);
     }
 
+    internal static void CaptureHearingDebug(
+        UnitSimulation simulation,
+        out RenderSoundPulse[] soundPulses,
+        out RenderAuditoryContact[] soundContacts)
+    {
+        UnitStore units = simulation.Units;
+        float nowSeconds = simulation.PerceptionMemory.CurrentTimeSeconds;
+        TacticalSoundDebugEvent[] events = simulation.HearingSystem.GetRecentDebugEvents(nowSeconds);
+        soundPulses = new RenderSoundPulse[events.Length];
+        for (int i = 0; i < events.Length; i++)
+        {
+            TacticalSoundDebugEvent sound = events[i];
+            soundPulses[i] = new RenderSoundPulse(
+                sound.Position, sound.Type, sound.AudibleRange, sound.Intensity,
+                MathF.Max(0f, nowSeconds - sound.OccurredAtSeconds));
+        }
+
+        const int MaxContactsPerObserver = 3;
+        List<RenderAuditoryContact> captured = new();
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        for (int activeIndex = 0; activeIndex < active.Length; activeIndex++)
+        {
+            int observerIndex = active[activeIndex];
+            if (simulation.Health.OverallHitPoints[observerIndex] <= 0f ||
+                !simulation.PerceptionMemory.TryGetMemory(observerIndex, out TacticalContactMemory memory))
+                continue;
+
+            RenderAuditoryContact best0 = default, best1 = default, best2 = default;
+            float bestTime0 = -1f, bestTime1 = -1f, bestTime2 = -1f;
+            IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+            for (int contactIndex = 0; contactIndex < contacts.Count; contactIndex++)
+            {
+                TacticalContact contact = contacts[contactIndex];
+                if (contact.ExpiresAtSeconds <= nowSeconds)
+                    continue;
+
+                PerceptionObservation latest = default;
+                bool foundAuditory = false;
+                IReadOnlyList<PerceptionObservation> observations = contact.Observations;
+                for (int observationIndex = 0; observationIndex < observations.Count; observationIndex++)
+                {
+                    PerceptionObservation observation = observations[observationIndex];
+                    if (observation.Sense != PerceptionSense.Auditory ||
+                        observation.ExpiresAtSeconds <= nowSeconds)
+                        continue;
+                    if (!foundAuditory || observation.ReceivedAtSeconds >= latest.ReceivedAtSeconds)
+                    {
+                        latest = observation;
+                        foundAuditory = true;
+                    }
+                }
+
+                if (!foundAuditory)
+                    continue;
+                float confidence = latest.GetEffectiveDetectionConfidence(nowSeconds, 2.5f);
+                if (confidence < 0.12f)
+                    continue;
+
+                RenderAuditoryContact item = new(
+                    units.GetId(observerIndex), units.Position[observerIndex],
+                    latest.EstimatedPosition, latest.PositionErrorRadius,
+                    confidence, MathF.Max(0f, nowSeconds - latest.OccurredAtSeconds),
+                    latest.StimulusType);
+                float received = latest.ReceivedAtSeconds;
+                if (received > bestTime0 || (received == bestTime0 && confidence > best0.Confidence))
+                {
+                    best2 = best1; bestTime2 = bestTime1;
+                    best1 = best0; bestTime1 = bestTime0;
+                    best0 = item; bestTime0 = received;
+                }
+                else if (received > bestTime1 || (received == bestTime1 && confidence > best1.Confidence))
+                {
+                    best2 = best1; bestTime2 = bestTime1;
+                    best1 = item; bestTime1 = received;
+                }
+                else if (received > bestTime2 || (received == bestTime2 && confidence > best2.Confidence))
+                {
+                    best2 = item; bestTime2 = received;
+                }
+            }
+
+            if (bestTime0 >= 0f) captured.Add(best0);
+            if (bestTime1 >= 0f) captured.Add(best1);
+            if (bestTime2 >= 0f) captured.Add(best2);
+        }
+
+        soundContacts = captured.ToArray();
+    }
+
     public static SimulationFrameSnapshot Capture(
         UnitSimulation simulation,
         UnitId visionDebugObserver = default,
-        WorldMap? visionDebugMap = null)
+        WorldMap? visionDebugMap = null,
+        bool includeHearingDebug = false)
     {
         long captureStarted = Stopwatch.GetTimestamp();
         UnitStore units = simulation.Units;
@@ -700,6 +801,11 @@ public sealed class SimulationFrameSnapshot
             visionContacts = contacts.ToArray();
         }
 
+        RenderSoundPulse[] soundPulses = Array.Empty<RenderSoundPulse>();
+        RenderAuditoryContact[] soundContacts = Array.Empty<RenderAuditoryContact>();
+        if (includeHearingDebug)
+            CaptureHearingDebug(simulation, out soundPulses, out soundContacts);
+
         return new SimulationFrameSnapshot
         {
             Units = unitStates,
@@ -710,6 +816,8 @@ public sealed class SimulationFrameSnapshot
             VisionDebugObserver = capturedVisionObserver,
             VisionDebugObserverEye = visionObserverEye,
             VisionContacts = visionContacts,
+            SoundPulses = soundPulses,
+            SoundContacts = soundContacts,
             Impacts = impacts,
             MeleeHitVisuals = meleeHitVisuals,
             ActiveProjectiles = projectiles.ActiveCount,
