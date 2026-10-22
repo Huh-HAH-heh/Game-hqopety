@@ -185,6 +185,20 @@ public sealed class SimulationFrameSnapshot
     public long VisionMemoryEntriesScanned { get; init; }
     public double AiMs { get; init; }
     public double AiPlanningMs { get; init; }
+    public bool UtilityAiEnabled { get; init; }
+    public bool UtilityAiReady { get; init; }
+    public int UtilityAiDecisionCount { get; init; }
+    public double UtilityAiDecisionMs { get; init; }
+    public int UtilityAiDeadCount { get; init; }
+    public int UtilityAiCoverCount { get; init; }
+    public int UtilityAiRetreatCount { get; init; }
+    public int UtilityAiFlankCount { get; init; }
+    public int UtilityAiEngageCount { get; init; }
+    public int UtilityAiInvestigateCount { get; init; }
+    public bool HasUtilityAiDebugState { get; init; }
+    public UnitId UtilityAiDebugObserver { get; init; }
+    public UnitIntentUtilityBreakdown UtilityAiDebugDecision { get; init; }
+    public UnitIntentUtilityContext UtilityAiDebugContext { get; init; }
     public bool BehaviacEnabled { get; init; }
     public bool BehaviacRuntimeReady { get; init; }
     public int BehaviacDecisionCount { get; init; }
@@ -459,10 +473,25 @@ public sealed class SimulationFrameSnapshot
         WorldMap? visionDebugMap = null,
         bool includeHearingDebug = false,
         bool includeMemoryDebug = false,
-        UnitId memoryDebugObserver = default)
+        UnitId memoryDebugObserver = default,
+        bool includeUtilityAiDebug = false,
+        UnitId utilityAiDebugObserver = default)
     {
         long captureStarted = Stopwatch.GetTimestamp();
         UnitStore units = simulation.Units;
+        bool hasUtilityAiDebugState = false;
+        UnitIntentUtilityBreakdown utilityAiDebugDecision = default;
+        UnitIntentUtilityContext utilityAiDebugContext = default;
+        if (includeUtilityAiDebug &&
+            utilityAiDebugObserver.IsValid &&
+            units.TryGetIndex(utilityAiDebugObserver, out int utilityDebugIndex))
+        {
+            UnitAiStore utilityStore = simulation.AI.Store;
+            hasUtilityAiDebugState = true;
+            utilityAiDebugDecision = utilityStore.UtilityIntentBreakdown[utilityDebugIndex];
+            utilityAiDebugContext = utilityStore.UtilityIntentContext[utilityDebugIndex];
+        }
+
         ReadOnlySpan<int> active = units.ActiveIndices;
         ReadOnlySpan<MeleeHitVisual> sourceMeleeHits = simulation.MeleeCombat.Visuals;
         MeleeHitVisual[] meleeHitVisuals = new MeleeHitVisual[sourceMeleeHits.Length];
@@ -1000,16 +1029,30 @@ public sealed class SimulationFrameSnapshot
             VisionMemoryEntriesScanned = vision.LastVisibilityMemoryEntriesScanned,
             AiMs = simulation.LastAIUpdateMilliseconds,
             AiPlanningMs = simulation.AI.LastPlanningMilliseconds,
-            BehaviacEnabled = simulation.AI.UseBehaviacDecisionLayer,
-            BehaviacRuntimeReady = simulation.AI.BehaviacRuntimeReady,
-            BehaviacDecisionCount = simulation.AI.LastBehaviacDecisions,
-            BehaviacDecisionMs = simulation.AI.LastBehaviacDecisionBatchMilliseconds,
-            BehaviacDeadCount = simulation.AI.LastBehaviacDeadDecisions,
-            BehaviacCoverCount = simulation.AI.LastBehaviacCoverDecisions,
-            BehaviacRetreatCount = simulation.AI.LastBehaviacRetreatDecisions,
-            BehaviacFlankCount = simulation.AI.LastBehaviacFlankDecisions,
-            BehaviacEngageCount = simulation.AI.LastBehaviacEngageDecisions,
-            BehaviacInvestigateCount = simulation.AI.LastBehaviacInvestigateDecisions,
+            UtilityAiEnabled = simulation.AI.Enabled && simulation.AI.UseUtilityDecisionLayer,
+            UtilityAiReady = simulation.AI.UtilityDecisionReady,
+            UtilityAiDecisionCount = simulation.AI.LastUtilityDecisions,
+            UtilityAiDecisionMs = simulation.AI.LastUtilityDecisionBatchMilliseconds,
+            UtilityAiDeadCount = simulation.AI.LastUtilityDeadDecisions,
+            UtilityAiCoverCount = simulation.AI.LastUtilityCoverDecisions,
+            UtilityAiRetreatCount = simulation.AI.LastUtilityRetreatDecisions,
+            UtilityAiFlankCount = simulation.AI.LastUtilityFlankDecisions,
+            UtilityAiEngageCount = simulation.AI.LastUtilityEngageDecisions,
+            UtilityAiInvestigateCount = simulation.AI.LastUtilityInvestigateDecisions,
+            HasUtilityAiDebugState = hasUtilityAiDebugState,
+            UtilityAiDebugObserver = hasUtilityAiDebugState ? utilityAiDebugObserver : default,
+            UtilityAiDebugDecision = utilityAiDebugDecision,
+            UtilityAiDebugContext = utilityAiDebugContext,
+            BehaviacEnabled = false,
+            BehaviacRuntimeReady = false,
+            BehaviacDecisionCount = 0,
+            BehaviacDecisionMs = 0d,
+            BehaviacDeadCount = 0,
+            BehaviacCoverCount = 0,
+            BehaviacRetreatCount = 0,
+            BehaviacFlankCount = 0,
+            BehaviacEngageCount = 0,
+            BehaviacInvestigateCount = 0,
             MovementMs = simulation.LastMovementUpdateMilliseconds,
             WeaponsMs = simulation.LastWeaponUpdateMilliseconds,
             BallisticsMs = simulation.LastProjectileUpdateMilliseconds,
