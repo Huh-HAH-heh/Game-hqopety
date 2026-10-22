@@ -106,11 +106,19 @@ public sealed class UnitNavigationSystem
 
         int[] path = _paths[unitIndex] ?? Array.Empty<int>();
         int start = Math.Clamp(_pathCursor[unitIndex], 0, path.Length);
-        int count = Math.Min(destination.Length, path.Length - start);
+        int routeCount = path.Length - start;
+        int count = Math.Min(destination.Length, routeCount);
+        if (count == 0)
+            return 0;
 
         for (int i = 0; i < count; i++)
         {
-            int cell = path[start + i];
+            int sourceOffset = count == routeCount
+                ? i
+                : count == 1
+                    ? routeCount - 1
+                    : (int)MathF.Round(i * (routeCount - 1f) / (count - 1f));
+            int cell = path[start + sourceOffset];
             destination[i] = new Vector2(
                 cell % _width + 0.5f,
                 cell / _width + 0.5f);
