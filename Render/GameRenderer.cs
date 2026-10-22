@@ -65,6 +65,12 @@ public sealed class GameRenderer
     private InfantryFormationType _infantryFormation = InfantryFormationType.Line;
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
+    private bool _isPlacingMoveLine;
+    private Vector2 _moveLineStartWorld;
+    private Vector2 _moveLineCurrentWorld;
+    private Vector2i _moveLineStartPixel;
+    private UnitId[] _moveLineUnits = Array.Empty<UnitId>();
+    private float _moveLineSpacing = 1.15f;
     private float _squadPruneTimer;
     private const float SquadMarkerRadiusPixels = 12f;
     private const float SquadMarkerHitTolerancePixels = 4f;
@@ -95,6 +101,18 @@ public sealed class GameRenderer
     {
         FillColor = new Color(85, 155, 225, 38),
         OutlineColor = new Color(125, 190, 255, 220),
+        OutlineThickness = 1f
+    };
+
+    private readonly RectangleShape _moveLinePreview = new(new Vector2f(1f, 3f))
+    {
+        FillColor = new Color(80, 205, 255, 210)
+    };
+
+    private readonly CircleShape _moveLineSlotMarker = new(4f)
+    {
+        FillColor = new Color(180, 240, 255, 240),
+        OutlineColor = new Color(35, 92, 125, 240),
         OutlineThickness = 1f
     };
 
@@ -624,6 +642,9 @@ public sealed class GameRenderer
 
         if (_isSelectingUnits && IsSelectionDrag())
             _window.Draw(_selectionBox);
+
+        if (_isPlacingMoveLine)
+            DrawMoveLinePreview();
 
         _gameMenuOverlay?.DrawWorldMarkers(
             _window,
@@ -1636,6 +1657,157 @@ public sealed class GameRenderer
         return dx * dx + dy * dy >= SelectionDragThreshold * SelectionDragThreshold;
     }
 
+    private bool TryBeginMoveLine(Vector2i mousePixel)
+    {
+        bool shiftPressed =
+            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+        if (shiftPressed || _selectedUnits.Count < 2)
+            return false;
+
+        SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+        if (snapshot == null)
+            return false;
+
+        UnitId[] selected = CaptureSelectedUnitIds(snapshot);
+        if (selected.Length < 2)
+            return false;
+
+        float spacing = 0.8f;
+        for (int i = 0; i < snapshot.Units.Length; i++)
+        {
+            RenderUnitState unit = snapshot.Units[i];
+            if (unit.HitPoints <= 0f)
+                continue;
+
+            bool isSelected = false;
+            for (int j = 0; j < selected.Length; j++)
+            {
+                if (selected[j].Index == unit.Index &&
+                    selected[j].Generation == unit.Generation)
+                {
+                    isSelected = true;
+                    break;
+                }
+            }
+
+            if (isSelected)
+                spacing = MathF.Max(spacing, unit.Radius * 2.25f);
+        }
+
+        Vector2f worldPixels = _window.MapPixelToCoords(mousePixel, _camera.View);
+        _moveLineStartWorld = new Vector2(
+            worldPixels.X / TerrainTilePixelSize,
+            worldPixels.Y / TerrainTilePixelSize);
+        _moveLineCurrentWorld = _moveLineStartWorld;
+        _moveLineStartPixel = mousePixel;
+        _moveLineUnits = selected;
+        _moveLineSpacing = spacing;
+        _isPlacingMoveLine = true;
+        _isSelectingUnits = false;
+        _selectionBox.Size = new Vector2f(0f, 0f);
+        return true;
+    }
+
+    private void GetAdjustedMoveLine(
+        out Vector2 start,
+        out Vector2 end)
+    {
+        start = _moveLineStartWorld;
+        end = _moveLineCurrentWorld;
+        Vector2 delta = end - start;
+        float length = delta.Length();
+        Vector2 direction = length > 0.001f ? delta / length : Vector2.UnitX;
+        float minimumLength = MathF.Max(0f, (_moveLineUnits.Length - 1) * _moveLineSpacing);
+        if (length >= minimumLength)
+            return;
+
+        Vector2 center = (start + end) * 0.5f;
+        start = center - direction * (minimumLength * 0.5f);
+        end = center + direction * (minimumLength * 0.5f);
+    }
+
+    private void DrawMoveLinePreview()
+    {
+        if (_moveLineUnits.Length < 2)
+            return;
+
+        GetAdjustedMoveLine(out Vector2 start, out Vector2 end);
+        Vector2 startPixels = start * TerrainTilePixelSize;
+        Vector2 endPixels = end * TerrainTilePixelSize;
+        Vector2 delta = endPixels - startPixels;
+        float length = delta.Length();
+        if (length <= 0.01f)
+            return;
+
+        _moveLinePreview.Position = new Vector2f(startPixels.X, startPixels.Y);
+        _moveLinePreview.Size = new Vector2f(length, 3f);
+        _moveLinePreview.Origin = new Vector2f(0f, 1.5f);
+        _moveLinePreview.Rotation = MathF.Atan2(delta.Y, delta.X) * 180f / MathF.PI;
+        _window.Draw(_moveLinePreview);
+
+        for (int i = 0; i < _moveLineUnits.Length; i++)
+        {
+            float t = i / (float)(_moveLineUnits.Length - 1);
+            Vector2 point = Vector2.Lerp(startPixels, endPixels, t);
+            _moveLineSlotMarker.Position = new Vector2f(point.X, point.Y);
+            _moveLineSlotMarker.Origin = new Vector2f(4f, 4f);
+            _window.Draw(_moveLineSlotMarker);
+        }
+    }
+
+    private void IssueMoveLineOrder(
+        UnitId[] memberIds,
+        Vector2 start,
+        Vector2 end,
+        float spacing)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        List<int> members = new(memberIds.Length);
+
+        for (int i = 0; i < memberIds.Length; i++)
+        {
+            if (units.TryGetIndex(memberIds[i], out int index) &&
+                _unitSimulation.Health.OverallHitPoints[index] > 0f &&
+                units.Posture[index] != UnitPosture.Injured)
+            {
+                members.Add(index);
+            }
+        }
+
+        if (members.Count == 0)
+            return;
+
+        Vector2 delta = end - start;
+        float length = delta.Length();
+        Vector2 direction = length > 0.001f ? delta / length : Vector2.UnitX;
+        float minimumLength = MathF.Max(0f, (members.Count - 1) * spacing);
+        if (length < minimumLength)
+        {
+            Vector2 center = (start + end) * 0.5f;
+            start = center - direction * (minimumLength * 0.5f);
+            end = center + direction * (minimumLength * 0.5f);
+        }
+
+        Vector2 line = end - start;
+        int assigned = 0;
+        for (int i = 0; i < members.Count; i++)
+        {
+            float t = members.Count == 1 ? 0.5f : i / (float)(members.Count - 1);
+            Vector2 point = start + line * t;
+            float x = Math.Clamp(point.X, 0.5f, _worldMap.MaxTileX - 0.5f);
+            float y = Math.Clamp(point.Y, 0.5f, _worldMap.MaxTileY - 0.5f);
+            int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
+            Vector3 target = new(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
+            ai.SetPlayerOrder(members[i], UnitAiOrderType.Move, target);
+            assigned++;
+        }
+
+        Console.WriteLine($"[MOVE] Move-line order assigned to {assigned} units.");
+    }
+
     private void UpdateSelectionBox()
     {
         float left = MathF.Min(_selectionDragStartWorld.X, _selectionDragCurrentWorld.X);
@@ -2590,7 +2762,12 @@ public sealed class GameRenderer
                 }
 
                 if (_menuPage == GameMenuPage.Closed)
+                {
+                    if (TryBeginMoveLine(e.Position))
+                        return;
+
                     BeginWorldSelection(e.Position);
+                }
             };
 
         _window.MouseMoved +=
@@ -2641,6 +2818,15 @@ public sealed class GameRenderer
                     {
                         return;
                     }
+                }
+
+                if (_isPlacingMoveLine)
+                {
+                    Vector2f worldPixels = _window.MapPixelToCoords(e.Position, _camera.View);
+                    _moveLineCurrentWorld = new Vector2(
+                        worldPixels.X / TerrainTilePixelSize,
+                        worldPixels.Y / TerrainTilePixelSize);
+                    return;
                 }
 
                 if (_isSelectingUnits)
@@ -2701,6 +2887,35 @@ public sealed class GameRenderer
                 if (_draggingMenuSlider.HasValue)
                 {
                     _draggingMenuSlider = null;
+                    return;
+                }
+
+                if (_isPlacingMoveLine)
+                {
+                    Vector2f worldPixels = _window.MapPixelToCoords(e.Position, _camera.View);
+                    _moveLineCurrentWorld = new Vector2(
+                        worldPixels.X / TerrainTilePixelSize,
+                        worldPixels.Y / TerrainTilePixelSize);
+                    int dx = e.Position.X - _moveLineStartPixel.X;
+                    int dy = e.Position.Y - _moveLineStartPixel.Y;
+                    bool dragged = dx * dx + dy * dy >=
+                        SelectionDragThreshold * SelectionDragThreshold;
+                    UnitId[] moveUnits = _moveLineUnits;
+                    Vector2 start = _moveLineStartWorld;
+                    Vector2 end = _moveLineCurrentWorld;
+                    float spacing = _moveLineSpacing;
+                    _isPlacingMoveLine = false;
+                    _moveLineUnits = Array.Empty<UnitId>();
+
+                    if (dragged && moveUnits.Length > 1)
+                    {
+                        ExecuteSimulationCommand(() =>
+                            IssueMoveLineOrder(moveUnits, start, end, spacing));
+                    }
+                    else
+                    {
+                        SelectWorldUnit(e.Position, false);
+                    }
                     return;
                 }
 

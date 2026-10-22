@@ -1112,15 +1112,53 @@ public sealed class UnitAiSystem
                 continue;
             }
 
-            // No memory hunts, squad contacts, cover, flanking, patrol, or player
-            // movement tasks: only a currently visible hostile can create a target.
+            bool hasMoveOrder = Store.PlayerOrderType[unit] == UnitAiOrderType.Move;
+            Vector3 moveOrderPosition = hasMoveOrder
+                ? Store.PlayerOrderPosition[unit]
+                : units.Position[unit];
+
+            if (hasMoveOrder)
+            {
+                Vector3 toMoveOrder = moveOrderPosition - units.Position[unit];
+                toMoveOrder.Z = 0f;
+                if (toMoveOrder.LengthSquared() <= 0.04f)
+                {
+                    Store.ClearPlayerOrder(unit);
+                    Store.ClearGoal(unit);
+                    units.HasTarget[unit] = false;
+                    units.Velocity[unit] = Vector3.Zero;
+                    hasMoveOrder = false;
+                }
+                else
+                {
+                    units.Target[unit] = moveOrderPosition;
+                    units.HasTarget[unit] = true;
+                    Store.SetGoal(unit, moveOrderPosition);
+                }
+            }
+
+            // No memory hunts, squad contacts, cover, flanking or patrol. A player
+            // move order is honoured; combat only engages a currently visible hostile.
             int targetIndex = FindNearestVisibleEnemy(units, health, vision, unit);
             if (targetIndex < 0 ||
                 !vision.IsRecentlyVisible(unit, targetIndex, units) ||
                 !HasRangedWeapon(units, inventory, unit))
             {
-                ResetSimpleCombatUnit(
-                    units, weapons, unit, UnitAiState.Idle, BehaviacUnitIntent.None);
+                if (hasMoveOrder)
+                {
+                    ClearAiming(weapons, unit);
+                    Store.ClearTarget(unit);
+                    Store.SetGoal(unit, moveOrderPosition);
+                    Store.State[unit] = UnitAiState.Idle;
+                    Store.LastIntent[unit] = BehaviacUnitIntent.None;
+                    units.Target[unit] = moveOrderPosition;
+                    units.HasTarget[unit] = true;
+                }
+                else
+                {
+                    ResetSimpleCombatUnit(
+                        units, weapons, unit, UnitAiState.Idle, BehaviacUnitIntent.None);
+                }
                 continue;
             }
 
@@ -1137,14 +1175,20 @@ public sealed class UnitAiSystem
             }
 
             Store.RememberTarget(unit, target, targetPosition, TargetMemorySeconds);
-            Store.ClearGoal(unit);
-            Store.ClearPlayerOrder(unit);
+            if (hasMoveOrder)
+                Store.SetGoal(unit, moveOrderPosition);
+            else
+            {
+                Store.ClearGoal(unit);
+                Store.ClearPlayerOrder(unit);
+            }
 
-            // Keep the pawn stationary. Store.HasTarget is only the combat target;
-            // UnitStore.HasTarget is the movement command consumed by navigation.
-            units.Target[unit] = units.Position[unit];
-            units.HasTarget[unit] = false;
-            units.Velocity[unit] = Vector3.Zero;
+            // Combat target and locomotion target are separate: a pawn can fire
+            // at a visible enemy while continuing to its explicit move-line slot.
+            units.Target[unit] = hasMoveOrder ? moveOrderPosition : units.Position[unit];
+            units.HasTarget[unit] = hasMoveOrder;
+            if (!hasMoveOrder)
+                units.Velocity[unit] = Vector3.Zero;
             Store.State[unit] = UnitAiState.Attack;
             Store.LastIntent[unit] = BehaviacUnitIntent.EngageTarget;
 
