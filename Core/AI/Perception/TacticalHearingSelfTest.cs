@@ -51,8 +51,6 @@ public static class TacticalHearingSelfTest
         if (!simulation.FireWeapon(shooter, UnitWeaponSlot.Primary, Vector3.UnitX) ||
             simulation.TotalShotsFired <= 0)
             return false;
-
-        simulation.AI.UseBehaviacDecisionLayer = true;
         simulation.AI.Enabled = true;
         simulation.Update(worldMap, 0.05f);
 
