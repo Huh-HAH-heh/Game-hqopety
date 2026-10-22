@@ -27,6 +27,9 @@ public sealed class UnitAiStore
 {
     private UnitAiState[] _state;
     private BehaviacUnitIntent[] _lastIntent;
+    private BehaviacUnitIntent[] _utilityIntent;
+    private float[] _utilityIntentCommitRemainingSeconds;
+    private UnitIntentUtilityBreakdown[] _utilityIntentBreakdown;
     private UnitAiOrderType[] _playerOrderType;
     private Vector3[] _playerOrderPosition;
     private UnitId[] _playerOrderTarget;
@@ -48,6 +51,15 @@ public sealed class UnitAiStore
 
     public BehaviacUnitIntent[] LastIntent =>
         _lastIntent;
+
+    public BehaviacUnitIntent[] UtilityIntent =>
+        _utilityIntent;
+
+    public float[] UtilityIntentCommitRemainingSeconds =>
+        _utilityIntentCommitRemainingSeconds;
+
+    public UnitIntentUtilityBreakdown[] UtilityIntentBreakdown =>
+        _utilityIntentBreakdown;
 
     public UnitAiOrderType[] PlayerOrderType =>
         _playerOrderType;
@@ -96,6 +108,9 @@ public sealed class UnitAiStore
 
         _state = new UnitAiState[initialUnitCapacity];
         _lastIntent = new BehaviacUnitIntent[initialUnitCapacity];
+        _utilityIntent = new BehaviacUnitIntent[initialUnitCapacity];
+        _utilityIntentCommitRemainingSeconds = new float[initialUnitCapacity];
+        _utilityIntentBreakdown = new UnitIntentUtilityBreakdown[initialUnitCapacity];
         _playerOrderType = new UnitAiOrderType[initialUnitCapacity];
         _playerOrderPosition = new Vector3[initialUnitCapacity];
         _playerOrderTarget = new UnitId[initialUnitCapacity];
@@ -117,6 +132,9 @@ public sealed class UnitAiStore
 
         _state[unitIndex] = UnitAiState.Idle;
         _lastIntent[unitIndex] = BehaviacUnitIntent.None;
+        _utilityIntent[unitIndex] = BehaviacUnitIntent.None;
+        _utilityIntentCommitRemainingSeconds[unitIndex] = 0f;
+        _utilityIntentBreakdown[unitIndex] = default;
         _playerOrderType[unitIndex] = UnitAiOrderType.None;
         _playerOrderPosition[unitIndex] = Vector3.Zero;
         _playerOrderTarget[unitIndex] = default;
@@ -142,6 +160,9 @@ public sealed class UnitAiStore
 
         _state[unitIndex] = UnitAiState.Idle;
         _lastIntent[unitIndex] = BehaviacUnitIntent.None;
+        _utilityIntent[unitIndex] = BehaviacUnitIntent.None;
+        _utilityIntentCommitRemainingSeconds[unitIndex] = 0f;
+        _utilityIntentBreakdown[unitIndex] = default;
         _playerOrderType[unitIndex] = UnitAiOrderType.None;
         _playerOrderPosition[unitIndex] = Vector3.Zero;
         _playerOrderTarget[unitIndex] = default;
@@ -263,6 +284,10 @@ public sealed class UnitAiStore
         Array.Resize(
             ref _lastIntent,
             newCapacity);
+
+        Array.Resize(ref _utilityIntent, newCapacity);
+        Array.Resize(ref _utilityIntentCommitRemainingSeconds, newCapacity);
+        Array.Resize(ref _utilityIntentBreakdown, newCapacity);
 
         Array.Resize(ref _playerOrderType, newCapacity);
         Array.Resize(ref _playerOrderPosition, newCapacity);

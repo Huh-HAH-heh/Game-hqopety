@@ -47,6 +47,7 @@ public sealed class UnitAiSystem
     private readonly UnitWeaponSystem _weaponSystem;
     private readonly UnitSkillStore? _skills;
     private readonly PerceptionMemoryStore? _perceptionMemory;
+    private readonly UnitMetabolismStore? _metabolism;
     private float _thinkTimer;
     private float _tacticalTimeSeconds;
     private readonly SquadTacticalCoordinator _squadCoordinator = new();
@@ -59,6 +60,7 @@ public sealed class UnitAiSystem
 
     public TacticalHearingSystem? Hearing { get; set; }
     public UnitAiStore Store { get; }
+    public UnitAiPersonalityStore Personality { get; }
     public SquadTacticalCoordinator SquadCoordinator => _squadCoordinator;
 
     public void SynchronizeSquadMemberships(IReadOnlyList<SquadMembershipSnapshot> squads) =>
@@ -89,7 +91,8 @@ public sealed class UnitAiSystem
         int initialUnitCapacity = 1024,
         UnitWeaponSystem? weaponSystem = null,
         UnitSkillStore? skills = null,
-        PerceptionMemoryStore? perceptionMemory = null)
+        PerceptionMemoryStore? perceptionMemory = null,
+        UnitMetabolismStore? metabolism = null)
     {
         Store =
             new UnitAiStore(
@@ -99,12 +102,21 @@ public sealed class UnitAiSystem
             weaponSystem ?? new UnitWeaponSystem();
         _skills = skills;
         _perceptionMemory = perceptionMemory;
+        _metabolism = metabolism;
+        Personality = new UnitAiPersonalityStore(initialUnitCapacity);
 
     }
 
-    public void InitializeUnit(int unitIndex)
+    public void InitializeUnit(int unitIndex) =>
+        InitializeUnit(unitIndex, generation: 1u, factionTag: 0);
+
+    public void InitializeUnit(int unitIndex, uint generation, ushort factionTag)
     {
         EnsurePlanningCapacity(unitIndex + 1);
+        Personality.InitializeUnit(unitIndex, generation, factionTag);
+        Store.UtilityIntent[unitIndex] = BehaviacUnitIntent.None;
+        Store.UtilityIntentCommitRemainingSeconds[unitIndex] = 0f;
+        Store.UtilityIntentBreakdown[unitIndex] = default;
         _searchPatrolLegByUnit[unitIndex] = 0;
         _rememberedEnemyContextByUnit[unitIndex] = null;
         _cachedRememberedEnemyContextByUnit[unitIndex] = null;
@@ -132,6 +144,13 @@ public sealed class UnitAiSystem
         _hasFlankTargetByUnit[unitIndex] = false;
         if ((uint)unitIndex < (uint)_behaviacAgents.Length)
             _behaviacAgents[unitIndex] = null;
+        if ((uint)unitIndex < (uint)Store.Capacity)
+        {
+            Store.UtilityIntent[unitIndex] = BehaviacUnitIntent.None;
+            Store.UtilityIntentCommitRemainingSeconds[unitIndex] = 0f;
+            Store.UtilityIntentBreakdown[unitIndex] = default;
+        }
+        Personality.ClearUnit(unitIndex);
     }
 
     internal bool TryGetFreshVisualContact(int observer, UnitId target, out Vector3 estimatedPosition)
@@ -262,6 +281,10 @@ public sealed class UnitAiSystem
             Store.TickMemory(
                 unit,
                 thinkDelta);
+
+            Store.UtilityIntentCommitRemainingSeconds[unit] = MathF.Max(
+                0f,
+                Store.UtilityIntentCommitRemainingSeconds[unit] - thinkDelta);
 
             Store.SuppressionCoverRetry[unit] =
                 MathF.Max(
@@ -1580,6 +1603,84 @@ public sealed class UnitAiSystem
             hasImmediateDanger,
             suppressionState == UnitSuppressionState.Panicked,
             isLowHealth);
+
+        float fatigue = _metabolism != null && unit < _metabolism.Capacity
+            ? _metabolism.Fatigue[unit] / 100f
+            : 0f;
+        float stress = _metabolism != null && unit < _metabolism.Capacity
+            ? _metabolism.Stress[unit] / 100f
+            : 0f;
+        float energyRatio = _metabolism != null &&
+            unit < _metabolism.Capacity &&
+            _metabolism.MaxEnergyKcal[unit] > 0f
+                ? _metabolism.EnergyKcal[unit] / _metabolism.MaxEnergyKcal[unit]
+                : 1f;
+        float hydrationRatio = _metabolism != null &&
+            unit < _metabolism.Capacity &&
+            _metabolism.MaxWaterLiters[unit] > 0f
+                ? _metabolism.WaterLiters[unit] / _metabolism.MaxWaterLiters[unit]
+                : 1f;
+        float shootingSkill = _skills != null
+            ? _skills.GetLevel(unit, UnitSkill.Shooting) / (float)UnitSkillStore.MaxLevel
+            : 0.5f;
+        float meleeSkill = _skills != null
+            ? _skills.GetLevel(unit, UnitSkill.Melee) / (float)UnitSkillStore.MaxLevel
+            : 0.5f;
+
+        var utilityContext = new UnitIntentUtilityContext
+        {
+            IsAlive = isAlive,
+            HasVisibleTarget = hasVisibleTarget,
+            HasRecentTarget = hasRecentTarget,
+            HasActiveTargetMemory = hasActiveTargetMemory,
+            HasCover = hasCover,
+            IsInImmediateDanger = hasImmediateDanger,
+            IsSuppressed = isSuppressed,
+            IsPanicked = suppressionState == UnitSuppressionState.Panicked,
+            IsLowHealth = isLowHealth,
+            HasSuppressiveWeapon = hasSuppressiveWeapon,
+            CanFlank = canFlank,
+            IsFlanking = isFlanking,
+            IsProne = units.Posture[unit] == UnitPosture.Lying,
+            IsAlerted = isAlerted,
+            HasAudibleContact = hasAudibleContact,
+            HasSquadContact = hasSquadContact,
+            IsInvestigatingContext = isInvestigatingContext,
+            OrderType = orderType,
+            HealthRatio = healthRatio,
+            Pain = health.Pain[unit] / 100f,
+            Fatigue = fatigue,
+            Stress = stress,
+            EnergyRatio = energyRatio,
+            HydrationRatio = hydrationRatio,
+            SuppressionResistance = _skills?.GetSuppressionResistance(unit) ?? 0.5f,
+            ShootingSkill = shootingSkill,
+            MeleeSkill = meleeSkill,
+            Caution = Personality.Caution[unit],
+            Aggression = Personality.Aggression[unit],
+            Discipline = Personality.Discipline[unit],
+            Alertness = suppression.GetAlertness(unit),
+            MoveOrderUtility = moveOrderUtility,
+            CombatUtility = combatUtility,
+            CoverUtility = coverUtility,
+            FlankUtility = flankUtility,
+            ProneCombatUtility = proneUtility,
+            LastKnownTargetUtility = lastKnownTargetUtility,
+            InvestigationUtility = investigationUtility,
+            SquadContactUtility = squadContactUtility
+        };
+
+        UnitIntentUtilityBreakdown utilityDecision = UnitIntentUtilityScorer.Select(
+            in utilityContext,
+            Store.UtilityIntent[unit],
+            Store.UtilityIntentCommitRemainingSeconds[unit]);
+        Store.UtilityIntentBreakdown[unit] = utilityDecision;
+        if (utilityDecision.SuggestedIntent != Store.UtilityIntent[unit])
+        {
+            Store.UtilityIntent[unit] = utilityDecision.SuggestedIntent;
+            Store.UtilityIntentCommitRemainingSeconds[unit] =
+                UnitIntentUtilityScorer.GetCommitDuration(Personality.Discipline[unit]);
+        }
 
         agent.SetFacts(
             isAlive,

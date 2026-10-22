@@ -178,7 +178,8 @@ public sealed class UnitSimulation
                 unitCapacity,
                 _weaponSystem,
                 Skills,
-                PerceptionMemory);
+                PerceptionMemory,
+                Metabolism);
         _aiSystem.Hearing = _hearingSystem;
 
         _meleeCombatSystem = new MeleeCombatSystem();
@@ -358,7 +359,7 @@ public sealed class UnitSimulation
         Skills.InitializeUnit(id.Index, definition.Type, Units.FactionTag[id.Index]);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
-        _aiSystem.InitializeUnit(id.Index);
+        _aiSystem.InitializeUnit(id.Index, id.Generation, factionTag);
         _meleeCombatSystem.InitializeUnit(id.Index, id);
 
         for (int i = 0; i < startingEquipment.Length; i++)
