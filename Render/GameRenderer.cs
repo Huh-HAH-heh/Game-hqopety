@@ -1925,7 +1925,7 @@ public sealed class GameRenderer
     {
         Vector2[] pathPoints = snapshot.OrderPathPoints;
         float worldPerPixel = _camera.View.Size.X / MathF.Max(1f, _window.Size.X);
-        Vector2 markerScale = new(worldPerPixel, worldPerPixel);
+        Vector2f markerScale = new(worldPerPixel, worldPerPixel);
 
         foreach (RenderUnitState unit in snapshot.Units)
         {
