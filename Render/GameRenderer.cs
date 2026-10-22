@@ -1742,8 +1742,7 @@ public sealed class GameRenderer
         out Vector2 start,
         out Vector2 end)
     {
-        // The drag length is the formation's width. Never stretch it to fit
-        // every pawn; overflow is wrapped into additional ranks.
+        // The drag defines a segment of possible destinations, not a formation.
         start = _moveLineStartWorld;
         end = _moveLineCurrentWorld;
     }
@@ -1780,7 +1779,7 @@ public sealed class GameRenderer
         uint jitterHash = MixMoveLineHash(seed ^ ((uint)index + 1u) * 0x9E3779B9u);
         float jitterUnit = (jitterHash & 0x00FFFFFFu) / 16777215f * 2f - 1f;
         float bucketLength = length / unitCount;
-        float maxJitter = MathF.Min(bucketLength * 0.28f, MathF.Max(0f, spacing) * 0.3f);
+        float maxJitter = MathF.Min(bucketLength * 0.42f, MathF.Max(0f, spacing) * 0.45f);
         float alongLine = ((slot + 0.5f) * bucketLength) + jitterUnit * maxJitter;
 
         return start + delta / length * alongLine;
@@ -2053,7 +2052,8 @@ public sealed class GameRenderer
         UnitId[] memberIds,
         Vector2 start,
         Vector2 end,
-        float spacing)
+        float spacing,
+        uint seed)
     {
         UnitStore units = _unitSimulation.Units;
         UnitAiStore ai = _unitSimulation.AI.Store;
@@ -2073,7 +2073,7 @@ public sealed class GameRenderer
                 start,
                 end,
                 spacing,
-                _moveLineSeed);
+                seed);
             Vector3 target;
             if (TryFindAvailableMoveCell(point.X, point.Y, reserved, out int tileX, out int tileY))
             {
@@ -3195,13 +3195,14 @@ public sealed class GameRenderer
                     Vector2 start = _moveLineStartWorld;
                     Vector2 end = _moveLineCurrentWorld;
                     float spacing = _moveLineSpacing;
+                    uint seed = _moveLineSeed;
                     _isPlacingMoveLine = false;
                     _moveLineUnits = Array.Empty<UnitId>();
 
                     if (dragged && moveUnits.Length > 1)
                     {
                         ExecuteSimulationCommand(() =>
-                            IssueMoveLineOrder(moveUnits, start, end, spacing));
+                            IssueMoveLineOrder(moveUnits, start, end, spacing, seed));
                     }
                     else
                     {
