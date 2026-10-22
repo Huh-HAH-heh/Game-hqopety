@@ -1137,9 +1137,47 @@ public sealed class UnitAiSystem
                 }
             }
 
-            // No memory hunts, squad contacts, cover, flanking or patrol. A player
-            // move order is honoured; combat only engages a currently visible hostile.
-            int targetIndex = FindNearestVisibleEnemy(units, health, vision, unit);
+            // Explicit attack orders retain their selected target marker and focus fire.
+            // The simple AI still refuses to fire at an unseen target.
+            bool hasAttackOrder = Store.PlayerOrderType[unit] == UnitAiOrderType.Attack;
+            int targetIndex = -1;
+            if (hasAttackOrder)
+            {
+                UnitId orderedTarget = Store.PlayerOrderTarget[unit];
+                if (units.TryGetIndex(orderedTarget, out int commandedIndex) &&
+                    health.OverallHitPoints[commandedIndex] > 0f &&
+                    FactionRules.ShouldAttack(
+                        units.FactionTag[unit],
+                        units.FactionTag[commandedIndex]))
+                {
+                    if (vision.IsRecentlyVisible(unit, commandedIndex, units))
+                    {
+                        targetIndex = commandedIndex;
+                    }
+                    else
+                    {
+                        ClearAiming(weapons, unit);
+                        Store.ClearTarget(unit);
+                        Store.ClearGoal(unit);
+                        units.HasTarget[unit] = false;
+                        units.Velocity[unit] = Vector3.Zero;
+                        Store.State[unit] = UnitAiState.Search;
+                        Store.LastIntent[unit] = BehaviacUnitIntent.AttackOrder;
+                        continue;
+                    }
+                }
+                else
+                {
+                    Store.ClearPlayerOrder(unit);
+                    hasAttackOrder = false;
+                }
+            }
+
+            // No memory hunts, squad contacts, cover, flanking or patrol. Without
+            // an explicit target order, combat only engages a currently visible hostile.
+            if (!hasAttackOrder)
+                targetIndex = FindNearestVisibleEnemy(units, health, vision, unit);
+
             if (targetIndex < 0 ||
                 !vision.IsRecentlyVisible(unit, targetIndex, units) ||
                 !HasRangedWeapon(units, inventory, unit))
@@ -1176,7 +1214,14 @@ public sealed class UnitAiSystem
 
             Store.RememberTarget(unit, target, targetPosition, TargetMemorySeconds);
             if (hasMoveOrder)
+            {
                 Store.SetGoal(unit, moveOrderPosition);
+            }
+            else if (hasAttackOrder)
+            {
+                Store.ClearGoal(unit);
+                Store.SetPlayerOrder(unit, UnitAiOrderType.Attack, targetPosition, target);
+            }
             else
             {
                 Store.ClearGoal(unit);
