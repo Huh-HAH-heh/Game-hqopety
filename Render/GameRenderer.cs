@@ -159,6 +159,7 @@ public sealed class GameRenderer
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
     private bool _showVisionDebug;
+    private bool _showHearingDebug;
     private volatile bool _massCombatMode;
     private volatile bool _simulationPaused;
     private bool _terrainStressMode;
@@ -249,6 +250,7 @@ public sealed class GameRenderer
         _unitSimulation.AI.Enabled = true;
         _unitSimulation.VisionEnabled = true;
         _showVisionDebug = false;
+        _showHearingDebug = false;
 
         // Show the window before constructing the 1,600-unit combat scene.
         // The simulation thread builds the scene after the first frame.
@@ -621,7 +623,8 @@ public sealed class GameRenderer
                 _showAiStateDebug && renderSnapshot.AiEnabled,
                 _selectedUnits,
                 _showUnitRig,
-                _showVisionDebug);
+                _showVisionDebug,
+                _showHearingDebug);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -646,7 +649,8 @@ public sealed class GameRenderer
                 _showAiStateDebug && _unitSimulation.AI.Enabled,
                 false,
                 _selectedUnits,
-                _showUnitRig);
+                _showUnitRig,
+                _showHearingDebug);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -819,8 +823,8 @@ public sealed class GameRenderer
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             "LMB drag=select units; RMB=menu; Shift+click=add selection; Attack=selected units; S=hold | " +
-            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
-            $"Vision {vision}";
+            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=vision U=hearing F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
+            $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
     private string BuildWindowTitle()
@@ -994,7 +998,7 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
+            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision U=hearing F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
     }
 
     private void StartSimulationThread()
@@ -2658,7 +2662,8 @@ public sealed class GameRenderer
                     SimulationFrameSnapshot.Capture(
                         _unitSimulation,
                         _showVisionDebug ? _selectedUnit : default,
-                        _showVisionDebug ? _worldMap : null));
+                        _showVisionDebug ? _worldMap : null,
+                        _showHearingDebug));
             }
             catch (Exception exception)
             {
@@ -3534,6 +3539,13 @@ public sealed class GameRenderer
         {
             _showVisionDebug =
                 !_showVisionDebug;
+            return;
+        }
+
+        if (key == Keyboard.Key.U)
+        {
+            _showHearingDebug = !_showHearingDebug;
+            Console.WriteLine($"[DEBUG] Hearing visualization={_showHearingDebug}");
             return;
         }
 
