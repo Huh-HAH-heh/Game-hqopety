@@ -1949,7 +1949,8 @@ public sealed class UnitAiSystem
 
         float now = _perceptionMemory.CurrentTimeSeconds;
         TacticalContact? cached = _cachedRememberedEnemyContextByUnit[observer];
-        if (cached != null)
+        if (cached != null &&
+            now < _nextRememberedEnemyQuerySecondsByUnit[observer])
         {
             if (IsUsableRememberedHostileContact(
                     units, health, vision, observer, cached, now, out _))
@@ -1959,6 +1960,7 @@ public sealed class UnitAiSystem
             }
 
             _cachedRememberedEnemyContextByUnit[observer] = null;
+            _nextRememberedEnemyQuerySecondsByUnit[observer] = now;
         }
 
         if (now < _nextRememberedEnemyQuerySecondsByUnit[observer])
