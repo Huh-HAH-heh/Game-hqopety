@@ -231,7 +231,7 @@ public sealed class SimulationFrameSnapshot
     {
         UnitStore units = simulation.Units;
         float nowSeconds = simulation.PerceptionMemory.CurrentTimeSeconds;
-        TacticalSoundDebugEvent[] events = simulation.HearingSystem.GetRecentDebugEvents(nowSeconds);
+        TacticalSoundDebugEvent[] events = simulation.GetRecentSoundDebugEvents();
         soundPulses = new RenderSoundPulse[events.Length];
         for (int i = 0; i < events.Length; i++)
         {
