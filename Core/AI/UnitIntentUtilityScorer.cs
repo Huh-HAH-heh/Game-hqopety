@@ -183,14 +183,19 @@ public static class UnitIntentUtilityScorer
                 engage = 0f;
             }
 
-            if (context.CanFlank && !context.IsSuppressed && !context.IsPanicked && !hasStopOrder)
+            if ((context.CanFlank || context.IsFlanking) &&
+                !context.IsSuppressed && !context.IsPanicked && !hasStopOrder)
             {
-                flank = Clamp01(
-                    context.FlankUtility +
-                    aggression * 0.08f -
-                    caution * 0.07f -
-                    fatigue * 0.045f -
-                    bodyBurden * 0.035f);
+                // Preserve a committed flank while its target remains visible;
+                // CanFlank is intentionally false after the maneuver starts.
+                flank = context.IsFlanking
+                    ? Clamp01(0.63f + aggression * 0.04f - caution * 0.04f - bodyBurden * 0.05f)
+                    : Clamp01(
+                        context.FlankUtility +
+                        aggression * 0.08f -
+                        caution * 0.07f -
+                        fatigue * 0.045f -
+                        bodyBurden * 0.035f);
             }
 
             bool canContinueProne = context.IsProne &&
