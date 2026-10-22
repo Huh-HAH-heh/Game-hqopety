@@ -214,17 +214,36 @@ public sealed class UnitRenderSystem : IDisposable
             int renderedParts = 0;
             if (showRigDetails)
             {
-                renderedParts = AppendBodyParts(
-                    _vertices,
-                    _bodyOutlines,
-                    bodies,
-                    bodyStarts[unitIndex],
-                    bodyCounts[unitIndex],
-                    units.FactionTag[unitIndex],
-                    isAlive,
-                    tilePixelSize,
-                    screenScale,
-                    1f);
+                UnitHitRegionProfile? hitProfile =
+                    simulation.HitRegions.GetProfile(unitIndex);
+
+                if (units.Type[unitIndex] == UnitType.Colonist &&
+                    hitProfile is UnitAnatomyProfile)
+                {
+                    renderedParts = AppendGameplayZones(
+                        _vertices,
+                        _bodyOutlines,
+                        units,
+                        unitIndex,
+                        units.FactionTag[unitIndex],
+                        isAlive,
+                        tilePixelSize,
+                        screenScale);
+                }
+                else
+                {
+                    renderedParts = AppendBodyParts(
+                        _vertices,
+                        _bodyOutlines,
+                        bodies,
+                        bodyStarts[unitIndex],
+                        bodyCounts[unitIndex],
+                        units.FactionTag[unitIndex],
+                        isAlive,
+                        tilePixelSize,
+                        screenScale,
+                        1f);
+                }
             }
 
             // A marker is a substitute for the rig, never an overlay on it.
@@ -709,6 +728,38 @@ public void DrawSnapshot(
         }
 
         return rendered;
+    }
+
+    private static int AppendGameplayZones(
+        VertexArray fills,
+        VertexArray outlines,
+        UnitStore units,
+        int unitIndex,
+        ushort factionTag,
+        bool isAlive,
+        float tilePixelSize,
+        float screenScale)
+    {
+        for (int zoneIndex = 0; zoneIndex < UnitGameplayZoneSystem.ZoneCount; zoneIndex++)
+        {
+            UnitGameplayZoneGeometry zone = UnitGameplayZoneSystem.GetGeometry(
+                units, unitIndex, zoneIndex);
+            RenderBodyPart part = UnitGameplayZoneRenderGeometry.CreatePart(zone);
+            AppendBodyPart(
+                fills,
+                outlines,
+                part.Position,
+                part.Scale,
+                part.Rotation,
+                part.Primitive,
+                part.Role,
+                factionTag,
+                isAlive,
+                tilePixelSize,
+                screenScale);
+        }
+
+        return UnitGameplayZoneSystem.ZoneCount;
     }
 
     private static int AppendHitRegions(

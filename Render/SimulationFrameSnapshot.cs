@@ -208,8 +208,8 @@ public sealed class SimulationFrameSnapshot
         sourceMeleeHits.CopyTo(meleeHitVisuals);
         RenderUnitState[] unitStates = new RenderUnitState[active.Length];
 
-        // Flatten all active rigs into one immutable array for the render thread.
-        // Each unit stores a range, avoiding a small managed array per unit per frame.
+        // Flatten active gameplay hit zones and fallback body visuals into one immutable
+        // array for the render thread. Each unit stores a range to avoid per-unit arrays.
         UnitBodyStore bodyStore = simulation.Bodies;
         UnitHitRegionStore hitRegionStore = simulation.HitRegions;
         int[] sourceBodyStarts = units.BodyStart;
@@ -220,6 +220,13 @@ public sealed class SimulationFrameSnapshot
         {
             int unitIndex = active[i];
             UnitHitRegionProfile? profile = hitRegionStore.GetProfile(unitIndex);
+
+            if (unitTypes[unitIndex] == UnitType.Colonist &&
+                profile is UnitAnatomyProfile)
+            {
+                totalBodyParts += UnitGameplayZoneSystem.ZoneCount;
+                continue;
+            }
 
             if (unitTypes[unitIndex] == UnitType.Colonist && profile != null)
             {
@@ -344,21 +351,16 @@ public sealed class SimulationFrameSnapshot
             UnitHitRegionProfile? hitProfile = hitRegionStore.GetProfile(index);
 
             if (unitTypes[index] == UnitType.Colonist &&
-                hitProfile is UnitAnatomyProfile anatomy &&
-                anatomy.HasSharedShapes &&
-                sourceBodyCount == anatomy.NodeCount)
+                hitProfile is UnitAnatomyProfile)
             {
-                // The anatomy rig is the rendering source of truth: preserve
-                // each live primitive, scale and rotation used by UnitBodyStore.
-                for (int part = 0; part < anatomy.NodeCount; part++)
+                // Draw the exact three procedural zones used by projectile hit testing.
+                // Do not substitute the informational anatomy rig for gameplay geometry.
+                for (int zoneIndex = 0; zoneIndex < UnitGameplayZoneSystem.ZoneCount; zoneIndex++)
                 {
-                    int sourceIndex = sourceBodyStart + part;
-                    renderBodyParts[renderBodyPartWrite++] = new RenderBodyPart(
-                        sourceBodyPositions[sourceIndex],
-                        sourceBodyScales[sourceIndex],
-                        sourceBodyRotations[sourceIndex],
-                        sourceBodyPrimitives[sourceIndex],
-                        sourceBodyRoles[sourceIndex]);
+                    UnitGameplayZoneGeometry zone = UnitGameplayZoneSystem.GetGeometry(
+                        units, index, zoneIndex);
+                    renderBodyParts[renderBodyPartWrite++] =
+                        UnitGameplayZoneRenderGeometry.CreatePart(zone);
                 }
             }
             else if (unitTypes[index] == UnitType.Colonist && hitProfile != null)

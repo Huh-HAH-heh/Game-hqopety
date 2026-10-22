@@ -1483,7 +1483,7 @@ void main()
         SetText(
             _unitRigLabel,
             ref _lastUnitRigLabel,
-            settings.ShowUnitRig ? "ЮНИТЫ: МАРКЕР + РИГ" : "ЮНИТЫ: ТОЛЬКО МАРКЕР");
+            settings.ShowUnitRig ? "ЮНИТЫ: ХИТБОКСЫ" : "ЮНИТЫ: ТОЛЬКО МАРКЕР");
 
         CenterButtonLabel(_gridButton, _gridLabel!);
         CenterButtonLabel(_extremaButton, _extremaLabel!);
