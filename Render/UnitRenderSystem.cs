@@ -59,6 +59,10 @@ public sealed class UnitRenderSystem : IDisposable
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _memoryDebug =
+        new VertexArray(
+            PrimitiveType.Lines);
+
     private readonly VertexArray _suppressionDebug =
         new VertexArray(
             PrimitiveType.Lines);
@@ -77,7 +81,8 @@ public sealed class UnitRenderSystem : IDisposable
         bool showUnitRig = true,
         bool showHearingDebug = false,
         bool showAttackLinks = true,
-        bool showSuppressionDebug = false)
+        bool showSuppressionDebug = false,
+        bool showMemoryDebug = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -103,6 +108,7 @@ public sealed class UnitRenderSystem : IDisposable
         _visionDebug.Clear();
         _aiDebug.Clear();
         _soundDebug.Clear();
+        _memoryDebug.Clear();
         _suppressionDebug.Clear();
 
         Vector2f center =
@@ -352,6 +358,14 @@ public sealed class UnitRenderSystem : IDisposable
             AppendSoundDebug(_soundDebug, soundPulses, soundContacts, cameraView, tilePixelSize);
         }
 
+        if (showMemoryDebug && selectedUnit.IsValid)
+        {
+            SimulationFrameSnapshot.CaptureMemoryDebug(
+                simulation, selectedUnit, out RenderMemoryContact[] memoryContacts);
+            AppendMemoryDebug(
+                _memoryDebug, memoryContacts, cameraView, tilePixelSize, selectedUnit.Index);
+        }
+
         if (_visionArea.VertexCount > 0)
         {
             window.Draw(
@@ -393,6 +407,8 @@ public sealed class UnitRenderSystem : IDisposable
         }
         if (_soundDebug.VertexCount > 0)
             window.Draw(_soundDebug);
+        if (_memoryDebug.VertexCount > 0)
+            window.Draw(_memoryDebug);
         if (_suppressionDebug.VertexCount > 0)
             window.Draw(_suppressionDebug);
     }
@@ -409,7 +425,8 @@ public void DrawSnapshot(
         bool showVisionDebug = false,
         bool showHearingDebug = false,
         bool showAttackLinks = true,
-        bool showSuppressionDebug = false)
+        bool showSuppressionDebug = false,
+        bool showMemoryDebug = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -439,6 +456,7 @@ public void DrawSnapshot(
         _visionDebug.Clear();
         _aiDebug.Clear();
         _soundDebug.Clear();
+        _memoryDebug.Clear();
         _suppressionDebug.Clear();
 
         RenderUnitState[] units = snapshot.Units;
@@ -670,6 +688,14 @@ public void DrawSnapshot(
         if (showHearingDebug)
             AppendSoundDebug(_soundDebug, snapshot.SoundPulses, snapshot.SoundContacts, cameraView, tilePixelSize);
 
+        if (showMemoryDebug && selectedUnitIndex >= 0)
+            AppendMemoryDebug(
+                _memoryDebug,
+                snapshot.MemoryContacts,
+                cameraView,
+                tilePixelSize,
+                selectedUnitIndex);
+
         if (_visionArea.VertexCount > 0)
             window.Draw(_visionArea);
 
@@ -758,6 +784,8 @@ public void DrawSnapshot(
             window.Draw(_aiDebug);
         if (_soundDebug.VertexCount > 0)
             window.Draw(_soundDebug);
+        if (_memoryDebug.VertexCount > 0)
+            window.Draw(_memoryDebug);
         if (_suppressionDebug.VertexCount > 0)
             window.Draw(_suppressionDebug);
     }
@@ -2544,6 +2572,107 @@ private static void AppendSuppressionDebug(
             AppendCircleOutline(debug, ex, ey, markerRadius, estimateColor, 12);
             AppendDebugLine(debug, ex - markerRadius, ey, ex + markerRadius, ey, estimateColor);
             AppendDebugLine(debug, ex, ey - markerRadius, ex, ey + markerRadius, estimateColor);
+        }
+    }
+
+    private static void AppendMemoryDebug(
+        VertexArray debug,
+        RenderMemoryContact[] contacts,
+        View cameraView,
+        float tilePixelSize,
+        int selectedUnitIndex)
+    {
+        if (tilePixelSize <= 0f || selectedUnitIndex < 0 || contacts.Length == 0)
+            return;
+
+        float minX = (cameraView.Center.X - cameraView.Size.X * 0.5f) / tilePixelSize - 2f;
+        float maxX = (cameraView.Center.X + cameraView.Size.X * 0.5f) / tilePixelSize + 2f;
+        float minY = (cameraView.Center.Y - cameraView.Size.Y * 0.5f) / tilePixelSize - 2f;
+        float maxY = (cameraView.Center.Y + cameraView.Size.Y * 0.5f) / tilePixelSize + 2f;
+
+        for (int i = 0; i < contacts.Length; i++)
+        {
+            RenderMemoryContact contact = contacts[i];
+            if (contact.Observer.Index != selectedUnitIndex)
+                continue;
+
+            Vector3 estimate = contact.EstimatedPosition;
+            float errorRadius = Math.Clamp(contact.ErrorRadius, 0.3f, 24f);
+            bool pointNearView = estimate.X + errorRadius >= minX &&
+                estimate.X - errorRadius <= maxX &&
+                estimate.Y + errorRadius >= minY &&
+                estimate.Y - errorRadius <= maxY;
+            Vector3 observer = contact.ObserverPosition;
+            bool observerNearView = observer.X >= minX && observer.X <= maxX &&
+                observer.Y >= minY && observer.Y <= maxY;
+            if (!pointNearView && !observerNearView)
+                continue;
+
+            bool knownEnemy = contact.HasVisualEvidence && contact.SubjectUnit.HasValue;
+            bool visuallyConfirmed = knownEnemy &&
+                contact.Kind == TacticalContactKind.VisualConfirmed &&
+                contact.VisualAgeSeconds < TacticalContactMemory.VisualConfirmationGraceSeconds;
+            Color baseColor = knownEnemy
+                ? visuallyConfirmed
+                    ? new Color(105, 245, 150, 235)
+                    : new Color(255, 105, 90, 235)
+                : contact.HasCommunicationEvidence
+                    ? new Color(110, 195, 255, 230)
+                    : GetSoundColor(contact.Type);
+
+            float age = knownEnemy && contact.VisualAgeSeconds >= 0f
+                ? contact.VisualAgeSeconds
+                : contact.AgeSeconds;
+            float lifetime = knownEnemy ? 8f : 10f;
+            float freshness = Math.Clamp(1f - age / lifetime, 0.12f, 1f);
+            float confidence = Math.Clamp(contact.Confidence, 0f, 1f);
+            float visibility = (0.32f + 0.68f * freshness) *
+                (0.35f + 0.65f * confidence) *
+                (contact.IsInvestigated ? 0.62f : 1f);
+            byte alpha = (byte)Math.Clamp((int)(210f * visibility), 24, 220);
+            Color markerColor = new(baseColor.R, baseColor.G, baseColor.B, alpha);
+
+            float ox = observer.X * tilePixelSize;
+            float oy = observer.Y * tilePixelSize;
+            float ex = estimate.X * tilePixelSize;
+            float ey = estimate.Y * tilePixelSize;
+            byte linkAlpha = (byte)Math.Clamp((int)(25f + 72f * visibility), 18, 105);
+            AppendDebugLine(
+                debug, ox, oy, ex, ey,
+                new Color(baseColor.R, baseColor.G, baseColor.B, linkAlpha));
+
+            // A remembered enemy is a crosshair at the last observed position,
+            // not a marker at the enemy's hidden current position.
+            float markerRadius = (knownEnemy ? 0.42f : 0.32f) * tilePixelSize;
+            float uncertaintyRadius = errorRadius * tilePixelSize;
+            byte uncertaintyAlpha = (byte)Math.Clamp(
+                (int)((contact.HasAuditoryEvidence ? 30f : 18f) * visibility),
+                4,
+                40);
+            AppendCircleOutline(
+                debug,
+                ex,
+                ey,
+                uncertaintyRadius,
+                new Color(baseColor.R, baseColor.G, baseColor.B, uncertaintyAlpha),
+                32);
+            AppendCircleOutline(debug, ex, ey, markerRadius, markerColor, 14);
+            AppendDebugLine(debug, ex - markerRadius, ey, ex + markerRadius, ey, markerColor);
+            AppendDebugLine(debug, ex, ey - markerRadius, ex, ey + markerRadius, markerColor);
+
+            if (knownEnemy)
+            {
+                // Two short side marks distinguish a unit identity from an anonymous sound.
+                float tick = markerRadius * 0.58f;
+                AppendDebugLine(debug, ex - markerRadius, ey - tick, ex - markerRadius, ey + tick, markerColor);
+                AppendDebugLine(debug, ex + markerRadius, ey - tick, ex + markerRadius, ey + tick, markerColor);
+            }
+            else if (contact.HasCommunicationEvidence)
+            {
+                float diagonal = markerRadius * 0.75f;
+                AppendDebugLine(debug, ex - diagonal, ey - diagonal, ex + diagonal, ey + diagonal, markerColor);
+                AppendDebugLine(debug, ex - diagonal, ey + diagonal, ex + diagonal, ey - diagonal, markerColor);
+            }
         }
     }
 
