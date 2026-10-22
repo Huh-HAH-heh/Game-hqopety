@@ -37,8 +37,10 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasCover { get; private set; }
     [MemberMetaInfo("Visible target", "Whether a hostile target is currently visible.", true)]
     public bool HasVisibleTarget { get; private set; }
-    [MemberMetaInfo("Recent target", "Whether the last known target memory is valid.", true)]
+    [MemberMetaInfo("Recent target", "Whether a visual enemy or last-known target exists in memory.", true)]
     public bool HasRecentTarget { get; private set; }
+    [MemberMetaInfo("Active target memory", "Whether the active target slot still holds a usable last-known target aim context.", true)]
+    public bool HasActiveTargetMemory { get; private set; }
     [MemberMetaInfo("Alerted", "Threat awareness independent of suppression or panic.", true)]
     public bool IsAlerted { get; private set; }
     [MemberMetaInfo("Audible contact", "Whether an uncertain sound contact is worth investigating.", true)]
@@ -114,7 +116,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool hasSquadContact = false,
         float squadContactUtility = 0f,
         float lastKnownTargetUtility = 0f,
-        bool isInvestigatingContext = false)
+        bool isInvestigatingContext = false,
+        bool hasActiveTargetMemory = false)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
@@ -154,6 +157,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
             ? System.Math.Clamp(lastKnownTargetUtility, 0f, 1f)
             : 0f;
         IsInvestigatingContext = isInvestigatingContext;
+        HasActiveTargetMemory = hasActiveTargetMemory;
         HasSquadContact = hasSquadContact;
         SquadContactUtility = float.IsFinite(squadContactUtility)
             ? System.Math.Clamp(squadContactUtility, 0f, 1f)
@@ -206,7 +210,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldSuppressLastKnownTarget", "Check whether a suppressed target should be fired at.")]
     public bool ShouldSuppressLastKnownTarget() =>
-        IsAlive && !HasVisibleTarget && HasRecentTarget && HasSuppressiveWeapon;
+        IsAlive && !HasVisibleTarget && HasActiveTargetMemory && HasSuppressiveWeapon &&
+        (!HasAudibleContact || LastKnownTargetUtility >= InvestigationUtility);
 
     [MethodMetaInfo("ShouldFlankVisibleTarget", "Check whether the current target should be flanked.")]
     public bool ShouldFlankVisibleTarget() =>
@@ -222,7 +227,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldInvestigateAudibleContact", "Investigate a credible sound only when no stronger tactical response is active.")]
     public bool ShouldInvestigateAudibleContact() =>
-        IsAlive && !IsInvestigatingContext && IsAlerted && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
+        IsAlive && !IsInvestigatingContext && IsAlerted && HasAudibleContact && !HasVisibleTarget &&
+        (!HasRecentTarget || InvestigationUtility > LastKnownTargetUtility) &&
         !IsSuppressed && !IsLowHealth &&
         InvestigationUtility >= Core.Unit.UnitTacticalUtility.MinimumInvestigationUtility;
 
