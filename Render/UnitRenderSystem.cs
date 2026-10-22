@@ -181,7 +181,7 @@ public sealed class UnitRenderSystem : IDisposable
             // Aim state is simulation data, so collect it before view culling.
             bool aliveForAttackLinks =
                 simulation.Health.OverallHitPoints[unitIndex] > 0f;
-            if (showUnitDetails && aliveForAttackLinks)
+            if (showUnitDetails && showAttackLinks && aliveForAttackLinks)
             {
                 AppendAimProgress(
                     _aiming,
@@ -712,7 +712,7 @@ public void DrawSnapshot(
                 flash);
         }
 
-        if (showUnitDetails)
+        if (showUnitDetails && showAttackLinks)
         {
             RenderAimRing[] aimRings = snapshot.AimRings;
             for (int i = 0; i < aimRings.Length; i++)
