@@ -73,30 +73,47 @@ public sealed class UnitAiSystem
     public double LastPlanningMilliseconds { get; private set; }
 
     public bool BehaviacRuntimeReady => false;
-    public long TotalBehaviacDecisions { get; private set; }
-    public long TotalUtilityDecisions => TotalBehaviacDecisions;
-    public int LastUtilityDecisions => LastBehaviacDecisions;
-    public double LastUtilityDecisionBatchMilliseconds => LastBehaviacDecisionBatchMilliseconds;
-    public int LastUtilityDeadDecisions => LastBehaviacDeadDecisions;
-    public int LastUtilityCoverDecisions => LastBehaviacCoverDecisions;
-    public int LastUtilityRetreatDecisions => LastBehaviacRetreatDecisions;
-    public int LastUtilityFlankDecisions => LastBehaviacFlankDecisions;
-    public int LastUtilityEngageDecisions => LastBehaviacEngageDecisions;
-    public int LastUtilityInvestigateDecisions => LastBehaviacInvestigateDecisions;
-    public int LastBehaviacDecisions { get; private set; }
-    public double LastBehaviacDecisionBatchMilliseconds { get; private set; }
-    public int LastBehaviacDeadDecisions { get; private set; }
-    public int LastBehaviacCoverDecisions { get; private set; }
-    public int LastBehaviacRetreatDecisions { get; private set; }
-    public int LastBehaviacFlankDecisions { get; private set; }
-    public int LastBehaviacEngageDecisions { get; private set; }
-    public int LastBehaviacSuppressDecisions { get; private set; }
-    public int LastBehaviacInvestigateDecisions { get; private set; }
-    public int LastBehaviacPatrolDecisions { get; private set; }
-    public int LastBehaviacMoveOrderDecisions { get; private set; }
-    public int LastBehaviacHoldOrderDecisions { get; private set; }
-    public int LastBehaviacAttackOrderDecisions { get; private set; }
-    public int LastBehaviacHoldAndEngageDecisions { get; private set; }
+    public long TotalUtilityDecisions { get; private set; }
+    public long TotalUtilityDecisions => TotalUtilityDecisions;
+    public int LastUtilityDecisions => LastUtilityDecisions;
+    public double LastUtilityDecisionBatchMilliseconds => LastUtilityDecisionBatchMilliseconds;
+    public int LastUtilityDeadDecisions => LastUtilityDeadDecisions;
+    public int LastUtilityCoverDecisions => LastUtilityCoverDecisions;
+    public int LastUtilityRetreatDecisions => LastUtilityRetreatDecisions;
+    public int LastUtilityFlankDecisions => LastUtilityFlankDecisions;
+    public int LastUtilityEngageDecisions => LastUtilityEngageDecisions;
+    public int LastUtilityInvestigateDecisions => LastUtilityInvestigateDecisions;
+    public int LastUtilityDecisions { get; private set; }
+    public double LastUtilityDecisionBatchMilliseconds { get; private set; }
+    public int LastUtilityDeadDecisions { get; private set; }
+    public int LastUtilityCoverDecisions { get; private set; }
+    public int LastUtilityRetreatDecisions { get; private set; }
+    public int LastUtilityFlankDecisions { get; private set; }
+    public int LastUtilityEngageDecisions { get; private set; }
+    public int LastUtilitySuppressDecisions { get; private set; }
+    public int LastUtilityInvestigateDecisions { get; private set; }
+    public int LastUtilityPatrolDecisions { get; private set; }
+    public int LastUtilityMoveOrderDecisions { get; private set; }
+    public int LastUtilityHoldOrderDecisions { get; private set; }
+    public int LastUtilityAttackOrderDecisions { get; private set; }
+    public int LastUtilityHoldAndEngageDecisions { get; private set; }
+
+    // Compatibility aliases for older overlay/snapshot callers.
+    public long TotalBehaviacDecisions => TotalUtilityDecisions;
+    public int LastBehaviacDecisions => LastUtilityDecisions;
+    public double LastBehaviacDecisionBatchMilliseconds => LastUtilityDecisionBatchMilliseconds;
+    public int LastBehaviacDeadDecisions => LastUtilityDeadDecisions;
+    public int LastBehaviacCoverDecisions => LastUtilityCoverDecisions;
+    public int LastBehaviacRetreatDecisions => LastUtilityRetreatDecisions;
+    public int LastBehaviacFlankDecisions => LastUtilityFlankDecisions;
+    public int LastBehaviacEngageDecisions => LastUtilityEngageDecisions;
+    public int LastBehaviacSuppressDecisions => LastUtilitySuppressDecisions;
+    public int LastBehaviacInvestigateDecisions => LastUtilityInvestigateDecisions;
+    public int LastBehaviacPatrolDecisions => LastUtilityPatrolDecisions;
+    public int LastBehaviacMoveOrderDecisions => LastUtilityMoveOrderDecisions;
+    public int LastBehaviacHoldOrderDecisions => LastUtilityHoldOrderDecisions;
+    public int LastBehaviacAttackOrderDecisions => LastUtilityAttackOrderDecisions;
+    public int LastBehaviacHoldAndEngageDecisions => LastUtilityHoldAndEngageDecisions;
 
     public UnitAiSystem(
         int initialUnitCapacity = 1024,
@@ -220,20 +237,20 @@ public sealed class UnitAiSystem
         // Preserve these results between think ticks so the one-second
         // performance logger doesn't usually sample a zero-work render frame.
         LastPlanningMilliseconds = 0d;
-        LastBehaviacDecisions = 0;
-        LastBehaviacDecisionBatchMilliseconds = 0d;
-        LastBehaviacDeadDecisions = 0;
-        LastBehaviacCoverDecisions = 0;
-        LastBehaviacRetreatDecisions = 0;
-        LastBehaviacFlankDecisions = 0;
-        LastBehaviacEngageDecisions = 0;
-        LastBehaviacSuppressDecisions = 0;
-        LastBehaviacInvestigateDecisions = 0;
-        LastBehaviacPatrolDecisions = 0;
-        LastBehaviacMoveOrderDecisions = 0;
-        LastBehaviacHoldOrderDecisions = 0;
-        LastBehaviacAttackOrderDecisions = 0;
-        LastBehaviacHoldAndEngageDecisions = 0;
+        LastUtilityDecisions = 0;
+        LastUtilityDecisionBatchMilliseconds = 0d;
+        LastUtilityDeadDecisions = 0;
+        LastUtilityCoverDecisions = 0;
+        LastUtilityRetreatDecisions = 0;
+        LastUtilityFlankDecisions = 0;
+        LastUtilityEngageDecisions = 0;
+        LastUtilitySuppressDecisions = 0;
+        LastUtilityInvestigateDecisions = 0;
+        LastUtilityPatrolDecisions = 0;
+        LastUtilityMoveOrderDecisions = 0;
+        LastUtilityHoldOrderDecisions = 0;
+        LastUtilityAttackOrderDecisions = 0;
+        LastUtilityHoldAndEngageDecisions = 0;
 
         Store.EnsureCapacity(
             units.Capacity);
@@ -315,9 +332,9 @@ public sealed class UnitAiSystem
             long decisionStarted = Stopwatch.GetTimestamp();
             BehaviacUnitIntent intent = SelectUnitIntent(
                 units, health, inventory, weapons, vision, suppression, unit, suppressionState, isAlive);
-            LastBehaviacDecisionBatchMilliseconds +=
+            LastUtilityDecisionBatchMilliseconds +=
                 Stopwatch.GetElapsedTime(decisionStarted).TotalMilliseconds;
-            RecordBehaviacIntent(intent);
+            RecordUtilityIntent(intent);
 
             Store.LastIntent[unit] = intent;
 
@@ -1156,30 +1173,30 @@ public sealed class UnitAiSystem
         return true;
     }
 
-    private void RecordBehaviacIntent(BehaviacUnitIntent intent)
+    private void RecordUtilityIntent(BehaviacUnitIntent intent)
     {
-        LastBehaviacDecisions++;
-        TotalBehaviacDecisions++;
+        LastUtilityDecisions++;
+        TotalUtilityDecisions++;
 
         switch (intent)
         {
-            case BehaviacUnitIntent.Dead: LastBehaviacDeadDecisions++; break;
-            case BehaviacUnitIntent.SeekCover: LastBehaviacCoverDecisions++; break;
-            case BehaviacUnitIntent.RetreatToCover: LastBehaviacRetreatDecisions++; break;
-            case BehaviacUnitIntent.FlankTarget: LastBehaviacFlankDecisions++; break;
+            case BehaviacUnitIntent.Dead: LastUtilityDeadDecisions++; break;
+            case BehaviacUnitIntent.SeekCover: LastUtilityCoverDecisions++; break;
+            case BehaviacUnitIntent.RetreatToCover: LastUtilityRetreatDecisions++; break;
+            case BehaviacUnitIntent.FlankTarget: LastUtilityFlankDecisions++; break;
             case BehaviacUnitIntent.EngageTarget:
-            case BehaviacUnitIntent.ProneEngage: LastBehaviacEngageDecisions++; break;
-            case BehaviacUnitIntent.SuppressiveFire: LastBehaviacSuppressDecisions++; break;
+            case BehaviacUnitIntent.ProneEngage: LastUtilityEngageDecisions++; break;
+            case BehaviacUnitIntent.SuppressiveFire: LastUtilitySuppressDecisions++; break;
             case BehaviacUnitIntent.InvestigateLastKnownTarget:
             case BehaviacUnitIntent.InvestigateAudibleContact:
             case BehaviacUnitIntent.InvestigateSquadContact:
-                LastBehaviacInvestigateDecisions++;
+                LastUtilityInvestigateDecisions++;
                 break;
-            case BehaviacUnitIntent.Patrol: LastBehaviacPatrolDecisions++; break;
-            case BehaviacUnitIntent.FollowMoveOrder: LastBehaviacMoveOrderDecisions++; break;
-            case BehaviacUnitIntent.HoldPosition: LastBehaviacHoldOrderDecisions++; break;
-            case BehaviacUnitIntent.AttackOrder: LastBehaviacAttackOrderDecisions++; break;
-            case BehaviacUnitIntent.HoldPositionEngage: LastBehaviacHoldAndEngageDecisions++; break;
+            case BehaviacUnitIntent.Patrol: LastUtilityPatrolDecisions++; break;
+            case BehaviacUnitIntent.FollowMoveOrder: LastUtilityMoveOrderDecisions++; break;
+            case BehaviacUnitIntent.HoldPosition: LastUtilityHoldOrderDecisions++; break;
+            case BehaviacUnitIntent.AttackOrder: LastUtilityAttackOrderDecisions++; break;
+            case BehaviacUnitIntent.HoldPositionEngage: LastUtilityHoldAndEngageDecisions++; break;
         }
     }
 
@@ -1324,14 +1341,6 @@ public sealed class UnitAiSystem
     {
         EnsurePlanningCapacity(units.Capacity);
         _rememberedEnemyContextByUnit[unit] = null;
-
-        BehaviacUnitDecisionAgent? agent = _behaviacAgents[unit];
-        if (agent is null)
-        {
-            agent = BehaviacRuntimeHost.CreateAgent<BehaviacUnitDecisionAgent>(
-                "rimclone_unit_decision");
-            _behaviacAgents[unit] = agent;
-        }
 
         UnitAiOrderType orderType = Store.PlayerOrderType[unit];
         bool hasAttackOrder = orderType == UnitAiOrderType.Attack;
