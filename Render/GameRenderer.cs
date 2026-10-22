@@ -161,6 +161,7 @@ public sealed class GameRenderer
     private int _visibleMaxLayer;
     private volatile bool _showVisionDebug;
     private volatile bool _showHearingDebug;
+    private volatile bool _showMemoryDebug;
     private bool _showAttackLinks = true;
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
@@ -630,7 +631,8 @@ public sealed class GameRenderer
                 _showVisionDebug,
                 _showHearingDebug,
                 _showAttackLinks,
-                _showSuppressionDebug);
+                _showSuppressionDebug,
+                _showMemoryDebug);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -658,7 +660,8 @@ public sealed class GameRenderer
                 _showUnitRig,
                 _showHearingDebug,
                 _showAttackLinks,
-                _showSuppressionDebug);
+                _showSuppressionDebug,
+                _showMemoryDebug);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -796,7 +799,8 @@ public sealed class GameRenderer
                 _showHearingDebug,
                 _showAttackLinks,
                 _showAiStateDebug,
-                _showSuppressionDebug);
+                _showSuppressionDebug,
+                _showMemoryDebug);
         }
 
         _bodyRigEditorOverlay?.Draw(_window, _window.Size.X, _window.Size.Y);
@@ -2682,7 +2686,9 @@ public sealed class GameRenderer
                         _unitSimulation,
                         _showVisionDebug ? _selectedUnit : default,
                         _showVisionDebug ? _worldMap : null,
-                        _showHearingDebug));
+                        _showHearingDebug,
+                        _showMemoryDebug,
+                        _showMemoryDebug ? _selectedUnit : default));
             }
             catch (Exception exception)
             {
@@ -3376,6 +3382,9 @@ public sealed class GameRenderer
                 break;
             case DebugLayerType.Suppression:
                 _showSuppressionDebug = !_showSuppressionDebug;
+                break;
+            case DebugLayerType.Memory:
+                _showMemoryDebug = !_showMemoryDebug;
                 break;
         }
     }
