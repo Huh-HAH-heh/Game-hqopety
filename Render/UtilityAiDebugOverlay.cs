@@ -187,7 +187,7 @@ public sealed class UtilityAiDebugOverlay : IDisposable
             _barFills[i].Position = new Vector2f(x + 286f, rowY + 5f);
             _barFills[i].Size = new Vector2f(BarWidth * score, 8f);
 
-            BehaviacUnitIntent rowIntent = IntentAt(i, context.IsLowHealth);
+            BehaviacUnitIntent rowIntent = IntentAt(i);
             _barFills[i].FillColor = rowIntent == decision.SuggestedIntent
                 ? new Color(91, 209, 144, 255)
                 : score >= decision.SuggestedScore - 0.12f && score > 0f
@@ -219,7 +219,7 @@ public sealed class UtilityAiDebugOverlay : IDisposable
             _ => decision.PatrolScore
         };
 
-    private static BehaviacUnitIntent IntentAt(int index, bool lowHealth) =>
+    private static BehaviacUnitIntent IntentAt(int index) =>
         index switch
         {
             0 => BehaviacUnitIntent.EngageTarget,
