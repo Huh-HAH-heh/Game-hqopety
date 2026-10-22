@@ -1790,6 +1790,7 @@ public sealed class GameRenderer
         float sideA = (sideHashA & 0x00FFFFFFu) / 16777215f;
         float sideB = (sideHashB & 0x00FFFFFFu) / 16777215f;
         float sideOffset = (sideA + sideB - 1f) * MathF.Max(0.15f, spacing * 1.25f);
+        Vector2 perpendicular = new(-delta.Y / length, delta.X / length);
 
         return start + delta / length * alongLine + perpendicular * sideOffset;
     }
