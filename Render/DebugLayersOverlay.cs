@@ -12,7 +12,8 @@ public enum DebugLayerType
     Hearing,
     AttackLinks,
     AiState,
-    Suppression
+    Suppression,
+    Memory
 }
 
 public sealed class DebugLayersOverlay : IDisposable
@@ -20,7 +21,7 @@ public sealed class DebugLayersOverlay : IDisposable
     private const float Width = 292f;
     private const float HeaderHeight = 34f;
     private const float RowHeight = 34f;
-    private const int LayerCount = 5;
+    private const int LayerCount = 6;
     private const float Height = HeaderHeight + LayerCount * RowHeight + 30f;
 
     private static readonly string[] LayerLabels =
@@ -29,7 +30,8 @@ public sealed class DebugLayersOverlay : IDisposable
         "Слух — звуки и оценки бойцов",
         "Прицеливание — линии к цели",
         "ИИ — цели и маршруты",
-        "Подавление — стресс и паника"
+        "Подавление — стресс и паника",
+        "Память — враги и звуки"
     };
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, Height))
@@ -170,7 +172,8 @@ public sealed class DebugLayersOverlay : IDisposable
         bool showHearing,
         bool showAttackLinks,
         bool showAiState,
-        bool showSuppression)
+        bool showSuppression,
+        bool showMemory)
     {
         if (!IsOpen)
             return;
@@ -191,7 +194,8 @@ public sealed class DebugLayersOverlay : IDisposable
             showHearing,
             showAttackLinks,
             showAiState,
-            showSuppression
+            showSuppression,
+            showMemory
         };
 
         float firstRowY = _panel.Position.Y + HeaderHeight + 3f;
