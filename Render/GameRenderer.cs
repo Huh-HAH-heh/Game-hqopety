@@ -620,7 +620,8 @@ public sealed class GameRenderer
                 _selectedUnit.IsValid ? _selectedUnit.Index : -1,
                 _showAiStateDebug && renderSnapshot.AiEnabled,
                 _selectedUnits,
-                _showUnitRig);
+                _showUnitRig,
+                _showVisionDebug);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -2654,7 +2655,9 @@ public sealed class GameRenderer
             {
                 Volatile.Write(
                     ref _latestSnapshot,
-                    SimulationFrameSnapshot.Capture(_unitSimulation));
+                    SimulationFrameSnapshot.Capture(
+                        _unitSimulation,
+                        _showVisionDebug ? _selectedUnit : default));
             }
             catch (Exception exception)
             {
