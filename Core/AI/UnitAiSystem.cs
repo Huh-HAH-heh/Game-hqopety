@@ -74,15 +74,6 @@ public sealed class UnitAiSystem
 
     public bool BehaviacRuntimeReady => false;
     public long TotalUtilityDecisions { get; private set; }
-    public long TotalUtilityDecisions => TotalUtilityDecisions;
-    public int LastUtilityDecisions => LastUtilityDecisions;
-    public double LastUtilityDecisionBatchMilliseconds => LastUtilityDecisionBatchMilliseconds;
-    public int LastUtilityDeadDecisions => LastUtilityDeadDecisions;
-    public int LastUtilityCoverDecisions => LastUtilityCoverDecisions;
-    public int LastUtilityRetreatDecisions => LastUtilityRetreatDecisions;
-    public int LastUtilityFlankDecisions => LastUtilityFlankDecisions;
-    public int LastUtilityEngageDecisions => LastUtilityEngageDecisions;
-    public int LastUtilityInvestigateDecisions => LastUtilityInvestigateDecisions;
     public int LastUtilityDecisions { get; private set; }
     public double LastUtilityDecisionBatchMilliseconds { get; private set; }
     public int LastUtilityDeadDecisions { get; private set; }
@@ -97,6 +88,23 @@ public sealed class UnitAiSystem
     public int LastUtilityHoldOrderDecisions { get; private set; }
     public int LastUtilityAttackOrderDecisions { get; private set; }
     public int LastUtilityHoldAndEngageDecisions { get; private set; }
+
+    // Compatibility aliases for legacy diagnostics and snapshot consumers.
+    public long TotalBehaviacDecisions => TotalUtilityDecisions;
+    public int LastBehaviacDecisions => LastUtilityDecisions;
+    public double LastBehaviacDecisionBatchMilliseconds => LastUtilityDecisionBatchMilliseconds;
+    public int LastBehaviacDeadDecisions => LastUtilityDeadDecisions;
+    public int LastBehaviacCoverDecisions => LastUtilityCoverDecisions;
+    public int LastBehaviacRetreatDecisions => LastUtilityRetreatDecisions;
+    public int LastBehaviacFlankDecisions => LastUtilityFlankDecisions;
+    public int LastBehaviacEngageDecisions => LastUtilityEngageDecisions;
+    public int LastBehaviacSuppressDecisions => LastUtilitySuppressDecisions;
+    public int LastBehaviacInvestigateDecisions => LastUtilityInvestigateDecisions;
+    public int LastBehaviacPatrolDecisions => LastUtilityPatrolDecisions;
+    public int LastBehaviacMoveOrderDecisions => LastUtilityMoveOrderDecisions;
+    public int LastBehaviacHoldOrderDecisions => LastUtilityHoldOrderDecisions;
+    public int LastBehaviacAttackOrderDecisions => LastUtilityAttackOrderDecisions;
+    public int LastBehaviacHoldAndEngageDecisions => LastUtilityHoldAndEngageDecisions;
 
     // Compatibility aliases for older overlay/snapshot callers.
     public long TotalBehaviacDecisions => TotalUtilityDecisions;
