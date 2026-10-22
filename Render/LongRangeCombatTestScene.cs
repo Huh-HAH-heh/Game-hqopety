@@ -622,12 +622,8 @@ public sealed class LongRangeCombatTestScene
             side == 1 &&
             index % UnitsPerFaction >= UnitsPerFaction - MeleeDuelUnitsPerSide;
 
-        // The detached red melee squad is on the left of faction 3, so it must
-        // face right into the duel instead of retaining the main red line's heading.
-        Vector3 direction =
-            side == 0 || isMeleeDuelUnit
-                ? Vector3.UnitX
-                : -Vector3.UnitX;
+        // The isolated red squad is to the right of faction 3; face it left.
+        Vector3 direction = side == 0 ? Vector3.UnitX : -Vector3.UnitX;
 
         UnitId id =
             simulation.Spawn(
@@ -788,11 +784,9 @@ public sealed class LongRangeCombatTestScene
             simulation.Units.FieldOfView[unit] =
                 180f;
 
-            simulation.SetHeadNormal(
-                _units[i],
-                side == 0 || isMeleeDuelUnit
-                    ? Vector3.UnitX
-                    : -Vector3.UnitX);
+            Vector3 facing = side == 0 ? Vector3.UnitX : -Vector3.UnitX;
+            simulation.Units.BodyNormal[unit] = facing;
+            simulation.SetHeadNormal(_units[i], facing);
 
             RestoreHealth(
                 simulation,
@@ -825,9 +819,8 @@ public sealed class LongRangeCombatTestScene
                 tileX + 0.5f,
                 tileY + 0.5f,
                 worldMap.GetSurfaceHeight(tileX, tileY));
-            // Faction 3 is on the right side of the arena; face left toward
-            // the isolated red squad so both groups can see and fire at each other.
-            Vector3 direction = -Vector3.UnitX;
+            // Faction 3 is left of the isolated red squad; face right toward it.
+            Vector3 direction = Vector3.UnitX;
             UnitId id = simulation.Spawn(
                 UnitType.Colonist,
                 position,
@@ -870,7 +863,8 @@ public sealed class LongRangeCombatTestScene
             EnsureRangedWeapon(simulation, id, unit, TotalUnits + i);
             RestoreHealth(simulation, unit);
             simulation.Suppression.ClearUnit(unit);
-            simulation.SetHeadNormal(id, -Vector3.UnitX);
+            simulation.Units.BodyNormal[unit] = Vector3.UnitX;
+            simulation.SetHeadNormal(id, Vector3.UnitX);
             simulation.SetPosture(id, UnitPosture.Standing);
             simulation.SetTarget(id, simulation.Units.Position[unit]);
         }

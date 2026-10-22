@@ -1141,6 +1141,23 @@ public sealed class UnitAiSystem
             Store.State[unit] = UnitAiState.Attack;
             Store.LastIntent[unit] = BehaviacUnitIntent.EngageTarget;
 
+            // Suppressive fire deliberately bypasses fresh LOS checks. The simple
+            // experiment must only fire when the current target is actually visible.
+            for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+            {
+                UnitWeaponSlot weaponSlot = (UnitWeaponSlot)slot;
+                short inventorySlot = inventory.GetWeaponEquipment(unit, weaponSlot);
+                if (inventorySlot < 0 ||
+                    inventory.GetItem(unit, inventorySlot) is not RangedWeaponConfig)
+                {
+                    continue;
+                }
+
+                int stateIndex = UnitWeaponStore.GetIndex(unit, weaponSlot);
+                if (weapons.CurrentAimMode[stateIndex] == AimMode.SuppressFire)
+                    weapons.CurrentAimMode[stateIndex] = AimMode.Snapshot;
+            }
+
             TryFireAnyRangedWeapon(
                 units,
                 inventory,
