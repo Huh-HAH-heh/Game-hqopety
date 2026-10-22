@@ -140,6 +140,7 @@ public sealed class GameRenderer
     private View? _uiView;
     private GameMenuOverlay? _gameMenuOverlay;
     private ContextMenuOverlay? _contextMenuOverlay;
+    private DebugLayersOverlay? _debugLayersOverlay;
     private UnitGroupCardOverlay? _unitGroupCardOverlay;
     private UnitBodyRigEditorOverlay? _bodyRigEditorOverlay;
     private readonly List<UnitCardEntry> _unitCards = new();
@@ -158,8 +159,10 @@ public sealed class GameRenderer
 
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
-    private bool _showVisionDebug;
+    private volatile bool _showVisionDebug;
     private volatile bool _showHearingDebug;
+    private bool _showAttackLinks = true;
+    private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
     private volatile bool _simulationPaused;
     private bool _terrainStressMode;
@@ -314,6 +317,7 @@ public sealed class GameRenderer
             _visionTestScene.Dispose();
             _gameMenuOverlay?.Dispose();
             _contextMenuOverlay?.Dispose();
+            _debugLayersOverlay?.Dispose();
             CloseUnitCards();
             _unitGroupCardOverlay?.Dispose();
             _bodyRigEditorOverlay?.Dispose();
@@ -624,7 +628,9 @@ public sealed class GameRenderer
                 _selectedUnits,
                 _showUnitRig,
                 _showVisionDebug,
-                _showHearingDebug);
+                _showHearingDebug,
+                _showAttackLinks,
+                _showSuppressionDebug);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -650,7 +656,9 @@ public sealed class GameRenderer
                 false,
                 _selectedUnits,
                 _showUnitRig,
-                _showHearingDebug);
+                _showHearingDebug,
+                _showAttackLinks,
+                _showSuppressionDebug);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -778,6 +786,17 @@ public sealed class GameRenderer
                     _window.Size.X,
                     _window.Size.Y);
             }
+
+            _debugLayersOverlay?.Draw(
+                _window,
+                _window.Size.X,
+                _window.Size.Y,
+                new Vector2i((int)uiMouseCoordinates.X, (int)uiMouseCoordinates.Y),
+                _showVisionDebug,
+                _showHearingDebug,
+                _showAttackLinks,
+                _showAiStateDebug,
+                _showSuppressionDebug);
         }
 
         _bodyRigEditorOverlay?.Draw(_window, _window.Size.X, _window.Size.Y);
@@ -823,7 +842,7 @@ public sealed class GameRenderer
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             "LMB drag=select units; RMB=menu; Shift+click=add selection; Attack=selected units; S=hold | " +
-            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=vision U=hearing F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
+            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug-layers F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
@@ -998,7 +1017,7 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=vision U=hearing F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
+            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug-layers F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
     }
 
     private void StartSimulationThread()
@@ -2716,6 +2735,7 @@ public sealed class GameRenderer
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
+        _debugLayersOverlay = new DebugLayersOverlay();
         _unitGroupCardOverlay = new UnitGroupCardOverlay();
         _bodyRigEditorOverlay = new UnitBodyRigEditorOverlay(
             SaveColonistBodyRig,
@@ -2809,6 +2829,22 @@ public sealed class GameRenderer
                     }
 
                     return;
+                }
+
+                if (_debugLayersOverlay?.IsOpen == true)
+                {
+                    Vector2f debugUi = _uiView != null
+                        ? _window.MapPixelToCoords(e.Position, _uiView)
+                        : new Vector2f(e.Position.X, e.Position.Y);
+                    if (_debugLayersOverlay.HandleMousePressed(
+                            new Vector2i((int)debugUi.X, (int)debugUi.Y),
+                            e.Button,
+                            _window.Size.X,
+                            _window.Size.Y,
+                            ToggleDebugLayer))
+                    {
+                        return;
+                    }
                 }
 
                 if (e.Button == Mouse.Button.Middle)
@@ -3322,6 +3358,28 @@ public sealed class GameRenderer
             };
     }
 
+    private void ToggleDebugLayer(DebugLayerType layer)
+    {
+        switch (layer)
+        {
+            case DebugLayerType.Vision:
+                _showVisionDebug = !_showVisionDebug;
+                break;
+            case DebugLayerType.Hearing:
+                _showHearingDebug = !_showHearingDebug;
+                break;
+            case DebugLayerType.AttackLinks:
+                _showAttackLinks = !_showAttackLinks;
+                break;
+            case DebugLayerType.AiState:
+                _showAiStateDebug = !_showAiStateDebug;
+                break;
+            case DebugLayerType.Suppression:
+                _showSuppressionDebug = !_showSuppressionDebug;
+                break;
+        }
+    }
+
     private void HandleKey(
         Keyboard.Key key)
     {
@@ -3428,6 +3486,12 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.Escape)
         {
+            if (_debugLayersOverlay?.IsOpen == true)
+            {
+                _debugLayersOverlay.Close();
+                return;
+            }
+
             if (_unitGroupCardOverlay?.IsOpen == true)
             {
                 _unitGroupCardOverlay.Close();
@@ -3537,15 +3601,7 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.V)
         {
-            _showVisionDebug =
-                !_showVisionDebug;
-            return;
-        }
-
-        if (key == Keyboard.Key.U)
-        {
-            _showHearingDebug = !_showHearingDebug;
-            Console.WriteLine($"[DEBUG] Hearing visualization={_showHearingDebug}");
+            _debugLayersOverlay?.Toggle();
             return;
         }
 
