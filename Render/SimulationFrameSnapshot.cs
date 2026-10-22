@@ -301,7 +301,7 @@ public sealed class SimulationFrameSnapshot
             if (playerOrderTypes[index] is UnitAiOrderType.Move or UnitAiOrderType.Attack)
             {
                 orderPathCounts[i] = Math.Min(
-                    1024,
+                    32,
                     simulation.Navigation.GetRoutePointCount(index));
                 totalOrderPathPoints += orderPathCounts[i];
             }
