@@ -59,6 +59,10 @@ public sealed class UnitRenderSystem : IDisposable
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _suppressionDebug =
+        new VertexArray(
+            PrimitiveType.Lines);
+
     public void Draw(
         RenderWindow window,
         UnitSimulation simulation,
@@ -71,7 +75,9 @@ public sealed class UnitRenderSystem : IDisposable
         bool hideUnseenTargets = false,
         HashSet<UnitId>? selectedUnits = null,
         bool showUnitRig = true,
-        bool showHearingDebug = false)
+        bool showHearingDebug = false,
+        bool showAttackLinks = true,
+        bool showSuppressionDebug = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -97,6 +103,7 @@ public sealed class UnitRenderSystem : IDisposable
         _visionDebug.Clear();
         _aiDebug.Clear();
         _soundDebug.Clear();
+        _suppressionDebug.Clear();
 
         Vector2f center =
             cameraView.Center;
@@ -184,7 +191,7 @@ public sealed class UnitRenderSystem : IDisposable
                     _aimTargetDrawn);
             }
 
-            if (aliveForAttackLinks)
+            if (showAttackLinks && aliveForAttackLinks)
             {
                 AppendActiveAttackLinks(
                     _aiming,
@@ -192,6 +199,9 @@ public sealed class UnitRenderSystem : IDisposable
                     unitIndex,
                     tilePixelSize);
             }
+
+            if (showSuppressionDebug && aliveForAttackLinks)
+                AppendSuppressionDebug(_suppressionDebug, simulation, unitIndex, tilePixelSize);
 
             if (hideUnseenTargets &&
                 hasSelection &&
@@ -383,6 +393,8 @@ public sealed class UnitRenderSystem : IDisposable
         }
         if (_soundDebug.VertexCount > 0)
             window.Draw(_soundDebug);
+        if (_suppressionDebug.VertexCount > 0)
+            window.Draw(_suppressionDebug);
     }
 
 public void DrawSnapshot(
@@ -395,7 +407,9 @@ public void DrawSnapshot(
         HashSet<UnitId>? selectedUnits = null,
         bool showUnitRig = true,
         bool showVisionDebug = false,
-        bool showHearingDebug = false)
+        bool showHearingDebug = false,
+        bool showAttackLinks = true,
+        bool showSuppressionDebug = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -425,6 +439,7 @@ public void DrawSnapshot(
         _visionDebug.Clear();
         _aiDebug.Clear();
         _soundDebug.Clear();
+        _suppressionDebug.Clear();
 
         RenderUnitState[] units = snapshot.Units;
         RenderBodyPart[] bodyParts = snapshot.BodyParts;
@@ -515,7 +530,7 @@ public void DrawSnapshot(
             }
 
             bool isAlive = unit.HitPoints > 0f;
-            if (isAlive)
+            if (showAttackLinks && isAlive)
                 AppendSnapshotAttackLinks(_aiming, unit, x, y, tilePixelSize);
 
             bool rootInView =
@@ -537,6 +552,9 @@ public void DrawSnapshot(
             {
                 continue;
             }
+
+            if (showSuppressionDebug && isAlive && rootInView)
+                AppendSnapshotSuppressionDebug(_suppressionDebug, unit, x, y, tilePixelSize);
 
             float markerRadius = GetMarkerRadius(
                 unit.Width,
@@ -740,6 +758,8 @@ public void DrawSnapshot(
             window.Draw(_aiDebug);
         if (_soundDebug.VertexCount > 0)
             window.Draw(_soundDebug);
+        if (_suppressionDebug.VertexCount > 0)
+            window.Draw(_suppressionDebug);
     }
 
     private static int AppendBodyParts(
@@ -1924,6 +1944,27 @@ private static void AppendSuppressionDebug(
             radius,
             color,
             14);
+    }
+
+    private static void AppendSnapshotSuppressionDebug(
+        VertexArray debug,
+        RenderUnitState unit,
+        float x,
+        float y,
+        float tilePixelSize)
+    {
+        float suppression = unit.Suppression;
+        if (suppression <= 0.01f)
+            return;
+
+        Color color = unit.SuppressionState switch
+        {
+            UnitSuppressionState.Panicked => new Color(255, 70, 70, 220),
+            UnitSuppressionState.Suppressed => new Color(255, 200, 70, 190),
+            _ => new Color(190, 190, 190, 130)
+        };
+        float radius = (0.45f + MathF.Min(1f, suppression * 0.15f)) * tilePixelSize;
+        AppendCircleOutline(debug, x, y, radius, color, 14);
     }
 
     private static void AppendAiDebug(
