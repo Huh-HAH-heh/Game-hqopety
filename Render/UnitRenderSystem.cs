@@ -2187,22 +2187,39 @@ private static void AppendSuppressionDebug(
 
             if (check.State == VisionState.Visible)
             {
-                float visibleX = check.VisibleTargetPoint.X * tilePixelSize;
-                float visibleY = check.VisibleTargetPoint.Y * tilePixelSize;
-                Color zoneColor = GetVisibleZoneColor(check.VisiblePoint);
-                AppendDebugLine(
-                    debug,
-                    eyeX,
-                    eyeY,
-                    visibleX,
-                    visibleY,
-                    new Color(zoneColor.R, zoneColor.G, zoneColor.B, 115));
-                AppendVisibleZoneMarker(
-                    debug,
-                    visibleX,
-                    visibleY,
-                    check.VisiblePoint,
-                    tilePixelSize);
+                int pointCount = UnitHitSystem.GetVisibilityPointCount(
+                    units,
+                    targetIndex,
+                    simulation.HitRegions);
+                for (int pointIndex = 0; pointIndex < pointCount; pointIndex++)
+                {
+                    VisionCheck pointCheck = simulation.Vision.EvaluateVisibilityPoint(
+                        units,
+                        worldMap,
+                        observerIndex,
+                        targetIndex,
+                        pointIndex,
+                        simulation.Bodies);
+                    if (!pointCheck.IsVisible)
+                        continue;
+
+                    float visibleX = pointCheck.VisibleTargetPoint.X * tilePixelSize;
+                    float visibleY = pointCheck.VisibleTargetPoint.Y * tilePixelSize;
+                    Color zoneColor = GetVisibleZoneColor(pointCheck.VisiblePoint);
+                    AppendDebugLine(
+                        debug,
+                        eyeX,
+                        eyeY,
+                        visibleX,
+                        visibleY,
+                        new Color(zoneColor.R, zoneColor.G, zoneColor.B, 115));
+                    AppendVisibleZoneMarker(
+                        debug,
+                        visibleX,
+                        visibleY,
+                        pointCheck.VisiblePoint,
+                        tilePixelSize);
+                }
             }
 
             if (check.State ==
