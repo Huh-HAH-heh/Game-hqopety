@@ -200,7 +200,7 @@ public sealed class VisionSystem
         if (_visibilityTerrainVersion != worldMap.TerrainVersion)
         {
             Array.Clear(_lastVisibleUpdate);
-            Array.Fill(_lastVisiblePoint, (short)-1);
+            
             _visibilityTerrainVersion = worldMap.TerrainVersion;
         }
 
@@ -652,7 +652,7 @@ public sealed class VisionSystem
         Array.Clear(_visibleStarts);
         Array.Clear(_visibleCounts);
         Array.Clear(_lastVisibleUpdate);
-        Array.Fill(_lastVisiblePoint, (short)-1);
+        
         Array.Clear(_sectorTargetCursors);
         _visibleTargetCount = 0;
         _visionUpdateSequence = 0;
