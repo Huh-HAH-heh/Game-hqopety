@@ -151,10 +151,12 @@ public sealed class MeleeCombatSystem
                 _randomState[attacker] = Seed(units.GetId(attacker));
 
             if (health.OverallHitPoints[attacker] <= 0f ||
+                units.Posture[attacker] == UnitPosture.Injured ||
                 !ai.HasTarget[attacker] ||
                 !units.TryGetIndex(ai.Target[attacker], out int target) ||
                 target == attacker ||
                 health.OverallHitPoints[target] <= 0f ||
+                units.Posture[target] == UnitPosture.Injured ||
                 !FactionRules.ShouldAttack(units.FactionTag[attacker], units.FactionTag[target]))
             {
                 continue;
