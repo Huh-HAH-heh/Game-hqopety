@@ -141,6 +141,7 @@ public sealed class GameRenderer
     private GameMenuOverlay? _gameMenuOverlay;
     private ContextMenuOverlay? _contextMenuOverlay;
     private DebugLayersOverlay? _debugLayersOverlay;
+    private UtilityAiDebugOverlay? _utilityAiDebugOverlay;
     private UnitGroupCardOverlay? _unitGroupCardOverlay;
     private UnitBodyRigEditorOverlay? _bodyRigEditorOverlay;
     private readonly List<UnitCardEntry> _unitCards = new();
@@ -162,6 +163,7 @@ public sealed class GameRenderer
     private volatile bool _showVisionDebug;
     private volatile bool _showHearingDebug;
     private volatile bool _showMemoryDebug;
+    private volatile bool _showUtilityAiDebug;
     private bool _showAttackLinks = true;
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
@@ -319,6 +321,7 @@ public sealed class GameRenderer
             _gameMenuOverlay?.Dispose();
             _contextMenuOverlay?.Dispose();
             _debugLayersOverlay?.Dispose();
+            _utilityAiDebugOverlay?.Dispose();
             CloseUnitCards();
             _unitGroupCardOverlay?.Dispose();
             _bodyRigEditorOverlay?.Dispose();
@@ -453,15 +456,16 @@ public sealed class GameRenderer
             double simMs = snapshot?.SimulationMs ?? _unitSimulation.LastSimulationUpdateMilliseconds;
             double aiMs = snapshot?.AiMs ?? _unitSimulation.LastAIUpdateMilliseconds;
             double aiPlanningMs = snapshot?.AiPlanningMs ?? _unitSimulation.AI.LastPlanningMilliseconds;
-            bool btEnabled = snapshot?.BehaviacEnabled ?? _unitSimulation.AI.UseBehaviacDecisionLayer;
-            bool btReady = snapshot?.BehaviacRuntimeReady ?? _unitSimulation.AI.BehaviacRuntimeReady;
-            int btDecisions = snapshot?.BehaviacDecisionCount ?? _unitSimulation.AI.LastBehaviacDecisions;
-            double btDecisionMs = snapshot?.BehaviacDecisionMs ?? _unitSimulation.AI.LastBehaviacDecisionBatchMilliseconds;
-            int btFlank = snapshot?.BehaviacFlankCount ?? _unitSimulation.AI.LastBehaviacFlankDecisions;
-            int btCover = snapshot?.BehaviacCoverCount ?? _unitSimulation.AI.LastBehaviacCoverDecisions;
-            int btRetreat = snapshot?.BehaviacRetreatCount ?? _unitSimulation.AI.LastBehaviacRetreatDecisions;
-            int btEngage = snapshot?.BehaviacEngageCount ?? _unitSimulation.AI.LastBehaviacEngageDecisions;
-            int btInvestigate = snapshot?.BehaviacInvestigateCount ?? _unitSimulation.AI.LastBehaviacInvestigateDecisions;
+            bool utilityAiEnabled = snapshot?.UtilityAiEnabled ??
+                (_unitSimulation.AI.Enabled && _unitSimulation.AI.UseUtilityDecisionLayer);
+            bool utilityAiReady = snapshot?.UtilityAiReady ?? _unitSimulation.AI.UtilityDecisionReady;
+            int utilityAiDecisions = snapshot?.UtilityAiDecisionCount ?? _unitSimulation.AI.LastUtilityDecisions;
+            double utilityAiDecisionMs = snapshot?.UtilityAiDecisionMs ?? _unitSimulation.AI.LastUtilityDecisionBatchMilliseconds;
+            int utilityAiFlank = snapshot?.UtilityAiFlankCount ?? _unitSimulation.AI.LastUtilityFlankDecisions;
+            int utilityAiCover = snapshot?.UtilityAiCoverCount ?? _unitSimulation.AI.LastUtilityCoverDecisions;
+            int utilityAiRetreat = snapshot?.UtilityAiRetreatCount ?? _unitSimulation.AI.LastUtilityRetreatDecisions;
+            int utilityAiEngage = snapshot?.UtilityAiEngageCount ?? _unitSimulation.AI.LastUtilityEngageDecisions;
+            int utilityAiInvestigate = snapshot?.UtilityAiInvestigateCount ?? _unitSimulation.AI.LastUtilityInvestigateDecisions;
             double moveMs = snapshot?.MovementMs ?? _unitSimulation.LastMovementUpdateMilliseconds;
             double weaponsMs = snapshot?.WeaponsMs ?? _unitSimulation.LastWeaponUpdateMilliseconds;
             double ballisticsMs = snapshot?.BallisticsMs ?? _unitSimulation.LastProjectileUpdateMilliseconds;
@@ -489,8 +493,9 @@ public sealed class GameRenderer
                 $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
                 $"Units={activeUnits} SimPaused={_simulationPaused} Sim={simMs:0.0}ms " +
                 $"Vision={visionMetrics} AI={aiMs:0.0}ms Plan={aiPlanningMs:0.0}ms Move={moveMs:0.0}ms " +
-                $"BT={(btEnabled ? (btReady ? "ON" : "INIT") : "OFF")} {btDecisions} decisions/{btDecisionMs:0.00}ms " +
-                $"F={btFlank} C={btCover} R={btRetreat} E={btEngage} Inv={btInvestigate} " +
+                $"UtilityAI={(utilityAiEnabled ? (utilityAiReady ? "ON" : "INIT") : "OFF")} " +
+                $"{utilityAiDecisions} decisions/{utilityAiDecisionMs:0.00}ms " +
+                $"F={utilityAiFlank} C={utilityAiCover} R={utilityAiRetreat} E={utilityAiEngage} Inv={utilityAiInvestigate} " +
                 $"Weapons={weaponsMs:0.0}ms Ballistics={ballisticsMs:0.0}ms Grid={gridMs:0.0}ms " +
                 $"P={pVisited} TraceCells={traceCells} UnitCandidates={unitCandidates} " +
                 $"Shots/s={shotsPerSecond:0} Rounds/s={roundsPerSecond:0} " +
@@ -790,6 +795,39 @@ public sealed class GameRenderer
                     _window.Size.Y);
             }
 
+            UnitIntentUtilityContext utilityAiContext = default;
+            UnitIntentUtilityBreakdown utilityAiDecision = default;
+            bool hasUtilityAiDebugState = false;
+            if (_showUtilityAiDebug && _selectedUnit.IsValid)
+            {
+                if (renderSnapshot != null &&
+                    renderSnapshot.HasUtilityAiDebugState &&
+                    renderSnapshot.UtilityAiDebugObserver == _selectedUnit)
+                {
+                    utilityAiContext = renderSnapshot.UtilityAiDebugContext;
+                    utilityAiDecision = renderSnapshot.UtilityAiDebugDecision;
+                    hasUtilityAiDebugState = true;
+                }
+                else if (_simulationThread == null &&
+                    _unitSimulation.Units.TryGetIndex(_selectedUnit, out int utilityUnitIndex))
+                {
+                    UnitAiStore utilityStore = _unitSimulation.AI.Store;
+                    utilityAiContext = utilityStore.UtilityIntentContext[utilityUnitIndex];
+                    utilityAiDecision = utilityStore.UtilityIntentBreakdown[utilityUnitIndex];
+                    hasUtilityAiDebugState = _unitSimulation.AI.Enabled;
+                }
+            }
+
+            _utilityAiDebugOverlay?.Draw(
+                _window,
+                _window.Size.X,
+                _window.Size.Y,
+                _showUtilityAiDebug,
+                _selectedUnit,
+                hasUtilityAiDebugState,
+                utilityAiContext,
+                utilityAiDecision);
+
             _debugLayersOverlay?.Draw(
                 _window,
                 _window.Size.X,
@@ -800,7 +838,8 @@ public sealed class GameRenderer
                 _showAttackLinks,
                 _showAiStateDebug,
                 _showSuppressionDebug,
-                _showMemoryDebug);
+                _showMemoryDebug,
+                _showUtilityAiDebug);
         }
 
         _bodyRigEditorOverlay?.Draw(_window, _window.Size.X, _window.Size.Y);
@@ -2688,7 +2727,9 @@ public sealed class GameRenderer
                         _showVisionDebug ? _worldMap : null,
                         _showHearingDebug,
                         _showMemoryDebug,
-                        _showMemoryDebug ? _selectedUnit : default));
+                        _showMemoryDebug ? _selectedUnit : default,
+                        _showUtilityAiDebug,
+                        _showUtilityAiDebug ? _selectedUnit : default));
             }
             catch (Exception exception)
             {
@@ -2742,6 +2783,7 @@ public sealed class GameRenderer
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
         _debugLayersOverlay = new DebugLayersOverlay();
+        _utilityAiDebugOverlay = new UtilityAiDebugOverlay();
         _unitGroupCardOverlay = new UnitGroupCardOverlay();
         _bodyRigEditorOverlay = new UnitBodyRigEditorOverlay(
             SaveColonistBodyRig,
@@ -3385,6 +3427,9 @@ public sealed class GameRenderer
                 break;
             case DebugLayerType.Memory:
                 _showMemoryDebug = !_showMemoryDebug;
+                break;
+            case DebugLayerType.UtilityAi:
+                _showUtilityAiDebug = !_showUtilityAiDebug;
                 break;
         }
     }
