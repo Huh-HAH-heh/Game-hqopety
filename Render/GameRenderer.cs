@@ -1779,10 +1779,19 @@ public sealed class GameRenderer
         uint jitterHash = MixMoveLineHash(seed ^ ((uint)index + 1u) * 0x9E3779B9u);
         float jitterUnit = (jitterHash & 0x00FFFFFFu) / 16777215f * 2f - 1f;
         float bucketLength = length / unitCount;
-        float maxJitter = MathF.Min(bucketLength * 0.42f, MathF.Max(0f, spacing) * 0.45f);
+        float maxJitter = MathF.Min(bucketLength * 0.45f, MathF.Max(0f, spacing) * 0.6f);
         float alongLine = ((slot + 0.5f) * bucketLength) + jitterUnit * maxJitter;
 
-        return start + delta / length * alongLine;
+        // Keep a visible average line, but spread pawns on both sides of it.
+        // The triangular distribution favours small offsets and avoids a rigid
+        // second row or a uniformly thick rectangular block.
+        uint sideHashA = MixMoveLineHash(seed ^ ((uint)index + 1u) * 0x85EBCA6Bu);
+        uint sideHashB = MixMoveLineHash(seed ^ ((uint)index + 1u) * 0xC2B2AE35u);
+        float sideA = (sideHashA & 0x00FFFFFFu) / 16777215f;
+        float sideB = (sideHashB & 0x00FFFFFFu) / 16777215f;
+        float sideOffset = (sideA + sideB - 1f) * MathF.Max(0.15f, spacing * 1.25f);
+
+        return start + delta / length * alongLine + perpendicular * sideOffset;
     }
 
     private static uint MixMoveLineHash(uint value)
