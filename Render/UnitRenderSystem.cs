@@ -14,6 +14,7 @@ namespace RimClone.Render;
 public sealed class UnitRenderSystem : IDisposable
 {
     private const int CircleSegments = 16;
+    private const float UnitVisualScale = 0.8f;
     private const float UnitDetailFadeStartPixels = 8f;
     private const float UnitDetailFadeEndPixels = 12f;
     private const int VisionConeSegments = 20;
@@ -242,6 +243,7 @@ public sealed class UnitRenderSystem : IDisposable
                         isAlive,
                         tilePixelSize,
                         screenScale,
+                        unitPosition,
                         1f);
                 }
             }
@@ -263,6 +265,18 @@ public sealed class UnitRenderSystem : IDisposable
             }
 
             
+
+            if (isAlive)
+            {
+                AppendPostureMarker(
+                    _statusIcons,
+                    screenX,
+                    screenY,
+                    markerRadius,
+                    units.Posture[unitIndex],
+                    screenScale,
+                    1f);
+            }
 
             if (!isAlive)
                 continue;
@@ -300,6 +314,7 @@ public sealed class UnitRenderSystem : IDisposable
                     MathF.Max(
                         selectionRadius,
                         0.45f) *
+                    UnitVisualScale *
                     tilePixelSize);
             }
         }
@@ -523,6 +538,7 @@ public void DrawSnapshot(
                     isAlive,
                     tilePixelSize,
                     screenScale,
+                    position,
                     1f);
             }
 
@@ -544,6 +560,18 @@ public void DrawSnapshot(
 
             
 
+            if (isAlive)
+            {
+                AppendPostureMarker(
+                    _statusIcons,
+                    x,
+                    y,
+                    markerRadius,
+                    unit.Posture,
+                    screenScale,
+                    1f);
+            }
+
             if (!isAlive)
                 continue;
 
@@ -554,7 +582,7 @@ public void DrawSnapshot(
                     _selection,
                     x,
                     y,
-                    MathF.Max(selectionRadius, 0.45f) * tilePixelSize);
+                    MathF.Max(selectionRadius, 0.45f) * UnitVisualScale * tilePixelSize);
             }
         }
 
@@ -651,6 +679,7 @@ public void DrawSnapshot(
         bool isAlive,
         float tilePixelSize,
         float screenScale,
+        Vector3 origin,
         float opacity = 1f)
     {
         if (start < 0 || count <= 0 || start >= bodies.Count)
@@ -672,8 +701,8 @@ public void DrawSnapshot(
             AppendBodyPart(
                 fills,
                 outlines,
-                positions[i],
-                scales[i],
+                origin + (positions[i] - origin) * UnitVisualScale,
+                scales[i] * UnitVisualScale,
                 rotations[i],
                 primitives[i],
                 roles[i],
@@ -698,6 +727,7 @@ public void DrawSnapshot(
         bool isAlive,
         float tilePixelSize,
         float screenScale,
+        Vector3 origin,
         float opacity = 1f)
     {
         if (start < 0 || count <= 0 || start >= bodyParts.Length)
@@ -714,8 +744,8 @@ public void DrawSnapshot(
             AppendBodyPart(
                 fills,
                 outlines,
-                part.Position,
-                part.Scale,
+                origin + (part.Position - origin) * UnitVisualScale,
+                part.Scale * UnitVisualScale,
                 part.Rotation,
                 part.Primitive,
                 part.Role,
@@ -740,6 +770,7 @@ public void DrawSnapshot(
         float tilePixelSize,
         float screenScale)
     {
+        Vector3 origin = units.Position[unitIndex];
         for (int zoneIndex = 0; zoneIndex < UnitGameplayZoneSystem.ZoneCount; zoneIndex++)
         {
             UnitGameplayZoneGeometry zone = UnitGameplayZoneSystem.GetGeometry(
@@ -748,8 +779,8 @@ public void DrawSnapshot(
             AppendBodyPart(
                 fills,
                 outlines,
-                part.Position,
-                part.Scale,
+                origin + (part.Position - origin) * UnitVisualScale,
+                part.Scale * UnitVisualScale,
                 part.Rotation,
                 part.Primitive,
                 part.Role,
@@ -1374,7 +1405,7 @@ public void DrawSnapshot(
         float screenScale)
     {
         float footprint = MathF.Max(width, length);
-        return MathF.Max(
+        return UnitVisualScale * MathF.Max(
             2.0f / MathF.Max(0.001f, screenScale),
             MathF.Max(0.13f, footprint * 0.125f) * tilePixelSize);
     }
@@ -1426,7 +1457,7 @@ public void DrawSnapshot(
             return;
 
         float pixel = 1f / MathF.Max(0.001f, screenScale);
-        float size = MathF.Max(pixel * 1.5f, MathF.Min(radius * 0.42f, pixel * 3f));
+        float size = UnitVisualScale * MathF.Max(pixel * 1.5f, MathF.Min(radius * 0.42f, pixel * 3f));
         float centerX = x + radius * 0.82f + size * 0.25f;
         float centerY = y - radius * 0.82f - size * 0.25f;
         Color color = ApplyOpacity(new Color(150, 162, 174, 145), opacity);
@@ -1465,6 +1496,15 @@ public void DrawSnapshot(
                     centerX - size, centerY, color);
                 AppendDebugLine(vertices, centerX - size, centerY,
                     centerX, centerY - size, color);
+                break;
+
+            case UnitPosture.Injured:
+                AppendDebugLine(vertices,
+                    centerX - size * 0.45f, centerY,
+                    centerX + size * 0.45f, centerY, color);
+                AppendDebugLine(vertices,
+                    centerX, centerY - size * 0.45f,
+                    centerX, centerY + size * 0.45f, color);
                 break;
         }
     }
