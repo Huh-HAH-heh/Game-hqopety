@@ -5,6 +5,7 @@ using System.Diagnostics;
 using Core.Items;
 using Core.AI;
 using Core.Combat;
+using Core.Map;
 using Core.AI.Behaviac;
 using Core.Unit;
 
@@ -214,7 +215,8 @@ public sealed class SimulationFrameSnapshot
 
     public static SimulationFrameSnapshot Capture(
         UnitSimulation simulation,
-        UnitId visionDebugObserver = default)
+        UnitId visionDebugObserver = default,
+        WorldMap? visionDebugMap = null)
     {
         long captureStarted = Stopwatch.GetTimestamp();
         UnitStore units = simulation.Units;
@@ -645,6 +647,7 @@ public sealed class SimulationFrameSnapshot
         Vector3 visionObserverEye = Vector3.Zero;
         RenderVisionContact[] visionContacts = Array.Empty<RenderVisionContact>();
         if (simulation.VisionEnabled &&
+            visionDebugMap != null &&
             visionDebugObserver.IsValid &&
             units.TryGetIndex(visionDebugObserver, out int visionObserverIndex) &&
             simulation.Health.OverallHitPoints[visionObserverIndex] > 0f)
@@ -655,18 +658,16 @@ public sealed class SimulationFrameSnapshot
                 visionObserverIndex,
                 bodyStore);
             ReadOnlySpan<int> visibleTargets = vision.GetVisibleTargets(visionObserverIndex);
-            List<RenderVisionContact> contacts = new(visibleTargets.Length);
+            List<RenderVisionContact> contacts = new(visibleTargets.Length * 2);
 
+            // Recheck each zone only for this selected observer's current visible
+            // targets. The normal all-unit vision and AI cadence stays unchanged.
             for (int i = 0; i < visibleTargets.Length; i++)
             {
                 int targetIndex = visibleTargets[i];
                 if ((uint)targetIndex >= (uint)units.Capacity ||
                     targetIndex == visionObserverIndex ||
-                    simulation.Health.OverallHitPoints[targetIndex] <= 0f ||
-                    !vision.TryGetLatestVisiblePointIndex(
-                        visionObserverIndex,
-                        targetIndex,
-                        out int visiblePointIndex))
+                    simulation.Health.OverallHitPoints[targetIndex] <= 0f)
                 {
                     continue;
                 }
@@ -675,23 +676,25 @@ public sealed class SimulationFrameSnapshot
                 if (!targetId.IsValid)
                     continue;
 
-                int regionIndex = UnitHitSystem.GetVisibilityRegionIndex(
-                    units,
-                    targetIndex,
-                    visiblePointIndex,
-                    hitRegionStore);
-                Vector3 visiblePoint = UnitHitSystem.GetGameplayTargetPoint(
-                    units,
-                    targetIndex,
-                    regionIndex,
-                    visionObserverEye,
-                    hitRegionStore,
-                    UnitAnatomyMarkerRole.Vision,
-                    bodyStore);
-                contacts.Add(new RenderVisionContact(
-                    targetId,
-                    visiblePoint,
-                    visiblePointIndex));
+                int pointCount = UnitHitSystem.GetVisibilityPointCount(
+                    units, targetIndex, hitRegionStore);
+                for (int pointIndex = 0; pointIndex < pointCount; pointIndex++)
+                {
+                    VisionCheck check = vision.EvaluateVisibilityPoint(
+                        units,
+                        visionDebugMap,
+                        visionObserverIndex,
+                        targetIndex,
+                        pointIndex,
+                        bodyStore);
+                    if (!check.IsVisible)
+                        continue;
+
+                    contacts.Add(new RenderVisionContact(
+                        targetId,
+                        check.VisibleTargetPoint,
+                        check.VisiblePoint));
+                }
             }
 
             visionContacts = contacts.ToArray();
