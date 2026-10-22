@@ -108,8 +108,14 @@ public sealed class UtilityAiDebugOverlay : IDisposable
             _traitsLine == null || _contactLine == null || _waitingLine == null)
             return;
 
-        float x = Math.Clamp((float)windowWidth - Width - 12f, 8f, Math.Max(8f, windowWidth - Width));
-        float y = Math.Clamp(92f, 8f, Math.Max(8f, windowHeight - Height));
+        // Keep this inspector away from both the top-right layer menu and
+        // the top-left combat HUD. Bottom-left also keeps the selected pawn's
+        // scoring bars visible when the debug-layer checklist is open.
+        float x = Math.Clamp(12f, 8f, Math.Max(8f, windowWidth - Width));
+        float y = Math.Clamp(
+            (float)windowHeight - Height - 8f,
+            8f,
+            Math.Max(8f, windowHeight - Height));
         _panel.Position = new Vector2f(x, y);
         _header.Position = new Vector2f(x + 1f, y + 1f);
 
