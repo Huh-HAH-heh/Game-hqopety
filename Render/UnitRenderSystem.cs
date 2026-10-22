@@ -174,6 +174,11 @@ public sealed class UnitRenderSystem : IDisposable
                     unitIndex,
                     tilePixelSize,
                     _aimTargetDrawn);
+                AppendActiveAttackLinks(
+                    _aiming,
+                    simulation,
+                    unitIndex,
+                    tilePixelSize);
             }
 
             if (hideUnseenTargets &&
@@ -366,7 +371,8 @@ public void DrawSnapshot(
         int selectedUnitIndex,
         bool showAiDebug,
         HashSet<UnitId>? selectedUnits = null,
-        bool showUnitRig = true)
+        bool showUnitRig = true,
+        bool showVisionDebug = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -505,6 +511,9 @@ public void DrawSnapshot(
             }
 
             bool isAlive = unit.HitPoints > 0f;
+            if (isAlive && showUnitDetails)
+                AppendSnapshotAttackLinks(_aiming, unit, x, y, tilePixelSize);
+
             float markerRadius = GetMarkerRadius(
                 unit.Width,
                 unit.Length,
@@ -587,6 +596,38 @@ public void DrawSnapshot(
             }
         }
 
+        if (showVisionDebug &&
+            snapshot.VisionDebugObserver.IsValid &&
+            snapshot.VisionDebugObserver.Index == selectedUnitIndex)
+        {
+            RenderUnitState observer = default;
+            bool observerFound = false;
+            for (int unitIndex = 0; unitIndex < units.Length; unitIndex++)
+            {
+                if (units[unitIndex].Index != selectedUnitIndex ||
+                    units[unitIndex].Generation != snapshot.VisionDebugObserver.Generation)
+                    continue;
+
+                observer = units[unitIndex];
+                observerFound = true;
+                break;
+            }
+
+            if (observerFound)
+            {
+                AppendSnapshotVisionDebug(
+                    _visionArea,
+                    _visionDebug,
+                    snapshot,
+                    observer,
+                    snapshot.VisionDebugObserverEye,
+                    tilePixelSize);
+            }
+        }
+
+        if (_visionArea.VertexCount > 0)
+            window.Draw(_visionArea);
+
         MeleeHitVisual[] meleeHitVisuals = snapshot.MeleeHitVisuals;
         for (int i = 0; i < meleeHitVisuals.Length; i++)
         {
@@ -666,6 +707,8 @@ public void DrawSnapshot(
             window.Draw(_selection);
         if (_aiming.VertexCount > 0)
             window.Draw(_aiming);
+        if (_visionDebug.VertexCount > 0)
+            window.Draw(_visionDebug);
         if (_aiDebug.VertexCount > 0)
             window.Draw(_aiDebug);
     }
@@ -2137,6 +2180,26 @@ private static void AppendSuppressionDebug(
                 continue;
             }
 
+            if (check.State == VisionState.Visible)
+            {
+                float visibleX = check.VisibleTargetPoint.X * tilePixelSize;
+                float visibleY = check.VisibleTargetPoint.Y * tilePixelSize;
+                Color zoneColor = GetVisibleZoneColor(check.VisiblePoint);
+                AppendDebugLine(
+                    debug,
+                    eyeX,
+                    eyeY,
+                    visibleX,
+                    visibleY,
+                    new Color(zoneColor.R, zoneColor.G, zoneColor.B, 115));
+                AppendVisibleZoneMarker(
+                    debug,
+                    visibleX,
+                    visibleY,
+                    check.VisiblePoint,
+                    tilePixelSize);
+            }
+
             if (check.State ==
                 VisionState.HiddenByTerrain)
             {
@@ -2156,6 +2219,161 @@ private static void AppendSuppressionDebug(
                     10);
             }
         }
+    }
+
+    private static Color GetVisibleZoneColor(int pointIndex) =>
+        pointIndex switch
+        {
+            0 => new Color(80, 210, 255, 235),  // head
+            1 => new Color(95, 230, 135, 235),  // torso
+            2 => new Color(255, 205, 85, 235),  // lower body
+            _ => new Color(205, 220, 245, 235)
+        };
+
+    private static void AppendVisibleZoneMarker(
+        VertexArray debug,
+        float x,
+        float y,
+        int pointIndex,
+        float tilePixelSize)
+    {
+        Color color = GetVisibleZoneColor(pointIndex);
+        float radius = MathF.Max(1.5f, tilePixelSize * 0.22f);
+        AppendCircleOutline(debug, x, y, radius, color, 12);
+
+        float s = MathF.Max(1f, MathF.Min(tilePixelSize * 0.11f, 3f));
+        switch (pointIndex)
+        {
+            case 0: // H = head
+                AppendDebugLine(debug, x - s, y - s, x - s, y + s, color);
+                AppendDebugLine(debug, x + s, y - s, x + s, y + s, color);
+                AppendDebugLine(debug, x - s, y, x + s, y, color);
+                break;
+            case 1: // T = torso
+                AppendDebugLine(debug, x - s, y - s, x + s, y - s, color);
+                AppendDebugLine(debug, x, y - s, x, y + s, color);
+                break;
+            case 2: // L = lower body
+                AppendDebugLine(debug, x - s, y - s, x - s, y + s, color);
+                AppendDebugLine(debug, x - s, y + s, x + s, y + s, color);
+                break;
+        }
+    }
+
+    private static void AppendSnapshotVisionDebug(
+        VertexArray area,
+        VertexArray debug,
+        SimulationFrameSnapshot snapshot,
+        RenderUnitState observer,
+        Vector3 observerEye,
+        float tilePixelSize)
+    {
+        float eyeX = observerEye.X * tilePixelSize;
+        float eyeY = observerEye.Y * tilePixelSize;
+        float rootX = observer.Position.X * tilePixelSize;
+        float rootY = observer.Position.Y * tilePixelSize;
+        float headAngle = MathF.Atan2(observer.HeadNormal.Y, observer.HeadNormal.X);
+        float range = observer.ViewRange * tilePixelSize;
+
+        AppendVisionCone(area, debug, eyeX, eyeY, headAngle,
+            observer.FieldOfView, range);
+        AppendRangeRing(debug, eyeX, eyeY, range);
+        AppendDebugLine(debug, rootX, rootY, eyeX, eyeY,
+            new Color(220, 220, 220, 170));
+        AppendDebugLine(
+            debug,
+            eyeX,
+            eyeY,
+            eyeX + MathF.Cos(headAngle) * MathF.Min(observer.ViewRange, 3f) * tilePixelSize,
+            eyeY + MathF.Sin(headAngle) * MathF.Min(observer.ViewRange, 3f) * tilePixelSize,
+            new Color(255, 255, 255, 220));
+
+        RenderVisionContact[] contacts = snapshot.VisionContacts;
+        for (int i = 0; i < contacts.Length; i++)
+        {
+            RenderVisionContact contact = contacts[i];
+            float x = contact.VisiblePoint.X * tilePixelSize;
+            float y = contact.VisiblePoint.Y * tilePixelSize;
+            Color color = GetVisibleZoneColor(contact.VisiblePointIndex);
+            AppendDebugLine(
+                debug, eyeX, eyeY, x, y,
+                new Color(color.R, color.G, color.B, 115));
+            AppendVisibleZoneMarker(
+                debug, x, y, contact.VisiblePointIndex, tilePixelSize);
+        }
+    }
+
+    private static void AppendActiveAttackLinks(
+        VertexArray aiming,
+        UnitSimulation simulation,
+        int shooterIndex,
+        float tilePixelSize)
+    {
+        UnitStore units = simulation.Units;
+        UnitInventoryStore inventory = simulation.Inventory;
+        UnitWeaponStore weapons = simulation.Weapons;
+        Vector3 origin = units.Position[shooterIndex];
+
+        for (int slot = 0; slot < UnitInventoryStore.WeaponSlotCount; slot++)
+        {
+            int stateIndex = UnitWeaponStore.GetIndex(shooterIndex, (UnitWeaponSlot)slot);
+            if (!weapons.AimIndicatorActive[stateIndex] ||
+                weapons.AimTimer[stateIndex] <= 0f ||
+                !units.TryGetIndex(weapons.AimTarget[stateIndex], out int targetIndex) ||
+                simulation.Health.OverallHitPoints[targetIndex] <= 0f)
+                continue;
+
+            short inventorySlot = inventory.GetWeaponEquipment(shooterIndex, (UnitWeaponSlot)slot);
+            if (inventorySlot < 0 ||
+                inventory.GetItem(shooterIndex, inventorySlot) is not RangedWeaponConfig)
+                continue;
+
+            Vector3 point = weapons.AimPoint[stateIndex];
+            if (point == Vector3.Zero)
+                continue;
+
+            AppendDebugLine(
+                aiming,
+                origin.X * tilePixelSize,
+                origin.Y * tilePixelSize,
+                point.X * tilePixelSize,
+                point.Y * tilePixelSize,
+                new Color(255, 125, 95, 105));
+        }
+    }
+
+    private static void AppendSnapshotAttackLinks(
+        VertexArray aiming,
+        RenderUnitState unit,
+        float x,
+        float y,
+        float tilePixelSize)
+    {
+        AppendSnapshotAttackLink(aiming, unit.PrimaryWeapon, x, y, tilePixelSize);
+        AppendSnapshotAttackLink(aiming, unit.SecondaryWeapon, x, y, tilePixelSize);
+        AppendSnapshotAttackLink(aiming, unit.UtilityWeapon, x, y, tilePixelSize);
+    }
+
+    private static void AppendSnapshotAttackLink(
+        VertexArray aiming,
+        RenderWeaponVisual weapon,
+        float x,
+        float y,
+        float tilePixelSize)
+    {
+        if (weapon.Config is not RangedWeaponConfig ||
+            !weapon.AimIndicatorActive ||
+            weapon.AimTimer <= 0f ||
+            weapon.AimPoint == Vector3.Zero)
+            return;
+
+        AppendDebugLine(
+            aiming,
+            x,
+            y,
+            weapon.AimPoint.X * tilePixelSize,
+            weapon.AimPoint.Y * tilePixelSize,
+            new Color(255, 125, 95, 105));
     }
 
     private static Color GetVisionColor(
