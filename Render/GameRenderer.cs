@@ -1765,9 +1765,9 @@ public sealed class GameRenderer
         float t = columnsInRow <= 1
             ? 0.5f
             : column / (float)(columnsInRow - 1);
-        Vector2 lineCenter = (start + end) * 0.5f;
         Vector2 onLine = Vector2.Lerp(start, end, t);
-        float rowOffset = (row - (rows - 1) * 0.5f) * spacing;
+        // The dragged line is the front rank; overflow ranks form behind it.
+        float rowOffset = -row * spacing;
         return onLine + perpendicular * rowOffset;
     }
 
