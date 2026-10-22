@@ -89,6 +89,36 @@ public sealed class UnitNavigationSystem
             ? _lastStatuses[unitIndex]
             : UnitNavigationStatus.Unknown;
 
+    public int GetRoutePointCount(int unitIndex)
+    {
+        if ((uint)unitIndex >= (uint)_paths.Length)
+            return 0;
+
+        int[] path = _paths[unitIndex] ?? Array.Empty<int>();
+        int start = Math.Clamp(_pathCursor[unitIndex], 0, path.Length);
+        return path.Length - start;
+    }
+
+    public int CopyRoutePoints(int unitIndex, Span<Vector2> destination)
+    {
+        if ((uint)unitIndex >= (uint)_paths.Length || _width <= 0)
+            return 0;
+
+        int[] path = _paths[unitIndex] ?? Array.Empty<int>();
+        int start = Math.Clamp(_pathCursor[unitIndex], 0, path.Length);
+        int count = Math.Min(destination.Length, path.Length - start);
+
+        for (int i = 0; i < count; i++)
+        {
+            int cell = path[start + i];
+            destination[i] = new Vector2(
+                cell % _width + 0.5f,
+                cell / _width + 0.5f);
+        }
+
+        return count;
+    }
+
     private int _width;
     private int _height;
     private int _cellCount;
