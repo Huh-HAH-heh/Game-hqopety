@@ -15,6 +15,7 @@ namespace Core.Unit;
 public sealed class UnitAiSystem
 {
     private const float ThinkInterval = 0.15f;
+    private const int ThinkPhaseBuckets = 9;
     private const float TargetMemorySeconds = 3f;
     private const float LowHealthThreshold = 0.35f;
     private const float CoverSearchRadius = 8f;
@@ -136,7 +137,7 @@ public sealed class UnitAiSystem
         // Spread the first decision across one ThinkInterval; all later decisions
         // stay on this pawn's own ~150 ms cadence instead of a world-wide batch.
         _unitThinkElapsedSeconds[unitIndex] =
-            ThinkInterval * (unitIndex % 9) / 9f;
+            ThinkInterval * (unitIndex % ThinkPhaseBuckets) / ThinkPhaseBuckets;
         _unitThinkDeltaSeconds[unitIndex] = 0f;
         Personality.InitializeUnit(unitIndex, generation, factionTag);
         Store.UtilityIntent[unitIndex] = BehaviacUnitIntent.None;
@@ -390,7 +391,7 @@ public sealed class UnitAiSystem
             {
                 // A non-panicked but suppressed/low-health unit may still seek
                 // cover under a Hold order. Move to the planned cover, then let
-                // the tree resume HoldPositionEngage once it is reached.
+                // the utility scorer resume its hold/engage choice once reached.
                 if (!Store.HasGoal[unit] && _hasSuppressionCoverByUnit[unit])
                     Store.SetGoal(unit, _suppressionCoverByUnit[unit]);
 
@@ -408,7 +409,7 @@ public sealed class UnitAiSystem
             if (intent != BehaviacUnitIntent.FlankTarget &&
                 Store.State[unit] == UnitAiState.Flank)
             {
-                // If the tree interrupts a flanking run (lost target, suppression,
+                // If Utility AI interrupts a flanking run (lost target, suppression,
                 // or a tactical change), cancel the stale destination immediately.
                 Store.ClearGoal(unit);
                 Store.State[unit] = UnitAiState.Search;
