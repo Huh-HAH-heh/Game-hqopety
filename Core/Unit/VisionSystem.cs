@@ -77,8 +77,7 @@ public sealed class VisionSystem
     private int _lineOfSightChecks;
     private int _targetEvaluationCount;
     private int[] _lastVisibleUpdate = Array.Empty<int>();
-    private short[] _lastVisiblePoint = Array.Empty<short>();
-    private int[] _sectorTargetCursors = Array.Empty<int>();
+        private int[] _sectorTargetCursors = Array.Empty<int>();
     private int _visibilityCapacity;
     private int _visionUpdateSequence;
     private long _visibilityTerrainVersion = long.MinValue;
@@ -192,7 +191,7 @@ public sealed class VisionSystem
         if (_visionUpdateSequence >= int.MaxValue - VisibilityMemoryUpdates)
         {
             Array.Clear(_lastVisibleUpdate);
-            Array.Fill(_lastVisiblePoint, (short)-1);
+            
             _visionUpdateSequence = 0;
         }
 
@@ -504,10 +503,7 @@ public sealed class VisionSystem
             _lastVisibleUpdate[pairIndex] = check.IsVisible
                 ? _visionUpdateSequence
                 : 0;
-            _lastVisiblePoint[pairIndex] = check.IsVisible && check.VisiblePoint >= 0
-                ? (short)Math.Min(check.VisiblePoint, short.MaxValue)
-                : (short)-1;
-        }
+                    }
 
         // Rotate far-target picks independently from the nearest target.
         for (int sector = 0; sector < VisibilitySectorCount; sector++)
@@ -548,32 +544,6 @@ public sealed class VisionSystem
 
         return _lastVisibleUpdate[observerIndex * _visibilityCapacity + targetIndex] ==
             _visionUpdateSequence;
-    }
-
-    /// <summary>Returns the visible body-point index from the latest vision update only.</summary>
-    public bool TryGetLatestVisiblePointIndex(
-        int observerIndex,
-        int targetIndex,
-        out int pointIndex)
-    {
-        pointIndex = -1;
-        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
-            (uint)targetIndex >= (uint)_visibilityCapacity ||
-            observerIndex == targetIndex ||
-            _visionUpdateSequence <= 0)
-        {
-            return false;
-        }
-
-        int pairIndex = observerIndex * _visibilityCapacity + targetIndex;
-        if (_lastVisibleUpdate[pairIndex] != _visionUpdateSequence ||
-            _lastVisiblePoint[pairIndex] < 0)
-        {
-            return false;
-        }
-
-        pointIndex = _lastVisiblePoint[pairIndex];
-        return true;
     }
 
     public bool IsRecentlyVisible(
@@ -624,7 +594,7 @@ public sealed class VisionSystem
 
         int pairIndex = observerIndex * _visibilityCapacity + targetIndex;
         _lastVisibleUpdate[pairIndex] = 0;
-        _lastVisiblePoint[pairIndex] = -1;
+        
 
         int start = _visibleStarts[observerIndex];
         int end = start + _visibleCounts[observerIndex];
@@ -712,6 +682,22 @@ public sealed class VisionSystem
         return result;
     }
 
+    public VisionCheck EvaluateVisibilityPoint(
+        UnitStore units,
+        WorldMap worldMap,
+        int observerIndex,
+        int targetIndex,
+        int pointIndex,
+        UnitBodyStore? bodies = null)
+    {
+        int lineOfSightChecks = 0;
+        VisionCheck result = EvaluateCore(
+            units, worldMap, observerIndex, targetIndex, null, bodies,
+            ref lineOfSightChecks, pointIndex);
+        Interlocked.Add(ref _lineOfSightChecks, lineOfSightChecks);
+        return result;
+    }
+
     public VisionCheck EvaluateTargetMode(
         UnitStore units,
         WorldMap worldMap,
@@ -735,7 +721,8 @@ public sealed class VisionSystem
         int targetIndex,
         TargetMode? targetMode,
         UnitBodyStore? bodies,
-        ref int lineOfSightChecks)
+        ref int lineOfSightChecks,
+        int onlyPointIndex = -1)
     {
         // Direct combat LOS checks often omit the optional body store. Reuse the
         // same live rig bound during Update instead of reverting to standing-height
@@ -825,6 +812,9 @@ public sealed class VisionSystem
 
         for (int i = 0; i < pointCount; i++)
         {
+            if (onlyPointIndex >= 0 && i != onlyPointIndex)
+                continue;
+
             int regionIndex = visibilityRegionIndices[i];
             Vector3 point = visibilityPoints[i];
 
@@ -1739,8 +1729,6 @@ public sealed class VisionSystem
             _visibilityCapacity == 0 ? 32 : _visibilityCapacity * 2);
 
         int[] nextVisibleUpdates = new int[checked(newCapacity * newCapacity)];
-        short[] nextVisiblePoints = new short[checked(newCapacity * newCapacity)];
-        Array.Fill(nextVisiblePoints, (short)-1);
         int[] nextSectorCursors = new int[checked(newCapacity * VisibilitySectorCount)];
 
         for (int row = 0; row < _visibilityCapacity; row++)
@@ -1753,13 +1741,6 @@ public sealed class VisionSystem
                 _visibilityCapacity);
 
             Array.Copy(
-                _lastVisiblePoint,
-                row * _visibilityCapacity,
-                nextVisiblePoints,
-                row * newCapacity,
-                _visibilityCapacity);
-
-            Array.Copy(
                 _sectorTargetCursors,
                 row * VisibilitySectorCount,
                 nextSectorCursors,
@@ -1768,7 +1749,7 @@ public sealed class VisionSystem
         }
 
         _lastVisibleUpdate = nextVisibleUpdates;
-        _lastVisiblePoint = nextVisiblePoints;
+        
         _sectorTargetCursors = nextSectorCursors;
         _visibilityCapacity = newCapacity;
     }
