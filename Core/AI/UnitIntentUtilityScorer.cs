@@ -270,6 +270,7 @@ public static class UnitIntentUtilityScorer
         }
 
         if (!context.HasVisibleTarget &&
+            !hasAnyPlayerOrder &&
             context.HasActiveTargetMemory &&
             context.HasSuppressiveWeapon &&
             (!context.HasAudibleContact ||
@@ -280,7 +281,10 @@ public static class UnitIntentUtilityScorer
                 Clamp01(context.LastKnownTargetUtility) * 0.62f +
                 aggression * 0.075f +
                 shooting * 0.035f -
-                bodyBurden * 0.045f);
+                bodyBurden * 0.045f -
+                (context.IsSuppressed ? 0.14f : 0f) -
+                (context.IsPanicked ? 0.20f : 0f) -
+                (context.IsLowHealth ? 0.10f : 0f));
         }
 
         bool canInvestigate = !context.HasVisibleTarget &&
@@ -294,7 +298,10 @@ public static class UnitIntentUtilityScorer
                 Clamp01(context.LastKnownTargetUtility) * 0.64f +
                 aggression * 0.035f +
                 caution * 0.015f -
-                bodyBurden * 0.035f);
+                bodyBurden * 0.035f -
+                (context.IsSuppressed ? 0.16f : 0f) -
+                (context.IsPanicked ? 0.22f : 0f) -
+                (context.IsLowHealth ? 0.14f : 0f));
         }
 
         if (canInvestigate &&
@@ -481,6 +488,7 @@ public static class UnitIntentUtilityScorer
         BehaviacUnitIntent intent,
         in UnitIntentUtilityContext context) =>
         intent == BehaviacUnitIntent.Dead ||
+        (intent == BehaviacUnitIntent.RetreatToCover && context.IsLowHealth) ||
         ((intent is BehaviacUnitIntent.SeekCover or BehaviacUnitIntent.RetreatToCover) &&
          (context.IsInImmediateDanger || context.IsPanicked));
 
