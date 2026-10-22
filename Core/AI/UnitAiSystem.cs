@@ -46,7 +46,8 @@ public sealed class UnitAiSystem
     private readonly UnitSkillStore? _skills;
     private readonly PerceptionMemoryStore? _perceptionMemory;
     private readonly UnitMetabolismStore? _metabolism;
-    private float _thinkTimer;
+    private float[] _unitThinkElapsedSeconds = Array.Empty<float>();
+    private float[] _unitThinkDeltaSeconds = Array.Empty<float>();
     private float _tacticalTimeSeconds;
     private readonly SquadTacticalCoordinator _squadCoordinator = new();
 
@@ -132,6 +133,11 @@ public sealed class UnitAiSystem
     public void InitializeUnit(int unitIndex, uint generation, ushort factionTag)
     {
         EnsurePlanningCapacity(unitIndex + 1);
+        // Spread the first decision across one ThinkInterval; all later decisions
+        // stay on this pawn's own ~150 ms cadence instead of a world-wide batch.
+        _unitThinkElapsedSeconds[unitIndex] =
+            ThinkInterval * (unitIndex % 9) / 9f;
+        _unitThinkDeltaSeconds[unitIndex] = 0f;
         Personality.InitializeUnit(unitIndex, generation, factionTag);
         Store.UtilityIntent[unitIndex] = BehaviacUnitIntent.None;
         Store.UtilityIntentCommitRemainingSeconds[unitIndex] = 0f;
@@ -155,6 +161,10 @@ public sealed class UnitAiSystem
             return;
 
         _searchPatrolLegByUnit[unitIndex] = 0;
+        if ((uint)unitIndex < (uint)_unitThinkElapsedSeconds.Length)
+            _unitThinkElapsedSeconds[unitIndex] = 0f;
+        if ((uint)unitIndex < (uint)_unitThinkDeltaSeconds.Length)
+            _unitThinkDeltaSeconds[unitIndex] = 0f;
         if ((uint)unitIndex < (uint)_rememberedEnemyContextByUnit.Length)
             _rememberedEnemyContextByUnit[unitIndex] = null;
         if ((uint)unitIndex < (uint)_cachedRememberedEnemyContextByUnit.Length)
@@ -218,19 +228,35 @@ public sealed class UnitAiSystem
             return;
         }
 
-        _thinkTimer += deltaTime;
+        Store.EnsureCapacity(units.Capacity);
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        EnsurePlanningCapacity(units.Capacity);
 
-        if (_thinkTimer < ThinkInterval)
+        // Only a fraction of pawns becomes due each frame. The elapsed time is
+        // accumulated per pawn so sensing/intent cadence remains near 150 ms,
+        // while cover scans and memory queries no longer spike on one frame.
+        _tacticalTimeSeconds += deltaTime;
+        int dueCount = 0;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            float elapsed = _unitThinkElapsedSeconds[unit] + deltaTime;
+            _unitThinkElapsedSeconds[unit] = elapsed;
+            if (elapsed < ThinkInterval)
+                continue;
+
+            _unitThinkDeltaSeconds[unit] = elapsed;
+            _unitThinkElapsedSeconds[unit] = 0f;
+            _activeUnitScratch[dueCount++] = unit;
+        }
+
+        if (dueCount == 0)
             return;
 
-        float thinkDelta =
-            _thinkTimer;
-
-        _thinkTimer = 0f;
         LastUpdateRanThinkPass = true;
 
-        // Preserve these results between think ticks so the one-second
-        // performance logger doesn't usually sample a zero-work render frame.
+        // Preserve the most recent non-empty metrics sample between due batches;
+        // the one-second performance logger should not usually report zero work.
         LastPlanningMilliseconds = 0d;
         LastUtilityDecisions = 0;
         LastUtilityDecisionBatchMilliseconds = 0d;
@@ -247,36 +273,29 @@ public sealed class UnitAiSystem
         LastUtilityAttackOrderDecisions = 0;
         LastUtilityHoldAndEngageDecisions = 0;
 
-        Store.EnsureCapacity(
-            units.Capacity);
-
         long planningStarted = Stopwatch.GetTimestamp();
-        ReadOnlySpan<int> active =
-            units.ActiveIndices;
-
-        EnsurePlanningCapacity(units.Capacity);
-        active.CopyTo(_activeUnitScratch);
-        int activeCount = active.Length;
-
-        if (activeCount >= 32 && MaxAiPlanningParallelism > 1)
+        if (dueCount >= 32 && MaxAiPlanningParallelism > 1)
         {
-            Parallel.For(0, activeCount, AiPlanningOptions, i =>
+            Parallel.For(0, dueCount, AiPlanningOptions, i =>
+            {
+                int unit = _activeUnitScratch[i];
                 PrepareUnitPlan(
                     units, health, suppression, vision, worldMap,
-                    _activeUnitScratch[i], thinkDelta));
+                    unit, _unitThinkDeltaSeconds[unit]);
+            });
         }
         else
         {
-            for (int i = 0; i < activeCount; i++)
+            for (int i = 0; i < dueCount; i++)
             {
+                int unit = _activeUnitScratch[i];
                 PrepareUnitPlan(
                     units, health, suppression, vision, worldMap,
-                    _activeUnitScratch[i], thinkDelta);
+                    unit, _unitThinkDeltaSeconds[unit]);
             }
         }
 
-        _tacticalTimeSeconds += thinkDelta;
-        for (int i = 0; i < activeCount; i++)
+        for (int i = 0; i < dueCount; i++)
         {
             int unit = _activeUnitScratch[i];
             int visibleTarget = _nearestVisibleEnemyByUnit[unit];
@@ -293,11 +312,11 @@ public sealed class UnitAiSystem
             Stopwatch.GetElapsedTime(planningStarted).TotalMilliseconds;
 
         for (int i = 0;
-             i < active.Length;
+             i < dueCount;
              i++)
         {
-            int unit =
-                active[i];
+            int unit = _activeUnitScratch[i];
+            float thinkDelta = _unitThinkDeltaSeconds[unit];
 
             Store.TickMemory(
                 unit,
@@ -1913,6 +1932,10 @@ public sealed class UnitAiSystem
     {
         if (_activeUnitScratch.Length < capacity)
             Array.Resize(ref _activeUnitScratch, capacity);
+        if (_unitThinkElapsedSeconds.Length < capacity)
+            Array.Resize(ref _unitThinkElapsedSeconds, capacity);
+        if (_unitThinkDeltaSeconds.Length < capacity)
+            Array.Resize(ref _unitThinkDeltaSeconds, capacity);
         if (_nearestVisibleEnemyByUnit.Length < capacity)
             Array.Resize(ref _nearestVisibleEnemyByUnit, capacity);
         if (_searchPatrolLegByUnit.Length < capacity)
