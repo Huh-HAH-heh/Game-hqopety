@@ -526,7 +526,7 @@ public sealed class UnitAiSystem
                     TargetMemorySeconds);
             }
 
-            // The tree can select Patrol only when there is neither a visible
+            // Utility AI can select Patrol only when there is neither a visible
             // target nor a remembered target. Drop an expired target before the
             // existing patrol/search path runs.
             if (intent == BehaviacUnitIntent.Patrol &&
@@ -1084,8 +1084,8 @@ public sealed class UnitAiSystem
                 return true;
             }
 
-            // Behaviac selected the task; this AI action translates it into the
-            // existing navigation goal without bypassing the decision tree.
+            // Utility AI selected the task; this action translates it into the
+            // existing navigation goal without bypassing the shared execution systems.
             store.ClearTarget(unit);
             store.SetGoal(unit, moveDestination);
             ClearAiming(weapons, unit);
@@ -1401,7 +1401,7 @@ public sealed class UnitAiSystem
                     units, health, vision, inventory, unit, currentTarget, visibleTargetIndex))
             {
                 // The same close-contact override used by target memory also feeds
-                // Behaviac, so it cannot plan around a distant target this tick.
+                // the utility scorer, so it cannot plan around a distant target this tick.
                 visibleTargetIndex = currentTarget.Index;
             }
         }
