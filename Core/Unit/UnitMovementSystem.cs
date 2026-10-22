@@ -333,6 +333,17 @@ public sealed class UnitMovementSystem
                                 continue;
                             }
 
+                            bool hostile = FactionRules.ShouldAttack(
+                                units.FactionTag[unit],
+                                units.FactionTag[other]);
+                            // RimWorld-style pawn passage: allies can cross paths while
+                            // moving, but settled allies are separated if they overlap.
+                            if (!hostile && (units.HasTarget[unit] || units.HasTarget[other]))
+                            {
+                                other = next;
+                                continue;
+                            }
+
                             Vector3 otherPosition = units.Position[other];
                             float dx = otherPosition.X - position.X;
                             float dy = otherPosition.Y - position.Y;
