@@ -106,14 +106,33 @@ public sealed class GameRenderer
 
     private readonly RectangleShape _moveLinePreview = new(new Vector2f(1f, 3f))
     {
-        FillColor = new Color(80, 205, 255, 210)
+        FillColor = new Color(80, 205, 255, 100)
     };
 
     private readonly CircleShape _moveLineSlotMarker = new(4f)
     {
-        FillColor = new Color(180, 240, 255, 240),
-        OutlineColor = new Color(35, 92, 125, 240),
+        FillColor = new Color(180, 240, 255, 165),
+        OutlineColor = new Color(35, 92, 125, 205),
         OutlineThickness = 1f
+    };
+
+    private readonly RectangleShape _orderPathLine = new(new Vector2f(1f, 2f))
+    {
+        FillColor = new Color(85, 205, 255, 82)
+    };
+
+    private readonly CircleShape _moveOrderMarker = new(5f)
+    {
+        FillColor = new Color(85, 205, 255, 32),
+        OutlineColor = new Color(85, 205, 255, 220),
+        OutlineThickness = 1.5f
+    };
+
+    private readonly CircleShape _attackOrderMarker = new(6f)
+    {
+        FillColor = new Color(255, 95, 80, 28),
+        OutlineColor = new Color(255, 95, 80, 230),
+        OutlineThickness = 1.5f
     };
 
     private RenderWindow _window = null!;
@@ -299,6 +318,9 @@ public sealed class GameRenderer
             _camera.Dispose();
             _uiView?.Dispose();
             _selectionBox.Dispose();
+            _orderPathLine.Dispose();
+            _moveOrderMarker.Dispose();
+            _attackOrderMarker.Dispose();
             _window?.Close();
             _window?.Dispose();
         }
@@ -586,6 +608,8 @@ public sealed class GameRenderer
 
         if (renderSnapshot != null)
         {
+            DrawPlayerOrderOverlays(renderSnapshot);
+
             stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.DrawSnapshot(
                 _window,
@@ -1673,7 +1697,7 @@ public sealed class GameRenderer
         if (selected.Length < 2)
             return false;
 
-        float spacing = 0.8f;
+        float spacing = 1f;
         for (int i = 0; i < snapshot.Units.Length; i++)
         {
             RenderUnitState unit = snapshot.Units[i];
@@ -1756,16 +1780,18 @@ public sealed class GameRenderer
         }
     }
 
-    private void IssueMoveLineOrder(
-        UnitId[] memberIds,
-        Vector2 start,
-        Vector2 end,
-        float spacing)
+    private Vector3 CreateMoveDestination(Vector2 point)
     {
-        UnitStore units = _unitSimulation.Units;
-        UnitAiStore ai = _unitSimulation.AI.Store;
-        List<int> members = new(memberIds.Length);
+        float x = Math.Clamp(point.X, 0.5f, _worldMap.MaxTileX - 0.5f);
+        float y = Math.Clamp(point.Y, 0.5f, _worldMap.MaxTileY - 0.5f);
+        int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
+        return new Vector3(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
+    }
 
+    private List<int> GetMovableMoveMembers(UnitId[] memberIds, UnitStore units)
+    {
+        List<int> members = new(memberIds.Length);
         for (int i = 0; i < memberIds.Length; i++)
         {
             if (units.TryGetIndex(memberIds[i], out int index) &&
@@ -1775,10 +1801,202 @@ public sealed class GameRenderer
                 members.Add(index);
             }
         }
+        return members;
+    }
+
+    private HashSet<int> BuildReservedMoveCells(List<int> members, UnitStore units)
+    {
+        HashSet<int> moving = new(members);
+        HashSet<int> reserved = new();
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            if (moving.Contains(unit) || _unitSimulation.Health.OverallHitPoints[unit] <= 0f)
+                continue;
+
+            int x = Math.Clamp((int)MathF.Floor(units.Position[unit].X), 0, _worldMap.MaxTileX);
+            int y = Math.Clamp((int)MathF.Floor(units.Position[unit].Y), 0, _worldMap.MaxTileY);
+            reserved.Add(x + y * _worldMap.TileWidth);
+        }
+        return reserved;
+    }
+
+    private bool TryFindAvailableMoveCell(
+        float desiredX,
+        float desiredY,
+        HashSet<int> reserved,
+        out int tileX,
+        out int tileY)
+    {
+        int originX = Math.Clamp((int)MathF.Floor(desiredX), 0, _worldMap.MaxTileX);
+        int originY = Math.Clamp((int)MathF.Floor(desiredY), 0, _worldMap.MaxTileY);
+
+        for (int radius = 0; radius <= 16; radius++)
+        {
+            bool found = false;
+            float bestScore = float.PositiveInfinity;
+            int bestX = originX;
+            int bestY = originY;
+
+            for (int y = Math.Max(0, originY - radius);
+                 y <= Math.Min(_worldMap.MaxTileY, originY + radius); y++)
+            {
+                for (int x = Math.Max(0, originX - radius);
+                     x <= Math.Min(_worldMap.MaxTileX, originX + radius); x++)
+                {
+                    if (Math.Max(Math.Abs(x - originX), Math.Abs(y - originY)) != radius)
+                        continue;
+                    if (_worldMap.IsNavigationBlocked(x, y) ||
+                        _worldMap.GetSurfaceLayer(x, y) < 0)
+                        continue;
+
+                    int cell = x + y * _worldMap.TileWidth;
+                    if (reserved.Contains(cell))
+                        continue;
+
+                    float dx = x + 0.5f - desiredX;
+                    float dy = y + 0.5f - desiredY;
+                    float score = dx * dx + dy * dy;
+                    if (score >= bestScore)
+                        continue;
+
+                    bestScore = score;
+                    bestX = x;
+                    bestY = y;
+                    found = true;
+                }
+            }
+
+            if (found)
+            {
+                tileX = bestX;
+                tileY = bestY;
+                reserved.Add(bestX + bestY * _worldMap.TileWidth);
+                return true;
+            }
+        }
+
+        tileX = originX;
+        tileY = originY;
+        return false;
+    }
+
+    private void IssueMoveOrderToPoint(UnitId[] memberIds, Vector3 destination)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        List<int> members = GetMovableMoveMembers(memberIds, units);
+        if (members.Count == 0)
+            return;
+
+        HashSet<int> reserved = BuildReservedMoveCells(members, units);
+        int assigned = 0;
+        for (int i = 0; i < members.Count; i++)
+        {
+            int unit = members[i];
+            float desiredX = destination.X;
+            float desiredY = destination.Y;
+
+            if (TryFindAvailableMoveCell(desiredX, desiredY, reserved, out int tileX, out int tileY))
+            {
+                ai.SetPlayerOrder(unit, UnitAiOrderType.Move, new Vector3(
+                    tileX + 0.5f,
+                    tileY + 0.5f,
+                    _worldMap.GetSurfaceHeight(tileX, tileY)));
+                assigned++;
+            }
+            else
+            {
+                ai.SetPlayerOrder(unit, UnitAiOrderType.Move, destination);
+                assigned++;
+            }
+        }
+
+        Console.WriteLine($"[MOVE] Move order assigned to {assigned} units; unique destination cells reserved.");
+    }
+
+    private void DrawPlayerOrderOverlays(SimulationFrameSnapshot snapshot)
+    {
+        Vector2[] pathPoints = snapshot.OrderPathPoints;
+        float worldPerPixel = _camera.View.Size.X / MathF.Max(1f, _window.Size.X);
+        Vector2 markerScale = new(worldPerPixel, worldPerPixel);
+
+        foreach (RenderUnitState unit in snapshot.Units)
+        {
+            if (unit.HitPoints <= 0f ||
+                unit.PlayerOrderType is not (UnitAiOrderType.Move or UnitAiOrderType.Attack))
+                continue;
+
+            UnitId id = new(unit.Index, unit.Generation);
+            if (!_selectedUnits.Contains(id) && !_selectedUnit.Equals(id))
+                continue;
+
+            bool attack = unit.PlayerOrderType == UnitAiOrderType.Attack;
+            Color pathColor = attack
+                ? new Color(255, 95, 80, 82)
+                : new Color(85, 205, 255, 82);
+            _orderPathLine.FillColor = pathColor;
+
+            Vector2 from = new(unit.Position.X * TerrainTilePixelSize,
+                unit.Position.Y * TerrainTilePixelSize);
+            Vector2 destination = new(unit.PlayerOrderPosition.X * TerrainTilePixelSize,
+                unit.PlayerOrderPosition.Y * TerrainTilePixelSize);
+
+            int pathStart = Math.Clamp(unit.OrderPathStart, 0, pathPoints.Length);
+            int pathCount = Math.Clamp(unit.OrderPathCount, 0, pathPoints.Length - pathStart);
+            if (pathCount > 0)
+            {
+                for (int i = 0; i < pathCount; i++)
+                {
+                    Vector2 next = pathPoints[pathStart + i] * TerrainTilePixelSize;
+                    DrawOrderPathSegment(from, next);
+                    from = next;
+                }
+                DrawOrderPathSegment(from, destination);
+            }
+            else
+            {
+                DrawOrderPathSegment(from, destination);
+            }
+
+            CircleShape marker = attack ? _attackOrderMarker : _moveOrderMarker;
+            marker.Origin = new Vector2f(attack ? 6f : 5f, attack ? 6f : 5f);
+            marker.Scale = markerScale;
+            marker.Position = new Vector2f(destination.X, destination.Y);
+            _window.Draw(marker);
+        }
+    }
+
+    private void DrawOrderPathSegment(Vector2 start, Vector2 end)
+    {
+        Vector2 delta = end - start;
+        float length = delta.Length();
+        if (length <= 0.2f)
+            return;
+
+        _orderPathLine.Position = new Vector2f(start.X, start.Y);
+        _orderPathLine.Size = new Vector2f(length, 2f);
+        _orderPathLine.Origin = new Vector2f(0f, 1f);
+        _orderPathLine.Rotation = MathF.Atan2(delta.Y, delta.X) * 180f / MathF.PI;
+        _window.Draw(_orderPathLine);
+    }
+
+    private void IssueMoveLineOrder(
+        UnitId[] memberIds,
+        Vector2 start,
+        Vector2 end,
+        float spacing)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        List<int> members = GetMovableMoveMembers(memberIds, units);
 
         if (members.Count == 0)
             return;
 
+        HashSet<int> reserved = BuildReservedMoveCells(members, units);
+        spacing = MathF.Max(1f, spacing);
         Vector2 delta = end - start;
         float length = delta.Length();
         Vector2 direction = length > 0.001f ? delta / length : Vector2.UnitX;
@@ -1796,11 +2014,13 @@ public sealed class GameRenderer
         {
             float t = members.Count == 1 ? 0.5f : i / (float)(members.Count - 1);
             Vector2 point = start + line * t;
-            float x = Math.Clamp(point.X, 0.5f, _worldMap.MaxTileX - 0.5f);
-            float y = Math.Clamp(point.Y, 0.5f, _worldMap.MaxTileY - 0.5f);
-            int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
-            int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
-            Vector3 target = new(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
+            if (!TryFindAvailableMoveCell(point.X, point.Y, reserved, out int tileX, out int tileY))
+                continue;
+
+            Vector3 target = new(
+                tileX + 0.5f,
+                tileY + 0.5f,
+                _worldMap.GetSurfaceHeight(tileX, tileY));
             ai.SetPlayerOrder(members[i], UnitAiOrderType.Move, target);
             assigned++;
         }
@@ -2576,6 +2796,20 @@ public sealed class GameRenderer
                             ? new UnitId(contextUnit.Index, contextUnit.Generation)
                             : default;
 
+                        if (!hasUnit && selectedIds.Length > 0)
+                        {
+                            if (selectedIds.Length > 1 && TryBeginMoveLine(e.Position))
+                                return;
+
+                            UnitId[] moveUnits = selectedIds;
+                            Vector3 destination = _contextMenuDestination;
+                            _contextMenuUnit = default;
+                            _contextMenuOverlay.Close();
+                            ExecuteSimulationCommand(() =>
+                                IssueMoveOrderToPoint(moveUnits, destination));
+                            return;
+                        }
+
                         _contextMenuOverlay.ToggleAt(
                             contextPosition,
                             _window.Size.X,
@@ -2762,12 +2996,7 @@ public sealed class GameRenderer
                 }
 
                 if (_menuPage == GameMenuPage.Closed)
-                {
-                    if (TryBeginMoveLine(e.Position))
-                        return;
-
                     BeginWorldSelection(e.Position);
-                }
             };
 
         _window.MouseMoved +=
@@ -2872,25 +3101,7 @@ public sealed class GameRenderer
                     return;
                 }
 
-                if (e.Button != Mouse.Button.Left)
-                    return;
-
-                if (_unitGroupCardOverlay?.HandleMouseReleased() == true)
-                    return;
-
-                for (int i = _unitCards.Count - 1; i >= 0; i--)
-                {
-                    if (_unitCards[i].Overlay.HandleMouseReleased())
-                        return;
-                }
-
-                if (_draggingMenuSlider.HasValue)
-                {
-                    _draggingMenuSlider = null;
-                    return;
-                }
-
-                if (_isPlacingMoveLine)
+                if (e.Button == Mouse.Button.Right && _isPlacingMoveLine)
                 {
                     Vector2f worldPixels = _window.MapPixelToCoords(e.Position, _camera.View);
                     _moveLineCurrentWorld = new Vector2(
@@ -2914,8 +3125,29 @@ public sealed class GameRenderer
                     }
                     else
                     {
-                        SelectWorldUnit(e.Position, false);
+                        Vector3 destination = CreateMoveDestination(end);
+                        ExecuteSimulationCommand(() =>
+                            IssueMoveOrderToPoint(moveUnits, destination));
                     }
+
+                    return;
+                }
+
+                if (e.Button != Mouse.Button.Left)
+                    return;
+
+                if (_unitGroupCardOverlay?.HandleMouseReleased() == true)
+                    return;
+
+                for (int i = _unitCards.Count - 1; i >= 0; i--)
+                {
+                    if (_unitCards[i].Overlay.HandleMouseReleased())
+                        return;
+                }
+
+                if (_draggingMenuSlider.HasValue)
+                {
+                    _draggingMenuSlider = null;
                     return;
                 }
 
