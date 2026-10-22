@@ -300,11 +300,18 @@ public sealed class UnitAiSystem
                         units.GetId(unit), _tacticalTimeSeconds))
                 {
                     // Another soldier in this squad is already searching the last-known
-                    // position. Drop this stale contact and let the unit resume its own
-                    // order/search instead of sending the whole squad to the same area.
-                    Store.ClearTarget(unit);
-                    units.HasTarget[unit] = false;
-                    intent = BehaviacUnitIntent.Patrol;
+                    // position. A visible threat still wins; otherwise let this unit resume
+                    // its own order/search instead of sending the whole squad to one area.
+                    if (_nearestVisibleEnemyByUnit[unit] >= 0 || currentTargetVisible)
+                    {
+                        intent = BehaviacUnitIntent.EngageTarget;
+                    }
+                    else
+                    {
+                        Store.ClearTarget(unit);
+                        units.HasTarget[unit] = false;
+                        intent = BehaviacUnitIntent.Patrol;
+                    }
                 }
 
                 RecordBehaviacIntent(intent);
