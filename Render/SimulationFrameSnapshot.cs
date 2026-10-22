@@ -310,6 +310,17 @@ public sealed class SimulationFrameSnapshot
             if (bestTime2 >= 0f) captured.Add(best2);
         }
 
+        const int MaxTotalAuditoryContacts = 1024;
+        if (captured.Count > MaxTotalAuditoryContacts)
+        {
+            captured.Sort(static (left, right) =>
+            {
+                int byAge = left.AgeSeconds.CompareTo(right.AgeSeconds);
+                return byAge != 0 ? byAge : right.Confidence.CompareTo(left.Confidence);
+            });
+            captured.RemoveRange(MaxTotalAuditoryContacts, captured.Count - MaxTotalAuditoryContacts);
+        }
+
         soundContacts = captured.ToArray();
     }
 
