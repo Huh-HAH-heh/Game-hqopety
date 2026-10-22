@@ -1737,18 +1737,38 @@ public sealed class GameRenderer
         out Vector2 start,
         out Vector2 end)
     {
+        // The drag length is the formation's width. Never stretch it to fit
+        // every pawn; overflow is wrapped into additional ranks.
         start = _moveLineStartWorld;
         end = _moveLineCurrentWorld;
+    }
+
+    private static Vector2 GetMoveLineSlot(
+        int index,
+        int unitCount,
+        Vector2 start,
+        Vector2 end,
+        float spacing)
+    {
         Vector2 delta = end - start;
         float length = delta.Length();
         Vector2 direction = length > 0.001f ? delta / length : Vector2.UnitX;
-        float minimumLength = MathF.Max(0f, (_moveLineUnits.Length - 1) * _moveLineSpacing);
-        if (length >= minimumLength)
-            return;
+        Vector2 perpendicular = new(-direction.Y, direction.X);
+        spacing = MathF.Max(0.5f, spacing);
 
-        Vector2 center = (start + end) * 0.5f;
-        start = center - direction * (minimumLength * 0.5f);
-        end = center + direction * (minimumLength * 0.5f);
+        int columns = Math.Clamp((int)MathF.Floor(length / spacing) + 1, 1, Math.Max(1, unitCount));
+        int rows = (unitCount + columns - 1) / columns;
+        int row = index / columns;
+        int column = index % columns;
+        int columnsInRow = Math.Min(columns, unitCount - row * columns);
+
+        float t = columnsInRow <= 1
+            ? 0.5f
+            : column / (float)(columnsInRow - 1);
+        Vector2 lineCenter = (start + end) * 0.5f;
+        Vector2 onLine = Vector2.Lerp(start, end, t);
+        float rowOffset = (row - (rows - 1) * 0.5f) * spacing;
+        return onLine + perpendicular * rowOffset;
     }
 
     private void DrawMoveLinePreview()
@@ -1761,19 +1781,24 @@ public sealed class GameRenderer
         Vector2 endPixels = end * TerrainTilePixelSize;
         Vector2 delta = endPixels - startPixels;
         float length = delta.Length();
-        if (length <= 0.01f)
-            return;
 
-        _moveLinePreview.Position = new Vector2f(startPixels.X, startPixels.Y);
-        _moveLinePreview.Size = new Vector2f(length, 3f);
-        _moveLinePreview.Origin = new Vector2f(0f, 1.5f);
-        _moveLinePreview.Rotation = MathF.Atan2(delta.Y, delta.X) * 180f / MathF.PI;
-        _window.Draw(_moveLinePreview);
+        if (length > 0.01f)
+        {
+            _moveLinePreview.Position = new Vector2f(startPixels.X, startPixels.Y);
+            _moveLinePreview.Size = new Vector2f(length, 3f);
+            _moveLinePreview.Origin = new Vector2f(0f, 1.5f);
+            _moveLinePreview.Rotation = MathF.Atan2(delta.Y, delta.X) * 180f / MathF.PI;
+            _window.Draw(_moveLinePreview);
+        }
 
         for (int i = 0; i < _moveLineUnits.Length; i++)
         {
-            float t = i / (float)(_moveLineUnits.Length - 1);
-            Vector2 point = Vector2.Lerp(startPixels, endPixels, t);
+            Vector2 point = GetMoveLineSlot(
+                i,
+                _moveLineUnits.Length,
+                start,
+                end,
+                _moveLineSpacing) * TerrainTilePixelSize;
             _moveLineSlotMarker.Position = new Vector2f(point.X, point.Y);
             _moveLineSlotMarker.Origin = new Vector2f(4f, 4f);
             _window.Draw(_moveLineSlotMarker);
@@ -2002,23 +2027,15 @@ public sealed class GameRenderer
 
         HashSet<int> reserved = BuildReservedMoveCells(members, units);
         spacing = MathF.Max(1f, spacing);
-        Vector2 delta = end - start;
-        float length = delta.Length();
-        Vector2 direction = length > 0.001f ? delta / length : Vector2.UnitX;
-        float minimumLength = MathF.Max(0f, (members.Count - 1) * spacing);
-        if (length < minimumLength)
-        {
-            Vector2 center = (start + end) * 0.5f;
-            start = center - direction * (minimumLength * 0.5f);
-            end = center + direction * (minimumLength * 0.5f);
-        }
-
-        Vector2 line = end - start;
         int assigned = 0;
         for (int i = 0; i < members.Count; i++)
         {
-            float t = members.Count == 1 ? 0.5f : i / (float)(members.Count - 1);
-            Vector2 point = start + line * t;
+            Vector2 point = GetMoveLineSlot(
+                i,
+                members.Count,
+                start,
+                end,
+                spacing);
             Vector3 target;
             if (TryFindAvailableMoveCell(point.X, point.Y, reserved, out int tileX, out int tileY))
             {
