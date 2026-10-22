@@ -1105,7 +1105,6 @@ public static class CombatSelfTest
         simulation.Units.ViewRange[shooter.Index] = 40f;
         simulation.Units.FieldOfView[shooter.Index] = 360f;
         simulation.AI.Enabled = true;
-        simulation.AI.UseBehaviacDecisionLayer = true;
         simulation.VisionEnabled = true;
 
         int inventorySlot = simulation.AddInventoryItem(shooter, WeaponCatalog.AssaultRifle);
