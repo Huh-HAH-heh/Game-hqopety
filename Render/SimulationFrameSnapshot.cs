@@ -399,9 +399,17 @@ public sealed class SimulationFrameSnapshot
             if (!hasVisualEvidence && !hasAuditoryEvidence && !hasCommunicationEvidence)
                 continue;
 
+            float visualAge = hasVisualEvidence
+                ? MathF.Max(0f, nowSeconds - contact.LastVisualAtSeconds)
+                : -1f;
             float confidence = contact.GetEffectiveConfidence(
                 nowSeconds,
                 hasVisualEvidence ? 4f : 2.5f);
+            // A last-known visual track can outlive its original observation record.
+            // Keep rendering that retained track with age-decayed confidence until
+            // the contact itself expires.
+            if (hasVisualEvidence && confidence < 0.06f)
+                confidence = MathF.Exp(-0.69314718f * visualAge / 4f);
             if (confidence < 0.06f)
                 continue;
 
@@ -414,9 +422,7 @@ public sealed class SimulationFrameSnapshot
                 contact.PositionErrorRadius,
                 confidence,
                 MathF.Max(0f, nowSeconds - contact.LastEventAtSeconds),
-                hasVisualEvidence
-                    ? MathF.Max(0f, nowSeconds - contact.LastVisualAtSeconds)
-                    : -1f,
+                visualAge,
                 contact.Kind,
                 contact.LastStimulusType,
                 hasVisualEvidence,
