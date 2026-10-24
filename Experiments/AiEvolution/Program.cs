@@ -8,12 +8,12 @@ using World;
 
 internal static class Program
 {
-    private const int GeneCount = 33;
+    private const int GeneCount = 35;
     private const float Dt = 0.05f;
 
-    private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f,.60f,.25f,.01f,.80f,.10f,4f,4f,5f,8f,10f,.75f,.80f];
-    private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f,.95f,3f,.08f,1f,.45f,14f,14f,20f,24f,30f,.98f,.999f];
-    private static readonly float[] BaseGenes = [1f,1f,1f,1f,1f,1f,1f,1f,1f,1f,.60f,.08f,.10f,.23f,.24f,.66f,24f,.22f,.35f,.84f,.35f,.84f,1f,.03f,.94f,.20f,8f,4f,6f,6f,8f,.90f,.98f];
+    private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f,.60f,.25f,.01f,.80f,.10f,4f,4f,5f,8f,10f,.75f,.80f,.04f,.04f];
+    private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f,.95f,3f,.08f,1f,.45f,14f,14f,20f,24f,30f,.98f,.999f,.30f,.35f];
+    private static readonly float[] BaseGenes = [1f,1f,1f,1f,1f,1f,1f,1f,1f,1f,.60f,.08f,.10f,.23f,.24f,.66f,24f,.22f,.35f,.84f,.35f,.84f,1f,.03f,.94f,.20f,8f,4f,6f,6f,8f,.90f,.98f,.12f,.16f];
 
     private static int Main(string[] args)
     {
@@ -97,7 +97,8 @@ internal static class Program
         p.RangedEngagementRangeFraction,p.RangedRangeToleranceMinimum,p.RangedRangeToleranceFraction,
         p.MeleeEngagementRangeFraction,p.MeleeMinimumEngagementDistance,p.CoverSearchRadius,
         p.FlankNearBackoffDistance,p.FlankNearLateralDistance,p.FlankFarBackoffDistance,p.FlankFarLateralDistance,
-        p.FlankNearRangeFraction,p.FlankFarRangeFraction
+        p.FlankNearRangeFraction,p.FlankFarRangeFraction,
+        p.CoverThreatSeparationWeight,p.CoverTravelCostWeight
     ];
 
     private static AiBalanceProfile LoadProfile(string path)
@@ -126,7 +127,8 @@ internal static class Program
         CoverSearchRadius=g[26], FlankNearBackoffDistance=g[27],
         FlankNearLateralDistance=g[28], FlankFarBackoffDistance=g[29],
         FlankFarLateralDistance=g[30], FlankNearRangeFraction=g[31],
-        FlankFarRangeFraction=g[32]
+        FlankFarRangeFraction=g[32], CoverThreatSeparationWeight=g[33],
+        CoverTravelCostWeight=g[34]
     };
 
     private static double Evaluate(AiBalanceProfile p,int battles,int ticks,int team)
