@@ -23,7 +23,7 @@ internal static class Program
             int popSize=Arg(args,"--population",8,4,128), generations=Arg(args,"--generations",4,1,10000);
             int battles=Arg(args,"--battles",8,2,1000), ticks=Arg(args,"--ticks",600,100,100000);
             int team=Arg(args,"--team-size",4,2,16), seed=Arg(args,"--seed",20261024,int.MinValue,int.MaxValue);
-            string output=Path.GetFullPath(TextArg(args,"--output","ai-balance-best.json"));
+            string output=Path.GetFullPath(TextArg(args,"--output","Experiments/AiEvolution/output/ai-balance-best.json"));
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
             string csv=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".history.csv");
             string? seedPath=TextOpt(args,"--seed-profile");
