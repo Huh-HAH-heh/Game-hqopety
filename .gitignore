@@ -23,6 +23,9 @@ nuget.config
 project.lock.json
 project.fragment.lock.json
 
+# Обученные профили и журналы эволюции
+/Experiments/AiEvolution/output/
+
 # Собранная портативная версия игры
 publish/
 artifacts/
