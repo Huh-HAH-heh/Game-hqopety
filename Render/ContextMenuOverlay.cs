@@ -57,6 +57,10 @@ public sealed class ContextMenuOverlay : IDisposable
     private readonly List<ContextMenuActionType> _actions = new();
     private readonly List<string> _labels = new();
 
+    private float _dragOffsetX;
+    private float _dragOffsetY;
+    private bool _dragging;
+
     public bool IsOpen { get; private set; }
 
     public ContextMenuOverlay()
@@ -120,6 +124,7 @@ public sealed class ContextMenuOverlay : IDisposable
     {
         _actions.Clear();
         _labels.Clear();
+        _dragging = false;
 
         if (hasUnit)
         {
@@ -165,6 +170,42 @@ public sealed class ContextMenuOverlay : IDisposable
         _labels.Add(label);
     }
 
+    public bool HandleMousePressed(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!IsOpen)
+            return false;
+
+        Layout(windowWidth, windowHeight);
+        if (!_header.GetGlobalBounds().Contains(position))
+            return false;
+
+        _dragging = true;
+        _dragOffsetX = position.X - _panel.Position.X;
+        _dragOffsetY = position.Y - _panel.Position.Y;
+        return true;
+    }
+
+    public bool HandleMouseMoved(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!_dragging || !IsOpen)
+            return false;
+
+        _panel.Position = new Vector2f(
+            position.X - _dragOffsetX,
+            position.Y - _dragOffsetY);
+        Layout(windowWidth, windowHeight);
+        return true;
+    }
+
+    public bool HandleMouseReleased()
+    {
+        if (!_dragging)
+            return false;
+
+        _dragging = false;
+        return true;
+    }
+
     public bool HandleClick(
         Vector2i position,
         out ContextMenuActionType action)
@@ -194,6 +235,7 @@ public sealed class ContextMenuOverlay : IDisposable
     public void Close()
     {
         IsOpen = false;
+        _dragging = false;
         _actions.Clear();
         _labels.Clear();
     }
