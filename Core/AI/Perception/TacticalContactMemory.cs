@@ -290,10 +290,14 @@ public sealed class TacticalContactMemory
     private const float UnknownContactMergeRadiusFloor = 1.5f;
     private const float CrossSenseMergeWindowSeconds = 1.25f;
     private const float ContactMaintenanceIntervalSeconds = 0.5f;
+    private const int ContactBufferTrimThreshold = 256;
+    private const int ContactBufferRetainedCapacity = 32;
+    private const float ContactBufferTrimQuietSeconds = 2f;
 
     private readonly List<TacticalContact> _contacts = new();
     private float _currentTimeSeconds;
     private float _lastMaintenanceTimeSeconds = float.NegativeInfinity;
+    private float _lastContactAtSeconds = float.NegativeInfinity;
     private long _nextContactId = 1;
 
     public IReadOnlyList<TacticalContact> Contacts => _contacts;
@@ -366,10 +370,12 @@ public sealed class TacticalContactMemory
         {
             contact = new TacticalContact(this, _nextContactId++, observation);
             _contacts.Add(contact);
+            _lastContactAtSeconds = nowSeconds;
             return contact;
         }
 
         UpdateContact(contact, observation);
+        _lastContactAtSeconds = nowSeconds;
         return contact;
     }
 
@@ -445,6 +451,8 @@ public sealed class TacticalContactMemory
             if (_contacts[i].ExpiresAtSeconds <= nowSeconds)
                 _contacts.RemoveAt(i);
         }
+
+        TrimContactBufferIfQuiet(nowSeconds);
     }
 
     public bool TryGetContact(UnitId target, out TacticalContact contact)
@@ -486,9 +494,25 @@ public sealed class TacticalContactMemory
     public void Clear()
     {
         _contacts.Clear();
+        if (_contacts.Capacity > ContactBufferTrimThreshold)
+            _contacts.Capacity = ContactBufferRetainedCapacity;
         _currentTimeSeconds = 0f;
         _lastMaintenanceTimeSeconds = float.NegativeInfinity;
+        _lastContactAtSeconds = float.NegativeInfinity;
         _nextContactId = 1;
+    }
+
+    private void TrimContactBufferIfQuiet(float nowSeconds)
+    {
+        if (_contacts.Capacity <= ContactBufferTrimThreshold ||
+            nowSeconds - _lastContactAtSeconds < ContactBufferTrimQuietSeconds)
+        {
+            return;
+        }
+
+        // Expiry removes contacts but List<T> normally keeps its peak backing array.
+        // Release that excess only after a quiet period; live contacts are untouched.
+        _contacts.Capacity = Math.Max(ContactBufferRetainedCapacity, _contacts.Count);
     }
 
     private TacticalContact? FindByContactId(long contactId)
