@@ -520,6 +520,10 @@ public sealed class GameRenderer
             int traceCells = snapshot?.TerrainCellsTraced ?? _unitSimulation.LastProjectileTerrainCellsTraced;
             int unitCandidates = snapshot?.ProjectileUnitCandidates ?? _unitSimulation.LastProjectileUnitCandidates;
             double healthMs = snapshot?.HealthMs ?? _unitSimulation.LastHealthUpdateMilliseconds;
+            double perceptionMs = snapshot?.PerceptionMs ?? _unitSimulation.LastPerceptionUpdateMilliseconds;
+            double suppressionMs = snapshot?.SuppressionMs ?? _unitSimulation.LastSuppressionUpdateMilliseconds;
+            double bodyMs = snapshot?.BodyMs ?? _unitSimulation.LastBodyUpdateMilliseconds;
+            double meleeMs = snapshot?.MeleeMs ?? _unitSimulation.LastMeleeUpdateMilliseconds;
             int routesBuilt = snapshot?.RoutesBuilt ?? _unitSimulation.Navigation.RoutesBuiltThisUpdate;
             int routesFailed = snapshot?.RoutesFailed ?? _unitSimulation.Navigation.RoutesFailedThisUpdate;
             int navSearches = snapshot?.NavigationSearches ?? _unitSimulation.Navigation.SearchesThisUpdate;
@@ -539,7 +543,9 @@ public sealed class GameRenderer
                 $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
                 $"Units={activeUnits} SimPaused={_simulationPaused} Speed={_simulationSpeed:0.00}x " +
                 $"SimRate={_simulationGameSecondsPerWallSecond:0.00}x UPS={_simulationUpdatesPerSecond:0} Sim={simMs:0.0}ms " +
-                $"Vision={visionMetrics} AI={aiMs:0.0}ms Plan={aiPlanningMs:0.0}ms Move={moveMs:0.0}ms " +
+                $"Vision={visionMetrics} Perception={perceptionMs:0.0}ms Suppression={suppressionMs:0.0}ms " +
+                $"AI={aiMs:0.0}ms Plan={aiPlanningMs:0.0}ms Move={moveMs:0.0}ms " +
+                $"Body={bodyMs:0.0}ms Melee={meleeMs:0.0}ms " +
                 $"UtilityAI={(utilityAiEnabled ? (utilityAiReady ? "ON" : "INIT") : "OFF")} " +
                 $"{utilityAiDecisions} decisions/{utilityAiDecisionMs:0.00}ms " +
                 $"F={utilityAiFlank} C={utilityAiCover} R={utilityAiRetreat} E={utilityAiEngage} Inv={utilityAiInvestigate} " +
