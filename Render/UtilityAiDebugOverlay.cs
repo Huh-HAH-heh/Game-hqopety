@@ -62,6 +62,52 @@ public sealed class UtilityAiDebugOverlay : IDisposable
         FillColor = new Color(28, 41, 55, 255)
     };
 
+    private float _x = 12f;
+    private float _y;
+    private float _dragOffsetX;
+    private float _dragOffsetY;
+    private bool _hasPosition;
+    private bool _dragging;
+
+    public bool Contains(Vector2i position) =>
+        _panel.GetGlobalBounds().Contains(position);
+
+    public bool HandleMousePressed(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        Layout(windowWidth, windowHeight);
+        if (!_panel.GetGlobalBounds().Contains(position))
+            return false;
+
+        if (_header.GetGlobalBounds().Contains(position))
+        {
+            _dragging = true;
+            _dragOffsetX = position.X - _panel.Position.X;
+            _dragOffsetY = position.Y - _panel.Position.Y;
+        }
+
+        return true;
+    }
+
+    public bool HandleMouseMoved(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!_dragging)
+            return false;
+
+        _x = Math.Clamp(position.X - _dragOffsetX, 8f, Math.Max(8f, windowWidth - Width - 8f));
+        _y = Math.Clamp(position.Y - _dragOffsetY, 8f, Math.Max(8f, windowHeight - Height - 8f));
+        Layout(windowWidth, windowHeight);
+        return true;
+    }
+
+    public bool HandleMouseReleased()
+    {
+        if (!_dragging)
+            return false;
+
+        _dragging = false;
+        return true;
+    }
+
     public UtilityAiDebugOverlay()
     {
         _font = LoadFont();
@@ -108,16 +154,9 @@ public sealed class UtilityAiDebugOverlay : IDisposable
             _traitsLine == null || _contactLine == null || _waitingLine == null)
             return;
 
-        // Keep this inspector away from both the top-right layer menu and
-        // the top-left combat HUD. Bottom-left also keeps the selected pawn's
-        // scoring bars visible when the debug-layer checklist is open.
-        float x = Math.Clamp(12f, 8f, Math.Max(8f, windowWidth - Width));
-        float y = Math.Clamp(
-            (float)windowHeight - Height - 8f,
-            8f,
-            Math.Max(8f, windowHeight - Height));
-        _panel.Position = new Vector2f(x, y);
-        _header.Position = new Vector2f(x + 1f, y + 1f);
+        Layout(windowWidth, windowHeight);
+        float x = _panel.Position.X;
+        float y = _panel.Position.Y;
 
         window.Draw(_panel);
         window.Draw(_header);
@@ -203,6 +242,21 @@ public sealed class UtilityAiDebugOverlay : IDisposable
             if (score > 0f)
                 window.Draw(_barFills[i]);
         }
+    }
+
+    private void Layout(uint windowWidth, uint windowHeight)
+    {
+        if (!_hasPosition)
+        {
+            _x = 12f;
+            _y = windowHeight - Height - 8f;
+            _hasPosition = true;
+        }
+
+        _x = Math.Clamp(_x, 8f, Math.Max(8f, windowWidth - Width - 8f));
+        _y = Math.Clamp(_y, 8f, Math.Max(8f, windowHeight - Height - 8f));
+        _panel.Position = new Vector2f(_x, _y);
+        _header.Position = new Vector2f(_x + 1f, _y + 1f);
     }
 
     private static float ScoreAt(in UnitIntentUtilityBreakdown decision, int index) =>
