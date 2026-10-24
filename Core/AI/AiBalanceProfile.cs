@@ -66,4 +66,16 @@ public sealed record AiBalanceProfile
     public float ProneDistanceWeight { get; init; } = 0.65f;
     public float ProneExposureWeight { get; init; } = 0.25f;
     public float ProneHealthWeight { get; init; } = 0.10f;
+
+    // Low-level tactical affordances: legal positions/distances, not abstract actions.
+    public float RangedEngagementRangeFraction { get; init; } = 0.84f;
+    public float RangedRangeToleranceMinimum { get; init; } = 1f;
+    public float RangedRangeToleranceFraction { get; init; } = 0.03f;
+    public float MeleeEngagementRangeFraction { get; init; } = 0.94f;
+    public float MeleeMinimumEngagementDistance { get; init; } = 0.20f;
+    public float CoverSearchRadius { get; init; } = 8f;
+    public float FlankNearBackoffDistance { get; init; } = 8f;
+    public float FlankNearLateralDistance { get; init; } = 12f;
+    public float FlankFarBackoffDistance { get; init; } = 16f;
+    public float FlankFarLateralDistance { get; init; } = 18f;
 }
