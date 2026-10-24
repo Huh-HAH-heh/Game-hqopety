@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.Json;
+using Core.AI;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
@@ -139,7 +140,14 @@ internal static class Program
         var sim=new UnitSimulation(unitCapacity:team*2+4,bodyCapacity:2048);
         sim.AI.SetBalanceProfileForFaction(1,leftCandidate?candidate:AiBalanceProfile.Default);
         sim.AI.SetBalanceProfileForFaction(2,leftCandidate?AiBalanceProfile.Default:candidate);
-        Spawn(sim,true,1,scenario,team); Spawn(sim,false,2,scenario,team); sim.AI.Enabled=true;
+        List<UnitId> leftMembers=Spawn(sim,true,1,scenario,team);
+        List<UnitId> rightMembers=Spawn(sim,false,2,scenario,team);
+        sim.AI.SynchronizeSquadMemberships(new[]
+        {
+            new SquadMembershipSnapshot(1,leftMembers),
+            new SquadMembershipSnapshot(2,rightMembers)
+        });
+        sim.AI.Enabled=true;
         Team left=ReadTeam(sim,1),right=ReadTeam(sim,2);
         for(int t=0;t<ticks;t++)
         {
@@ -152,13 +160,15 @@ internal static class Program
         return 45* outcome+20*own.Hp+20*(1-enemy.Hp)+15d*own.Alive/Math.Max(1,own.Total);
     }
 
-    private static void Spawn(UnitSimulation sim,bool left,ushort faction,int scenario,int count)
+    private static List<UnitId> Spawn(UnitSimulation sim,bool left,ushort faction,int scenario,int count)
     {
+        var members=new List<UnitId>(count);
         for(int i=0;i<count;i++)
         {
             int y=9+i*46/Math.Max(1,count-1),offset=(i%2)*2;
             int x=scenario switch { 2=>left?33+offset:95-offset, 1=>left?16+offset:112-offset, _=>left?10+offset:118-offset };
             UnitId id=sim.Spawn(UnitType.Colonist,new Vector3(x,y,.1f),bodyAngle:left?0f:MathF.PI,factionTag:faction);
+            members.Add(id);
             if(i%5==1)
             {
                 var meleeWeapon=MeleeWeaponCatalog.CombatKnife;
@@ -174,6 +184,7 @@ internal static class Program
                     throw new InvalidOperationException($"Could not equip {weapon.Name}.");
             }
         }
+        return members;
     }
 
     private static void Barrier(WorldMap world)
