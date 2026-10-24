@@ -178,6 +178,89 @@ internal static class Program
         }
     }
 
+    private static void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
+    {
+        e.Cancel = true;
+        _cancelRequested = true;
+    }
+
+    private static void PollTrainingControls()
+    {
+        ReadTrainingKeys();
+        if(_cancelRequested)
+            throw new OperationCanceledException("Evolution stopped by user.");
+
+        while(_trainingPaused)
+        {
+            Thread.Sleep(50);
+            ReadTrainingKeys();
+            if(_cancelRequested)
+                throw new OperationCanceledException("Evolution stopped by user.");
+        }
+    }
+
+    private static void ReadTrainingKeys()
+    {
+        if(Console.IsInputRedirected)
+            return;
+
+        try
+        {
+            while(Console.KeyAvailable)
+            {
+                ConsoleKey key=Console.ReadKey(intercept:true).Key;
+                if(key is ConsoleKey.P or ConsoleKey.Spacebar)
+                {
+                    _trainingPaused=!_trainingPaused;
+                    Console.WriteLine(_trainingPaused
+                        ? "[EVOLVE] PAUSED. Press P or Space to resume; Esc/Ctrl+C stops safely."
+                        : "[EVOLVE] RESUMED.");
+                }
+                else if(key==ConsoleKey.Escape)
+                {
+                    _cancelRequested=true;
+                    Console.WriteLine("[EVOLVE] Stop requested; finishing at the next control point.");
+                }
+            }
+        }
+        catch(InvalidOperationException)
+        {
+            // Some IDE output consoles do not provide interactive key polling;
+            // Ctrl+C still uses the cancellation handler.
+        }
+    }
+
+    private static void ReportTrainingProgress(int tick,int totalTicks)
+    {
+        _tickNow=tick;
+        _ticksTotal=totalTicks;
+        double fraction=0d;
+        if(_progressPhase=="TRAIN" && _generationsTotal>0 && _populationTotal>0)
+        {
+            double candidateProgress=(_battleNow-1+(tick/(double)Math.Max(1,totalTicks))) /
+                Math.Max(1,_battlesTotal);
+            double completed=(_generationNow-1d)*_populationTotal+(_candidateNow-1d)+candidateProgress;
+            fraction=Math.Clamp(completed/(_generationsTotal*(double)_populationTotal),0d,0.9999d);
+        }
+
+        TimeSpan elapsed=Stopwatch.GetElapsedTime(_trainingStartedAt);
+        string etaText=_progressPhase=="TRAIN" && fraction>0d
+            ? TimeSpan.FromSeconds(Math.Max(0d,elapsed.TotalSeconds*(1d-fraction)/fraction)).ToString(@"hh\:mm\:ss")
+            : "--:--:--";
+        string status=$"[EVOLVE] {_progressPhase} | gen {_generationNow}/{_generationsTotal} | " +
+            $"candidate {_candidateNow}/{_populationTotal} | battle {_battleNow}/{_battlesTotal} " +
+            $"{_currentScenarioName} | tick {tick}/{totalTicks} ({tick/(double)Math.Max(1,totalTicks):P0}) | " +
+            $"elapsed {elapsed:hh\:mm\:ss} | ETA {etaText}";
+
+        if(Console.IsOutputRedirected)
+        {
+            if(tick%100==0||tick==totalTicks)
+                Console.WriteLine(status);
+        }
+        else
+            Console.Write("\r"+status.PadRight(160));
+    }
+
     private static void ValidateGenomeConfiguration()
     {
         float[] defaults=GenesFrom(AiBalanceProfile.Default);
@@ -285,12 +368,20 @@ internal static class Program
         var scenarioKills=new double[scenarioCount];
         var scenarioMatches=new int[scenarioCount];
 
+        _battlesTotal=battles;
+        _ticksTotal=ticks;
         for(int i=0;i<battles;i++)
         {
+            PollTrainingControls();
             // Keep the layout for each match index identical across every candidate.
             int scenario=(i/2)%scenarioCount;
             int scenarioSeed=unchecked(seed+(i+1)*7919);
+            _battleNow=i+1;
+            _tickNow=0;
+            _currentScenarioName=ScenarioName(scenario);
+            Console.WriteLine($"[EVOLVE] Battle {i+1}/{battles}: {_currentScenarioName}, seed={scenarioSeed}, candidate-side={(i%2==0?"left":"right")}.");
             BattleResult result=Battle(p,i%2==0,scenario,ticks,team,scenarioSeed);
+            Console.WriteLine($"[EVOLVE] Battle {i+1}/{battles} finished: score={result.Fitness:F2}, outcome={result.Outcome}, survivors={result.SurvivorRate:P0}, nav-failures={result.NavigationRoutesFailed}.");
             fitness+=result.Fitness;
             if(result.Outcome>0) winRate++;
             else if(result.Outcome==0) drawRate++;
@@ -368,11 +459,15 @@ internal static class Program
         long navigationSearches=0;
         for(int t=0;t<ticks;t++)
         {
+            if(t%10==0) PollTrainingControls();
             sim.Update(world,Dt);
             navigationSearches+=sim.Navigation.SearchesThisUpdate;
             left=ReadTeam(sim,leftMembers);
             right=ReadTeam(sim,rightMembers);
-            if(left.Alive==0||right.Alive==0) break;
+            bool terminal=left.Alive==0||right.Alive==0;
+            if((t+1)%25==0||terminal||t==ticks-1)
+                ReportTrainingProgress(t+1,ticks);
+            if(terminal) break;
         }
         Team own=leftCandidate?left:right, enemy=leftCandidate?right:left;
         int outcome=own.Alive>enemy.Alive?1:own.Alive<enemy.Alive?-1:
