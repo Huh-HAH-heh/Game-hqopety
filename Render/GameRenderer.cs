@@ -184,6 +184,8 @@ public sealed class GameRenderer
     private float _perfTimer;
     private long _simulationUpdatesSample;
     private long _simulationGameMicrosecondsSample;
+    private long _snapshotCapturesSample;
+    private double _snapshotCapturesPerSecond;
     private double _simulationUpdatesPerSecond;
     private double _simulationGameSecondsPerWallSecond;
     private int _perfFrames;
@@ -448,6 +450,9 @@ public sealed class GameRenderer
                 _allocatedBytes - _lastAllocatedBytesSample) / sampleSeconds;
             _lastAllocatedBytesSample = _allocatedBytes;
 
+            long snapshotCaptures = Interlocked.Exchange(ref _snapshotCapturesSample, 0);
+            _snapshotCapturesPerSecond = snapshotCaptures / Math.Max(0.001f, sampleSeconds);
+
             long simulationUpdates = Interlocked.Exchange(ref _simulationUpdatesSample, 0);
             long simulationMicroseconds = Interlocked.Exchange(ref _simulationGameMicrosecondsSample, 0);
             _simulationUpdatesPerSecond = simulationUpdates / Math.Max(0.001f, sampleSeconds);
@@ -578,7 +583,7 @@ public sealed class GameRenderer
                 $"NavGrid={navGridMs:0.0}ms RouteReuse={routesReused}/{routeTrafficCells:N0} " +
                 $"Render={_lastRenderMilliseconds:0.0}ms TerrainDraw={_lastTerrainDrawMilliseconds:0.0}ms " +
                  $"UnitsDraw={_lastUnitDrawMilliseconds:0.0}ms ProjectilesDraw={_lastProjectileDrawMilliseconds:0.0}ms " +
-                 $"UiDraw={_lastUiDrawMilliseconds:0.0}ms Snapshot={snapshot?.SnapshotCaptureMs ?? 0d:0.0}ms " +
+                 $"UiDraw={_lastUiDrawMilliseconds:0.0}ms Snapshot={snapshot?.SnapshotCaptureMs ?? 0d:0.0}ms SnapshotHz={_snapshotCapturesPerSecond:0} " +
                  $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"LayerShader={_mapRenderer.UsesTerrainLayerShader} VisibleV={_mapRenderer.TerrainVertexCount:N0} " +
                 $"CacheV={_mapRenderer.TerrainCachedVertexCount:N0} ScratchV={_mapRenderer.TerrainScratchCapacity:N0} " +
@@ -2754,6 +2759,8 @@ public sealed class GameRenderer
         long lastTick = Stopwatch.GetTimestamp();
         long nextFrame = lastTick;
         long frameTicks = Math.Max(1L, Stopwatch.Frequency / 60L);
+        long snapshotIntervalTicks = Math.Max(1L, Stopwatch.Frequency / 30L);
+        long nextSnapshotCapture = lastTick;
 
         while (true)
         {
@@ -2819,11 +2826,12 @@ public sealed class GameRenderer
                 }
             }
 
-            try
+            long snapshotNow = Stopwatch.GetTimestamp();
+            if (snapshotNow >= nextSnapshotCapture)
             {
-                Volatile.Write(
-                    ref _latestSnapshot,
-                    SimulationFrameSnapshot.Capture(
+                try
+                {
+                    SimulationFrameSnapshot snapshot = SimulationFrameSnapshot.Capture(
                         _unitSimulation,
                         _showVisionDebug ? _selectedUnit : default,
                         _showVisionDebug ? _worldMap : null,
@@ -2831,11 +2839,19 @@ public sealed class GameRenderer
                         _showMemoryDebug,
                         _showMemoryDebug ? _selectedUnit : default,
                         _showUtilityAiDebug,
-                        _showUtilityAiDebug ? _selectedUnit : default));
-            }
-            catch (Exception exception)
-            {
-                Console.WriteLine($"[Simulation snapshot] {exception}");
+                        _showUtilityAiDebug ? _selectedUnit : default);
+                    Volatile.Write(ref _latestSnapshot, snapshot);
+                    Interlocked.Increment(ref _snapshotCapturesSample);
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine($"[Simulation snapshot] {exception}");
+                }
+
+                // A large battle needs a fresh immutable frame regularly, but not
+                // at the full simulation-loop rate. This also avoids building full
+                // unit/body/projectile arrays while the simulation is paused.
+                nextSnapshotCapture = snapshotNow + snapshotIntervalTicks;
             }
 
             foreach (KeyValuePair<long, UnitCardEntry> request in _unitCardRequests)
