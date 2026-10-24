@@ -168,7 +168,7 @@ public sealed class UtilityAiDebugOverlay : IDisposable
 
         _contactLine.DisplayedString =
             $"Контакт: зрение {(context.HasVisibleTarget ? "+" : "−")} · память {(context.HasRecentTarget ? "+" : "−")} · " +
-            $"звук {(context.HasAudibleContact ? "+" : "−")} · группа {(context.HasSquadContact ? "+" : "−")} · " +
+            $"сигнал {(context.HasInvestigableContact ? "+" : "−")} · группа {(context.HasSquadContact ? "+" : "−")} · " +
             $"опасность {(context.IsInImmediateDanger ? "!" : "—")}";
         _contactLine.Position = new Vector2f(x + 11f, y + 102f);
         _contactLine.FillColor = new Color(157, 178, 199, 255);
@@ -219,7 +219,7 @@ public sealed class UtilityAiDebugOverlay : IDisposable
             8 => decision.ProneScore,
             9 => decision.SuppressiveFireScore,
             10 => decision.LastKnownContactScore,
-            11 => decision.AudibleContactScore,
+            11 => decision.InvestigableContactScore,
             12 => decision.SquadContactScore,
             _ => decision.PatrolScore
         };
@@ -238,7 +238,7 @@ public sealed class UtilityAiDebugOverlay : IDisposable
             8 => BehaviacUnitIntent.ProneEngage,
             9 => BehaviacUnitIntent.SuppressiveFire,
             10 => BehaviacUnitIntent.InvestigateLastKnownTarget,
-            11 => BehaviacUnitIntent.InvestigateAudibleContact,
+            11 => BehaviacUnitIntent.InvestigateContact,
             12 => BehaviacUnitIntent.InvestigateSquadContact,
             _ => BehaviacUnitIntent.Patrol
         };
@@ -254,7 +254,7 @@ public sealed class UtilityAiDebugOverlay : IDisposable
             BehaviacUnitIntent.ProneEngage => "ЛЁЖА",
             BehaviacUnitIntent.SuppressiveFire => "ПОДАВЛЕНИЕ",
             BehaviacUnitIntent.InvestigateLastKnownTarget => "ПОСЛЕДНИЙ КОНТАКТ",
-            BehaviacUnitIntent.InvestigateAudibleContact => "ИССЛЕДОВАТЬ ЗВУК",
+            BehaviacUnitIntent.InvestigateContact => "ИССЛЕДОВАТЬ КОНТАКТ",
             BehaviacUnitIntent.InvestigateSquadContact => "ОТЧЁТ СОЮЗНИКА",
             BehaviacUnitIntent.FollowMoveOrder => "ПРИКАЗ: ДВИЖЕНИЕ",
             BehaviacUnitIntent.HoldPosition => "ПРИКАЗ: УДЕРЖАНИЕ",

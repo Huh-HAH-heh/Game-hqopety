@@ -58,7 +58,7 @@ public static class UnitIntentUtilityScorer
         float prone = 0f;
         float suppressiveFire = 0f;
         float lastKnown = 0f;
-        float audible = 0f;
+        float investigation = 0f;
         float squad = 0f;
 
         bool hasMoveOrder = context.OrderType == UnitAiOrderType.Move;
@@ -181,7 +181,7 @@ public static class UnitIntentUtilityScorer
             !hasAnyPlayerOrder &&
             context.HasActiveTargetMemory &&
             context.HasSuppressiveWeapon &&
-            (!context.HasAudibleContact ||
+            (!context.HasInvestigableContact ||
              context.LastKnownTargetUtility >= context.InvestigationUtility))
         {
             suppressiveFire = Clamp01(
@@ -214,7 +214,7 @@ public static class UnitIntentUtilityScorer
 
         if (canInvestigate &&
             context.IsAlerted &&
-            context.HasAudibleContact &&
+            context.HasInvestigableContact &&
             !context.IsSuppressed &&
             !context.IsPanicked &&
             !context.IsLowHealth &&
@@ -222,7 +222,7 @@ public static class UnitIntentUtilityScorer
             (!context.HasRecentTarget ||
              context.InvestigationUtility > context.LastKnownTargetUtility))
         {
-            audible = Clamp01(
+            investigation = Clamp01(
                 0.18f +
                 Clamp01(context.InvestigationUtility) * 0.64f +
                 Clamp01(context.Alertness) * 0.11f +
@@ -265,8 +265,8 @@ public static class UnitIntentUtilityScorer
                 case BehaviacUnitIntent.InvestigateLastKnownTarget:
                     lastKnown = continuationScore;
                     break;
-                case BehaviacUnitIntent.InvestigateAudibleContact:
-                    audible = continuationScore;
+                case BehaviacUnitIntent.InvestigateContact:
+                    investigation = continuationScore;
                     break;
                 case BehaviacUnitIntent.InvestigateSquadContact:
                     squad = continuationScore;
@@ -288,7 +288,7 @@ public static class UnitIntentUtilityScorer
             ProneScore = prone,
             SuppressiveFireScore = suppressiveFire,
             LastKnownContactScore = lastKnown,
-            AudibleContactScore = audible,
+            InvestigableContactScore = investigation,
             SquadContactScore = squad,
             PatrolScore = patrol
         };
@@ -306,7 +306,7 @@ public static class UnitIntentUtilityScorer
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.ProneEngage, prone);
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.SuppressiveFire, suppressiveFire);
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.InvestigateLastKnownTarget, lastKnown);
-        Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.InvestigateAudibleContact, audible);
+        Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.InvestigateContact, investigation);
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.InvestigateSquadContact, squad);
 
         float previousScore = ScoreFor(previousIntent, scores);
@@ -386,7 +386,7 @@ public static class UnitIntentUtilityScorer
             BehaviacUnitIntent.ProneEngage => scores.ProneScore,
             BehaviacUnitIntent.SuppressiveFire => scores.SuppressiveFireScore,
             BehaviacUnitIntent.InvestigateLastKnownTarget => scores.LastKnownContactScore,
-            BehaviacUnitIntent.InvestigateAudibleContact => scores.AudibleContactScore,
+            BehaviacUnitIntent.InvestigateContact => scores.InvestigableContactScore,
             BehaviacUnitIntent.InvestigateSquadContact => scores.SquadContactScore,
             BehaviacUnitIntent.Patrol => scores.PatrolScore,
             _ => 0f
@@ -402,7 +402,7 @@ public static class UnitIntentUtilityScorer
 
     private static bool IsInvestigationIntent(BehaviacUnitIntent intent) =>
         intent is BehaviacUnitIntent.InvestigateLastKnownTarget or
-            BehaviacUnitIntent.InvestigateAudibleContact or
+            BehaviacUnitIntent.InvestigateContact or
             BehaviacUnitIntent.InvestigateSquadContact;
 
     private static float Clamp01(float value) =>

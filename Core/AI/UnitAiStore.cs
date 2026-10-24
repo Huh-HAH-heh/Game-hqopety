@@ -56,7 +56,7 @@ public readonly record struct UnitIntentUtilityBreakdown
     public float ProneScore { get; init; }
     public float SuppressiveFireScore { get; init; }
     public float LastKnownContactScore { get; init; }
-    public float AudibleContactScore { get; init; }
+    public float InvestigableContactScore { get; init; }
     public float SquadContactScore { get; init; }
     public float PatrolScore { get; init; }
 }
@@ -82,7 +82,7 @@ public readonly record struct UnitIntentUtilityContext
     public bool IsFlanking { get; init; }
     public bool IsProne { get; init; }
     public bool IsAlerted { get; init; }
-    public bool HasAudibleContact { get; init; }
+    public bool HasInvestigableContact { get; init; }
     public bool HasSquadContact { get; init; }
     public bool IsInvestigatingContext { get; init; }
     public UnitAiOrderType OrderType { get; init; }

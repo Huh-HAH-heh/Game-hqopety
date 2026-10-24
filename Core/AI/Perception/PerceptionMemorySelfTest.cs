@@ -339,6 +339,65 @@ public static class PerceptionMemorySelfTest
         return visualTimeUnchanged && downgraded && notFresh && aiRemainsDisabled;
     }
 
+    public static bool SemanticSignalsRespectEvidenceLifetime()
+    {
+        var memory = new TacticalContactMemory();
+        var observation = new PerceptionObservation(
+            PerceptionSense.Olfactory,
+            TacticalStimulusType.SensorReading,
+            new Vector3(15f, 9f, 0.1f),
+            positionErrorRadius: 6f,
+            intensity: 0.7f,
+            detectionConfidence: 0.7f,
+            identificationConfidence: 0f,
+            detectionLevel: PerceptionDetectionLevel.Detected,
+            identificationLevel: PerceptionIdentificationLevel.Unknown,
+            occurredAtSeconds: 1f,
+            receivedAtSeconds: 1f,
+            expiresAtSeconds: 3f,
+            signals: PerceptionSignalFlags.Investigate);
+        TacticalContact? contact = memory.Record(observation);
+
+        return contact != null &&
+               (contact.GetActiveSignals(2f) & PerceptionSignalFlags.Investigate) != 0 &&
+               (contact.GetActiveSignals(3f) & PerceptionSignalFlags.Investigate) == 0;
+    }
+
+    public static bool UtilityAiInvestigatesNonAuditoryContactFromSharedMemory()
+    {
+        var world = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
+        var simulation = new UnitSimulation(4, 64) { VisionEnabled = false };
+        UnitId observer = simulation.Spawn(
+            UnitType.Colonist, new Vector3(10f, 10f, 0.1f), factionTag: 1);
+
+        simulation.PerceptionMemory.RecordObservation(observer.Index, new PerceptionObservation(
+            PerceptionSense.Olfactory,
+            TacticalStimulusType.SensorReading,
+            new Vector3(18f, 13f, 0.1f),
+            positionErrorRadius: 4f,
+            intensity: 0.8f,
+            detectionConfidence: 0.8f,
+            identificationConfidence: 0f,
+            detectionLevel: PerceptionDetectionLevel.Suspected,
+            identificationLevel: PerceptionIdentificationLevel.Unknown,
+            occurredAtSeconds: 0.1f,
+            receivedAtSeconds: 0.1f,
+            expiresAtSeconds: 8f,
+            signals: PerceptionSignalFlags.Investigate | PerceptionSignalFlags.PotentialThreat));
+
+        simulation.AI.Enabled = true;
+        simulation.AI.Update(
+            simulation.Units, simulation.Health, simulation.Inventory,
+            simulation.Weapons, simulation.Projectiles, simulation.Suppression,
+            simulation.Vision, world, 0.16f);
+
+        return simulation.AI.Store.UtilityIntent[observer.Index] ==
+                   BehaviacUnitIntent.InvestigateContact &&
+               simulation.AI.Store.HasGoal[observer.Index] &&
+               !simulation.AI.Store.HasTarget[observer.Index] &&
+               simulation.Units.HasTarget[observer.Index];
+    }
+
     private static bool TryCreateVisionScenario(
         out WorldMap world,
         out UnitSimulation simulation,

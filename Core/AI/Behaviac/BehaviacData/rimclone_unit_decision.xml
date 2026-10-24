@@ -143,11 +143,11 @@
     <node class="Sequence" id="39">
       <node class="Condition" id="40">
         <property Operator="Equal" />
-        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateAudibleContact()" />
+        <property Opl="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::ShouldInvestigateContact()" />
         <property Opr="const bool true" />
       </node>
       <node class="Action" id="41">
-        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectInvestigateAudibleContact()" />
+        <property Method="Self.Core::AI::Behaviac::BehaviacUnitDecisionAgent::SelectInvestigateContact()" />
         <property ResultOption="BT_INVALID" />
       </node>
     </node>

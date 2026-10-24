@@ -527,8 +527,8 @@ public sealed class UnitAiSystem
                 }
             }
 
-            if (intent == BehaviacUnitIntent.InvestigateAudibleContact &&
-                TryExecuteAudibleInvestigation(units, weapons, worldMap, unit))
+            if (intent == BehaviacUnitIntent.InvestigateContact &&
+                TryExecutePerceptionInvestigation(units, weapons, worldMap, unit))
             {
                 continue;
             }
@@ -1234,7 +1234,7 @@ public sealed class UnitAiSystem
             case BehaviacUnitIntent.ProneEngage: LastUtilityEngageDecisions++; break;
             case BehaviacUnitIntent.SuppressiveFire: LastUtilitySuppressDecisions++; break;
             case BehaviacUnitIntent.InvestigateLastKnownTarget:
-            case BehaviacUnitIntent.InvestigateAudibleContact:
+            case BehaviacUnitIntent.InvestigateContact:
             case BehaviacUnitIntent.InvestigateSquadContact:
                 LastUtilityInvestigateDecisions++;
                 break;
@@ -1344,13 +1344,16 @@ public sealed class UnitAiSystem
         return true;
     }
 
-    private bool TryExecuteAudibleInvestigation(
+    private bool TryExecutePerceptionInvestigation(
         UnitStore units,
         UnitWeaponStore weapons,
         WorldMap worldMap,
         int unit)
     {
-        if (Hearing?.TryGetBestInvestigableContact(unit, out TacticalContact contact) != true)
+        if (!TryGetBestInvestigableContact(units, unit, out TacticalContact contact, out float utility) ||
+            utility < UnitTacticalUtility.MinimumInvestigationUtility ||
+            _perceptionMemory == null ||
+            !_perceptionMemory.TryGetMemory(unit, out TacticalContactMemory memory))
             return false;
 
         Vector3 estimate = contact.EstimatedPosition;
@@ -1362,7 +1365,7 @@ public sealed class UnitAiSystem
         int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
         Vector3 searchPoint = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
 
-        // Audio is only a search location: it never creates an identified combat target.
+        // Nonvisual evidence provides only a search location, not an identified combat target.
         ClearAiming(weapons, unit);
         Store.ClearTarget(unit);
         Store.SetGoal(unit, searchPoint);
@@ -1370,8 +1373,74 @@ public sealed class UnitAiSystem
         units.HasTarget[unit] = true;
         Store.State[unit] = UnitAiState.Search;
         _isContextInvestigationGoal[unit] = true;
-        Hearing.MarkInvestigated(unit, contact.ContactId);
+        memory.MarkInvestigated(contact.ContactId);
         return true;
+    }
+
+    private bool TryGetBestInvestigableContact(
+        UnitStore units,
+        int unit,
+        out TacticalContact bestContact,
+        out float bestUtility)
+    {
+        bestContact = null!;
+        bestUtility = 0f;
+        if (_perceptionMemory == null ||
+            !_perceptionMemory.TryGetMemory(unit, out TacticalContactMemory memory))
+            return false;
+
+        float now = _perceptionMemory.CurrentTimeSeconds;
+        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            TacticalContact candidate = contacts[i];
+            if (candidate.IsInvestigated ||
+                candidate.ExpiresAtSeconds <= now ||
+                candidate.Kind == TacticalContactKind.VisualConfirmed ||
+                (candidate.GetActiveSignals(now) & PerceptionSignalFlags.Investigate) == 0)
+                continue;
+
+            float confidence = candidate.GetEffectiveConfidence(now, 2.5f);
+            if (confidence <= 0f)
+                continue;
+
+            Vector3 delta = candidate.EstimatedPosition - units.Position[unit];
+            float distance = MathF.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
+            float utility = UnitTacticalUtility.EvaluateInvestigation(
+                confidence, distance, candidate.PositionErrorRadius);
+            if (utility <= bestUtility)
+                continue;
+
+            bestContact = candidate;
+            bestUtility = utility;
+        }
+
+        return bestContact != null;
+    }
+
+    private bool HasPerceivedSignal(
+        int unit,
+        PerceptionSignalFlags signal,
+        float confidenceHalfLife,
+        float minimumConfidence)
+    {
+        if (_perceptionMemory == null ||
+            !_perceptionMemory.TryGetMemory(unit, out TacticalContactMemory memory))
+            return false;
+
+        float now = _perceptionMemory.CurrentTimeSeconds;
+        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            TacticalContact contact = contacts[i];
+            if (contact.ExpiresAtSeconds <= now ||
+                (contact.GetActiveSignals(now) & signal) == 0)
+                continue;
+            if (contact.GetEffectiveConfidence(now, confidenceHalfLife) >= minimumConfidence)
+                return true;
+        }
+
+        return false;
     }
 
     private BehaviacUnitIntent SelectUnitIntent(
@@ -1620,23 +1689,12 @@ public sealed class UnitAiSystem
                !ReachedGoal(units.Position[unit], _suppressionCoverByUnit[unit])) ||
               (hasCoverGoal && !ReachedGoal(units.Position[unit], Store.Goal[unit]));
 
-        bool hasAudibleContact = false;
+        bool hasInvestigableContact = false;
         float investigationUtility = 0f;
         if (!isInvestigatingContext &&
-            Hearing != null &&
-            Hearing.TryGetBestInvestigableContact(unit, out TacticalContact audibleContact))
+            TryGetBestInvestigableContact(units, unit, out _, out investigationUtility))
         {
-            Vector3 contactDelta = audibleContact.EstimatedPosition - units.Position[unit];
-            float contactDistance = MathF.Sqrt(
-                contactDelta.X * contactDelta.X +
-                contactDelta.Y * contactDelta.Y);
-            float confidence = audibleContact.GetEffectiveConfidence(
-                Hearing.CurrentTimeSeconds,
-                2.5f);
-            investigationUtility = UnitTacticalUtility.EvaluateInvestigation(
-                confidence,
-                contactDistance);
-            hasAudibleContact =
+            hasInvestigableContact =
                 investigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility;
         }
 
@@ -1654,7 +1712,10 @@ public sealed class UnitAiSystem
             hasSquadContact = squadContactUtility >= UnitTacticalUtility.MinimumSquadContactUtility;
         }
 
-        bool hasImmediateDanger = suppression.IsInImmediateDanger(unit);
+        bool hasImmediateDanger = suppression.IsInImmediateDanger(unit) ||
+            HasPerceivedSignal(unit, PerceptionSignalFlags.ImmediateDanger, 0.75f, 0.14f);
+        isAlerted |= hasImmediateDanger ||
+            HasPerceivedSignal(unit, PerceptionSignalFlags.PotentialThreat, 2.5f, 0.16f);
         float coverUtility = UnitTacticalUtility.EvaluateCover(
             suppression.Value[unit],
             hasCover,
@@ -1702,7 +1763,7 @@ public sealed class UnitAiSystem
             IsFlanking = isFlanking,
             IsProne = units.Posture[unit] == UnitPosture.Lying,
             IsAlerted = isAlerted,
-            HasAudibleContact = hasAudibleContact,
+            HasInvestigableContact = hasInvestigableContact,
             HasSquadContact = hasSquadContact,
             IsInvestigatingContext = isInvestigatingContext,
             OrderType = orderType,
