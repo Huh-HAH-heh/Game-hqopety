@@ -29,7 +29,6 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private const float DebugEventLifetimeSeconds = 2.25f;
     private const int MaxRecentLoudDebugEvents = 96;
     private const int MaxRecentFootstepDebugEvents = 48;
-    private const float GunshotMergeCellSize = 4f;
 
     private readonly List<SoundPulse> _pendingPulses = new();
     private readonly Dictionary<AcousticCellKey, AcousticBatch> _pendingAcousticBatches = new(128);
@@ -39,6 +38,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private float[] _bestGunshotErrorByObserver = Array.Empty<float>();
     private bool[] _hasBestGunshotByObserver = Array.Empty<bool>();
     private float[] _lastGunshotMemoryPublishedAt = Array.Empty<float>();
+    private bool[] _hasPublishedGunshotMemory = Array.Empty<bool>();
     private int _pendingGunshotEvents;
     private int _pendingGunshotBatches;
     private int _pendingGunshotsMerged;
@@ -178,6 +178,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         _footstepCooldown[unitIndex] = 0f;
         _hasBestGunshotByObserver[unitIndex] = false;
         _lastGunshotMemoryPublishedAt[unitIndex] = 0f;
+        _hasPublishedGunshotMemory[unitIndex] = false;
     }
 
     public void ClearUnit(int unitIndex)
@@ -187,6 +188,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             _footstepCooldown[unitIndex] = 0f;
             _hasBestGunshotByObserver[unitIndex] = false;
             _lastGunshotMemoryPublishedAt[unitIndex] = 0f;
+            _hasPublishedGunshotMemory[unitIndex] = false;
         }
     }
 
@@ -382,6 +384,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                     response, units, vision, worldMap, observer, pulse.Type,
                     pulse.Position, pulse.Range, confidence, estimate);
             }
+        }
 
         // Persist gunfire as a sensory update, not once per bullet received by
         // every listener. Fast bursts still raise alertness for all heard clusters.
@@ -392,7 +395,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 continue;
 
             float lastPublished = _lastGunshotMemoryPublishedAt[observer];
-            if (lastPublished > 0f &&
+            if (_hasPublishedGunshotMemory[observer] &&
                 nowSeconds - lastPublished < GunshotMemoryPublishIntervalSeconds)
                 continue;
 
@@ -411,8 +414,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             }
 
             _lastGunshotMemoryPublishedAt[observer] = nowSeconds;
-        }
-            }
+            _hasPublishedGunshotMemory[observer] = true;
         }
     }
 
@@ -612,6 +614,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             Array.Resize(ref _bestGunshotErrorByObserver, capacity);
             Array.Resize(ref _hasBestGunshotByObserver, capacity);
             Array.Resize(ref _lastGunshotMemoryPublishedAt, capacity);
+            Array.Resize(ref _hasPublishedGunshotMemory, capacity);
         }
     }
 
