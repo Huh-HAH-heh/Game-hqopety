@@ -4,6 +4,7 @@ using Core.AI;
 using Core.Items;
 using Core.Map;
 using Core.Unit;
+using World;
 
 internal static class Program
 {
@@ -19,7 +20,7 @@ internal static class Program
         try
         {
             int popSize=Arg(args,"--population",8,4,128), generations=Arg(args,"--generations",4,1,10000);
-            int battles=Arg(args,"--battles",6,2,1000), ticks=Arg(args,"--ticks",600,100,100000);
+            int battles=Arg(args,"--battles",8,2,1000), ticks=Arg(args,"--ticks",600,100,100000);
             int team=Arg(args,"--team-size",4,2,16), seed=Arg(args,"--seed",20261024,int.MinValue,int.MaxValue);
             string output=Path.GetFullPath(TextArg(args,"--output","ai-balance-best.json"));
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
@@ -129,19 +130,23 @@ internal static class Program
     private static double Evaluate(AiBalanceProfile p,int battles,int ticks,int team)
     {
         double total=0;
-        for(int i=0;i<battles;i++) total+=Battle(p,i%2==0,(i/2)%3,ticks,team);
+        for(int i=0;i<battles;i++) total+=Battle(p,i%2==0,(i/2)%4,ticks,team);
         return total/battles;
     }
 
     private static double Battle(AiBalanceProfile candidate,bool leftCandidate,int scenario,int ticks,int team)
     {
-        var world=new WorldMap(regionsX:8,regionsY:4,layerCount:32);
+        bool canyonScenario=scenario==3;
+        var world=canyonScenario
+            ? new WorldMap(regionsX:12,regionsY:6,layerCount:500)
+            : new WorldMap(regionsX:8,regionsY:4,layerCount:32);
+        if(canyonScenario) WorldGenerator.Generate(world,writeLog:false);
         if(scenario==1) Barrier(world);
         var sim=new UnitSimulation(unitCapacity:team*2+4,bodyCapacity:2048);
         sim.AI.SetBalanceProfileForFaction(1,leftCandidate?candidate:AiBalanceProfile.Default);
         sim.AI.SetBalanceProfileForFaction(2,leftCandidate?AiBalanceProfile.Default:candidate);
-        List<UnitId> leftMembers=Spawn(sim,true,1,scenario,team);
-        List<UnitId> rightMembers=Spawn(sim,false,2,scenario,team);
+        List<UnitId> leftMembers=Spawn(sim,world,true,1,scenario,team);
+        List<UnitId> rightMembers=Spawn(sim,world,false,2,scenario,team);
         sim.AI.SynchronizeSquadMemberships(new[]
         {
             new SquadMembershipSnapshot(1,leftMembers),
@@ -160,14 +165,23 @@ internal static class Program
         return 45* outcome+20*own.Hp+20*(1-enemy.Hp)+15d*own.Alive/Math.Max(1,own.Total);
     }
 
-    private static List<UnitId> Spawn(UnitSimulation sim,bool left,ushort faction,int scenario,int count)
+    private static List<UnitId> Spawn(UnitSimulation sim,WorldMap world,bool left,ushort faction,int scenario,int count)
     {
         var members=new List<UnitId>(count);
         for(int i=0;i<count;i++)
         {
-            int y=9+i*46/Math.Max(1,count-1),offset=(i%2)*2;
-            int x=scenario switch { 2=>left?33+offset:95-offset, 1=>left?16+offset:112-offset, _=>left?10+offset:118-offset };
-            UnitId id=sim.Spawn(UnitType.Colonist,new Vector3(x,y,.1f),bodyAngle:left?0f:MathF.PI,factionTag:faction);
+            int margin=scenario==3?10:9;
+            int y=margin+i*(world.TileHeight-2*margin-1)/Math.Max(1,count-1),offset=(i%2)*2;
+            int center=(world.TileWidth-1)/2;
+            int x=scenario switch
+            {
+                1=>left?16+offset:world.TileWidth-17-offset,
+                2=>left?center-31+offset:center+31-offset,
+                3=>left?center-34+offset:center+34-offset,
+                _=>left?center-50+offset:center+50-offset
+            };
+            float height=scenario==3?world.GetSurfaceHeight(x,y):0.1f;
+            UnitId id=sim.Spawn(UnitType.Colonist,new Vector3(x,y,height),bodyAngle:left?0f:MathF.PI,factionTag:faction);
             members.Add(id);
             if(i%5==1)
             {
@@ -189,11 +203,14 @@ internal static class Program
 
     private static void Barrier(WorldMap world)
     {
-        for(int y=4;y<60;y++)
+        int x=world.TileWidth/2;
+        for(int y=4;y<world.TileHeight-4;y++)
         {
-            if((y>=18&&y<=24)||(y>=40&&y<=46)) continue;
-            world.SetNavigationBlocked(64,y,true);
-            for(int z=0;z<16;z++) world.SetMaterialId(64,y,z,(ushort)1);
+            float ratio=(float)y/world.TileHeight;
+            if((ratio>=.28f&&ratio<=.38f)||(ratio>=.62f&&ratio<=.72f)) continue;
+            world.SetNavigationBlocked(x,y,true);
+            for(int z=0;z<Math.Min(16,world.LayerCount);z++)
+                world.SetMaterialId(x,y,z,(ushort)1);
         }
     }
 
