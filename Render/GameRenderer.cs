@@ -1099,7 +1099,8 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug-layers F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD";
+            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug-layers " +
+            $"F6=vision F7=pause F8=scale F11=normal Shift+F12=slower F12=faster I=AI-states T=tracers F9=HUD";
     }
 
     private void StartSimulationThread()
@@ -3474,9 +3475,43 @@ public sealed class GameRenderer
         }
     }
 
+    private void ChangeSimulationSpeed(int direction)
+    {
+        int currentIndex = 0;
+        float nearestDistance = float.MaxValue;
+        for (int i = 0; i < SimulationSpeedLevels.Length; i++)
+        {
+            float distance = MathF.Abs(SimulationSpeedLevels[i] - _simulationSpeed);
+            if (distance >= nearestDistance)
+                continue;
+            nearestDistance = distance;
+            currentIndex = i;
+        }
+
+        int nextIndex = Math.Clamp(currentIndex + Math.Sign(direction), 0, SimulationSpeedLevels.Length - 1);
+        _simulationSpeed = SimulationSpeedLevels[nextIndex];
+        Console.WriteLine($"[SIM] Time scale={_simulationSpeed:0.00}x; F7=pause, Shift+F12=slower, F12=faster, F11=normal.");
+    }
+
     private void HandleKey(
         Keyboard.Key key)
     {
+        if (key == Keyboard.Key.F12)
+        {
+            bool slower =
+                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+            ChangeSimulationSpeed(slower ? -1 : 1);
+            return;
+        }
+
+        if (key == Keyboard.Key.F11)
+        {
+            _simulationSpeed = 1f;
+            Console.WriteLine("[SIM] Time scale reset to 1.00x.");
+            return;
+        }
+
         if (key == Keyboard.Key.F10)
         {
             if (_bodyRigEditorOverlay?.IsOpen == true)
