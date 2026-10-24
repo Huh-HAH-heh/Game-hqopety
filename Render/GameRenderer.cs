@@ -2,6 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Text.Json;
 using System.Numerics;
 using System.Threading;
 using Core.AI;
@@ -236,6 +238,7 @@ public sealed class GameRenderer
 
         _unitSimulation =
             new UnitSimulation(unitCapacity: 2048);
+        LoadAiBalanceProfile();
 
         _unitRenderer =
             new UnitRenderSystem();
@@ -270,6 +273,34 @@ public sealed class GameRenderer
 
         _lastAllocatedBytesSample =
             GC.GetTotalAllocatedBytes(false);
+    }
+
+    private void LoadAiBalanceProfile()
+    {
+        string? configuredPath = Environment.GetEnvironmentVariable("RIMCLONE_AI_BALANCE_PROFILE");
+        if (string.IsNullOrWhiteSpace(configuredPath))
+            return;
+
+        string fullPath = Path.GetFullPath(configuredPath);
+        try
+        {
+            AiBalanceProfile? profile = JsonSerializer.Deserialize<AiBalanceProfile>(
+                File.ReadAllText(fullPath),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (profile == null)
+            {
+                Console.WriteLine($"[AI] Profile '{fullPath}' was empty; keeping default balance.");
+                return;
+            }
+
+            _unitSimulation.AI.BalanceProfile = profile;
+            Console.WriteLine($"[AI] Loaded balance profile: {fullPath}");
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"[AI] Could not load profile '{fullPath}'; keeping default balance. {exception.Message}");
+        }
     }
 
     public void Run()
