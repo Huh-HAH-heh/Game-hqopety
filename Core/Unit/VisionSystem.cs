@@ -54,6 +54,10 @@ public sealed class VisionSystem
     private const int VisibilityMemoryUpdates = 60;
     private const int VisibilitySectorCount = 8;
     private const int CandidatesPerSector = 3;
+    private const int RecentVisibilityWays = 4;
+    private const int RecentVisibilitySlotsPerObserver = 512;
+    private const int RecentVisibilityBucketCount =
+        RecentVisibilitySlotsPerObserver / RecentVisibilityWays;
     private const int MaxTargetCandidatesPerObserver = 64;
     private const int TargetScanStride = 97;
     private const int TargetObserverOffset = 37;
@@ -76,8 +80,10 @@ public sealed class VisionSystem
     private int _candidatePairCount;
     private int _lineOfSightChecks;
     private int _targetEvaluationCount;
-    private int[] _lastVisibleUpdate = Array.Empty<int>();
-        private int[] _sectorTargetCursors = Array.Empty<int>();
+    private int[] _recentVisibleTargets = Array.Empty<int>();
+    private int[] _recentVisibleUpdates = Array.Empty<int>();
+    private int[] _candidateVisibleUpdates = Array.Empty<int>();
+    private int[] _sectorTargetCursors = Array.Empty<int>();
     private int _visibilityCapacity;
     private int _visionUpdateSequence;
     private long _visibilityTerrainVersion = long.MinValue;
@@ -190,8 +196,7 @@ public sealed class VisionSystem
 
         if (_visionUpdateSequence >= int.MaxValue - VisibilityMemoryUpdates)
         {
-            Array.Clear(_lastVisibleUpdate);
-            
+            ClearVisibilityMemory();
             _visionUpdateSequence = 0;
         }
 
@@ -199,8 +204,7 @@ public sealed class VisionSystem
 
         if (_visibilityTerrainVersion != worldMap.TerrainVersion)
         {
-            Array.Clear(_lastVisibleUpdate);
-            
+            ClearVisibilityMemory();
             _visibilityTerrainVersion = worldMap.TerrainVersion;
         }
 
@@ -309,6 +313,9 @@ public sealed class VisionSystem
         Span<int> candidateTargets = _candidateTargetsByObserver.AsSpan(
             candidateOffset, CandidateSlots);
         candidateTargets.Fill(-1);
+        Span<int> candidateVisibleUpdates = _candidateVisibleUpdates.AsSpan(
+            candidateOffset, CandidateSlots);
+        candidateVisibleUpdates.Clear();
 
         Span<float> candidateDistances = stackalloc float[CandidateSlots];
         Span<int> rotationDistances = stackalloc int[CandidateSlots];
@@ -504,11 +511,14 @@ public sealed class VisionSystem
                 units, worldMap, observer, target, null, bodies,
                 ref lineOfSightChecks);
 
-            int pairIndex = observer * _visibilityCapacity + target;
-            _lastVisibleUpdate[pairIndex] = check.IsVisible
+            candidateVisibleUpdates[candidate] = check.IsVisible
                 ? _visionUpdateSequence
                 : 0;
-                    }
+            if (check.IsVisible)
+                RememberVisibleTarget(observer, target, _visionUpdateSequence);
+            else
+                ForgetCachedVisibleTarget(observer, target);
+        }
 
         // Rotate far-target picks independently from the nearest target.
         for (int sector = 0; sector < VisibilitySectorCount; sector++)
@@ -547,8 +557,16 @@ public sealed class VisionSystem
             _visionUpdateSequence <= 0)
             return false;
 
-        return _lastVisibleUpdate[observerIndex * _visibilityCapacity + targetIndex] ==
-            _visionUpdateSequence;
+        int candidateOffset = observerIndex * CandidateSlots;
+        for (int i = 0; i < CandidateSlots; i++)
+        {
+            if (_candidateTargetsByObserver[candidateOffset + i] != targetIndex)
+                continue;
+
+            return _candidateVisibleUpdates[candidateOffset + i] == _visionUpdateSequence;
+        }
+
+        return false;
     }
 
     public bool IsRecentlyVisible(
@@ -563,13 +581,11 @@ public sealed class VisionSystem
             return false;
         }
 
-        int pairIndex = observerIndex * _visibilityCapacity + targetIndex;
-        int lastVisible = _lastVisibleUpdate[pairIndex];
-
-        if (lastVisible == 0 ||
+        if (!TryGetRecentVisibleUpdate(observerIndex, targetIndex, out int lastVisible) ||
+            lastVisible == 0 ||
             _visionUpdateSequence - lastVisible > VisibilityMemoryUpdates)
         {
-            _lastVisibleUpdate[pairIndex] = 0;
+            ForgetCachedVisibleTarget(observerIndex, targetIndex);
             return false;
         }
 
@@ -584,7 +600,7 @@ public sealed class VisionSystem
                 targetIndex,
                 out _))
         {
-            _lastVisibleUpdate[pairIndex] = 0;
+            ForgetCachedVisibleTarget(observerIndex, targetIndex);
             return false;
         }
 
@@ -599,9 +615,7 @@ public sealed class VisionSystem
             return;
         }
 
-        int pairIndex = observerIndex * _visibilityCapacity + targetIndex;
-        _lastVisibleUpdate[pairIndex] = 0;
-        
+        ForgetCachedVisibleTarget(observerIndex, targetIndex);
 
         int start = _visibleStarts[observerIndex];
         int end = start + _visibleCounts[observerIndex];
@@ -621,8 +635,26 @@ public sealed class VisionSystem
         _visibleStarts[unitIndex] = 0;
         _visibleCounts[unitIndex] = 0;
 
-        // Remove this unit from every already-built observer list as well as
-        // from the pair cache, because unit indices can be recycled after death.
+        // Clear the destroyed unit's observer row and remove its index from all
+        // bounded history/current candidate rows before the index can be reused.
+        int unitCandidateOffset = unitIndex * CandidateSlots;
+        Array.Fill(_candidateTargetsByObserver, -1, unitCandidateOffset, CandidateSlots);
+        Array.Clear(_candidateVisibleUpdates, unitCandidateOffset, CandidateSlots);
+
+        Array.Fill(
+            _recentVisibleTargets,
+            -1,
+            unitIndex * RecentVisibilitySlotsPerObserver,
+            RecentVisibilitySlotsPerObserver);
+        Array.Clear(
+            _recentVisibleUpdates,
+            unitIndex * RecentVisibilitySlotsPerObserver,
+            RecentVisibilitySlotsPerObserver);
+        Array.Clear(
+            _sectorTargetCursors,
+            unitIndex * VisibilitySectorCount,
+            VisibilitySectorCount);
+
         for (int observer = 0; observer < _visibleCounts.Length; observer++)
         {
             int start = _visibleStarts[observer];
@@ -633,22 +665,22 @@ public sealed class VisionSystem
                 if (_visibleTargets[i] == unitIndex)
                     _visibleTargets[i] = -1;
             }
-        }
 
-        if ((uint)unitIndex < (uint)_visibilityCapacity)
-        {
-            Array.Clear(
-                _lastVisibleUpdate,
-                unitIndex * _visibilityCapacity,
-                _visibilityCapacity);
+            if (observer == unitIndex)
+                continue;
 
-            for (int observer = 0; observer < _visibilityCapacity; observer++)
-                _lastVisibleUpdate[observer * _visibilityCapacity + unitIndex] = 0;
+            int candidateOffset = observer * CandidateSlots;
+            for (int i = 0; i < CandidateSlots; i++)
+            {
+                int slot = candidateOffset + i;
+                if (_candidateTargetsByObserver[slot] == unitIndex)
+                {
+                    _candidateTargetsByObserver[slot] = -1;
+                    _candidateVisibleUpdates[slot] = 0;
+                }
+            }
 
-            Array.Clear(
-                _sectorTargetCursors,
-                unitIndex * VisibilitySectorCount,
-                VisibilitySectorCount);
+            ForgetCachedVisibleTarget(observer, unitIndex);
         }
 
         _updateTimer = UpdateInterval;
@@ -658,8 +690,7 @@ public sealed class VisionSystem
     {
         Array.Clear(_visibleStarts);
         Array.Clear(_visibleCounts);
-        Array.Clear(_lastVisibleUpdate);
-        
+        ClearVisibilityMemory();
         Array.Clear(_sectorTargetCursors);
         _visibleTargetCount = 0;
         _visionUpdateSequence = 0;
@@ -1611,8 +1642,8 @@ public sealed class VisionSystem
 
             LastVisibilityMemoryEntriesScanned++;
 
-            int pairIndex = observer * _visibilityCapacity + target;
-            if (_lastVisibleUpdate[pairIndex] != _visionUpdateSequence)
+            int candidateOffset = observer * CandidateSlots;
+            if (_candidateVisibleUpdates[candidateOffset + i] != _visionUpdateSequence)
                 continue;
 
             bool duplicate = false;
@@ -1628,6 +1659,96 @@ public sealed class VisionSystem
             if (!duplicate)
                 AppendVisibleTarget(target);
         }
+    }
+
+    private static int GetRecentVisibilityBucket(int targetIndex)
+    {
+        uint value = (uint)targetIndex;
+        value ^= value >> 16;
+        value *= 0x7feb352du;
+        value ^= value >> 15;
+        value *= 0x846ca68bu;
+        value ^= value >> 16;
+        return (int)(value & (uint)(RecentVisibilityBucketCount - 1));
+    }
+
+    private static int GetRecentVisibilityBucketStart(int observerIndex, int targetIndex) =>
+        observerIndex * RecentVisibilitySlotsPerObserver +
+        GetRecentVisibilityBucket(targetIndex) * RecentVisibilityWays;
+
+    private bool TryGetRecentVisibleUpdate(int observerIndex, int targetIndex, out int update)
+    {
+        int start = GetRecentVisibilityBucketStart(observerIndex, targetIndex);
+        for (int way = 0; way < RecentVisibilityWays; way++)
+        {
+            int slot = start + way;
+            if (_recentVisibleTargets[slot] != targetIndex)
+                continue;
+
+            update = _recentVisibleUpdates[slot];
+            return true;
+        }
+
+        update = 0;
+        return false;
+    }
+
+    private void RememberVisibleTarget(int observerIndex, int targetIndex, int update)
+    {
+        int start = GetRecentVisibilityBucketStart(observerIndex, targetIndex);
+        int replacement = start;
+        int oldestUpdate = int.MaxValue;
+
+        for (int way = 0; way < RecentVisibilityWays; way++)
+        {
+            int slot = start + way;
+            int cachedTarget = _recentVisibleTargets[slot];
+            if (cachedTarget == targetIndex)
+            {
+                _recentVisibleUpdates[slot] = update;
+                return;
+            }
+
+            if (cachedTarget < 0 ||
+                _recentVisibleUpdates[slot] == 0 ||
+                update - _recentVisibleUpdates[slot] > VisibilityMemoryUpdates)
+            {
+                replacement = slot;
+                oldestUpdate = int.MinValue;
+                break;
+            }
+
+            if (_recentVisibleUpdates[slot] < oldestUpdate)
+            {
+                oldestUpdate = _recentVisibleUpdates[slot];
+                replacement = slot;
+            }
+        }
+
+        _recentVisibleTargets[replacement] = targetIndex;
+        _recentVisibleUpdates[replacement] = update;
+    }
+
+    private void ForgetCachedVisibleTarget(int observerIndex, int targetIndex)
+    {
+        int start = GetRecentVisibilityBucketStart(observerIndex, targetIndex);
+        for (int way = 0; way < RecentVisibilityWays; way++)
+        {
+            int slot = start + way;
+            if (_recentVisibleTargets[slot] != targetIndex)
+                continue;
+
+            _recentVisibleTargets[slot] = -1;
+            _recentVisibleUpdates[slot] = 0;
+            return;
+        }
+    }
+
+    private void ClearVisibilityMemory()
+    {
+        Array.Fill(_recentVisibleTargets, -1);
+        Array.Clear(_recentVisibleUpdates);
+        Array.Clear(_candidateVisibleUpdates);
     }
 
     private bool IsWithinRangeAndFov(
@@ -1731,22 +1852,39 @@ public sealed class VisionSystem
         if (_visibilityCapacity >= capacity)
             return;
 
+        int oldCapacity = _visibilityCapacity;
         int newCapacity = Math.Max(
             capacity,
-            _visibilityCapacity == 0 ? 32 : _visibilityCapacity * 2);
+            oldCapacity == 0 ? 32 : oldCapacity * 2);
 
-        int[] nextVisibleUpdates = new int[checked(newCapacity * newCapacity)];
+        int oldRecentSlots = oldCapacity * RecentVisibilitySlotsPerObserver;
+        int newRecentSlots = checked(newCapacity * RecentVisibilitySlotsPerObserver);
+        int[] nextRecentTargets = new int[newRecentSlots];
+        Array.Fill(nextRecentTargets, -1);
+        int[] nextRecentUpdates = new int[newRecentSlots];
+        int[] nextCandidateUpdates = new int[checked(newCapacity * CandidateSlots)];
         int[] nextSectorCursors = new int[checked(newCapacity * VisibilitySectorCount)];
 
-        for (int row = 0; row < _visibilityCapacity; row++)
+        for (int row = 0; row < oldCapacity; row++)
         {
             Array.Copy(
-                _lastVisibleUpdate,
-                row * _visibilityCapacity,
-                nextVisibleUpdates,
-                row * newCapacity,
-                _visibilityCapacity);
-
+                _recentVisibleTargets,
+                row * RecentVisibilitySlotsPerObserver,
+                nextRecentTargets,
+                row * RecentVisibilitySlotsPerObserver,
+                RecentVisibilitySlotsPerObserver);
+            Array.Copy(
+                _recentVisibleUpdates,
+                row * RecentVisibilitySlotsPerObserver,
+                nextRecentUpdates,
+                row * RecentVisibilitySlotsPerObserver,
+                RecentVisibilitySlotsPerObserver);
+            Array.Copy(
+                _candidateVisibleUpdates,
+                row * CandidateSlots,
+                nextCandidateUpdates,
+                row * CandidateSlots,
+                CandidateSlots);
             Array.Copy(
                 _sectorTargetCursors,
                 row * VisibilitySectorCount,
@@ -1755,8 +1893,9 @@ public sealed class VisionSystem
                 VisibilitySectorCount);
         }
 
-        _lastVisibleUpdate = nextVisibleUpdates;
-        
+        _recentVisibleTargets = nextRecentTargets;
+        _recentVisibleUpdates = nextRecentUpdates;
+        _candidateVisibleUpdates = nextCandidateUpdates;
         _sectorTargetCursors = nextSectorCursors;
         _visibilityCapacity = newCapacity;
     }
