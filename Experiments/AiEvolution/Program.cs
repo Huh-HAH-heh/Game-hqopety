@@ -23,6 +23,7 @@ internal static class Program
             ValidateGenomeConfiguration();
             int popSize=Arg(args,"--population",8,4,128), generations=Arg(args,"--generations",4,1,10000);
             int battles=Arg(args,"--battles",8,2,1000), ticks=Arg(args,"--ticks",600,100,100000);
+            int validationBattles=Arg(args,"--validation-battles",Math.Max(8,battles),8,1000);
             int team=Arg(args,"--team-size",4,2,16), seed=Arg(args,"--seed",20261024,int.MinValue,int.MaxValue);
             string output=Path.GetFullPath(TextArg(args,"--output","Experiments/AiEvolution/output/ai-balance-best.json"));
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
@@ -74,7 +75,35 @@ internal static class Program
                 if(gen<generations)
                     population=Next(results.Select(x=>(x.Genes,x.Metrics.Fitness)).ToList(),popSize,rng,mutationBase);
             }
-            Console.WriteLine($"Saved profile: {output}"); Console.WriteLine($"History: {csv}");
+            int validationSeed=unchecked(seed^0x5F3759DF);
+            Evaluation trained=Evaluate(Profile(globalGenes),validationBattles,ticks,team,validationSeed);
+            Evaluation baseline=Evaluate(AiBalanceProfile.Default,validationBattles,ticks,team,validationSeed);
+            string validationPath=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".validation.json");
+            var validationReport=new
+            {
+                TrainingSeed=seed,
+                ValidationSeed=validationSeed,
+                BattlesPerProfile=validationBattles,
+                Baseline=baseline,
+                Trained=trained,
+                Delta=new
+                {
+                    Fitness=trained.Fitness-baseline.Fitness,
+                    WinRate=trained.WinRate-baseline.WinRate,
+                    SurvivorRate=trained.SurvivorRate-baseline.SurvivorRate,
+                    OwnHealthRatio=trained.OwnHealthRatio-baseline.OwnHealthRatio,
+                    EnemyHealthDamage=baseline.EnemyHealthRatio-trained.EnemyHealthRatio
+                },
+                ImprovesFitness=trained.Fitness>baseline.Fitness,
+                ImprovesWinRate=trained.WinRate>baseline.WinRate
+            };
+            File.WriteAllText(validationPath,JsonSerializer.Serialize(validationReport,new JsonSerializerOptions{WriteIndented=true}));
+            Console.WriteLine($"HOLDOUT baseline: score={baseline.Fitness:F2}; wins={baseline.WinRate:P1}; survivor-rate={baseline.SurvivorRate:P1}");
+            Console.WriteLine($"HOLDOUT trained:  score={trained.Fitness:F2}; wins={trained.WinRate:P1}; survivor-rate={trained.SurvivorRate:P1}");
+            Console.WriteLine($"HOLDOUT delta:    score={trained.Fitness-baseline.Fitness:+0.00;-0.00;0.00}; wins={trained.WinRate-baseline.WinRate:+P1;-P1;P1}");
+            Console.WriteLine($"Saved profile: {output}");
+            Console.WriteLine($"History: {csv}");
+            Console.WriteLine($"Holdout report: {validationPath}");
             return 0;
         }
         catch(Exception ex) { Console.Error.WriteLine($"AI evolution failed: {ex.Message}"); return 1; }
