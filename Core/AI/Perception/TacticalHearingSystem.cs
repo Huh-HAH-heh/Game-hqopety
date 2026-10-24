@@ -30,6 +30,9 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private const int MaxRecentLoudDebugEvents = 96;
     private const int MaxRecentFootstepDebugEvents = 48;
     private const int ListenerGridCellSize = 32;
+    private const int PulseBufferTrimThreshold = 4096;
+    private const int PulseBufferRetainedCapacity = 128;
+    private const float PulseBufferTrimQuietSeconds = 2f;
 
     private readonly List<SoundPulse> _pendingPulses = new();
     private readonly Dictionary<AcousticCellKey, AcousticBatch> _pendingAcousticBatches = new(128);
@@ -54,6 +57,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private int[] _listenerCellWriteCursors = Array.Empty<int>();
     private int[] _listenerUnits = Array.Empty<int>();
     private long _nextPulseId = 1;
+    private float _lastPulseAtSeconds = float.NegativeInfinity;
 
     public float CurrentTimeSeconds => _memoryStore.CurrentTimeSeconds;
     public int LastQueuedPulseCount { get; private set; }
@@ -170,12 +174,21 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         LastGunshotBatchesQueued = _pendingGunshotBatches;
         LastGunshotsMerged = _pendingGunshotsMerged;
 
-        DeliverPulses(units, health, response, nowSeconds, worldMap, vision);
-        _pendingPulses.Clear();
-        _pendingAcousticBatches.Clear();
-        _pendingGunshotEvents = 0;
-        _pendingGunshotBatches = 0;
-        _pendingGunshotsMerged = 0;
+        try
+        {
+            DeliverPulses(units, health, response, nowSeconds, worldMap, vision);
+        }
+        finally
+        {
+            // Clear transient events even when delivery fails partway through.
+            // Retrying a partially delivered batch would duplicate sensory effects.
+            _pendingPulses.Clear();
+            _pendingAcousticBatches.Clear();
+            _pendingGunshotEvents = 0;
+            _pendingGunshotBatches = 0;
+            _pendingGunshotsMerged = 0;
+            TrimTransientBuffersIfQuiet(nowSeconds);
+        }
     }
 
     public void InitializeUnit(int unitIndex)
@@ -668,6 +681,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
 
     private void QueuePulse(SoundPulse pulse)
     {
+        _lastPulseAtSeconds = pulse.OccurredAtSeconds;
         bool appendPulse = true;
         bool gunshot = pulse.Type == TacticalStimulusType.Gunshot;
         bool batchable = gunshot || pulse.Type == TacticalStimulusType.Footstep;
@@ -739,6 +753,28 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         while (events.Count > 0 &&
                nowSeconds - events.Peek().OccurredAtSeconds > DebugEventLifetimeSeconds)
             events.Dequeue();
+    }
+
+    private void TrimTransientBuffersIfQuiet(float nowSeconds)
+    {
+        if (_pendingPulses.Count != 0 ||
+            _pendingAcousticBatches.Count != 0 ||
+            nowSeconds - _lastPulseAtSeconds < PulseBufferTrimQuietSeconds)
+        {
+            return;
+        }
+
+        // Keep normal small buffers warm, but release the high-water allocation after
+        // an unusually large battle burst has been quiet for a while. Events are never
+        // dropped to satisfy a cap; this only affects empty collection capacity.
+        if (_pendingPulses.Capacity > PulseBufferTrimThreshold)
+            _pendingPulses.Capacity = PulseBufferRetainedCapacity;
+
+        if (_pendingAcousticBatches.EnsureCapacity(0) > PulseBufferTrimThreshold)
+        {
+            _pendingAcousticBatches.TrimExcess();
+            _pendingAcousticBatches.EnsureCapacity(PulseBufferRetainedCapacity);
+        }
     }
 
     private void EnsureCapacity(int required)
