@@ -2072,7 +2072,7 @@ public sealed class UnitAiSystem
             return false;
         _nextRememberedEnemyQuerySecondsByUnit[observer] = now + RememberedEnemyRefreshInterval;
 
-        float bestUtility = GetBalanceProfile(units.FactionTag[unit]).MinimumInvestigationUtility;
+        float bestUtility = GetBalanceProfile(units.FactionTag[observer]).MinimumInvestigationUtility;
         IReadOnlyList<TacticalContact> contacts = memory.Contacts;
         for (int i = 0; i < contacts.Count; i++)
         {
@@ -2126,7 +2126,7 @@ public sealed class UnitAiSystem
         float dy = contact.EstimatedPosition.Y - units.Position[observer].Y;
         float distance = MathF.Sqrt(dx * dx + dy * dy);
         utility = UnitTacticalUtility.EvaluateInvestigation(confidence, distance, GetBalanceProfile(units.FactionTag[observer]));
-        return utility > GetBalanceProfile(units.FactionTag[unit]).MinimumInvestigationUtility;
+        return utility > GetBalanceProfile(units.FactionTag[observer]).MinimumInvestigationUtility;
     }
 
     private static int FindNearestVisibleEnemy(
