@@ -2788,8 +2788,7 @@ public sealed class UnitAiSystem
         Vector3 origin =
             units.Position[unit];
 
-        float bestDistanceSquared =
-            float.PositiveInfinity;
+        float bestScore = float.NegativeInfinity;
 
         for (int direction = 0;
              direction < CoverDirectionCount;
@@ -2825,8 +2824,12 @@ public sealed class UnitAiSystem
                 if (tileX < 1 ||
                     tileY < 1 ||
                     tileX >= worldMap.TileWidth - 1 ||
-                    tileY >= worldMap.TileHeight - 1)
+                    tileY >= worldMap.TileHeight - 1 ||
+                    worldMap.IsNavigationBlocked(tileX, tileY) ||
+                    worldMap.GetSurfaceLayer(tileX, tileY) < 0)
+                {
                     continue;
+                }
 
                 candidate.Z =
                     worldMap.GetSurfaceHeight(
@@ -2859,25 +2862,25 @@ public sealed class UnitAiSystem
                     continue;
                 }
 
-                float distanceSquared =
-                    (candidate.X - origin.X) *
-                    (candidate.X - origin.X) +
-                    (candidate.Y - origin.Y) *
-                    (candidate.Y - origin.Y);
+                float travelDistance = Vector2.Distance(
+                    new Vector2(candidate.X, candidate.Y),
+                    new Vector2(origin.X, origin.Y));
+                float threatDistance = Vector2.Distance(
+                    new Vector2(candidate.X, candidate.Y),
+                    new Vector2(threatPoint.X, threatPoint.Y));
+                float score =
+                    threatDistance * balance.CoverThreatSeparationWeight -
+                    travelDistance * balance.CoverTravelCostWeight;
 
-                if (distanceSquared >= bestDistanceSquared)
+                if (score <= bestScore)
                     continue;
 
-                bestDistanceSquared =
-                    distanceSquared;
-
-                cover =
-                    candidate;
+                bestScore = score;
+                cover = candidate;
             }
         }
 
-        return bestDistanceSquared <
-               float.PositiveInfinity;
+        return float.IsFinite(bestScore);
     }
 
     private static bool ReachedGoal(
@@ -2915,8 +2918,7 @@ public sealed class UnitAiSystem
                 units,
                 enemy);
 
-        float bestDistanceSquared =
-            float.PositiveInfinity;
+        float bestScore = float.NegativeInfinity;
 
         for (int direction = 0;
              direction < CoverDirectionCount;
@@ -2954,7 +2956,9 @@ public sealed class UnitAiSystem
                 if (tileX < 1 ||
                     tileY < 1 ||
                     tileX >= worldMap.TileWidth - 1 ||
-                    tileY >= worldMap.TileHeight - 1)
+                    tileY >= worldMap.TileHeight - 1 ||
+                    worldMap.IsNavigationBlocked(tileX, tileY) ||
+                    worldMap.GetSurfaceLayer(tileX, tileY) < 0)
                 {
                     continue;
                 }
@@ -2982,27 +2986,24 @@ public sealed class UnitAiSystem
                     continue;
                 }
 
-                float distanceSquared =
-                    offset.X * radius *
-                    offset.X * radius +
-                    offset.Y * radius *
-                    offset.Y * radius;
+                float travelDistance = Vector2.Distance(
+                    new Vector2(candidate.X, candidate.Y),
+                    new Vector2(origin.X, origin.Y));
+                float threatDistance = Vector2.Distance(
+                    new Vector2(candidate.X, candidate.Y),
+                    new Vector2(enemyEye.X, enemyEye.Y));
+                float score =
+                    threatDistance * balance.CoverThreatSeparationWeight -
+                    travelDistance * balance.CoverTravelCostWeight;
 
-                if (distanceSquared >=
-                    bestDistanceSquared)
-                {
+                if (score <= bestScore)
                     continue;
-                }
 
-                bestDistanceSquared =
-                    distanceSquared;
-
-                cover =
-                    candidate;
+                bestScore = score;
+                cover = candidate;
             }
         }
 
-        return bestDistanceSquared <
-               float.PositiveInfinity;
+        return float.IsFinite(bestScore);
     }
 }
