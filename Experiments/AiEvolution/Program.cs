@@ -40,7 +40,7 @@ internal static class Program
             double globalBest=double.NegativeInfinity;
             float[] globalGenes=(float[])mutationBase.Clone();
             using var history=new StreamWriter(csv,false);
-            history.WriteLine("generation,best_fitness,mean_fitness,win_rate,draw_rate,survivor_rate,own_health_ratio,enemy_health_ratio,enemy_kills,engage,flank,cover,retreat,prone,suppressive_fire");
+            history.WriteLine("generation,best_fitness,mean_fitness,win_rate,draw_rate,survivor_rate,own_health_ratio,enemy_health_ratio,enemy_kills,engage,flank,cover,retreat,prone,suppressive_fire,open_score,barrier_score,close_score,canyon_score,open_win_rate,barrier_win_rate,close_win_rate,canyon_win_rate");
             Console.WriteLine($"AI evolution: population={popSize}; generations={generations}; battles={battles}; ticks={ticks}; team={team}v{team}");
 
             for(int gen=1;gen<=generations;gen++)
@@ -67,7 +67,11 @@ internal static class Program
                     $"{champion.Metrics.SurvivorRate:F4},{champion.Metrics.OwnHealthRatio:F4}," +
                     $"{champion.Metrics.EnemyHealthRatio:F4},{champion.Metrics.AverageEnemyKills:F3}," +
                     $"{champion.Genes[0]:F4},{champion.Genes[1]:F4},{champion.Genes[2]:F4}," +
-                    $"{champion.Genes[3]:F4},{champion.Genes[4]:F4},{champion.Genes[5]:F4}");
+                    $"{champion.Genes[3]:F4},{champion.Genes[4]:F4},{champion.Genes[5]:F4}," +
+                    $"{champion.Metrics.Scenarios[0].AverageFitness:F3},{champion.Metrics.Scenarios[1].AverageFitness:F3}," +
+                    $"{champion.Metrics.Scenarios[2].AverageFitness:F3},{champion.Metrics.Scenarios[3].AverageFitness:F3}," +
+                    $"{champion.Metrics.Scenarios[0].WinRate:F4},{champion.Metrics.Scenarios[1].WinRate:F4}," +
+                    $"{champion.Metrics.Scenarios[2].WinRate:F4},{champion.Metrics.Scenarios[3].WinRate:F4}");
                 history.Flush();
                 Console.WriteLine($"GENERATION {gen}: best={champion.Metrics.Fitness:F2}; mean={mean:F2}; " +
                     $"wins={champion.Metrics.WinRate:P1}; survivor-rate={champion.Metrics.SurvivorRate:P1}; " +
@@ -101,6 +105,12 @@ internal static class Program
             Console.WriteLine($"HOLDOUT baseline: score={baseline.Fitness:F2}; wins={baseline.WinRate:P1}; survivor-rate={baseline.SurvivorRate:P1}");
             Console.WriteLine($"HOLDOUT trained:  score={trained.Fitness:F2}; wins={trained.WinRate:P1}; survivor-rate={trained.SurvivorRate:P1}");
             Console.WriteLine($"HOLDOUT delta:    score={trained.Fitness-baseline.Fitness:+0.00;-0.00;0.00}; wins={trained.WinRate-baseline.WinRate:+0.0%;-0.0%;0.0%}");
+            for(int i=0;i<trained.Scenarios.Length;i++)
+            {
+                ScenarioMetrics b=baseline.Scenarios[i],t=trained.Scenarios[i];
+                Console.WriteLine($"HOLDOUT {t.Name}: baseline={b.AverageFitness:F2}/{b.WinRate:P0} wins; " +
+                    $"trained={t.AverageFitness:F2}/{t.WinRate:P0} wins; survival={t.SurvivorRate:P0}");
+            }
             Console.WriteLine($"Saved profile: {output}");
             Console.WriteLine($"History: {csv}");
             Console.WriteLine($"Holdout report: {validationPath}");
@@ -204,12 +214,23 @@ internal static class Program
 
     private static Evaluation Evaluate(AiBalanceProfile p,int battles,int ticks,int team,int seed)
     {
+        const int scenarioCount=4;
         double fitness=0, winRate=0, drawRate=0, survivorRate=0, ownHp=0, enemyHp=0, kills=0;
+        var scenarioFitness=new double[scenarioCount];
+        var scenarioWins=new double[scenarioCount];
+        var scenarioDraws=new double[scenarioCount];
+        var scenarioSurvivors=new double[scenarioCount];
+        var scenarioOwnHp=new double[scenarioCount];
+        var scenarioEnemyHp=new double[scenarioCount];
+        var scenarioKills=new double[scenarioCount];
+        var scenarioMatches=new int[scenarioCount];
+
         for(int i=0;i<battles;i++)
         {
             // Keep the layout for each match index identical across every candidate.
+            int scenario=(i/2)%scenarioCount;
             int scenarioSeed=unchecked(seed+(i+1)*7919);
-            BattleResult result=Battle(p,i%2==0,(i/2)%4,ticks,team,scenarioSeed);
+            BattleResult result=Battle(p,i%2==0,scenario,ticks,team,scenarioSeed);
             fitness+=result.Fitness;
             if(result.Outcome>0) winRate++;
             else if(result.Outcome==0) drawRate++;
@@ -217,11 +238,40 @@ internal static class Program
             ownHp+=result.OwnHealthRatio;
             enemyHp+=result.EnemyHealthRatio;
             kills+=result.EnemyKills;
+
+            scenarioMatches[scenario]++;
+            scenarioFitness[scenario]+=result.Fitness;
+            if(result.Outcome>0) scenarioWins[scenario]++;
+            else if(result.Outcome==0) scenarioDraws[scenario]++;
+            scenarioSurvivors[scenario]+=result.SurvivorRate;
+            scenarioOwnHp[scenario]+=result.OwnHealthRatio;
+            scenarioEnemyHp[scenario]+=result.EnemyHealthRatio;
+            scenarioKills[scenario]+=result.EnemyKills;
         }
+
         double divisor=Math.Max(1,battles);
+        var scenarioResults=new ScenarioMetrics[scenarioCount];
+        for(int i=0;i<scenarioCount;i++)
+        {
+            double n=Math.Max(1,scenarioMatches[i]);
+            scenarioResults[i]=new ScenarioMetrics(
+                ScenarioName(i),scenarioMatches[i],scenarioFitness[i]/n,
+                scenarioWins[i]/n,scenarioDraws[i]/n,scenarioSurvivors[i]/n,
+                scenarioOwnHp[i]/n,scenarioEnemyHp[i]/n,scenarioKills[i]/n);
+        }
+
         return new Evaluation(fitness/divisor,winRate/divisor,drawRate/divisor,
-            survivorRate/divisor,ownHp/divisor,enemyHp/divisor,kills/divisor);
+            survivorRate/divisor,ownHp/divisor,enemyHp/divisor,kills/divisor,scenarioResults);
     }
+
+    private static string ScenarioName(int index) => index switch
+    {
+        0 => "Open field",
+        1 => "Barrier",
+        2 => "Close start",
+        3 => "Canyon",
+        _ => "Unknown"
+    };
 
     private static BattleResult Battle(AiBalanceProfile candidate,bool leftCandidate,int scenario,int ticks,int team,int scenarioSeed)
     {
@@ -383,7 +433,11 @@ internal static class Program
     private readonly record struct BattleResult(
         double Fitness,int Outcome,double SurvivorRate,double OwnHealthRatio,
         double EnemyHealthRatio,int EnemyKills);
+    private readonly record struct ScenarioMetrics(
+        string Name,int Matches,double AverageFitness,double WinRate,double DrawRate,
+        double SurvivorRate,double OwnHealthRatio,double EnemyHealthRatio,double AverageEnemyKills);
     private readonly record struct Evaluation(
         double Fitness,double WinRate,double DrawRate,double SurvivorRate,
-        double OwnHealthRatio,double EnemyHealthRatio,double AverageEnemyKills);
+        double OwnHealthRatio,double EnemyHealthRatio,double AverageEnemyKills,
+        ScenarioMetrics[] Scenarios);
 }
