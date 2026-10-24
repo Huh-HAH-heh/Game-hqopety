@@ -80,7 +80,8 @@ public sealed class LiveAiEvolutionTrainer
     private AiBalanceProfile _baseProfile = AiBalanceProfile.Default;
     private AiBalanceProfile _bestProfile = AiBalanceProfile.Default;
     private float[] _bestGenes = (float[])DefaultGenes.Clone();
-    private double _bestFitness;
+    private double _bestFitness = double.NegativeInfinity;
+    private double _baselineFitness = double.NaN;
     private int _generation;
     private int _candidateIndex;
     private int _roundIndex;
@@ -144,7 +145,8 @@ public sealed class LiveAiEvolutionTrainer
         _baseProfile = simulation.AI.BalanceProfile ?? AiBalanceProfile.Default;
         _bestProfile = _baseProfile;
         _bestGenes = GenesFrom(_baseProfile);
-        _bestFitness = 0d;
+        _bestFitness = double.NegativeInfinity;
+        _baselineFitness = double.NaN;
         _generation = 1;
         _candidateIndex = 0;
         _roundIndex = 0;
@@ -196,7 +198,7 @@ public sealed class LiveAiEvolutionTrainer
         WorldMap worldMap)
     {
         _running = false;
-        bool applyBest = _bestFitness > 0d;
+        bool applyBest = double.IsFinite(_baselineFitness) && _bestFitness > _baselineFitness;
         AiBalanceProfile selected = applyBest ? _bestProfile : _baseProfile;
         simulation.AI.BalanceProfile = selected;
         simulation.AI.SetBalanceProfileForFaction(1, null);
@@ -266,6 +268,9 @@ public sealed class LiveAiEvolutionTrainer
         float[] genes = _population[_candidateIndex];
         AiBalanceProfile profile = Profile(genes, _baseProfile);
         _scores.Add(new CandidateResult((float[])genes.Clone(), averageFitness));
+
+        if (_generation == 1 && _candidateIndex == 0)
+            _baselineFitness = averageFitness;
 
         if (averageFitness > _bestFitness)
         {
@@ -411,7 +416,7 @@ public sealed class LiveAiEvolutionTrainer
             (float)red.HealthRatio,
             _latestRoundFitness,
             _roundFitnessSum / Math.Max(1, _roundIndex),
-            _bestFitness,
+            double.IsFinite(_bestFitness) ? _bestFitness : 0d,
             GeneSummary(profile),
             _message,
             _bestProfilePath);
