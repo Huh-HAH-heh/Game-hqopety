@@ -6,12 +6,12 @@ using Core.Unit;
 
 internal static class Program
 {
-    private const int GeneCount = 22;
+    private const int GeneCount = 21;
     private const float Dt = 0.05f;
 
-    private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f,12f];
-    private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f,40f];
-    private static readonly float[] BaseGenes = [1f,1f,1f,1f,1f,1f,1f,1f,1f,1f,.60f,.08f,.10f,.23f,.24f,.66f,24f,.22f,.35f,.84f,.35f,24f];
+    private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f];
+    private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f];
+    private static readonly float[] BaseGenes = [1f,1f,1f,1f,1f,1f,1f,1f,1f,1f,.60f,.08f,.10f,.23f,.24f,.66f,24f,.22f,.35f,.84f,.35f];
 
     private static int Main(string[] args)
     {
@@ -23,9 +23,14 @@ internal static class Program
             string output=Path.GetFullPath(TextArg(args,"--output","ai-balance-best.json"));
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
             string csv=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".history.csv");
+            string? seedPath=TextOpt(args,"--seed-profile");
+            AiBalanceProfile seedProfile=seedPath==null ? AiBalanceProfile.Default : LoadProfile(Path.GetFullPath(seedPath));
+            float[] seedGenes=GenesFrom(seedProfile);
+            float[] mutationBase=seedPath==null ? BaseGenes : seedGenes;
             var rng=new Random(seed);
             var population=new List<float[]>(popSize) { (float[])BaseGenes.Clone() };
-            while(population.Count<popSize) population.Add(Mutate(BaseGenes,rng,.75,.22f));
+            if(seedPath!=null && popSize>1) population.Add(seedGenes);
+            while(population.Count<popSize) population.Add(Mutate(mutationBase,rng,.75,.22f));
 
             double globalBest=double.NegativeInfinity;
             float[] globalGenes=(float[])BaseGenes.Clone();
@@ -45,8 +50,7 @@ internal static class Program
                 results.Sort((a,b)=>b.Fitness.CompareTo(a.Fitness));
                 double mean=results.Average(x=>x.Fitness);
                 if(results[0].Fitness>globalBest) { globalBest=results[0].Fitness; globalGenes=(float[])results[0].Genes.Clone(); }
-                var artifact=new { system="RimClone.UtilityAI", generation=gen, seed, fitness=globalBest, profile=Profile(globalGenes) };
-                File.WriteAllText(output,JsonSerializer.Serialize(artifact,new JsonSerializerOptions{WriteIndented=true}));
+                File.WriteAllText(output,JsonSerializer.Serialize(Profile(globalGenes),new JsonSerializerOptions{WriteIndented=true}));
                 history.WriteLine($"{gen},{results[0].Fitness:F3},{mean:F3},{results[0].Genes[0]:F4},{results[0].Genes[1]:F4},{results[0].Genes[2]:F4},{results[0].Genes[3]:F4},{results[0].Genes[4]:F4},{results[0].Genes[5]:F4}");
                 history.Flush();
                 Console.WriteLine($"GENERATION {gen}: best={results[0].Fitness:F2}; mean={mean:F2}; best-ever={globalBest:F2}");
@@ -81,6 +85,27 @@ internal static class Program
         return g;
     }
 
+    private static float[] GenesFrom(AiBalanceProfile p) =>
+    [
+        p.EngageScale,p.FlankScale,p.CoverScale,p.RetreatScale,p.ProneScale,
+        p.SuppressiveFireScale,p.LastKnownScale,p.InvestigationScale,p.SquadContactScale,p.PatrolScale,
+        p.ProneAdoptionMinimumUtility,p.FlankUtilityAdvantage,p.RegularSwitchMargin,p.CommittedSwitchMargin,
+        p.MinimumInvestigationUtility,p.TacticalCoverPressureWeight,p.TacticalFlankDistanceStart,
+        p.TacticalFlankDistanceWeight,p.InvestigationDistancePenalty,p.VisibleCombatMediumScore,p.CommitDurationBaseSeconds
+    ];
+
+    private static AiBalanceProfile LoadProfile(string path)
+    {
+        using JsonDocument doc=JsonDocument.Parse(File.ReadAllText(path));
+        JsonElement root=doc.RootElement;
+        if(root.ValueKind==JsonValueKind.Object &&
+            (root.TryGetProperty("profile",out JsonElement nested) || root.TryGetProperty("Profile",out nested)))
+            root=nested;
+        return JsonSerializer.Deserialize<AiBalanceProfile>(root.GetRawText(),new JsonSerializerOptions
+        { PropertyNameCaseInsensitive=true })
+            ?? throw new InvalidDataException($"No AiBalanceProfile in {path}.");
+    }
+
     private static AiBalanceProfile Profile(float[] g) => AiBalanceProfile.Default with
     {
         EngageScale=g[0], FlankScale=g[1], CoverScale=g[2], RetreatScale=g[3], ProneScale=g[4],
@@ -89,7 +114,7 @@ internal static class Program
         RegularSwitchMargin=g[12], CommittedSwitchMargin=g[13], MinimumInvestigationUtility=g[14],
         TacticalCoverPressureWeight=g[15], TacticalFlankDistanceStart=g[16], TacticalFlankDistanceWeight=g[17],
         InvestigationDistancePenalty=g[18], VisibleCombatMediumScore=g[19],
-        CommitDurationBaseSeconds=g[20], MoveDistanceForMaximumUtility=g[21]
+        CommitDurationBaseSeconds=g[20]
     };
 
     private static double Evaluate(AiBalanceProfile p,int battles,int ticks,int team)
