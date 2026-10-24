@@ -50,8 +50,18 @@ public sealed class UnitAiSystem
     private float[] _unitThinkDeltaSeconds = Array.Empty<float>();
     private float _tacticalTimeSeconds;
     private readonly SquadTacticalCoordinator _squadCoordinator = new();
+    private readonly Dictionary<ushort, AiBalanceProfile> _factionBalanceProfiles = new();
 
     public bool Enabled { get; set; }
+    public AiBalanceProfile BalanceProfile { get; set; } = AiBalanceProfile.Default;
+    public AiBalanceProfile GetBalanceProfile(ushort factionTag) =>
+        _factionBalanceProfiles.TryGetValue(factionTag, out AiBalanceProfile profile) ? profile : BalanceProfile;
+    /// <summary>Set between matches, never during a parallel AI update.</summary>
+    public void SetBalanceProfileForFaction(ushort factionTag, AiBalanceProfile? profile)
+    {
+        if (profile == null) _factionBalanceProfiles.Remove(factionTag);
+        else _factionBalanceProfiles[factionTag] = profile;
+    }
     public bool LastUpdateRanThinkPass { get; private set; }
 
     /// <summary>The utility scorer is the authoritative autonomous intent selector.</summary>
@@ -1322,7 +1332,7 @@ public sealed class UnitAiSystem
         int unit)
     {
         if (!TryGetBestInvestigableContact(units, unit, out TacticalContact contact, out float utility) ||
-            utility < UnitTacticalUtility.MinimumInvestigationUtility ||
+            utility < GetBalanceProfile(units.FactionTag[unit]).MinimumInvestigationUtility ||
             _perceptionMemory == null ||
             !_perceptionMemory.TryGetMemory(unit, out TacticalContactMemory memory))
             return false;
@@ -1378,7 +1388,7 @@ public sealed class UnitAiSystem
             Vector3 delta = candidate.EstimatedPosition - units.Position[unit];
             float distance = MathF.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
             float utility = UnitTacticalUtility.EvaluateInvestigation(
-                confidence, distance, candidate.PositionErrorRadius);
+                confidence, distance, candidate.PositionErrorRadius, GetBalanceProfile(units.FactionTag[unit]));
             if (utility <= bestUtility)
                 continue;
 
@@ -1533,14 +1543,14 @@ public sealed class UnitAiSystem
                 float dx = currentContact.EstimatedPosition.X - units.Position[unit].X;
                 float dy = currentContact.EstimatedPosition.Y - units.Position[unit].Y;
                 lastKnownTargetUtility = UnitTacticalUtility.EvaluateInvestigation(
-                    confidence, MathF.Sqrt(dx * dx + dy * dy));
+                    confidence, MathF.Sqrt(dx * dx + dy * dy), GetBalanceProfile(units.FactionTag[unit]));
             }
             else if (hasRecentTarget)
             {
                 float dx = Store.LastSeenPosition[unit].X - units.Position[unit].X;
                 float dy = Store.LastSeenPosition[unit].Y - units.Position[unit].Y;
                 lastKnownTargetUtility = UnitTacticalUtility.EvaluateInvestigation(
-                    0.35f, MathF.Sqrt(dx * dx + dy * dy));
+                    0.35f, MathF.Sqrt(dx * dx + dy * dy), GetBalanceProfile(units.FactionTag[unit]));
             }
             else
             {
@@ -1554,7 +1564,7 @@ public sealed class UnitAiSystem
                     float confidence = rememberedEnemyContext.GetEffectiveConfidence(
                         _perceptionMemory!.CurrentTimeSeconds, 4f);
                     lastKnownTargetUtility = UnitTacticalUtility.EvaluateInvestigation(
-                        confidence, MathF.Sqrt(dx * dx + dy * dy));
+                        confidence, MathF.Sqrt(dx * dx + dy * dy), GetBalanceProfile(units.FactionTag[unit]));
                 }
             }
         }
@@ -1573,7 +1583,7 @@ public sealed class UnitAiSystem
             moveOrderUtility = UnitTacticalUtility.EvaluateMoveOrder(
                 moveDistance,
                 suppressionState is UnitSuppressionState.Panicked or UnitSuppressionState.Suppressed,
-                IsLowHealth(health, unit));
+                IsLowHealth(health, unit), GetBalanceProfile(units.FactionTag[unit]));
         }
 
         float combatUtility = 0f;
@@ -1581,7 +1591,7 @@ public sealed class UnitAiSystem
         {
             Vector3 enemyDelta = units.Position[visibleTargetIndex] - units.Position[unit];
             float enemyDistance = MathF.Sqrt(enemyDelta.X * enemyDelta.X + enemyDelta.Y * enemyDelta.Y);
-            combatUtility = UnitTacticalUtility.EvaluateVisibleCombat(enemyDistance, true);
+            combatUtility = UnitTacticalUtility.EvaluateVisibleCombat(enemyDistance, true, GetBalanceProfile(units.FactionTag[unit]));
         }
 
         bool isSuppressed =
@@ -1631,7 +1641,8 @@ public sealed class UnitAiSystem
         float flankUtility = UnitTacticalUtility.EvaluateFlanking(
             flankDistance,
             flankEffectiveRange,
-            canFlank);
+            canFlank,
+            GetBalanceProfile(units.FactionTag[unit]));
 
         float proneUtility = 0f;
         if (hasVisibleTarget &&
@@ -1649,7 +1660,8 @@ public sealed class UnitAiSystem
             proneUtility = UnitTacticalUtility.EvaluateProneFiring(
                 distance,
                 exposed,
-                healthRatio);
+                healthRatio,
+                GetBalanceProfile(units.FactionTag[unit]));
         }
 
         bool hasCoverGoal = Store.HasGoal[unit] &&
@@ -1666,7 +1678,7 @@ public sealed class UnitAiSystem
             TryGetBestInvestigableContact(units, unit, out _, out investigationUtility))
         {
             hasInvestigableContact =
-                investigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility;
+                investigationUtility >= GetBalanceProfile(units.FactionTag[unit]).MinimumInvestigationUtility;
         }
 
         bool hasSquadContact = false;
@@ -1679,8 +1691,8 @@ public sealed class UnitAiSystem
             float squadDistance = MathF.Sqrt(
                 squadDelta.X * squadDelta.X + squadDelta.Y * squadDelta.Y);
             squadContactUtility = UnitTacticalUtility.EvaluateInvestigation(
-                squadContact.Confidence, squadDistance);
-            hasSquadContact = squadContactUtility >= UnitTacticalUtility.MinimumSquadContactUtility;
+                squadContact.Confidence, squadDistance, GetBalanceProfile(units.FactionTag[unit]));
+            hasSquadContact = squadContactUtility >= GetBalanceProfile(units.FactionTag[unit]).MinimumSquadContactUtility;
         }
 
         bool hasImmediateDanger = suppression.IsInImmediateDanger(unit) ||
@@ -1692,7 +1704,8 @@ public sealed class UnitAiSystem
             hasCover,
             hasImmediateDanger,
             suppressionState == UnitSuppressionState.Panicked,
-            isLowHealth);
+            isLowHealth,
+            GetBalanceProfile(units.FactionTag[unit]));
 
         float fatigue = _metabolism != null && unit < _metabolism.Capacity
             ? _metabolism.Fatigue[unit] / 100f
@@ -1764,14 +1777,15 @@ public sealed class UnitAiSystem
         UnitIntentUtilityBreakdown utilityDecision = UnitIntentUtilityScorer.Select(
             in utilityContext,
             Store.UtilityIntent[unit],
-            Store.UtilityIntentCommitRemainingSeconds[unit]);
+            Store.UtilityIntentCommitRemainingSeconds[unit],
+            GetBalanceProfile(units.FactionTag[unit]));
         Store.UtilityIntentBreakdown[unit] = utilityDecision;
         Store.UtilityIntentContext[unit] = utilityContext;
         if (utilityDecision.SuggestedIntent != Store.UtilityIntent[unit])
         {
             Store.UtilityIntent[unit] = utilityDecision.SuggestedIntent;
             Store.UtilityIntentCommitRemainingSeconds[unit] =
-                UnitIntentUtilityScorer.GetCommitDuration(Personality.Discipline[unit]);
+                UnitIntentUtilityScorer.GetCommitDuration(Personality.Discipline[unit], GetBalanceProfile(units.FactionTag[unit]));
         }
 
         return utilityDecision.SuggestedIntent;
@@ -2058,7 +2072,7 @@ public sealed class UnitAiSystem
             return false;
         _nextRememberedEnemyQuerySecondsByUnit[observer] = now + RememberedEnemyRefreshInterval;
 
-        float bestUtility = UnitTacticalUtility.MinimumInvestigationUtility;
+        float bestUtility = GetBalanceProfile(units.FactionTag[unit]).MinimumInvestigationUtility;
         IReadOnlyList<TacticalContact> contacts = memory.Contacts;
         for (int i = 0; i < contacts.Count; i++)
         {
@@ -2078,7 +2092,7 @@ public sealed class UnitAiSystem
         return bestContact != null;
     }
 
-    private static bool IsUsableRememberedHostileContact(
+    private bool IsUsableRememberedHostileContact(
         UnitStore units,
         UnitHealthStore health,
         VisionSystem vision,
@@ -2111,8 +2125,8 @@ public sealed class UnitAiSystem
         float dx = contact.EstimatedPosition.X - units.Position[observer].X;
         float dy = contact.EstimatedPosition.Y - units.Position[observer].Y;
         float distance = MathF.Sqrt(dx * dx + dy * dy);
-        utility = UnitTacticalUtility.EvaluateInvestigation(confidence, distance);
-        return utility > UnitTacticalUtility.MinimumInvestigationUtility;
+        utility = UnitTacticalUtility.EvaluateInvestigation(confidence, distance, GetBalanceProfile(units.FactionTag[observer]));
+        return utility > GetBalanceProfile(units.FactionTag[unit]).MinimumInvestigationUtility;
     }
 
     private static int FindNearestVisibleEnemy(

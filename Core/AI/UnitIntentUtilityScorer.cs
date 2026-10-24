@@ -5,17 +5,13 @@ namespace Core.Unit;
 
 public static class UnitIntentUtilityScorer
 {
-    private const float MinimumCandidateScore = 0.001f;
-    private const float MinimumInvestigationScore = 0.24f;
-    private const float MinimumSquadContactScore = 0.30f;
-    private const float RegularSwitchMargin = 0.10f;
-    private const float CommittedSwitchMargin = 0.23f;
-
     public static UnitIntentUtilityBreakdown Select(
         in UnitIntentUtilityContext context,
         BehaviacUnitIntent previousIntent,
-        float commitRemainingSeconds)
+        float commitRemainingSeconds,
+        AiBalanceProfile? balanceProfile = null)
     {
+        AiBalanceProfile balance = balanceProfile ?? AiBalanceProfile.Default;
         float caution = Clamp01(context.Caution);
         float aggression = Clamp01(context.Aggression);
         float discipline = Clamp01(context.Discipline);
@@ -103,30 +99,33 @@ public static class UnitIntentUtilityScorer
                         caution * 0.07f -
                         fatigue * 0.045f -
                         bodyBurden * 0.035f);
+                flank = Clamp01(flank * balance.FlankScale);
             }
 
             bool canContinueProne = context.IsProne &&
                 !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth &&
                 !context.IsFlanking &&
                 (!context.CanFlank ||
-                 context.FlankUtility <= context.CombatUtility + UnitTacticalUtility.FlankUtilityAdvantage);
-            bool canAdoptProne = context.ProneCombatUtility >= 0.60f &&
+                 context.FlankUtility <= context.CombatUtility + balance.FlankUtilityAdvantage);
+            bool canAdoptProne = context.ProneCombatUtility >= balance.ProneAdoptionMinimumUtility &&
                 context.ProneCombatUtility > context.CombatUtility &&
                 !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth &&
                 !context.IsFlanking &&
                 (!context.CanFlank ||
-                 context.FlankUtility <= context.CombatUtility + UnitTacticalUtility.FlankUtilityAdvantage);
+                 context.FlankUtility <= context.CombatUtility + balance.FlankUtilityAdvantage);
 
             if (canContinueProne || canAdoptProne)
             {
                 prone = Clamp01(
-                    MathF.Max(context.ProneCombatUtility, canContinueProne ? 0.62f : 0f) +
+                    MathF.Max(context.ProneCombatUtility, canContinueProne ? balance.ProneContinuationUtility : 0f) +
                     caution * 0.035f +
                     shooting * 0.025f -
                     bodyBurden * 0.025f);
+                prone = Clamp01(prone * balance.ProneScale);
                 if (hasStopOrder)
                     prone = 0f;
             }
+            engage = Clamp01(engage * balance.EngageScale);
         }
 
         if (context.HasCover &&
@@ -141,6 +140,7 @@ public static class UnitIntentUtilityScorer
                 pain * 0.045f +
                 bodyBurden * 0.035f);
 
+            cover = Clamp01(cover * balance.CoverScale);
             if (context.IsInImmediateDanger || context.IsPanicked)
                 cover = MathF.Max(cover, 0.96f);
         }
@@ -156,6 +156,8 @@ public static class UnitIntentUtilityScorer
                 caution * 0.075f +
                 (context.HasCover ? 0.04f : 0f) -
                 aggression * 0.035f);
+            if (!context.IsLowHealth)
+                retreat = Clamp01(retreat * balance.RetreatScale);
         }
 
         if (hasMoveOrder)
@@ -193,6 +195,7 @@ public static class UnitIntentUtilityScorer
                 (context.IsSuppressed ? 0.14f : 0f) -
                 (context.IsPanicked ? 0.20f : 0f) -
                 (context.IsLowHealth ? 0.10f : 0f));
+            suppressiveFire = Clamp01(suppressiveFire * balance.SuppressiveFireScale);
         }
 
         bool canInvestigate = !context.HasVisibleTarget &&
@@ -210,6 +213,7 @@ public static class UnitIntentUtilityScorer
                 (context.IsSuppressed ? 0.16f : 0f) -
                 (context.IsPanicked ? 0.22f : 0f) -
                 (context.IsLowHealth ? 0.14f : 0f));
+            lastKnown = Clamp01(lastKnown * balance.LastKnownScale);
         }
 
         if (canInvestigate &&
@@ -218,7 +222,7 @@ public static class UnitIntentUtilityScorer
             !context.IsSuppressed &&
             !context.IsPanicked &&
             !context.IsLowHealth &&
-            context.InvestigationUtility >= MinimumInvestigationScore &&
+            context.InvestigationUtility >= balance.MinimumInvestigationUtility &&
             (!context.HasRecentTarget ||
              context.InvestigationUtility > context.LastKnownTargetUtility))
         {
@@ -229,6 +233,7 @@ public static class UnitIntentUtilityScorer
                 discipline * 0.025f -
                 caution * 0.035f -
                 fatigue * 0.035f);
+            investigation = Clamp01(investigation * balance.InvestigationScale);
         }
 
         if (canInvestigate &&
@@ -237,7 +242,7 @@ public static class UnitIntentUtilityScorer
             !context.IsSuppressed &&
             !context.IsPanicked &&
             !context.IsLowHealth &&
-            context.SquadContactUtility >= MinimumSquadContactScore)
+            context.SquadContactUtility >= balance.MinimumSquadContactUtility)
         {
             squad = Clamp01(
                 0.16f +
@@ -245,9 +250,10 @@ public static class UnitIntentUtilityScorer
                 discipline * 0.075f -
                 caution * 0.025f -
                 bodyBurden * 0.035f);
+            squad = Clamp01(squad * balance.SquadContactScale);
         }
 
-        float patrol = hasAnyPlayerOrder ? 0f : Clamp01(0.12f + discipline * 0.025f);
+        float patrol = hasAnyPlayerOrder ? 0f : Clamp01(0.12f + discipline * 0.025f) * balance.PatrolScale;
 
         // Continuing an investigation is a valid incumbent, not a fresh target request.
         if (context.IsInvestigatingContext &&
@@ -316,14 +322,14 @@ public static class UnitIntentUtilityScorer
 
         if (bestIntent != previousIntent &&
             previousIntent != BehaviacUnitIntent.None &&
-            previousScore >= MinimumCandidateScore)
+            previousScore >= balance.MinimumCandidateScore)
         {
             bool emergency = IsEmergencyIntent(bestIntent, context);
             float margin = emergency
                 ? 0f
                 : commitRemainingSeconds > 0f
-                    ? CommittedSwitchMargin - discipline * 0.035f
-                    : RegularSwitchMargin + discipline * 0.055f;
+                    ? balance.CommittedSwitchMargin - discipline * balance.CommittedSwitchDisciplineRelief
+                    : balance.RegularSwitchMargin + discipline * balance.RegularSwitchDisciplinePenalty;
 
             if (bestScore < previousScore + margin)
             {
@@ -338,7 +344,7 @@ public static class UnitIntentUtilityScorer
         }
         else if (bestIntent != previousIntent &&
                  previousIntent != BehaviacUnitIntent.None &&
-                 previousScore < MinimumCandidateScore)
+                 previousScore < balance.MinimumCandidateScore)
         {
             reason = UnitIntentDecisionReason.PreviousIntentNoLongerValid;
         }
@@ -353,8 +359,11 @@ public static class UnitIntentUtilityScorer
         };
     }
 
-    public static float GetCommitDuration(float discipline) =>
-        0.35f + Clamp01(discipline) * 0.55f;
+    public static float GetCommitDuration(float discipline, AiBalanceProfile? balanceProfile = null)
+    {
+        AiBalanceProfile balance = balanceProfile ?? AiBalanceProfile.Default;
+        return balance.CommitDurationBaseSeconds + Clamp01(discipline) * balance.CommitDurationDisciplineSeconds;
+    }
 
     private static void Consider(
         ref BehaviacUnitIntent bestIntent,
