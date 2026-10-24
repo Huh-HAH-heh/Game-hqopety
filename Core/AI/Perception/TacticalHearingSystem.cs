@@ -338,9 +338,14 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 float confidence = pulse.Intensity * (0.25f + 0.75f * attenuation);
                 if (confidence < MinimumContactConfidence)
                     continue;
-                float error = pulse.Type == TacticalStimulusType.Footstep
-                    ? 1.5f + distance * 0.20f
-                    : 4f + distance * 0.22f;
+                float error = pulse.Type switch
+                {
+                    TacticalStimulusType.Footstep =>
+                        MathF.Max(1.5f + distance * 0.20f, FootstepMergeCellSize * 0.75f),
+                    TacticalStimulusType.Gunshot =>
+                        MathF.Max(4f + distance * 0.22f, GunshotMergeCellSize * 0.75f),
+                    _ => 4f + distance * 0.22f
+                };
                 Vector3 estimate = EstimatePosition(pulse, observer, error, attenuation);
 
                 float alertFactor = pulse.Type switch
