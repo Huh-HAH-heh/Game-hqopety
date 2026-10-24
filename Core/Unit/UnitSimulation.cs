@@ -54,6 +54,7 @@ public sealed class UnitSimulation
     public int LastVisualObservationsPublished => _visualPerceptionSense.LastObservationsPublished;
     public int LastHearingQueuedPulses => _hearingSystem.LastQueuedPulseCount;
     public int LastHearingListenerChecks => _hearingSystem.LastListenerChecks;
+    public int LastHearingListenerCellsVisited => _hearingSystem.LastListenerCellsVisited;
     public int LastHearingContactsRecorded => _hearingSystem.LastContactsRecorded;
     public int LastGunshotEventsQueued => _hearingSystem.LastGunshotEventsQueued;
     public int LastGunshotBatchesQueued => _hearingSystem.LastGunshotBatchesQueued;

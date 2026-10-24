@@ -186,6 +186,7 @@ public sealed class SimulationFrameSnapshot
     public int VisualObservationsPublished { get; init; }
     public int HearingQueuedPulses { get; init; }
     public int HearingListenerChecks { get; init; }
+    public int HearingListenerCellsVisited { get; init; }
     public int HearingContactsRecorded { get; init; }
     public int GunshotEventsQueued { get; init; }
     public int GunshotBatchesQueued { get; init; }
@@ -1052,6 +1053,7 @@ public sealed class SimulationFrameSnapshot
             VisualObservationsPublished = simulation.LastVisualObservationsPublished,
             HearingQueuedPulses = simulation.LastHearingQueuedPulses,
             HearingListenerChecks = simulation.LastHearingListenerChecks,
+            HearingListenerCellsVisited = simulation.LastHearingListenerCellsVisited,
             HearingContactsRecorded = simulation.LastHearingContactsRecorded,
             GunshotEventsQueued = simulation.LastGunshotEventsQueued,
             GunshotBatchesQueued = simulation.LastGunshotBatchesQueued,

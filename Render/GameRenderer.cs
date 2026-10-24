@@ -529,6 +529,7 @@ public sealed class GameRenderer
             int visualObservations = snapshot?.VisualObservationsPublished ?? _unitSimulation.LastVisualObservationsPublished;
             int hearingPulses = snapshot?.HearingQueuedPulses ?? _unitSimulation.LastHearingQueuedPulses;
             int hearingChecks = snapshot?.HearingListenerChecks ?? _unitSimulation.LastHearingListenerChecks;
+            int hearingCells = snapshot?.HearingListenerCellsVisited ?? _unitSimulation.LastHearingListenerCellsVisited;
             int hearingRecords = snapshot?.HearingContactsRecorded ?? _unitSimulation.LastHearingContactsRecorded;
             int gunshotEvents = snapshot?.GunshotEventsQueued ?? _unitSimulation.LastGunshotEventsQueued;
             int gunshotBatches = snapshot?.GunshotBatchesQueued ?? _unitSimulation.LastGunshotBatchesQueued;
@@ -559,7 +560,7 @@ public sealed class GameRenderer
                 $"SimRate={_simulationGameSecondsPerWallSecond:0.00}x UPS={_simulationUpdatesPerSecond:0} Sim={simMs:0.0}ms " +
                 $"Vision={visionMetrics} Perception={perceptionMs:0.0}ms " +
                 $"Hearing={hearingMs:0.0}ms VisualSense={visualSenseMs:0.0}ms VisualPublish={visualPublishMs:0.0}ms " +
-                $"VisualObs={visualObservations} SoundPulses={hearingPulses} HearingChecks={hearingChecks:N0} " +
+                $"VisualObs={visualObservations} SoundPulses={hearingPulses} HearingCells={hearingCells:N0} HearingChecks={hearingChecks:N0} " +
                 $"AudioRecords={hearingRecords} Gunshots={gunshotEvents}/{gunshotBatches} merged={gunshotsMerged} " +
                 $"PerceptionAlloc={perceptionAllocatedBytes / 1024d:0.0}KB SnapshotAlloc={snapshotAllocatedBytes / 1024d:0.0}KB " +
                 $"Suppression={suppressionMs:0.0}ms " +
