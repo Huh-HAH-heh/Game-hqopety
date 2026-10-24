@@ -8,16 +8,20 @@ public static class WorldGenerator
     private const ushort BaseMaterialId = 1;
 
     public static void Generate(
-        WorldMap worldMap)
+        WorldMap worldMap,
+        bool writeLog = true)
     {
         worldMap.Water.Clear();
 
         GenerateBaseTerrain(worldMap);
 
-        Console.WriteLine(
-            "[WorldGenerator] " +
-            $"Полнообъёмный тест каньона создан: " +
-            $"{worldMap.LayerCount} уровней, шаг высоты 0,1 м.");
+        if (writeLog)
+        {
+            Console.WriteLine(
+                "[WorldGenerator] " +
+                $"Полнообъёмный тест каньона создан: " +
+                $"{worldMap.LayerCount} уровней, шаг высоты 0,1 м.");
+        }
     }
 
     private static void GenerateBaseTerrain(
