@@ -173,6 +173,7 @@ public sealed class GameRenderer
     private volatile bool _massCombatMode;
     private volatile bool _simulationPaused;
     private volatile float _simulationSpeed = 1f;
+    private int _singleStepRequested;
     private bool _terrainStressMode;
     private bool _showCombatTracers = true;
     private bool _showCombatHud = true;
@@ -565,14 +566,17 @@ public sealed class GameRenderer
         {
             _camera.Update(_input.MoveDirection, deltaTime);
 
-            if (_simulationThread == null && !_simulationPaused)
+            bool singleStepRequested = _simulationThread == null &&
+                Interlocked.Exchange(ref _singleStepRequested, 0) != 0;
+            if (_simulationThread == null && (!_simulationPaused || singleStepRequested))
             {
+                float updateDeltaTime = singleStepRequested ? 1f / 60f : simulationDeltaTime;
                 if (!_terrainStressMode && !_massCombatMode)
                 {
                     _visionTestScene.UpdateAiDemo(
                         _unitSimulation,
                         _worldMap,
-                        simulationDeltaTime);
+                        updateDeltaTime);
                 }
 
                 if (_massCombatMode)
@@ -580,14 +584,14 @@ public sealed class GameRenderer
                     _massCombatTestScene.Update(
                         _unitSimulation,
                         _worldMap,
-                        simulationDeltaTime);
+                        updateDeltaTime);
                 }
 
                 if (!_terrainStressMode)
                 {
                     _unitSimulation.BeginMetricsFrame();
-                    _unitSimulation.Update(_worldMap, simulationDeltaTime);
-                    RecordSimulationStep(simulationDeltaTime);
+                    _unitSimulation.Update(_worldMap, updateDeltaTime);
+                    RecordSimulationStep(updateDeltaTime);
                 }
             }
         }
@@ -1114,7 +1118,7 @@ public sealed class GameRenderer
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug-layers " +
-            $"F6=vision F7=pause F8=scale F11=normal Shift+F12=slower F12=faster I=AI-states T=tracers F9=HUD";
+            $"F4=step F6=vision F7=pause F8=scale F11=normal Shift+F12=slower F12=faster I=AI-states T=tracers F9=HUD";
     }
 
     private void StartSimulationThread()
@@ -2755,17 +2759,19 @@ public sealed class GameRenderer
                 deltaTime = 0.1f;
             float simulationDeltaTime = Math.Clamp(deltaTime * _simulationSpeed, 0f, MaximumScaledSimulationDelta);
 
-            if (_simulationRunEnabled)
+            bool singleStepRequested = Interlocked.Exchange(ref _singleStepRequested, 0) != 0;
+            if (_simulationRunEnabled || singleStepRequested)
             {
+                float updateDeltaTime = singleStepRequested ? 1f / 60f : simulationDeltaTime;
                 try
                 {
                     _unitSimulation.BeginMetricsFrame();
                     _massCombatTestScene.Update(
                         _unitSimulation,
                         _worldMap,
-                        simulationDeltaTime);
-                    _unitSimulation.Update(_worldMap, simulationDeltaTime);
-                    RecordSimulationStep(simulationDeltaTime);
+                        updateDeltaTime);
+                    _unitSimulation.Update(_worldMap, updateDeltaTime);
+                    RecordSimulationStep(updateDeltaTime);
                 }
                 catch (Exception exception)
                 {
@@ -3519,6 +3525,19 @@ public sealed class GameRenderer
     private void HandleKey(
         Keyboard.Key key)
     {
+        if (key == Keyboard.Key.F4)
+        {
+            if (!_simulationPaused || _menuPage != GameMenuPage.Closed)
+            {
+                Console.WriteLine("[SIM] Pause with F7 first, then use F4 for one simulation step.");
+                return;
+            }
+
+            Interlocked.Exchange(ref _singleStepRequested, 1);
+            Console.WriteLine("[SIM] Single-step requested.");
+            return;
+        }
+
         if (key == Keyboard.Key.F12)
         {
             bool slower =
