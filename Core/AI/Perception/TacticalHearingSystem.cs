@@ -14,8 +14,10 @@ public readonly record struct TacticalSoundDebugEvent(
 /// Converts loud events and locomotion into uncertain per-observer contacts.
 /// The observer never receives the emitter ID from an audio-only contact.
 /// </summary>
-public sealed class TacticalHearingSystem
+public sealed class TacticalHearingSystem : PerceptionSenseBase
 {
+    public override string Id => "auditory";
+    public override PerceptionSense Channel => PerceptionSense.Auditory;
     private const float GunshotRange = 180f;
     private const float GunshotMemorySeconds = 8f;
     private const float FootstepMemorySeconds = 3f;
@@ -102,14 +104,32 @@ public sealed class TacticalHearingSystem
         float nowSeconds,
         float deltaTime,
         WorldMap? worldMap = null,
-        VisionSystem? vision = null)
+        VisionSystem? vision = null) =>
+        UpdateInternal(units, health, response, nowSeconds, deltaTime, worldMap, vision,
+            advanceMemoryTime: true);
+
+    protected override void UpdateCore(in PerceptionSenseContext context) =>
+        UpdateInternal(context.Units, context.Health, context.Suppression,
+            context.SimulationTimeSeconds, context.DeltaTime, context.WorldMap, context.Vision,
+            advanceMemoryTime: false);
+
+    private void UpdateInternal(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitSuppressionStore response,
+        float nowSeconds,
+        float deltaTime,
+        WorldMap? worldMap,
+        VisionSystem? vision,
+        bool advanceMemoryTime)
     {
         ArgumentNullException.ThrowIfNull(units);
         ArgumentNullException.ThrowIfNull(health);
         if (!float.IsFinite(nowSeconds) || nowSeconds < CurrentTimeSeconds)
             throw new ArgumentOutOfRangeException(nameof(nowSeconds));
         EnsureCapacity(units.Capacity);
-        _memoryStore.AdvanceTime(nowSeconds);
+        if (advanceMemoryTime)
+            _memoryStore.AdvanceTime(nowSeconds);
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f)
             return;
         CollectFootsteps(units, health, deltaTime, nowSeconds);
@@ -122,13 +142,11 @@ public sealed class TacticalHearingSystem
         if (unitIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(unitIndex));
         EnsureCapacity(unitIndex + 1);
-        _memoryStore.InitializeUnit(unitIndex);
         _footstepCooldown[unitIndex] = 0f;
     }
 
     public void ClearUnit(int unitIndex)
     {
-        _memoryStore.ClearUnit(unitIndex);
         if ((uint)unitIndex < (uint)_footstepCooldown.Length)
             _footstepCooldown[unitIndex] = 0f;
     }

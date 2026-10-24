@@ -19,7 +19,9 @@ public enum TacticalStimulusType : byte
     CoverImpact = 6,
     UnitWounded = 7,
     UnitKilled = 8,
-    AllyContactReport = 9
+    AllyContactReport = 9,
+    /// <summary>Generic type for a sensor without a dedicated event category.</summary>
+    SensorReading = 10
 }
 
 /// <summary>
@@ -69,6 +71,9 @@ public sealed class TacticalStimulus
         {
             throw new ArgumentException("A visual contact must identify the observed unit.", nameof(subjectUnit));
         }
+
+        if (type == TacticalStimulusType.SensorReading && !sense.HasValue)
+            throw new ArgumentException("Generic sensor readings must specify their sensory channel.", nameof(sense));
 
         Type = type;
         Sense = sense ?? ResolveSense(type);

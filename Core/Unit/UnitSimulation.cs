@@ -9,8 +9,6 @@ namespace Core.Unit;
 
 public sealed class UnitSimulation
 {
-    private const float VisualContactMemorySeconds = 8f;
-
     private readonly UnitMovementSystem _movementSystem;
     private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
@@ -22,10 +20,10 @@ public sealed class UnitSimulation
     private readonly UnitAiSystem _aiSystem;
     private readonly MeleeCombatSystem _meleeCombatSystem;
     private readonly TacticalHearingSystem _hearingSystem;
+    private readonly VisualPerceptionSense _visualPerceptionSense;
     private float _simulationTimeSeconds;
     private bool[] _deathHandled = Array.Empty<bool>();
     private float[] _baseMoveSpeed = Array.Empty<float>();
-    private long _lastPublishedVisionUpdateCount;
 
     public UnitStore Units { get; }
     public UnitSkillStore Skills { get; }
@@ -39,25 +37,16 @@ public sealed class UnitSimulation
     public ProjectileStore Projectiles { get; }
     public UnitSuppressionStore Suppression { get; }
     public PerceptionMemoryStore PerceptionMemory { get; }
-
-    private bool _visionEnabled = true;
+    public PerceptionSystem Perception { get; }
 
     public bool VisionEnabled
     {
-        get => _visionEnabled;
-        set
-        {
-            if (_visionEnabled == value)
-                return;
-
-            _visionEnabled = value;
-
-            if (!value)
-                _visionSystem.ClearAll();
-        }
+        get => _visualPerceptionSense.Enabled;
+        set => _visualPerceptionSense.Enabled = value;
     }
 
     public double LastSimulationUpdateMilliseconds { get; private set; }
+    public double LastPerceptionUpdateMilliseconds { get; private set; }
     public double LastSuppressionUpdateMilliseconds { get; private set; }
     public double LastVisionCallMilliseconds { get; private set; }
     public double LastAIUpdateMilliseconds { get; private set; }
@@ -172,6 +161,11 @@ public sealed class UnitSimulation
             new VisionSystem(
                 unitCapacity,
                 HitRegions);
+
+        _visualPerceptionSense = new VisualPerceptionSense(_visionSystem);
+        Perception = new PerceptionSystem(PerceptionMemory);
+        Perception.Register(_hearingSystem);
+        Perception.Register(_visualPerceptionSense);
 
         _aiSystem =
             new UnitAiSystem(
@@ -355,7 +349,7 @@ public sealed class UnitSimulation
         Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);
         Weapons.InitializeUnit(id.Index);
-        _hearingSystem.InitializeUnit(id.Index);
+        Perception.InitializeUnit(id.Index);
         Skills.InitializeUnit(id.Index, definition.Type, Units.FactionTag[id.Index]);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
@@ -396,8 +390,7 @@ public sealed class UnitSimulation
 
         _aiSystem.InvalidateSquadUnit(id);
         _movementSystem.Navigation.ClearRoute(index);
-        _visionSystem.ClearUnit(index);
-        _hearingSystem.ClearUnit(index);
+        Perception.ClearUnit(index);
         _deathHandled[index] = false;
 
         BodyHandle body =
@@ -943,25 +936,20 @@ public sealed class UnitSimulation
 
         if (float.IsFinite(deltaTime) && deltaTime > 0f)
             _simulationTimeSeconds += deltaTime;
-        _hearingSystem.Update(Units, Health, Suppression, _simulationTimeSeconds, deltaTime, worldMap, _visionSystem);
 
         long phaseStarted = Stopwatch.GetTimestamp();
+        var perceptionContext = new PerceptionSenseContext(
+            Units, Health, Inventory, Weapons, Suppression, Metabolism, Skills,
+            Bodies, HitRegions, worldMap, _visionSystem, PerceptionMemory,
+            _simulationTimeSeconds, deltaTime);
+        Perception.Update(in perceptionContext);
+        LastPerceptionUpdateMilliseconds = Perception.LastUpdateMilliseconds;
+        LastVisionCallMilliseconds = _visualPerceptionSense.LastUpdateMilliseconds;
+
+        phaseStarted = Stopwatch.GetTimestamp();
         Suppression.Update(Units, deltaTime);
         LastSuppressionUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
-
-        if (VisionEnabled)
-        {
-            phaseStarted = Stopwatch.GetTimestamp();
-            _visionSystem.Update(Units, worldMap, deltaTime, Health, Bodies);
-            PublishVisualPerception();
-            LastVisionCallMilliseconds =
-                Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
-        }
-        else
-        {
-            LastVisionCallMilliseconds = 0d;
-        }
 
         phaseStarted = Stopwatch.GetTimestamp();
         _aiSystem.Update(
@@ -1052,56 +1040,6 @@ public sealed class UnitSimulation
         ProcessDeadUnits();
         LastSimulationUpdateMilliseconds =
             Stopwatch.GetElapsedTime(totalStarted).TotalMilliseconds;
-    }
-
-    /// <summary>
-    /// Bridges the legacy binary visibility result into the shared perception contract.
-    /// Only targets freshly checked in the latest VisionSystem pass are published;
-    /// its longer visibility cache is not treated as a current observation.
-    /// </summary>
-    private void PublishVisualPerception()
-    {
-        if (_visionSystem.UpdateCount == _lastPublishedVisionUpdateCount)
-            return;
-
-        _lastPublishedVisionUpdateCount = _visionSystem.UpdateCount;
-        float nowSeconds = _simulationTimeSeconds;
-        ReadOnlySpan<int> active = Units.ActiveIndices;
-
-        for (int i = 0; i < active.Length; i++)
-        {
-            int observer = active[i];
-            if (Health.OverallHitPoints[observer] <= 0f)
-                continue;
-
-            ReadOnlySpan<int> visibleTargets = _visionSystem.GetVisibleTargets(observer);
-            for (int j = 0; j < visibleTargets.Length; j++)
-            {
-                int target = visibleTargets[j];
-                if ((uint)target >= (uint)Units.Capacity ||
-                    target == observer ||
-                    Health.OverallHitPoints[target] <= 0f ||
-                    !_visionSystem.WasVisibleOnLatestUpdate(observer, target))
-                    continue;
-
-                PerceptionMemory.RecordObservation(
-                    observer,
-                    new PerceptionObservation(
-                        PerceptionSense.Visual,
-                        TacticalStimulusType.VisualContact,
-                        Units.Position[target],
-                        positionErrorRadius: 0.25f,
-                        intensity: 1f,
-                        detectionConfidence: 1f,
-                        identificationConfidence: 1f,
-                        detectionLevel: PerceptionDetectionLevel.Detected,
-                        identificationLevel: PerceptionIdentificationLevel.Identified,
-                        occurredAtSeconds: nowSeconds,
-                        receivedAtSeconds: nowSeconds,
-                        expiresAtSeconds: nowSeconds + VisualContactMemorySeconds,
-                        identifiedSubject: Units.GetId(target)));
-            }
-        }
     }
 
     private void EnsureDeathCapacity()
@@ -1234,7 +1172,7 @@ public sealed class UnitSimulation
         Units.Velocity[unitIndex] = Vector3.Zero;
         Units.Posture[unitIndex] = UnitPosture.Lying;
         _movementSystem.Navigation.ClearRoute(unitIndex);
-        _visionSystem.ClearUnit(unitIndex);
+        Perception.ClearUnit(unitIndex);
         Weapons.CancelActions(unitIndex);
         _aiSystem.Store.ClearUnit(unitIndex);
         _aiSystem.Store.State[unitIndex] = UnitAiState.Dead;
