@@ -78,4 +78,6 @@ public sealed record AiBalanceProfile
     public float FlankNearLateralDistance { get; init; } = 12f;
     public float FlankFarBackoffDistance { get; init; } = 16f;
     public float FlankFarLateralDistance { get; init; } = 18f;
+    public float FlankNearRangeFraction { get; init; } = 0.70f;
+    public float FlankFarRangeFraction { get; init; } = 0.82f;
 }
