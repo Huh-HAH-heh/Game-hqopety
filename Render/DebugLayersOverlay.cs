@@ -124,6 +124,8 @@ public sealed class DebugLayersOverlay : IDisposable
     public void Toggle()
     {
         IsOpen = !IsOpen;
+        if (!IsOpen)
+            _dragging = false;
     }
 
     public void Close()
