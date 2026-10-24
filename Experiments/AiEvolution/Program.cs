@@ -12,7 +12,7 @@ internal static class Program
     private const float Dt = 0.05f;
     private static AiBalanceProfile _profileBase = AiBalanceProfile.Default;
 
-    private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f,.60f,.25f,.01f,.80f,.10f,4f,4f,5f,8f,10f,.75f,.80f,.04f,.04f,.50f,.30f,.02f,.003f,.20f];
+    private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f,.60f,.25f,.01f,.80f,.10f,4f,4f,5f,4f,5f,.75f,.80f,.04f,.04f,.50f,.30f,.02f,.003f,.20f];
     private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f,.95f,3f,.08f,1f,.45f,14f,14f,20f,24f,30f,.98f,.999f,.30f,.35f,.95f,.80f,.16f,.04f,1.50f];
     private static readonly float[] BaseGenes = [1f,1f,1f,1f,1f,1f,1f,1f,1f,1f,.60f,.08f,.10f,.23f,.24f,.66f,24f,.22f,.35f,.84f,.35f,.84f,1f,.03f,.94f,.20f,8f,4f,6f,6f,8f,.90f,.98f,.12f,.16f,.80f,.60f,.08f,.012f,.90f];
 
@@ -20,6 +20,7 @@ internal static class Program
     {
         try
         {
+            ValidateGenomeConfiguration();
             int popSize=Arg(args,"--population",8,4,128), generations=Arg(args,"--generations",4,1,10000);
             int battles=Arg(args,"--battles",8,2,1000), ticks=Arg(args,"--ticks",600,100,100000);
             int team=Arg(args,"--team-size",4,2,16), seed=Arg(args,"--seed",20261024,int.MinValue,int.MaxValue);
@@ -77,6 +78,28 @@ internal static class Program
             return 0;
         }
         catch(Exception ex) { Console.Error.WriteLine($"AI evolution failed: {ex.Message}"); return 1; }
+    }
+
+    private static void ValidateGenomeConfiguration()
+    {
+        float[] defaults=GenesFrom(AiBalanceProfile.Default);
+        if(Min.Length!=GeneCount || Max.Length!=GeneCount ||
+           BaseGenes.Length!=GeneCount || defaults.Length!=GeneCount)
+            throw new InvalidOperationException(
+                $"Genome shape mismatch: expected {GeneCount}, min={Min.Length}, max={Max.Length}, " +
+                $"base={BaseGenes.Length}, profile={defaults.Length}.");
+
+        for(int i=0;i<GeneCount;i++)
+        {
+            if(!float.IsFinite(Min[i]) || !float.IsFinite(Max[i]) ||
+               Min[i]>Max[i] || BaseGenes[i]<Min[i] || BaseGenes[i]>Max[i])
+                throw new InvalidOperationException(
+                    $"Invalid gene bounds at index {i}: {Min[i]} <= {BaseGenes[i]} <= {Max[i]}.");
+
+            if(MathF.Abs(defaults[i]-BaseGenes[i])>0.0001f)
+                throw new InvalidOperationException(
+                    $"Base gene {i} no longer matches AiBalanceProfile.Default ({BaseGenes[i]} vs {defaults[i]}).");
+        }
     }
 
     private static List<float[]> Next(List<(float[] Genes,double Fitness)> rank,int count,Random r)
