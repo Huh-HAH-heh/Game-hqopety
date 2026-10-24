@@ -581,9 +581,11 @@ public sealed class VisionSystem
             return false;
         }
 
-        if (!TryGetRecentVisibleUpdate(observerIndex, targetIndex, out int lastVisible) ||
-            lastVisible == 0 ||
-            _visionUpdateSequence - lastVisible > VisibilityMemoryUpdates)
+        bool visibleOnLatestUpdate = WasVisibleOnLatestUpdate(observerIndex, targetIndex);
+        if (!visibleOnLatestUpdate &&
+            (!TryGetRecentVisibleUpdate(observerIndex, targetIndex, out int lastVisible) ||
+             lastVisible == 0 ||
+             _visionUpdateSequence - lastVisible > VisibilityMemoryUpdates))
         {
             ForgetCachedVisibleTarget(observerIndex, targetIndex);
             return false;
