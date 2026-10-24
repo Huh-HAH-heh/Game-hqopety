@@ -15,7 +15,11 @@ namespace RimClone.Render;
 public sealed class UnitRenderSystem : IDisposable
 {
     private const int CircleSegments = 16;
-    private const float UnitVisualScale = 0.8f;
+    // Gameplay-zone visuals were already scaled to 0.8; another 20% reduction
+    // makes their current on-screen footprint 0.64 of the original geometry.
+    private const float UnitVisualScale = 0.64f;
+    // Full body-rig paths were unscaled, so reduce those by 20% from current size.
+    private const float UnitRigVisualScale = 0.8f;
     private const float UnitDetailFadeStartPixels = 8f;
     private const float UnitDetailFadeEndPixels = 12f;
     private const int VisionConeSegments = 20;
@@ -276,7 +280,9 @@ public sealed class UnitRenderSystem : IDisposable
                         isAlive,
                         tilePixelSize,
                         screenScale,
-                        1f);
+                        1f,
+                        unitPosition,
+                        UnitRigVisualScale);
                 }
             }
 
@@ -621,7 +627,10 @@ public void DrawSnapshot(
                         unit.FactionTag,
                         isAlive,
                         tilePixelSize,
-                        screenScale);
+                        screenScale,
+                        1f,
+                        position,
+                        UnitRigVisualScale);
                 }
             }
 
@@ -800,7 +809,9 @@ public void DrawSnapshot(
         bool isAlive,
         float tilePixelSize,
         float screenScale,
-        float opacity = 1f)
+        float opacity = 1f,
+        Vector3 visualOrigin = default,
+        float visualScale = 1f)
     {
         if (start < 0 || count <= 0 || start >= bodies.Count)
             return 0;
@@ -818,11 +829,19 @@ public void DrawSnapshot(
             if (roles[i] == BodyPartRole.Internal)
                 continue;
 
+            Vector3 partPosition = positions[i];
+            Vector3 partScale = scales[i];
+            if (visualScale != 1f)
+            {
+                partPosition = visualOrigin + (partPosition - visualOrigin) * visualScale;
+                partScale *= visualScale;
+            }
+
             AppendBodyPart(
                 fills,
                 outlines,
-                positions[i],
-                scales[i],
+                partPosition,
+                partScale,
                 rotations[i],
                 primitives[i],
                 roles[i],
@@ -847,7 +866,9 @@ public void DrawSnapshot(
         bool isAlive,
         float tilePixelSize,
         float screenScale,
-        float opacity = 1f)
+        float opacity = 1f,
+        Vector3 visualOrigin = default,
+        float visualScale = 1f)
     {
         if (start < 0 || count <= 0 || start >= bodyParts.Length)
             return 0;
@@ -860,11 +881,19 @@ public void DrawSnapshot(
             if (part.Role == BodyPartRole.Internal)
                 continue;
 
+            Vector3 partPosition = part.Position;
+            Vector3 partScale = part.Scale;
+            if (visualScale != 1f)
+            {
+                partPosition = visualOrigin + (partPosition - visualOrigin) * visualScale;
+                partScale *= visualScale;
+            }
+
             AppendBodyPart(
                 fills,
                 outlines,
-                part.Position,
-                part.Scale,
+                partPosition,
+                partScale,
                 part.Rotation,
                 part.Primitive,
                 part.Role,
