@@ -176,8 +176,20 @@ public sealed class SimulationFrameSnapshot
     public int PanickedCount { get; init; }
 
     public double SnapshotCaptureMs { get; init; }
+    public long SnapshotAllocatedBytes { get; init; }
+    public long PerceptionAllocatedBytes { get; init; }
     public double SimulationMs { get; init; }
     public double PerceptionMs { get; init; }
+    public double HearingSenseMs { get; init; }
+    public double VisualSenseMs { get; init; }
+    public double VisualPublishMs { get; init; }
+    public int VisualObservationsPublished { get; init; }
+    public int HearingQueuedPulses { get; init; }
+    public int HearingListenerChecks { get; init; }
+    public int HearingContactsRecorded { get; init; }
+    public int GunshotEventsQueued { get; init; }
+    public int GunshotBatchesQueued { get; init; }
+    public int GunshotsMerged { get; init; }
     public double SuppressionMs { get; init; }
     public double BodyMs { get; init; }
     public double MeleeMs { get; init; }
@@ -482,6 +494,7 @@ public sealed class SimulationFrameSnapshot
         UnitId utilityAiDebugObserver = default)
     {
         long captureStarted = Stopwatch.GetTimestamp();
+        long captureAllocatedBytesStarted = GC.GetAllocatedBytesForCurrentThread();
         UnitStore units = simulation.Units;
         bool hasUtilityAiDebugState = false;
         UnitIntentUtilityBreakdown utilityAiDebugDecision = default;
@@ -1028,8 +1041,21 @@ public sealed class SimulationFrameSnapshot
             SuppressedCount = suppressed,
             PanickedCount = panicked,
             SnapshotCaptureMs = Stopwatch.GetElapsedTime(captureStarted).TotalMilliseconds,
+            SnapshotAllocatedBytes = Math.Max(
+                0L, GC.GetAllocatedBytesForCurrentThread() - captureAllocatedBytesStarted),
+            PerceptionAllocatedBytes = simulation.LastPerceptionAllocatedBytes,
             SimulationMs = simulation.LastSimulationUpdateMilliseconds,
             PerceptionMs = simulation.LastPerceptionUpdateMilliseconds,
+            HearingSenseMs = simulation.LastHearingSenseMilliseconds,
+            VisualSenseMs = simulation.LastVisualSenseMilliseconds,
+            VisualPublishMs = simulation.LastVisualPublishMilliseconds,
+            VisualObservationsPublished = simulation.LastVisualObservationsPublished,
+            HearingQueuedPulses = simulation.LastHearingQueuedPulses,
+            HearingListenerChecks = simulation.LastHearingListenerChecks,
+            HearingContactsRecorded = simulation.LastHearingContactsRecorded,
+            GunshotEventsQueued = simulation.LastGunshotEventsQueued,
+            GunshotBatchesQueued = simulation.LastGunshotBatchesQueued,
+            GunshotsMerged = simulation.LastGunshotsMerged,
             SuppressionMs = simulation.LastSuppressionUpdateMilliseconds,
             BodyMs = simulation.LastBodyUpdateMilliseconds,
             MeleeMs = simulation.LastMeleeUpdateMilliseconds,

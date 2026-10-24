@@ -523,6 +523,18 @@ public sealed class GameRenderer
             int unitCandidates = snapshot?.ProjectileUnitCandidates ?? _unitSimulation.LastProjectileUnitCandidates;
             double healthMs = snapshot?.HealthMs ?? _unitSimulation.LastHealthUpdateMilliseconds;
             double perceptionMs = snapshot?.PerceptionMs ?? _unitSimulation.LastPerceptionUpdateMilliseconds;
+            double hearingMs = snapshot?.HearingSenseMs ?? _unitSimulation.LastHearingSenseMilliseconds;
+            double visualSenseMs = snapshot?.VisualSenseMs ?? _unitSimulation.LastVisualSenseMilliseconds;
+            double visualPublishMs = snapshot?.VisualPublishMs ?? _unitSimulation.LastVisualPublishMilliseconds;
+            int visualObservations = snapshot?.VisualObservationsPublished ?? _unitSimulation.LastVisualObservationsPublished;
+            int hearingPulses = snapshot?.HearingQueuedPulses ?? _unitSimulation.LastHearingQueuedPulses;
+            int hearingChecks = snapshot?.HearingListenerChecks ?? _unitSimulation.LastHearingListenerChecks;
+            int hearingRecords = snapshot?.HearingContactsRecorded ?? _unitSimulation.LastHearingContactsRecorded;
+            int gunshotEvents = snapshot?.GunshotEventsQueued ?? _unitSimulation.LastGunshotEventsQueued;
+            int gunshotBatches = snapshot?.GunshotBatchesQueued ?? _unitSimulation.LastGunshotBatchesQueued;
+            int gunshotsMerged = snapshot?.GunshotsMerged ?? _unitSimulation.LastGunshotsMerged;
+            long perceptionAllocatedBytes = snapshot?.PerceptionAllocatedBytes ?? _unitSimulation.LastPerceptionAllocatedBytes;
+            long snapshotAllocatedBytes = snapshot?.SnapshotAllocatedBytes ?? 0L;
             double suppressionMs = snapshot?.SuppressionMs ?? _unitSimulation.LastSuppressionUpdateMilliseconds;
             double bodyMs = snapshot?.BodyMs ?? _unitSimulation.LastBodyUpdateMilliseconds;
             double meleeMs = snapshot?.MeleeMs ?? _unitSimulation.LastMeleeUpdateMilliseconds;
@@ -545,7 +557,12 @@ public sealed class GameRenderer
                 $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
                 $"Units={activeUnits} SimPaused={_simulationPaused} Speed={_simulationSpeed:0.00}x " +
                 $"SimRate={_simulationGameSecondsPerWallSecond:0.00}x UPS={_simulationUpdatesPerSecond:0} Sim={simMs:0.0}ms " +
-                $"Vision={visionMetrics} Perception={perceptionMs:0.0}ms Suppression={suppressionMs:0.0}ms " +
+                $"Vision={visionMetrics} Perception={perceptionMs:0.0}ms " +
+                $"Hearing={hearingMs:0.0}ms VisualSense={visualSenseMs:0.0}ms VisualPublish={visualPublishMs:0.0}ms " +
+                $"VisualObs={visualObservations} SoundPulses={hearingPulses} HearingChecks={hearingChecks:N0} " +
+                $"AudioRecords={hearingRecords} Gunshots={gunshotEvents}/{gunshotBatches} merged={gunshotsMerged} " +
+                $"PerceptionAlloc={perceptionAllocatedBytes / 1024d:0.0}KB SnapshotAlloc={snapshotAllocatedBytes / 1024d:0.0}KB " +
+                $"Suppression={suppressionMs:0.0}ms " +
                 $"AI={aiMs:0.0}ms Plan={aiPlanningMs:0.0}ms Move={moveMs:0.0}ms " +
                 $"Body={bodyMs:0.0}ms Melee={meleeMs:0.0}ms " +
                 $"UtilityAI={(utilityAiEnabled ? (utilityAiReady ? "ON" : "INIT") : "OFF")} " +

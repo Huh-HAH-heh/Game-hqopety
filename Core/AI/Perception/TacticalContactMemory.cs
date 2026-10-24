@@ -274,9 +274,11 @@ public sealed class TacticalContactMemory
 
     private const float UnknownContactMergeRadiusFloor = 1.5f;
     private const float CrossSenseMergeWindowSeconds = 1.25f;
+    private const float ContactMaintenanceIntervalSeconds = 0.25f;
 
     private readonly List<TacticalContact> _contacts = new();
     private float _currentTimeSeconds;
+    private float _lastMaintenanceTimeSeconds = float.NegativeInfinity;
     private long _nextContactId = 1;
 
     public IReadOnlyList<TacticalContact> Contacts => _contacts;
@@ -415,8 +417,14 @@ public sealed class TacticalContactMemory
         if (nowSeconds < _currentTimeSeconds)
             throw new ArgumentOutOfRangeException(nameof(nowSeconds),
                 "Contact memory time cannot move backwards.");
+        if (nowSeconds == _currentTimeSeconds)
+            return;
 
         _currentTimeSeconds = nowSeconds;
+        if (nowSeconds - _lastMaintenanceTimeSeconds < ContactMaintenanceIntervalSeconds)
+            return;
+
+        _lastMaintenanceTimeSeconds = nowSeconds;
         for (int i = _contacts.Count - 1; i >= 0; i--)
         {
             TacticalContact contact = _contacts[i];
@@ -474,6 +482,7 @@ public sealed class TacticalContactMemory
     {
         _contacts.Clear();
         _currentTimeSeconds = 0f;
+        _lastMaintenanceTimeSeconds = float.NegativeInfinity;
         _nextContactId = 1;
     }
 

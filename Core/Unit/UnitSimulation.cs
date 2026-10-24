@@ -47,6 +47,17 @@ public sealed class UnitSimulation
 
     public double LastSimulationUpdateMilliseconds { get; private set; }
     public double LastPerceptionUpdateMilliseconds { get; private set; }
+    public long LastPerceptionAllocatedBytes { get; private set; }
+    public double LastHearingSenseMilliseconds => _hearingSystem.LastUpdateMilliseconds;
+    public double LastVisualSenseMilliseconds => _visualPerceptionSense.LastUpdateMilliseconds;
+    public double LastVisualPublishMilliseconds => _visualPerceptionSense.LastPublishMilliseconds;
+    public int LastVisualObservationsPublished => _visualPerceptionSense.LastObservationsPublished;
+    public int LastHearingQueuedPulses => _hearingSystem.LastQueuedPulseCount;
+    public int LastHearingListenerChecks => _hearingSystem.LastListenerChecks;
+    public int LastHearingContactsRecorded => _hearingSystem.LastContactsRecorded;
+    public int LastGunshotEventsQueued => _hearingSystem.LastGunshotEventsQueued;
+    public int LastGunshotBatchesQueued => _hearingSystem.LastGunshotBatchesQueued;
+    public int LastGunshotsMerged => _hearingSystem.LastGunshotsMerged;
     public double LastSuppressionUpdateMilliseconds { get; private set; }
     public double LastVisionCallMilliseconds { get; private set; }
     public double LastAIUpdateMilliseconds { get; private set; }
@@ -938,12 +949,15 @@ public sealed class UnitSimulation
             _simulationTimeSeconds += deltaTime;
 
         long phaseStarted = Stopwatch.GetTimestamp();
+        long perceptionAllocatedBytesStarted = GC.GetAllocatedBytesForCurrentThread();
         var perceptionContext = new PerceptionSenseContext(
             Units, Health, Inventory, Weapons, Suppression, Metabolism, Skills,
             Bodies, HitRegions, worldMap, _visionSystem, PerceptionMemory,
             _simulationTimeSeconds, deltaTime);
         Perception.Update(in perceptionContext);
         LastPerceptionUpdateMilliseconds = Perception.LastUpdateMilliseconds;
+        LastPerceptionAllocatedBytes = Math.Max(
+            0L, GC.GetAllocatedBytesForCurrentThread() - perceptionAllocatedBytesStarted);
         LastVisionCallMilliseconds = _visualPerceptionSense.LastUpdateMilliseconds;
 
         phaseStarted = Stopwatch.GetTimestamp();

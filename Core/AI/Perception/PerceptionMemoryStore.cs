@@ -8,7 +8,9 @@ namespace Core.AI.Perception;
 /// </summary>
 public sealed class PerceptionMemoryStore : IPerceptionObservationSink
 {
+    private const float MemoryMaintenanceIntervalSeconds = 0.25f;
     private TacticalContactMemory?[] _memories;
+    private float _lastMaintenanceTimeSeconds = float.NegativeInfinity;
 
     public float CurrentTimeSeconds { get; private set; }
     public int Capacity => _memories.Length;
@@ -26,8 +28,14 @@ public sealed class PerceptionMemoryStore : IPerceptionObservationSink
         if (nowSeconds < CurrentTimeSeconds)
             throw new ArgumentOutOfRangeException(nameof(nowSeconds),
                 "Perception memory time cannot move backwards.");
+        if (nowSeconds == CurrentTimeSeconds)
+            return;
 
         CurrentTimeSeconds = nowSeconds;
+        if (nowSeconds - _lastMaintenanceTimeSeconds < MemoryMaintenanceIntervalSeconds)
+            return;
+
+        _lastMaintenanceTimeSeconds = nowSeconds;
         for (int i = 0; i < _memories.Length; i++)
             _memories[i]?.AdvanceTime(nowSeconds);
     }

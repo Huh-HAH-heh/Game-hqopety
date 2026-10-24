@@ -26,13 +26,25 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private const float DebugEventLifetimeSeconds = 2.25f;
     private const int MaxRecentLoudDebugEvents = 96;
     private const int MaxRecentFootstepDebugEvents = 48;
+    private const float GunshotMergeCellSize = 4f;
+
     private readonly List<SoundPulse> _pendingPulses = new();
+    private readonly Dictionary<GunshotCellKey, GunshotBatch> _pendingGunshotBatches = new(128);
+    private int _pendingGunshotEvents;
+    private int _pendingGunshotsMerged;
     private readonly Queue<TacticalSoundDebugEvent> _recentLoudDebugEvents = new();
     private readonly Queue<TacticalSoundDebugEvent> _recentFootstepDebugEvents = new();
     private readonly PerceptionMemoryStore _memoryStore;
     private float[] _footstepCooldown;
     private long _nextPulseId = 1;
+
     public float CurrentTimeSeconds => _memoryStore.CurrentTimeSeconds;
+    public int LastQueuedPulseCount { get; private set; }
+    public int LastListenerChecks { get; private set; }
+    public int LastContactsRecorded { get; private set; }
+    public int LastGunshotEventsQueued { get; private set; }
+    public int LastGunshotBatchesQueued { get; private set; }
+    public int LastGunshotsMerged { get; private set; }
 
     public TacticalHearingSystem(
         int initialUnitCapacity = 1024,
@@ -133,8 +145,18 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f)
             return;
         CollectFootsteps(units, health, deltaTime, nowSeconds);
+        LastQueuedPulseCount = _pendingPulses.Count;
+        LastListenerChecks = 0;
+        LastContactsRecorded = 0;
+        LastGunshotEventsQueued = _pendingGunshotEvents;
+        LastGunshotBatchesQueued = _pendingGunshotBatches.Count;
+        LastGunshotsMerged = _pendingGunshotsMerged;
+
         DeliverPulses(units, health, response, nowSeconds, worldMap, vision);
         _pendingPulses.Clear();
+        _pendingGunshotBatches.Clear();
+        _pendingGunshotEvents = 0;
+        _pendingGunshotsMerged = 0;
     }
 
     public void InitializeUnit(int unitIndex)
@@ -275,6 +297,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 continue;
             for (int i = 0; i < active.Length; i++)
             {
+                LastListenerChecks++;
                 int observer = active[i];
                 if (health.OverallHitPoints[observer] <= 0f ||
                     units.GetId(observer).Equals(pulse.SourceUnit))
@@ -297,13 +320,16 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                     ? 1.5f + distance * 0.20f
                     : 4f + distance * 0.22f;
                 Vector3 estimate = EstimatePosition(pulse, observer, error, attenuation);
-                _memoryStore.Record(
-                    observer,
-                    new TacticalStimulus(
-                        pulse.Type, estimate, pulse.OccurredAtSeconds,
-                        pulse.Intensity, error, confidence),
-                    nowSeconds,
-                    lifetime);
+                if (_memoryStore.Record(
+                        observer,
+                        new TacticalStimulus(
+                            pulse.Type, estimate, pulse.OccurredAtSeconds,
+                            pulse.Intensity, error, confidence),
+                        nowSeconds,
+                        lifetime) != null)
+                {
+                    LastContactsRecorded++;
+                }
 
                 float alertFactor = pulse.Type switch
                 {
@@ -431,6 +457,44 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
 
     private void QueuePulse(SoundPulse pulse)
     {
+        bool appendPulse = true;
+        if (pulse.Type == TacticalStimulusType.Gunshot && pulse.SourceFaction != 0)
+        {
+            _pendingGunshotEvents++;
+            var key = new GunshotCellKey(
+                (int)MathF.Floor(pulse.Position.X / GunshotMergeCellSize),
+                (int)MathF.Floor(pulse.Position.Y / GunshotMergeCellSize),
+                pulse.SourceFaction);
+
+            if (_pendingGunshotBatches.TryGetValue(key, out GunshotBatch batch))
+            {
+                SoundPulse existing = _pendingPulses[batch.PulseIndex];
+                Vector3 positionSum = batch.PositionSum + pulse.Position;
+                int count = batch.Count + 1;
+                _pendingPulses[batch.PulseIndex] = new SoundPulse(
+                    existing.Sequence,
+                    existing.SourceUnit,
+                    existing.SourceFaction,
+                    positionSum / count,
+                    existing.Type,
+                    MathF.Max(existing.OccurredAtSeconds, pulse.OccurredAtSeconds),
+                    MathF.Max(existing.Intensity, pulse.Intensity),
+                    MathF.Max(existing.Range, pulse.Range));
+                _pendingGunshotBatches[key] = new GunshotBatch(batch.PulseIndex, positionSum, count);
+                _pendingGunshotsMerged++;
+                appendPulse = false;
+            }
+            else
+            {
+                _pendingGunshotBatches.Add(
+                    key,
+                    new GunshotBatch(_pendingPulses.Count, pulse.Position, 1));
+            }
+        }
+
+        if (!appendPulse)
+            return;
+
         _pendingPulses.Add(pulse);
         Queue<TacticalSoundDebugEvent> history = pulse.Type == TacticalStimulusType.Footstep
             ? _recentFootstepDebugEvents
@@ -463,6 +527,9 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
 
     private static bool IsFinite(Vector3 value) =>
         float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+
+    private readonly record struct GunshotCellKey(int X, int Y, ushort Faction);
+    private readonly record struct GunshotBatch(int PulseIndex, Vector3 PositionSum, int Count);
 
     private readonly record struct SoundPulse(
         long Sequence, UnitId SourceUnit, ushort SourceFaction, Vector3 Position,
