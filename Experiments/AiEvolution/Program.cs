@@ -1,5 +1,7 @@
 using System.Numerics;
 using System.Text.Json;
+using System.Diagnostics;
+using System.Threading;
 using Core.AI;
 using Core.Items;
 using Core.Map;
@@ -11,6 +13,14 @@ internal static class Program
     private const int GeneCount = 40;
     private const float Dt = 0.05f;
     private static AiBalanceProfile _profileBase = AiBalanceProfile.Default;
+    private static volatile bool _cancelRequested;
+    private static bool _trainingPaused;
+    private static long _trainingStartedAt;
+    private static string _checkpointPath = "ai-balance-best.json";
+    private static string _progressPhase = "TRAIN";
+    private static int _generationNow, _generationsTotal, _candidateNow, _populationTotal;
+    private static int _battleNow, _battlesTotal, _tickNow, _ticksTotal;
+    private static string _currentScenarioName = "Starting";
 
     private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f,.60f,.25f,.01f,.80f,.10f,4f,4f,5f,4f,5f,.75f,.80f,.04f,.04f,.50f,.30f,.02f,.003f,.20f];
     private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f,.95f,3f,.08f,1f,.45f,14f,14f,20f,24f,30f,.98f,.999f,.30f,.35f,.95f,.80f,.16f,.04f,1.50f];
@@ -18,6 +28,9 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        _cancelRequested = false;
+        _trainingPaused = false;
+        Console.CancelKeyPress += OnCancelKeyPress;
         try
         {
             ValidateGenomeConfiguration();
@@ -26,6 +39,7 @@ internal static class Program
             int validationBattles=Arg(args,"--validation-battles",Math.Max(8,battles),8,1000);
             int team=Arg(args,"--team-size",4,2,16), seed=Arg(args,"--seed",20261024,int.MinValue,int.MaxValue);
             string output=Path.GetFullPath(TextArg(args,"--output","Experiments/AiEvolution/output/ai-balance-best.json"));
+            _checkpointPath = output;
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
             string csv=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".history.csv");
             string? seedPath=TextOpt(args,"--seed-profile");
@@ -41,15 +55,35 @@ internal static class Program
             float[] globalGenes=(float[])mutationBase.Clone();
             using var history=new StreamWriter(csv,false);
             history.WriteLine("generation,best_fitness,mean_fitness,win_rate,draw_rate,survivor_rate,own_health_ratio,enemy_health_ratio,enemy_kills,engage,flank,cover,retreat,prone,suppressive_fire,open_score,barrier_score,close_score,canyon_score,open_win_rate,barrier_win_rate,close_win_rate,canyon_win_rate,shots_per_battle,rounds_per_battle,navigation_routes_built,navigation_routes_failed,navigation_failure_rate,navigation_searches,utility_decisions");
+            _trainingStartedAt = Stopwatch.GetTimestamp();
+            _generationsTotal = generations;
+            _populationTotal = popSize;
+            _progressPhase = "TRAIN";
+            File.WriteAllText(output,JsonSerializer.Serialize(Profile(globalGenes),new JsonSerializerOptions{WriteIndented=true}));
             Console.WriteLine($"AI evolution: population={popSize}; generations={generations}; battles={battles}; ticks={ticks}; team={team}v{team}");
+            Console.WriteLine("[EVOLVE] Live progress is shown below. P/Space=pause-resume, Esc=stop, Ctrl+C=checkpoint and stop.");
 
             for(int gen=1;gen<=generations;gen++)
             {
+                _generationNow = gen;
+                Console.WriteLine($"[EVOLVE] ===== GENERATION {gen}/{generations} =====");
                 var results=new List<(float[] Genes,Evaluation Metrics)>(popSize);
                 for(int i=0;i<population.Count;i++)
                 {
+                    PollTrainingControls();
+                    _candidateNow = i + 1;
+                    _battleNow = 0;
+                    _tickNow = 0;
+                    Console.WriteLine($"[EVOLVE] Generation {gen}/{generations}, candidate {i+1}/{popSize} started.");
                     Evaluation metrics=Evaluate(Profile(population[i]),battles,ticks,team,seed);
                     results.Add((population[i],metrics));
+                    if(metrics.Fitness>globalBest)
+                    {
+                        globalBest=metrics.Fitness;
+                        globalGenes=(float[])population[i].Clone();
+                        File.WriteAllText(output,JsonSerializer.Serialize(Profile(globalGenes),new JsonSerializerOptions{WriteIndented=true}));
+                        Console.WriteLine($"[EVOLVE] New best checkpoint: fitness={globalBest:F2}; saved={output}");
+                    }
                     Console.WriteLine($"gen={gen}/{generations} candidate={i+1}/{popSize} " +
                         $"fitness={metrics.Fitness:F2}; wins={metrics.WinRate:P0}; survivors={metrics.SurvivorRate:P0}");
                 }
@@ -83,8 +117,12 @@ internal static class Program
                 if(gen<generations)
                     population=Next(results.Select(x=>(x.Genes,x.Metrics.Fitness)).ToList(),popSize,rng,mutationBase);
             }
+            _progressPhase = "HOLDOUT trained";
+            Console.WriteLine("[EVOLVE] Starting held-out validation of trained profile.");
             int validationSeed=unchecked(seed^0x5F3759DF);
             Evaluation trained=Evaluate(Profile(globalGenes),validationBattles,ticks,team,validationSeed);
+            _progressPhase = "HOLDOUT baseline";
+            Console.WriteLine("[EVOLVE] Starting held-out validation of default profile.");
             Evaluation baseline=Evaluate(AiBalanceProfile.Default,validationBattles,ticks,team,validationSeed);
             string validationPath=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".validation.json");
             var validationReport=new
@@ -122,7 +160,22 @@ internal static class Program
             Console.WriteLine($"Holdout report: {validationPath}");
             return 0;
         }
-        catch(Exception ex) { Console.Error.WriteLine($"AI evolution failed: {ex.Message}"); return 1; }
+        catch(OperationCanceledException)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"[EVOLVE] Stopped by user. Latest best-profile checkpoint: {_checkpointPath}");
+            return 2;
+        }
+        catch(Exception ex)
+        {
+            Console.Error.WriteLine($"AI evolution failed: {ex.Message}");
+            return 1;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= OnCancelKeyPress;
+            if (!Console.IsOutputRedirected) Console.WriteLine();
+        }
     }
 
     private static void ValidateGenomeConfiguration()
