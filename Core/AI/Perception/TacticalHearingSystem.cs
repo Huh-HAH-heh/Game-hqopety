@@ -86,7 +86,6 @@ public sealed class TacticalHearingSystem
         if (!float.IsFinite(nowSeconds) || nowSeconds < CurrentTimeSeconds)
             throw new ArgumentOutOfRangeException(nameof(nowSeconds));
         EnsureCapacity(units.Capacity);
-        _memoryStore.AdvanceTime(nowSeconds);
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f)
             return;
         CollectFootsteps(units, health, deltaTime, nowSeconds);
