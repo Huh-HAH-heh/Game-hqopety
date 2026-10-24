@@ -15,6 +15,29 @@ namespace RimClone
                 return;
             }
 
+            const string profilePrefix = "--ai-balance-profile=";
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i].StartsWith(profilePrefix, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    string profilePath = args[i].Substring(profilePrefix.Length);
+                    System.Environment.SetEnvironmentVariable("RIMCLONE_AI_BALANCE_PROFILE", profilePath);
+                    System.Console.WriteLine($"[AI] Balance profile requested: {profilePath}");
+                }
+                else if (string.Equals(args[i], "--ai-balance-profile", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        System.Console.WriteLine("[AI] Missing path after --ai-balance-profile.");
+                        continue;
+                    }
+
+                    string profilePath = args[++i];
+                    System.Environment.SetEnvironmentVariable("RIMCLONE_AI_BALANCE_PROFILE", profilePath);
+                    System.Console.WriteLine($"[AI] Balance profile requested: {profilePath}");
+                }
+            }
+
             const string navDebugPrefix = "--ai-nav-debug=";
             for (int i = 0; i < args.Length; i++)
             {
@@ -39,8 +62,8 @@ namespace RimClone
 
             System.Environment.SetEnvironmentVariable("RIMCLONE_USE_BEHAVIAC_AI", "0");
             System.Console.WriteLine(
-                "[AI] Policy=SIMPLE COMBAT (visible hostile -> ranged fire); " +
-                "movement, melee actions, tactical behaviors and Behaviac decision tree are disabled.");
+                "[AI] Policy=Utility AI with shared perception, tactical movement, ranged/melee combat and " +
+                "contact memory. Behaviac decision runtime remains disabled.");
 
             GameBootstrap.Run();
         }
