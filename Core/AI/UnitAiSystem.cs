@@ -1836,7 +1836,7 @@ public sealed class UnitAiSystem
                 : balance.FlankFarRangeFraction;
             float desiredOrbit = MathF.Min(
                 distanceToTarget * 0.94f,
-                MathF.Max(6f, MathF.Max(workingRange, distanceToTarget * orbitFraction)));
+                MathF.Max(6f, workingRange * Math.Clamp(orbitFraction, 0.65f, 1f)));
 
             // The two components approximate the chosen orbit radius, while existing
             // minimum offsets keep close-range movement from degenerating into a nudge.
