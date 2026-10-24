@@ -156,8 +156,9 @@ public static class UnitIntentUtilityScorer
                 caution * 0.075f +
                 (context.HasCover ? 0.04f : 0f) -
                 aggression * 0.035f);
-            if (!context.IsLowHealth)
-                retreat = Clamp01(retreat * balance.RetreatScale);
+            // Preserve the base retreat preference while letting training tune
+            // how strongly injury, pain, caution and cover increase urgency.
+            retreat = Clamp01(0.60f + (retreat - 0.60f) * balance.RetreatScale);
         }
 
         if (hasMoveOrder)
