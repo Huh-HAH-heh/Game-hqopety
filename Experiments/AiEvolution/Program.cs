@@ -33,12 +33,11 @@ internal static class Program
             float[] seedGenes=GenesFrom(seedProfile);
             float[] mutationBase=seedPath==null ? BaseGenes : seedGenes;
             var rng=new Random(seed);
-            var population=new List<float[]>(popSize) { (float[])BaseGenes.Clone() };
-            if(seedPath!=null && popSize>1) population.Add(seedGenes);
+            var population=new List<float[]>(popSize) { (float[])mutationBase.Clone() };
             while(population.Count<popSize) population.Add(Mutate(mutationBase,rng,.75,.22f));
 
             double globalBest=double.NegativeInfinity;
-            float[] globalGenes=(float[])BaseGenes.Clone();
+            float[] globalGenes=(float[])mutationBase.Clone();
             using var history=new StreamWriter(csv,false);
             history.WriteLine("generation,best_fitness,mean_fitness,win_rate,draw_rate,survivor_rate,own_health_ratio,enemy_health_ratio,enemy_kills,engage,flank,cover,retreat,prone,suppressive_fire");
             Console.WriteLine($"AI evolution: population={popSize}; generations={generations}; battles={battles}; ticks={ticks}; team={team}v{team}");
@@ -72,7 +71,8 @@ internal static class Program
                 Console.WriteLine($"GENERATION {gen}: best={champion.Metrics.Fitness:F2}; mean={mean:F2}; " +
                     $"wins={champion.Metrics.WinRate:P1}; survivor-rate={champion.Metrics.SurvivorRate:P1}; " +
                     $"health={champion.Metrics.OwnHealthRatio:P1}; best-ever={globalBest:F2}");
-                if(gen<generations) population=Next(results.Select(x=>(x.Genes,x.Metrics.Fitness)).ToList(),popSize,rng);
+                if(gen<generations)
+                    population=Next(results.Select(x=>(x.Genes,x.Metrics.Fitness)).ToList(),popSize,rng,mutationBase);
             }
             Console.WriteLine($"Saved profile: {output}"); Console.WriteLine($"History: {csv}");
             return 0;
@@ -102,14 +102,14 @@ internal static class Program
         }
     }
 
-    private static List<float[]> Next(List<(float[] Genes,double Fitness)> rank,int count,Random r)
+    private static List<float[]> Next(List<(float[] Genes,double Fitness)> rank,int count,Random r,float[] restartBase)
     {
         var next=new List<float[]>(count) { (float[])rank[0].Genes.Clone() };
         if(count>1) next.Add((float[])rank[1].Genes.Clone());
         int pool=Math.Clamp(count/2,2,rank.Count);
         while(next.Count<count)
         {
-            if(r.NextDouble()<.06) { next.Add(Mutate(BaseGenes,r,.9,.45f)); continue; }
+            if(r.NextDouble()<.06) { next.Add(Mutate(restartBase,r,.9,.45f)); continue; }
             float[] a=rank[r.Next(pool)].Genes,b=rank[r.Next(pool)].Genes,g=new float[GeneCount];
             for(int j=0;j<GeneCount;j++) g[j]=r.Next(2)==0?a[j]:b[j];
             next.Add(Mutate(g,r,.18,.14f));
