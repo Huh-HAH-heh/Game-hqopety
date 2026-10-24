@@ -48,7 +48,7 @@ internal static class Program
                 var results=new List<(float[] Genes,Evaluation Metrics)>(popSize);
                 for(int i=0;i<population.Count;i++)
                 {
-                    Evaluation metrics=Evaluate(Profile(population[i]),battles,ticks,team);
+                    Evaluation metrics=Evaluate(Profile(population[i]),battles,ticks,team,seed);
                     results.Add((population[i],metrics));
                     Console.WriteLine($"gen={gen}/{generations} candidate={i+1}/{popSize} " +
                         $"fitness={metrics.Fitness:F2}; wins={metrics.WinRate:P0}; survivors={metrics.SurvivorRate:P0}");
@@ -173,12 +173,14 @@ internal static class Program
         FlankTravelCostWeight=g[38], FlankLineOfSightBonus=g[39]
     };
 
-    private static Evaluation Evaluate(AiBalanceProfile p,int battles,int ticks,int team)
+    private static Evaluation Evaluate(AiBalanceProfile p,int battles,int ticks,int team,int seed)
     {
         double fitness=0, winRate=0, drawRate=0, survivorRate=0, ownHp=0, enemyHp=0, kills=0;
         for(int i=0;i<battles;i++)
         {
-            BattleResult result=Battle(p,i%2==0,(i/2)%4,ticks,team);
+            // Keep the layout for each match index identical across every candidate.
+            int scenarioSeed=unchecked(seed+(i+1)*7919);
+            BattleResult result=Battle(p,i%2==0,(i/2)%4,ticks,team,scenarioSeed);
             fitness+=result.Fitness;
             if(result.Outcome>0) winRate++;
             else if(result.Outcome==0) drawRate++;
@@ -192,7 +194,7 @@ internal static class Program
             survivorRate/divisor,ownHp/divisor,enemyHp/divisor,kills/divisor);
     }
 
-    private static double Battle(AiBalanceProfile candidate,bool leftCandidate,int scenario,int ticks,int team)
+    private static BattleResult Battle(AiBalanceProfile candidate,bool leftCandidate,int scenario,int ticks,int team,int scenarioSeed)
     {
         bool canyonScenario=scenario==3;
         var world=canyonScenario
@@ -202,12 +204,12 @@ internal static class Program
             WorldGenerator.Generate(world,writeLog:false);
         else
             BuildFlatGround(world);
-        if(scenario==1) Barrier(world);
+        if(scenario==1) Barrier(world,scenarioSeed);
         var sim=new UnitSimulation(unitCapacity:team*2+4,bodyCapacity:2048);
         sim.AI.SetBalanceProfileForFaction(1,leftCandidate?candidate:AiBalanceProfile.Default);
         sim.AI.SetBalanceProfileForFaction(2,leftCandidate?AiBalanceProfile.Default:candidate);
-        List<UnitId> leftMembers=Spawn(sim,world,true,1,scenario,team);
-        List<UnitId> rightMembers=Spawn(sim,world,false,2,scenario,team);
+        List<UnitId> leftMembers=Spawn(sim,world,true,1,scenario,team,scenarioSeed);
+        List<UnitId> rightMembers=Spawn(sim,world,false,2,scenario,team,scenarioSeed);
         sim.AI.SynchronizeSquadMemberships(new[]
         {
             new SquadMembershipSnapshot(1,leftMembers),
@@ -233,13 +235,23 @@ internal static class Program
             own.Alive/(double)Math.Max(1,own.Total),own.Hp,enemy.Hp,enemy.Total-enemy.Alive);
     }
 
-    private static List<UnitId> Spawn(UnitSimulation sim,WorldMap world,bool left,ushort faction,int scenario,int count)
+    private static List<UnitId> Spawn(
+        UnitSimulation sim,WorldMap world,bool left,ushort faction,int scenario,int count,int scenarioSeed)
     {
         var members=new List<UnitId>(count);
+        var positionRandom=new Random(unchecked(scenarioSeed^(left?0x45D9F3B:0x119DE1F3)));
+        var equipmentRandom=new Random(scenarioSeed);
+        int meleeIndex=equipmentRandom.Next(count);
+        int rifleOffset=equipmentRandom.Next(3);
+
         for(int i=0;i<count;i++)
         {
             int margin=scenario==3?10:9;
-            int y=margin+i*(world.TileHeight-2*margin-1)/Math.Max(1,count-1),offset=(i%2)*2;
+            int spacing=(world.TileHeight-2*margin-1)/Math.Max(1,count-1);
+            int jitter=Math.Min(2,spacing/4);
+            int y=margin+i*(world.TileHeight-2*margin-1)/Math.Max(1,count-1)+
+                positionRandom.Next(-jitter,jitter+1);
+            int offset=(i%2)*2+positionRandom.Next(-1,2);
             int center=(world.TileWidth-1)/2;
             int x=scenario switch
             {
@@ -248,10 +260,14 @@ internal static class Program
                 3=>left?center-34+offset:center+34-offset,
                 _=>left?center-50+offset:center+50-offset
             };
-            float height=scenario==3?world.GetSurfaceHeight(x,y):0.1f;
-            UnitId id=sim.Spawn(UnitType.Colonist,new Vector3(x,y,height),bodyAngle:left?0f:MathF.PI,factionTag:faction);
+            x=Math.Clamp(x,2,world.MaxTileX-2);
+            y=Math.Clamp(y,2,world.MaxTileY-2);
+            float height=world.GetSurfaceHeight(x,y);
+            UnitId id=sim.Spawn(UnitType.Colonist,new Vector3(x,y,height),
+                bodyAngle:left?0f:MathF.PI,factionTag:faction);
             members.Add(id);
-            if(i%5==1)
+
+            if(i==meleeIndex)
             {
                 var meleeWeapon=MeleeWeaponCatalog.CombatKnife;
                 int meleeSlot=sim.AddInventoryItem(id,meleeWeapon);
@@ -260,7 +276,9 @@ internal static class Program
             }
             else
             {
-                var weapon=i%3==0?WeaponCatalog.AssaultRifle:WeaponCatalog.Pistol;
+                var weapon=(i+rifleOffset)%3==0
+                    ? WeaponCatalog.AssaultRifle
+                    : WeaponCatalog.Pistol;
                 int slot=sim.AddInventoryItem(id,weapon);
                 if(slot<0||!sim.EquipWeapon(id,slot,UnitWeaponSlot.Primary))
                     throw new InvalidOperationException($"Could not equip {weapon.Name}.");
@@ -278,13 +296,20 @@ internal static class Program
                 world.SetSolidHeight(x,y,1,(ushort)1);
     }
 
-    private static void Barrier(WorldMap world)
+    private static void Barrier(WorldMap world,int scenarioSeed)
     {
         int x=world.TileWidth/2;
+        var random=new Random(unchecked(scenarioSeed^0x6D2B79F5));
+        int firstGap=world.TileHeight/3+random.Next(-3,4);
+        int secondGap=world.TileHeight*2/3+random.Next(-3,4);
+        int firstRadius=3+random.Next(0,3);
+        int secondRadius=3+random.Next(0,3);
+
         for(int y=4;y<world.TileHeight-4;y++)
         {
-            float ratio=(float)y/world.TileHeight;
-            if((ratio>=.28f&&ratio<=.38f)||(ratio>=.62f&&ratio<=.72f)) continue;
+            if(Math.Abs(y-firstGap)<=firstRadius ||
+               Math.Abs(y-secondGap)<=secondRadius)
+                continue;
 
             // 2 m wall: physically present in LOS/projectile tracing and
             // separately forbidden to navigation. Ground exists beneath it.
