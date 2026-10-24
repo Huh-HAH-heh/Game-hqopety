@@ -16,6 +16,12 @@ The run writes a directly deserializable `AiBalanceProfile` to `ai-balance-best.
 dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --seed-profile .\ai-balance-best.json --generations 4 --population 8
 ```
 
-The default profile remains in the candidate pool and the opponent remains the default profile. Trained results are not loaded by the game automatically.
+The default profile remains in the candidate pool and the opponent remains the default profile. To load a trained profile into normal gameplay:
 
-The 31-gene profile evolves action preferences, preferred weapon ranges, cover-search distance and flank waypoint geometry, intent persistence, investigation thresholds, cover/flank response and tactical-distance scoring. Fitness considers outcome, health remaining, enemy damage and survivors. This stage optimizes the current action/tactical surface; it cannot invent a capability that does not exist in game code. To avoid limiting future AI to a few high-level commands, the next stage should expose legal low-level affordances such as firing-position candidates, cover slots, flank lanes, line-of-fire estimates and navigation costs. Weapon physics, perception evidence, path validity, injury rules and emergency gates stay outside the genome.
+```powershell
+dotnet run --project App -- --ai-balance-profile=.\ai-balance-best.json
+```
+
+The game loads the file once at startup. If the file cannot be read or deserialized, it logs the problem and keeps the default balance; it never silently adopts a training result.
+
+The 31-gene profile evolves action preferences, preferred weapon ranges, cover-search distance and flank waypoint geometry, intent persistence, investigation thresholds, cover/flank response and tactical-distance scoring. Fitness considers outcome, health remaining, enemy damage and survivors. This stage optimizes the current action/tactical surface and now evolves low-level choices such as preferred firing distance, cover-search radius and flank waypoint geometry. It still cannot invent a capability that does not exist in game code. The next stage should improve the candidate generator with scored firing-position candidates, cover slots, flank lanes, line-of-fire estimates and navigation costs. Weapon physics, perception evidence, path validity, injury rules and emergency gates stay outside the genome.
