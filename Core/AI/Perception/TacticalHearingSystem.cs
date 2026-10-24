@@ -174,21 +174,13 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         LastGunshotBatchesQueued = _pendingGunshotBatches;
         LastGunshotsMerged = _pendingGunshotsMerged;
 
-        try
-        {
-            DeliverPulses(units, health, response, nowSeconds, worldMap, vision);
-        }
-        finally
-        {
-            // Clear transient events even when delivery fails partway through.
-            // Retrying a partially delivered batch would duplicate sensory effects.
-            _pendingPulses.Clear();
-            _pendingAcousticBatches.Clear();
-            _pendingGunshotEvents = 0;
-            _pendingGunshotBatches = 0;
-            _pendingGunshotsMerged = 0;
-            TrimTransientBuffersIfQuiet(nowSeconds);
-        }
+        DeliverPulses(units, health, response, nowSeconds, worldMap, vision);
+        _pendingPulses.Clear();
+        _pendingAcousticBatches.Clear();
+        _pendingGunshotEvents = 0;
+        _pendingGunshotBatches = 0;
+        _pendingGunshotsMerged = 0;
+        TrimTransientBuffersIfQuiet(nowSeconds);
     }
 
     public void InitializeUnit(int unitIndex)
