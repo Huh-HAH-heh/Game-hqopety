@@ -70,7 +70,7 @@ public static class TacticalHearingSelfTest
         for (int i = 0; i < 8; i++)
         {
             if (simulation.AI.Store.LastIntent[listener.Index] ==
-                BehaviacUnitIntent.InvestigateAudibleContact)
+                BehaviacUnitIntent.InvestigateContact)
             {
                 break;
             }
@@ -87,7 +87,7 @@ public static class TacticalHearingSelfTest
             contact.PositionErrorRadius * 0.15f) + 0.1f;
 
         return simulation.AI.Store.LastIntent[listener.Index] ==
-                   BehaviacUnitIntent.InvestigateAudibleContact &&
+                   BehaviacUnitIntent.InvestigateContact &&
                simulation.AI.Store.HasGoal[listener.Index] &&
                simulation.AI.Store.State[listener.Index] == UnitAiState.Search &&
                simulation.Units.HasTarget[listener.Index] &&

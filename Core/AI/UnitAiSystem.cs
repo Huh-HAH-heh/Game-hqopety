@@ -1276,7 +1276,7 @@ public sealed class UnitAiSystem
         int tileY = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
         Vector3 searchPoint = new(x, y, worldMap.GetSurfaceHeight(tileX, tileY));
 
-        // Audio is only a search location: it never creates an identified combat target.
+        // Nonvisual evidence supplies only a search location, never an identified combat target.
         ClearAiming(weapons, unit);
         Store.ClearTarget(unit);
         Store.SetGoal(unit, searchPoint);

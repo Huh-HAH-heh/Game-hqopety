@@ -78,7 +78,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public float CoverUtility { get; private set; }
     [MemberMetaInfo("Flank utility", "Utility of the available flank maneuver (0 to 1).", true)]
     public float FlankUtility { get; private set; }
-    [MemberMetaInfo("Investigation utility", "Utility of investigating an uncertain sound contact (0 to 1).", true)]
+    [MemberMetaInfo("Investigation utility", "Utility of investigating an uncertain perception contact (0 to 1).", true)]
     public float InvestigationUtility { get; private set; }
     [MemberMetaInfo("Squad contact", "Whether a delayed, uncertain location report was received from a squad mate.", true)]
     public bool HasSquadContact { get; private set; }

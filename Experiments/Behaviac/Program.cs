@@ -597,19 +597,19 @@ internal static class Program
             BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f, CombatUtility: 0.4f),
         new("visible combat interrupts a low-utility move task", true, false, false, true, false,
             BehaviacUnitIntent.EngageTarget, HasMoveOrder: true, MoveOrderUtility: 0.2f, CombatUtility: 0.9f),
-        new("unknown sound with awareness is investigated", true, false, false, false, false,
-            BehaviacUnitIntent.InvestigateContact, HasAudibleContact: true, IsAlerted: true,
+        new("credible nonvisual contact with awareness is investigated", true, false, false, false, false,
+            BehaviacUnitIntent.InvestigateContact, HasInvestigableContact: true, IsAlerted: true,
             InvestigationUtility: 0.70f),
-        new("faint sound without alertness does not trigger investigation", true, false, false, false, false,
-            BehaviacUnitIntent.Patrol, HasAudibleContact: true, InvestigationUtility: 0.70f),
-        new("move order outranks an uncertain sound", true, false, false, false, false,
+        new("faint contact without alertness does not trigger investigation", true, false, false, false, false,
+            BehaviacUnitIntent.Patrol, HasInvestigableContact: true, InvestigationUtility: 0.70f),
+        new("move order outranks an uncertain contact", true, false, false, false, false,
             BehaviacUnitIntent.FollowMoveOrder, HasMoveOrder: true, MoveOrderUtility: 0.8f,
-            HasAudibleContact: true, IsAlerted: true, InvestigationUtility: 0.70f),
-        new("hold order outranks an uncertain sound", true, false, false, false, false,
-            BehaviacUnitIntent.HoldPosition, HasStopOrder: true, HasAudibleContact: true, IsAlerted: true,
+            HasInvestigableContact: true, IsAlerted: true, InvestigationUtility: 0.70f),
+        new("hold order outranks an uncertain contact", true, false, false, false, false,
+            BehaviacUnitIntent.HoldPosition, HasStopOrder: true, HasInvestigableContact: true, IsAlerted: true,
             InvestigationUtility: 0.70f),
-        new("identified last-known contact outranks an uncertain sound", true, false, false, false, true,
-            BehaviacUnitIntent.InvestigateLastKnownTarget, HasAudibleContact: true, IsAlerted: true,
+        new("identified last-known contact outranks an uncertain contact", true, false, false, false, true,
+            BehaviacUnitIntent.InvestigateLastKnownTarget, HasInvestigableContact: true, IsAlerted: true,
             InvestigationUtility: 0.70f),
         new("immediate danger selects cover when an option exists", true, false, true, false, false,
             BehaviacUnitIntent.SeekCover, HasImmediateDanger: true),
@@ -636,7 +636,7 @@ internal static class Program
             hasAttackOrder: test.HasAttackOrder,
             moveOrderUtility: test.MoveOrderUtility,
             combatUtility: test.CombatUtility,
-            hasInvestigableContact: test.HasAudibleContact,
+            hasInvestigableContact: test.HasInvestigableContact,
             isInImmediateDanger: test.HasImmediateDanger,
             isAlerted: test.IsAlerted,
             coverUtility: test.CoverUtility,
@@ -698,7 +698,7 @@ internal static class Program
         if (test.HasRecentTarget)
             return BehaviacUnitIntent.InvestigateLastKnownTarget;
 
-        if (test.IsAlerted && test.HasAudibleContact && !test.IsSuppressed && !test.IsLowHealth &&
+        if (test.IsAlerted && test.HasInvestigableContact && !test.IsSuppressed && !test.IsLowHealth &&
             test.InvestigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility)
             return BehaviacUnitIntent.InvestigateContact;
 
@@ -724,7 +724,7 @@ internal static class Program
         bool HasAttackOrder = false,
         float MoveOrderUtility = 0f,
         float CombatUtility = 0f,
-        bool HasAudibleContact = false,
+        bool HasInvestigableContact = false,
         bool HasImmediateDanger = false,
         bool IsAlerted = false,
         float CoverUtility = 0f,
