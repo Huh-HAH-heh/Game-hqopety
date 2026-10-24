@@ -941,7 +941,8 @@ public sealed class GameRenderer
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             "LMB drag=select units; RMB=menu; Shift+click=add selection; Attack=selected units; S=hold | " +
-            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug-layers F6=vision F7=pause F8=scale I=AI-states T=tracers F9=HUD | " +
+            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug-layers " +
+            "F4=step F6=vision F7=pause F8=scale F11=normal Shift+F12=slower F12=faster I=AI-states T=tracers F9=HUD | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
