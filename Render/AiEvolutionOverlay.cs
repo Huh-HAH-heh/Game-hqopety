@@ -8,7 +8,7 @@ namespace RimClone.Render;
 public sealed class AiEvolutionOverlay : IDisposable
 {
     private const float Width = 560f;
-    private const float Height = 232f;
+    private const float Height = 260f;
 
     private readonly Font? _font;
     private readonly RectangleShape _panel = new(new Vector2f(Width, Height))
@@ -45,6 +45,7 @@ public sealed class AiEvolutionOverlay : IDisposable
     private readonly Text? _red;
     private readonly Text? _fitness;
     private readonly Text? _genes;
+    private readonly Text? _lastCandidate;
     private readonly Text? _message;
     private readonly Text? _controls;
 
@@ -61,6 +62,7 @@ public sealed class AiEvolutionOverlay : IDisposable
         _red = CreateText("", 10, true);
         _fitness = CreateText("", 10, true);
         _genes = CreateText("", 9, false);
+        _lastCandidate = CreateText("", 9, true);
         _message = CreateText("", 9, false);
         _controls = CreateText("F5 — остановить и применить лучшую версию", 9, true);
     }
@@ -69,7 +71,8 @@ public sealed class AiEvolutionOverlay : IDisposable
     {
         if (_font == null || _title == null || _generation == null ||
             _timer == null || _blue == null || _red == null ||
-            _fitness == null || _genes == null || _message == null || _controls == null)
+            _fitness == null || _genes == null || _lastCandidate == null ||
+            _message == null || _controls == null)
         {
             return;
         }
@@ -132,13 +135,23 @@ public sealed class AiEvolutionOverlay : IDisposable
         _genes.Position = new Vector2f(x + 12f, y + 131f);
         _genes.DisplayedString = status.GeneSummary;
 
-        _message.Position = new Vector2f(x + 12f, y + 157f);
+        _lastCandidate.Position = new Vector2f(x + 12f, y + 157f);
+        _lastCandidate.DisplayedString = double.IsFinite(status.LastCompletedCandidateFitness)
+            ? $"Последний завершённый кандидат G{status.LastCompletedGeneration} #{status.LastCompletedCandidateIndex}: " +
+              $"fitness {status.LastCompletedCandidateFitness:+0.0;-0.0;0.0}"
+            : "Последний завершённый кандидат: ожидание первого результата";
+        _lastCandidate.FillColor = double.IsFinite(status.LastCompletedCandidateFitness) &&
+            status.LastCompletedCandidateFitness >= status.BestFitness
+                ? new Color(158, 225, 169, 255)
+                : new Color(191, 208, 224, 255);
+
+        _message.Position = new Vector2f(x + 12f, y + 181f);
         _message.DisplayedString = status.Message;
         _message.FillColor = status.IsRunning
             ? new Color(191, 208, 224, 255)
             : new Color(242, 207, 139, 255);
 
-        _controls.Position = new Vector2f(x + 12f, y + 204f);
+        _controls.Position = new Vector2f(x + 12f, y + 231f);
         _controls.DisplayedString = status.IsRunning
             ? $"F5 — остановить и применить лучшую версию  ·  файл: {Path.GetFileName(status.BestProfilePath)}"
             : $"Лучший профиль сохранён отдельно  ·  файл: {Path.GetFileName(status.BestProfilePath)}";
@@ -156,6 +169,7 @@ public sealed class AiEvolutionOverlay : IDisposable
         window.Draw(_red);
         window.Draw(_fitness);
         window.Draw(_genes);
+        window.Draw(_lastCandidate);
         window.Draw(_message);
         window.Draw(_controls);
     }
@@ -194,6 +208,7 @@ public sealed class AiEvolutionOverlay : IDisposable
     {
         _controls?.Dispose();
         _message?.Dispose();
+        _lastCandidate?.Dispose();
         _genes?.Dispose();
         _fitness?.Dispose();
         _red?.Dispose();
