@@ -74,6 +74,8 @@ public sealed record AiBalanceProfile
     public float MeleeEngagementRangeFraction { get; init; } = 0.94f;
     public float MeleeMinimumEngagementDistance { get; init; } = 0.20f;
     public float CoverSearchRadius { get; init; } = 8f;
+    public float CoverThreatSeparationWeight { get; init; } = 0.12f;
+    public float CoverTravelCostWeight { get; init; } = 0.16f;
     public float FlankNearBackoffDistance { get; init; } = 4f;
     public float FlankNearLateralDistance { get; init; } = 6f;
     public float FlankFarBackoffDistance { get; init; } = 6f;
