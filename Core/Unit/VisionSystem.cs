@@ -635,26 +635,8 @@ public sealed class VisionSystem
         _visibleStarts[unitIndex] = 0;
         _visibleCounts[unitIndex] = 0;
 
-        // Clear the destroyed unit's observer row and remove its index from all
-        // bounded history/current candidate rows before the index can be reused.
-        int unitCandidateOffset = unitIndex * CandidateSlots;
-        Array.Fill(_candidateTargetsByObserver, -1, unitCandidateOffset, CandidateSlots);
-        Array.Clear(_candidateVisibleUpdates, unitCandidateOffset, CandidateSlots);
-
-        Array.Fill(
-            _recentVisibleTargets,
-            -1,
-            unitIndex * RecentVisibilitySlotsPerObserver,
-            RecentVisibilitySlotsPerObserver);
-        Array.Clear(
-            _recentVisibleUpdates,
-            unitIndex * RecentVisibilitySlotsPerObserver,
-            RecentVisibilitySlotsPerObserver);
-        Array.Clear(
-            _sectorTargetCursors,
-            unitIndex * VisibilitySectorCount,
-            VisibilitySectorCount);
-
+        // Remove the destroyed unit from the current visible lists even if
+        // vision has not completed its first update yet.
         for (int observer = 0; observer < _visibleCounts.Length; observer++)
         {
             int start = _visibleStarts[observer];
@@ -665,22 +647,48 @@ public sealed class VisionSystem
                 if (_visibleTargets[i] == unitIndex)
                     _visibleTargets[i] = -1;
             }
+        }
 
-            if (observer == unitIndex)
-                continue;
+        // Vision caches are allocated lazily during the first actual vision update.
+        // Destroy can happen earlier (or while startup is still populating units).
+        if ((uint)unitIndex < (uint)_visibilityCapacity)
+        {
+            int unitCandidateOffset = unitIndex * CandidateSlots;
+            Array.Fill(_candidateTargetsByObserver, -1, unitCandidateOffset, CandidateSlots);
+            Array.Clear(_candidateVisibleUpdates, unitCandidateOffset, CandidateSlots);
 
-            int candidateOffset = observer * CandidateSlots;
-            for (int i = 0; i < CandidateSlots; i++)
+            Array.Fill(
+                _recentVisibleTargets,
+                -1,
+                unitIndex * RecentVisibilitySlotsPerObserver,
+                RecentVisibilitySlotsPerObserver);
+            Array.Clear(
+                _recentVisibleUpdates,
+                unitIndex * RecentVisibilitySlotsPerObserver,
+                RecentVisibilitySlotsPerObserver);
+            Array.Clear(
+                _sectorTargetCursors,
+                unitIndex * VisibilitySectorCount,
+                VisibilitySectorCount);
+
+            for (int observer = 0; observer < _visibleCounts.Length; observer++)
             {
-                int slot = candidateOffset + i;
-                if (_candidateTargetsByObserver[slot] == unitIndex)
-                {
-                    _candidateTargetsByObserver[slot] = -1;
-                    _candidateVisibleUpdates[slot] = 0;
-                }
-            }
+                if (observer == unitIndex || (uint)observer >= (uint)_visibilityCapacity)
+                    continue;
 
-            ForgetCachedVisibleTarget(observer, unitIndex);
+                int candidateOffset = observer * CandidateSlots;
+                for (int i = 0; i < CandidateSlots; i++)
+                {
+                    int slot = candidateOffset + i;
+                    if (_candidateTargetsByObserver[slot] == unitIndex)
+                    {
+                        _candidateTargetsByObserver[slot] = -1;
+                        _candidateVisibleUpdates[slot] = 0;
+                    }
+                }
+
+                ForgetCachedVisibleTarget(observer, unitIndex);
+            }
         }
 
         _updateTimer = UpdateInterval;
@@ -1857,7 +1865,6 @@ public sealed class VisionSystem
             capacity,
             oldCapacity == 0 ? 32 : oldCapacity * 2);
 
-        int oldRecentSlots = oldCapacity * RecentVisibilitySlotsPerObserver;
         int newRecentSlots = checked(newCapacity * RecentVisibilitySlotsPerObserver);
         int[] nextRecentTargets = new int[newRecentSlots];
         Array.Fill(nextRecentTargets, -1);
