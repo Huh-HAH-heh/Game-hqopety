@@ -150,7 +150,10 @@ internal static class Program
         var world=canyonScenario
             ? new WorldMap(regionsX:12,regionsY:6,layerCount:500)
             : new WorldMap(regionsX:8,regionsY:4,layerCount:32);
-        if(canyonScenario) WorldGenerator.Generate(world,writeLog:false);
+        if(canyonScenario)
+            WorldGenerator.Generate(world,writeLog:false);
+        else
+            BuildFlatGround(world);
         if(scenario==1) Barrier(world);
         var sim=new UnitSimulation(unitCapacity:team*2+4,bodyCapacity:2048);
         sim.AI.SetBalanceProfileForFaction(1,leftCandidate?candidate:AiBalanceProfile.Default);
@@ -211,6 +214,15 @@ internal static class Program
         return members;
     }
 
+    private static void BuildFlatGround(WorldMap world)
+    {
+        // An empty WorldMap has no navigable surface. Use the same solid-column
+        // representation as generated terrain so A*, LOS and bullets share a floor.
+        for(int y=0;y<world.TileHeight;y++)
+            for(int x=0;x<world.TileWidth;x++)
+                world.SetSolidHeight(x,y,1,(ushort)1);
+    }
+
     private static void Barrier(WorldMap world)
     {
         int x=world.TileWidth/2;
@@ -218,9 +230,11 @@ internal static class Program
         {
             float ratio=(float)y/world.TileHeight;
             if((ratio>=.28f&&ratio<=.38f)||(ratio>=.62f&&ratio<=.72f)) continue;
+
+            // 2 m wall: physically present in LOS/projectile tracing and
+            // separately forbidden to navigation. Ground exists beneath it.
+            world.SetSolidHeight(x,y,(ushort)Math.Min(20,world.LayerCount),(ushort)1);
             world.SetNavigationBlocked(x,y,true);
-            for(int z=0;z<Math.Min(16,world.LayerCount);z++)
-                world.SetMaterialId(x,y,z,(ushort)1);
         }
     }
 
