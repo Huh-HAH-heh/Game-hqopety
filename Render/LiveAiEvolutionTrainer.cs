@@ -177,7 +177,7 @@ public sealed class LiveAiEvolutionTrainer
             {
                 File.WriteAllText(
                     _historyPath,
-                    "generation,candidate,fitness,best_fitness,blue_survivors,red_survivors,blue_health,red_health,engage,flank,cover,retreat,prone,suppressive_fire\n");
+                    "generation,candidate,average_fitness,best_fitness,last_match_blue_survivors,last_match_red_survivors,last_match_blue_health,last_match_red_health,engage,flank,cover,retreat,prone,suppressive_fire\n");
             }
         }
         catch (Exception exception)
