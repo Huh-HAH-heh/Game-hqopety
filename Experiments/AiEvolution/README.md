@@ -8,15 +8,15 @@ Offline evolutionary trainer running the real `Core.Unit.UnitSimulation` loop: p
 dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --population 8 --generations 4 --battles 8 --ticks 600 --team-size 4 --seed 20261024
 ```
 
-Options: `--population`, `--generations`, `--battles`, `--ticks`, `--team-size`, `--seed`, `--output`, `--seed-profile`. At least eight battles per candidate covers open-field, wall/barrier, close-start and generated-canyon scenarios from both sides. The canyon uses the same `WorldGenerator` as normal gameplay. Higher settings mean more simulation work.
+Options: `--population`, `--generations`, `--battles`, `--ticks`, `--team-size`, `--seed`, `--output`, `--seed-profile`. At least eight battles per candidate covers open-field, wall/barrier, close-start and generated-canyon scenarios from both sides. The `--seed` value changes formations, equipment assignment and barrier gaps; all candidates still face the same layout per match index, making comparisons fair. The canyon uses the same `WorldGenerator` as normal gameplay. Higher settings mean more simulation work.
 
-The run writes a directly deserializable `AiBalanceProfile` to `Experiments/AiEvolution/output/ai-balance-best.json` and per-generation fitness to `Experiments/AiEvolution/output/ai-balance-best.history.csv`. Generated outputs are excluded from Git. To resume from a previous profile:
+The run writes a directly deserializable `AiBalanceProfile` to `Experiments/AiEvolution/output/ai-balance-best.json` and per-generation results to `Experiments/AiEvolution/output/ai-balance-best.history.csv`. The CSV includes score, average win/draw rate, survivors, own/enemy health, enemy kills and key genes. Generated outputs are excluded from Git. To resume from a previous profile:
 
 ```powershell
 dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --seed-profile .\Experiments\AiEvolution\output\ai-balance-best.json --generations 4 --population 8
 ```
 
-The default profile remains in the candidate pool and the opponent remains the default profile. To load a trained profile into normal gameplay:
+Without `--seed-profile`, the exact default profile is in the candidate pool. With `--seed-profile`, evolution starts from that saved profile instead of creating a hybrid of its values and default genes. The opponent remains the current default profile. To load a trained profile into normal gameplay:
 
 ```powershell
 dotnet run --project App/App.csproj -- --ai-balance-profile=.\Experiments\AiEvolution\output\ai-balance-best.json
