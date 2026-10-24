@@ -1842,10 +1842,10 @@ public sealed class UnitAiSystem
             // minimum offsets keep close-range movement from degenerating into a nudge.
             float backoff = MathF.Max(
                 nearOrbit ? balance.FlankNearBackoffDistance : balance.FlankFarBackoffDistance,
-                desiredOrbit * 0.8f);
+                desiredOrbit * balance.FlankBackoffProportion);
             float lateral = MathF.Max(
                 nearOrbit ? balance.FlankNearLateralDistance : balance.FlankFarLateralDistance,
-                desiredOrbit * 0.6f);
+                desiredOrbit * balance.FlankLateralProportion);
             float targetX = target.X - forward.X * backoff + side.X * lateral * sideSign;
             float targetY = target.Y - forward.Y * backoff + side.Y * lateral * sideSign;
             targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
@@ -1883,10 +1883,9 @@ public sealed class UnitAiSystem
                 out _);
 
             float score =
-                2f -
-                MathF.Abs(candidateRange - desiredOrbit) * 0.08f -
-                travelDistance * 0.012f +
-                (hasLineOfSight ? 0.9f : 0f);
+                -MathF.Abs(candidateRange - desiredOrbit) * balance.FlankRangeErrorWeight -
+                travelDistance * balance.FlankTravelCostWeight +
+                (hasLineOfSight ? balance.FlankLineOfSightBonus : 0f);
 
             if (score <= bestScore)
                 continue;
