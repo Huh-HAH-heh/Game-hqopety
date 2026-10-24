@@ -40,7 +40,7 @@ internal static class Program
             double globalBest=double.NegativeInfinity;
             float[] globalGenes=(float[])mutationBase.Clone();
             using var history=new StreamWriter(csv,false);
-            history.WriteLine("generation,best_fitness,mean_fitness,win_rate,draw_rate,survivor_rate,own_health_ratio,enemy_health_ratio,enemy_kills,engage,flank,cover,retreat,prone,suppressive_fire,open_score,barrier_score,close_score,canyon_score,open_win_rate,barrier_win_rate,close_win_rate,canyon_win_rate");
+            history.WriteLine("generation,best_fitness,mean_fitness,win_rate,draw_rate,survivor_rate,own_health_ratio,enemy_health_ratio,enemy_kills,engage,flank,cover,retreat,prone,suppressive_fire,open_score,barrier_score,close_score,canyon_score,open_win_rate,barrier_win_rate,close_win_rate,canyon_win_rate,shots_per_battle,rounds_per_battle,navigation_routes_built,navigation_routes_failed,navigation_failure_rate,navigation_searches,utility_decisions");
             Console.WriteLine($"AI evolution: population={popSize}; generations={generations}; battles={battles}; ticks={ticks}; team={team}v{team}");
 
             for(int gen=1;gen<=generations;gen++)
@@ -71,7 +71,11 @@ internal static class Program
                     $"{champion.Metrics.Scenarios[0].AverageFitness:F3},{champion.Metrics.Scenarios[1].AverageFitness:F3}," +
                     $"{champion.Metrics.Scenarios[2].AverageFitness:F3},{champion.Metrics.Scenarios[3].AverageFitness:F3}," +
                     $"{champion.Metrics.Scenarios[0].WinRate:F4},{champion.Metrics.Scenarios[1].WinRate:F4}," +
-                    $"{champion.Metrics.Scenarios[2].WinRate:F4},{champion.Metrics.Scenarios[3].WinRate:F4}");
+                    $"{champion.Metrics.Scenarios[2].WinRate:F4},{champion.Metrics.Scenarios[3].WinRate:F4}," +
+                    $"{champion.Metrics.AverageShotsFired:F2},{champion.Metrics.AverageRoundsConsumed:F2}," +
+                    $"{champion.Metrics.AverageNavigationRoutesBuilt:F2},{champion.Metrics.AverageNavigationRoutesFailed:F2}," +
+                    $"{champion.Metrics.NavigationFailureRate:F4},{champion.Metrics.AverageNavigationSearches:F2}," +
+                    $"{champion.Metrics.AverageUtilityDecisions:F2}");
                 history.Flush();
                 Console.WriteLine($"GENERATION {gen}: best={champion.Metrics.Fitness:F2}; mean={mean:F2}; " +
                     $"wins={champion.Metrics.WinRate:P1}; survivor-rate={champion.Metrics.SurvivorRate:P1}; " +
@@ -103,7 +107,9 @@ internal static class Program
             };
             File.WriteAllText(validationPath,JsonSerializer.Serialize(validationReport,new JsonSerializerOptions{WriteIndented=true}));
             Console.WriteLine($"HOLDOUT baseline: score={baseline.Fitness:F2}; wins={baseline.WinRate:P1}; survivor-rate={baseline.SurvivorRate:P1}");
-            Console.WriteLine($"HOLDOUT trained:  score={trained.Fitness:F2}; wins={trained.WinRate:P1}; survivor-rate={trained.SurvivorRate:P1}");
+            Console.WriteLine($"HOLDOUT trained:  score={trained.Fitness:F2}; wins={trained.WinRate:P1}; " +
+                $"survivor-rate={trained.SurvivorRate:P1}; route-fail-rate={trained.NavigationFailureRate:P1}; " +
+                $"shots/battle={trained.AverageShotsFired:F1}");
             Console.WriteLine($"HOLDOUT delta:    score={trained.Fitness-baseline.Fitness:+0.00;-0.00;0.00}; wins={trained.WinRate-baseline.WinRate:+0.0%;-0.0%;0.0%}");
             for(int i=0;i<trained.Scenarios.Length;i++)
             {
@@ -216,6 +222,7 @@ internal static class Program
     {
         const int scenarioCount=4;
         double fitness=0, winRate=0, drawRate=0, survivorRate=0, ownHp=0, enemyHp=0, kills=0;
+        double shots=0, rounds=0, routesBuilt=0, routesFailed=0, searches=0, decisions=0;
         var scenarioFitness=new double[scenarioCount];
         var scenarioWins=new double[scenarioCount];
         var scenarioDraws=new double[scenarioCount];
@@ -238,6 +245,12 @@ internal static class Program
             ownHp+=result.OwnHealthRatio;
             enemyHp+=result.EnemyHealthRatio;
             kills+=result.EnemyKills;
+            shots+=result.ShotsFired;
+            rounds+=result.RoundsConsumed;
+            routesBuilt+=result.NavigationRoutesBuilt;
+            routesFailed+=result.NavigationRoutesFailed;
+            searches+=result.NavigationSearches;
+            decisions+=result.UtilityDecisions;
 
             scenarioMatches[scenario]++;
             scenarioFitness[scenario]+=result.Fitness;
@@ -260,8 +273,11 @@ internal static class Program
                 scenarioOwnHp[i]/n,scenarioEnemyHp[i]/n,scenarioKills[i]/n);
         }
 
+        double routeFailureRate=routesFailed/Math.Max(1d,routesBuilt+routesFailed);
         return new Evaluation(fitness/divisor,winRate/divisor,drawRate/divisor,
-            survivorRate/divisor,ownHp/divisor,enemyHp/divisor,kills/divisor,scenarioResults);
+            survivorRate/divisor,ownHp/divisor,enemyHp/divisor,kills/divisor,
+            shots/divisor,rounds/divisor,routesBuilt/divisor,routesFailed/divisor,
+            routeFailureRate,searches/divisor,decisions/divisor,scenarioResults);
     }
 
     private static string ScenarioName(int index) => index switch
@@ -296,9 +312,11 @@ internal static class Program
         });
         sim.AI.Enabled=true;
         Team left=ReadTeam(sim,leftMembers),right=ReadTeam(sim,rightMembers);
+        long navigationSearches=0;
         for(int t=0;t<ticks;t++)
         {
             sim.Update(world,Dt);
+            navigationSearches+=sim.Navigation.SearchesThisUpdate;
             left=ReadTeam(sim,leftMembers);
             right=ReadTeam(sim,rightMembers);
             if(left.Alive==0||right.Alive==0) break;
@@ -311,7 +329,9 @@ internal static class Program
         double fitness=45*outcomeScore+20*own.Hp+20*(1-enemy.Hp)+
             15d*own.Alive/Math.Max(1,own.Total);
         return new BattleResult(fitness,outcome,
-            own.Alive/(double)Math.Max(1,own.Total),own.Hp,enemy.Hp,enemy.Total-enemy.Alive);
+            own.Alive/(double)Math.Max(1,own.Total),own.Hp,enemy.Hp,enemy.Total-enemy.Alive,
+            sim.TotalShotsFired,sim.TotalRoundsConsumed,sim.Navigation.RoutesBuilt,
+            sim.Navigation.RoutesFailed,navigationSearches,sim.AI.TotalUtilityDecisions);
     }
 
     private static List<UnitId> Spawn(
@@ -432,12 +452,15 @@ internal static class Program
     private readonly record struct Team(int Total,int Alive,double Hp);
     private readonly record struct BattleResult(
         double Fitness,int Outcome,double SurvivorRate,double OwnHealthRatio,
-        double EnemyHealthRatio,int EnemyKills);
+        double EnemyHealthRatio,int EnemyKills,long ShotsFired,long RoundsConsumed,
+        int NavigationRoutesBuilt,int NavigationRoutesFailed,long NavigationSearches,long UtilityDecisions);
     private readonly record struct ScenarioMetrics(
         string Name,int Matches,double AverageFitness,double WinRate,double DrawRate,
         double SurvivorRate,double OwnHealthRatio,double EnemyHealthRatio,double AverageEnemyKills);
     private readonly record struct Evaluation(
         double Fitness,double WinRate,double DrawRate,double SurvivorRate,
         double OwnHealthRatio,double EnemyHealthRatio,double AverageEnemyKills,
-        ScenarioMetrics[] Scenarios);
+        double AverageShotsFired,double AverageRoundsConsumed,double AverageNavigationRoutesBuilt,
+        double AverageNavigationRoutesFailed,double NavigationFailureRate,double AverageNavigationSearches,
+        double AverageUtilityDecisions,ScenarioMetrics[] Scenarios);
 }
