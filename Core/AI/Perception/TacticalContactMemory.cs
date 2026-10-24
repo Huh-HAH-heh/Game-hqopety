@@ -20,7 +20,18 @@ public enum TacticalContactKind : byte
 public sealed class TacticalContact
 {
     public long ContactId { get; internal set; }
-    public TacticalContactKind Kind { get; internal set; }
+    private readonly TacticalContactMemory _owner;
+    private TacticalContactKind _kind;
+
+    public TacticalContactKind Kind
+    {
+        get => _kind == TacticalContactKind.VisualConfirmed &&
+            _owner.CurrentTimeSeconds - LastVisualAtSeconds >=
+                TacticalContactMemory.VisualConfirmationGraceSeconds
+            ? TacticalContactKind.LastKnown
+            : _kind;
+        internal set => _kind = value;
+    }
     public UnitId? SubjectUnit { get; internal set; }
     public UnitId? ReporterUnit { get; internal set; }
     public Vector3 EstimatedPosition { get; internal set; }
@@ -39,8 +50,12 @@ public sealed class TacticalContact
     private const int MaxEvidencePerSense = 4;
     private readonly List<PerceptionObservation> _observations = new();
 
-    internal TacticalContact(long contactId, PerceptionObservation observation)
+    internal TacticalContact(
+        TacticalContactMemory owner,
+        long contactId,
+        PerceptionObservation observation)
     {
+        _owner = owner ?? throw new ArgumentNullException(nameof(owner));
         ContactId = contactId;
         Kind = ResolveKind(observation);
         SubjectUnit = observation.IdentifiedSubject;
@@ -274,9 +289,11 @@ public sealed class TacticalContactMemory
 
     private const float UnknownContactMergeRadiusFloor = 1.5f;
     private const float CrossSenseMergeWindowSeconds = 1.25f;
+    private const float ContactMaintenanceIntervalSeconds = 0.5f;
 
     private readonly List<TacticalContact> _contacts = new();
     private float _currentTimeSeconds;
+    private float _lastMaintenanceTimeSeconds = float.NegativeInfinity;
     private long _nextContactId = 1;
 
     public IReadOnlyList<TacticalContact> Contacts => _contacts;
@@ -347,7 +364,7 @@ public sealed class TacticalContactMemory
 
         if (contact == null)
         {
-            contact = new TacticalContact(_nextContactId++, observation);
+            contact = new TacticalContact(this, _nextContactId++, observation);
             _contacts.Add(contact);
             return contact;
         }
@@ -419,20 +436,14 @@ public sealed class TacticalContactMemory
             return;
 
         _currentTimeSeconds = nowSeconds;
+        if (nowSeconds - _lastMaintenanceTimeSeconds < ContactMaintenanceIntervalSeconds)
+            return;
+
+        _lastMaintenanceTimeSeconds = nowSeconds;
         for (int i = _contacts.Count - 1; i >= 0; i--)
         {
-            TacticalContact contact = _contacts[i];
-            if (contact.ExpiresAtSeconds <= nowSeconds)
-            {
+            if (_contacts[i].ExpiresAtSeconds <= nowSeconds)
                 _contacts.RemoveAt(i);
-                continue;
-            }
-
-            if (contact.Kind == TacticalContactKind.VisualConfirmed &&
-                nowSeconds - contact.LastVisualAtSeconds >= VisualConfirmationGraceSeconds)
-            {
-                contact.Kind = TacticalContactKind.LastKnown;
-            }
         }
     }
 
@@ -476,6 +487,7 @@ public sealed class TacticalContactMemory
     {
         _contacts.Clear();
         _currentTimeSeconds = 0f;
+        _lastMaintenanceTimeSeconds = float.NegativeInfinity;
         _nextContactId = 1;
     }
 
@@ -483,7 +495,8 @@ public sealed class TacticalContactMemory
     {
         for (int i = 0; i < _contacts.Count; i++)
         {
-            if (_contacts[i].ContactId == contactId)
+            if (_contacts[i].ContactId == contactId &&
+                _contacts[i].ExpiresAtSeconds > _currentTimeSeconds)
                 return _contacts[i];
         }
         return null;
@@ -496,7 +509,8 @@ public sealed class TacticalContactMemory
 
         for (int i = 0; i < _contacts.Count; i++)
         {
-            if (_contacts[i].SubjectUnit is UnitId candidate &&
+            if (_contacts[i].ExpiresAtSeconds > _currentTimeSeconds &&
+                _contacts[i].SubjectUnit is UnitId candidate &&
                 candidate.Equals(subject.Value))
             {
                 return _contacts[i];
@@ -514,7 +528,8 @@ public sealed class TacticalContactMemory
         for (int i = 0; i < _contacts.Count; i++)
         {
             TacticalContact contact = _contacts[i];
-            if (contact.SubjectUnit.HasValue ||
+            if (contact.ExpiresAtSeconds <= observation.ReceivedAtSeconds ||
+                contact.SubjectUnit.HasValue ||
                 MathF.Abs(contact.LastEventAtSeconds - observation.OccurredAtSeconds) >
                     CrossSenseMergeWindowSeconds)
             {
