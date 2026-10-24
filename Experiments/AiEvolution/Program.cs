@@ -6,12 +6,12 @@ using Core.Unit;
 
 internal static class Program
 {
-    private const int GeneCount = 21;
+    private const int GeneCount = 31;
     private const float Dt = 0.05f;
 
-    private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f];
-    private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f];
-    private static readonly float[] BaseGenes = [1f,1f,1f,1f,1f,1f,1f,1f,1f,1f,.60f,.08f,.10f,.23f,.24f,.66f,24f,.22f,.35f,.84f,.35f];
+    private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f,.60f,.25f,.01f,.80f,.10f,4f,4f,5f,8f,10f];
+    private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f,.95f,3f,.08f,1f,.45f,14f,14f,20f,24f,30f];
+    private static readonly float[] BaseGenes = [1f,1f,1f,1f,1f,1f,1f,1f,1f,1f,.60f,.08f,.10f,.23f,.24f,.66f,24f,.22f,.35f,.84f,.35f,.84f,1f,.03f,.94f,.20f,8f,8f,12f,16f,18f];
 
     private static int Main(string[] args)
     {
@@ -91,7 +91,10 @@ internal static class Program
         p.SuppressiveFireScale,p.LastKnownScale,p.InvestigationScale,p.SquadContactScale,p.PatrolScale,
         p.ProneAdoptionMinimumUtility,p.FlankUtilityAdvantage,p.RegularSwitchMargin,p.CommittedSwitchMargin,
         p.MinimumInvestigationUtility,p.TacticalCoverPressureWeight,p.TacticalFlankDistanceStart,
-        p.TacticalFlankDistanceWeight,p.InvestigationDistancePenalty,p.VisibleCombatMediumScore,p.CommitDurationBaseSeconds
+        p.TacticalFlankDistanceWeight,p.InvestigationDistancePenalty,p.VisibleCombatMediumScore,p.CommitDurationBaseSeconds,
+        p.RangedEngagementRangeFraction,p.RangedRangeToleranceMinimum,p.RangedRangeToleranceFraction,
+        p.MeleeEngagementRangeFraction,p.MeleeMinimumEngagementDistance,p.CoverSearchRadius,
+        p.FlankNearBackoffDistance,p.FlankNearLateralDistance,p.FlankFarBackoffDistance,p.FlankFarLateralDistance
     ];
 
     private static AiBalanceProfile LoadProfile(string path)
@@ -114,7 +117,12 @@ internal static class Program
         RegularSwitchMargin=g[12], CommittedSwitchMargin=g[13], MinimumInvestigationUtility=g[14],
         TacticalCoverPressureWeight=g[15], TacticalFlankDistanceStart=g[16], TacticalFlankDistanceWeight=g[17],
         InvestigationDistancePenalty=g[18], VisibleCombatMediumScore=g[19],
-        CommitDurationBaseSeconds=g[20]
+        CommitDurationBaseSeconds=g[20], RangedEngagementRangeFraction=g[21],
+        RangedRangeToleranceMinimum=g[22], RangedRangeToleranceFraction=g[23],
+        MeleeEngagementRangeFraction=g[24], MeleeMinimumEngagementDistance=g[25],
+        CoverSearchRadius=g[26], FlankNearBackoffDistance=g[27],
+        FlankNearLateralDistance=g[28], FlankFarBackoffDistance=g[29],
+        FlankFarLateralDistance=g[30]
     };
 
     private static double Evaluate(AiBalanceProfile p,int battles,int ticks,int team)
