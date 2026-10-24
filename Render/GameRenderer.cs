@@ -59,6 +59,7 @@ public sealed class GameRenderer
     private readonly ProjectileRenderSystem _projectileRenderer;
     private readonly VisionTestScene _visionTestScene;
     private CombatStatusOverlay? _combatStatusOverlay;
+    private SimulationControlOverlay? _simulationControlOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
 
     private UnitId _selectedUnit;
@@ -365,6 +366,7 @@ public sealed class GameRenderer
             _unitGroupCardOverlay?.Dispose();
             _bodyRigEditorOverlay?.Dispose();
             _combatStatusOverlay?.Dispose();
+            _simulationControlOverlay?.Dispose();
             _camera.Dispose();
             _uiView?.Dispose();
             _selectionBox.Dispose();
@@ -791,6 +793,19 @@ public sealed class GameRenderer
             Vector2i mousePixels = Mouse.GetPosition(_window);
             Vector2f uiMouseCoordinates =
                 _window.MapPixelToCoords(mousePixels, _uiView);
+            Vector2i uiMousePosition = new(
+                (int)uiMouseCoordinates.X,
+                (int)uiMouseCoordinates.Y);
+
+            _simulationControlOverlay?.Draw(
+                _window,
+                _window.Size.X,
+                _window.Size.Y,
+                _simulationPaused,
+                _simulationSpeed,
+                _simulationGameSecondsPerWallSecond,
+                _simulationUpdatesPerSecond,
+                uiMousePosition);
 
             _gameMenuOverlay?.Draw(
                 _window,
@@ -948,7 +963,7 @@ public sealed class GameRenderer
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             "LMB drag=select units; RMB=menu; Shift+click=add selection; Attack=selected units; S=hold | " +
             "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug-layers " +
-            "F4=step F6=vision F7=pause F8=scale F11=normal Shift+F12=slower F12=faster I=AI-states T=tracers F9=HUD | " +
+            "F6=vision F8=scale I=AI-states T=tracers F9=HUD | time controls: visual card | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
@@ -1125,7 +1140,7 @@ public sealed class GameRenderer
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug-layers " +
-            $"F4=step F6=vision F7=pause F8=scale F11=normal Shift+F12=slower F12=faster I=AI-states T=tracers F9=HUD";
+            $"F6=vision F8=scale I=AI-states T=tracers F9=HUD | time controls: visual card";
     }
 
     private void StartSimulationThread()
@@ -2858,6 +2873,7 @@ public sealed class GameRenderer
             SaveColonistBodyRig,
             SaveProjectUnitAsset);
         _combatStatusOverlay = new CombatStatusOverlay();
+        _simulationControlOverlay = new SimulationControlOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
         _window.Closed +=
@@ -2914,6 +2930,15 @@ public sealed class GameRenderer
                 {
                     if (_unitCards[i].Overlay.HandleWheel(wheelPosition, e.Delta))
                         return;
+                }
+
+                if (_simulationControlOverlay?.Contains(wheelPosition) == true ||
+                    _combatStatusOverlay?.Contains(wheelPosition) == true ||
+                    _debugLayersOverlay?.Contains(wheelPosition) == true ||
+                    (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(wheelPosition) == true) ||
+                    _contextMenuOverlay?.Contains(wheelPosition) == true)
+                {
+                    return;
                 }
 
                 bool shiftPressed =
@@ -2976,7 +3001,12 @@ public sealed class GameRenderer
                             (int)middleUi.Y);
 
                         bool overUi =
-                            _unitGroupCardOverlay?.Contains(middlePosition) == true;
+                            _unitGroupCardOverlay?.Contains(middlePosition) == true ||
+                            _simulationControlOverlay?.Contains(middlePosition) == true ||
+                            _combatStatusOverlay?.Contains(middlePosition) == true ||
+                            _debugLayersOverlay?.Contains(middlePosition) == true ||
+                            (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(middlePosition) == true) ||
+                            _contextMenuOverlay?.Contains(middlePosition) == true;
                         for (int i = _unitCards.Count - 1; i >= 0 && !overUi; i--)
                             overUi = _unitCards[i].Overlay.Contains(middlePosition);
 
@@ -3004,8 +3034,14 @@ public sealed class GameRenderer
                         (int)contextCoordinates.X,
                         (int)contextCoordinates.Y);
 
-                    if (_unitGroupCardOverlay?.Contains(contextPosition) == true)
+                    if (_unitGroupCardOverlay?.Contains(contextPosition) == true ||
+                        _simulationControlOverlay?.Contains(contextPosition) == true ||
+                        _combatStatusOverlay?.Contains(contextPosition) == true ||
+                        _debugLayersOverlay?.Contains(contextPosition) == true ||
+                        (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(contextPosition) == true))
+                    {
                         return;
+                    }
 
                     for (int i = _unitCards.Count - 1; i >= 0; i--)
                     {
@@ -3125,6 +3161,15 @@ public sealed class GameRenderer
                     (int)uiCoordinates.X,
                     (int)uiCoordinates.Y);
 
+                if (_showUtilityAiDebug &&
+                    _utilityAiDebugOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
                 if (_unitGroupCardOverlay?.HandleMousePressed(
                         uiPosition,
                         _window.Size.X,
@@ -3154,6 +3199,14 @@ public sealed class GameRenderer
                         _unitCards.Add(card);
                     }
 
+                    return;
+                }
+
+                if (_contextMenuOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
                     return;
                 }
 
@@ -3276,6 +3329,26 @@ public sealed class GameRenderer
                     return;
                 }
 
+                if (_menuPage == GameMenuPage.Closed &&
+                    _simulationControlOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y,
+                        _simulationPaused,
+                        HandleSimulationControl) == true)
+                {
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _combatStatusOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
                 if (_menuPage == GameMenuPage.Closed)
                     BeginWorldSelection(e.Position);
             };
@@ -3293,6 +3366,23 @@ public sealed class GameRenderer
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
                     _bodyRigEditorOverlay.HandleMouseMoved(dragUiPosition);
+                    return;
+                }
+
+                if (_debugLayersOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_showUtilityAiDebug &&
+                    _utilityAiDebugOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
                     return;
                 }
 
@@ -3328,6 +3418,30 @@ public sealed class GameRenderer
                     {
                         return;
                     }
+                }
+
+                if (_contextMenuOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_simulationControlOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_combatStatusOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
                 }
 
                 if (_isPlacingMoveLine)
@@ -3418,6 +3532,15 @@ public sealed class GameRenderer
                 if (e.Button != Mouse.Button.Left)
                     return;
 
+                if (_debugLayersOverlay?.HandleMouseReleased() == true)
+                    return;
+
+                if (_showUtilityAiDebug &&
+                    _utilityAiDebugOverlay?.HandleMouseReleased() == true)
+                {
+                    return;
+                }
+
                 if (_unitGroupCardOverlay?.HandleMouseReleased() == true)
                     return;
 
@@ -3426,6 +3549,15 @@ public sealed class GameRenderer
                     if (_unitCards[i].Overlay.HandleMouseReleased())
                         return;
                 }
+
+                if (_contextMenuOverlay?.HandleMouseReleased() == true)
+                    return;
+
+                if (_simulationControlOverlay?.HandleMouseReleased() == true)
+                    return;
+
+                if (_combatStatusOverlay?.HandleMouseReleased() == true)
+                    return;
 
                 if (_draggingMenuSlider.HasValue)
                 {
@@ -3526,41 +3658,44 @@ public sealed class GameRenderer
 
         int nextIndex = Math.Clamp(currentIndex + Math.Sign(direction), 0, SimulationSpeedLevels.Length - 1);
         _simulationSpeed = SimulationSpeedLevels[nextIndex];
-        Console.WriteLine($"[SIM] Time scale={_simulationSpeed:0.00}x; F7=pause, Shift+F12=slower, F12=faster, F11=normal.");
+        Console.WriteLine($"[SIM] Time scale={_simulationSpeed:0.00}x; change it in the simulation control card.");
+    }
+
+    private void HandleSimulationControl(SimulationControlAction action)
+    {
+        switch (action)
+        {
+            case SimulationControlAction.TogglePause:
+                _simulationPaused = !_simulationPaused;
+                Console.WriteLine($"[SIM] Paused={_simulationPaused}");
+                break;
+
+            case SimulationControlAction.Step:
+                if (!_simulationPaused || _menuPage != GameMenuPage.Closed)
+                    return;
+
+                Interlocked.Exchange(ref _singleStepRequested, 1);
+                Console.WriteLine("[SIM] Single-step requested.");
+                break;
+
+            case SimulationControlAction.Slower:
+                ChangeSimulationSpeed(-1);
+                break;
+
+            case SimulationControlAction.Normal:
+                _simulationSpeed = 1f;
+                Console.WriteLine("[SIM] Time scale reset to 1.00x.");
+                break;
+
+            case SimulationControlAction.Faster:
+                ChangeSimulationSpeed(1);
+                break;
+        }
     }
 
     private void HandleKey(
         Keyboard.Key key)
     {
-        if (key == Keyboard.Key.F4)
-        {
-            if (!_simulationPaused || _menuPage != GameMenuPage.Closed)
-            {
-                Console.WriteLine("[SIM] Pause with F7 first, then use F4 for one simulation step.");
-                return;
-            }
-
-            Interlocked.Exchange(ref _singleStepRequested, 1);
-            Console.WriteLine("[SIM] Single-step requested.");
-            return;
-        }
-
-        if (key == Keyboard.Key.F12)
-        {
-            bool slower =
-                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-            ChangeSimulationSpeed(slower ? -1 : 1);
-            return;
-        }
-
-        if (key == Keyboard.Key.F11)
-        {
-            _simulationSpeed = 1f;
-            Console.WriteLine("[SIM] Time scale reset to 1.00x.");
-            return;
-        }
-
         if (key == Keyboard.Key.F10)
         {
             if (_bodyRigEditorOverlay?.IsOpen == true)
@@ -3729,14 +3864,6 @@ public sealed class GameRenderer
                 Console.WriteLine(
                     $"[TEST] Vision simulation={_unitSimulation.VisionEnabled}");
             });
-            return;
-        }
-
-        if (key == Keyboard.Key.F7)
-        {
-            _simulationPaused = !_simulationPaused;
-            Console.WriteLine(
-                $"[TEST] Simulation paused={_simulationPaused}; rendering remains active");
             return;
         }
 
