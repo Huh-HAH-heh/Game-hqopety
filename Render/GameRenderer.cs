@@ -43,6 +43,8 @@ public sealed class GameRenderer
     }
 
     private const float TileSize = 16f;
+    private const float MaximumScaledSimulationDelta = 0.2f;
+    private static readonly float[] SimulationSpeedLevels = { 0.25f, 0.5f, 1f, 2f };
 
     private const float TerrainTilePixelSize =
         TileSize / 3f;
@@ -170,6 +172,7 @@ public sealed class GameRenderer
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
     private volatile bool _simulationPaused;
+    private volatile float _simulationSpeed = 1f;
     private bool _terrainStressMode;
     private bool _showCombatTracers = true;
     private bool _showCombatHud = true;
@@ -373,6 +376,7 @@ public sealed class GameRenderer
         float rawDeltaTime)
     {
         _input.Update();
+        float simulationDeltaTime = Math.Clamp(deltaTime * _simulationSpeed, 0f, MaximumScaledSimulationDelta);
 
         if (_massCombatMode &&
             !_startupMassCombatSelectionApplied &&
@@ -557,7 +561,7 @@ public sealed class GameRenderer
                     _visionTestScene.UpdateAiDemo(
                         _unitSimulation,
                         _worldMap,
-                        deltaTime);
+                        simulationDeltaTime);
                 }
 
                 if (_massCombatMode)
@@ -565,13 +569,13 @@ public sealed class GameRenderer
                     _massCombatTestScene.Update(
                         _unitSimulation,
                         _worldMap,
-                        deltaTime);
+                        simulationDeltaTime);
                 }
 
                 if (!_terrainStressMode)
                 {
                     _unitSimulation.BeginMetricsFrame();
-                    _unitSimulation.Update(_worldMap, deltaTime);
+                    _unitSimulation.Update(_worldMap, simulationDeltaTime);
                 }
             }
         }
@@ -2734,6 +2738,7 @@ public sealed class GameRenderer
                 deltaTime = 1f / 60f;
             if (deltaTime > 0.1f)
                 deltaTime = 0.1f;
+            float simulationDeltaTime = Math.Clamp(deltaTime * _simulationSpeed, 0f, MaximumScaledSimulationDelta);
 
             if (_simulationRunEnabled)
             {
@@ -2743,8 +2748,8 @@ public sealed class GameRenderer
                     _massCombatTestScene.Update(
                         _unitSimulation,
                         _worldMap,
-                        deltaTime);
-                    _unitSimulation.Update(_worldMap, deltaTime);
+                        simulationDeltaTime);
+                    _unitSimulation.Update(_worldMap, simulationDeltaTime);
                 }
                 catch (Exception exception)
                 {
