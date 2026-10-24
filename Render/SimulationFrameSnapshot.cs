@@ -177,6 +177,10 @@ public sealed class SimulationFrameSnapshot
 
     public double SnapshotCaptureMs { get; init; }
     public double SimulationMs { get; init; }
+    public double PerceptionMs { get; init; }
+    public double SuppressionMs { get; init; }
+    public double BodyMs { get; init; }
+    public double MeleeMs { get; init; }
     public double VisionMs { get; init; }
     public long VisionCandidatePairs { get; init; }
     public long VisionTargetEvaluations { get; init; }
@@ -1025,6 +1029,10 @@ public sealed class SimulationFrameSnapshot
             PanickedCount = panicked,
             SnapshotCaptureMs = Stopwatch.GetElapsedTime(captureStarted).TotalMilliseconds,
             SimulationMs = simulation.LastSimulationUpdateMilliseconds,
+            PerceptionMs = simulation.LastPerceptionUpdateMilliseconds,
+            SuppressionMs = simulation.LastSuppressionUpdateMilliseconds,
+            BodyMs = simulation.LastBodyUpdateMilliseconds,
+            MeleeMs = simulation.LastMeleeUpdateMilliseconds,
             VisionMs = vision.LastUpdateMilliseconds,
             VisionCandidatePairs = vision.LastCandidatePairs,
             VisionTargetEvaluations = vision.LastTargetEvaluations,
