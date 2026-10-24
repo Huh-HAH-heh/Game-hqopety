@@ -382,6 +382,7 @@ internal static class Program
             _currentScenarioName=ScenarioName(scenario);
             Console.WriteLine($"[EVOLVE] Battle {i+1}/{battles}: {_currentScenarioName}, seed={scenarioSeed}, candidate-side={(i%2==0?"left":"right")}.");
             BattleResult result=Battle(p,i%2==0,scenario,ticks,team,scenarioSeed);
+            if(!Console.IsOutputRedirected) Console.WriteLine();
             Console.WriteLine($"[EVOLVE] Battle {i+1}/{battles} finished: score={result.Fitness:F2}, outcome={result.Outcome}, survivors={result.SurvivorRate:P0}, nav-failures={result.NavigationRoutesFailed}.");
             fitness+=result.Fitness;
             if(result.Outcome>0) winRate++;
