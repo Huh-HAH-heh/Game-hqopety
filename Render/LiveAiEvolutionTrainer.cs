@@ -30,6 +30,9 @@ public sealed record AiEvolutionStatus(
     double CurrentRoundFitness,
     double CandidateMeanFitness,
     double BestFitness,
+    double LastCompletedCandidateFitness,
+    int LastCompletedGeneration,
+    int LastCompletedCandidateIndex,
     string GeneSummary,
     string Message,
     string BestProfilePath);
@@ -82,6 +85,9 @@ public sealed class LiveAiEvolutionTrainer
     private float[] _bestGenes = (float[])DefaultGenes.Clone();
     private double _bestFitness = double.NegativeInfinity;
     private double _baselineFitness = double.NaN;
+    private double _lastCompletedCandidateFitness = double.NaN;
+    private int _lastCompletedGeneration;
+    private int _lastCompletedCandidateIndex;
     private int _generation;
     private int _candidateIndex;
     private int _roundIndex;
@@ -147,6 +153,9 @@ public sealed class LiveAiEvolutionTrainer
         _bestGenes = GenesFrom(_baseProfile);
         _bestFitness = double.NegativeInfinity;
         _baselineFitness = double.NaN;
+        _lastCompletedCandidateFitness = double.NaN;
+        _lastCompletedGeneration = 0;
+        _lastCompletedCandidateIndex = 0;
         _generation = 1;
         _candidateIndex = 0;
         _roundIndex = 0;
@@ -265,6 +274,9 @@ public sealed class LiveAiEvolutionTrainer
         }
 
         double averageFitness = _roundFitnessSum / RoundsPerCandidate;
+        _lastCompletedCandidateFitness = averageFitness;
+        _lastCompletedGeneration = _generation;
+        _lastCompletedCandidateIndex = _candidateIndex + 1;
         float[] genes = _population[_candidateIndex];
         AiBalanceProfile profile = Profile(genes, _baseProfile);
         _scores.Add(new CandidateResult((float[])genes.Clone(), averageFitness));
@@ -417,6 +429,9 @@ public sealed class LiveAiEvolutionTrainer
             _latestRoundFitness,
             _roundFitnessSum / Math.Max(1, _roundIndex),
             double.IsFinite(_bestFitness) ? _bestFitness : 0d,
+            _lastCompletedCandidateFitness,
+            _lastCompletedGeneration,
+            _lastCompletedCandidateIndex,
             GeneSummary(profile),
             _message,
             _bestProfilePath);
