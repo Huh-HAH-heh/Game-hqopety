@@ -358,11 +358,21 @@ public sealed class LiveAiEvolutionTrainer
         try
         {
             Directory.CreateDirectory(_outputDirectory);
-            string row = string.Create(CultureInfo.InvariantCulture,
-                $"{_generation},{_candidateIndex + 1},{fitness:F4},{_bestFitness:F4}," +
-                $"{blue.Alive}/{blue.Total},{red.Alive}/{red.Total},{blue.HealthRatio:F4},{red.HealthRatio:F4}," +
-                $"{profile.EngageScale:F4},{profile.FlankScale:F4},{profile.CoverScale:F4}," +
-                $"{profile.RetreatScale:F4},{profile.ProneScale:F4},{profile.SuppressiveFireScale:F4}{Environment.NewLine}");
+            string row = string.Join(",",
+                _generation.ToString(CultureInfo.InvariantCulture),
+                (_candidateIndex + 1).ToString(CultureInfo.InvariantCulture),
+                fitness.ToString("F4", CultureInfo.InvariantCulture),
+                _bestFitness.ToString("F4", CultureInfo.InvariantCulture),
+                $"{blue.Alive}/{blue.Total}",
+                $"{red.Alive}/{red.Total}",
+                blue.HealthRatio.ToString("F4", CultureInfo.InvariantCulture),
+                red.HealthRatio.ToString("F4", CultureInfo.InvariantCulture),
+                profile.EngageScale.ToString("F4", CultureInfo.InvariantCulture),
+                profile.FlankScale.ToString("F4", CultureInfo.InvariantCulture),
+                profile.CoverScale.ToString("F4", CultureInfo.InvariantCulture),
+                profile.RetreatScale.ToString("F4", CultureInfo.InvariantCulture),
+                profile.ProneScale.ToString("F4", CultureInfo.InvariantCulture),
+                profile.SuppressiveFireScale.ToString("F4", CultureInfo.InvariantCulture)) + Environment.NewLine;
             File.AppendAllText(_historyPath, row);
         }
         catch (Exception exception)
@@ -395,10 +405,10 @@ public sealed class LiveAiEvolutionTrainer
             EpisodeDurationSeconds,
             blue.Alive,
             blue.Total,
-            blue.HealthRatio,
+            (float)blue.HealthRatio,
             red.Alive,
             red.Total,
-            red.HealthRatio,
+            (float)red.HealthRatio,
             _latestRoundFitness,
             _roundFitnessSum / Math.Max(1, _roundIndex),
             _bestFitness,
@@ -493,10 +503,15 @@ public sealed class LiveAiEvolutionTrainer
     }
 
     private static string GeneSummary(AiBalanceProfile profile) =>
-        string.Create(CultureInfo.InvariantCulture,
-            $"engage {profile.EngageScale:F2} · flank {profile.FlankScale:F2} · " +
-            $"cover {profile.CoverScale:F2} · retreat {profile.RetreatScale:F2} · " +
-            $"prone {profile.ProneScale:F2} · suppress {profile.SuppressiveFireScale:F2}");
+        string.Format(
+            CultureInfo.InvariantCulture,
+            "engage {0:F2} · flank {1:F2} · cover {2:F2} · retreat {3:F2} · prone {4:F2} · suppress {5:F2}",
+            profile.EngageScale,
+            profile.FlankScale,
+            profile.CoverScale,
+            profile.RetreatScale,
+            profile.ProneScale,
+            profile.SuppressiveFireScale);
 
     private static float[] GenesFrom(AiBalanceProfile p) =>
     [
