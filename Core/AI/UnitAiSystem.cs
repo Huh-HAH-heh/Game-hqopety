@@ -18,7 +18,6 @@ public sealed class UnitAiSystem
     private const int ThinkPhaseBuckets = 9;
     private const float TargetMemorySeconds = 3f;
     private const float LowHealthThreshold = 0.35f;
-    private const float CoverSearchRadius = 8f;
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
     private const float RememberedEnemyRefreshInterval = 0.45f;
@@ -711,8 +710,8 @@ public sealed class UnitAiSystem
                         float dx = targetPosition.X - position.X;
                         float dy = targetPosition.Y - position.Y;
                         float distanceSquared = dx * dx + dy * dy;
-                        float desiredDistance = MathF.Max(3f, range * 0.84f);
-                        float approachThreshold = desiredDistance + MathF.Max(1f, range * 0.03f);
+                        float desiredDistance = MathF.Max(3f, range * GetBalanceProfile(units.FactionTag[unit]).RangedEngagementRangeFraction);
+                        float approachThreshold = desiredDistance + MathF.Max(GetBalanceProfile(units.FactionTag[unit]).RangedRangeToleranceMinimum, range * GetBalanceProfile(units.FactionTag[unit]).RangedRangeToleranceFraction);
                         approachingForWeaponRange =
                             distanceSquared > approachThreshold * approachThreshold;
                     }
@@ -794,6 +793,7 @@ public sealed class UnitAiSystem
                             worldMap,
                             unit,
                             target.Index,
+                            GetBalanceProfile(units.FactionTag[unit]),
                             out Vector3 cover))
                     {
                         Store.SetGoal(unit, cover);
@@ -850,6 +850,7 @@ public sealed class UnitAiSystem
                             worldMap,
                             unit,
                             target.Index,
+                            GetBalanceProfile(units.FactionTag[unit]),
                             out Vector3 flankWaypoint))
                     {
                         Store.SetGoal(unit, flankWaypoint);
@@ -899,8 +900,8 @@ public sealed class UnitAiSystem
                         float dx = targetPosition.X - position.X;
                         float dy = targetPosition.Y - position.Y;
                         float distanceSquared = dx * dx + dy * dy;
-                        float desiredDistance = MathF.Max(3f, range * 0.84f);
-                        float approachThreshold = desiredDistance + MathF.Max(1f, range * 0.03f);
+                        float desiredDistance = MathF.Max(3f, range * GetBalanceProfile(units.FactionTag[unit]).RangedEngagementRangeFraction);
+                        float approachThreshold = desiredDistance + MathF.Max(GetBalanceProfile(units.FactionTag[unit]).RangedRangeToleranceMinimum, range * GetBalanceProfile(units.FactionTag[unit]).RangedRangeToleranceFraction);
 
                         if (distanceSquared > approachThreshold * approachThreshold)
                         {
@@ -937,7 +938,7 @@ public sealed class UnitAiSystem
                     // side instead of circling the defender for a reserved slot.
                     if (distanceSquared > attackDistance * attackDistance)
                     {
-                        float desiredDistance = MathF.Max(0.20f, attackDistance * 0.94f);
+                        float desiredDistance = MathF.Max(GetBalanceProfile(units.FactionTag[unit]).MeleeMinimumEngagementDistance, attackDistance * GetBalanceProfile(units.FactionTag[unit]).MeleeEngagementRangeFraction);
                         Vector3 engagementPoint = GetMeleeEngagementPoint(
                             unit, target.Index, targetPosition, desiredDistance);
                         units.Target[unit] = engagementPoint;
@@ -1796,6 +1797,7 @@ public sealed class UnitAiSystem
         WorldMap worldMap,
         int unit,
         int targetIndex,
+        AiBalanceProfile balance,
         out Vector3 waypoint)
     {
         waypoint = Vector3.Zero;
@@ -1815,8 +1817,8 @@ public sealed class UnitAiSystem
         for (int candidate = 0; candidate < 4; candidate++)
         {
             float sideSign = candidate % 2 == 0 ? preferredSide : -preferredSide;
-            float backoff = candidate < 2 ? 8f : 16f;
-            float lateral = candidate < 2 ? 12f : 18f;
+            float backoff = candidate < 2 ? balance.FlankNearBackoffDistance : balance.FlankFarBackoffDistance;
+            float lateral = candidate < 2 ? balance.FlankNearLateralDistance : balance.FlankFarLateralDistance;
             float targetX = target.X - forward.X * backoff + side.X * lateral * sideSign;
             float targetY = target.Y - forward.Y * backoff + side.Y * lateral * sideSign;
             targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
@@ -2017,9 +2019,10 @@ public sealed class UnitAiSystem
             return;
 
         Vector3 cover;
+        AiBalanceProfile balance = GetBalanceProfile(units.FactionTag[unit]);
         bool foundCover = lowHealthHoldNeedsCover
-            ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, out cover)
-            : TryFindSuppressionCover(units, vision, worldMap, unit, threat, out cover);
+            ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, balance, out cover)
+            : TryFindSuppressionCover(units, vision, worldMap, unit, threat, balance, out cover);
 
         if (!isPanicked)
             Store.SuppressionRetrySource[unit] = threat;
@@ -2721,6 +2724,7 @@ public sealed class UnitAiSystem
         WorldMap worldMap,
         int unit,
         Vector3 threat,
+        AiBalanceProfile balance,
         out Vector3 cover)
     {
         cover = Vector3.Zero;
@@ -2746,7 +2750,7 @@ public sealed class UnitAiSystem
                     MathF.Sin(angle));
 
             for (float radius = CoverStep;
-                 radius <= CoverSearchRadius;
+                 radius <= balance.CoverSearchRadius;
                  radius += CoverStep)
             {
                 Vector3 candidate =
@@ -2841,6 +2845,7 @@ public sealed class UnitAiSystem
         WorldMap worldMap,
         int unit,
         int enemy,
+        AiBalanceProfile balance,
         out Vector3 cover)
     {
         cover =
@@ -2872,7 +2877,7 @@ public sealed class UnitAiSystem
                     MathF.Sin(angle));
 
             for (float radius = CoverStep;
-                 radius <= CoverSearchRadius;
+                 radius <= balance.CoverSearchRadius;
                  radius += CoverStep)
             {
                 Vector3 candidate =
