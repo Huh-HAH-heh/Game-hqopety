@@ -35,6 +35,22 @@ public enum PerceptionIdentificationLevel : byte
 }
 
 /// <summary>
+/// Semantic affordances an observation offers to pawn AI. These describe how
+/// the report may be used, not which action the pawn must perform.
+/// </summary>
+[Flags]
+public enum PerceptionSignalFlags : ushort
+{
+    None = 0,
+    Investigate = 1 << 0,
+    ImmediateDanger = 1 << 1,
+    PotentialThreat = 1 << 2,
+    Resource = 1 << 3,
+    Avoid = 1 << 4,
+    Social = 1 << 5
+}
+
+/// <summary>
 /// A sensor's report about the world. Position is an estimate, not an authoritative
 /// world coordinate. Detection and identity are separate so a sound or a fleeting
 /// shape can be detected without revealing which unit produced it.
@@ -55,6 +71,7 @@ public readonly record struct PerceptionObservation
     public float ExpiresAtSeconds { get; }
     public UnitId? IdentifiedSubject { get; }
     public UnitId? ReporterUnit { get; }
+    public PerceptionSignalFlags Signals { get; }
 
     // Compatibility names for code migrating from the first perception-memory pass.
     public float Confidence => DetectionConfidence;
@@ -74,7 +91,8 @@ public readonly record struct PerceptionObservation
         float receivedAtSeconds,
         float expiresAtSeconds,
         UnitId? identifiedSubject = null,
-        UnitId? reporterUnit = null)
+        UnitId? reporterUnit = null,
+        PerceptionSignalFlags? signals = null)
     {
         if (!Enum.IsDefined(sense) || sense == PerceptionSense.Unknown)
             throw new ArgumentOutOfRangeException(nameof(sense), "An observation must name its sensory channel.");
@@ -105,8 +123,19 @@ public readonly record struct PerceptionObservation
         if (identificationLevel == PerceptionIdentificationLevel.Identified && !validSubject.HasValue)
             throw new ArgumentException("An identified source must have a valid unit identity.", nameof(identifiedSubject));
 
+        const PerceptionSignalFlags allSignals =
+            PerceptionSignalFlags.Investigate |
+            PerceptionSignalFlags.ImmediateDanger |
+            PerceptionSignalFlags.PotentialThreat |
+            PerceptionSignalFlags.Resource |
+            PerceptionSignalFlags.Avoid |
+            PerceptionSignalFlags.Social;
+        if (signals.HasValue && (signals.Value & ~allSignals) != 0)
+            throw new ArgumentOutOfRangeException(nameof(signals));
+
         Sense = sense;
         StimulusType = stimulusType;
+        Signals = signals ?? DefaultSignals(stimulusType);
         EstimatedPosition = estimatedPosition;
         PositionErrorRadius = positionErrorRadius;
         Intensity = Math.Clamp(intensity, 0f, 1f);
@@ -165,6 +194,20 @@ public readonly record struct PerceptionObservation
             stimulus.SubjectUnit,
             stimulus.ReporterUnit);
     }
+
+    private static PerceptionSignalFlags DefaultSignals(TacticalStimulusType type) =>
+        type switch
+        {
+            TacticalStimulusType.Gunshot or
+            TacticalStimulusType.Footstep or
+            TacticalStimulusType.AllyContactReport =>
+                PerceptionSignalFlags.Investigate,
+            TacticalStimulusType.NearMiss or
+            TacticalStimulusType.CoverImpact or
+            TacticalStimulusType.Explosion =>
+                PerceptionSignalFlags.ImmediateDanger,
+            _ => PerceptionSignalFlags.None
+        };
 
     public float GetEffectiveDetectionConfidence(float nowSeconds, float halfLifeSeconds)
     {

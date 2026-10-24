@@ -181,6 +181,24 @@ public sealed class TacticalContact
     public float GetEffectiveConfidence(float nowSeconds, float halfLifeSeconds) =>
         GetCombinedConfidence(nowSeconds, halfLifeSeconds, applyAgeDecay: true);
 
+    /// <summary>
+    /// Returns semantic affordances from non-expired evidence. A sense can add
+    /// or remove relevance over time by publishing new evidence with its own lifetime.
+    /// </summary>
+    public PerceptionSignalFlags GetActiveSignals(float nowSeconds)
+    {
+        ValidateTime(nowSeconds, nameof(nowSeconds));
+        PerceptionSignalFlags signals = PerceptionSignalFlags.None;
+        for (int i = 0; i < _observations.Count; i++)
+        {
+            PerceptionObservation observation = _observations[i];
+            if (observation.ExpiresAtSeconds > nowSeconds)
+                signals |= observation.Signals;
+        }
+
+        return signals;
+    }
+
     /// <summary>Identity evidence decays independently from confidence that a signal was detected.</summary>
     public float GetEffectiveIdentificationConfidence(float nowSeconds, float halfLifeSeconds)
     {

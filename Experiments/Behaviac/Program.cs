@@ -598,7 +598,7 @@ internal static class Program
         new("visible combat interrupts a low-utility move task", true, false, false, true, false,
             BehaviacUnitIntent.EngageTarget, HasMoveOrder: true, MoveOrderUtility: 0.2f, CombatUtility: 0.9f),
         new("unknown sound with awareness is investigated", true, false, false, false, false,
-            BehaviacUnitIntent.InvestigateAudibleContact, HasAudibleContact: true, IsAlerted: true,
+            BehaviacUnitIntent.InvestigateContact, HasAudibleContact: true, IsAlerted: true,
             InvestigationUtility: 0.70f),
         new("faint sound without alertness does not trigger investigation", true, false, false, false, false,
             BehaviacUnitIntent.Patrol, HasAudibleContact: true, InvestigationUtility: 0.70f),
@@ -636,7 +636,7 @@ internal static class Program
             hasAttackOrder: test.HasAttackOrder,
             moveOrderUtility: test.MoveOrderUtility,
             combatUtility: test.CombatUtility,
-            hasAudibleContact: test.HasAudibleContact,
+            hasInvestigableContact: test.HasAudibleContact,
             isInImmediateDanger: test.HasImmediateDanger,
             isAlerted: test.IsAlerted,
             coverUtility: test.CoverUtility,
@@ -700,7 +700,7 @@ internal static class Program
 
         if (test.IsAlerted && test.HasAudibleContact && !test.IsSuppressed && !test.IsLowHealth &&
             test.InvestigationUtility >= UnitTacticalUtility.MinimumInvestigationUtility)
-            return BehaviacUnitIntent.InvestigateAudibleContact;
+            return BehaviacUnitIntent.InvestigateContact;
 
         return BehaviacUnitIntent.Patrol;
     }

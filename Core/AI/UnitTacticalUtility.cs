@@ -143,6 +143,20 @@ public static class UnitTacticalUtility
             1f);
     }
 
+    public static float EvaluateInvestigation(
+        float confidence,
+        float distance,
+        float positionErrorRadius)
+    {
+        if (!float.IsFinite(positionErrorRadius) || positionErrorRadius < 0f)
+            return 0f;
+
+        float baseUtility = EvaluateInvestigation(confidence, distance);
+        float uncertaintyPenalty =
+            Math.Clamp(positionErrorRadius / 48f, 0f, 1f) * 0.20f;
+        return Math.Clamp(baseUtility - uncertaintyPenalty, 0f, 1f);
+    }
+
     public static float EvaluateProneFiring(
         float distanceToTarget,
         bool exposed,

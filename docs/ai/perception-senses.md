@@ -26,3 +26,24 @@ PerceptionSystem хранит список модулей и обновляет 
 - auditory — TacticalHearingSystem; сохраняет текущую модель выстрелов, шагов, близких пролётов пуль и ударов по укрытиям.
 
 Порядок регистрации имеет значение. В базовой конфигурации слух обновляется первым, затем зрение: это сохраняет прежний порядок обработки звуковых импульсов относительно обновления зрительного кэша. Остальные системы игры продолжают использовать тот же экземпляр VisionSystem.
+
+
+## Pawn-AI signal semantics
+
+Sensors do not choose a pawn's action. Each observation may additionally publish
+semantic affordances: Investigate, ImmediateDanger, PotentialThreat, Resource,
+Avoid, and Social. The common contact memory fuses the active flags from all live
+evidence, independently of which sensor supplied it.
+
+The Behaviac/Utility layer consumes these semantics rather than querying the
+hearing module directly. An investigable contact is selected using its effective
+confidence, distance and position-error radius. Immediate-danger evidence is
+observer-specific and decays quickly. A thermal, smell, vibration or other future
+sensor can therefore influence the same policy by publishing an observation with
+the appropriate flags; it does not need a new branch in the AI's main update loop.
+
+Default policy for the existing event bridge:
+- gunshots, footsteps and ally contact reports suggest an area to investigate;
+- near misses, cover impacts and explosions signal immediate danger;
+- other event types receive no tactical affordance unless the producing sensor
+  explicitly supplies one.

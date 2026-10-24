@@ -18,7 +18,8 @@ public enum BehaviacUnitIntent : byte
     HoldPosition = 11,
     AttackOrder = 12,
     HoldPositionEngage = 13,
-    InvestigateAudibleContact = 14,
+    InvestigateContact = 14,
+    InvestigateAudibleContact = InvestigateContact,
     InvestigateSquadContact = 15
 }
 
@@ -41,8 +42,8 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasRecentTarget { get; private set; }
     [MemberMetaInfo("Alerted", "Threat awareness independent of suppression or panic.", true)]
     public bool IsAlerted { get; private set; }
-    [MemberMetaInfo("Audible contact", "Whether an uncertain sound contact is worth investigating.", true)]
-    public bool HasAudibleContact { get; private set; }
+    [MemberMetaInfo("Investigable contact", "Whether the pawn has a credible contact worth investigating.", true)]
+    public bool HasInvestigableContact { get; private set; }
     [MemberMetaInfo("Immediate danger", "Whether a close bullet pass, stopped bullet or explosion was recently perceived.", true)]
     public bool IsInImmediateDanger { get; private set; }
     [MemberMetaInfo("Low health", "Whether the unit is below the retreat health threshold.", true)]
@@ -101,7 +102,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool hasAttackOrder = false,
         float moveOrderUtility = 0f,
         float combatUtility = 0f,
-        bool hasAudibleContact = false,
+        bool hasInvestigableContact = false,
         bool isInImmediateDanger = false,
         bool isAlerted = false,
         float coverUtility = 0f,
@@ -115,7 +116,7 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         HasCover = hasCover;
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
-        HasAudibleContact = hasAudibleContact;
+        HasInvestigableContact = hasInvestigableContact;
         IsInImmediateDanger = isInImmediateDanger;
         IsAlerted = isAlerted;
         IsLowHealth = isLowHealth;
@@ -209,10 +210,11 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool ShouldInvestigateLastKnownTarget() =>
         IsAlive && HasRecentTarget;
 
-    [MethodMetaInfo("ShouldInvestigateAudibleContact", "Investigate a credible sound only when no stronger tactical response is active.")]
-    public bool ShouldInvestigateAudibleContact() =>
-        IsAlive && IsAlerted && HasAudibleContact && !HasVisibleTarget && !HasRecentTarget &&
+    [MethodMetaInfo("ShouldInvestigateContact", "Investigate a credible perception contact only when no stronger tactical response or player order is active.")]
+    public bool ShouldInvestigateContact() =>
+        IsAlive && IsAlerted && HasInvestigableContact && !HasVisibleTarget && !HasRecentTarget &&
         !IsSuppressed && !IsLowHealth &&
+        !HasMoveOrder && !HasStopOrder && !HasAttackOrder &&
         InvestigationUtility >= Core.Unit.UnitTacticalUtility.MinimumInvestigationUtility;
 
     [MethodMetaInfo("ShouldInvestigateSquadContact", "Investigate a delayed and uncertain position reported by a squad mate, without treating it as an identified target.")]
@@ -270,9 +272,13 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public EBTStatus SelectInvestigateLastKnownTarget() =>
         SelectIntent(BehaviacUnitIntent.InvestigateLastKnownTarget);
 
-    [MethodMetaInfo("SelectInvestigateAudibleContact", "Move to an uncertain sound area without treating it as an identified enemy.")]
+    [MethodMetaInfo("SelectInvestigateContact", "Move to an uncertain sensed area without treating it as an identified enemy.")]
+    public EBTStatus SelectInvestigateContact() =>
+        SelectIntent(BehaviacUnitIntent.InvestigateContact);
+
+    [MethodMetaInfo("SelectInvestigateAudibleContact", "Compatibility alias for older Behaviac trees.")]
     public EBTStatus SelectInvestigateAudibleContact() =>
-        SelectIntent(BehaviacUnitIntent.InvestigateAudibleContact);
+        SelectInvestigateContact();
 
     [MethodMetaInfo("SelectInvestigateSquadContact", "Move to a squad-reported area without identifying or firing at a hidden unit.")]
     public EBTStatus SelectInvestigateSquadContact() =>
