@@ -10,16 +10,16 @@ dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --population 
 
 Options: `--population`, `--generations`, `--battles`, `--ticks`, `--team-size`, `--seed`, `--output`, `--seed-profile`. At least eight battles per candidate covers open-field, wall/barrier, close-start and generated-canyon scenarios from both sides. The canyon uses the same `WorldGenerator` as normal gameplay. Higher settings mean more simulation work.
 
-The run writes a directly deserializable `AiBalanceProfile` to `ai-balance-best.json` and per-generation fitness to `ai-balance-best.history.csv`. To resume from a previous profile:
+The run writes a directly deserializable `AiBalanceProfile` to `Experiments/AiEvolution/output/ai-balance-best.json` and per-generation fitness to `Experiments/AiEvolution/output/ai-balance-best.history.csv`. Generated outputs are excluded from Git. To resume from a previous profile:
 
 ```powershell
-dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --seed-profile .\ai-balance-best.json --generations 4 --population 8
+dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --seed-profile .\Experiments\AiEvolution\output\ai-balance-best.json --generations 4 --population 8
 ```
 
 The default profile remains in the candidate pool and the opponent remains the default profile. To load a trained profile into normal gameplay:
 
 ```powershell
-dotnet run --project App/App.csproj -- --ai-balance-profile=.\ai-balance-best.json
+dotnet run --project App/App.csproj -- --ai-balance-profile=.\Experiments\AiEvolution\output\ai-balance-best.json
 ```
 
 The game loads the file once at startup. If the file cannot be read or deserialized, it logs the problem and keeps the default balance; it never silently adopts a training result.
