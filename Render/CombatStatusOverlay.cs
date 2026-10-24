@@ -31,7 +31,55 @@ public sealed class CombatStatusOverlay : IDisposable
             FillColor = new Color(255, 112, 70, 245)
         };
 
+    private float _x = 12f;
+    private float _y = 12f;
+    private float _dragOffsetX;
+    private float _dragOffsetY;
+    private bool _dragging;
+
     public bool Visible { get; set; } = true;
+
+    public bool Contains(Vector2i position) =>
+        Visible && _panel.GetGlobalBounds().Contains(position);
+
+    public bool HandleMousePressed(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!Visible)
+            return false;
+
+        Layout(windowWidth, windowHeight);
+        if (!_panel.GetGlobalBounds().Contains(position))
+            return false;
+
+        if (position.Y <= _panel.Position.Y + 32f)
+        {
+            _dragging = true;
+            _dragOffsetX = position.X - _panel.Position.X;
+            _dragOffsetY = position.Y - _panel.Position.Y;
+        }
+
+        return true;
+    }
+
+    public bool HandleMouseMoved(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!_dragging)
+            return false;
+
+        _x = Math.Clamp(position.X - _dragOffsetX, 8f, Math.Max(8f, windowWidth - 520f - 8f));
+        _y = Math.Clamp(position.Y - _dragOffsetY, 8f, Math.Max(8f, windowHeight - 198f - 8f));
+        Layout(windowWidth, windowHeight);
+        return true;
+    }
+
+    public bool HandleMouseReleased()
+    {
+        if (!_dragging)
+            return false;
+
+        _dragging = false;
+        return true;
+    }
 
     public CombatStatusOverlay()
     {
@@ -146,13 +194,7 @@ public sealed class CombatStatusOverlay : IDisposable
             "HITBOX KEY: HEAD amber | TORSO blue | ARMS orange/red\n" +
             "HANDS gold/pink | LEGS green/teal | FEET violet/magenta";
 
-        _panel.Position = new Vector2f(12f, 12f);
-        _blueAccent.Position = new Vector2f(12f, 40f);
-        _redAccent.Position = new Vector2f(268f, 40f);
-        _title.Position = new Vector2f(24f, 20f);
-        _blue.Position = new Vector2f(26f, 42f);
-        _red.Position = new Vector2f(282f, 42f);
-        _details.Position = new Vector2f(24f, 64f);
+        Layout(window.Size.X, window.Size.Y);
 
         window.Draw(_panel);
         window.Draw(_blueAccent);
@@ -196,13 +238,7 @@ public sealed class CombatStatusOverlay : IDisposable
             "HITBOX KEY: HEAD amber | TORSO blue | ARMS orange/red\n" +
             "HANDS gold/pink | LEGS green/teal | FEET violet/magenta";
 
-        _panel.Position = new Vector2f(12f, 12f);
-        _blueAccent.Position = new Vector2f(12f, 40f);
-        _redAccent.Position = new Vector2f(268f, 40f);
-        _title.Position = new Vector2f(24f, 20f);
-        _blue.Position = new Vector2f(26f, 42f);
-        _red.Position = new Vector2f(282f, 42f);
-        _details.Position = new Vector2f(24f, 64f);
+        Layout(window.Size.X, window.Size.Y);
 
         window.Draw(_panel);
         window.Draw(_blueAccent);
@@ -211,6 +247,23 @@ public sealed class CombatStatusOverlay : IDisposable
         window.Draw(_blue);
         window.Draw(_red);
         window.Draw(_details);
+    }
+
+    private void Layout(uint windowWidth, uint windowHeight)
+    {
+        _x = Math.Clamp(_x, 8f, Math.Max(8f, windowWidth - 520f - 8f));
+        _y = Math.Clamp(_y, 8f, Math.Max(8f, windowHeight - 198f - 8f));
+        _panel.Position = new Vector2f(_x, _y);
+        _blueAccent.Position = new Vector2f(_x, _y + 28f);
+        _redAccent.Position = new Vector2f(_x + 256f, _y + 28f);
+        if (_title != null)
+            _title.Position = new Vector2f(_x + 12f, _y + 8f);
+        if (_blue != null)
+            _blue.Position = new Vector2f(_x + 14f, _y + 30f);
+        if (_red != null)
+            _red.Position = new Vector2f(_x + 270f, _y + 30f);
+        if (_details != null)
+            _details.Position = new Vector2f(_x + 12f, _y + 52f);
     }
 
     private static int CountAlive(
