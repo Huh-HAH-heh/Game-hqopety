@@ -847,9 +847,11 @@ public sealed class UnitAiSystem
                     _hasFlankTargetByUnit[unit] = true;
                     if (TryFindFlankWaypoint(
                             units,
+                            vision,
                             worldMap,
                             unit,
                             target.Index,
+                            GetMaxEffectiveRange(inventory, unit),
                             GetBalanceProfile(units.FactionTag[unit]),
                             out Vector3 flankWaypoint))
                     {
@@ -1794,9 +1796,11 @@ public sealed class UnitAiSystem
 
     private static bool TryFindFlankWaypoint(
         UnitStore units,
+        VisionSystem vision,
         WorldMap worldMap,
         int unit,
         int targetIndex,
+        float weaponRange,
         AiBalanceProfile balance,
         out Vector3 waypoint)
     {
@@ -1804,21 +1808,44 @@ public sealed class UnitAiSystem
         Vector3 position = units.Position[unit];
         Vector3 target = units.Position[targetIndex];
         Vector2 towardTarget = new(target.X - position.X, target.Y - position.Y);
-        float lengthSquared = towardTarget.LengthSquared();
-        if (lengthSquared < 1f)
+        float distanceSquared = towardTarget.LengthSquared();
+        if (!float.IsFinite(distanceSquared) || distanceSquared < 1f)
             return false;
 
+        float distanceToTarget = MathF.Sqrt(distanceSquared);
         Vector2 forward = Vector2.Normalize(towardTarget);
         Vector2 side = new(-forward.Y, forward.X);
         float preferredSide = (unit & 1) == 0 ? 1f : -1f;
+        float workingRange = weaponRange > 0.1f
+            ? weaponRange * balance.RangedEngagementRangeFraction
+            : distanceToTarget * 0.65f;
 
-        // Try both sides and a shallower side-step if the preferred point is blocked.
-        // This reduces stalls near walls while keeping the maneuver deterministic.
+        float bestScore = float.NegativeInfinity;
+        Vector3 bestWaypoint = Vector3.Zero;
+        Vector3 targetEye = vision.GetEyePosition(units, targetIndex);
+
+        // Compare all legal side/backoff points. A ranged flank should settle near
+        // a useful firing distance, not blindly crawl to a fixed 14-cell orbit.
+        // Existing weapon range and actual terrain line-of-sight remain authoritative.
         for (int candidate = 0; candidate < 4; candidate++)
         {
+            bool nearOrbit = candidate < 2;
             float sideSign = candidate % 2 == 0 ? preferredSide : -preferredSide;
-            float backoff = candidate < 2 ? balance.FlankNearBackoffDistance : balance.FlankFarBackoffDistance;
-            float lateral = candidate < 2 ? balance.FlankNearLateralDistance : balance.FlankFarLateralDistance;
+            float orbitFraction = nearOrbit
+                ? balance.FlankNearRangeFraction
+                : balance.FlankFarRangeFraction;
+            float desiredOrbit = MathF.Min(
+                distanceToTarget * 0.94f,
+                MathF.Max(6f, MathF.Max(workingRange, distanceToTarget * orbitFraction)));
+
+            // The two components approximate the chosen orbit radius, while existing
+            // minimum offsets keep close-range movement from degenerating into a nudge.
+            float backoff = MathF.Max(
+                nearOrbit ? balance.FlankNearBackoffDistance : balance.FlankFarBackoffDistance,
+                desiredOrbit * 0.8f);
+            float lateral = MathF.Max(
+                nearOrbit ? balance.FlankNearLateralDistance : balance.FlankFarLateralDistance,
+                desiredOrbit * 0.6f);
             float targetX = target.X - forward.X * backoff + side.X * lateral * sideSign;
             float targetY = target.Y - forward.Y * backoff + side.Y * lateral * sideSign;
             targetX = Math.Clamp(targetX, 2f, worldMap.MaxTileX - 2f);
@@ -1826,8 +1853,14 @@ public sealed class UnitAiSystem
 
             int tileX = Math.Clamp((int)MathF.Floor(targetX), 0, worldMap.MaxTileX);
             int tileY = Math.Clamp((int)MathF.Floor(targetY), 0, worldMap.MaxTileY);
-            if (worldMap.IsNavigationBlocked(tileX, tileY))
+            if (tileX < 1 || tileY < 1 ||
+                tileX >= worldMap.TileWidth - 1 ||
+                tileY >= worldMap.TileHeight - 1 ||
+                worldMap.IsNavigationBlocked(tileX, tileY) ||
+                worldMap.GetSurfaceLayer(tileX, tileY) < 0)
+            {
                 continue;
+            }
 
             Vector3 candidateWaypoint = new(
                 tileX + 0.5f,
@@ -1839,11 +1872,34 @@ public sealed class UnitAiSystem
             if (toWaypoint.LengthSquared() <= 4f)
                 continue;
 
-            waypoint = candidateWaypoint;
-            return true;
+            float candidateRange = Vector2.Distance(
+                new Vector2(candidateWaypoint.X, candidateWaypoint.Y),
+                new Vector2(target.X, target.Y));
+            float travelDistance = toWaypoint.Length();
+            bool hasLineOfSight = vision.HasLineOfSight(
+                worldMap,
+                candidateWaypoint + new Vector3(0f, 0f, MathF.Max(0.05f, units.Height[unit])),
+                targetEye,
+                out _);
+
+            float score =
+                2f -
+                MathF.Abs(candidateRange - desiredOrbit) * 0.08f -
+                travelDistance * 0.012f +
+                (hasLineOfSight ? 0.9f : 0f);
+
+            if (score <= bestScore)
+                continue;
+
+            bestScore = score;
+            bestWaypoint = candidateWaypoint;
         }
 
-        return false;
+        if (!float.IsFinite(bestScore))
+            return false;
+
+        waypoint = bestWaypoint;
+        return true;
     }
 
     private static bool TryFindSearchWaypoint(
