@@ -61,6 +61,8 @@ public sealed class GameRenderer
     private CombatStatusOverlay? _combatStatusOverlay;
     private SimulationControlOverlay? _simulationControlOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
+    private readonly LiveAiEvolutionTrainer _liveAiEvolutionTrainer = new();
+    private AiEvolutionOverlay? _aiEvolutionOverlay;
 
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
@@ -367,6 +369,7 @@ public sealed class GameRenderer
             _bodyRigEditorOverlay?.Dispose();
             _combatStatusOverlay?.Dispose();
             _simulationControlOverlay?.Dispose();
+            _aiEvolutionOverlay?.Dispose();
             _camera.Dispose();
             _uiView?.Dispose();
             _selectionBox.Dispose();
@@ -784,6 +787,11 @@ public sealed class GameRenderer
         if (_uiView != null)
         {
             _window.SetView(_uiView);
+
+            AiEvolutionStatus? evolutionStatus = _liveAiEvolutionTrainer.Status;
+            if (evolutionStatus?.HasStarted == true)
+                _aiEvolutionOverlay?.Draw(
+                    _window, _window.Size.X, _window.Size.Y, evolutionStatus);
 
             if (renderSnapshot != null)
             {
@@ -2811,6 +2819,11 @@ public sealed class GameRenderer
                         _worldMap,
                         updateDeltaTime);
                     _unitSimulation.Update(_worldMap, updateDeltaTime);
+                    _liveAiEvolutionTrainer.Update(
+                        _unitSimulation,
+                        _massCombatTestScene,
+                        _worldMap,
+                        updateDeltaTime);
                     RecordSimulationStep(updateDeltaTime);
                 }
                 catch (Exception exception)
@@ -2892,6 +2905,7 @@ public sealed class GameRenderer
             SaveProjectUnitAsset);
         _combatStatusOverlay = new CombatStatusOverlay();
         _simulationControlOverlay = new SimulationControlOverlay();
+        _aiEvolutionOverlay = new AiEvolutionOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
         _window.Closed +=
@@ -3853,6 +3867,19 @@ public sealed class GameRenderer
         {
             _showCombatTracers = !_showCombatTracers;
             Console.WriteLine($"[TEST] Tracers={_showCombatTracers}");
+            return;
+        }
+
+        if (key == Keyboard.Key.F5)
+        {
+            if (!_massCombatMode)
+            {
+                Console.WriteLine("[EVOLVE LIVE] Switch to the mass-combat scene (C) before starting live evolution.");
+                return;
+            }
+
+            ExecuteSimulationCommand(() =>
+                _liveAiEvolutionTrainer.Toggle(_unitSimulation, _massCombatTestScene, _worldMap));
             return;
         }
 
