@@ -10,7 +10,7 @@ namespace Core.AI.Perception;
 /// Converts loud events and locomotion into uncertain per-observer contacts.
 /// The observer never receives the emitter ID from an audio-only contact.
 /// </summary>
-public sealed class TacticalHearingSystem
+public sealed class TacticalHearingSystem : PerceptionSenseBase
 {
     private const float GunshotRange = 180f;
     private const float GunshotMemorySeconds = 8f;
@@ -22,6 +22,19 @@ public sealed class TacticalHearingSystem
     private float[] _footstepCooldown;
     private long _nextPulseId = 1;
     public float CurrentTimeSeconds => _memoryStore.CurrentTimeSeconds;
+
+    public override string Id => "auditory";
+    public override PerceptionSense Channel => PerceptionSense.Auditory;
+
+    protected override void UpdateCore(in PerceptionSenseContext context) =>
+        Update(
+            context.Units,
+            context.Health,
+            context.Suppression,
+            context.SimulationTimeSeconds,
+            context.DeltaTime,
+            context.WorldMap,
+            context.Vision);
 
     public TacticalHearingSystem(
         int initialUnitCapacity = 1024,
@@ -93,18 +106,16 @@ public sealed class TacticalHearingSystem
         _pendingPulses.Clear();
     }
 
-    public void InitializeUnit(int unitIndex)
+    public override void InitializeUnit(int unitIndex)
     {
         if (unitIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(unitIndex));
         EnsureCapacity(unitIndex + 1);
-        _memoryStore.InitializeUnit(unitIndex);
         _footstepCooldown[unitIndex] = 0f;
     }
 
-    public void ClearUnit(int unitIndex)
+    public override void ClearUnit(int unitIndex)
     {
-        _memoryStore.ClearUnit(unitIndex);
         if ((uint)unitIndex < (uint)_footstepCooldown.Length)
             _footstepCooldown[unitIndex] = 0f;
     }

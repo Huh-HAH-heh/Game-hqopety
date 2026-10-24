@@ -19,7 +19,9 @@ public enum TacticalStimulusType : byte
     CoverImpact = 6,
     UnitWounded = 7,
     UnitKilled = 8,
-    AllyContactReport = 9
+    AllyContactReport = 9,
+    /// <summary>Generic event type for a sensor with no specialized stimulus type yet.</summary>
+    SensorReading = 10
 }
 
 /// <summary>
