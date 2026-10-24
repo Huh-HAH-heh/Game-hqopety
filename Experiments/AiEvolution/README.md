@@ -27,6 +27,18 @@ The game loads the file once at startup. If the file cannot be read or deseriali
 The 40-gene profile evolves action preferences, preferred weapon ranges, cover-search distance, range-relative near/far flank orbits and flank waypoint geometry, intent persistence, investigation thresholds, cover/flank response and tactical-distance scoring. Flank candidates are ranked by target range, travel distance and actual terrain line of sight; the genome evolves range-error, travel-cost and line-of-sight weights as well as backoff/lateral proportions. Default geometry keeps them near the weapon's working range. Cover search rejects blocked destinations and ranks remaining occluded positions by threat separation versus travel cost, both of which are trainable. Fitness considers outcome, health remaining, enemy damage and survivors. This stage optimizes the current action/tactical surface and now evaluates all legal flank points by weapon working range, travel distance and actual line of sight. Genome controls include the near/far flank orbit fractions, preferred firing distance, cover-search radius and flank waypoint geometry. It still cannot invent a capability that does not exist in game code. The next stage should improve the candidate generator with scored firing-position candidates, cover slots, flank lanes, line-of-fire estimates and navigation costs. Weapon physics, perception evidence, path validity, injury rules and emergency gates stay outside the genome.
 
 
+## Watching evolutionary training inside the game
+
+The normal game also has a visible live-training mode. Start the mass-combat scene, then press **F5**. A training panel appears over the active battlefield and shows the current generation, candidate, side, elapsed match time, survivors, team health, fitness, best score and the candidate's main genes.
+
+- The live trainer evolves the same 40 `AiBalanceProfile` genes as the offline trainer.
+- Population size is 4. Each candidate fights the current baseline for up to 30 simulation seconds from each side, so the result is less dependent on blue/red starting position.
+- After all four candidates are evaluated, selection, crossover and mutation produce the next generation. Training continues until F5 is pressed again.
+- When stopped, the best profile is applied to the current game only if its measured fitness beat the baseline score. The checkpoint is written to `Experiments/AiEvolution/output/ai-balance-live-best.json`, and per-candidate observations are appended to `ai-balance-live-history.csv`.
+- This live fitness is a battlefield comparison, not a separate holdout validation. Inspect the CSV and test the saved profile across the four offline scenarios before treating it as a generally better profile.
+
+F5 live training operates on the existing mass-combat battle. Avoid changing battle scale with F8 or switching scenes with C while a training session is active, because that would make candidate comparisons inconsistent. The offline trainer below remains available for broader, held-out scenario evaluation.
+
 ## Watching and controlling a training run
 
 Start the trainer from a real PowerShell/terminal window to use interactive keys. The console reports generation, candidate, battle/scenario, tick progress, elapsed time and an estimated time remaining. Each completed battle reports its result; the CSV keeps per-generation and per-scenario scores.
