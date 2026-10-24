@@ -81,7 +81,17 @@ public sealed class DebugLayersOverlay : IDisposable
     private readonly Text? _checkLabel;
     private readonly Text? _footer;
 
+    private float _x;
+    private float _y = 74f;
+    private float _dragOffsetX;
+    private float _dragOffsetY;
+    private bool _hasPosition;
+    private bool _dragging;
+
     public bool IsOpen { get; private set; }
+
+    public bool Contains(Vector2i position) =>
+        IsOpen && _panel.GetGlobalBounds().Contains(position);
 
     public DebugLayersOverlay()
     {
@@ -119,6 +129,7 @@ public sealed class DebugLayersOverlay : IDisposable
     public void Close()
     {
         IsOpen = false;
+        _dragging = false;
     }
 
     public bool HandleMousePressed(
@@ -133,10 +144,7 @@ public sealed class DebugLayersOverlay : IDisposable
 
         Layout(windowWidth, windowHeight);
         if (!_panel.GetGlobalBounds().Contains(position))
-        {
-            Close();
-            return true;
-        }
+            return false;
 
         if (_closeButton.GetGlobalBounds().Contains(position))
         {
@@ -147,6 +155,14 @@ public sealed class DebugLayersOverlay : IDisposable
 
         if (button != Mouse.Button.Left)
             return true;
+
+        if (_header.GetGlobalBounds().Contains(position))
+        {
+            _dragging = true;
+            _dragOffsetX = position.X - _panel.Position.X;
+            _dragOffsetY = position.Y - _panel.Position.Y;
+            return true;
+        }
 
         float firstRowY = _panel.Position.Y + HeaderHeight + 3f;
         for (int i = 0; i < LayerCount; i++)
@@ -162,6 +178,26 @@ public sealed class DebugLayersOverlay : IDisposable
             return true;
         }
 
+        return true;
+    }
+
+    public bool HandleMouseMoved(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!_dragging || !IsOpen)
+            return false;
+
+        _x = Math.Clamp(position.X - _dragOffsetX, 8f, Math.Max(8f, windowWidth - Width - 8f));
+        _y = Math.Clamp(position.Y - _dragOffsetY, 8f, Math.Max(8f, windowHeight - Height - 8f));
+        Layout(windowWidth, windowHeight);
+        return true;
+    }
+
+    public bool HandleMouseReleased()
+    {
+        if (!_dragging)
+            return false;
+
+        _dragging = false;
         return true;
     }
 
@@ -252,8 +288,17 @@ public sealed class DebugLayersOverlay : IDisposable
 
     private void Layout(uint windowWidth, uint windowHeight)
     {
-        float x = Math.Clamp((float)windowWidth - Width - 18f, 8f, Math.Max(8f, windowWidth - Width));
-        float y = Math.Clamp(74f, 8f, Math.Max(8f, windowHeight - Height));
+        if (!_hasPosition)
+        {
+            _x = Math.Clamp((float)windowWidth - Width - 18f, 8f, Math.Max(8f, windowWidth - Width));
+            _y = Math.Clamp(74f, 8f, Math.Max(8f, windowHeight - Height));
+            _hasPosition = true;
+        }
+
+        _x = Math.Clamp(_x, 8f, Math.Max(8f, windowWidth - Width - 8f));
+        _y = Math.Clamp(_y, 8f, Math.Max(8f, windowHeight - Height - 8f));
+        float x = _x;
+        float y = _y;
         _panel.Position = new Vector2f(x, y);
         _header.Position = new Vector2f(x + 1f, y + 1f);
         _accent.Position = new Vector2f(x + 1f, y + 1f);
