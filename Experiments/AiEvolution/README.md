@@ -45,4 +45,4 @@ When the profile is loaded in the game:
 - `F12`: speed simulation up (`1x → 2x`).
 - `F11`: return to `1x`.
 
-The game title and `[PERF]` line now show `Speed`, `SimRate`, and `UPS`. `SimRate` means game-seconds advanced per real second; `UPS` means simulation updates per second. The existing `Sim=...ms` value is the wall-clock cost of one simulation update, while `FPS` describes rendering. This separates a smooth window from a simulation thread that cannot keep up with real time.
+The game title and `[PERF]` line now show `Speed`, `SimRate`, and `UPS`. `SimRate` means game-seconds advanced per real second; `UPS` means simulation updates per second. The existing `Sim=...ms` value is the wall-clock cost of one simulation update, while `FPS` describes rendering. The breakdown also reports full perception, suppression, body update and melee update timings, in addition to AI, movement, weapons, ballistics and health. This separates a smooth window from a simulation thread that cannot keep up with real time and helps locate the expensive simulation phase.
