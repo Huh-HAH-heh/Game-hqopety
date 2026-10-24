@@ -39,26 +39,39 @@ internal static class Program
             double globalBest=double.NegativeInfinity;
             float[] globalGenes=(float[])BaseGenes.Clone();
             using var history=new StreamWriter(csv,false);
-            history.WriteLine("generation,best_fitness,mean_fitness,engage,flank,cover,retreat,prone,suppressive_fire");
+            history.WriteLine("generation,best_fitness,mean_fitness,win_rate,draw_rate,survivor_rate,own_health_ratio,enemy_health_ratio,enemy_kills,engage,flank,cover,retreat,prone,suppressive_fire");
             Console.WriteLine($"AI evolution: population={popSize}; generations={generations}; battles={battles}; ticks={ticks}; team={team}v{team}");
 
             for(int gen=1;gen<=generations;gen++)
             {
-                var results=new List<(float[] Genes,double Fitness)>(popSize);
+                var results=new List<(float[] Genes,Evaluation Metrics)>(popSize);
                 for(int i=0;i<population.Count;i++)
                 {
-                    double fitness=Evaluate(Profile(population[i]),battles,ticks,team);
-                    results.Add((population[i],fitness));
-                    Console.WriteLine($"gen={gen}/{generations} candidate={i+1}/{popSize} fitness={fitness:F2}");
+                    Evaluation metrics=Evaluate(Profile(population[i]),battles,ticks,team);
+                    results.Add((population[i],metrics));
+                    Console.WriteLine($"gen={gen}/{generations} candidate={i+1}/{popSize} " +
+                        $"fitness={metrics.Fitness:F2}; wins={metrics.WinRate:P0}; survivors={metrics.SurvivorRate:P0}");
                 }
-                results.Sort((a,b)=>b.Fitness.CompareTo(a.Fitness));
-                double mean=results.Average(x=>x.Fitness);
-                if(results[0].Fitness>globalBest) { globalBest=results[0].Fitness; globalGenes=(float[])results[0].Genes.Clone(); }
+                results.Sort((a,b)=>b.Metrics.Fitness.CompareTo(a.Metrics.Fitness));
+                double mean=results.Average(x=>x.Metrics.Fitness);
+                var champion=results[0];
+                if(champion.Metrics.Fitness>globalBest)
+                {
+                    globalBest=champion.Metrics.Fitness;
+                    globalGenes=(float[])champion.Genes.Clone();
+                }
                 File.WriteAllText(output,JsonSerializer.Serialize(Profile(globalGenes),new JsonSerializerOptions{WriteIndented=true}));
-                history.WriteLine($"{gen},{results[0].Fitness:F3},{mean:F3},{results[0].Genes[0]:F4},{results[0].Genes[1]:F4},{results[0].Genes[2]:F4},{results[0].Genes[3]:F4},{results[0].Genes[4]:F4},{results[0].Genes[5]:F4}");
+                history.WriteLine($"{gen},{champion.Metrics.Fitness:F3},{mean:F3}," +
+                    $"{champion.Metrics.WinRate:F4},{champion.Metrics.DrawRate:F4}," +
+                    $"{champion.Metrics.SurvivorRate:F4},{champion.Metrics.OwnHealthRatio:F4}," +
+                    $"{champion.Metrics.EnemyHealthRatio:F4},{champion.Metrics.AverageEnemyKills:F3}," +
+                    $"{champion.Genes[0]:F4},{champion.Genes[1]:F4},{champion.Genes[2]:F4}," +
+                    $"{champion.Genes[3]:F4},{champion.Genes[4]:F4},{champion.Genes[5]:F4}");
                 history.Flush();
-                Console.WriteLine($"GENERATION {gen}: best={results[0].Fitness:F2}; mean={mean:F2}; best-ever={globalBest:F2}");
-                if(gen<generations) population=Next(results,popSize,rng);
+                Console.WriteLine($"GENERATION {gen}: best={champion.Metrics.Fitness:F2}; mean={mean:F2}; " +
+                    $"wins={champion.Metrics.WinRate:P1}; survivor-rate={champion.Metrics.SurvivorRate:P1}; " +
+                    $"health={champion.Metrics.OwnHealthRatio:P1}; best-ever={globalBest:F2}");
+                if(gen<generations) population=Next(results.Select(x=>(x.Genes,x.Metrics.Fitness)).ToList(),popSize,rng);
             }
             Console.WriteLine($"Saved profile: {output}"); Console.WriteLine($"History: {csv}");
             return 0;
@@ -137,11 +150,23 @@ internal static class Program
         FlankTravelCostWeight=g[38], FlankLineOfSightBonus=g[39]
     };
 
-    private static double Evaluate(AiBalanceProfile p,int battles,int ticks,int team)
+    private static Evaluation Evaluate(AiBalanceProfile p,int battles,int ticks,int team)
     {
-        double total=0;
-        for(int i=0;i<battles;i++) total+=Battle(p,i%2==0,(i/2)%4,ticks,team);
-        return total/battles;
+        double fitness=0, winRate=0, drawRate=0, survivorRate=0, ownHp=0, enemyHp=0, kills=0;
+        for(int i=0;i<battles;i++)
+        {
+            BattleResult result=Battle(p,i%2==0,(i/2)%4,ticks,team);
+            fitness+=result.Fitness;
+            if(result.Outcome>0) winRate++;
+            else if(result.Outcome==0) drawRate++;
+            survivorRate+=result.SurvivorRate;
+            ownHp+=result.OwnHealthRatio;
+            enemyHp+=result.EnemyHealthRatio;
+            kills+=result.EnemyKills;
+        }
+        double divisor=Math.Max(1,battles);
+        return new Evaluation(fitness/divisor,winRate/divisor,drawRate/divisor,
+            survivorRate/divisor,ownHp/divisor,enemyHp/divisor,kills/divisor);
     }
 
     private static double Battle(AiBalanceProfile candidate,bool leftCandidate,int scenario,int ticks,int team)
@@ -166,16 +191,23 @@ internal static class Program
             new SquadMembershipSnapshot(2,rightMembers)
         });
         sim.AI.Enabled=true;
-        Team left=ReadTeam(sim,1),right=ReadTeam(sim,2);
+        Team left=ReadTeam(sim,leftMembers),right=ReadTeam(sim,rightMembers);
         for(int t=0;t<ticks;t++)
         {
-            sim.Update(world,Dt); left=ReadTeam(sim,1); right=ReadTeam(sim,2);
+            sim.Update(world,Dt);
+            left=ReadTeam(sim,leftMembers);
+            right=ReadTeam(sim,rightMembers);
             if(left.Alive==0||right.Alive==0) break;
         }
         Team own=leftCandidate?left:right, enemy=leftCandidate?right:left;
-        double outcome=own.Alive>enemy.Alive?1:own.Alive<enemy.Alive?0:
+        int outcome=own.Alive>enemy.Alive?1:own.Alive<enemy.Alive?-1:
+            own.Hp>enemy.Hp+.03?1:own.Hp+.03<enemy.Hp?-1:0;
+        double outcomeScore=outcome>0?1d:outcome<0?0d:
             own.Hp>enemy.Hp+.03?.75:own.Hp+.03<enemy.Hp?.25:.5;
-        return 45* outcome+20*own.Hp+20*(1-enemy.Hp)+15d*own.Alive/Math.Max(1,own.Total);
+        double fitness=45*outcomeScore+20*own.Hp+20*(1-enemy.Hp)+
+            15d*own.Alive/Math.Max(1,own.Total);
+        return new BattleResult(fitness,outcome,
+            own.Alive/(double)Math.Max(1,own.Total),own.Hp,enemy.Hp,enemy.Total-enemy.Alive);
     }
 
     private static List<UnitId> Spawn(UnitSimulation sim,WorldMap world,bool left,ushort faction,int scenario,int count)
@@ -238,16 +270,23 @@ internal static class Program
         }
     }
 
-    private static Team ReadTeam(UnitSimulation sim,ushort faction)
+    private static Team ReadTeam(UnitSimulation sim,IReadOnlyList<UnitId> roster)
     {
-        int total=0,alive=0; double hp=0,max=0;
-        foreach(int i in sim.Units.ActiveIndices)
+        int alive=0;
+        double hp=0,max=0;
+        foreach(UnitId id in roster)
         {
-            if(sim.Units.FactionTag[i]!=faction) continue;
-            total++; float m=MathF.Max(0,sim.Health.OverallMaxHitPoints[i]);
-            float h=Math.Clamp(sim.Health.OverallHitPoints[i],0,m); max+=m; hp+=h; if(h>0) alive++;
+            int index=id.Index;
+            float maximum=MathF.Max(0,sim.Health.OverallMaxHitPoints[index]);
+            bool active=sim.Units.TryGetIndex(id,out _);
+            float current=active
+                ? Math.Clamp(sim.Health.OverallHitPoints[index],0,maximum)
+                : 0f;
+            if(active && current>0f) alive++;
+            max+=maximum;
+            hp+=current;
         }
-        return new Team(total,alive,max>0?Math.Clamp(hp/max,0,1):0);
+        return new Team(roster.Count,alive,max>0?Math.Clamp(hp/max,0,1):0);
     }
 
     private static int Arg(string[] a,string key,int fallback,int min,int max)
@@ -264,4 +303,10 @@ internal static class Program
         return null;
     }
     private readonly record struct Team(int Total,int Alive,double Hp);
+    private readonly record struct BattleResult(
+        double Fitness,int Outcome,double SurvivorRate,double OwnHealthRatio,
+        double EnemyHealthRatio,int EnemyKills);
+    private readonly record struct Evaluation(
+        double Fitness,double WinRate,double DrawRate,double SurvivorRate,
+        double OwnHealthRatio,double EnemyHealthRatio,double AverageEnemyKills);
 }
