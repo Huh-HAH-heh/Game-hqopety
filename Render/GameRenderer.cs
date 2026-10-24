@@ -3535,11 +3535,8 @@ public sealed class GameRenderer
                 if (_debugLayersOverlay?.HandleMouseReleased() == true)
                     return;
 
-                if (_showUtilityAiDebug &&
-                    _utilityAiDebugOverlay?.HandleMouseReleased() == true)
-                {
+                if (_utilityAiDebugOverlay?.HandleMouseReleased() == true)
                     return;
-                }
 
                 if (_unitGroupCardOverlay?.HandleMouseReleased() == true)
                     return;
