@@ -184,8 +184,10 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     public void ClearUnit(int unitIndex)
     {
         if ((uint)unitIndex < (uint)_footstepCooldown.Length)
-        {
             _footstepCooldown[unitIndex] = 0f;
+
+        if ((uint)unitIndex < (uint)_hasBestGunshotByObserver.Length)
+        {
             _hasBestGunshotByObserver[unitIndex] = false;
             _lastGunshotMemoryPublishedAt[unitIndex] = 0f;
             _hasPublishedGunshotMemory[unitIndex] = false;
