@@ -180,6 +180,10 @@ public sealed class GameRenderer
     private int _visionTestIndex;
 
     private float _perfTimer;
+    private long _simulationUpdatesSample;
+    private long _simulationGameMicrosecondsSample;
+    private double _simulationUpdatesPerSecond;
+    private double _simulationGameSecondsPerWallSecond;
     private int _perfFrames;
     private float _perfFrameTimeSum;
     private float _maxFrameMs;
@@ -441,6 +445,12 @@ public sealed class GameRenderer
                 _allocatedBytes - _lastAllocatedBytesSample) / sampleSeconds;
             _lastAllocatedBytesSample = _allocatedBytes;
 
+            long simulationUpdates = Interlocked.Exchange(ref _simulationUpdatesSample, 0);
+            long simulationMicroseconds = Interlocked.Exchange(ref _simulationGameMicrosecondsSample, 0);
+            _simulationUpdatesPerSecond = simulationUpdates / Math.Max(0.001f, sampleSeconds);
+            _simulationGameSecondsPerWallSecond =
+                simulationMicroseconds / 1_000_000d / Math.Max(0.001f, sampleSeconds);
+
             SimulationFrameSnapshot? snapshot = _simulationThread != null
                 ? Volatile.Read(ref _latestSnapshot)
                 : null;
@@ -526,7 +536,8 @@ public sealed class GameRenderer
                 $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.00}MB/s " +
                 $"TotalAlloc={_allocatedBytes / 1024d / 1024d:0.0}MB " +
                 $"GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} " +
-                $"Units={activeUnits} SimPaused={_simulationPaused} Sim={simMs:0.0}ms " +
+                $"Units={activeUnits} SimPaused={_simulationPaused} Speed={_simulationSpeed:0.00}x " +
+                $"SimRate={_simulationGameSecondsPerWallSecond:0.00}x UPS={_simulationUpdatesPerSecond:0} Sim={simMs:0.0}ms " +
                 $"Vision={visionMetrics} AI={aiMs:0.0}ms Plan={aiPlanningMs:0.0}ms Move={moveMs:0.0}ms " +
                 $"UtilityAI={(utilityAiEnabled ? (utilityAiReady ? "ON" : "INIT") : "OFF")} " +
                 $"{utilityAiDecisions} decisions/{utilityAiDecisionMs:0.00}ms " +
@@ -576,6 +587,7 @@ public sealed class GameRenderer
                 {
                     _unitSimulation.BeginMetricsFrame();
                     _unitSimulation.Update(_worldMap, simulationDeltaTime);
+                    RecordSimulationStep(simulationDeltaTime);
                 }
             }
         }
@@ -913,7 +925,8 @@ public sealed class GameRenderer
         }
 
         return
-            $"RimClone | Units={snapshot.UnitCount} | " +
+            $"RimClone | Speed={_simulationSpeed:0.00}x SimRate={_simulationGameSecondsPerWallSecond:0.00}x UPS={_simulationUpdatesPerSecond:0} | " +
+            $"Units={snapshot.UnitCount} | " +
             $"Projectiles={snapshot.ActiveProjectiles}/{snapshot.ProjectileCapacity} Hits={snapshot.TotalHits} | " +
             $"Teams 1:{snapshot.BlueAlive} 2:{snapshot.RedAlive} F3:{snapshot.ThirdFactionAlive} | " +
             $"Melee hits/swings={snapshot.MeleeHits}/{snapshot.MeleeSwings} | AI={ai}:{selectedState} | " +
@@ -1083,7 +1096,8 @@ public sealed class GameRenderer
                 : "MASS OFF";
 
         return
-            $"RimClone | FPS={_fps:0.0} RAM={_workingSetBytes / 1024d / 1024d:0}MB " +
+            $"RimClone | Speed={_simulationSpeed:0.00}x SimRate={_simulationGameSecondsPerWallSecond:0.00}x UPS={_simulationUpdatesPerSecond:0} | " +
+            $"FPS={_fps:0.0} RAM={_workingSetBytes / 1024d / 1024d:0}MB " +
             $"Heap={_managedHeapBytes / 1024d / 1024d:0}MB " +
             $"Alloc/s={_allocatedBytesPerSecond / 1024d / 1024d:0.0}MB/s TotalAlloc={_allocatedBytes / 1024d / 1024d:0}MB | " +
             $"Terrain={_mapRenderer.TerrainQuadCount:N0} quads Chunks={_mapRenderer.TerrainChunkCacheCount} LayerShader={_mapRenderer.UsesTerrainLayerShader} VisibleV={_mapRenderer.TerrainVertexCount:N0} CacheV={_mapRenderer.TerrainCachedVertexCount:N0} ScratchV={_mapRenderer.TerrainScratchCapacity:N0} VBO={_mapRenderer.UsesTerrainVertexBuffer} LastChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms ChunkBuilds={_mapRenderer.TerrainMeshRebuildCount} | " +
@@ -2751,6 +2765,7 @@ public sealed class GameRenderer
                         _worldMap,
                         simulationDeltaTime);
                     _unitSimulation.Update(_worldMap, simulationDeltaTime);
+                    RecordSimulationStep(simulationDeltaTime);
                 }
                 catch (Exception exception)
                 {
@@ -3473,6 +3488,14 @@ public sealed class GameRenderer
                 _showUtilityAiDebug = !_showUtilityAiDebug;
                 break;
         }
+    }
+
+    private void RecordSimulationStep(float deltaTime)
+    {
+        Interlocked.Increment(ref _simulationUpdatesSample);
+        Interlocked.Add(
+            ref _simulationGameMicrosecondsSample,
+            (long)(Math.Max(0f, deltaTime) * 1_000_000d));
     }
 
     private void ChangeSimulationSpeed(int direction)
