@@ -74,10 +74,10 @@ public sealed record AiBalanceProfile
     public float MeleeEngagementRangeFraction { get; init; } = 0.94f;
     public float MeleeMinimumEngagementDistance { get; init; } = 0.20f;
     public float CoverSearchRadius { get; init; } = 8f;
-    public float FlankNearBackoffDistance { get; init; } = 8f;
-    public float FlankNearLateralDistance { get; init; } = 12f;
-    public float FlankFarBackoffDistance { get; init; } = 16f;
-    public float FlankFarLateralDistance { get; init; } = 18f;
-    public float FlankNearRangeFraction { get; init; } = 0.70f;
-    public float FlankFarRangeFraction { get; init; } = 0.82f;
+    public float FlankNearBackoffDistance { get; init; } = 4f;
+    public float FlankNearLateralDistance { get; init; } = 6f;
+    public float FlankFarBackoffDistance { get; init; } = 6f;
+    public float FlankFarLateralDistance { get; init; } = 8f;
+    public float FlankNearRangeFraction { get; init; } = 0.90f;
+    public float FlankFarRangeFraction { get; init; } = 0.98f;
 }
