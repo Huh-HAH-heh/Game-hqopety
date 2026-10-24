@@ -3913,6 +3913,11 @@ public sealed class GameRenderer
         {
             if (!_massCombatMode)
                 return;
+            if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
+            {
+                Console.WriteLine("[EVOLVE LIVE] Stop training with F5 before changing battle scale.");
+                return;
+            }
 
             // Scale changes rebuild both terrain and units, so perform them
             // with the simulation worker stopped rather than racing the map renderer.
@@ -3927,6 +3932,12 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.C)
         {
+            if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
+            {
+                Console.WriteLine("[EVOLVE LIVE] Stop training with F5 before switching scenes.");
+                return;
+            }
+
             StopSimulationThread();
             ToggleTerrainCombatTest();
             if (_massCombatMode)
