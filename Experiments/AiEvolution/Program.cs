@@ -247,10 +247,11 @@ internal static class Program
         string etaText=_progressPhase=="TRAIN" && fraction>0d
             ? TimeSpan.FromSeconds(Math.Max(0d,elapsed.TotalSeconds*(1d-fraction)/fraction)).ToString(@"hh\:mm\:ss")
             : "--:--:--";
+        string elapsedText=elapsed.ToString(@"hh\:mm\:ss");
         string status=$"[EVOLVE] {_progressPhase} | gen {_generationNow}/{_generationsTotal} | " +
             $"candidate {_candidateNow}/{_populationTotal} | battle {_battleNow}/{_battlesTotal} " +
             $"{_currentScenarioName} | tick {tick}/{totalTicks} ({tick/(double)Math.Max(1,totalTicks):P0}) | " +
-            $"elapsed {elapsed:hh\:mm\:ss} | ETA {etaText}";
+            $"elapsed {elapsedText} | ETA {etaText}";
 
         if(Console.IsOutputRedirected)
         {
