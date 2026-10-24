@@ -281,9 +281,9 @@ public sealed class GameRenderer
         if (string.IsNullOrWhiteSpace(configuredPath))
             return;
 
-        string fullPath = Path.GetFullPath(configuredPath);
         try
         {
+            string fullPath = Path.GetFullPath(configuredPath);
             AiBalanceProfile? profile = JsonSerializer.Deserialize<AiBalanceProfile>(
                 File.ReadAllText(fullPath),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
@@ -299,7 +299,7 @@ public sealed class GameRenderer
         }
         catch (Exception exception)
         {
-            Console.WriteLine($"[AI] Could not load profile '{fullPath}'; keeping default balance. {exception.Message}");
+            Console.WriteLine($"[AI] Could not load profile '{configuredPath}'; keeping default balance. {exception.Message}");
         }
     }
 
