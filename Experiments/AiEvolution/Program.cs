@@ -100,7 +100,7 @@ internal static class Program
             File.WriteAllText(validationPath,JsonSerializer.Serialize(validationReport,new JsonSerializerOptions{WriteIndented=true}));
             Console.WriteLine($"HOLDOUT baseline: score={baseline.Fitness:F2}; wins={baseline.WinRate:P1}; survivor-rate={baseline.SurvivorRate:P1}");
             Console.WriteLine($"HOLDOUT trained:  score={trained.Fitness:F2}; wins={trained.WinRate:P1}; survivor-rate={trained.SurvivorRate:P1}");
-            Console.WriteLine($"HOLDOUT delta:    score={trained.Fitness-baseline.Fitness:+0.00;-0.00;0.00}; wins={trained.WinRate-baseline.WinRate:+P1;-P1;P1}");
+            Console.WriteLine($"HOLDOUT delta:    score={trained.Fitness-baseline.Fitness:+0.00;-0.00;0.00}; wins={trained.WinRate-baseline.WinRate:+0.0%;-0.0%;0.0%}");
             Console.WriteLine($"Saved profile: {output}");
             Console.WriteLine($"History: {csv}");
             Console.WriteLine($"Holdout report: {validationPath}");
