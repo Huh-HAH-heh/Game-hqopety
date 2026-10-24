@@ -636,7 +636,7 @@ internal static class Program
             hasAttackOrder: test.HasAttackOrder,
             moveOrderUtility: test.MoveOrderUtility,
             combatUtility: test.CombatUtility,
-            hasAudibleContact: test.HasAudibleContact,
+            hasInvestigableContact: test.HasAudibleContact,
             isInImmediateDanger: test.HasImmediateDanger,
             isAlerted: test.IsAlerted,
             coverUtility: test.CoverUtility,
