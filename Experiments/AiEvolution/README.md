@@ -1,6 +1,6 @@
 # RimClone AI Evolution Trainer
 
-Offline evolutionary trainer running the real `Core.Unit.UnitSimulation` loop: perception, Utility AI, movement, ranged and melee weapon handling, projectile/damage and death processing. It runs without a renderer window. Each team contains both ranged fighters and a knife user so range and melee positioning genes receive feedback.
+Offline evolutionary trainer running the real `Core.Unit.UnitSimulation` loop: perception, Utility AI, movement, ranged and melee weapon handling, projectile/damage and death processing. It runs without a renderer window. Each team contains both ranged fighters and a knife user, and the trainer registers both teams as squads so delayed contact-sharing behavior is exercised.
 
 ## Run from the repository root
 
