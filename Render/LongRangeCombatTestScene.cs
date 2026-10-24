@@ -11,6 +11,7 @@ public sealed class LongRangeCombatTestScene
 {
     // Starts with 400 units per faction; 24 red units are isolated for melee. F8 cycles 80/400/800 per side.
     private const int InitialUnitsPerFaction = 400;
+    private const bool EnableScriptedFallbackVolleys = false;
     private const int Columns = 40;
     private const float FormationSpacing = 2.5f;
 
@@ -21,10 +22,9 @@ public sealed class LongRangeCombatTestScene
     private const float CombatDistance = 200f;
     private const float BaseHeight = 6f;
     private const float TerrainScale = 2.25f;
-    // The line-to-line gap is wider than vision after only 25 m of advance.
-    // Advance far enough for the front ranks to acquire targets while marching.
+    // Long-range stress setup: evaluate target acquisition across the initial 200 m gap.
     private const float AdvanceDistance = 50f;
-    private const float VisionStressRange = 85f;
+    private const float VisionStressRange = 200f;
     private const ushort BaseMaterialId = 1;
     private const int MeleeDuelUnitsPerSide = 24;
     private const int MeleeFormationColumns = 6;
@@ -159,9 +159,9 @@ public sealed class LongRangeCombatTestScene
                 0f,
                 deltaTime);
 
-        // Scripted volleys keep the opening fight active until AI is enabled.
-        // The two fire drivers never fire at once.
-        if (simulation.AI.Enabled)
+        // Autonomous AI and scripted fallback firing are both disabled for the
+        // systematic AI rebuild. Keep FireVolley available for controlled experiments.
+        if (simulation.AI.Enabled || !EnableScriptedFallbackVolleys)
         {
             _fireTimer = 0f;
         }
@@ -188,7 +188,7 @@ public sealed class LongRangeCombatTestScene
             $"FIGHT {TotalUnits + _thirdFactionUnits.Length} total | " +
             $"Blue {AliveBlue} | Red {AliveRed} | F3 melee {AliveThirdFaction} | " +
             $"Initial center gap {CombatDistance:0}m | Advance {AdvanceDistance:0}m | " +
-            $"Fire mode {(simulation.AI.Enabled ? "AI" : "scripted volley")} | " +
+            $"Fire mode {(simulation.AI.Enabled ? "AI" : EnableScriptedFallbackVolleys ? "scripted volley" : "disabled")} | " +
             $"Vision {(simulation.VisionEnabled ? "ON" : "OFF")} | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Routes {simulation.Navigation.RoutesBuilt} built/{simulation.Navigation.RoutesFailed} failed | " +
@@ -643,8 +643,9 @@ public sealed class LongRangeCombatTestScene
         int unitIndex =
             id.Index;
 
-        // Keep the detached squad out of the main firefight until it spots faction 3.
-        if (isMeleeDuelUnit)
+        // Keep units stationary while autonomous AI is disabled. A controlled AI
+        // experiment can still initialize the old marching targets explicitly.
+        if (isMeleeDuelUnit || !simulation.AI.Enabled)
             simulation.SetTarget(id, position);
         else
             SetMarchTarget(simulation, id, worldMap, side, tileX, tileY);
@@ -782,7 +783,7 @@ public sealed class LongRangeCombatTestScene
             simulation.Units.Velocity[unit] =
                 Vector3.Zero;
 
-            if (isMeleeDuelUnit)
+            if (isMeleeDuelUnit || !simulation.AI.Enabled)
                 simulation.SetTarget(_units[i], simulation.Units.Position[unit]);
             else
                 SetMarchTarget(simulation, _units[i], worldMap, side, tileX, tileY);

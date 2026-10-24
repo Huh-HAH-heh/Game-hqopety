@@ -149,9 +149,7 @@ public sealed class SimulationFrameSnapshot
     public int BehaviacRetreatCount { get; init; }
     public int BehaviacFlankCount { get; init; }
     public int BehaviacEngageCount { get; init; }
-    public int BehaviacSuppressCount { get; init; }
     public int BehaviacInvestigateCount { get; init; }
-    public int BehaviacPatrolCount { get; init; }
     public double MovementMs { get; init; }
     public double WeaponsMs { get; init; }
     public double BallisticsMs { get; init; }
@@ -210,8 +208,8 @@ public sealed class SimulationFrameSnapshot
         sourceMeleeHits.CopyTo(meleeHitVisuals);
         RenderUnitState[] unitStates = new RenderUnitState[active.Length];
 
-        // Flatten all active rigs into one immutable array for the render thread.
-        // Each unit stores a range, avoiding a small managed array per unit per frame.
+        // Flatten active gameplay hit zones and fallback body visuals into one immutable
+        // array for the render thread. Each unit stores a range to avoid per-unit arrays.
         UnitBodyStore bodyStore = simulation.Bodies;
         UnitHitRegionStore hitRegionStore = simulation.HitRegions;
         int[] sourceBodyStarts = units.BodyStart;
@@ -222,6 +220,13 @@ public sealed class SimulationFrameSnapshot
         {
             int unitIndex = active[i];
             UnitHitRegionProfile? profile = hitRegionStore.GetProfile(unitIndex);
+
+            if (unitTypes[unitIndex] == UnitType.Colonist &&
+                profile is UnitAnatomyProfile)
+            {
+                totalBodyParts += UnitGameplayZoneSystem.ZoneCount;
+                continue;
+            }
 
             if (unitTypes[unitIndex] == UnitType.Colonist && profile != null)
             {
@@ -333,18 +338,6 @@ public sealed class SimulationFrameSnapshot
             bool hasGoal = aiStore.HasGoal[index];
             Vector3 goal = aiStore.Goal[index];
 
-            // Patrol can be advancing toward a scenario-issued movement target
-            // before it has created its own search waypoint. Publish that active
-            // destination as the patrol marker too, rather than leaving the AI
-            // overlay blank while the pawn is visibly moving.
-            if (aiIntent == BehaviacUnitIntent.Patrol &&
-                !hasGoal &&
-                units.HasTarget[index])
-            {
-                hasGoal = true;
-                goal = units.Target[index];
-            }
-
             float suppression = suppressionStore.Value[index];
             UnitSuppressionState suppressionState = suppressionStore.GetState(index);
 
@@ -358,21 +351,16 @@ public sealed class SimulationFrameSnapshot
             UnitHitRegionProfile? hitProfile = hitRegionStore.GetProfile(index);
 
             if (unitTypes[index] == UnitType.Colonist &&
-                hitProfile is UnitAnatomyProfile anatomy &&
-                anatomy.HasSharedShapes &&
-                sourceBodyCount == anatomy.NodeCount)
+                hitProfile is UnitAnatomyProfile)
             {
-                // The anatomy rig is the rendering source of truth: preserve
-                // each live primitive, scale and rotation used by UnitBodyStore.
-                for (int part = 0; part < anatomy.NodeCount; part++)
+                // Draw the exact three procedural zones used by projectile hit testing.
+                // Do not substitute the informational anatomy rig for gameplay geometry.
+                for (int zoneIndex = 0; zoneIndex < UnitGameplayZoneSystem.ZoneCount; zoneIndex++)
                 {
-                    int sourceIndex = sourceBodyStart + part;
-                    renderBodyParts[renderBodyPartWrite++] = new RenderBodyPart(
-                        sourceBodyPositions[sourceIndex],
-                        sourceBodyScales[sourceIndex],
-                        sourceBodyRotations[sourceIndex],
-                        sourceBodyPrimitives[sourceIndex],
-                        sourceBodyRoles[sourceIndex]);
+                    UnitGameplayZoneGeometry zone = UnitGameplayZoneSystem.GetGeometry(
+                        units, index, zoneIndex);
+                    renderBodyParts[renderBodyPartWrite++] =
+                        UnitGameplayZoneRenderGeometry.CreatePart(zone);
                 }
             }
             else if (unitTypes[index] == UnitType.Colonist && hitProfile != null)
@@ -650,9 +638,7 @@ public sealed class SimulationFrameSnapshot
             BehaviacRetreatCount = simulation.AI.LastBehaviacRetreatDecisions,
             BehaviacFlankCount = simulation.AI.LastBehaviacFlankDecisions,
             BehaviacEngageCount = simulation.AI.LastBehaviacEngageDecisions,
-            BehaviacSuppressCount = simulation.AI.LastBehaviacSuppressDecisions,
             BehaviacInvestigateCount = simulation.AI.LastBehaviacInvestigateDecisions,
-            BehaviacPatrolCount = simulation.AI.LastBehaviacPatrolDecisions,
             MovementMs = simulation.LastMovementUpdateMilliseconds,
             WeaponsMs = simulation.LastWeaponUpdateMilliseconds,
             BallisticsMs = simulation.LastProjectileUpdateMilliseconds,

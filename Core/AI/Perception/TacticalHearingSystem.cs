@@ -1,0 +1,414 @@
+using System;
+using System.Collections.Generic;
+using System.Numerics;
+using Core.Map;
+using Core.Unit;
+
+namespace Core.AI.Perception;
+
+/// <summary>
+/// Converts loud events and locomotion into uncertain per-observer contacts.
+/// The observer never receives the emitter ID from an audio-only contact.
+/// </summary>
+public sealed class TacticalHearingSystem : PerceptionSenseBase
+{
+    private const float GunshotRange = 180f;
+    private const float GunshotMemorySeconds = 8f;
+    private const float FootstepMemorySeconds = 3f;
+    private const float ConfidenceHalfLifeSeconds = 2.5f;
+    private const float MinimumContactConfidence = 0.12f;
+    private readonly List<SoundPulse> _pendingPulses = new();
+    private readonly PerceptionMemoryStore _memoryStore;
+    private float[] _footstepCooldown;
+    private long _nextPulseId = 1;
+    public float CurrentTimeSeconds => _memoryStore.CurrentTimeSeconds;
+
+    public override string Id => "auditory";
+    public override PerceptionSense Channel => PerceptionSense.Auditory;
+
+    protected override void UpdateCore(in PerceptionSenseContext context) =>
+        Update(
+            context.Units,
+            context.Health,
+            context.Suppression,
+            context.SimulationTimeSeconds,
+            context.DeltaTime,
+            context.WorldMap,
+            context.Vision);
+
+    public TacticalHearingSystem(
+        int initialUnitCapacity = 1024,
+        PerceptionMemoryStore? memoryStore = null)
+    {
+        if (initialUnitCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(initialUnitCapacity));
+
+        _memoryStore = memoryStore ?? new PerceptionMemoryStore(initialUnitCapacity);
+        _memoryStore.EnsureCapacity(initialUnitCapacity);
+        _footstepCooldown = new float[initialUnitCapacity];
+    }
+
+    public void EmitGunshot(UnitId shooter, Vector3 position, ushort factionTag) =>
+        EmitDanger(shooter, factionTag, TacticalStimulusType.Gunshot, position, 1f, GunshotRange);
+
+    public void EmitDanger(
+        UnitId sourceUnit,
+        ushort sourceFaction,
+        TacticalStimulusType type,
+        Vector3 position,
+        float intensity,
+        float audibleRange)
+    {
+        if (!IsFinite(position) ||
+            !float.IsFinite(intensity) ||
+            !float.IsFinite(audibleRange) ||
+            intensity <= 0f ||
+            audibleRange <= 0f ||
+            type is not (TacticalStimulusType.Gunshot or TacticalStimulusType.NearMiss or
+                TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion))
+            return;
+
+        _pendingPulses.Add(new SoundPulse(
+            _nextPulseId++, sourceUnit, sourceFaction, position, type,
+            CurrentTimeSeconds, Math.Clamp(intensity, 0f, 1f), audibleRange));
+    }
+
+    /// <summary>
+    /// Entry point for future blast producers. The current weapon model does not
+    /// yet implement explosive ammunition or radius-based blast damage.
+    /// </summary>
+    public void EmitExplosion(
+        Vector3 position,
+        ushort sourceFaction = 0,
+        float intensity = 1f,
+        float audibleRange = 80f) =>
+        EmitDanger(default, sourceFaction, TacticalStimulusType.Explosion,
+            position, intensity, audibleRange);
+
+    public void Update(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitSuppressionStore response,
+        float nowSeconds,
+        float deltaTime,
+        WorldMap? worldMap = null,
+        VisionSystem? vision = null)
+    {
+        ArgumentNullException.ThrowIfNull(units);
+        ArgumentNullException.ThrowIfNull(health);
+        if (!float.IsFinite(nowSeconds) || nowSeconds < CurrentTimeSeconds)
+            throw new ArgumentOutOfRangeException(nameof(nowSeconds));
+        EnsureCapacity(units.Capacity);
+        if (!float.IsFinite(deltaTime) || deltaTime <= 0f)
+            return;
+        CollectFootsteps(units, health, deltaTime, nowSeconds);
+        DeliverPulses(units, health, response, nowSeconds, worldMap, vision);
+        _pendingPulses.Clear();
+    }
+
+    public override void InitializeUnit(int unitIndex)
+    {
+        if (unitIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(unitIndex));
+        EnsureCapacity(unitIndex + 1);
+        _footstepCooldown[unitIndex] = 0f;
+    }
+
+    public override void ClearUnit(int unitIndex)
+    {
+        if ((uint)unitIndex < (uint)_footstepCooldown.Length)
+            _footstepCooldown[unitIndex] = 0f;
+    }
+
+    public bool HasInvestigableContact(int observerIndex) =>
+        TryGetBestInvestigableContact(observerIndex, out _);
+
+    public bool TryGetBestInvestigableContact(int observerIndex, out TacticalContact contact)
+    {
+        contact = null!;
+        if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
+            return false;
+        float bestScore = 0f;
+        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            TacticalContact candidate = contacts[i];
+            if (candidate.IsInvestigated ||
+                candidate.ExpiresAtSeconds <= CurrentTimeSeconds ||
+                candidate.LastStimulusType is not (TacticalStimulusType.Gunshot or TacticalStimulusType.Footstep))
+                continue;
+            float confidence = candidate.GetEffectiveConfidence(CurrentTimeSeconds, ConfidenceHalfLifeSeconds);
+            float minimum = candidate.LastStimulusType == TacticalStimulusType.Footstep ? 0.18f : 0.16f;
+            if (confidence < minimum)
+                continue;
+            float score = confidence +
+                (candidate.LastStimulusType == TacticalStimulusType.Gunshot ? 0.12f : 0f);
+            if (score <= bestScore)
+                continue;
+            bestScore = score;
+            contact = candidate;
+        }
+        return bestScore > 0f;
+    }
+
+    public bool HasImmediateDangerContact(int observerIndex) =>
+        TryGetBestImmediateDangerContact(observerIndex, out _);
+
+    public bool TryGetBestImmediateDangerContact(int observerIndex, out TacticalContact contact)
+    {
+        contact = null!;
+        if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
+            return false;
+
+        float bestScore = 0f;
+        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            TacticalContact candidate = contacts[i];
+            if (candidate.IsInvestigated ||
+                candidate.ExpiresAtSeconds <= CurrentTimeSeconds ||
+                candidate.LastStimulusType is not (TacticalStimulusType.NearMiss or
+                    TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion))
+                continue;
+
+            float confidence = candidate.GetEffectiveConfidence(CurrentTimeSeconds, ConfidenceHalfLifeSeconds);
+            if (confidence < 0.14f || confidence <= bestScore)
+                continue;
+            bestScore = confidence;
+            contact = candidate;
+        }
+        return bestScore > 0f;
+    }
+
+    public bool MarkInvestigated(int observerIndex, long contactId)
+    {
+        if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
+            return false;
+        return memory.MarkInvestigated(contactId);
+    }
+
+    private void CollectFootsteps(UnitStore units, UnitHealthStore health, float deltaTime, float nowSeconds)
+    {
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            _footstepCooldown[unit] = MathF.Max(0f, _footstepCooldown[unit] - deltaTime);
+            if (health.OverallHitPoints[unit] <= 0f)
+            {
+                _footstepCooldown[unit] = 0f;
+                continue;
+            }
+            Vector3 velocity = units.Velocity[unit];
+            if (velocity.X * velocity.X + velocity.Y * velocity.Y < 0.36f ||
+                _footstepCooldown[unit] > 0f)
+                continue;
+            UnitPosture posture = units.Posture[unit];
+            float intensity, range, interval;
+            switch (posture)
+            {
+                case UnitPosture.Lying: intensity = 0.22f; range = 9f; interval = 0.90f; break;
+                case UnitPosture.Crouching: intensity = 0.36f; range = 14f; interval = 0.70f; break;
+                case UnitPosture.Sitting: intensity = 0.28f; range = 11f; interval = 0.80f; break;
+                default: intensity = 0.55f; range = 20f; interval = 0.50f; break;
+            }
+            _pendingPulses.Add(new SoundPulse(
+                _nextPulseId++, units.GetId(unit), units.FactionTag[unit],
+                units.Position[unit], TacticalStimulusType.Footstep, nowSeconds, intensity, range));
+            _footstepCooldown[unit] = interval;
+        }
+    }
+
+    private void DeliverPulses(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitSuppressionStore response,
+        float nowSeconds,
+        WorldMap? worldMap,
+        VisionSystem? vision)
+    {
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        for (int pulseIndex = 0; pulseIndex < _pendingPulses.Count; pulseIndex++)
+        {
+            SoundPulse pulse = _pendingPulses[pulseIndex];
+            float lifetime = pulse.Type switch
+            {
+                TacticalStimulusType.Footstep => FootstepMemorySeconds,
+                TacticalStimulusType.Gunshot => GunshotMemorySeconds,
+                TacticalStimulusType.NearMiss => 5f,
+                TacticalStimulusType.CoverImpact => 6f,
+                TacticalStimulusType.Explosion => 10f,
+                _ => 4f
+            };
+            if (nowSeconds - pulse.OccurredAtSeconds >= lifetime)
+                continue;
+            for (int i = 0; i < active.Length; i++)
+            {
+                int observer = active[i];
+                if (health.OverallHitPoints[observer] <= 0f ||
+                    units.GetId(observer).Equals(pulse.SourceUnit))
+                    continue;
+                ushort observerFaction = units.FactionTag[observer];
+                if (pulse.SourceFaction != 0 && pulse.SourceFaction == observerFaction)
+                    continue;
+                Vector3 observerPosition = units.Position[observer];
+                float dx = pulse.Position.X - observerPosition.X;
+                float dy = pulse.Position.Y - observerPosition.Y;
+                float d2 = dx * dx + dy * dy;
+                if (d2 > pulse.Range * pulse.Range)
+                    continue;
+                float distance = MathF.Sqrt(d2);
+                float attenuation = Math.Clamp(1f - distance / pulse.Range, 0f, 1f);
+                float confidence = pulse.Intensity * (0.25f + 0.75f * attenuation);
+                if (confidence < MinimumContactConfidence)
+                    continue;
+                float error = pulse.Type == TacticalStimulusType.Footstep
+                    ? 1.5f + distance * 0.20f
+                    : 4f + distance * 0.22f;
+                Vector3 estimate = EstimatePosition(pulse, observer, error, attenuation);
+                _memoryStore.Record(
+                    observer,
+                    new TacticalStimulus(
+                        pulse.Type, estimate, pulse.OccurredAtSeconds,
+                        pulse.Intensity, error, confidence),
+                    nowSeconds,
+                    lifetime);
+
+                float alertFactor = pulse.Type switch
+                {
+                    TacticalStimulusType.Gunshot => 0.42f,
+                    TacticalStimulusType.Footstep => 0.24f,
+                    TacticalStimulusType.NearMiss => 0.55f,
+                    TacticalStimulusType.CoverImpact => 0.36f,
+                    TacticalStimulusType.Explosion => 0.70f,
+                    _ => 0.18f
+                };
+                response.AddAlertness(observer, alertFactor * confidence, estimate);
+                ApplyImmediateDangerResponse(
+                    response, units, vision, worldMap, observer, pulse.Type,
+                    pulse.Position, pulse.Range, confidence, estimate);
+            }
+        }
+    }
+
+    private static void ApplyImmediateDangerResponse(
+        UnitSuppressionStore response,
+        UnitStore units,
+        VisionSystem? vision,
+        WorldMap? worldMap,
+        int observer,
+        TacticalStimulusType type,
+        Vector3 sourcePosition,
+        float eventRange,
+        float confidence,
+        Vector3 estimatedSource)
+    {
+        float dangerRadius;
+        float minimumConfidence;
+        float duration;
+
+        switch (type)
+        {
+            case TacticalStimulusType.NearMiss:
+                dangerRadius = 5f;
+                minimumConfidence = 0.20f;
+                duration = 0.25f + 0.25f * confidence;
+                break;
+            case TacticalStimulusType.CoverImpact:
+                dangerRadius = 8f;
+                minimumConfidence = 0.24f;
+                duration = 0.16f + 0.30f * confidence;
+                break;
+            case TacticalStimulusType.Explosion:
+                dangerRadius = Math.Clamp(eventRange * 0.30f, 10f, 24f);
+                minimumConfidence = 0.18f;
+                duration = 0.45f + 0.85f * confidence;
+                break;
+            default:
+                return;
+        }
+
+        // Sound can travel vertically, but danger radius is physical 3D proximity.
+        float dangerDistance = Vector3.Distance(units.Position[observer], sourcePosition);
+        if (!float.IsFinite(dangerDistance) ||
+            dangerDistance > dangerRadius ||
+            confidence < minimumConfidence)
+            return;
+
+        bool hasDirectExposure = true;
+        if ((type is TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion) &&
+            vision != null && worldMap != null)
+        {
+            Vector3 eyePosition = vision.GetEyePosition(units, observer);
+            Vector3 exposurePoint = sourcePosition;
+
+            // Terrain impacts are reported at the material entry boundary.
+            // Check the observer-side point just before that boundary, not a
+            // point that is already inside the wall that stopped the projectile.
+            if (type == TacticalStimulusType.CoverImpact)
+            {
+                Vector3 towardObserver = eyePosition - sourcePosition;
+                float distanceSquared = towardObserver.LengthSquared();
+                if (distanceSquared > 0.000001f)
+                {
+                    float backoff = MathF.Min(0.05f, MathF.Sqrt(distanceSquared) * 0.5f);
+                    exposurePoint += towardObserver * (backoff / MathF.Sqrt(distanceSquared));
+                }
+            }
+
+            hasDirectExposure = vision.HasLineOfSight(
+                worldMap, eyePosition, exposurePoint, out _);
+        }
+
+        // A wall that stops a round protects units behind it from the impact.
+        // The report still raises alertness, but does not force a cover reaction.
+        if (type == TacticalStimulusType.CoverImpact && !hasDirectExposure)
+            return;
+
+        // A blast can still be heard behind terrain, but its immediate pressure is lower.
+        if (type == TacticalStimulusType.Explosion && !hasDirectExposure)
+            duration *= 0.25f;
+
+        // Suppression resistance reduces flinch-driven reactions to close rounds
+        // and nearby impacts; it does not make a true blast physically harmless.
+        if (type is TacticalStimulusType.NearMiss or TacticalStimulusType.CoverImpact)
+            duration *= 1f - response.GetSuppressionResistance(observer) * 0.45f;
+
+        // Existing cover status further reduces urgency once a protected position is reached.
+        if ((uint)observer < (uint)response.InCover.Length && response.InCover[observer])
+            duration *= 0.60f;
+
+        if (duration < 0.16f)
+            return;
+
+        response.MarkImmediateDanger(observer, duration, estimatedSource);
+    }
+
+    private static Vector3 EstimatePosition(SoundPulse pulse, int observer, float error, float attenuation)
+    {
+        ulong seed = unchecked(
+            (ulong)pulse.Sequence * 6364136223846793005UL +
+            (ulong)(observer + 1) * 1442695040888963407UL +
+            (ulong)(pulse.SourceUnit.Index + 1) * 22695477UL);
+        float angle = (seed % 628319UL) / 100000f;
+        float offset = error * (0.15f + (1f - attenuation) * 0.45f);
+        return new Vector3(
+            pulse.Position.X + MathF.Cos(angle) * offset,
+            pulse.Position.Y + MathF.Sin(angle) * offset,
+            pulse.Position.Z);
+    }
+
+    private void EnsureCapacity(int required)
+    {
+        _memoryStore.EnsureCapacity(required);
+        if (_footstepCooldown.Length < required)
+            Array.Resize(ref _footstepCooldown, Math.Max(required, _footstepCooldown.Length * 2));
+    }
+
+    private static bool IsFinite(Vector3 value) =>
+        float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+
+    private readonly record struct SoundPulse(
+        long Sequence, UnitId SourceUnit, ushort SourceFaction, Vector3 Position,
+        TacticalStimulusType Type, float OccurredAtSeconds, float Intensity, float Range);
+}

@@ -1,5 +1,6 @@
 using Core.Items;
 using Core.Map;
+using Core.AI.Perception;
 using System;
 using System.Diagnostics;
 using System.Numerics;
@@ -18,6 +19,9 @@ public sealed class UnitSimulation
     private readonly ProjectileSystem _projectileSystem;
     private readonly UnitAiSystem _aiSystem;
     private readonly MeleeCombatSystem _meleeCombatSystem;
+    private readonly TacticalHearingSystem _hearingSystem;
+    private readonly VisualPerceptionSense _visualPerceptionSense;
+    private float _simulationTimeSeconds;
     private bool[] _deathHandled = Array.Empty<bool>();
     private float[] _baseMoveSpeed = Array.Empty<float>();
 
@@ -32,25 +36,17 @@ public sealed class UnitSimulation
     public UnitWeaponStore Weapons { get; }
     public ProjectileStore Projectiles { get; }
     public UnitSuppressionStore Suppression { get; }
-
-    private bool _visionEnabled = true;
+    public PerceptionMemoryStore PerceptionMemory { get; }
+    public PerceptionSystem Perception { get; }
 
     public bool VisionEnabled
     {
-        get => _visionEnabled;
-        set
-        {
-            if (_visionEnabled == value)
-                return;
-
-            _visionEnabled = value;
-
-            if (!value)
-                _visionSystem.ClearAll();
-        }
+        get => _visualPerceptionSense.Enabled;
+        set => _visualPerceptionSense.Enabled = value;
     }
 
     public double LastSimulationUpdateMilliseconds { get; private set; }
+    public double LastPerceptionUpdateMilliseconds { get; private set; }
     public double LastSuppressionUpdateMilliseconds { get; private set; }
     public double LastVisionCallMilliseconds { get; private set; }
     public double LastAIUpdateMilliseconds { get; private set; }
@@ -69,6 +65,14 @@ public sealed class UnitSimulation
     {
         _weaponSystem.BeginMetricsFrame();
     }
+
+    /// <summary>Reports an explosion to nearby units when a blast producer supplies the event.</summary>
+    public void ReportExplosion(
+        Vector3 position,
+        ushort sourceFaction = 0,
+        float intensity = 1f,
+        float audibleRange = 80f) =>
+        _hearingSystem.EmitExplosion(position, sourceFaction, intensity, audibleRange);
     public double LastProjectileGridBuildMilliseconds =>
         _projectileSystem.LastGridBuildMilliseconds;
     public int LastProjectilesVisited =>
@@ -80,6 +84,8 @@ public sealed class UnitSimulation
 
     public UnitAiSystem AI =>
         _aiSystem;
+    internal TacticalHearingSystem HearingSystem =>
+        _hearingSystem;
     public MeleeCombatSystem MeleeCombat =>
         _meleeCombatSystem;
     public VisionSystem Vision =>
@@ -138,23 +144,34 @@ public sealed class UnitSimulation
         Suppression =
             new UnitSuppressionStore(unitCapacity);
         Suppression.BindSkillStore(Skills);
+        PerceptionMemory = new PerceptionMemoryStore(unitCapacity);
+        _hearingSystem = new TacticalHearingSystem(unitCapacity, PerceptionMemory);
 
         _weaponSystem =
             new UnitWeaponSystem(HitRegions, Bodies, Skills, Health);
+        _weaponSystem.ShotFired += _hearingSystem.EmitGunshot;
 
         _projectileSystem =
             new ProjectileSystem();
+        _projectileSystem.DangerStimulus += _hearingSystem.EmitDanger;
 
         _visionSystem =
             new VisionSystem(
                 unitCapacity,
                 HitRegions);
 
+        _visualPerceptionSense = new VisualPerceptionSense(_visionSystem);
+        Perception = new PerceptionSystem(PerceptionMemory);
+        Perception.Register(_hearingSystem);
+        Perception.Register(_visualPerceptionSense);
+
         _aiSystem =
             new UnitAiSystem(
                 unitCapacity,
                 _weaponSystem,
-                Skills);
+                Skills,
+                PerceptionMemory);
+        _aiSystem.Hearing = _hearingSystem;
 
         _meleeCombatSystem = new MeleeCombatSystem();
     }
@@ -329,6 +346,7 @@ public sealed class UnitSimulation
         Health.RegisterHitRegionParts(id.Index, hitProfile);
         Inventory.InitializeUnit(id.Index);
         Weapons.InitializeUnit(id.Index);
+        Perception.InitializeUnit(id.Index);
         Skills.InitializeUnit(id.Index, definition.Type, Units.FactionTag[id.Index]);
         Suppression.InitializeUnit(id.Index);
         _aiSystem.Store.InitializeUnit(id.Index);
@@ -367,8 +385,9 @@ public sealed class UnitSimulation
             return false;
         }
 
+        _aiSystem.InvalidateSquadUnit(id);
         _movementSystem.Navigation.ClearRoute(index);
-        _visionSystem.ClearUnit(index);
+        Perception.ClearUnit(index);
         _deathHandled[index] = false;
 
         BodyHandle body =
@@ -912,22 +931,35 @@ public sealed class UnitSimulation
         long totalStarted = Stopwatch.GetTimestamp();
         EnsureDeathCapacity();
 
+        if (float.IsFinite(deltaTime) && deltaTime > 0f)
+            _simulationTimeSeconds += deltaTime;
+
         long phaseStarted = Stopwatch.GetTimestamp();
+        var perceptionContext = new PerceptionSenseContext(
+            Units,
+            Health,
+            Inventory,
+            Weapons,
+            Suppression,
+            Metabolism,
+            Skills,
+            Bodies,
+            HitRegions,
+            worldMap,
+            _visionSystem,
+            PerceptionMemory,
+            _simulationTimeSeconds,
+            deltaTime);
+        Perception.Update(in perceptionContext);
+        LastPerceptionUpdateMilliseconds =
+            Perception.LastUpdateMilliseconds;
+        LastVisionCallMilliseconds =
+            _visualPerceptionSense.LastUpdateMilliseconds;
+
+        phaseStarted = Stopwatch.GetTimestamp();
         Suppression.Update(Units, deltaTime);
         LastSuppressionUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
-
-        if (VisionEnabled)
-        {
-            phaseStarted = Stopwatch.GetTimestamp();
-            _visionSystem.Update(Units, worldMap, deltaTime, Health, Bodies);
-            LastVisionCallMilliseconds =
-                Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
-        }
-        else
-        {
-            LastVisionCallMilliseconds = 0d;
-        }
 
         phaseStarted = Stopwatch.GetTimestamp();
         _aiSystem.Update(
@@ -1002,7 +1034,8 @@ public sealed class UnitSimulation
             Projectiles,
             Suppression,
             worldMap,
-            deltaTime);
+            deltaTime,
+            _visionSystem);
         LastProjectileUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
 
@@ -1120,6 +1153,7 @@ public sealed class UnitSimulation
 
         _deathHandled[unitIndex] = true;
         UnitId deadId = Units.GetId(unitIndex);
+        _aiSystem.InvalidateSquadUnit(deadId);
 
         // Do not leave live units' AI or weapon state pointing at the corpse.
         ReadOnlySpan<int> active = Units.ActiveIndices;
@@ -1148,7 +1182,7 @@ public sealed class UnitSimulation
         Units.Velocity[unitIndex] = Vector3.Zero;
         Units.Posture[unitIndex] = UnitPosture.Lying;
         _movementSystem.Navigation.ClearRoute(unitIndex);
-        _visionSystem.ClearUnit(unitIndex);
+        Perception.ClearUnit(unitIndex);
         Weapons.CancelActions(unitIndex);
         _aiSystem.Store.ClearUnit(unitIndex);
         _aiSystem.Store.State[unitIndex] = UnitAiState.Dead;

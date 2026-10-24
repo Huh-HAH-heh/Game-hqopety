@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
 using Core.Combat;
+using Core.AI.Perception;
 
 namespace Core.Unit;
 
@@ -15,12 +16,18 @@ public sealed class ProjectileSystem
     private readonly UnitSpatialGrid _unitGrid = new UnitSpatialGrid();
     private readonly UnitHitSystem _hitSystem = new UnitHitSystem();
     private readonly DamageSystem _damageSystem = new DamageSystem();
+    private int[] _nearMissMarks = Array.Empty<int>();
+    private int[] _nearMissCandidates = Array.Empty<int>();
+    private float[] _nearMissCandidateHitTimes = Array.Empty<float>();
+    private int _nearMissStamp;
 
     public double LastUpdateMilliseconds { get; private set; }
     public double LastGridBuildMilliseconds { get; private set; }
     public int LastProjectilesVisited { get; private set; }
     public int LastTerrainCellsTraced { get; private set; }
     public int LastUnitCandidates { get; private set; }
+
+    public event Action<UnitId, ushort, TacticalStimulusType, Vector3, float, float>? DangerStimulus;
 
     public void Update(
         UnitStore units,
@@ -32,7 +39,8 @@ public sealed class ProjectileSystem
         ProjectileStore projectiles,
         UnitSuppressionStore suppression,
         WorldMap worldMap,
-        float deltaTime)
+        float deltaTime,
+        VisionSystem? vision = null)
     {
         projectiles.UpdateImpactEffects(deltaTime);
 
@@ -52,6 +60,12 @@ public sealed class ProjectileSystem
         LastUnitCandidates = 0;
 
         _unitGrid.Ensure(worldMap, units.Capacity);
+        if (_nearMissMarks.Length < units.Capacity)
+            Array.Resize(ref _nearMissMarks, units.Capacity);
+        if (_nearMissCandidates.Length < units.Capacity)
+            Array.Resize(ref _nearMissCandidates, units.Capacity);
+        if (_nearMissCandidateHitTimes.Length < units.Capacity)
+            Array.Resize(ref _nearMissCandidateHitTimes, units.Capacity);
 
         long gridStarted = Stopwatch.GetTimestamp();
         _unitGrid.Build(units, bodies, health, hitRegions);
@@ -129,6 +143,7 @@ public sealed class ProjectileSystem
                     projectiles,
                     suppression,
                     worldMap,
+                    vision,
                     projectileIndex,
                     start,
                     end);
@@ -172,6 +187,7 @@ public sealed class ProjectileSystem
         ProjectileStore projectiles,
         UnitSuppressionStore suppression,
         WorldMap worldMap,
+        VisionSystem? vision,
         int projectileIndex,
         Vector3 start,
         Vector3 end)
@@ -265,6 +281,9 @@ public sealed class ProjectileSystem
 
         int hitUnitCount = 0;
 
+        // Prevent repeated near-miss effects when the same target occupies several grid cells.
+        int nearMissStamp = NextNearMissStamp();
+
         while (segmentStart < 1f)
         {
             LastTerrainCellsTraced++;
@@ -346,6 +365,8 @@ public sealed class ProjectileSystem
                 (end - start) *
                 segmentEnd;
 
+            int nearMissCandidateCount = 0;
+
             while (node >= 0)
             {
                 int unitIndex =
@@ -387,42 +408,35 @@ public sealed class ProjectileSystem
                     continue;
                 }
 
-                if (!_hitSystem.TryHitUnit(
-                        units,
-                        unitIndex,
-                        subStart,
-                        subEnd,
-                        projectiles.DiameterM[
-                            projectileIndex] *
-                        0.5f,
-                        UnitHealthPartId.None,
-                        out UnitHitResult localHit,
-                        bodies,
-                        hitRegions))
-                {
-                    if (projectiles.Owner[projectileIndex].Index != unitIndex &&
-                        (projectiles.FactionTag[projectileIndex] == 0 ||
-                         units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex]))
-                    {
-                        UnitSuppressionSystem.AddNearMiss(
-                            suppression,
-                            units,
-                            hitRegions,
-                            unitIndex,
-                            subStart,
-                            subEnd,
-                            projectiles.BaseDamage[projectileIndex] +
-                            projectiles.Energy[projectileIndex] * 0.005f,
-                            projectiles.SuppressionFactor[projectileIndex]);
-                    }
+                bool alreadyNearMissed = _nearMissMarks[unitIndex] == nearMissStamp;
+                bool intersectsUnit = _hitSystem.TryHitUnit(
+                    units,
+                    unitIndex,
+                    subStart,
+                    subEnd,
+                    projectiles.DiameterM[projectileIndex] * 0.5f,
+                    UnitHealthPartId.None,
+                    out UnitHitResult localHit,
+                    bodies,
+                    hitRegions);
 
-                    continue;
+                float globalT = intersectsUnit
+                    ? segmentStart + (segmentEnd - segmentStart) * localHit.T
+                    : 2f;
+                // Collect eligible candidates now, but defer the distance query
+                // until the earliest actual collision in this cell is known.
+                if (!alreadyNearMissed &&
+                    (projectiles.FactionTag[projectileIndex] == 0 ||
+                     units.FactionTag[unitIndex] != projectiles.FactionTag[projectileIndex]))
+                {
+                    _nearMissCandidates[nearMissCandidateCount] = unitIndex;
+                    _nearMissCandidateHitTimes[nearMissCandidateCount] =
+                        intersectsUnit ? globalT : 2f;
+                    nearMissCandidateCount++;
                 }
 
-                float globalT =
-                    segmentStart +
-                    (segmentEnd - segmentStart) *
-                    localHit.T;
+                if (!intersectsUnit)
+                    continue;
 
                 if (globalT >= unitT)
                     continue;
@@ -439,6 +453,42 @@ public sealed class ProjectileSystem
                         globalT,
                         localHit.RegionIndex,
                         localHit.BindingIndex);
+            }
+
+            // Only the actually travelled segment can produce a near miss:
+            // a terrain impact or the first unit collision ends this trace piece.
+            float nearMissEndT = MathF.Min(segmentEnd, MathF.Min(terrainT, unitT));
+            Vector3 nearMissEnd = start + (end - start) * nearMissEndT;
+            for (int n = 0; n < nearMissCandidateCount; n++)
+            {
+                int nearMissUnit = _nearMissCandidates[n];
+                if (_nearMissMarks[nearMissUnit] == nearMissStamp ||
+                    _nearMissCandidateHitTimes[n] <= nearMissEndT)
+                    continue;
+
+                if (!UnitSuppressionSystem.AddNearMiss(
+                        suppression,
+                        units,
+                        hitRegions,
+                        nearMissUnit,
+                        subStart,
+                        nearMissEnd,
+                        projectiles.BaseDamage[projectileIndex] +
+                        projectiles.Energy[projectileIndex] * 0.005f,
+                        projectiles.SuppressionFactor[projectileIndex],
+                        worldMap,
+                        vision))
+                    continue;
+
+                _nearMissMarks[nearMissUnit] = nearMissStamp;
+                Vector3 dangerPoint = (subStart + nearMissEnd) * 0.5f;
+                DangerStimulus?.Invoke(
+                    projectiles.Owner[projectileIndex],
+                    projectiles.FactionTag[projectileIndex],
+                    TacticalStimulusType.NearMiss,
+                    dangerPoint,
+                    0.95f,
+                    28f);
             }
 
             if (terrainT > 1f &&
@@ -497,6 +547,14 @@ public sealed class ProjectileSystem
                         end,
                         out bool continues))
                 {
+                    DangerStimulus?.Invoke(
+                        projectiles.Owner[projectileIndex],
+                        projectiles.FactionTag[projectileIndex],
+                        TacticalStimulusType.CoverImpact,
+                        start + (end - start) * terrainT,
+                        0.80f,
+                        42f);
+
                     if (CombatDiagnostics.Enabled)
                     {
                         CombatDiagnostics.WriteLine(
@@ -512,7 +570,16 @@ public sealed class ProjectileSystem
                 }
 
                 if (!continues)
+                {
+                    DangerStimulus?.Invoke(
+                        projectiles.Owner[projectileIndex],
+                        projectiles.FactionTag[projectileIndex],
+                        TacticalStimulusType.CoverImpact,
+                        start + (end - start) * terrainT,
+                        0.80f,
+                        42f);
                     return false;
+                }
 
                 segmentStart =
                     MathF.Max(
@@ -685,6 +752,21 @@ public sealed class ProjectileSystem
         }
 
         return true;
+    }
+
+    private int NextNearMissStamp()
+    {
+        if (_nearMissStamp == int.MaxValue)
+        {
+            Array.Clear(_nearMissMarks, 0, _nearMissMarks.Length);
+            _nearMissStamp = 1;
+        }
+        else
+        {
+            _nearMissStamp++;
+        }
+
+        return _nearMissStamp;
     }
 
     private readonly struct TerrainMaterialInterval

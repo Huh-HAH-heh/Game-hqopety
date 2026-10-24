@@ -1,17 +1,30 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using SFML.Graphics;
 using SFML.System;
 
 namespace RimClone.Render;
 
+public enum ContextMenuActionType
+{
+    None,
+    OpenUnitCard,
+    OpenUnitAnatomy,
+    GiveFood,
+    GiveWater,
+    OpenSelectionOverview,
+    CreateSquad,
+    SendSquad,
+    AttackTarget
+}
+
 public sealed class ContextMenuOverlay : IDisposable
 {
-    private const float Width = 196f;
+    private const float Width = 224f;
     private const float EmptyHeight = 58f;
-    private const float SelectionHeight = 94f;
-    private const float UnitHeight = 158f;
-    private const float GroupHeight = 190f;
+    private const float HeaderHeight = 26f;
+    private const float RowHeight = 30f;
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, EmptyHeight))
     {
@@ -20,59 +33,35 @@ public sealed class ContextMenuOverlay : IDisposable
         OutlineThickness = 1f
     };
 
-    private readonly RectangleShape _header = new(new Vector2f(Width - 2f, 24f))
+    private readonly RectangleShape _header = new(new Vector2f(Width - 2f, HeaderHeight))
     {
         FillColor = new Color(34, 43, 56, 255)
     };
 
-    private readonly RectangleShape _accent = new(new Vector2f(2f, UnitHeight - 2f))
+    private readonly RectangleShape _accent = new(new Vector2f(2f, EmptyHeight - 2f))
     {
         FillColor = new Color(125, 170, 220, 220)
     };
 
-    private readonly RectangleShape _unitCardButton = new(new Vector2f(Width - 12f, 28f))
+    private readonly RectangleShape _actionButton = new(new Vector2f(Width - 12f, RowHeight - 3f))
     {
-        FillColor = new Color(28, 36, 47, 255)
-    };
-
-    private readonly RectangleShape _selectedCardsButton = new(new Vector2f(Width - 12f, 26f))
-    {
-        FillColor = new Color(28, 36, 47, 255)
-    };
-
-    private readonly RectangleShape _anatomyButton = new(new Vector2f(Width - 12f, 26f))
-    {
-        FillColor = new Color(28, 36, 47, 255)
-    };
-
-    private readonly RectangleShape _foodButton = new(new Vector2f(Width - 12f, 26f))
-    {
-        FillColor = new Color(28, 36, 47, 255)
-    };
-
-    private readonly RectangleShape _waterButton = new(new Vector2f(Width - 12f, 26f))
-    {
-        FillColor = new Color(28, 36, 47, 255)
+        FillColor = new Color(28, 36, 47, 255),
+        OutlineColor = new Color(75, 98, 125, 200),
+        OutlineThickness = 0.5f
     };
 
     private readonly Font? _font;
     private readonly Text? _title;
     private readonly Text? _emptyLabel;
-    private readonly Text? _unitCardLabel;
-    private readonly Text? _anatomyLabel;
-    private readonly Text? _selectedCardsLabel;
-    private readonly Text? _foodLabel;
-    private readonly Text? _waterLabel;
-
-    private bool _hasUnitAction;
-    private bool _hasMultipleUnitsAction;
+    private readonly Text? _actionLabel;
+    private readonly List<ContextMenuActionType> _actions = new();
+    private readonly List<string> _labels = new();
 
     public bool IsOpen { get; private set; }
 
     public ContextMenuOverlay()
     {
         _font = LoadFont();
-
         if (_font == null)
             return;
 
@@ -86,27 +75,7 @@ public sealed class ContextMenuOverlay : IDisposable
             FillColor = new Color(148, 159, 174)
         };
 
-        _unitCardLabel = new Text(_font, "Карточка юнита", 11)
-        {
-            FillColor = new Color(224, 233, 244)
-        };
-
-        _anatomyLabel = new Text(_font, "Органы / части тела", 11)
-        {
-            FillColor = new Color(224, 233, 244)
-        };
-
-        _selectedCardsLabel = new Text(_font, "Обзор выделенных", 11)
-        {
-            FillColor = new Color(224, 233, 244)
-        };
-
-        _foodLabel = new Text(_font, "Рацион (+700 ккал)", 11)
-        {
-            FillColor = new Color(224, 233, 244)
-        };
-
-        _waterLabel = new Text(_font, "Вода (+0,5 л)", 11)
+        _actionLabel = new Text(_font, "", 11)
         {
             FillColor = new Color(224, 233, 244)
         };
@@ -117,7 +86,10 @@ public sealed class ContextMenuOverlay : IDisposable
         uint windowWidth,
         uint windowHeight,
         bool hasUnit,
-        bool hasMultipleUnits)
+        bool hasMultipleUnits,
+        bool canCreateSquad,
+        bool canSendSquad,
+        bool canAttackTarget)
     {
         if (IsOpen && _panel.GetGlobalBounds().Contains(position))
         {
@@ -125,7 +97,15 @@ public sealed class ContextMenuOverlay : IDisposable
             return;
         }
 
-        OpenAt(position, windowWidth, windowHeight, hasUnit, hasMultipleUnits);
+        OpenAt(
+            position,
+            windowWidth,
+            windowHeight,
+            hasUnit,
+            hasMultipleUnits,
+            canCreateSquad,
+            canSendSquad,
+            canAttackTarget);
     }
 
     public void OpenAt(
@@ -133,14 +113,35 @@ public sealed class ContextMenuOverlay : IDisposable
         uint windowWidth,
         uint windowHeight,
         bool hasUnit,
-        bool hasMultipleUnits)
+        bool hasMultipleUnits,
+        bool canCreateSquad,
+        bool canSendSquad,
+        bool canAttackTarget)
     {
-        _hasUnitAction = hasUnit;
-        _hasMultipleUnitsAction = hasMultipleUnits;
-        float height = hasUnit && hasMultipleUnits
-            ? GroupHeight
-            : hasUnit ? UnitHeight
-            : hasMultipleUnits ? SelectionHeight : EmptyHeight;
+        _actions.Clear();
+        _labels.Clear();
+
+        if (hasUnit)
+        {
+            AddAction(ContextMenuActionType.OpenUnitCard, "Карточка юнита");
+            AddAction(ContextMenuActionType.OpenUnitAnatomy, "Органы / части тела");
+            AddAction(ContextMenuActionType.GiveFood, "Рацион (+700 ккал)");
+            AddAction(ContextMenuActionType.GiveWater, "Вода (+0,5 л)");
+        }
+
+        if (canAttackTarget)
+            AddAction(ContextMenuActionType.AttackTarget, "Атаковать цель");
+
+        if (canSendSquad)
+            AddAction(ContextMenuActionType.SendSquad, "Отправить отряд сюда");
+
+        if (canCreateSquad)
+            AddAction(ContextMenuActionType.CreateSquad, "Создать отряд");
+
+        if (hasMultipleUnits)
+            AddAction(ContextMenuActionType.OpenSelectionOverview, "Обзор выделенных");
+
+        float height = GetHeight();
         float x = Math.Clamp(position.X, 0f, Math.Max(0f, windowWidth - Width));
         float y = Math.Clamp(position.Y, 0f, Math.Max(0f, windowHeight - height));
 
@@ -149,59 +150,35 @@ public sealed class ContextMenuOverlay : IDisposable
         _header.Position = new Vector2f(x + 1f, y + 1f);
         _accent.Position = new Vector2f(x + 1f, y + 1f);
         _accent.Size = new Vector2f(2f, height - 2f);
-        _unitCardButton.Position = new Vector2f(x + 6f, y + 29f);
-        _anatomyButton.Position = new Vector2f(x + 6f, y + 60f);
-        _foodButton.Position = new Vector2f(x + 6f, y + 89f);
-        _waterButton.Position = new Vector2f(x + 6f, y + 118f);
-        _selectedCardsButton.Position = new Vector2f(x + 6f, y + (hasUnit ? 151f : 60f));
 
         if (_title != null)
             _title.Position = new Vector2f(x + 10f, y + 5f);
         if (_emptyLabel != null)
             _emptyLabel.Position = new Vector2f(x + 10f, y + 32f);
-        if (_unitCardLabel != null)
-            _unitCardLabel.Position = new Vector2f(x + 13f, y + 35f);
-        if (_anatomyLabel != null)
-            _anatomyLabel.Position = new Vector2f(x + 13f, y + 64f);
-        if (_foodLabel != null)
-            _foodLabel.Position = new Vector2f(x + 13f, y + 93f);
-        if (_waterLabel != null)
-            _waterLabel.Position = new Vector2f(x + 13f, y + 122f);
-        if (_selectedCardsLabel != null)
-            _selectedCardsLabel.Position = new Vector2f(x + 13f, y + (hasUnit ? 155f : 64f));
 
         IsOpen = true;
     }
 
+    private void AddAction(ContextMenuActionType action, string label)
+    {
+        _actions.Add(action);
+        _labels.Add(label);
+    }
+
     public bool HandleClick(
         Vector2i position,
-        out bool openUnitCard,
-        out bool openUnitAnatomy,
-        out bool openSelectionOverview,
-        out bool giveFood,
-        out bool giveWater)
+        out ContextMenuActionType action)
     {
-        openUnitCard = false;
-        openUnitAnatomy = false;
-        openSelectionOverview = false;
-        giveFood = false;
-        giveWater = false;
+        action = ContextMenuActionType.None;
         if (!IsOpen)
             return false;
 
         if (_panel.GetGlobalBounds().Contains(position))
         {
-            if (_hasUnitAction && _unitCardButton.GetGlobalBounds().Contains(position))
-                openUnitCard = true;
-            else if (_hasUnitAction && _anatomyButton.GetGlobalBounds().Contains(position))
-                openUnitAnatomy = true;
-            else if (_hasUnitAction && _foodButton.GetGlobalBounds().Contains(position))
-                giveFood = true;
-            else if (_hasUnitAction && _waterButton.GetGlobalBounds().Contains(position))
-                giveWater = true;
-            else if (_hasMultipleUnitsAction &&
-                     _selectedCardsButton.GetGlobalBounds().Contains(position))
-                openSelectionOverview = true;
+            float firstRowY = _panel.Position.Y + HeaderHeight + 4f;
+            int row = (int)((position.Y - firstRowY) / RowHeight);
+            if (row >= 0 && row < _actions.Count)
+                action = _actions[row];
 
             Close();
             return true;
@@ -211,57 +188,92 @@ public sealed class ContextMenuOverlay : IDisposable
         return false;
     }
 
+    public bool Contains(Vector2i position) =>
+        IsOpen && _panel.GetGlobalBounds().Contains(position);
+
     public void Close()
     {
         IsOpen = false;
-        _hasUnitAction = false;
-        _hasMultipleUnitsAction = false;
+        _actions.Clear();
+        _labels.Clear();
     }
 
-    public void Draw(RenderWindow window, uint windowWidth, uint windowHeight)
+    public void Draw(
+        RenderWindow window,
+        uint windowWidth,
+        uint windowHeight,
+        Vector2i mousePosition)
     {
         if (!IsOpen)
             return;
 
-        Vector2f position = _panel.Position;
-        OpenAt(
-            new Vector2i((int)position.X, (int)position.Y),
-            windowWidth,
-            windowHeight,
-            _hasUnitAction,
-            _hasMultipleUnitsAction);
-
+        Layout(windowWidth, windowHeight);
         window.Draw(_panel);
         window.Draw(_header);
         window.Draw(_accent);
 
-        if (_hasUnitAction)
-        {
-            window.Draw(_unitCardButton);
-            window.Draw(_anatomyButton);
-            window.Draw(_foodButton);
-            window.Draw(_waterButton);
-        }
-        if (_hasMultipleUnitsAction)
-            window.Draw(_selectedCardsButton);
-
         if (_title != null)
             window.Draw(_title);
 
-        if (_hasUnitAction && _unitCardLabel != null)
-            window.Draw(_unitCardLabel);
-        if (_hasUnitAction && _anatomyLabel != null)
-            window.Draw(_anatomyLabel);
-        if (_hasUnitAction && _foodLabel != null)
-            window.Draw(_foodLabel);
-        if (_hasUnitAction && _waterLabel != null)
-            window.Draw(_waterLabel);
-        if (_hasMultipleUnitsAction && _selectedCardsLabel != null)
-            window.Draw(_selectedCardsLabel);
-        if (!_hasUnitAction && !_hasMultipleUnitsAction && _emptyLabel != null)
+        if (_actions.Count == 0)
         {
-            window.Draw(_emptyLabel);
+            if (_emptyLabel != null)
+                window.Draw(_emptyLabel);
+            return;
         }
+
+        for (int i = 0; i < _actions.Count; i++)
+        {
+            float x = _panel.Position.X + 6f;
+            float y = _panel.Position.Y + HeaderHeight + 4f + i * RowHeight;
+            _actionButton.Position = new Vector2f(x, y);
+            bool hovered = _actionButton.GetGlobalBounds().Contains(mousePosition);
+            bool command = _actions[i] is ContextMenuActionType.CreateSquad
+                or ContextMenuActionType.SendSquad
+                or ContextMenuActionType.AttackTarget;
+            _actionButton.FillColor = hovered
+                ? new Color(61, 88, 118, 255)
+                : command
+                    ? new Color(35, 50, 67, 255)
+                    : new Color(28, 36, 47, 255);
+            _actionButton.OutlineColor = command || hovered
+                ? new Color(112, 164, 218, 230)
+                : new Color(75, 98, 125, 150);
+            _actionButton.OutlineThickness = hovered ? 1f : command ? 0.8f : 0.4f;
+            window.Draw(_actionButton);
+
+            if (_actionLabel != null)
+            {
+                _actionLabel.DisplayedString = _labels[i];
+                _actionLabel.Position = new Vector2f(x + 7f, y + 6f);
+                _actionLabel.FillColor = hovered
+                    ? new Color(255, 255, 255, 255)
+                    : new Color(224, 233, 244, 255);
+                window.Draw(_actionLabel);
+            }
+        }
+    }
+
+    private float GetHeight() =>
+        _actions.Count == 0
+            ? EmptyHeight
+            : HeaderHeight + 8f + _actions.Count * RowHeight + 8f;
+
+    private void Layout(uint windowWidth, uint windowHeight)
+    {
+        float height = GetHeight();
+        float x = Math.Clamp(_panel.Position.X, 0f, Math.Max(0f, windowWidth - Width));
+        float y = Math.Clamp(_panel.Position.Y, 0f, Math.Max(0f, windowHeight - height));
+        _panel.Position = new Vector2f(x, y);
+        _panel.Size = new Vector2f(Width, height);
+        _header.Position = new Vector2f(x + 1f, y + 1f);
+        _accent.Position = new Vector2f(x + 1f, y + 1f);
+        _accent.Size = new Vector2f(2f, height - 2f);
+
+        if (_title != null)
+            _title.Position = new Vector2f(x + 10f, y + 5f);
+        if (_emptyLabel != null)
+            _emptyLabel.Position = new Vector2f(x + 10f, y + 32f);
     }
 
     private static Font? LoadFont()
@@ -292,19 +304,11 @@ public sealed class ContextMenuOverlay : IDisposable
     {
         _title?.Dispose();
         _emptyLabel?.Dispose();
-        _unitCardLabel?.Dispose();
-        _anatomyLabel?.Dispose();
-        _selectedCardsLabel?.Dispose();
-        _foodLabel?.Dispose();
-        _waterLabel?.Dispose();
+        _actionLabel?.Dispose();
         _font?.Dispose();
         _panel.Dispose();
         _header.Dispose();
         _accent.Dispose();
-        _unitCardButton.Dispose();
-        _anatomyButton.Dispose();
-        _selectedCardsButton.Dispose();
-        _foodButton.Dispose();
-        _waterButton.Dispose();
+        _actionButton.Dispose();
     }
 }

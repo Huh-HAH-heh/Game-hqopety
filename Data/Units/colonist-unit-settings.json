@@ -4,7 +4,7 @@
   "Width": 0.35,
   "Length": 0.6,
   "Height": 1.75,
-  "ViewRange": 20,
+  "ViewRange": 60,
   "FieldOfView": 110,
   "BodyMassKg": 75,
   "MuscleMassKg": 30,

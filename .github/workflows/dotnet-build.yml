@@ -53,8 +53,10 @@ jobs:
         run: dotnet run --project App/App.csproj --configuration Release --no-build -- --self-test
 
       - name: Run Behaviac .NET 10 compatibility probe
+        if: always()
         run: dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release
       - name: Run Behaviac unit-intent decision tests
+        if: always()
         run: dotnet run --project Experiments/Behaviac/Behaviac.Probe.csproj --configuration Release -- --decision-test
 
       - name: Benchmark Behaviac unit-intent decisions

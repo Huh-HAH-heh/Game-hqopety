@@ -1,11 +1,12 @@
 using System;
 using System.Numerics;
+using Core.Map;
 
 namespace Core.Unit;
 
 public static class UnitSuppressionSystem
 {
-    public static void AddNearMiss(
+    public static bool AddNearMiss(
         UnitSuppressionStore suppression,
         int unitIndex,
         Vector3 unitPosition,
@@ -14,15 +15,16 @@ public static class UnitSuppressionSystem
         float danger,
         float factor)
     {
-        float distance = DistanceToSegment2D(
+        float distance = DistanceToSegment(
             unitPosition,
             segmentStart,
-            segmentEnd);
+            segmentEnd,
+            out Vector3 threatPosition);
 
-        ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
+        return ApplyNearMiss(suppression, unitIndex, distance, threatPosition, danger, factor);
     }
 
-    public static void AddNearMiss(
+    public static bool AddNearMiss(
         UnitSuppressionStore suppression,
         UnitStore units,
         UnitHitRegionStore? hitRegions,
@@ -30,12 +32,15 @@ public static class UnitSuppressionSystem
         Vector3 segmentStart,
         Vector3 segmentEnd,
         float danger,
-        float factor)
+        float factor,
+        WorldMap? worldMap = null,
+        VisionSystem? vision = null)
     {
         UnitHitRegionProfile profile = hitRegions?.GetProfile(unitIndex) ??
             UnitHitRegionCatalog.Get(UnitCatalog.Get(units.Type[unitIndex]).BodyType);
 
         float distance = float.PositiveInfinity;
+        Vector3 threatPosition = (segmentStart + segmentEnd) * 0.5f;
         for (int regionIndex = 0; regionIndex < profile.RegionCount; regionIndex++)
         {
             UnitHitRegionGeometry region = UnitHitSystem.GetRegionGeometry(
@@ -44,17 +49,37 @@ public static class UnitSuppressionSystem
                 regionIndex,
                 hitRegions);
 
-            float centerDistance = DistanceToSegment2D(
+            float centerDistance = DistanceToSegment(
                 region.Center,
                 segmentStart,
-                segmentEnd);
-            distance = MathF.Min(distance, MathF.Max(0f, centerDistance - region.Radius));
+                segmentEnd,
+                out Vector3 closestPoint);
+            float regionDistance = MathF.Max(0f, centerDistance - region.Radius);
+            if (regionDistance >= distance)
+                continue;
+
+            distance = regionDistance;
+            threatPosition = closestPoint;
         }
 
-        ApplyNearMiss(suppression, unitIndex, distance, segmentEnd, danger, factor);
+        if (!float.IsFinite(distance) || distance > 1.5f ||
+            !float.IsFinite(danger) || danger <= 0f ||
+            !float.IsFinite(factor) || factor <= 0f)
+            return false;
+
+        // Terrain can shield a nearby unit from a projectile passing on the far side.
+        if (vision != null && worldMap != null &&
+            !vision.HasLineOfSight(
+                worldMap,
+                vision.GetEyePosition(units, unitIndex),
+                threatPosition,
+                out _))
+            return false;
+
+        return ApplyNearMiss(suppression, unitIndex, distance, threatPosition, danger, factor);
     }
 
-    private static void ApplyNearMiss(
+    private static bool ApplyNearMiss(
         UnitSuppressionStore suppression,
         int unitIndex,
         float distance,
@@ -62,45 +87,61 @@ public static class UnitSuppressionSystem
         float danger,
         float factor)
     {
-        if (distance > 1.5f)
-            return;
+        if ((uint)unitIndex >= (uint)suppression.Capacity ||
+            !float.IsFinite(distance) || distance > 1.5f ||
+            !float.IsFinite(danger) || danger <= 0f ||
+            !float.IsFinite(factor) || factor <= 0f)
+            return false;
 
         float proximity = 1f / (0.25f + distance * distance);
-        float amount = danger * factor * proximity * 0.0014f;
+        float amount = danger * factor * proximity * 0.0012f;
         suppression.Add(unitIndex, amount, impactPosition);
+
+        // A very close round may cause a brief flinch; repeated passes build
+        // suppression gradually instead of forcing a full second of cover-seeking.
+        float distanceWeight = 1f / (1f + distance * distance);
+        float dangerWeight = Math.Clamp(danger / 35f, 0.35f, 1.4f);
+        float weaponWeight = Math.Clamp(factor, 0f, 1.25f);
+        float resistanceMultiplier = 1f - suppression.GetSuppressionResistance(unitIndex) * 0.55f;
+        float dangerDuration = Math.Clamp(
+            (0.10f + 0.36f * distanceWeight * dangerWeight * weaponWeight) * resistanceMultiplier,
+            0.10f,
+            0.55f);
+
+        if (suppression.InCover[unitIndex])
+            dangerDuration *= 0.60f;
+
+        suppression.MarkImmediateDanger(unitIndex, dangerDuration, impactPosition);
+        return true;
     }
 
-    private static float DistanceToSegment2D(
+    private static float DistanceToSegment(
         Vector3 point,
         Vector3 start,
-        Vector3 end)
+        Vector3 end) =>
+        DistanceToSegment(point, start, end, out _);
+
+    private static float DistanceToSegment(
+        Vector3 point,
+        Vector3 start,
+        Vector3 end,
+        out Vector3 closest)
     {
-        Vector2 p =
-            new Vector2(point.X, point.Y);
-
-        Vector2 a =
-            new Vector2(start.X, start.Y);
-
-        Vector2 b =
-            new Vector2(end.X, end.Y);
-
-        Vector2 ab = b - a;
-        float lengthSquared = ab.LengthSquared();
+        Vector3 segment = end - start;
+        float lengthSquared = segment.LengthSquared();
 
         if (lengthSquared <= 0.000001f)
-            return (p - a).Length();
+        {
+            closest = start;
+            return (point - start).Length();
+        }
 
-        float t =
-            Vector2.Dot(
-                p - a,
-                ab) /
-            lengthSquared;
+        float t = Math.Clamp(
+            Vector3.Dot(point - start, segment) / lengthSquared,
+            0f,
+            1f);
 
-        t = Math.Clamp(t, 0f, 1f);
-
-        Vector2 closest =
-            a + ab * t;
-
-        return (p - closest).Length();
+        closest = start + segment * t;
+        return (point - closest).Length();
     }
 }

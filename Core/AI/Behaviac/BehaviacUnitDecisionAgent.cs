@@ -13,7 +13,14 @@ public enum BehaviacUnitIntent : byte
     SuppressiveFire = 6,
     InvestigateLastKnownTarget = 7,
     Patrol = 8,
-    ProneEngage = 9
+    ProneEngage = 9,
+    FollowMoveOrder = 10,
+    HoldPosition = 11,
+    AttackOrder = 12,
+    HoldPositionEngage = 13,
+    InvestigateContact = 14,
+    InvestigateAudibleContact = InvestigateContact,
+    InvestigateSquadContact = 15
 }
 
 /// <summary>
@@ -33,6 +40,12 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     public bool HasVisibleTarget { get; private set; }
     [MemberMetaInfo("Recent target", "Whether the last known target memory is valid.", true)]
     public bool HasRecentTarget { get; private set; }
+    [MemberMetaInfo("Alerted", "Threat awareness independent of suppression or panic.", true)]
+    public bool IsAlerted { get; private set; }
+    [MemberMetaInfo("Investigable contact", "Whether the pawn has a credible contact worth investigating.", true)]
+    public bool HasInvestigableContact { get; private set; }
+    [MemberMetaInfo("Immediate danger", "Whether a close bullet pass, stopped bullet or explosion was recently perceived.", true)]
+    public bool IsInImmediateDanger { get; private set; }
     [MemberMetaInfo("Low health", "Whether the unit is below the retreat health threshold.", true)]
     public bool IsLowHealth { get; private set; }
     [MemberMetaInfo("Suppressive weapon", "Whether the current loadout supports suppressive fire.", true)]
@@ -51,6 +64,27 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MemberMetaInfo("Selected intent", "The tactical intent returned by the behavior tree.", true)]
     public BehaviacUnitIntent Intent { get; private set; }
 
+    [MemberMetaInfo("Has move order", "Whether the player assigned a movement task.", true)]
+    public bool HasMoveOrder { get; private set; }
+    [MemberMetaInfo("Has stop order", "Whether the player assigned a hold-position task.", true)]
+    public bool HasStopOrder { get; private set; }
+    [MemberMetaInfo("Has attack order", "Whether the player assigned an attack-target task.", true)]
+    public bool HasAttackOrder { get; private set; }
+    [MemberMetaInfo("Move-order utility", "Utility score for continuing the player's move task (0 to 1).", true)]
+    public float MoveOrderUtility { get; private set; }
+    [MemberMetaInfo("Combat utility", "Utility score for responding to current hostile contact (0 to 1).", true)]
+    public float CombatUtility { get; private set; }
+    [MemberMetaInfo("Cover utility", "Utility of the available cover action (0 to 1).", true)]
+    public float CoverUtility { get; private set; }
+    [MemberMetaInfo("Flank utility", "Utility of the available flank maneuver (0 to 1).", true)]
+    public float FlankUtility { get; private set; }
+    [MemberMetaInfo("Investigation utility", "Utility of investigating an uncertain perception contact (0 to 1).", true)]
+    public float InvestigationUtility { get; private set; }
+    [MemberMetaInfo("Squad contact", "Whether a delayed, uncertain location report was received from a squad mate.", true)]
+    public bool HasSquadContact { get; private set; }
+    [MemberMetaInfo("Squad contact utility", "Utility score for investigating the reported area (0 to 1).", true)]
+    public float SquadContactUtility { get; private set; }
+
     public void SetFacts(
         bool isAlive,
         bool isSuppressed,
@@ -62,13 +96,29 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         bool canFlank,
         bool isFlanking,
         float proneCombatUtility = 0f,
-        bool isProne = false)
+        bool isProne = false,
+        bool hasMoveOrder = false,
+        bool hasStopOrder = false,
+        bool hasAttackOrder = false,
+        float moveOrderUtility = 0f,
+        float combatUtility = 0f,
+        bool hasInvestigableContact = false,
+        bool isInImmediateDanger = false,
+        bool isAlerted = false,
+        float coverUtility = 0f,
+        float flankUtility = 0f,
+        float investigationUtility = 0f,
+        bool hasSquadContact = false,
+        float squadContactUtility = 0f)
     {
         IsAlive = isAlive;
         IsSuppressed = isSuppressed;
         HasCover = hasCover;
         HasVisibleTarget = hasVisibleTarget;
         HasRecentTarget = hasRecentTarget;
+        HasInvestigableContact = hasInvestigableContact;
+        IsInImmediateDanger = isInImmediateDanger;
+        IsAlerted = isAlerted;
         IsLowHealth = isLowHealth;
         HasSuppressiveWeapon = hasSuppressiveWeapon;
         CanFlank = canFlank;
@@ -76,6 +126,28 @@ public sealed class BehaviacUnitDecisionAgent : Agent
         IsProne = isProne;
         ProneCombatUtility = float.IsFinite(proneCombatUtility)
             ? System.Math.Clamp(proneCombatUtility, 0f, 1f)
+            : 0f;
+        HasMoveOrder = hasMoveOrder;
+        HasStopOrder = hasStopOrder;
+        HasAttackOrder = hasAttackOrder;
+        MoveOrderUtility = float.IsFinite(moveOrderUtility)
+            ? System.Math.Clamp(moveOrderUtility, 0f, 1f)
+            : 0f;
+        CombatUtility = float.IsFinite(combatUtility)
+            ? System.Math.Clamp(combatUtility, 0f, 1f)
+            : 0f;
+        CoverUtility = float.IsFinite(coverUtility)
+            ? System.Math.Clamp(coverUtility, 0f, 1f)
+            : 0f;
+        FlankUtility = float.IsFinite(flankUtility)
+            ? System.Math.Clamp(flankUtility, 0f, 1f)
+            : 0f;
+        InvestigationUtility = float.IsFinite(investigationUtility)
+            ? System.Math.Clamp(investigationUtility, 0f, 1f)
+            : 0f;
+        HasSquadContact = hasSquadContact;
+        SquadContactUtility = float.IsFinite(squadContactUtility)
+            ? System.Math.Clamp(squadContactUtility, 0f, 1f)
             : 0f;
         Intent = BehaviacUnitIntent.None;
     }
@@ -85,16 +157,39 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldSeekCover", "Check whether suppression cover should take priority.")]
     public bool ShouldSeekCover() =>
-        IsAlive && IsSuppressed && HasCover;
+        IsAlive && HasCover &&
+        (IsInImmediateDanger || (IsSuppressed && CoverUtility > CombatUtility));
 
-    [MethodMetaInfo("ShouldRetreatToCover", "Check whether low health requires retreat.")]
+    [MethodMetaInfo("ShouldExecuteAttackOrder", "Continue the attack task toward its last known contact only when no hostile is visible.")]
+    public bool ShouldExecuteAttackOrder() =>
+        IsAlive && HasAttackOrder && !HasVisibleTarget;
+
+    [MethodMetaInfo("ShouldFollowMoveOrder", "Compare movement-task utility with immediate combat utility.")]
+    public bool ShouldFollowMoveOrder() =>
+        IsAlive && HasMoveOrder && MoveOrderUtility >= CombatUtility;
+
+    [MethodMetaInfo("ShouldHoldPosition", "Keep the assigned position when no hostile is visible; cover priorities remain above this branch.")]
+    public bool ShouldHoldPosition() =>
+        IsAlive && HasStopOrder && !HasVisibleTarget;
+
+    [MethodMetaInfo("ShouldHoldPositionAndEngage", "Fire at a visible hostile without advancing unless a higher-priority cover action is selected.")]
+    public bool ShouldHoldPositionAndEngage() =>
+        IsAlive && HasStopOrder && HasVisibleTarget;
+
+    [MethodMetaInfo("ShouldRetreatToCover", "Check whether low health requires cover; when holding, only interrupt the position if a cover goal is available.")]
     public bool ShouldRetreatToCover() =>
-        IsAlive && IsLowHealth && (HasVisibleTarget || HasRecentTarget);
+        IsAlive && IsLowHealth && (HasVisibleTarget || HasRecentTarget) &&
+        (!HasStopOrder || HasCover);
 
     [MethodMetaInfo("ShouldTakePronePosition", "Prefer a prone firing position when distance and exposure justify it.")]
     public bool ShouldTakePronePosition() =>
         IsAlive && HasVisibleTarget && !IsSuppressed && !IsLowHealth &&
-        !CanFlank && !IsFlanking && (ProneCombatUtility >= 0.60f || IsProne);
+        !IsFlanking &&
+        (IsProne ||
+         (ProneCombatUtility >= 0.60f &&
+          ProneCombatUtility > CombatUtility &&
+          (!CanFlank ||
+           FlankUtility <= CombatUtility + Core.Unit.UnitTacticalUtility.FlankUtilityAdvantage)));
 
     [MethodMetaInfo("ShouldEngageVisibleTarget", "Check whether a visible target should be engaged.")]
     public bool ShouldEngageVisibleTarget() =>
@@ -106,11 +201,28 @@ public sealed class BehaviacUnitDecisionAgent : Agent
 
     [MethodMetaInfo("ShouldFlankVisibleTarget", "Check whether the current target should be flanked.")]
     public bool ShouldFlankVisibleTarget() =>
-        IsAlive && !IsSuppressed && HasVisibleTarget && (CanFlank || IsFlanking);
+        IsAlive && !IsSuppressed && HasVisibleTarget &&
+        (IsFlanking ||
+         (CanFlank &&
+          FlankUtility > CombatUtility + Core.Unit.UnitTacticalUtility.FlankUtilityAdvantage));
 
     [MethodMetaInfo("ShouldInvestigateLastKnownTarget", "Check whether last known target position should be investigated.")]
     public bool ShouldInvestigateLastKnownTarget() =>
         IsAlive && HasRecentTarget;
+
+    [MethodMetaInfo("ShouldInvestigateContact", "Investigate a credible perception contact only when no stronger tactical response or player order is active.")]
+    public bool ShouldInvestigateContact() =>
+        IsAlive && IsAlerted && HasInvestigableContact && !HasVisibleTarget && !HasRecentTarget &&
+        !IsSuppressed && !IsLowHealth &&
+        !HasMoveOrder && !HasStopOrder && !HasAttackOrder &&
+        InvestigationUtility >= Core.Unit.UnitTacticalUtility.MinimumInvestigationUtility;
+
+    [MethodMetaInfo("ShouldInvestigateSquadContact", "Investigate a delayed and uncertain position reported by a squad mate, without treating it as an identified target.")]
+    public bool ShouldInvestigateSquadContact() =>
+        IsAlive && HasSquadContact && !HasVisibleTarget && !HasRecentTarget &&
+        !IsSuppressed && !IsLowHealth &&
+        !HasMoveOrder && !HasStopOrder && !HasAttackOrder &&
+        SquadContactUtility >= Core.Unit.UnitTacticalUtility.MinimumSquadContactUtility;
 
     [MethodMetaInfo("SelectDead", "Return the dead-unit intent.")]
     public EBTStatus SelectDead() =>
@@ -119,6 +231,22 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("SelectSeekCover", "Return the suppression-cover intent.")]
     public EBTStatus SelectSeekCover() =>
         SelectIntent(BehaviacUnitIntent.SeekCover);
+
+    [MethodMetaInfo("SelectMoveOrder", "Return the player movement-task intent.")]
+    public EBTStatus SelectMoveOrder() =>
+        SelectIntent(BehaviacUnitIntent.FollowMoveOrder);
+
+    [MethodMetaInfo("SelectHoldPosition", "Return the hold-position intent.")]
+    public EBTStatus SelectHoldPosition() =>
+        SelectIntent(BehaviacUnitIntent.HoldPosition);
+
+    [MethodMetaInfo("SelectAttackOrder", "Resume the attack task toward its last known position while no hostile is visible.")]
+    public EBTStatus SelectAttackOrder() =>
+        SelectIntent(BehaviacUnitIntent.AttackOrder);
+
+    [MethodMetaInfo("SelectHoldPositionEngage", "Return the stationary combat intent.")]
+    public EBTStatus SelectHoldPositionEngage() =>
+        SelectIntent(BehaviacUnitIntent.HoldPositionEngage);
 
     [MethodMetaInfo("SelectRetreatToCover", "Return the low-health retreat intent.")]
     public EBTStatus SelectRetreatToCover() =>
@@ -143,6 +271,18 @@ public sealed class BehaviacUnitDecisionAgent : Agent
     [MethodMetaInfo("SelectInvestigateLastKnownTarget", "Return the investigate intent.")]
     public EBTStatus SelectInvestigateLastKnownTarget() =>
         SelectIntent(BehaviacUnitIntent.InvestigateLastKnownTarget);
+
+    [MethodMetaInfo("SelectInvestigateContact", "Move to an uncertain sensed area without treating it as an identified enemy.")]
+    public EBTStatus SelectInvestigateContact() =>
+        SelectIntent(BehaviacUnitIntent.InvestigateContact);
+
+    [MethodMetaInfo("SelectInvestigateAudibleContact", "Compatibility alias for older Behaviac trees.")]
+    public EBTStatus SelectInvestigateAudibleContact() =>
+        SelectInvestigateContact();
+
+    [MethodMetaInfo("SelectInvestigateSquadContact", "Move to a squad-reported area without identifying or firing at a hidden unit.")]
+    public EBTStatus SelectInvestigateSquadContact() =>
+        SelectIntent(BehaviacUnitIntent.InvestigateSquadContact);
 
     [MethodMetaInfo("SelectPatrol", "Return the patrol intent.")]
     public EBTStatus SelectPatrol() =>
