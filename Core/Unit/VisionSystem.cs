@@ -551,8 +551,8 @@ public sealed class VisionSystem
     /// </summary>
     public bool WasVisibleOnLatestUpdate(int observerIndex, int targetIndex)
     {
-        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
-            (uint)targetIndex >= (uint)_visibilityCapacity ||
+        if ((uint)observerIndex >= (uint)_visibleCounts.Length ||
+            (uint)targetIndex >= (uint)_visibleCounts.Length ||
             observerIndex == targetIndex ||
             _visionUpdateSequence <= 0)
             return false;
@@ -574,8 +574,8 @@ public sealed class VisionSystem
         int targetIndex,
         UnitStore units)
     {
-        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
-            (uint)targetIndex >= (uint)_visibilityCapacity ||
+        if ((uint)observerIndex >= (uint)_visibleCounts.Length ||
+            (uint)targetIndex >= (uint)_visibleCounts.Length ||
             observerIndex == targetIndex)
         {
             return false;
@@ -609,8 +609,8 @@ public sealed class VisionSystem
 
     public void ForgetVisibleTarget(int observerIndex, int targetIndex)
     {
-        if ((uint)observerIndex >= (uint)_visibilityCapacity ||
-            (uint)targetIndex >= (uint)_visibilityCapacity)
+        if ((uint)observerIndex >= (uint)_visibleCounts.Length ||
+            (uint)targetIndex >= (uint)_visibleCounts.Length)
         {
             return;
         }
@@ -1637,6 +1637,7 @@ public sealed class VisionSystem
         ReadOnlySpan<int> candidates)
     {
         int visibleStart = _visibleTargetCount;
+        int candidateOffset = observer * CandidateSlots;
 
         // Every candidate in this span was selected by the spatial index for
         // this observer. Only publish targets whose LOS was verified this tick.
@@ -1650,7 +1651,6 @@ public sealed class VisionSystem
 
             LastVisibilityMemoryEntriesScanned++;
 
-            int candidateOffset = observer * CandidateSlots;
             if (_candidateVisibleUpdates[candidateOffset + i] != _visionUpdateSequence)
                 continue;
 
