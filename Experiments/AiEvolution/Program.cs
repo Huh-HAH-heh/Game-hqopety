@@ -18,7 +18,7 @@ internal static class Program
         try
         {
             int popSize=Arg(args,"--population",8,4,128), generations=Arg(args,"--generations",4,1,10000);
-            int battles=Arg(args,"--battles",6,2,1000), ticks=Arg(args,"--ticks",400,100,100000);
+            int battles=Arg(args,"--battles",6,2,1000), ticks=Arg(args,"--ticks",600,100,100000);
             int team=Arg(args,"--team-size",4,2,16), seed=Arg(args,"--seed",20261024,int.MinValue,int.MaxValue);
             string output=Path.GetFullPath(TextArg(args,"--output","ai-balance-best.json"));
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
@@ -159,9 +159,20 @@ internal static class Program
             int y=9+i*46/Math.Max(1,count-1),offset=(i%2)*2;
             int x=scenario switch { 2=>left?33+offset:95-offset, 1=>left?16+offset:112-offset, _=>left?10+offset:118-offset };
             UnitId id=sim.Spawn(UnitType.Colonist,new Vector3(x,y,.1f),bodyAngle:left?0f:MathF.PI,factionTag:faction);
-            var weapon=i%3==0?WeaponCatalog.AssaultRifle:WeaponCatalog.Pistol;
-            int slot=sim.AddInventoryItem(id,weapon);
-            if(slot<0||!sim.EquipWeapon(id,slot,UnitWeaponSlot.Primary)) throw new InvalidOperationException($"Could not equip {weapon.Name}.");
+            if(i%5==1)
+            {
+                var meleeWeapon=MeleeWeaponCatalog.CombatKnife;
+                int meleeSlot=sim.AddInventoryItem(id,meleeWeapon);
+                if(meleeSlot<0||!sim.EquipWeapon(id,meleeSlot,UnitWeaponSlot.Melee))
+                    throw new InvalidOperationException($"Could not equip {meleeWeapon.Name}.");
+            }
+            else
+            {
+                var weapon=i%3==0?WeaponCatalog.AssaultRifle:WeaponCatalog.Pistol;
+                int slot=sim.AddInventoryItem(id,weapon);
+                if(slot<0||!sim.EquipWeapon(id,slot,UnitWeaponSlot.Primary))
+                    throw new InvalidOperationException($"Could not equip {weapon.Name}.");
+            }
         }
     }
 
