@@ -253,7 +253,7 @@ public static class UnitIntentUtilityScorer
             squad = Clamp01(squad * balance.SquadContactScale);
         }
 
-        float patrol = hasAnyPlayerOrder ? 0f : Clamp01(0.12f + discipline * 0.025f) * balance.PatrolScale;
+        float patrol = hasAnyPlayerOrder ? 0f : Clamp01(Clamp01(0.12f + discipline * 0.025f) * balance.PatrolScale);
 
         // Continuing an investigation is a valid incumbent, not a fresh target request.
         if (context.IsInvestigatingContext &&
