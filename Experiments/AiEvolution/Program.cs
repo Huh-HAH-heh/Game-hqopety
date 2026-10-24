@@ -10,6 +10,7 @@ internal static class Program
 {
     private const int GeneCount = 35;
     private const float Dt = 0.05f;
+    private static AiBalanceProfile _profileBase = AiBalanceProfile.Default;
 
     private static readonly float[] Min = [.65f,.55f,.65f,.70f,.35f,.50f,.50f,.50f,.50f,.50f,.45f,.03f,.04f,.12f,.12f,.35f,12f,.08f,.15f,.60f,.20f,.60f,.25f,.01f,.80f,.10f,4f,4f,5f,8f,10f,.75f,.80f,.04f,.04f];
     private static readonly float[] Max = [1.35f,1.45f,1.45f,1.40f,1.25f,1.50f,1.50f,1.50f,1.50f,1.50f,.85f,.15f,.18f,.34f,.34f,.85f,40f,.40f,.50f,.95f,.60f,.95f,3f,.08f,1f,.45f,14f,14f,20f,24f,30f,.98f,.999f,.30f,.35f];
@@ -27,6 +28,7 @@ internal static class Program
             string csv=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".history.csv");
             string? seedPath=TextOpt(args,"--seed-profile");
             AiBalanceProfile seedProfile=seedPath==null ? AiBalanceProfile.Default : LoadProfile(Path.GetFullPath(seedPath));
+            _profileBase=seedProfile;
             float[] seedGenes=GenesFrom(seedProfile);
             float[] mutationBase=seedPath==null ? BaseGenes : seedGenes;
             var rng=new Random(seed);
@@ -113,7 +115,7 @@ internal static class Program
             ?? throw new InvalidDataException($"No AiBalanceProfile in {path}.");
     }
 
-    private static AiBalanceProfile Profile(float[] g) => AiBalanceProfile.Default with
+    private static AiBalanceProfile Profile(float[] g) => _profileBase with
     {
         EngageScale=g[0], FlankScale=g[1], CoverScale=g[2], RetreatScale=g[3], ProneScale=g[4],
         SuppressiveFireScale=g[5], LastKnownScale=g[6], InvestigationScale=g[7], SquadContactScale=g[8],
