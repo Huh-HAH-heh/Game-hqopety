@@ -1,11 +1,11 @@
 # RimClone AI Evolution Trainer
 
-Offline evolutionary trainer running the real `Core.Unit.UnitSimulation` loop: perception, Utility AI, movement, weapon handling, projectile/damage and death processing. It runs without a renderer window.
+Offline evolutionary trainer running the real `Core.Unit.UnitSimulation` loop: perception, Utility AI, movement, ranged and melee weapon handling, projectile/damage and death processing. It runs without a renderer window. Each team contains both ranged fighters and a knife user so range and melee positioning genes receive feedback.
 
 ## Run from the repository root
 
 ```powershell
-dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --population 8 --generations 4 --battles 6 --ticks 400 --team-size 4 --seed 20261024
+dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --population 8 --generations 4 --battles 6 --ticks 600 --team-size 4 --seed 20261024
 ```
 
 Options: `--population`, `--generations`, `--battles`, `--ticks`, `--team-size`, `--seed`, `--output`, `--seed-profile`. At least six battles per candidate covers open-field, wall/barrier, and close-start scenarios from both sides. Higher settings mean more simulation work.
@@ -19,7 +19,7 @@ dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --seed-profil
 The default profile remains in the candidate pool and the opponent remains the default profile. To load a trained profile into normal gameplay:
 
 ```powershell
-dotnet run --project App -- --ai-balance-profile=.\ai-balance-best.json
+dotnet run --project App/App.csproj -- --ai-balance-profile=.\ai-balance-best.json
 ```
 
 The game loads the file once at startup. If the file cannot be read or deserialized, it logs the problem and keeps the default balance; it never silently adopts a training result.
