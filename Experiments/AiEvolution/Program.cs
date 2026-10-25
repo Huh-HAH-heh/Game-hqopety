@@ -340,10 +340,11 @@ internal static class Program
             string etaText=_progressPhase=="TRAIN" && fraction>0d
                 ? eta.ToString(@"hh\:mm\:ss")
                 : "--:--:--";
+            string elapsedText=elapsed.ToString(@"hh\:mm\:ss");
             string status=$"[EVOLVE] {_progressPhase} | gen {_generationNow}/{_generationsTotal} | " +
                 $"candidate {_candidateNow}/{_populationTotal} | parallel match {battle}/{totalBattles} " +
                 $"{scenarioName} | tick {tick}/{totalTicks} ({tick/(double)Math.Max(1,totalTicks):P0}) | " +
-                $"elapsed {elapsed:hh\:mm\:ss} | ETA {etaText} | workers {_workers}";
+                $"elapsed {elapsedText} | ETA {etaText} | workers {_workers}";
 
             if(Console.IsOutputRedirected)
             {
