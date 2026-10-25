@@ -762,6 +762,24 @@ public sealed class VisionSystem
         return result;
     }
 
+    private static float GetTargetVisibilityRangeMultiplier(UnitStore units, int targetIndex)
+    {
+        float multiplier = units.Posture[targetIndex] switch
+        {
+            UnitPosture.Crouching => 0.80f,
+            UnitPosture.Lying => 0.58f,
+            UnitPosture.Sitting => 0.90f,
+            UnitPosture.Injured => 0.78f,
+            _ => 1f
+        };
+
+        // A moving low silhouette is more visible than a still one.
+        if (units.Velocity[targetIndex].LengthSquared() > 0.04f)
+            multiplier = MathF.Min(1f, multiplier + (units.Posture[targetIndex] == UnitPosture.Lying ? 0.12f : 0.10f));
+
+        return Math.Clamp(multiplier, 0.45f, 1f);
+    }
+
     private VisionCheck EvaluateCore(
         UnitStore units,
         WorldMap worldMap,
@@ -795,7 +813,7 @@ public sealed class VisionSystem
                 Vector3.Zero);
         }
 
-        float range = MathF.Max(0f, units.ViewRange[observerIndex]);
+        float range = MathF.Max(0f, units.ViewRange[observerIndex]) * GetTargetVisibilityRangeMultiplier(units, targetIndex);
         float rangeSquared = range * range;
         Vector3 forward = NormalizeHorizontal(units.HeadNormal[observerIndex]);
         float halfFovRadians = units.FieldOfView[observerIndex] * MathF.PI / 360f;
@@ -1037,7 +1055,9 @@ public sealed class VisionSystem
             float dy = point.Y - observerEye.Y;
             float distanceSquared = dx * dx + dy * dy;
 
-            if (distanceSquared > rangeSquared ||
+            float targetRangeMultiplier = GetTargetVisibilityRangeMultiplier(units, targetIndex);
+            float targetRangeSquared = rangeSquared * targetRangeMultiplier * targetRangeMultiplier;
+            if (distanceSquared > targetRangeSquared ||
                 distanceSquared >= bestDistanceSquared)
             {
                 continue;

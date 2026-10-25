@@ -57,7 +57,8 @@ public static class UnitIntentUtilityScorer
         float investigation = 0f;
         float squad = 0f;
 
-        bool hasMoveOrder = context.OrderType == UnitAiOrderType.Move;
+        bool hasMoveOrder = context.OrderType is UnitAiOrderType.Move or UnitAiOrderType.StealthMove;
+        bool hasStealthOrder = context.OrderType == UnitAiOrderType.StealthMove;
         bool hasStopOrder = context.OrderType == UnitAiOrderType.Stop;
         bool hasAttackOrder = context.OrderType == UnitAiOrderType.Attack;
         bool hasAnyPlayerOrder = context.OrderType != UnitAiOrderType.None;
@@ -279,6 +280,15 @@ public static class UnitIntentUtilityScorer
                     squad = continuationScore;
                     break;
             }
+        }
+
+        if (hasStealthOrder)
+        {
+            // StealthMove remains active under contact; the navigation policy decides
+            // how to react to reports rather than converting the task to a firefight.
+            engage = holdAndEngage = cover = retreat = flank = prone = 0f;
+            suppressiveFire = lastKnown = investigation = squad = patrol = 0f;
+            moveOrder = 0.995f;
         }
 
         var scores = new UnitIntentUtilityBreakdown

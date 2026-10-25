@@ -50,9 +50,11 @@ public sealed class UnitAiSystem
     private float _tacticalTimeSeconds;
     private readonly SquadTacticalCoordinator _squadCoordinator = new();
     private readonly Dictionary<ushort, AiBalanceProfile> _factionBalanceProfiles = new();
+    private readonly Dictionary<ushort, AiStealthProfile> _factionStealthProfiles = new();
 
     public bool Enabled { get; set; }
     public AiBalanceProfile BalanceProfile { get; set; } = AiBalanceProfile.Default;
+    public AiStealthProfile StealthProfile { get; set; } = AiStealthProfile.Default;
     public AiBalanceProfile GetBalanceProfile(ushort factionTag) =>
         _factionBalanceProfiles.TryGetValue(factionTag, out AiBalanceProfile profile) ? profile : BalanceProfile;
     /// <summary>Set between matches, never during a parallel AI update.</summary>
@@ -60,6 +62,18 @@ public sealed class UnitAiSystem
     {
         if (profile == null) _factionBalanceProfiles.Remove(factionTag);
         else _factionBalanceProfiles[factionTag] = profile;
+    }
+
+    public AiStealthProfile GetStealthProfile(ushort factionTag) =>
+        _factionStealthProfiles.TryGetValue(factionTag, out AiStealthProfile profile)
+            ? profile
+            : StealthProfile;
+
+    /// <summary>Set between simulation steps; active planning reads this profile in parallel.</summary>
+    public void SetStealthProfileForFaction(ushort factionTag, AiStealthProfile? profile)
+    {
+        if (profile == null) _factionStealthProfiles.Remove(factionTag);
+        else _factionStealthProfiles[factionTag] = profile.Sanitized();
     }
     public bool LastUpdateRanThinkPass { get; private set; }
 
@@ -421,9 +435,10 @@ public sealed class UnitAiSystem
                 continue;
             }
 
-            if (suppressionState != UnitSuppressionState.Panicked &&
+            if ((suppressionState != UnitSuppressionState.Panicked ||
+                 Store.PlayerOrderType[unit] == UnitAiOrderType.StealthMove) &&
                 TryExecutePlayerOrderIntent(
-                    units, health, weapons, vision, unit, intent))
+                    units, health, weapons, vision, worldMap, unit, intent))
             {
                 continue;
             }
@@ -1104,10 +1119,51 @@ public sealed class UnitAiSystem
         UnitHealthStore health,
         UnitWeaponStore weapons,
         VisionSystem vision,
+        WorldMap worldMap,
         int unit,
         BehaviacUnitIntent intent)
     {
         UnitAiStore store = Store;
+
+        if (intent == BehaviacUnitIntent.FollowMoveOrder &&
+            store.PlayerOrderType[unit] == UnitAiOrderType.StealthMove)
+        {
+            Vector3 finalDestination = store.PlayerOrderPosition[unit];
+            if (ReachedGoal(units.Position[unit], finalDestination))
+            {
+                store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
+                store.ClearTarget(unit);
+                store.ClearGoal(unit);
+                ClearAiming(weapons, unit);
+                units.Target[unit] = units.Position[unit];
+                units.HasTarget[unit] = false;
+                units.Posture[unit] = UnitPosture.Standing;
+                store.State[unit] = UnitAiState.Idle;
+                return true;
+            }
+
+            AiStealthProfile stealthProfile = GetStealthProfile(units.FactionTag[unit]).Sanitized();
+            AiStealthRisk currentRisk = AiStealthMovementPlanner.MeasureRisk(
+                units, worldMap, vision, _perceptionMemory, unit, units.Position[unit], stealthProfile);
+            units.Posture[unit] = AiStealthMovementPlanner.SelectPosture(currentRisk, stealthProfile);
+
+            if (!store.HasGoal[unit] || ReachedGoal(units.Position[unit], store.Goal[unit]))
+            {
+                AiStealthWaypointPlan plan = AiStealthMovementPlanner.SelectNextWaypoint(
+                    units, worldMap, vision, _perceptionMemory, unit, finalDestination, stealthProfile);
+                Vector3 next = plan.Destination;
+                if (ReachedGoal(units.Position[unit], next))
+                    next = finalDestination;
+                store.SetGoal(unit, next);
+            }
+
+            store.ClearTarget(unit);
+            ClearAiming(weapons, unit);
+            units.Target[unit] = store.Goal[unit];
+            units.HasTarget[unit] = true;
+            store.State[unit] = UnitAiState.Search;
+            return true;
+        }
 
         if (intent == BehaviacUnitIntent.FollowMoveOrder)
         {

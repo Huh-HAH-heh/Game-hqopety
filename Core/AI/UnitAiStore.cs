@@ -20,7 +20,8 @@ public enum UnitAiOrderType : byte
     None = 0,
     Move = 1,
     Stop = 2,
-    Attack = 3
+    Attack = 3,
+    StealthMove = 4
 }
 
 public enum UnitIntentDecisionReason : byte

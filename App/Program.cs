@@ -38,6 +38,29 @@ namespace RimClone
                 }
             }
 
+            const string stealthProfilePrefix = "--ai-stealth-profile=";
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i].StartsWith(stealthProfilePrefix, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    string profilePath = args[i].Substring(stealthProfilePrefix.Length);
+                    System.Environment.SetEnvironmentVariable("RIMCLONE_AI_STEALTH_PROFILE", profilePath);
+                    System.Console.WriteLine($"[AI-STEALTH] Profile requested: {profilePath}");
+                }
+                else if (string.Equals(args[i], "--ai-stealth-profile", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        System.Console.WriteLine("[AI-STEALTH] Missing path after --ai-stealth-profile.");
+                        continue;
+                    }
+
+                    string profilePath = args[++i];
+                    System.Environment.SetEnvironmentVariable("RIMCLONE_AI_STEALTH_PROFILE", profilePath);
+                    System.Console.WriteLine($"[AI-STEALTH] Profile requested: {profilePath}");
+                }
+            }
+
             const string navDebugPrefix = "--ai-nav-debug=";
             for (int i = 0; i < args.Length; i++)
             {

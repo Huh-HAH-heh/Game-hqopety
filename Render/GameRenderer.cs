@@ -250,6 +250,7 @@ public sealed class GameRenderer
         _unitSimulation =
             new UnitSimulation(unitCapacity: 2048);
         LoadAiBalanceProfile();
+        LoadAiStealthProfile();
 
         _unitRenderer =
             new UnitRenderSystem();
@@ -284,6 +285,34 @@ public sealed class GameRenderer
 
         _lastAllocatedBytesSample =
             GC.GetTotalAllocatedBytes(false);
+    }
+
+    private void LoadAiStealthProfile()
+    {
+        string? configuredPath = Environment.GetEnvironmentVariable("RIMCLONE_AI_STEALTH_PROFILE");
+        if (string.IsNullOrWhiteSpace(configuredPath))
+            return;
+
+        try
+        {
+            string fullPath = Path.GetFullPath(configuredPath);
+            AiStealthProfile? profile = JsonSerializer.Deserialize<AiStealthProfile>(
+                File.ReadAllText(fullPath),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (profile == null)
+            {
+                Console.WriteLine($"[AI-STEALTH] Profile '{fullPath}' was empty; keeping default.");
+                return;
+            }
+
+            _unitSimulation.AI.StealthProfile = profile.Sanitized();
+            Console.WriteLine($"[AI-STEALTH] Loaded stealth profile: {fullPath}");
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"[AI-STEALTH] Could not load profile '{configuredPath}'; keeping default. {exception.Message}");
+        }
     }
 
     private void LoadAiBalanceProfile()
