@@ -288,6 +288,16 @@ public sealed class UnitAiStore
             throw new ArgumentOutOfRangeException(nameof(unitIndex));
 
         EnsureCapacity(unitIndex + 1);
+
+        // Replacing an order must not keep navigating to the previous task's goal
+        // or retain its remembered combat target.
+        bool replacesTask =
+            _playerOrderType[unitIndex] != order ||
+            _playerOrderPosition[unitIndex] != position ||
+            !_playerOrderTarget[unitIndex].Equals(target);
+        if (replacesTask)
+            ClearTarget(unitIndex);
+
         _playerOrderType[unitIndex] = order;
         _playerOrderPosition[unitIndex] = position;
         _playerOrderTarget[unitIndex] = target;

@@ -63,9 +63,10 @@ public sealed record AiExperimentDefinition(
 }
 
 /// <summary>
-/// Ready-to-configure experiment types. The runnable evaluator currently runs
-/// general combat only; specialized goals are declarations for the upcoming
-/// scenario/evaluator stages and must not be reported as trained until implemented.
+/// Experiment catalog. General combat is handled by the balance-profile trainer;
+/// remain-undetected and break-contact have a runnable specialized trainer.
+/// Other presets describe future evaluators and are not runnable merely because
+/// they appear in this catalog.
 /// </summary>
 public static class AiExperimentPresets
 {

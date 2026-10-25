@@ -69,7 +69,7 @@ dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --population 
 
 Keyboard pause/resume and stop are read by one control thread; simulation workers observe shared pause/cancel flags. Do not share a mutable WorldMap or UnitSimulation between jobs.
 
-The experiment-definition contract lists intended objectives for individual units and squads: general combat, remain undetected, break contact after detection, seek cover under fire, weapon-specific behavior, squad coordination, and squad weapon doctrine. These are declarations for upcoming scenario/evaluator stages, not a claim that every listed objective is already trainable. The current runnable evaluator still optimizes the general-combat AiBalanceProfile; specialized goals need objective-specific scenarios, observations, fitness metrics, and holdout checks before use.
+The experiment-definition contract lists objectives for individual units and squads. The specialized trainer now executes remain-undetected and break-contact tasks against the real simulation with separate fitness functions and held-out scenarios. Seek-cover, weapon-employment, and squad-level objectives remain declarations until their own scenario/evaluator implementations are added.
 
 
 ## Specialized stealth-skill evolution
@@ -83,11 +83,11 @@ Both tasks use the real UnitSimulation, VisionSystem, PerceptionMemoryStore, Uni
 
 Example commands:
 
-    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task remain-undetected --population 16 --generations 12 --matches 6 --ticks 3600 --workers 6 --seed 20261025
-    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task break-contact --population 16 --generations 12 --matches 6 --ticks 3600 --workers 6 --seed 20261025
+    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task remain-undetected --population 16 --generations 12 --matches 6 --ticks 3600 --workers 6 --holdout-matches 32 --seed 20261025
+    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task break-contact --population 16 --generations 12 --matches 6 --ticks 3600 --workers 6 --holdout-matches 32 --seed 20261025
 
 Outputs are separate per objective: ai-stealth-remain-undetected.json / ai-stealth-break-contact.json, plus each one's history CSV and validation JSON. The JSON is a direct AiStealthProfile that the game can load with:
 
     dotnet run --project App/App.csproj -- --ai-stealth-profile=.\Experiments\AiEvolution\output\ai-stealth-break-contact.json
 
-StealthMove is currently an AI-order API used by the evaluator; a dedicated player-facing command in the normal game UI is future work. The profile only influences units assigned to this explicit order. Posture-based detection reduction is implemented in the shared vision rule, so it also affects ordinary crouching/lying units, not just the specialized training scene. Those gameplay values need runtime balancing once simulation runs are available.
+The trained profile affects selected units when they receive a StealthMove order. In normal gameplay, select one or more living units, place the mouse cursor at the destination, and press Ctrl+S to issue a stealth-movement order; plain S remains the hold-position command. The order path is drawn in green. The profile is loaded with the command shown above. The profile only influences units assigned to this explicit order. Posture-based detection reduction is implemented in the shared vision rule, so it also affects ordinary crouching/lying units, not just the specialized training scene. Those gameplay values need runtime balancing once simulation runs are available.
