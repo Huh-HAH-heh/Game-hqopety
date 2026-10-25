@@ -38,6 +38,29 @@ namespace RimClone
                 }
             }
 
+            const string genomePoolPrefix = "--ai-genome-pool=";
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i].StartsWith(genomePoolPrefix, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    string poolPath = args[i].Substring(genomePoolPrefix.Length);
+                    System.Environment.SetEnvironmentVariable("RIMCLONE_AI_GENOME_POOL", poolPath);
+                    System.Console.WriteLine($"[AI-EVOLUTION] Tactical genome pool requested: {poolPath}");
+                }
+                else if (string.Equals(args[i], "--ai-genome-pool", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        System.Console.WriteLine("[AI-EVOLUTION] Missing path after --ai-genome-pool.");
+                        continue;
+                    }
+
+                    string poolPath = args[++i];
+                    System.Environment.SetEnvironmentVariable("RIMCLONE_AI_GENOME_POOL", poolPath);
+                    System.Console.WriteLine($"[AI-EVOLUTION] Tactical genome pool requested: {poolPath}");
+                }
+            }
+
             const string stealthProfilePrefix = "--ai-stealth-profile=";
             for (int i = 0; i < args.Length; i++)
             {

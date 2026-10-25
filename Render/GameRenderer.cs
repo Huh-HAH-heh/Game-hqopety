@@ -250,6 +250,7 @@ public sealed class GameRenderer
         _unitSimulation =
             new UnitSimulation(unitCapacity: 2048);
         LoadAiBalanceProfile();
+        LoadAiGenomePool();
         LoadAiStealthProfile();
 
         _unitRenderer =
@@ -340,6 +341,37 @@ public sealed class GameRenderer
         catch (Exception exception)
         {
             Console.WriteLine($"[AI] Could not load profile '{configuredPath}'; keeping default balance. {exception.Message}");
+        }
+    }
+
+    private void LoadAiGenomePool()
+    {
+        string? configuredPath = Environment.GetEnvironmentVariable("RIMCLONE_AI_GENOME_POOL");
+        if (string.IsNullOrWhiteSpace(configuredPath))
+            return;
+
+        try
+        {
+            string fullPath = Path.GetFullPath(configuredPath);
+            AiTacticalGenomePool? pool = JsonSerializer.Deserialize<AiTacticalGenomePool>(
+                File.ReadAllText(fullPath),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            pool = pool?.Sanitized();
+            if (pool == null || pool.Genomes.Count == 0)
+            {
+                Console.WriteLine($"[AI-EVOLUTION] Genome pool '{fullPath}' contains no usable genomes; keeping regular AI.");
+                return;
+            }
+
+            _unitSimulation.AI.SetTacticalGenomePool(pool);
+            Console.WriteLine(
+                $"[AI-EVOLUTION] Loaded {pool.Genomes.Count} individual tactical genomes: {fullPath}. " +
+                "New pawns receive a stable genome selected by pawn identity.");
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"[AI-EVOLUTION] Could not load genome pool '{configuredPath}'; keeping regular AI. {exception.Message}");
         }
     }
 

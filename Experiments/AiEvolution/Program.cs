@@ -54,12 +54,14 @@ internal static class Program
             _checkpointPath = output;
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
             string csv=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".history.csv");
+            string poolOutput=Path.GetFullPath(TextArg(args,"--pool-output",Path.Combine(dir,"ai-tactical-genome-pool.json")));
             string? seedPath=TextOpt(args,"--seed-profile");
             AiBalanceProfile seedProfile=seedPath==null ? AiBalanceProfile.Default : LoadProfile(Path.GetFullPath(seedPath));
             _profileBase=seedProfile;
             float[] seedGenes=GenesFrom(seedProfile);
             float[] mutationBase=seedPath==null ? BaseGenes : seedGenes;
             var rng=new Random(seed);
+            var genomeArchive=new List<(float[] Genes,double Fitness)>();
             var population=new List<float[]>(popSize) { (float[])mutationBase.Clone() };
             while(population.Count<popSize) population.Add(Mutate(mutationBase,rng,.75,.22f));
 
@@ -90,6 +92,7 @@ internal static class Program
                     Console.WriteLine($"[EVOLVE] Generation {gen}/{generations}, candidate {i+1}/{popSize} started.");
                     Evaluation metrics=Evaluate(Profile(population[i]),battles,ticks,team,seed);
                     results.Add((population[i],metrics));
+                    ArchiveGenome(genomeArchive,population[i],metrics.Fitness,48);
                     if(metrics.Fitness>globalBest)
                     {
                         globalBest=metrics.Fitness;
@@ -137,6 +140,31 @@ internal static class Program
             _progressPhase = "HOLDOUT baseline";
             Console.WriteLine("[EVOLVE] Starting held-out validation of default profile.");
             Evaluation baseline=Evaluate(AiBalanceProfile.Default,validationBattles,ticks,team,validationSeed);
+            _progressPhase = "HOLDOUT pool";
+            int poolValidationCount = Math.Min(12, genomeArchive.Count);
+            var validatedGenomes = new List<(float[] Genes, double TrainingFitness, Evaluation Validation)>(poolValidationCount);
+            for (int i = 0; i < poolValidationCount; i++)
+            {
+                PollTrainingControls();
+                _candidateNow = i + 1;
+                _populationTotal = Math.Max(1, poolValidationCount);
+                _battleNow = 0;
+                _tickNow = 0;
+                var archived = genomeArchive[i];
+                Console.WriteLine($"[EVOLVE] Held-out validation of distinct genome {i + 1}/{poolValidationCount}.");
+                Evaluation candidateValidation = Evaluate(Profile(archived.Genes), validationBattles, ticks, team, validationSeed);
+                validatedGenomes.Add(((float[])archived.Genes.Clone(), archived.Fitness, candidateValidation));
+                Console.WriteLine(
+                    $"[EVOLVE] Genome {i + 1}: holdout={candidateValidation.Fitness:F2}; " +
+                    $"default={baseline.Fitness:F2}; wins={candidateValidation.WinRate:P0}.");
+            }
+
+            AiTacticalGenomePool genomePool = BuildTacticalGenomePool(validatedGenomes, baseline.Fitness, validationSeed);
+            File.WriteAllText(poolOutput, JsonSerializer.Serialize(genomePool, new JsonSerializerOptions { WriteIndented = true }));
+            Console.WriteLine(
+                $"[EVOLVE] Saved per-unit tactical pool: {poolOutput}; genomes={genomePool.Genomes.Count}; " +
+                $"validated candidates={Math.Max(0, genomePool.Genomes.Count - 1)}.");
+
             string validationPath=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".validation.json");
             var validationReport=new
             {
@@ -171,6 +199,7 @@ internal static class Program
             Console.WriteLine($"Saved profile: {output}");
             Console.WriteLine($"History: {csv}");
             Console.WriteLine($"Holdout report: {validationPath}");
+            Console.WriteLine($"Per-unit tactical genome pool: {poolOutput}");
             return 0;
         }
         catch(OperationCanceledException)
@@ -344,6 +373,105 @@ internal static class Program
                 throw new InvalidOperationException(
                     $"Base gene {i} no longer matches AiBalanceProfile.Default ({BaseGenes[i]} vs {defaults[i]}).");
         }
+    }
+
+    private static void ArchiveGenome(
+        List<(float[] Genes, double Fitness)> archive,
+        float[] genes,
+        double fitness,
+        int maximumCount)
+    {
+        for (int i = 0; i < archive.Count; i++)
+        {
+            if (GenomeDistance(archive[i].Genes, genes) >= 0.035d)
+                continue;
+
+            if (fitness > archive[i].Fitness)
+                archive[i] = ((float[])genes.Clone(), fitness);
+            archive.Sort((a, b) => b.Fitness.CompareTo(a.Fitness));
+            return;
+        }
+
+        archive.Add(((float[])genes.Clone(), fitness));
+        archive.Sort((a, b) => b.Fitness.CompareTo(a.Fitness));
+        if (archive.Count > maximumCount)
+            archive.RemoveRange(maximumCount, archive.Count - maximumCount);
+    }
+
+    private static AiTacticalGenomePool BuildTacticalGenomePool(
+        List<(float[] Genes, double TrainingFitness, Evaluation Validation)> candidates,
+        double baselineFitness,
+        int validationSeed)
+    {
+        var selected = new List<AiTacticalGenome>
+        {
+            new()
+            {
+                Name = "default-baseline",
+                IsBaseline = true,
+                TrainingFitness = baselineFitness,
+                ValidationFitness = baselineFitness,
+                Profile = AiBalanceProfile.Default
+            }
+        };
+
+        var ranked = candidates.OrderByDescending(x => x.Validation.Fitness).ToList();
+        double[] allowedRegression = { 2d, 5d, 8d };
+        foreach (double tolerance in allowedRegression)
+        {
+            foreach (var candidate in ranked)
+            {
+                if (selected.Count >= 5)
+                    break;
+                if (candidate.Validation.Fitness < baselineFitness - tolerance)
+                    continue;
+
+                bool tooSimilar = false;
+                foreach (AiTacticalGenome genome in selected)
+                {
+                    if (genome.Profile != null &&
+                        GenomeDistance(GenesFrom(genome.Profile), candidate.Genes) < 0.055d)
+                    {
+                        tooSimilar = true;
+                        break;
+                    }
+                }
+                if (tooSimilar)
+                    continue;
+
+                selected.Add(new AiTacticalGenome
+                {
+                    Name = $"evolved-{selected.Count:00}",
+                    IsBaseline = false,
+                    TrainingFitness = candidate.TrainingFitness,
+                    ValidationFitness = candidate.Validation.Fitness,
+                    Profile = Profile(candidate.Genes)
+                });
+            }
+
+            if (selected.Count >= 4)
+                break;
+        }
+
+        return new AiTacticalGenomePool
+        {
+            CreatedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            ValidationSeed = validationSeed,
+            BaselineFitness = baselineFitness,
+            Genomes = selected
+        };
+    }
+
+    private static double GenomeDistance(float[] first, float[] second)
+    {
+        int count = Math.Min(first.Length, second.Length);
+        if (count == 0)
+            return 0d;
+
+        double distance = 0d;
+        for (int i = 0; i < count; i++)
+            distance += Math.Abs(first[i] - second[i]) / Math.Max(0.0001f, Max[i] - Min[i]);
+        return distance / count;
     }
 
     private static List<float[]> Next(List<(float[] Genes,double Fitness)> rank,int count,Random r,float[] restartBase)
