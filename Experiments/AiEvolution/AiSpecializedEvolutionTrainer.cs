@@ -76,7 +76,7 @@ internal static class AiSpecializedEvolutionTrainer
             int populationSize = Arg(args, "--population", 16, 4, 128);
             int generations = Arg(args, "--generations", 12, 1, 10000);
             int matches = Arg(args, "--matches", 6, 2, 1000);
-            int ticks = Arg(args, "--ticks", 2400, 200, 100000);
+            int ticks = Arg(args, "--ticks", 3600, 200, 100000);
             int holdoutMatches = Arg(args, "--holdout-matches", 16, 8, 1000);
             int workers = Arg(args, "--workers", Math.Clamp(Environment.ProcessorCount - 1, 1, 6), 1, 32);
             int seed = Arg(args, "--seed", 20261025, int.MinValue, int.MaxValue);

@@ -130,7 +130,14 @@ public static class AiStealthMovementPlanner
         float proximitySurvival = 1f;
         float now = memory.CurrentTimeSeconds;
         ushort ownFaction = units.FactionTag[unitIndex];
-        Vector3 candidateEye = candidatePosition + new Vector3(0f, 0f, 1.45f);
+        float eyeOffset = units.Posture[unitIndex] switch
+        {
+            UnitPosture.Lying => 0.48f,
+            UnitPosture.Crouching => 0.92f,
+            UnitPosture.Sitting => 1.08f,
+            _ => 1.45f
+        };
+        Vector3 candidateEye = candidatePosition + new Vector3(0f, 0f, eyeOffset);
 
         for (int i = 0; i < memory.Contacts.Count; i++)
         {
@@ -139,7 +146,8 @@ public static class AiStealthMovementPlanner
                 continue;
 
             float age = MathF.Max(0f, now - contact.LastReceivedAtSeconds);
-            float freshness = MathF.Exp(-0.69314718f * age / 18f);
+            float contactHalfLife = contact.LastStimulusType == TacticalStimulusType.AllyContactReport ? 65f : 18f;
+            float freshness = MathF.Exp(-0.69314718f * age / contactHalfLife);
             float confidence = Math.Clamp(contact.Confidence * freshness, 0f, 1f);
             if (confidence < 0.035f)
                 continue;

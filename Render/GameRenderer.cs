@@ -2189,8 +2189,19 @@ public sealed class GameRenderer
         return false;
     }
 
-    private void IssueMoveOrderToPoint(UnitId[] memberIds, Vector3 destination)
+    private void IssueMoveOrderToPoint(UnitId[] memberIds, Vector3 destination) =>
+        IssueMoveOrderToPoint(memberIds, destination, UnitAiOrderType.Move);
+
+    private void IssueStealthMoveOrderToPoint(UnitId[] memberIds, Vector3 destination) =>
+        IssueMoveOrderToPoint(memberIds, destination, UnitAiOrderType.StealthMove);
+
+    private void IssueMoveOrderToPoint(
+        UnitId[] memberIds,
+        Vector3 destination,
+        UnitAiOrderType orderType)
     {
+        if (orderType is not (UnitAiOrderType.Move or UnitAiOrderType.StealthMove))
+            throw new ArgumentOutOfRangeException(nameof(orderType));
         UnitStore units = _unitSimulation.Units;
         UnitAiStore ai = _unitSimulation.AI.Store;
         List<int> members = GetMovableMoveMembers(memberIds, units);
@@ -2207,7 +2218,7 @@ public sealed class GameRenderer
 
             if (TryFindAvailableMoveCell(desiredX, desiredY, reserved, out int tileX, out int tileY))
             {
-                ai.SetPlayerOrder(unit, UnitAiOrderType.Move, new Vector3(
+                ai.SetPlayerOrder(unit, orderType, new Vector3(
                     tileX + 0.5f,
                     tileY + 0.5f,
                     _worldMap.GetSurfaceHeight(tileX, tileY)));
@@ -2215,12 +2226,14 @@ public sealed class GameRenderer
             }
             else
             {
-                ai.SetPlayerOrder(unit, UnitAiOrderType.Move, destination);
+                ai.SetPlayerOrder(unit, orderType, destination);
                 assigned++;
             }
         }
 
-        Console.WriteLine($"[MOVE] Move order assigned to {assigned} units; unique destination cells reserved.");
+        Console.WriteLine(orderType == UnitAiOrderType.StealthMove
+            ? $"[AI-STEALTH] Stealth-move order assigned to {assigned} units."
+            : $"[MOVE] Move order assigned to {assigned} units; unique destination cells reserved.");
     }
 
     private void DrawPlayerOrderOverlays(SimulationFrameSnapshot snapshot)
@@ -2232,7 +2245,7 @@ public sealed class GameRenderer
         foreach (RenderUnitState unit in snapshot.Units)
         {
             if (unit.HitPoints <= 0f ||
-                unit.PlayerOrderType is not (UnitAiOrderType.Move or UnitAiOrderType.Attack))
+                unit.PlayerOrderType is not (UnitAiOrderType.Move or UnitAiOrderType.Attack or UnitAiOrderType.StealthMove))
                 continue;
 
             UnitId id = new(unit.Index, unit.Generation);
@@ -2240,9 +2253,12 @@ public sealed class GameRenderer
                 continue;
 
             bool attack = unit.PlayerOrderType == UnitAiOrderType.Attack;
+            bool stealth = unit.PlayerOrderType == UnitAiOrderType.StealthMove;
             Color pathColor = attack
                 ? new Color(255, 95, 80, 82)
-                : new Color(85, 205, 255, 82);
+                : stealth
+                    ? new Color(115, 230, 160, 100)
+                    : new Color(85, 205, 255, 82);
             _orderPathLine.FillColor = pathColor;
 
             Vector2 from = new(unit.Position.X * TerrainTilePixelSize,
@@ -3792,6 +3808,36 @@ public sealed class GameRenderer
         {
             _infantryFormation = (InfantryFormationType)(((int)_infantryFormation + 1) % 3);
             Console.WriteLine($"[INFANTRY] Formation: {InfantryFormation.GetName(_infantryFormation)}");
+            return;
+        }
+
+        if (key == Keyboard.Key.S &&
+            (Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
+             Keyboard.IsKeyPressed(Keyboard.Key.RControl)))
+        {
+            SimulationFrameSnapshot? stealthSnapshot = GetInputSnapshot();
+            if (stealthSnapshot != null)
+            {
+                UnitId[] stealthUnits = CaptureSelectedUnitIds(stealthSnapshot);
+                if (stealthUnits.Length > 0)
+                {
+                    SFML.System.Vector2 mouseWorld =
+                        _window.MapPixelToCoords(Mouse.GetPosition(_window), _camera.View);
+                    float x = Math.Clamp(mouseWorld.X, 0.5f, _worldMap.TileWidth - 0.5f);
+                    float y = Math.Clamp(mouseWorld.Y, 0.5f, _worldMap.TileHeight - 0.5f);
+                    int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
+                    int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
+                    Vector3 destination = new(
+                        x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
+                    ExecuteSimulationCommand(() =>
+                        IssueStealthMoveOrderToPoint(stealthUnits, destination));
+                }
+                else
+                {
+                    Console.WriteLine("[AI-STEALTH] Select one or more living units first.");
+                }
+            }
+
             return;
         }
 

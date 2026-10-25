@@ -83,8 +83,8 @@ Both tasks use the real UnitSimulation, VisionSystem, PerceptionMemoryStore, Uni
 
 Example commands:
 
-    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task remain-undetected --population 16 --generations 12 --matches 6 --ticks 2400 --workers 6 --seed 20261025
-    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task break-contact --population 16 --generations 12 --matches 6 --ticks 2400 --workers 6 --seed 20261025
+    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task remain-undetected --population 16 --generations 12 --matches 6 --ticks 3600 --workers 6 --seed 20261025
+    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task break-contact --population 16 --generations 12 --matches 6 --ticks 3600 --workers 6 --seed 20261025
 
 Outputs are separate per objective: ai-stealth-remain-undetected.json / ai-stealth-break-contact.json, plus each one's history CSV and validation JSON. The JSON is a direct AiStealthProfile that the game can load with:
 
