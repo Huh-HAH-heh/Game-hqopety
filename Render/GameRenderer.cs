@@ -3853,7 +3853,7 @@ public sealed class GameRenderer
                 UnitId[] stealthUnits = CaptureSelectedUnitIds(stealthSnapshot);
                 if (stealthUnits.Length > 0)
                 {
-                    SFML.System.Vector2 mouseWorld =
+                    SFML.System.Vector2f mouseWorld =
                         _window.MapPixelToCoords(Mouse.GetPosition(_window), _camera.View);
                     float x = Math.Clamp(mouseWorld.X, 0.5f, _worldMap.TileWidth - 0.5f);
                     float y = Math.Clamp(mouseWorld.Y, 0.5f, _worldMap.TileHeight - 0.5f);
