@@ -55,6 +55,8 @@ internal static class Program
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
             string csv=Path.Combine(dir,Path.GetFileNameWithoutExtension(output)+".history.csv");
             string poolOutput=Path.GetFullPath(TextArg(args,"--pool-output",Path.Combine(dir,"ai-tactical-genome-pool.json")));
+            string? poolOutputDirectory=Path.GetDirectoryName(poolOutput);
+            if (!string.IsNullOrEmpty(poolOutputDirectory)) Directory.CreateDirectory(poolOutputDirectory);
             string? seedPath=TextOpt(args,"--seed-profile");
             AiBalanceProfile seedProfile=seedPath==null ? AiBalanceProfile.Default : LoadProfile(Path.GetFullPath(seedPath));
             _profileBase=seedProfile;

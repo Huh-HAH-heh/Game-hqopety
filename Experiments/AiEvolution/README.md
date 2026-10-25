@@ -99,7 +99,7 @@ The general combat trainer preserves distinct candidate profiles across generati
 Load the pool in the regular game:
 
 ```powershell
-dotnet run --project App/App.csproj -- --ai-genome-pool=.\\Experiments\\AiEvolution\\output\\ai-tactical-genome-pool.json
+dotnet run --project App/App.csproj -- --ai-genome-pool=.\Experiments\AiEvolution\output\ai-tactical-genome-pool.json
 ```
 
 The pool is opt-in; omitting the flag leaves the current default AI unchanged. The current selection metric measures candidate profiles in team-versus-baseline battles, not causal credit for each individual pawn's kills; per-genome held-out scores are included in the pool, so it does not pretend to have individual kill attribution. These changes have not been validated by a local game run yet.
