@@ -7,6 +7,7 @@ using Core.Items;
 using Core.Map;
 using Core.Unit;
 using World;
+using RimClone.Experiments.AiEvolution;
 
 internal static class Program
 {
@@ -14,7 +15,12 @@ internal static class Program
     private const float Dt = 0.05f;
     private static AiBalanceProfile _profileBase = AiBalanceProfile.Default;
     private static volatile bool _cancelRequested;
-    private static bool _trainingPaused;
+    private static volatile bool _trainingPaused;
+    private static int _workers = 1;
+    private static readonly object _progressLock = new();
+    private static long _lastProgressOutputTimestamp;
+    private static volatile bool _controlReaderRunning;
+    private static Thread? _controlReader;
     private static long _trainingStartedAt;
     private static string _checkpointPath = "ai-balance-best.json";
     private static string _progressPhase = "TRAIN";
@@ -38,6 +44,8 @@ internal static class Program
             int battles=Arg(args,"--battles",8,2,1000), ticks=Arg(args,"--ticks",600,100,100000);
             int validationBattles=Arg(args,"--validation-battles",Math.Max(8,battles),8,1000);
             int team=Arg(args,"--team-size",4,2,16), seed=Arg(args,"--seed",20261024,int.MinValue,int.MaxValue);
+            int workers=Arg(args,"--workers",Math.Clamp(Environment.ProcessorCount-1,1,8),1,32);
+            _workers=workers;
             string output=Path.GetFullPath(TextArg(args,"--output","Experiments/AiEvolution/output/ai-balance-best.json"));
             _checkpointPath = output;
             string dir=Path.GetDirectoryName(output)!; Directory.CreateDirectory(dir);
@@ -60,8 +68,9 @@ internal static class Program
             _populationTotal = popSize;
             _progressPhase = "TRAIN";
             File.WriteAllText(output,JsonSerializer.Serialize(Profile(globalGenes),new JsonSerializerOptions{WriteIndented=true}));
-            Console.WriteLine($"AI evolution: population={popSize}; generations={generations}; battles={battles}; ticks={ticks}; team={team}v{team}");
+            Console.WriteLine($"AI evolution: population={popSize}; generations={generations}; battles={battles}; ticks={ticks}; team={team}v{team}; workers={workers}");
             Console.WriteLine("[EVOLVE] Live progress is shown below. P/Space=pause-resume, Esc=stop, Ctrl+C=checkpoint and stop.");
+            StartControlReader();
 
             for(int gen=1;gen<=generations;gen++)
             {
@@ -173,6 +182,7 @@ internal static class Program
         }
         finally
         {
+            StopControlReader();
             Console.CancelKeyPress -= OnCancelKeyPress;
             if (!Console.IsOutputRedirected) Console.WriteLine();
         }
@@ -184,19 +194,49 @@ internal static class Program
         _cancelRequested = true;
     }
 
+    private static void StartControlReader()
+    {
+        if(Console.IsInputRedirected)
+            return;
+
+        _controlReaderRunning=true;
+        _controlReader=new Thread(() =>
+        {
+            while(_controlReaderRunning)
+            {
+                ReadTrainingKeys();
+                Thread.Sleep(20);
+            }
+        })
+        {
+            IsBackground=true,
+            Name="AiEvolutionControlReader"
+        };
+        _controlReader.Start();
+    }
+
+    private static void StopControlReader()
+    {
+        _controlReaderRunning=false;
+        if(_controlReader!=null && _controlReader.IsAlive)
+            _controlReader.Join(500);
+        _controlReader=null;
+    }
+
     private static void PollTrainingControls()
     {
-        ReadTrainingKeys();
         if(_cancelRequested)
             throw new OperationCanceledException("Evolution stopped by user.");
 
         while(_trainingPaused)
         {
-            Thread.Sleep(50);
-            ReadTrainingKeys();
             if(_cancelRequested)
                 throw new OperationCanceledException("Evolution stopped by user.");
+            Thread.Sleep(25);
         }
+
+        if(_cancelRequested)
+            throw new OperationCanceledException("Evolution stopped by user.");
     }
 
     private static void ReadTrainingKeys()
@@ -212,14 +252,16 @@ internal static class Program
                 if(key is ConsoleKey.P or ConsoleKey.Spacebar)
                 {
                     _trainingPaused=!_trainingPaused;
-                    Console.WriteLine(_trainingPaused
-                        ? "[EVOLVE] PAUSED. Press P or Space to resume; Esc/Ctrl+C stops safely."
-                        : "[EVOLVE] RESUMED.");
+                    lock(_progressLock)
+                        Console.WriteLine(_trainingPaused
+                            ? "[EVOLVE] PAUSED. Press P or Space to resume; Esc/Ctrl+C stops safely."
+                            : "[EVOLVE] RESUMED.");
                 }
                 else if(key==ConsoleKey.Escape)
                 {
                     _cancelRequested=true;
-                    Console.WriteLine("[EVOLVE] Stop requested; finishing at the next control point.");
+                    lock(_progressLock)
+                        Console.WriteLine("[EVOLVE] Stop requested; finishing at the next control point.");
                 }
             }
         }
@@ -230,36 +272,52 @@ internal static class Program
         }
     }
 
-    private static void ReportTrainingProgress(int tick,int totalTicks)
+    private static void ReportTrainingProgress(int tick,int totalTicks,int battle,int totalBattles,string scenarioName)
     {
-        _tickNow=tick;
-        _ticksTotal=totalTicks;
-        double fraction=0d;
-        if(_progressPhase=="TRAIN" && _generationsTotal>0 && _populationTotal>0)
+        long now=Stopwatch.GetTimestamp();
+        lock(_progressLock)
         {
-            double candidateProgress=(_battleNow-1+(tick/(double)Math.Max(1,totalTicks))) /
-                Math.Max(1,_battlesTotal);
-            double completed=(_generationNow-1d)*_populationTotal+(_candidateNow-1d)+candidateProgress;
-            fraction=Math.Clamp(completed/(_generationsTotal*(double)_populationTotal),0d,0.9999d);
-        }
+            if(tick!=totalTicks && tick%100!=0 &&
+                _lastProgressOutputTimestamp!=0 &&
+                Stopwatch.GetElapsedTime(_lastProgressOutputTimestamp,now).TotalMilliseconds<250)
+                return;
 
-        TimeSpan elapsed=Stopwatch.GetElapsedTime(_trainingStartedAt);
-        string etaText=_progressPhase=="TRAIN" && fraction>0d
-            ? TimeSpan.FromSeconds(Math.Max(0d,elapsed.TotalSeconds*(1d-fraction)/fraction)).ToString(@"hh\:mm\:ss")
-            : "--:--:--";
-        string elapsedText=elapsed.ToString(@"hh\:mm\:ss");
-        string status=$"[EVOLVE] {_progressPhase} | gen {_generationNow}/{_generationsTotal} | " +
-            $"candidate {_candidateNow}/{_populationTotal} | battle {_battleNow}/{_battlesTotal} " +
-            $"{_currentScenarioName} | tick {tick}/{totalTicks} ({tick/(double)Math.Max(1,totalTicks):P0}) | " +
-            $"elapsed {elapsedText} | ETA {etaText}";
+            _lastProgressOutputTimestamp=now;
+            _tickNow=tick;
+            _ticksTotal=totalTicks;
+            _battleNow=battle;
+            _battlesTotal=totalBattles;
+            _currentScenarioName=scenarioName;
 
-        if(Console.IsOutputRedirected)
-        {
-            if(tick%100==0||tick==totalTicks)
-                Console.WriteLine(status);
+            double fraction=0d;
+            if(_progressPhase=="TRAIN" && _generationsTotal>0 && _populationTotal>0)
+            {
+                double candidateProgress=(battle-1+(tick/(double)Math.Max(1,totalTicks))) /
+                    Math.Max(1,totalBattles);
+                double completed=(_generationNow-1d)*_populationTotal+(_candidateNow-1d)+candidateProgress;
+                fraction=Math.Clamp(completed/(_generationsTotal*(double)_populationTotal),0d,0.9999d);
+            }
+
+            TimeSpan elapsed=Stopwatch.GetElapsedTime(_trainingStartedAt);
+            TimeSpan eta=fraction>0d
+                ? TimeSpan.FromSeconds(Math.Max(0d,elapsed.TotalSeconds*(1d-fraction)/fraction))
+                : TimeSpan.Zero;
+            string etaText=_progressPhase=="TRAIN" && fraction>0d
+                ? eta.ToString(@"hh\:mm\:ss")
+                : "--:--:--";
+            string status=$"[EVOLVE] {_progressPhase} | gen {_generationNow}/{_generationsTotal} | " +
+                $"candidate {_candidateNow}/{_populationTotal} | parallel match {battle}/{totalBattles} " +
+                $"{scenarioName} | tick {tick}/{totalTicks} ({tick/(double)Math.Max(1,totalTicks):P0}) | " +
+                $"elapsed {elapsed:hh\:mm\:ss} | ETA {etaText} | workers {_workers}";
+
+            if(Console.IsOutputRedirected)
+            {
+                if(tick%100==0||tick==totalTicks)
+                    Console.WriteLine(status);
+            }
+            else
+                Console.Write("\r"+status.PadRight(190));
         }
-        else
-            Console.Write("\r"+status.PadRight(160));
     }
 
     private static void ValidateGenomeConfiguration()
@@ -371,19 +429,43 @@ internal static class Program
 
         _battlesTotal=battles;
         _ticksTotal=ticks;
+        var jobs=new AiBattleJob[battles];
+        for(int i=0;i<battles;i++)
+        {
+            int scenario=(i/2)%scenarioCount;
+            int scenarioSeed=unchecked(seed+(i+1)*7919);
+            jobs[i]=new AiBattleJob(i,scenario,scenarioSeed,i%2==0);
+        }
+
+        // Each job constructs its own WorldMap and UnitSimulation in Battle().
+        // Store results by input index so completion order cannot affect fitness.
+        BattleResult[] battleResults=AiExperimentBatchRunner.Execute(
+            jobs,
+            _workers,
+            (job,index) =>
+            {
+                PollTrainingControls();
+                lock(_progressLock)
+                    Console.WriteLine($"[EVOLVE] Battle {job.Index+1}/{battles}: {ScenarioName(job.ScenarioId)}, seed={job.Seed}, candidate-side={(job.CandidateStartsLeft?"left":"right")}.");
+
+                BattleResult result=Battle(
+                    p,job.CandidateStartsLeft,job.ScenarioId,ticks,team,job.Seed,
+                    job.Index+1,battles);
+
+                lock(_progressLock)
+                {
+                    if(!Console.IsOutputRedirected) Console.WriteLine();
+                    Console.WriteLine($"[EVOLVE] Battle {job.Index+1}/{battles} finished: score={result.Fitness:F2}, outcome={result.Outcome}, survivors={result.SurvivorRate:P0}, nav-failures={result.NavigationRoutesFailed}.");
+                }
+                return result;
+            });
+
+        // Aggregate in stable input order, after parallel matches finish.
         for(int i=0;i<battles;i++)
         {
             PollTrainingControls();
-            // Keep the layout for each match index identical across every candidate.
-            int scenario=(i/2)%scenarioCount;
-            int scenarioSeed=unchecked(seed+(i+1)*7919);
-            _battleNow=i+1;
-            _tickNow=0;
-            _currentScenarioName=ScenarioName(scenario);
-            Console.WriteLine($"[EVOLVE] Battle {i+1}/{battles}: {_currentScenarioName}, seed={scenarioSeed}, candidate-side={(i%2==0?"left":"right")}.");
-            BattleResult result=Battle(p,i%2==0,scenario,ticks,team,scenarioSeed);
-            if(!Console.IsOutputRedirected) Console.WriteLine();
-            Console.WriteLine($"[EVOLVE] Battle {i+1}/{battles} finished: score={result.Fitness:F2}, outcome={result.Outcome}, survivors={result.SurvivorRate:P0}, nav-failures={result.NavigationRoutesFailed}.");
+            int scenario=jobs[i].ScenarioId;
+            BattleResult result=battleResults[i];
             fitness+=result.Fitness;
             if(result.Outcome>0) winRate++;
             else if(result.Outcome==0) drawRate++;
@@ -435,7 +517,7 @@ internal static class Program
         _ => "Unknown"
     };
 
-    private static BattleResult Battle(AiBalanceProfile candidate,bool leftCandidate,int scenario,int ticks,int team,int scenarioSeed)
+    private static BattleResult Battle(AiBalanceProfile candidate,bool leftCandidate,int scenario,int ticks,int team,int scenarioSeed,int battleIndex,int battleCount)
     {
         bool canyonScenario=scenario==3;
         var world=canyonScenario
@@ -468,7 +550,7 @@ internal static class Program
             right=ReadTeam(sim,rightMembers);
             bool terminal=left.Alive==0||right.Alive==0;
             if((t+1)%25==0||terminal||t==ticks-1)
-                ReportTrainingProgress(t+1,ticks);
+                ReportTrainingProgress(t+1,ticks,battleIndex,battleCount,ScenarioName(scenario));
             if(terminal) break;
         }
         Team own=leftCandidate?left:right, enemy=leftCandidate?right:left;

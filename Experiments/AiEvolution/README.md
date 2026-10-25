@@ -58,3 +58,15 @@ When the profile is loaded in the game:
 - `F11`: return to `1x`.
 
 The game title and `[PERF]` line now show `Speed`, `SimRate`, and `UPS`. `SimRate` means game-seconds advanced per real second; `UPS` means simulation updates per second. The existing `Sim=...ms` value is the wall-clock cost of one simulation update, while `FPS` describes rendering. The breakdown also reports full perception, suppression, body update and melee update timings, in addition to AI, movement, weapons, ballistics and health. This separates a smooth window from a simulation thread that cannot keep up with real time and helps locate the expensive simulation phase.
+
+
+## Parallel experiment foundation
+
+The offline evaluator accepts the --workers N option and evaluates independent matches for one candidate concurrently. Each battle constructs a fresh WorldMap and UnitSimulation; results are aggregated by input index so worker completion order cannot alter candidate fitness. The default worker limit is min(processor count - 1, 8), at least one. Lower it if canyon scenarios compete with the game for memory, or raise it deliberately.
+
+Example command:
+dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --population 8 --generations 4 --battles 8 --ticks 600 --team-size 4 --workers 6 --seed 20261024
+
+Keyboard pause/resume and stop are read by one control thread; simulation workers observe shared pause/cancel flags. Do not share a mutable WorldMap or UnitSimulation between jobs.
+
+The experiment-definition contract lists intended objectives for individual units and squads: general combat, remain undetected, break contact after detection, seek cover under fire, weapon-specific behavior, squad coordination, and squad weapon doctrine. These are declarations for upcoming scenario/evaluator stages, not a claim that every listed objective is already trainable. The current runnable evaluator still optimizes the general-combat AiBalanceProfile; specialized goals need objective-specific scenarios, observations, fitness metrics, and holdout checks before use.
