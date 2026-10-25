@@ -296,7 +296,7 @@ internal static class AiSpecializedEvolutionTrainer
     {
         ThrowIfStopped();
         var random = new Random(seed);
-        var world = new WorldMap(regionsX: 4, regionsY: 2, layerCount: 32);
+        var world = new WorldMap(regionsX: 6, regionsY: 3, layerCount: 32);
         BuildFlatGround(world);
 
         var sim = new UnitSimulation(unitCapacity: 16, bodyCapacity: 256)
@@ -312,7 +312,7 @@ internal static class AiSpecializedEvolutionTrainer
         if (task == AiStealthTrainingTask.RemainUndetected)
         {
             candidateStart = Surface(world, 5.5f, 54.5f);
-            destination = Surface(world, 248.5f, 54.5f);
+            destination = Surface(world, 278.5f, 54.5f);
             guardLayout = BuildConcealmentCourse(world, random);
         }
         else
@@ -541,7 +541,7 @@ internal static class AiSpecializedEvolutionTrainer
     private static List<(float X, float Y, float Angle)> BuildConcealmentCourse(
         WorldMap world, Random random)
     {
-        int[] wallXs = { 28, 56, 84, 112, 140, 168, 196 };
+        int[] wallXs = { 28, 56, 84, 112, 140, 168, 196, 224 };
         var guards = new List<(float X, float Y, float Angle)>(4);
         for (int i = 0; i < wallXs.Length; i++)
         {
