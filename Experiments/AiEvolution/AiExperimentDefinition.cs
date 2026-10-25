@@ -69,8 +69,9 @@ public sealed record AiExperimentDefinition(
 /// </summary>
 public static class AiExperimentPresets
 {
-    public static IReadOnlyList<AiExperimentDefinition> All { get; } = Array.AsReadOnly(
-    [
+    public static IReadOnlyList<AiExperimentDefinition> All { get; } = Array.AsReadOnly<AiExperimentDefinition>(
+    new AiExperimentDefinition[]
+    {
         new("unit-general-combat", "Individual combat policy", AiExperimentScope.Unit,
             AiExperimentGoal.GeneralCombat, "combat-basic"),
         new("unit-remain-undetected", "Remain undetected", AiExperimentScope.Unit,
@@ -85,7 +86,7 @@ public static class AiExperimentPresets
             AiExperimentGoal.SquadCoordination, "squad-tactics"),
         new("squad-weapon-employment", "Squad weapon doctrine", AiExperimentScope.Squad,
             AiExperimentGoal.SquadWeaponEmployment, "squad-weapon-employment")
-    ]);
+    });
 
     public static bool TryGet(string id, out AiExperimentDefinition? definition)
     {
