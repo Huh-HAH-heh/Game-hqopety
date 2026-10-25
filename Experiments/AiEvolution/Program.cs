@@ -34,6 +34,10 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        string? specializedTask = TextOpt(args, "--specialized-task");
+        if (!string.IsNullOrWhiteSpace(specializedTask))
+            return AiSpecializedEvolutionTrainer.Run(args, specializedTask);
+
         _cancelRequested = false;
         _trainingPaused = false;
         Console.CancelKeyPress += OnCancelKeyPress;

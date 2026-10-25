@@ -70,3 +70,24 @@ dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --population 
 Keyboard pause/resume and stop are read by one control thread; simulation workers observe shared pause/cancel flags. Do not share a mutable WorldMap or UnitSimulation between jobs.
 
 The experiment-definition contract lists intended objectives for individual units and squads: general combat, remain undetected, break contact after detection, seek cover under fire, weapon-specific behavior, squad coordination, and squad weapon doctrine. These are declarations for upcoming scenario/evaluator stages, not a claim that every listed objective is already trainable. The current runnable evaluator still optimizes the general-combat AiBalanceProfile; specialized goals need objective-specific scenarios, observations, fitness metrics, and holdout checks before use.
+
+
+## Specialized stealth-skill evolution
+
+The specialized evaluator provides two real objectives and evolves an AiStealthProfile separately from general combat.
+
+- remain-undetected: traverse a randomized series of wall gates and stationary sentries without any guard ever registering a visual contact, then reach extraction.
+- break-contact: begin under actual guard observation, receive a StealthMove order after a guard's perception memory records the sighting, navigate behind terrain, stay out of sight for a continuous hold period, and reach extraction.
+
+Both tasks use the real UnitSimulation, VisionSystem, PerceptionMemoryStore, UnitAiSystem, and navigation. Guard detection is scored by inspecting each guard's recorded visual contact with the candidate; it is not inferred from distance alone. The pawn's route planner only reads its own uncertain reported or remembered contacts. Each generation evaluates matched scenario seeds across candidates with a bounded worker pool; final validation compares the best profile against the default on different seeds. A profile is not labelled an improvement automatically when holdout results do not support it.
+
+Example commands:
+
+    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task remain-undetected --population 16 --generations 12 --matches 6 --ticks 2400 --workers 6 --seed 20261025
+    dotnet run --project Experiments/AiEvolution/AiEvolution.csproj -- --specialized-task break-contact --population 16 --generations 12 --matches 6 --ticks 2400 --workers 6 --seed 20261025
+
+Outputs are separate per objective: ai-stealth-remain-undetected.json / ai-stealth-break-contact.json, plus each one's history CSV and validation JSON. The JSON is a direct AiStealthProfile that the game can load with:
+
+    dotnet run --project App/App.csproj -- --ai-stealth-profile=.\Experiments\AiEvolution\output\ai-stealth-break-contact.json
+
+StealthMove is currently an AI-order API used by the evaluator; a dedicated player-facing command in the normal game UI is future work. The profile only influences units assigned to this explicit order. Posture-based detection reduction is implemented in the shared vision rule, so it also affects ordinary crouching/lying units, not just the specialized training scene. Those gameplay values need runtime balancing once simulation runs are available.
