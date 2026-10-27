@@ -248,19 +248,52 @@ public sealed class UnitMovementSystem
                     velocity = Vector2.Zero;
                 }
 
-                position.X += velocity.X * substepDelta;
-                position.Y += velocity.Y * substepDelta;
+                float rawNextX = position.X + velocity.X * substepDelta;
+                float rawNextY = position.Y + velocity.Y * substepDelta;
+                float nextX = Math.Clamp(rawNextX, minX, maxX);
+                float nextY = Math.Clamp(rawNextY, minY, maxY);
+                bool hitXBoundary = nextX != rawNextX;
+                bool hitYBoundary = nextY != rawNextY;
 
-                float unclampedX = position.X;
-                float unclampedY = position.Y;
-                position.X = Math.Clamp(position.X, minX, maxX);
-                position.Y = Math.Clamp(position.Y, minY, maxY);
+                Vector2 from = new(position.X, position.Y);
+                Vector2 proposed = new(nextX, nextY);
+                if ((proposed - from).LengthSquared() > 0.0000001f)
+                {
+                    if (_navigation.CanMoveDirectly(units, unit, worldMap, from, proposed))
+                    {
+                        position.X = nextX;
+                        position.Y = nextY;
+                    }
+                    else
+                    {
+                        // If inertia would cross blocked terrain, slide along any
+                        // axis that remains traversable instead of clipping through it.
+                        if (MathF.Abs(nextX - position.X) > 0.000001f)
+                        {
+                            Vector2 xOnly = new(nextX, position.Y);
+                            if (_navigation.CanMoveDirectly(units, unit, worldMap, from, xOnly))
+                                position.X = nextX;
+                            else
+                                velocity.X = 0f;
+                        }
+
+                        if (MathF.Abs(nextY - position.Y) > 0.000001f)
+                        {
+                            Vector2 yStart = new(position.X, position.Y);
+                            Vector2 yOnly = new(position.X, nextY);
+                            if (_navigation.CanMoveDirectly(units, unit, worldMap, yStart, yOnly))
+                                position.Y = nextY;
+                            else
+                                velocity.Y = 0f;
+                        }
+                    }
+                }
 
                 // The map boundary acts as a solid constraint rather than
                 // allowing persistent velocity to drive the unit out of bounds.
-                if (position.X != unclampedX)
+                if (hitXBoundary)
                     velocity.X = 0f;
-                if (position.Y != unclampedY)
+                if (hitYBoundary)
                     velocity.Y = 0f;
 
                 // Stage 1 is still ground-only. Vertical free-flight is added
