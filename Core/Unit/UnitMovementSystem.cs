@@ -28,9 +28,14 @@ public sealed class UnitMovementSystem
             : -1;
     }
 
+    private const float ReferenceMassKg = 75f;
     private const float BaseMovementAcceleration = 6.5f;
     private const float BaseBrakingAcceleration = 8.5f;
     private const float BaseTurningAcceleration = 6f;
+    private const float ForceResponseTime = 0.32f;
+    private const float GroundRollingDeceleration = 0.18f;
+    private const float CollisionRestitution = 0.08f;
+    private const float CollisionFriction = 0.45f;
     private const float ArrivalRadius = 0.14f;
     private const float ArrivalSpeed = 0.12f;
     private const float MinimumMovingSpeed = 0.035f;
@@ -141,10 +146,16 @@ public sealed class UnitMovementSystem
                 moveSpeed *= 0.45f;
 
             float mass = MathF.Max(1f, masses[unit]);
-            float massScale = Math.Clamp(MathF.Sqrt(75f / mass), 0.7f, 1.25f);
-            float maxAcceleration = BaseMovementAcceleration * massScale;
-            float maxBraking = BaseBrakingAcceleration * massScale;
-            float maxTurningAcceleration = BaseTurningAcceleration * massScale;
+            // Motor/traction force grows roughly with muscle cross-section (mass^(2/3)),
+            // not linearly with body mass. Heavier bodies therefore accelerate more slowly.
+            float massAccelerationScale = MathF.Pow(
+                ReferenceMassKg / mass, 1f / 3f);
+            float maxAcceleration = BaseMovementAcceleration * massAccelerationScale;
+            float maxBraking = BaseBrakingAcceleration * massAccelerationScale;
+            float maxTurningAcceleration = BaseTurningAcceleration * massAccelerationScale;
+            float maxDriveForce = mass * maxAcceleration;
+            float maxBrakeForce = mass * maxBraking;
+            float maxLateralForce = mass * maxTurningAcceleration;
 
             Vector2 steeringPoint = new(position.X, position.Y);
             float distanceToGoal = float.PositiveInfinity;
@@ -213,37 +224,45 @@ public sealed class UnitMovementSystem
                     }
                 }
 
+                // The route controller requests a force; it never assigns velocity.
+                // F = m * deltaVelocity / responseTime, then available traction limits it.
                 Vector2 velocityDelta = desiredVelocity - velocity;
-                float deltaLengthSquared = velocityDelta.LengthSquared();
                 float currentSpeed = velocity.Length();
                 float desiredSpeedNow = desiredVelocity.Length();
+                Vector2 forward = currentSpeed > 0.05f
+                    ? velocity / currentSpeed
+                    : (desiredSpeedNow > 0.05f
+                        ? desiredVelocity / desiredSpeedNow
+                        : Vector2.UnitX);
 
-                if (deltaLengthSquared > 0.000001f)
+                Vector2 requestedForce = velocityDelta * (mass / ForceResponseTime);
+                float requestedLongitudinalForce = Vector2.Dot(requestedForce, forward);
+                float longitudinalForce = Math.Clamp(
+                    requestedLongitudinalForce, -maxBrakeForce, maxDriveForce);
+                Vector2 lateralForce = requestedForce -
+                    forward * requestedLongitudinalForce;
+                float lateralForceLength = lateralForce.Length();
+                if (lateralForceLength > maxLateralForce && lateralForceLength > 0.0001f)
+                    lateralForce *= maxLateralForce / lateralForceLength;
+
+                Vector2 netForce = forward * longitudinalForce + lateralForce;
+                Vector2 previousVelocity = velocity;
+                Vector2 acceleration = netForce / mass;
+                velocity += acceleration * substepDelta;
+
+                // Rolling resistance is an external ground force. Clamp its effect
+                // so a discrete step cannot reverse a nearly stopped body.
+                float postForceSpeed = velocity.Length();
+                if (postForceSpeed > 0.0001f &&
+                    Vector2.Dot(velocity, previousVelocity) > 0f)
                 {
-                    float directionDot = 1f;
-                    if (currentSpeed > 0.001f && desiredSpeedNow > 0.001f)
-                    {
-                        directionDot = Vector2.Dot(
-                            velocity / currentSpeed,
-                            desiredVelocity / desiredSpeedNow);
-                    }
-
-                    float allowedAcceleration;
-                    if (currentSpeed > desiredSpeedNow + 0.05f)
-                        allowedAcceleration = maxBraking;
-                    else if (directionDot < 0.92f)
-                        allowedAcceleration = maxTurningAcceleration;
-                    else
-                        allowedAcceleration = maxAcceleration;
-
-                    float maxVelocityChange = allowedAcceleration * substepDelta;
-                    float deltaLength = MathF.Sqrt(deltaLengthSquared);
-                    if (deltaLength <= maxVelocityChange)
-                        velocity = desiredVelocity;
-                    else
-                        velocity += velocityDelta * (maxVelocityChange / deltaLength);
+                    float dragDelta = MathF.Min(
+                        GroundRollingDeceleration * substepDelta, postForceSpeed);
+                    velocity -= velocity / postForceSpeed * dragDelta;
                 }
-                else if (!steeringActive && currentSpeed <= MinimumMovingSpeed)
+
+                if (!steeringActive && velocity.LengthSquared() <=
+                    MinimumMovingSpeed * MinimumMovingSpeed)
                 {
                     velocity = Vector2.Zero;
                 }
@@ -450,6 +469,15 @@ public sealed class UnitMovementSystem
                             }
 
                             Vector3 otherPosition = units.Position[other];
+                            // Positions are surface bases. Bodies on vertically separated
+                            // floors should not collide merely because their XY footprints overlap.
+                            if (otherPosition.Z >= position.Z + units.Height[unit] ||
+                                position.Z >= otherPosition.Z + units.Height[other])
+                            {
+                                other = next;
+                                continue;
+                            }
+
                             float dx = otherPosition.X - position.X;
                             float dy = otherPosition.Y - position.Y;
                             float distanceSquared = dx * dx + dy * dy;
@@ -480,21 +508,109 @@ public sealed class UnitMovementSystem
                                 dy /= distance;
                             }
 
-                            float push = (minimumDistance - distance) * 0.51f;
+                            Vector2 normal = new(dx, dy);
+                            float massA = MathF.Max(1f, units.BodyMassKg[unit]);
+                            float massB = MathF.Max(1f, units.BodyMassKg[other]);
+                            float inverseMassA = 1f / massA;
+                            float inverseMassB = 1f / massB;
+                            float inverseMassSum = inverseMassA + inverseMassB;
+
+                            // Correct actual overlap, weighted by inverse mass. Keep the
+                            // correction on traversable ground so contacts do not push pawns
+                            // through walls; if one side is blocked, try moving the other.
+                            float correctionDistance =
+                                MathF.Max(0f, minimumDistance - distance - 0.005f) * 0.8f;
                             Vector3 a = units.Position[unit];
                             Vector3 b = units.Position[other];
-                            a.X -= dx * push;
-                            a.Y -= dy * push;
-                            b.X += dx * push;
-                            b.Y += dy * push;
-
+                            Vector2 oldA = new(a.X, a.Y);
+                            Vector2 oldB = new(b.X, b.Y);
+                            Vector2 moveA = -normal *
+                                (correctionDistance * inverseMassA / inverseMassSum);
+                            Vector2 moveB = normal *
+                                (correctionDistance * inverseMassB / inverseMassSum);
+                            a.X += moveA.X;
+                            a.Y += moveA.Y;
+                            b.X += moveB.X;
+                            b.Y += moveB.Y;
                             ClampUnitPosition(ref a, units, unit, worldMap);
                             ClampUnitPosition(ref b, units, other, worldMap);
-                            units.Position[unit] = a;
-                            units.Position[other] = b;
-                            units.Velocity[unit] = Vector3.Zero;
-                            units.Velocity[other] = Vector3.Zero;
-                            position = a;
+
+                            bool canMoveA = _navigation.CanMoveDirectly(
+                                units, unit, worldMap, oldA, new Vector2(a.X, a.Y));
+                            bool canMoveB = _navigation.CanMoveDirectly(
+                                units, other, worldMap, oldB, new Vector2(b.X, b.Y));
+                            if (canMoveA && canMoveB)
+                            {
+                                units.Position[unit] = a;
+                                units.Position[other] = b;
+                                position = a;
+                            }
+                            else if (canMoveA)
+                            {
+                                a = units.Position[unit];
+                                a.X -= normal.X * correctionDistance;
+                                a.Y -= normal.Y * correctionDistance;
+                                ClampUnitPosition(ref a, units, unit, worldMap);
+                                if (_navigation.CanMoveDirectly(
+                                    units, unit, worldMap, oldA, new Vector2(a.X, a.Y)))
+                                {
+                                    units.Position[unit] = a;
+                                    position = a;
+                                }
+                            }
+                            else if (canMoveB)
+                            {
+                                b = units.Position[other];
+                                b.X += normal.X * correctionDistance;
+                                b.Y += normal.Y * correctionDistance;
+                                ClampUnitPosition(ref b, units, other, worldMap);
+                                if (_navigation.CanMoveDirectly(
+                                    units, other, worldMap, oldB, new Vector2(b.X, b.Y)))
+                                    units.Position[other] = b;
+                            }
+
+                            // Impulse-based contact: only approaching bodies receive a
+                            // normal impulse. Mass converts the impulse into velocity change.
+                            Vector3 storedVelocityA = units.Velocity[unit];
+                            Vector3 storedVelocityB = units.Velocity[other];
+                            Vector2 velocityA = new(storedVelocityA.X, storedVelocityA.Y);
+                            Vector2 velocityB = new(storedVelocityB.X, storedVelocityB.Y);
+                            Vector2 relativeVelocity = velocityB - velocityA;
+                            float normalVelocity = Vector2.Dot(relativeVelocity, normal);
+                            if (normalVelocity < 0f)
+                            {
+                                float normalImpulseMagnitude =
+                                    -(1f + CollisionRestitution) * normalVelocity /
+                                    inverseMassSum;
+                                Vector2 normalImpulse = normal * normalImpulseMagnitude;
+                                velocityA -= normalImpulse * inverseMassA;
+                                velocityB += normalImpulse * inverseMassB;
+
+                                // Coulomb-like tangential friction is capped by the normal impulse.
+                                relativeVelocity = velocityB - velocityA;
+                                Vector2 tangent = relativeVelocity -
+                                    normal * Vector2.Dot(relativeVelocity, normal);
+                                float tangentLength = tangent.Length();
+                                if (tangentLength > 0.0001f)
+                                {
+                                    tangent /= tangentLength;
+                                    float tangentImpulseMagnitude =
+                                        -Vector2.Dot(relativeVelocity, tangent) / inverseMassSum;
+                                    float frictionLimit =
+                                        CollisionFriction * normalImpulseMagnitude;
+                                    tangentImpulseMagnitude = Math.Clamp(
+                                        tangentImpulseMagnitude, -frictionLimit, frictionLimit);
+                                    Vector2 tangentImpulse = tangent * tangentImpulseMagnitude;
+                                    velocityA -= tangentImpulse * inverseMassA;
+                                    velocityB += tangentImpulse * inverseMassB;
+                                }
+
+                                units.Velocity[unit] =
+                                    new Vector3(velocityA.X, velocityA.Y, 0f);
+                                units.Velocity[other] =
+                                    new Vector3(velocityB.X, velocityB.Y, 0f);
+                            }
+
                             other = next;
                         }
                     }
