@@ -315,9 +315,14 @@ public sealed class UnitMovementSystem
                 if (hitYBoundary)
                     velocity.Y = 0f;
 
-                // Stage 1 is still ground-only. Vertical free-flight is added
-                // after the inertial ground controller has been validated.
-                position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+                // Ground height changes only when the body actually travels across
+                // the surface. A stationary unit keeps its authored Z so perception and
+                // projectile geometry do not move merely because movement was updated.
+                if (MathF.Abs(position.X - from.X) > 0.000001f ||
+                    MathF.Abs(position.Y - from.Y) > 0.000001f)
+                {
+                    position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+                }
             }
 
             velocities[unit] = new Vector3(velocity.X, velocity.Y, 0f);
