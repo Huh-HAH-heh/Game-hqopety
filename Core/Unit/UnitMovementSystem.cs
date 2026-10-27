@@ -28,6 +28,15 @@ public sealed class UnitMovementSystem
             : -1;
     }
 
+    private const float BaseMovementAcceleration = 6.5f;
+    private const float BaseBrakingAcceleration = 8.5f;
+    private const float BaseTurningAcceleration = 6f;
+    private const float ArrivalRadius = 0.14f;
+    private const float ArrivalSpeed = 0.12f;
+    private const float MinimumMovingSpeed = 0.035f;
+    private const float MaximumMovementDelta = 0.1f;
+    private const float FixedMovementStep = 1f / 60f;
+
     public void Update(
         UnitStore units,
         WorldMap worldMap,
@@ -37,7 +46,7 @@ public sealed class UnitMovementSystem
         UnitAiStore? ai = null,
         UnitInventoryStore? inventory = null)
     {
-        if (deltaTime <= 0f || units.ActiveCount == 0)
+        if (!float.IsFinite(deltaTime) || deltaTime <= 0f || units.ActiveCount == 0)
             return;
 
         _navigation.BeginUpdate(units, worldMap);
@@ -46,11 +55,17 @@ public sealed class UnitMovementSystem
         if (traceThisUpdate)
             _traceElapsedSeconds = 0f;
 
+        float movementDelta = MathF.Min(deltaTime, MaximumMovementDelta);
+        int substepCount = Math.Clamp(
+            (int)MathF.Ceiling(movementDelta / FixedMovementStep), 1, 6);
+        float substepDelta = movementDelta / substepCount;
+
         ReadOnlySpan<int> active = units.ActiveIndices;
         Vector3[] positions = units.Position;
         Vector3[] velocities = units.Velocity;
         Vector3[] targets = units.Target;
         float[] speeds = units.MoveSpeed;
+        float[] masses = units.BodyMassKg;
         float[] widths = units.Width;
         float[] lengths = units.Length;
         UnitPosture[] postures = units.Posture;
@@ -69,8 +84,7 @@ public sealed class UnitMovementSystem
                 continue;
             }
 
-            // Keep the original movement order, but do not move during a landed
-            // melee hit's short stagger window. Navigation can resume afterwards.
+            // Preserve the existing short combat stagger lock.
             if (meleeCombat?.IsMovementLocked(unit) == true)
             {
                 velocities[unit] = Vector3.Zero;
@@ -79,147 +93,205 @@ public sealed class UnitMovementSystem
                 continue;
             }
 
-            // A melee pawn stops when it reaches striking distance even if its
-            // cached navigation waypoint still points past the opponent.
-            if (ai != null && inventory != null && meleeCombat != null &&
-                MeleeCombatSystem.IsMeleeOnly(inventory, unit) &&
-                ai.HasTarget[unit] &&
-                units.TryGetIndex(ai.Target[unit], out int combatTarget) &&
-                combatTarget != unit &&
-                (health == null || health.OverallHitPoints[combatTarget] > 0f) &&
-                FactionRules.ShouldAttack(units.FactionTag[unit], units.FactionTag[combatTarget]))
-            {
-                Vector3 combatDelta = positions[combatTarget] - positions[unit];
-                float attackDistance = MeleeCombatSystem.GetAttackDistance(
-                    unit, combatTarget, units, inventory);
-                float stopDistance = attackDistance * 0.975f;
-
-                // Stop at contact distance even if navigation still has a waypoint
-                // behind the target. The AI can still assign a different attack slot
-                // next think cycle, but movement never pushes into the opponent.
-                if (combatDelta.X * combatDelta.X + combatDelta.Y * combatDelta.Y <=
-                    stopDistance * stopDistance)
-                {
-                    hasTarget[unit] = false;
-                    velocities[unit] = Vector3.Zero;
-                    TraceUnit(traceUnit, "melee-contact-range", units, ai, inventory, hasTarget,
-                        targets, unit, false, default);
-                    _navigation.ClearRoute(unit);
-                    continue;
-                }
-            }
-
-            if (!hasTarget[unit])
-            {
-                velocities[unit] = Vector3.Zero;
-                TraceUnit(traceUnit, "no-movement-target", units, ai, inventory, hasTarget,
-                    targets, unit, false, default);
-                _navigation.ClearRoute(unit);
-                continue;
-            }
-
             Vector3 position = positions[unit];
             Vector3 target = targets[unit];
+            bool steeringActive = hasTarget[unit];
+            string? stopReason = null;
 
             float halfWidth = MathF.Max(0.01f, widths[unit] * 0.5f);
             float halfLength = MathF.Max(0.01f, lengths[unit] * 0.5f);
-
             float minX = MathF.Min(halfWidth, worldMap.MaxTileX);
             float maxX = MathF.Max(minX, worldMap.MaxTileX - halfWidth);
             float minY = MathF.Min(halfLength, worldMap.MaxTileY);
             float maxY = MathF.Max(minY, worldMap.MaxTileY - halfLength);
 
-            target.X = Math.Clamp(target.X, minX, maxX);
-            target.Y = Math.Clamp(target.Y, minY, maxY);
-            targets[unit] = target;
-
-            Vector2 targetDelta = new(
-                target.X - position.X,
-                target.Y - position.Y);
-
-            float targetDistanceSquared = targetDelta.LengthSquared();
-
-            if (targetDistanceSquared <= 0.0025f)
+            if (steeringActive)
             {
-                position.X = target.X;
-                position.Y = target.Y;
-                position.Z = SampleSurfaceZ(worldMap, target.X, target.Y);
-                positions[unit] = position;
-                velocities[unit] = Vector3.Zero;
-                hasTarget[unit] = false;
-                TraceUnit(traceUnit, "movement-destination-reached", units, ai, inventory,
-                    hasTarget, targets, unit, false, default);
-                _navigation.ClearRoute(unit);
-                continue;
+                target.X = Math.Clamp(target.X, minX, maxX);
+                target.Y = Math.Clamp(target.Y, minY, maxY);
+                targets[unit] = target;
+
+                // A melee pawn starts braking at striking distance. The target
+                // command is released, but residual movement is not erased.
+                if (ai != null && inventory != null && meleeCombat != null &&
+                    MeleeCombatSystem.IsMeleeOnly(inventory, unit) &&
+                    ai.HasTarget[unit] &&
+                    units.TryGetIndex(ai.Target[unit], out int combatTarget) &&
+                    combatTarget != unit &&
+                    (health == null || health.OverallHitPoints[combatTarget] > 0f) &&
+                    FactionRules.ShouldAttack(units.FactionTag[unit], units.FactionTag[combatTarget]))
+                {
+                    Vector3 combatDelta = positions[combatTarget] - position;
+                    float attackDistance = MeleeCombatSystem.GetAttackDistance(
+                        unit, combatTarget, units, inventory);
+                    float stopDistance = attackDistance * 0.975f;
+                    if (combatDelta.X * combatDelta.X + combatDelta.Y * combatDelta.Y <=
+                        stopDistance * stopDistance)
+                    {
+                        hasTarget[unit] = false;
+                        steeringActive = false;
+                        stopReason = "melee-contact-range";
+                        _navigation.ClearRoute(unit);
+                    }
+                }
             }
 
-            if (!_navigation.TryGetWaypoint(
+            float moveSpeed = MathF.Max(0f, speeds[unit]);
+            if (postures[unit] == UnitPosture.Lying)
+                moveSpeed *= 0.45f;
+
+            float mass = MathF.Max(1f, masses[unit]);
+            float massScale = Math.Clamp(MathF.Sqrt(75f / mass), 0.7f, 1.25f);
+            float maxAcceleration = BaseMovementAcceleration * massScale;
+            float maxBraking = BaseBrakingAcceleration * massScale;
+            float maxTurningAcceleration = BaseTurningAcceleration * massScale;
+
+            Vector2 steeringPoint = new(position.X, position.Y);
+            float distanceToGoal = float.PositiveInfinity;
+            float distanceToNextTurn = float.PositiveInfinity;
+            float turnSeverity = 0f;
+            bool hasWaypoint = false;
+
+            if (steeringActive)
+            {
+                Vector3 currentVelocity = velocities[unit];
+                float currentSpeed = MathF.Sqrt(
+                    currentVelocity.X * currentVelocity.X +
+                    currentVelocity.Y * currentVelocity.Y);
+
+                hasWaypoint = _navigation.TryGetLookAheadWaypoint(
                     units,
                     unit,
                     worldMap,
                     position,
                     target,
-                    out Vector2 waypoint))
-            {
-                // Keep the order while a route is queued or temporarily unavailable.
-                velocities[unit] = Vector3.Zero;
-                TraceUnit(traceUnit, "no-waypoint", units, ai, inventory, hasTarget,
-                    targets, unit, false, default);
-                continue;
-            }
-
-            Vector2 delta = waypoint - new Vector2(position.X, position.Y);
-            float distanceSquared = delta.LengthSquared();
-
-            if (distanceSquared <= 0.0025f)
-            {
-                velocities[unit] = Vector3.Zero;
-                TraceUnit(traceUnit, "waypoint-near", units, ai, inventory, hasTarget,
-                    targets, unit, true, waypoint);
-                continue;
-            }
-
-            // Crawling uses a distinct slow locomotion speed, not a standing
-            // walk cycle pasted over a prone silhouette.
-            float moveSpeed = MathF.Max(0f, speeds[unit]);
-            if (postures[unit] == UnitPosture.Lying)
-                moveSpeed *= 0.45f;
-
-            float step = moveSpeed * deltaTime;
-
-            if (step <= 0f)
-            {
-                velocities[unit] = Vector3.Zero;
-                TraceUnit(traceUnit, "zero-move-speed", units, ai, inventory, hasTarget,
-                    targets, unit, true, waypoint);
-                continue;
-            }
-
-            if (distanceSquared <= step * step)
-            {
-                position.X = waypoint.X;
-                position.Y = waypoint.Y;
-                velocities[unit] = Vector3.Zero;
+                    currentSpeed,
+                    out steeringPoint,
+                    out distanceToGoal,
+                    out distanceToNextTurn,
+                    out turnSeverity);
             }
             else
             {
-                float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
-                Vector2 direction = delta * inverseDistance;
-
-                position.X += direction.X * step;
-                position.Y += direction.Y * step;
-                velocities[unit] = new Vector3(
-                    direction.X * moveSpeed,
-                    direction.Y * moveSpeed,
-                    0f);
+                _navigation.ClearRoute(unit);
             }
 
-            position.X = Math.Clamp(position.X, minX, maxX);
-            position.Y = Math.Clamp(position.Y, minY, maxY);
-            position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+            Vector2 velocity = new(velocities[unit].X, velocities[unit].Y);
+
+            for (int substep = 0; substep < substepCount; substep++)
+            {
+                Vector2 desiredVelocity = Vector2.Zero;
+                if (steeringActive && hasWaypoint && moveSpeed > 0f)
+                {
+                    Vector2 toSteeringPoint = steeringPoint - new Vector2(position.X, position.Y);
+                    float steeringDistanceSquared = toSteeringPoint.LengthSquared();
+                    if (steeringDistanceSquared > 0.0025f)
+                    {
+                        float steeringDistance = MathF.Sqrt(steeringDistanceSquared);
+                        float desiredSpeed = moveSpeed;
+
+                        // Final-goal braking is based on remaining route length,
+                        // not distance to the temporary look-ahead point.
+                        float safeGoalDistance = MathF.Max(0f, distanceToGoal - ArrivalRadius);
+                        desiredSpeed = MathF.Min(
+                            desiredSpeed,
+                            MathF.Sqrt(2f * maxBraking * safeGoalDistance));
+
+                        // Reduce speed as a corner approaches. Straight segments
+                        // retain their normal speed; sharp turns request a lower
+                        // speed before the steering direction begins to swing.
+                        if (float.IsFinite(distanceToNextTurn))
+                        {
+                            float turnRange = MathF.Max(2.5f, moveSpeed * 1.8f);
+                            float turnInfluence = Math.Clamp(
+                                (turnRange - distanceToNextTurn) / turnRange, 0f, 1f);
+                            float turnSpeedRatio = 1f - 0.55f * turnSeverity * turnInfluence;
+                            desiredSpeed = MathF.Min(desiredSpeed, moveSpeed * turnSpeedRatio);
+                        }
+
+                        desiredVelocity = toSteeringPoint * (desiredSpeed / steeringDistance);
+                    }
+                }
+
+                Vector2 velocityDelta = desiredVelocity - velocity;
+                float deltaLengthSquared = velocityDelta.LengthSquared();
+                float currentSpeed = velocity.Length();
+                float desiredSpeedNow = desiredVelocity.Length();
+
+                if (deltaLengthSquared > 0.000001f)
+                {
+                    float directionDot = 1f;
+                    if (currentSpeed > 0.001f && desiredSpeedNow > 0.001f)
+                    {
+                        directionDot = Vector2.Dot(
+                            velocity / currentSpeed,
+                            desiredVelocity / desiredSpeedNow);
+                    }
+
+                    float allowedAcceleration;
+                    if (currentSpeed > desiredSpeedNow + 0.05f)
+                        allowedAcceleration = maxBraking;
+                    else if (directionDot < 0.92f)
+                        allowedAcceleration = maxTurningAcceleration;
+                    else
+                        allowedAcceleration = maxAcceleration;
+
+                    float maxVelocityChange = allowedAcceleration * substepDelta;
+                    float deltaLength = MathF.Sqrt(deltaLengthSquared);
+                    if (deltaLength <= maxVelocityChange)
+                        velocity = desiredVelocity;
+                    else
+                        velocity += velocityDelta * (maxVelocityChange / deltaLength);
+                }
+                else if (!steeringActive && currentSpeed <= MinimumMovingSpeed)
+                {
+                    velocity = Vector2.Zero;
+                }
+
+                position.X += velocity.X * substepDelta;
+                position.Y += velocity.Y * substepDelta;
+
+                float unclampedX = position.X;
+                float unclampedY = position.Y;
+                position.X = Math.Clamp(position.X, minX, maxX);
+                position.Y = Math.Clamp(position.Y, minY, maxY);
+
+                // The map boundary acts as a solid constraint rather than
+                // allowing persistent velocity to drive the unit out of bounds.
+                if (position.X != unclampedX)
+                    velocity.X = 0f;
+                if (position.Y != unclampedY)
+                    velocity.Y = 0f;
+
+                // Stage 1 is still ground-only. Vertical free-flight is added
+                // after the inertial ground controller has been validated.
+                position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+            }
+
+            velocities[unit] = new Vector3(velocity.X, velocity.Y, 0f);
             positions[unit] = position;
-            TraceUnit(traceUnit, "move-step", units, ai, inventory, hasTarget,
-                targets, unit, true, waypoint);
+
+            if (hasTarget[unit])
+            {
+                Vector2 toGoal = new(targets[unit].X - position.X, targets[unit].Y - position.Y);
+                if (toGoal.LengthSquared() <= ArrivalRadius * ArrivalRadius &&
+                    velocity.LengthSquared() <= ArrivalSpeed * ArrivalSpeed)
+                {
+                    hasTarget[unit] = false;
+                    _navigation.ClearRoute(unit);
+                    stopReason = "movement-destination-reached";
+                    steeringActive = false;
+                }
+            }
+
+            string stage = stopReason ??
+                (hasTarget[unit]
+                    ? (hasWaypoint ? "move-steering" : "waiting-for-route-braking")
+                    : (velocity.LengthSquared() > MinimumMovingSpeed * MinimumMovingSpeed
+                        ? "braking-without-target"
+                        : "no-movement-target"));
+            TraceUnit(traceUnit, stage, units, ai, inventory, hasTarget,
+                targets, unit, hasWaypoint, steeringPoint);
         }
 
         ResolveUnitOverlaps(units, worldMap, health);
