@@ -1,9 +1,9 @@
 # RimClone — Physics-Driven Movement Refactor Plan
 
-**Status:** plan draft based on the agreed design decisions; implementation is intentionally not included in this commit  
+**Status:** Stage 1 implemented; later stages remain planned. Build/tests were not run in this session.  
 **Base branch:** `feature/squad-behaviac-orders`  
 **Base commit:** `3a6697b4a731fa47ac372256f8a440a036d106ef`  
-**Working branch:** `feature/physics-driven-movement-plan`
+**Working branch:** `feature/physics-driven-movement`
 
 ## 1. Goal
 
@@ -244,12 +244,23 @@ actual UnitStore position and motion state
 - No unrequested health/damage changes, no full ragdoll, no group-movement-manager revival.
 - Each stage is complete only when its acceptance criteria are observed in a focused gameplay scenario and the timing counters show that its added cost is understood.
 
-## 8. First implementation task
+## 8. Stage 1 implementation delivered
 
-Only after this plan is accepted as the implementation contract:
+**Files changed:**
+- `Core/Unit/UnitMovementSystem.cs`
+- `Core/Unit/UnitStore.cs`
+- `Core/Unit/UnitSimulation.cs`
 
-1. Change the movement state storage as needed for the controller.
-2. Replace direct `position += direction * speed * deltaTime` with acceleration-controlled integration and braking.
-3. Remove waypoint/goal position snapping.
-4. Make surface-height assignment conditional on grounded state.
-5. Leave collision response, falling, gait traction and zero-g for the next stages rather than mixing them into the first patch.
+**Implemented:**
+- The existing waypoint now provides a steering target; it no longer directly assigns the unit's position.
+- Movement accelerates and brakes with bounded velocity changes. The maximum acceleration/braking is scaled by stored body mass; existing `MoveSpeed` remains the speed limit.
+- Units brake before waypoints and the final destination. Reaching a point is determined by position tolerance plus low residual speed; there is no snap to the waypoint or destination.
+- Clearing a movement target removes steering intent without zeroing velocity; the movement controller brakes naturally.
+- The store now keeps unit mass and a grounded flag in its structure-of-arrays layout. Grounded units follow sampled terrain height; the controller does not forcibly replace Z for a future airborne state.
+- Waiting for a queued/unavailable route brakes the unit but preserves its target and navigation retry state.
+- Movement integration uses short substeps and caps a single update's movement delta to avoid large position jumps after a frame hitch.
+- Existing route generation, waypoint API, melee stop distance, and dead-unit handling remain in place.
+
+**Not included in Stage 1:** surface traction/gait forces, falling/gravity, impulses, momentum-aware collisions, posture-specific colliders, zero-gravity equipment, weapon stabilization, and health/damage changes.
+
+**Next:** Stage 2 — ground contact and active simplified gait, after reviewing Stage 1 behavior in-game.
