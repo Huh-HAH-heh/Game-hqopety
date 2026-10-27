@@ -1,6 +1,6 @@
 # RimClone — Physics-Driven Movement Refactor Plan
 
-**Status:** approved design scope; implementation is intentionally not included in this commit  
+**Status:** plan draft based on the agreed design decisions; implementation is intentionally not included in this commit  
 **Base branch:** `feature/squad-behaviac-orders`  
 **Base commit:** `3a6697b4a731fa47ac372256f8a440a036d106ef`  
 **Working branch:** `feature/physics-driven-movement-plan`
