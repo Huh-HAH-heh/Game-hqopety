@@ -37,7 +37,7 @@ public sealed class UnitMovementSystem
         UnitAiStore? ai = null,
         UnitInventoryStore? inventory = null)
     {
-        if (deltaTime <= 0f || units.ActiveCount == 0)
+        if (!float.IsFinite(deltaTime) || deltaTime <= 0f || units.ActiveCount == 0)
             return;
 
         _navigation.BeginUpdate(units, worldMap);
@@ -46,14 +46,23 @@ public sealed class UnitMovementSystem
         if (traceThisUpdate)
             _traceElapsedSeconds = 0f;
 
+        // Keep movement integration stable through a frame hitch. Normal frames use
+        // their full delta; one stalled frame cannot move a unit an entire route segment.
+        float movementDelta = MathF.Min(deltaTime, 0.1f);
+        int substepCount = Math.Clamp(
+            (int)MathF.Ceiling(movementDelta / (1f / 60f)), 1, 6);
+        float substepDelta = movementDelta / substepCount;
+
         ReadOnlySpan<int> active = units.ActiveIndices;
         Vector3[] positions = units.Position;
         Vector3[] velocities = units.Velocity;
         Vector3[] targets = units.Target;
         float[] speeds = units.MoveSpeed;
+        float[] masses = units.BodyMassKg;
         float[] widths = units.Width;
         float[] lengths = units.Length;
         UnitPosture[] postures = units.Posture;
+        bool[] grounded = units.Grounded;
         bool[] hasTarget = units.HasTarget;
 
         for (int i = 0; i < active.Length; i++)
@@ -69,8 +78,7 @@ public sealed class UnitMovementSystem
                 continue;
             }
 
-            // Keep the original movement order, but do not move during a landed
-            // melee hit's short stagger window. Navigation can resume afterwards.
+            // Preserve the existing melee hit-stagger lock.
             if (meleeCombat?.IsMovementLocked(unit) == true)
             {
                 velocities[unit] = Vector3.Zero;
@@ -79,9 +87,21 @@ public sealed class UnitMovementSystem
                 continue;
             }
 
-            // A melee pawn stops when it reaches striking distance even if its
-            // cached navigation waypoint still points past the opponent.
-            if (ai != null && inventory != null && meleeCombat != null &&
+            Vector3 position = positions[unit];
+            Vector3 target = targets[unit];
+            float halfWidth = MathF.Max(0.01f, widths[unit] * 0.5f);
+            float halfLength = MathF.Max(0.01f, lengths[unit] * 0.5f);
+            float minX = MathF.Min(halfWidth, worldMap.MaxTileX);
+            float maxX = MathF.Max(minX, worldMap.MaxTileX - halfWidth);
+            float minY = MathF.Min(halfLength, worldMap.MaxTileY);
+            float maxY = MathF.Max(minY, worldMap.MaxTileY - halfLength);
+
+            string? stopReason = null;
+
+            // Melee pawns still stop at striking distance, but lose steering intent
+            // rather than being moved into or snapped onto the opponent.
+            if (hasTarget[unit] &&
+                ai != null && inventory != null && meleeCombat != null &&
                 MeleeCombatSystem.IsMeleeOnly(inventory, unit) &&
                 ai.HasTarget[unit] &&
                 units.TryGetIndex(ai.Target[unit], out int combatTarget) &&
@@ -89,140 +109,198 @@ public sealed class UnitMovementSystem
                 (health == null || health.OverallHitPoints[combatTarget] > 0f) &&
                 FactionRules.ShouldAttack(units.FactionTag[unit], units.FactionTag[combatTarget]))
             {
-                Vector3 combatDelta = positions[combatTarget] - positions[unit];
+                Vector3 combatDelta = positions[combatTarget] - position;
                 float attackDistance = MeleeCombatSystem.GetAttackDistance(
                     unit, combatTarget, units, inventory);
                 float stopDistance = attackDistance * 0.975f;
-
-                // Stop at contact distance even if navigation still has a waypoint
-                // behind the target. The AI can still assign a different attack slot
-                // next think cycle, but movement never pushes into the opponent.
                 if (combatDelta.X * combatDelta.X + combatDelta.Y * combatDelta.Y <=
                     stopDistance * stopDistance)
                 {
                     hasTarget[unit] = false;
-                    velocities[unit] = Vector3.Zero;
-                    TraceUnit(traceUnit, "melee-contact-range", units, ai, inventory, hasTarget,
-                        targets, unit, false, default);
                     _navigation.ClearRoute(unit);
-                    continue;
+                    stopReason = "melee-contact-range";
                 }
             }
 
-            if (!hasTarget[unit])
+            Vector2 waypoint = default;
+            bool hasWaypoint = false;
+
+            if (hasTarget[unit])
             {
-                velocities[unit] = Vector3.Zero;
-                TraceUnit(traceUnit, "no-movement-target", units, ai, inventory, hasTarget,
-                    targets, unit, false, default);
+                target.X = Math.Clamp(target.X, minX, maxX);
+                target.Y = Math.Clamp(target.Y, minY, maxY);
+                targets[unit] = target;
+
+                Vector2 targetDelta = new(target.X - position.X, target.Y - position.Y);
+                float targetDistanceSquared = targetDelta.LengthSquared();
+                Vector2 currentVelocity = new(velocities[unit].X, velocities[unit].Y);
+                if (targetDistanceSquared <= ArrivalRadiusSquared &&
+                    currentVelocity.LengthSquared() <= StoppedSpeedSquared)
+                {
+                    hasTarget[unit] = false;
+                    _navigation.ClearRoute(unit);
+                    stopReason = "movement-destination-reached";
+                }
+                else if (_navigation.TryGetWaypoint(
+                    units, unit, worldMap, position, target, out waypoint))
+                {
+                    hasWaypoint = true;
+                }
+                else
+                {
+                    // A queued/unavailable route is not an order cancellation.
+                    // Brake in place and preserve the target for navigation retries.
+                    _navigation.ClearRoute(unit);
+                }
+            }
+            else
+            {
                 _navigation.ClearRoute(unit);
-                continue;
             }
 
-            Vector3 position = positions[unit];
-            Vector3 target = targets[unit];
-
-            float halfWidth = MathF.Max(0.01f, widths[unit] * 0.5f);
-            float halfLength = MathF.Max(0.01f, lengths[unit] * 0.5f);
-
-            float minX = MathF.Min(halfWidth, worldMap.MaxTileX);
-            float maxX = MathF.Max(minX, worldMap.MaxTileX - halfWidth);
-            float minY = MathF.Min(halfLength, worldMap.MaxTileY);
-            float maxY = MathF.Max(minY, worldMap.MaxTileY - halfLength);
-
-            target.X = Math.Clamp(target.X, minX, maxX);
-            target.Y = Math.Clamp(target.Y, minY, maxY);
-            targets[unit] = target;
-
-            Vector2 targetDelta = new(
-                target.X - position.X,
-                target.Y - position.Y);
-
-            float targetDistanceSquared = targetDelta.LengthSquared();
-
-            if (targetDistanceSquared <= 0.0025f)
-            {
-                position.X = target.X;
-                position.Y = target.Y;
-                position.Z = SampleSurfaceZ(worldMap, target.X, target.Y);
-                positions[unit] = position;
-                velocities[unit] = Vector3.Zero;
-                hasTarget[unit] = false;
-                TraceUnit(traceUnit, "movement-destination-reached", units, ai, inventory,
-                    hasTarget, targets, unit, false, default);
-                _navigation.ClearRoute(unit);
-                continue;
-            }
-
-            if (!_navigation.TryGetWaypoint(
-                    units,
-                    unit,
-                    worldMap,
-                    position,
-                    target,
-                    out Vector2 waypoint))
-            {
-                // Keep the order while a route is queued or temporarily unavailable.
-                velocities[unit] = Vector3.Zero;
-                TraceUnit(traceUnit, "no-waypoint", units, ai, inventory, hasTarget,
-                    targets, unit, false, default);
-                continue;
-            }
-
-            Vector2 delta = waypoint - new Vector2(position.X, position.Y);
-            float distanceSquared = delta.LengthSquared();
-
-            if (distanceSquared <= 0.0025f)
-            {
-                velocities[unit] = Vector3.Zero;
-                TraceUnit(traceUnit, "waypoint-near", units, ai, inventory, hasTarget,
-                    targets, unit, true, waypoint);
-                continue;
-            }
-
-            // Crawling uses a distinct slow locomotion speed, not a standing
-            // walk cycle pasted over a prone silhouette.
             float moveSpeed = MathF.Max(0f, speeds[unit]);
             if (postures[unit] == UnitPosture.Lying)
                 moveSpeed *= 0.45f;
 
-            float step = moveSpeed * deltaTime;
+            float mass = MathF.Max(1f, masses[unit]);
+            float massAccelerationScale = Math.Clamp(
+                MathF.Sqrt(75f / mass), 0.55f, 1.4f);
+            float maxAcceleration = BaseMovementAcceleration * massAccelerationScale;
+            float maxBraking = BaseBrakingAcceleration * massAccelerationScale;
 
-            if (step <= 0f)
+            for (int substep = 0; substep < substepCount; substep++)
             {
-                velocities[unit] = Vector3.Zero;
-                TraceUnit(traceUnit, "zero-move-speed", units, ai, inventory, hasTarget,
-                    targets, unit, true, waypoint);
-                continue;
+                Vector2 desiredVelocity = Vector2.Zero;
+                if (hasTarget[unit] && hasWaypoint && moveSpeed > 0f)
+                {
+                    Vector2 toWaypoint = waypoint - new Vector2(position.X, position.Y);
+                    float distanceSquared = toWaypoint.LengthSquared();
+                    if (distanceSquared > 0.000001f)
+                    {
+                        float distance = MathF.Sqrt(distanceSquared);
+                        float desiredSpeed = MathF.Min(
+                            moveSpeed,
+                            MathF.Sqrt(2f * maxBraking * distance));
+                        desiredVelocity = toWaypoint * (desiredSpeed / distance);
+                    }
+                }
+
+                AdvanceMovementStep(
+                    ref position,
+                    ref velocities[unit],
+                    desiredVelocity,
+                    maxAcceleration,
+                    maxBraking,
+                    substepDelta,
+                    minX, maxX, minY, maxY,
+                    grounded[unit],
+                    worldMap);
+
+                // Arrival is a tolerance plus low residual speed, never a position snap.
+                if (hasTarget[unit])
+                {
+                    Vector3 finalTarget = targets[unit];
+                    float dx = finalTarget.X - position.X;
+                    float dy = finalTarget.Y - position.Y;
+                    Vector3 velocity = velocities[unit];
+                    if (dx * dx + dy * dy <= ArrivalRadiusSquared &&
+                        velocity.X * velocity.X + velocity.Y * velocity.Y <= StoppedSpeedSquared)
+                    {
+                        hasTarget[unit] = false;
+                        hasWaypoint = false;
+                        _navigation.ClearRoute(unit);
+                        stopReason = "movement-destination-reached";
+                    }
+                }
             }
 
-            if (distanceSquared <= step * step)
-            {
-                position.X = waypoint.X;
-                position.Y = waypoint.Y;
-                velocities[unit] = Vector3.Zero;
-            }
-            else
-            {
-                float inverseDistance = 1f / MathF.Sqrt(distanceSquared);
-                Vector2 direction = delta * inverseDistance;
-
-                position.X += direction.X * step;
-                position.Y += direction.Y * step;
-                velocities[unit] = new Vector3(
-                    direction.X * moveSpeed,
-                    direction.Y * moveSpeed,
-                    0f);
-            }
-
-            position.X = Math.Clamp(position.X, minX, maxX);
-            position.Y = Math.Clamp(position.Y, minY, maxY);
-            position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
             positions[unit] = position;
-            TraceUnit(traceUnit, "move-step", units, ai, inventory, hasTarget,
-                targets, unit, true, waypoint);
+
+            string stage = stopReason ??
+                (hasTarget[unit]
+                    ? (hasWaypoint ? "move-accelerating" : "waiting-for-route-braking")
+                    : "no-movement-target");
+            TraceUnit(traceUnit, stage, units, ai, inventory, hasTarget,
+                targets, unit, hasWaypoint, waypoint);
         }
 
         ResolveUnitOverlaps(units, worldMap, health);
+    }
+
+    private const float BaseMovementAcceleration = 8f;
+    private const float BaseBrakingAcceleration = 10f;
+    private const float ArrivalRadiusSquared = 0.12f * 0.12f;
+    private const float StoppedSpeedSquared = 0.08f * 0.08f;
+
+    private static void AdvanceMovementStep(
+        ref Vector3 position,
+        ref Vector3 velocity,
+        Vector2 desiredVelocity,
+        float maxAcceleration,
+        float maxBraking,
+        float deltaTime,
+        float minX,
+        float maxX,
+        float minY,
+        float maxY,
+        bool grounded,
+        WorldMap worldMap)
+    {
+        Vector2 currentVelocity = new(velocity.X, velocity.Y);
+        float currentSpeed = currentVelocity.Length();
+        float desiredSpeed = desiredVelocity.Length();
+        Vector2 velocityDelta = desiredVelocity - currentVelocity;
+        float deltaLengthSquared = velocityDelta.LengthSquared();
+
+        if (deltaLengthSquared > 0.000001f)
+        {
+            float alongDesired = desiredSpeed > 0.001f
+                ? Vector2.Dot(currentVelocity, desiredVelocity / desiredSpeed)
+                : 0f;
+            bool braking = currentSpeed > desiredSpeed + 0.03f ||
+                (desiredSpeed > 0.1f && alongDesired < currentSpeed * 0.9f);
+            float maxDelta = (braking ? maxBraking : maxAcceleration) * deltaTime;
+            float deltaLength = MathF.Sqrt(deltaLengthSquared);
+
+            if (deltaLength <= maxDelta)
+                currentVelocity = desiredVelocity;
+            else
+                currentVelocity += velocityDelta * (maxDelta / deltaLength);
+        }
+        else if (desiredSpeed < 0.001f && currentSpeed <= 0.08f)
+        {
+            currentVelocity = Vector2.Zero;
+        }
+
+        velocity.X = currentVelocity.X;
+        velocity.Y = currentVelocity.Y;
+
+        float nextX = position.X + velocity.X * deltaTime;
+        float nextY = position.Y + velocity.Y * deltaTime;
+        float clampedX = Math.Clamp(nextX, minX, maxX);
+        float clampedY = Math.Clamp(nextY, minY, maxY);
+
+        if ((clampedX != nextX && velocity.X * (nextX - clampedX) > 0f) ||
+            (clampedY != nextY && velocity.Y * (nextY - clampedY) > 0f))
+        {
+            if (clampedX != nextX)
+                velocity.X = 0f;
+            if (clampedY != nextY)
+                velocity.Y = 0f;
+        }
+
+        position.X = clampedX;
+        position.Y = clampedY;
+
+        if (grounded)
+        {
+            velocity.Z = 0f;
+            position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+        }
+        else
+        {
+            position.Z += velocity.Z * deltaTime;
+        }
     }
 
     private void TraceUnit(
