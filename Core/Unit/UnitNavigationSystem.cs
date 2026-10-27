@@ -53,6 +53,8 @@ public sealed class UnitNavigationSystem
     private int[] _waypointCursor = Array.Empty<int>();
     private int[] _routeGoalX = Array.Empty<int>();
     private int[] _routeGoalY = Array.Empty<int>();
+    private float[] _routeStartX = Array.Empty<float>();
+    private float[] _routeStartY = Array.Empty<float>();
     private int[] _routeFootprintX = Array.Empty<int>();
     private int[] _routeFootprintY = Array.Empty<int>();
     private int[] _failedFootprintX = Array.Empty<int>();
@@ -218,6 +220,18 @@ public sealed class UnitNavigationSystem
         bool goalChanged = sameOwner &&
             (targetX != _routeGoalX[unitIndex] ||
              targetY != _routeGoalY[unitIndex]);
+        if (sameOwner &&
+            !targetFarMoved &&
+            !footprintChanged &&
+            _routeTerrainVersion[unitIndex] == worldMap.TerrainVersion)
+        {
+            AdvanceWaypointCursor(
+                units, unitIndex, worldMap, position, target,
+                route, waypoints, waypointPathIndices,
+                ref cursor, ref waypointCursor,
+                footprintX, footprintY);
+        }
+
         bool routeFinished = length > 0 && cursor >= length;
         float distanceToGoalX = position.X - target.X;
         float distanceToGoalY = position.Y - target.Y;
@@ -301,6 +315,8 @@ public sealed class UnitNavigationSystem
                     _waypointCursor[unitIndex] = 0;
                     _routeGoalX[unitIndex] = targetX;
                     _routeGoalY[unitIndex] = targetY;
+                    _routeStartX[unitIndex] = position.X;
+                    _routeStartY[unitIndex] = position.Y;
                     _routeFootprintX[unitIndex] = footprintX;
                     _routeFootprintY[unitIndex] = footprintY;
                     _routeOwner[unitIndex] = owner;
@@ -369,35 +385,11 @@ public sealed class UnitNavigationSystem
             return false;
         }
 
-        // Each simplified waypoint maps back to the cell in the original A* route.
-        // Traffic still reserves the full route, and cells are released as segments are reached.
-        while (waypointCursor < waypoints.Length)
-        {
-            int cell = waypoints[waypointCursor];
-            float cellX = cell % _width + 0.5f;
-            float cellY = cell / _width + 0.5f;
-            float dx = position.X - cellX;
-            float dy = position.Y - cellY;
-
-            if (dx * dx + dy * dy > WaypointRadius * WaypointRadius)
-                break;
-
-            int reachedRouteIndex = waypointPathIndices[waypointCursor];
-            if (_routeTrafficRegistered[unitIndex])
-            {
-                for (int i = cursor; i <= reachedRouteIndex && i < route.Length; i++)
-                    DecrementRouteTraffic(route[i]);
-            }
-
-            cursor = Math.Max(cursor, reachedRouteIndex + 1);
-            waypointCursor++;
-        }
-
-        _pathCursor[unitIndex] = cursor;
-        _waypointCursor[unitIndex] = waypointCursor;
-
-        if (waypointCursor >= waypoints.Length)
-            _routeTrafficRegistered[unitIndex] = false;
+        AdvanceWaypointCursor(
+            units, unitIndex, worldMap, position, target,
+            route, waypoints, waypointPathIndices,
+            ref cursor, ref waypointCursor,
+            footprintX, footprintY);
 
         if (waypointCursor < waypoints.Length)
         {
@@ -421,6 +413,215 @@ public sealed class UnitNavigationSystem
 
         waypoint = default;
         return false;
+    }
+
+    /// <summary>
+    /// Returns a safe point ahead on the smoothed route, allowing units to pass
+    /// intermediate control points without treating each point as a stopping place.
+    /// </summary>
+    public bool TryGetLookAheadWaypoint(
+        UnitStore units,
+        int unitIndex,
+        WorldMap worldMap,
+        Vector3 position,
+        Vector3 target,
+        float currentSpeed,
+        out Vector2 waypoint,
+        out float distanceToGoal,
+        out float distanceToNextTurn,
+        out float turnSeverity)
+    {
+        waypoint = default;
+        distanceToGoal = 0f;
+        distanceToNextTurn = float.PositiveInfinity;
+        turnSeverity = 0f;
+
+        if (!TryGetWaypoint(units, unitIndex, worldMap, position, target, out Vector2 currentWaypoint))
+            return false;
+
+        int[] waypoints = _waypoints[unitIndex] ?? Array.Empty<int>();
+        int cursor = Math.Clamp(_waypointCursor[unitIndex], 0, waypoints.Length);
+        Vector2 position2 = new(position.X, position.Y);
+        Vector2 previous = position2;
+        Vector2 previousDirection = Vector2.Zero;
+        float walked = 0f;
+
+        for (int i = cursor; i < waypoints.Length; i++)
+        {
+            Vector2 next = GetWaypointPosition(waypoints[i]);
+            Vector2 segment = next - previous;
+            float length = segment.Length();
+            if (length > 0.0001f)
+            {
+                Vector2 direction = segment / length;
+                if (previousDirection != Vector2.Zero)
+                    RecordTurn(previousDirection, direction, walked,
+                        ref distanceToNextTurn, ref turnSeverity);
+
+                walked += length;
+                previousDirection = direction;
+            }
+            previous = next;
+        }
+
+        Vector2 finalTarget = new(target.X, target.Y);
+        Vector2 finalSegment = finalTarget - previous;
+        float finalLength = finalSegment.Length();
+        if (finalLength > 0.0001f)
+        {
+            Vector2 direction = finalSegment / finalLength;
+            if (previousDirection != Vector2.Zero && finalLength > 0.75f)
+                RecordTurn(previousDirection, direction, walked,
+                    ref distanceToNextTurn, ref turnSeverity);
+            walked += finalLength;
+        }
+
+        distanceToGoal = walked;
+
+        float lookAheadDistance = Math.Clamp(1.75f + MathF.Max(0f, currentSpeed) * 0.7f, 2f, 5f);
+        int footprintX = GetFootprintRadius(units.Width[unitIndex]);
+        int footprintY = GetFootprintRadius(units.Length[unitIndex]);
+        for (int attempt = 0; attempt < 6; attempt++)
+        {
+            Vector2 candidate = GetPointAlongRoute(
+                position2, finalTarget, waypoints, cursor, lookAheadDistance);
+            if (HasClearStraightRouteToPoint(
+                    worldMap, position2, candidate, footprintX, footprintY))
+            {
+                waypoint = candidate;
+                return true;
+            }
+
+            lookAheadDistance *= 0.65f;
+        }
+
+        // The current waypoint is the conservative fallback. It is part of the
+        // already validated route and keeps the controller outside blocked corners.
+        waypoint = currentWaypoint;
+        return true;
+    }
+
+    private Vector2 GetWaypointPosition(int cell) =>
+        new(cell % _width + 0.5f, cell / _width + 0.5f);
+
+    private static void RecordTurn(
+        Vector2 incoming,
+        Vector2 outgoing,
+        float distance,
+        ref float distanceToNextTurn,
+        ref float turnSeverity)
+    {
+        float dot = Math.Clamp(Vector2.Dot(incoming, outgoing), -1f, 1f);
+        if (dot >= 0.94f || distance >= distanceToNextTurn)
+            return;
+
+        distanceToNextTurn = distance;
+        turnSeverity = Math.Clamp((0.98f - dot) / 0.98f, 0f, 1f);
+    }
+
+    private Vector2 GetPointAlongRoute(
+        Vector2 start,
+        Vector2 target,
+        int[] waypoints,
+        int cursor,
+        float lookAheadDistance)
+    {
+        Vector2 previous = start;
+        float remaining = lookAheadDistance;
+
+        for (int i = cursor; i < waypoints.Length; i++)
+        {
+            Vector2 next = GetWaypointPosition(waypoints[i]);
+            Vector2 segment = next - previous;
+            float length = segment.Length();
+            if (length > 0.0001f)
+            {
+                if (remaining <= length)
+                    return previous + segment * (remaining / length);
+                remaining -= length;
+            }
+            previous = next;
+        }
+
+        Vector2 finalSegment = target - previous;
+        float finalLength = finalSegment.Length();
+        if (finalLength > 0.0001f && remaining < finalLength)
+            return previous + finalSegment * (remaining / finalLength);
+
+        return target;
+    }
+
+    private void AdvanceWaypointCursor(
+        UnitStore units,
+        int unitIndex,
+        WorldMap worldMap,
+        Vector3 position,
+        Vector3 target,
+        int[] route,
+        int[] waypoints,
+        int[] waypointPathIndices,
+        ref int cursor,
+        ref int waypointCursor,
+        int footprintX,
+        int footprintY)
+    {
+        Vector2 current = new(position.X, position.Y);
+        while (waypointCursor < waypoints.Length)
+        {
+            Vector2 waypoint = GetWaypointPosition(waypoints[waypointCursor]);
+            Vector2 offset = current - waypoint;
+            bool reached = offset.LengthSquared() <= WaypointRadius * WaypointRadius;
+            bool passed = false;
+
+            if (!reached)
+            {
+                Vector2 previous = waypointCursor == 0
+                    ? new Vector2(_routeStartX[unitIndex], _routeStartY[unitIndex])
+                    : GetWaypointPosition(waypoints[waypointCursor - 1]);
+                Vector2 incoming = waypoint - previous;
+                float length = incoming.Length();
+                if (length > 0.0001f)
+                {
+                    Vector2 direction = incoming / length;
+                    float forward = Vector2.Dot(offset, direction);
+                    float lateral = MathF.Abs(offset.X * direction.Y - offset.Y * direction.X);
+                    float passTolerance = MathF.Max(
+                        0.9f,
+                        MathF.Max(units.Width[unitIndex], units.Length[unitIndex]) * 0.5f + 0.25f);
+
+                    bool finalPointBehind = waypointCursor == waypoints.Length - 1 &&
+                        Vector2.Dot(new Vector2(target.X, target.Y) - waypoint, direction) < -0.05f &&
+                        Vector2.Distance(current, new Vector2(target.X, target.Y)) > 0.4f;
+
+                    if (forward >= 0f && lateral <= passTolerance && !finalPointBehind)
+                    {
+                        Vector2 next = waypointCursor + 1 < waypoints.Length
+                            ? GetWaypointPosition(waypoints[waypointCursor + 1])
+                            : new Vector2(target.X, target.Y);
+                        passed = HasClearStraightRouteToPoint(
+                            worldMap, current, next, footprintX, footprintY);
+                    }
+                }
+            }
+
+            if (!reached && !passed)
+                break;
+
+            int reachedRouteIndex = waypointPathIndices[waypointCursor];
+            if (_routeTrafficRegistered[unitIndex])
+            {
+                for (int i = cursor; i <= reachedRouteIndex && i < route.Length; i++)
+                    DecrementRouteTraffic(route[i]);
+            }
+
+            cursor = Math.Max(cursor, reachedRouteIndex + 1);
+            waypointCursor++;
+        }
+
+        _pathCursor[unitIndex] = cursor;
+        _waypointCursor[unitIndex] = waypointCursor;
+        if (waypointCursor >= waypoints.Length)
+            _routeTrafficRegistered[unitIndex] = false;
     }
 
     public void ClearRoute(int unitIndex)
@@ -727,6 +928,39 @@ public sealed class UnitNavigationSystem
         int targetX,
         int targetY,
         int footprintRadiusX,
+        int footprintRadiusY) =>
+        CanTravelStraightToPoint(
+            worldMap, startX, startY, x, y, targetX, targetY,
+            targetX + 0.5f, targetY + 0.5f,
+            footprintRadiusX, footprintRadiusY);
+
+    private bool HasClearStraightRouteToPoint(
+        WorldMap worldMap,
+        Vector2 start,
+        Vector2 end,
+        int footprintRadiusX,
+        int footprintRadiusY)
+    {
+        int startX = ClampCell((int)MathF.Floor(start.X), _width);
+        int startY = ClampCell((int)MathF.Floor(start.Y), _height);
+        int targetX = ClampCell((int)MathF.Floor(end.X), _width);
+        int targetY = ClampCell((int)MathF.Floor(end.Y), _height);
+        return CanTravelStraightToPoint(
+            worldMap, start.X, start.Y, startX, startY,
+            targetX, targetY, end.X, end.Y, footprintRadiusX, footprintRadiusY);
+    }
+
+    private bool CanTravelStraightToPoint(
+        WorldMap worldMap,
+        float startX,
+        float startY,
+        int x,
+        int y,
+        int targetX,
+        int targetY,
+        float endX,
+        float endY,
+        int footprintRadiusX,
         int footprintRadiusY)
     {
         if (!IsInside(x, y) ||
@@ -736,9 +970,6 @@ public sealed class UnitNavigationSystem
         {
             return false;
         }
-
-        float endX = targetX + 0.5f;
-        float endY = targetY + 0.5f;
         float deltaX = endX - startX;
         float deltaY = endY - startY;
 
@@ -1130,6 +1361,8 @@ public sealed class UnitNavigationSystem
         Array.Resize(ref _waypointCursor, newCapacity);
         Array.Resize(ref _routeGoalX, newCapacity);
         Array.Resize(ref _routeGoalY, newCapacity);
+        Array.Resize(ref _routeStartX, newCapacity);
+        Array.Resize(ref _routeStartY, newCapacity);
         Array.Resize(ref _routeFootprintX, newCapacity);
         Array.Resize(ref _routeFootprintY, newCapacity);
         Array.Resize(ref _failedFootprintX, newCapacity);
