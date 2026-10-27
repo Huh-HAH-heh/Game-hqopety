@@ -149,8 +149,7 @@ public sealed class UnitMovementSystem
                 else
                 {
                     // A queued/unavailable route is not an order cancellation.
-                    // Brake in place and preserve the target for navigation retries.
-                    _navigation.ClearRoute(unit);
+                    // Brake in place while preserving navigation retry state and target.
                 }
             }
             else
