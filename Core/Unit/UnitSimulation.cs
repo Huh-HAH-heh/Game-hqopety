@@ -840,6 +840,7 @@ public sealed class UnitSimulation
         Metabolism.ApplyEditedDefinition(index, previousDefinition, definition);
         _baseMoveSpeed[index] = definition.MoveSpeed;
         Units.MoveSpeed[index] = definition.MoveSpeed;
+        Units.BodyMassKg[index] = MathF.Max(1f, definition.BodyMassKg);
         Units.Width[index] = definition.Width;
         Units.Length[index] = definition.Length;
         Units.Height[index] = definition.Height;
