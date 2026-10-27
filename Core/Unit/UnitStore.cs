@@ -15,6 +15,7 @@ public sealed class UnitStore
     private Vector3[] _headNormal;
 
     private float[] _moveSpeed;
+    private float[] _bodyMassKg;
     private float[] _width;
     private float[] _length;
     private float[] _height;
@@ -31,6 +32,7 @@ public sealed class UnitStore
     private short[] _bodyCount;
 
     private bool[] _hasTarget;
+    private bool[] _grounded;
     private uint[] _generation;
 
     private int[] _activeIndices;
@@ -64,6 +66,12 @@ public sealed class UnitStore
 
     public float[] MoveSpeed =>
         _moveSpeed;
+
+    public float[] BodyMassKg =>
+        _bodyMassKg;
+
+    public bool[] Grounded =>
+        _grounded;
 
     public float[] Width =>
         _width;
@@ -126,6 +134,7 @@ public sealed class UnitStore
         _headNormal = new Vector3[initialCapacity];
 
         _moveSpeed = new float[initialCapacity];
+        _bodyMassKg = new float[initialCapacity];
         _width = new float[initialCapacity];
         _length = new float[initialCapacity];
         _height = new float[initialCapacity];
@@ -142,6 +151,7 @@ public sealed class UnitStore
         _bodyCount = new short[initialCapacity];
 
         _hasTarget = new bool[initialCapacity];
+        _grounded = new bool[initialCapacity];
         _generation = new uint[initialCapacity];
 
         _activeIndices = new int[initialCapacity];
@@ -196,6 +206,7 @@ public sealed class UnitStore
         _headNormal[index] = headNormal;
 
         _moveSpeed[index] = definition.MoveSpeed;
+        _bodyMassKg[index] = MathF.Max(1f, definition.BodyMassKg);
         _width[index] = definition.Width;
         _length[index] = definition.Length;
         _height[index] = definition.Height;
@@ -217,6 +228,7 @@ public sealed class UnitStore
         _bodyCount[index] = checked((short)body.Count);
 
         _hasTarget[index] = false;
+        _grounded[index] = true;
 
         _activeSlots[index] = _activeCount;
         _activeIndices[_activeCount++] = index;
@@ -258,7 +270,9 @@ public sealed class UnitStore
         _freeIndices[_freeCount++] = index;
 
         _hasTarget[index] = false;
-        _velocity[index] = Vector3.Zero;
+
+        // Clearing an order removes steering intent; the movement controller
+        // applies braking so the unit does not lose momentum instantaneously.
 
         return true;
     }
@@ -424,6 +438,10 @@ public sealed class UnitStore
             newCapacity);
 
         Array.Resize(
+            ref _bodyMassKg,
+            newCapacity);
+
+        Array.Resize(
             ref _width,
             newCapacity);
 
@@ -473,6 +491,10 @@ public sealed class UnitStore
 
         Array.Resize(
             ref _hasTarget,
+            newCapacity);
+
+        Array.Resize(
+            ref _grounded,
             newCapacity);
 
         Array.Resize(
