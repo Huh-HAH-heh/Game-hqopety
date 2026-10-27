@@ -226,10 +226,9 @@ public sealed class UnitNavigationSystem
             _routeTerrainVersion[unitIndex] == worldMap.TerrainVersion)
         {
             AdvanceWaypointCursor(
-                units, unitIndex, worldMap, position, target,
+                units, unitIndex, position, target,
                 route, waypoints, waypointPathIndices,
-                ref cursor, ref waypointCursor,
-                footprintX, footprintY);
+                ref cursor, ref waypointCursor);
         }
 
         bool routeFinished = length > 0 && cursor >= length;
@@ -386,10 +385,9 @@ public sealed class UnitNavigationSystem
         }
 
         AdvanceWaypointCursor(
-            units, unitIndex, worldMap, position, target,
+            units, unitIndex, position, target,
             route, waypoints, waypointPathIndices,
-            ref cursor, ref waypointCursor,
-            footprintX, footprintY);
+            ref cursor, ref waypointCursor);
 
         if (waypointCursor < waypoints.Length)
         {
@@ -438,6 +436,20 @@ public sealed class UnitNavigationSystem
 
         if (!TryGetWaypoint(units, unitIndex, worldMap, position, target, out Vector2 currentWaypoint))
             return false;
+
+        // A sub-cell goal is already reachable inside the current passable tile.
+        // Do not route the unit through that tile's centre before reaching the actual goal.
+        if ((int)MathF.Floor(position.X) == (int)MathF.Floor(target.X) &&
+            (int)MathF.Floor(position.Y) == (int)MathF.Floor(target.Y))
+        {
+            waypoint = new Vector2(target.X, target.Y);
+            distanceToGoal = Vector2.Distance(
+                new Vector2(position.X, position.Y),
+                new Vector2(target.X, target.Y));
+            distanceToNextTurn = float.PositiveInfinity;
+            turnSeverity = 0f;
+            return true;
+        }
 
         int[] waypoints = _waypoints[unitIndex] ?? Array.Empty<int>();
         int cursor = Math.Clamp(_waypointCursor[unitIndex], 0, waypoints.Length);
@@ -554,16 +566,13 @@ public sealed class UnitNavigationSystem
     private void AdvanceWaypointCursor(
         UnitStore units,
         int unitIndex,
-        WorldMap worldMap,
         Vector3 position,
         Vector3 target,
         int[] route,
         int[] waypoints,
         int[] waypointPathIndices,
         ref int cursor,
-        ref int waypointCursor,
-        int footprintX,
-        int footprintY)
+        ref int waypointCursor)
     {
         Vector2 current = new(position.X, position.Y);
         while (waypointCursor < waypoints.Length)
@@ -595,11 +604,10 @@ public sealed class UnitNavigationSystem
 
                     if (forward >= 0f && lateral <= passTolerance && !finalPointBehind)
                     {
-                        Vector2 next = waypointCursor + 1 < waypoints.Length
-                            ? GetWaypointPosition(waypoints[waypointCursor + 1])
-                            : new Vector2(target.X, target.Y);
-                        passed = HasClearStraightRouteToPoint(
-                            worldMap, current, next, footprintX, footprintY);
+                        // The steering point is separately checked for a safe
+                        // straight segment. Once this control point is passed inside
+                        // its corridor, advance even if the next corner is not directly visible.
+                        passed = true;
                     }
                 }
             }
