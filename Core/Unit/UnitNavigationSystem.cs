@@ -414,6 +414,29 @@ public sealed class UnitNavigationSystem
     }
 
     /// <summary>
+    /// Validates one short movement segment against the same terrain/footprint
+    /// rules used by navigation. Used by the movement integrator to prevent
+    /// inertia from carrying a unit through a blocked cell.
+    /// </summary>
+    public bool CanMoveDirectly(
+        UnitStore units,
+        int unitIndex,
+        WorldMap worldMap,
+        Vector2 start,
+        Vector2 end)
+    {
+        EnsureUnitCapacity(units.Capacity);
+        EnsureWorkspace(worldMap);
+        EnsureNavigationGrid(worldMap);
+        return HasClearStraightRouteToPoint(
+            worldMap,
+            start,
+            end,
+            GetFootprintRadius(units.Width[unitIndex]),
+            GetFootprintRadius(units.Length[unitIndex]));
+    }
+
+    /// <summary>
     /// Returns a safe point ahead on the smoothed route, allowing units to pass
     /// intermediate control points without treating each point as a stopping place.
     /// </summary>
