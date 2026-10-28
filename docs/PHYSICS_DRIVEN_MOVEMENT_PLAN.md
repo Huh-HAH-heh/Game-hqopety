@@ -1,6 +1,6 @@
 # RimClone — живая модель движения с инерцией
 
-**Статус:** рабочий прототип этапов 1–2. 28.10.2026 скорректированы инерционное прохождение waypoint, физическое торможение перед углами и мягкие контакты движущихся союзников. CI после этих изменений ещё не проверен; игровая проверка не выполнена.  
+**Статус:** рабочий прототип этапов 1–2. 28.10.2026 скорректированы инерционное прохождение waypoint, торможение перед углами и мягкие контакты движущихся союзников. GitHub Actions: Release build и portable Windows package успешны; self-tests всё ещё падают на тех же базовых ошибках, что и `main`. Игровая проверка не выполнена.  
 **База:** `main` на `cdc0335318cca1d7b2937ae6b957951cd9d19f25`  
 **Рабочая ветка:** `feature/physics-driven-movement-v2`
 
@@ -180,7 +180,7 @@
 
 **Не изменялись:** `UnitBodySystem`, риг и анимация ног, текущая боевая hit-модель, оружие, здоровье, Behaviac и Utility AI. `main` не изменён.
 
-**Проверка CI (GitHub Actions, commit `04bde30`):** `dotnet build RimClone.sln --configuration Release --no-restore` — **успешно**; публикация portable Windows build — успешно. Simulation self-tests: **72 PASS / 2 FAIL**. Эти же две ошибки воспроизвелись на baseline `main` (`cdc0335`): `Behaviac: lost visual target causes search at last known position` (`IndexOutOfRangeException`) и `AI: exposed unit crawls prone toward firing range`. Две дополнительные ошибки, появившиеся на первом варианте контроллера (`AI: target eligibility expires...` и `Ballistics: close-range projectile...`), после сохранения исходной Z неподвижного юнита исчезли. Behaviac unit-intent probe по-прежнему имеет 7 тех же падений, что и baseline. **После последних правок CI, тесты именно на прохождение углов/плотную толпу и игровой прогон ещё не выполнены.**
+**Проверка CI (GitHub Actions, commit `04bde30`):** `dotnet build RimClone.sln --configuration Release --no-restore` — **успешно**; публикация portable Windows build — успешно. Simulation self-tests: **72 PASS / 2 FAIL**. Эти же две ошибки воспроизвелись на baseline `main` (`cdc0335`): `Behaviac: lost visual target causes search at last known position` (`IndexOutOfRangeException`) и `AI: exposed unit crawls prone toward firing range`. Две дополнительные ошибки, появившиеся на первом варианте контроллера (`AI: target eligibility expires...` и `Ballistics: close-range projectile...`), после сохранения исходной Z неподвижного юнита исчезли. Behaviac unit-intent probe по-прежнему имеет 7 тех же падений, что и baseline. **GitHub Actions run [#40752184924](https://github.com/Huh-HAH-heh/Game-hqopety/actions/runs/40752184924): Release build, portable Windows publish/archive/upload и Behaviac .NET 10 compatibility probe успешны. Simulation self-tests — 72 PASS / 2 FAIL (`lost visual target...`, `exposed unit crawls prone...`); Behaviac unit-intent decision tests — те же 7 FAIL, что были на baseline `main`. Эти провалы не относятся к двум изменённым movement-файлам по текущему сравнению с baseline. Специальные тесты прохождения углов/плотной толпы и игровой прогон ещё не выполнены.**
 
 
 ## 10. Корректировка инерции и контактов — 28.10.2026
