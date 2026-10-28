@@ -617,19 +617,34 @@ public sealed class UnitNavigationSystem
                     Vector2 direction = incoming / length;
                     float forward = Vector2.Dot(offset, direction);
                     float lateral = MathF.Abs(offset.X * direction.Y - offset.Y * direction.X);
-                    float passTolerance = MathF.Max(
+
+                    Vector3 storedVelocity = units.Velocity[unitIndex];
+                    Vector2 planarVelocity = new(storedVelocity.X, storedVelocity.Y);
+                    float speed = planarVelocity.Length();
+
+                    // A waypoint is a path control point, not a physical stop.
+                    // Let the cursor pass it when inertia carries the pawn through
+                    // the turn corridor; otherwise the controller would reverse
+                    // toward a waypoint it can no longer reach cleanly.
+                    float bodyTolerance = MathF.Max(
                         0.9f,
                         MathF.Max(units.Width[unitIndex], units.Length[unitIndex]) * 0.5f + 0.25f);
+                    float inertiaTolerance = MathF.Min(4f, speed * 0.8f);
+                    float passTolerance = MathF.Max(bodyTolerance, inertiaTolerance);
+                    bool movingAlongIncoming = speed <= 0.08f ||
+                        Vector2.Dot(planarVelocity, direction) >= -0.05f;
 
                     bool finalPointBehind = waypointCursor == waypoints.Length - 1 &&
                         Vector2.Dot(new Vector2(target.X, target.Y) - waypoint, direction) < -0.05f &&
                         Vector2.Distance(current, new Vector2(target.X, target.Y)) > 0.4f;
 
-                    if (forward >= 0f && lateral <= passTolerance && !finalPointBehind)
+                    if (forward >= 0f &&
+                        lateral <= passTolerance &&
+                        movingAlongIncoming &&
+                        !finalPointBehind)
                     {
-                        // The steering point is separately checked for a safe
-                        // straight segment. Once this control point is passed inside
-                        // its corridor, advance even if the next corner is not directly visible.
+                        // The next look-ahead segment is still checked against terrain
+                        // and footprint constraints before it can be followed.
                         passed = true;
                     }
                 }
