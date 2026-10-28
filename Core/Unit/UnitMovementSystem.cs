@@ -163,34 +163,35 @@ public sealed class UnitMovementSystem
             float turnSeverity = 0f;
             bool hasWaypoint = false;
 
-            if (steeringActive)
-            {
-                Vector3 currentVelocity = velocities[unit];
-                float currentSpeed = MathF.Sqrt(
-                    currentVelocity.X * currentVelocity.X +
-                    currentVelocity.Y * currentVelocity.Y);
-
-                hasWaypoint = _navigation.TryGetLookAheadWaypoint(
-                    units,
-                    unit,
-                    worldMap,
-                    position,
-                    target,
-                    currentSpeed,
-                    out steeringPoint,
-                    out distanceToGoal,
-                    out distanceToNextTurn,
-                    out turnSeverity);
-            }
-            else
-            {
+            // The route follower is evaluated inside the integration loop so
+            // each substep steers from the body's updated position and velocity.
+            if (!steeringActive)
                 _navigation.ClearRoute(unit);
-            }
 
             Vector2 velocity = new(velocities[unit].X, velocities[unit].Y);
 
             for (int substep = 0; substep < substepCount; substep++)
             {
+                if (steeringActive && moveSpeed > 0f)
+                {
+                    float speedBeforeSteering = velocity.Length();
+                    hasWaypoint = _navigation.TryGetLookAheadWaypoint(
+                        units,
+                        unit,
+                        worldMap,
+                        position,
+                        target,
+                        speedBeforeSteering,
+                        out steeringPoint,
+                        out distanceToGoal,
+                        out distanceToNextTurn,
+                        out turnSeverity);
+                }
+                else
+                {
+                    hasWaypoint = false;
+                }
+
                 Vector2 desiredVelocity = Vector2.Zero;
                 if (steeringActive && hasWaypoint && moveSpeed > 0f)
                 {
@@ -208,16 +209,23 @@ public sealed class UnitMovementSystem
                             desiredSpeed,
                             MathF.Sqrt(2f * maxBraking * safeGoalDistance));
 
-                        // Reduce speed as a corner approaches. Straight segments
-                        // retain their normal speed; sharp turns request a lower
-                        // speed before the steering direction begins to swing.
+                        // A corner is not a waypoint to stop at, but a speed
+                        // constraint the body must satisfy before reaching it.
+                        // Reserve turning distance from the available braking distance:
+                        // v^2 = v_corner^2 + 2 * a_brake * d.
                         if (float.IsFinite(distanceToNextTurn))
                         {
-                            float turnRange = MathF.Max(2.5f, moveSpeed * 1.8f);
-                            float turnInfluence = Math.Clamp(
-                                (turnRange - distanceToNextTurn) / turnRange, 0f, 1f);
-                            float turnSpeedRatio = 1f - 0.55f * turnSeverity * turnInfluence;
-                            desiredSpeed = MathF.Min(desiredSpeed, moveSpeed * turnSpeedRatio);
+                            float speedAlongRoute = velocity.Length();
+                            float cornerSpeed = moveSpeed * (1f - 0.6f * turnSeverity);
+                            float turnBuffer = MathF.Max(
+                                0.5f,
+                                speedAlongRoute * speedAlongRoute /
+                                    MathF.Max(1f, maxTurningAcceleration) * turnSeverity);
+                            float brakeDistance = MathF.Max(
+                                0f, distanceToNextTurn - turnBuffer);
+                            float turnSpeedLimit = MathF.Sqrt(
+                                cornerSpeed * cornerSpeed + 2f * maxBraking * brakeDistance);
+                            desiredSpeed = MathF.Min(desiredSpeed, turnSpeedLimit);
                         }
 
                         desiredVelocity = toSteeringPoint * (desiredSpeed / steeringDistance);
@@ -465,13 +473,10 @@ public sealed class UnitMovementSystem
                             bool hostile = FactionRules.ShouldAttack(
                                 units.FactionTag[unit],
                                 units.FactionTag[other]);
-                            // RimWorld-style pawn passage: allies can cross paths while
-                            // moving, but settled allies are separated if they overlap.
-                            if (!hostile && (units.HasTarget[unit] || units.HasTarget[other]))
-                            {
-                                other = next;
-                                continue;
-                            }
+                            // Moving allies use a softer contact response so crowds can
+                            // compress and flow, but never pass through one another.
+                            bool movingAllies = !hostile &&
+                                (units.HasTarget[unit] || units.HasTarget[other]);
 
                             Vector3 otherPosition = units.Position[other];
                             // Positions are surface bases. Bodies on vertically separated
@@ -488,7 +493,8 @@ public sealed class UnitMovementSystem
                             float distanceSquared = dx * dx + dy * dy;
                             float minimumDistance = MathF.Max(
                                 0.04f,
-                                (units.Radius[unit] + units.Radius[other]) * 1.08f);
+                                (units.Radius[unit] + units.Radius[other]) *
+                                    (movingAllies ? 0.96f : 1.08f));
 
                             if (distanceSquared >= minimumDistance * minimumDistance)
                             {
@@ -524,7 +530,8 @@ public sealed class UnitMovementSystem
                             // correction on traversable ground so contacts do not push pawns
                             // through walls; if one side is blocked, try moving the other.
                             float correctionDistance =
-                                MathF.Max(0f, minimumDistance - distance - 0.005f) * 0.8f;
+                                MathF.Max(0f, minimumDistance - distance - 0.005f) *
+                                (movingAllies ? 0.55f : 0.8f);
                             Vector3 a = units.Position[unit];
                             Vector3 b = units.Position[other];
                             Vector2 oldA = new(a.X, a.Y);
@@ -587,6 +594,8 @@ public sealed class UnitMovementSystem
                                 float normalImpulseMagnitude =
                                     -(1f + CollisionRestitution) * normalVelocity /
                                     inverseMassSum;
+                                if (movingAllies)
+                                    normalImpulseMagnitude *= 0.4f;
                                 Vector2 normalImpulse = normal * normalImpulseMagnitude;
                                 velocityA -= normalImpulse * inverseMassA;
                                 velocityB += normalImpulse * inverseMassB;
@@ -602,7 +611,8 @@ public sealed class UnitMovementSystem
                                     float tangentImpulseMagnitude =
                                         -Vector2.Dot(relativeVelocity, tangent) / inverseMassSum;
                                     float frictionLimit =
-                                        CollisionFriction * normalImpulseMagnitude;
+                                        CollisionFriction * normalImpulseMagnitude *
+                                        (movingAllies ? 0.6f : 1f);
                                     tangentImpulseMagnitude = Math.Clamp(
                                         tangentImpulseMagnitude, -frictionLimit, frictionLimit);
                                     Vector2 tangentImpulse = tangent * tangentImpulseMagnitude;
