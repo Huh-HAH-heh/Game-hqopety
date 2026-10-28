@@ -34,6 +34,7 @@ public sealed class UnitMovementSystem
     private const float BaseTurningAcceleration = 6f;
     private const float ForceResponseTime = 0.32f;
     private const float GroundRollingDeceleration = 0.18f;
+    private const float CollisionRadiusScale = 0.72f;
     private const float CollisionRestitution = 0.08f;
     private const float CollisionFriction = 0.45f;
     private const float ArrivalRadius = 0.14f;
@@ -448,7 +449,7 @@ public sealed class UnitMovementSystem
                 int cellX = Math.Clamp((int)MathF.Floor(position.X), 0, _collisionWidth - 1);
                 int cellY = Math.Clamp((int)MathF.Floor(position.Y), 0, _collisionHeight - 1);
                 int radius = Math.Clamp(
-                    (int)MathF.Ceiling(units.Radius[unit] + _collisionMaxRadius) + 1,
+                    (int)MathF.Ceiling(GetCollisionRadius(units, unit) + _collisionMaxRadius) + 1,
                     1, 6);
 
                 for (int y = Math.Max(0, cellY - radius);
@@ -493,8 +494,8 @@ public sealed class UnitMovementSystem
                             float distanceSquared = dx * dx + dy * dy;
                             float minimumDistance = MathF.Max(
                                 0.04f,
-                                (units.Radius[unit] + units.Radius[other]) *
-                                    (movingAllies ? 0.96f : 1.08f));
+                                (GetCollisionRadius(units, unit) + GetCollisionRadius(units, other)) *
+                                    (movingAllies ? 0.96f : 1.04f));
 
                             if (distanceSquared >= minimumDistance * minimumDistance)
                             {
@@ -666,7 +667,7 @@ public sealed class UnitMovementSystem
             if (health != null && health.OverallHitPoints[unit] <= 0f)
                 continue;
 
-            _collisionMaxRadius = MathF.Max(_collisionMaxRadius, units.Radius[unit]);
+            _collisionMaxRadius = MathF.Max(_collisionMaxRadius, GetCollisionRadius(units, unit));
             int x = Math.Clamp((int)MathF.Floor(units.Position[unit].X), 0, width - 1);
             int y = Math.Clamp((int)MathF.Floor(units.Position[unit].Y), 0, height - 1);
             int cell = x + y * width;
@@ -676,6 +677,13 @@ public sealed class UnitMovementSystem
             _collisionNextUnit[unit] = _collisionCellHeads[cell];
             _collisionCellHeads[cell] = unit;
         }
+    }
+
+    private static float GetCollisionRadius(UnitStore units, int unit)
+    {
+        // The visual/body dimensions remain unchanged; pawn-to-pawn physical
+        // contact uses a tighter circle so units do not feel as bulky as their rig.
+        return MathF.Max(0.01f, units.Radius[unit] * CollisionRadiusScale);
     }
 
     private static void ClampUnitPosition(
