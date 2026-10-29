@@ -62,6 +62,7 @@ public static class CombatSelfTest
         RunTest("Movement: direction changes respect inertia", UnitMovementSelfTest.DirectionChangesRespectInertia, ref passed, ref failed);
         RunTest("Movement: follows route around wall without crossing it", UnitMovementSelfTest.FollowsRouteAroundWallWithoutCrossingIt, ref passed, ref failed);
         RunTest("Movement: contacts use reduced radius without explosive separation", UnitMovementSelfTest.ContactsUseReducedRadiusWithoutExplosiveSeparation, ref passed, ref failed);
+        RunTest("Movement: dense moving crowd continues to advance", UnitMovementSelfTest.DenseMovingCrowdContinuesToAdvance, ref passed, ref failed);
         RunTest("Movement: opposing units steer around one another", UnitMovementSelfTest.OpposingUnitsSteerAroundOneAnother, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
