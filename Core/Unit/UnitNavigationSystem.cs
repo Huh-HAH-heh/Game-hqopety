@@ -536,6 +536,18 @@ public sealed class UnitNavigationSystem
         if (!TryGetWaypoint(units, unitIndex, worldMap, position, target, out Vector2 currentWaypoint))
             return false;
 
+        Vector2 position2 = new(position.X, position.Y);
+        if (_lastStatuses[unitIndex] ==
+            UnitNavigationStatus.MovingTowardGoalWhileWaitingForRoute)
+        {
+            // Do not let a stale cached route replace the short fallback point
+            // returned while the next route chunk is waiting for search budget.
+            waypoint = currentWaypoint;
+            distanceToGoal = Vector2.Distance(
+                position2, new Vector2(target.X, target.Y));
+            return true;
+        }
+
         // A sub-cell goal is already reachable inside the current passable tile.
         // Do not route the unit through that tile's centre before reaching the actual goal.
         if ((int)MathF.Floor(position.X) == (int)MathF.Floor(target.X) &&
@@ -552,7 +564,6 @@ public sealed class UnitNavigationSystem
 
         int[] waypoints = _waypoints[unitIndex] ?? Array.Empty<int>();
         int cursor = Math.Clamp(_waypointCursor[unitIndex], 0, waypoints.Length);
-        Vector2 position2 = new(position.X, position.Y);
         Vector2 previous = position2;
         Vector2 previousDirection = Vector2.Zero;
         float walked = 0f;
