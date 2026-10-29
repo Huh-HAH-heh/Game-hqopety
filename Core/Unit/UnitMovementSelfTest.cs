@@ -54,6 +54,45 @@ public static class UnitMovementSelfTest
                float.IsFinite(finalPosition.Y);
     }
 
+    public static bool CancellingCommandAppliesGradualBraking()
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(8.5f, 8.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        UnitMovementSystem movement = new UnitMovementSystem();
+        simulation.Units.SetTarget(id, new Vector3(35.5f, 8.5f, 1f));
+        for (int tick = 0; tick < 36; tick++)
+            movement.Update(simulation.Units, map, TestDeltaTime);
+
+        Vector3 beforePosition = simulation.Units.Position[id.Index];
+        Vector3 beforeVelocity3 = simulation.Units.Velocity[id.Index];
+        float beforeSpeed = MathF.Sqrt(
+            beforeVelocity3.X * beforeVelocity3.X +
+            beforeVelocity3.Y * beforeVelocity3.Y);
+        if (beforeSpeed < 0.75f)
+            return false;
+
+        simulation.Units.ClearTarget(id);
+        movement.Update(simulation.Units, map, TestDeltaTime);
+
+        Vector3 afterPosition = simulation.Units.Position[id.Index];
+        Vector3 afterVelocity3 = simulation.Units.Velocity[id.Index];
+        float afterSpeed = MathF.Sqrt(
+            afterVelocity3.X * afterVelocity3.X +
+            afterVelocity3.Y * afterVelocity3.Y);
+
+        return !simulation.Units.HasTarget[id.Index] &&
+               afterSpeed < beforeSpeed &&
+               afterSpeed > 0.05f &&
+               PlanarDistance(beforePosition, afterPosition) > 0f;
+    }
+
     public static bool DirectionChangesRespectInertia()
     {
         WorldMap map = CreateFlatWorld();
