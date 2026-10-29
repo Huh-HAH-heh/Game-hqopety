@@ -66,6 +66,11 @@ public sealed class UnitMovementSystem
             (int)MathF.Ceiling(movementDelta / FixedMovementStep), 1, 6);
         float substepDelta = movementDelta / substepCount;
 
+        // Snapshot spatial membership before any unit advances. The same grid
+        // supports inexpensive predictive steering; contact resolution rebuilds
+        // it after integration because units may have crossed cell boundaries.
+        BuildCollisionGrid(units, worldMap, health);
+
         ReadOnlySpan<int> active = units.ActiveIndices;
         Vector3[] positions = units.Position;
         Vector3[] velocities = units.Velocity;
@@ -231,6 +236,12 @@ public sealed class UnitMovementSystem
 
                         desiredVelocity = toSteeringPoint * (desiredSpeed / steeringDistance);
                     }
+                }
+
+                if (desiredVelocity.LengthSquared() > 0.0025f)
+                {
+                    desiredVelocity = ApplyPredictiveAvoidance(
+                        units, worldMap, health, unit, position, velocity, desiredVelocity);
                 }
 
                 // The route controller requests a force; it never assigns velocity.
@@ -425,6 +436,169 @@ public sealed class UnitMovementSystem
             $"moveDist={movementDistance:0.0} goal={hasGoal}:{(hasGoal ? goal.ToString() : "-")} " +
             $"nav={_navigation.GetLastStatus(unit)} " +
             $"waypoint={(hasWaypoint ? waypoint.ToString() : "-")}");
+    }
+
+    private Vector2 ApplyPredictiveAvoidance(
+        UnitStore units,
+        WorldMap worldMap,
+        UnitHealthStore? health,
+        int unit,
+        Vector3 position,
+        Vector2 velocity,
+        Vector2 desiredVelocity)
+    {
+        const float predictionHorizon = 0.7f;
+        const float safetyMargin = 0.45f;
+
+        float desiredSpeed = desiredVelocity.Length();
+        if (desiredSpeed <= 0.05f || _collisionTouchedCount == 0)
+            return desiredVelocity;
+
+        int cellX = Math.Clamp((int)MathF.Floor(position.X), 0, _collisionWidth - 1);
+        int cellY = Math.Clamp((int)MathF.Floor(position.Y), 0, _collisionHeight - 1);
+        int searchRadius = Math.Clamp(
+            (int)MathF.Ceiling(
+                GetCollisionRadius(units, unit) + _collisionMaxRadius + safetyMargin),
+            1, 6);
+
+        Vector2 avoidance = Vector2.Zero;
+        Vector3[] positions = units.Position;
+        Vector3[] velocities = units.Velocity;
+        Vector3[] targets = units.Target;
+        bool[] hasTarget = units.HasTarget;
+        float[] moveSpeeds = units.MoveSpeed;
+
+        for (int y = Math.Max(0, cellY - searchRadius);
+             y <= Math.Min(_collisionHeight - 1, cellY + searchRadius);
+             y++)
+        {
+            for (int x = Math.Max(0, cellX - searchRadius);
+                 x <= Math.Min(_collisionWidth - 1, cellX + searchRadius);
+                 x++)
+            {
+                int other = _collisionCellHeads[x + y * _collisionWidth];
+                while (other >= 0)
+                {
+                    int next = _collisionNextUnit[other];
+                    if (other == unit ||
+                        (health != null && health.OverallHitPoints[other] <= 0f))
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    Vector3 otherPosition3 = positions[other];
+                    if (otherPosition3.Z >= position.Z + units.Height[unit] ||
+                        position.Z >= otherPosition3.Z + units.Height[other])
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    Vector2 relativePosition = new(
+                        otherPosition3.X - position.X,
+                        otherPosition3.Y - position.Y);
+                    Vector3 storedOtherVelocity = velocities[other];
+                    Vector2 otherVelocity = new(
+                        storedOtherVelocity.X,
+                        storedOtherVelocity.Y);
+
+                    // A unit processed later in this update may not have integrated
+                    // yet. Its issued target is a useful low-cost velocity estimate.
+                    if (otherVelocity.LengthSquared() < 0.01f && hasTarget[other])
+                    {
+                        Vector2 toOtherGoal = new(
+                            targets[other].X - otherPosition3.X,
+                            targets[other].Y - otherPosition3.Y);
+                        float goalLength = toOtherGoal.Length();
+                        if (goalLength > 0.05f)
+                        {
+                            otherVelocity = toOtherGoal *
+                                (MathF.Min(moveSpeeds[other], 4f) / goalLength);
+                        }
+                    }
+
+                    Vector2 relativeVelocity = otherVelocity - velocity;
+                    float relativeSpeedSquared = relativeVelocity.LengthSquared();
+                    if (relativeSpeedSquared <= 0.01f)
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    float approach = Vector2.Dot(relativePosition, relativeVelocity);
+                    if (approach >= -0.01f)
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    float timeToClosest = -approach / relativeSpeedSquared;
+                    if (timeToClosest < 0f || timeToClosest > predictionHorizon)
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    Vector2 predictedSeparation =
+                        relativePosition + relativeVelocity * timeToClosest;
+                    float predictedDistance = predictedSeparation.Length();
+
+                    bool hostile = FactionRules.ShouldAttack(
+                        units.FactionTag[unit], units.FactionTag[other]);
+                    bool movingAllies = !hostile && (hasTarget[unit] || hasTarget[other]);
+                    float minimumDistance =
+                        (GetCollisionRadius(units, unit) + GetCollisionRadius(units, other)) *
+                        (movingAllies ? 0.96f : 1.04f);
+                    float safetyDistance = minimumDistance + safetyMargin;
+
+                    if (predictedDistance >= safetyDistance)
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    float urgency = Math.Clamp(
+                        (safetyDistance - predictedDistance) / safetyDistance, 0f, 1f) *
+                        Math.Clamp(
+                            (predictionHorizon - timeToClosest) / predictionHorizon,
+                            0.15f, 1f);
+
+                    Vector2 away = predictedDistance > 0.001f
+                        ? -predictedSeparation / predictedDistance
+                        : new Vector2(0f, unit < other ? -1f : 1f);
+
+                    Vector2 heading = velocity.LengthSquared() > 0.01f
+                        ? Vector2.Normalize(velocity)
+                        : desiredVelocity / desiredSpeed;
+                    // A consistent right-hand passing bias lets two approaching
+                    // bodies choose opposite sides instead of both braking in place.
+                    Vector2 passingSide = new(heading.Y, -heading.X);
+                    Vector2 steer = away * 0.25f + passingSide * 0.95f;
+                    float steerLength = steer.Length();
+                    if (steerLength > 0.001f)
+                        avoidance += steer * (urgency / steerLength);
+
+                    other = next;
+                }
+            }
+        }
+
+        float avoidanceLength = avoidance.Length();
+        if (avoidanceLength <= 0.001f)
+            return desiredVelocity;
+
+        if (avoidanceLength > 1f)
+            avoidance /= avoidanceLength;
+
+        // Preserve the route controller's speed request; avoidance changes the
+        // heading only, while actual velocity still turns under the lateral-force limit.
+        Vector2 adjustedVelocity =
+            desiredVelocity + avoidance * (desiredSpeed * 0.9f);
+        float adjustedLength = adjustedVelocity.Length();
+        return adjustedLength > 0.001f
+            ? adjustedVelocity * (desiredSpeed / adjustedLength)
+            : desiredVelocity;
     }
 
     private void ResolveUnitOverlaps(
