@@ -44,6 +44,8 @@ public static class CombatSelfTest
         RunTest("Behaviac: lost visual target causes search at last known position", PerceptionMemorySelfTest.BehaviacInvestigatesLastKnownPositionWithoutCurrentTargetKnowledge, ref passed, ref failed);
         RunTest("Behaviac: no contact selects patrol instead of hold-position fallback", PerceptionMemorySelfTest.BehaviacFallsBackToPatrolWithoutAContact, ref passed, ref failed);
         RunTest("Perception: real gunshot creates anonymous contact and triggers audible investigation", TacticalHearingSelfTest.Run, ref passed, ref failed);
+        RunTest("Hearing: merges nearby gunshots in 50 ms acoustic cells", TacticalHearingSelfTest.CoalescesGunshotsInSpaceAndTime, ref passed, ref failed);
+        RunTest("Hearing: urgent danger bypasses acoustic batching", TacticalHearingSelfTest.UrgentDangerBypassesAcousticBatchWindow, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("AI: last Behaviac intent resets on unit lifecycle", TestAiIntentLifecycle, ref passed, ref failed);
         RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
