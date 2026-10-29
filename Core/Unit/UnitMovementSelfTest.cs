@@ -151,6 +151,77 @@ public static class UnitMovementSelfTest
         return false;
     }
 
+    public static bool DenseMovingCrowdContinuesToAdvance()
+    {
+        WorldMap map = CreateFlatWorld();
+        const int columns = 4;
+        const int rows = 4;
+        const float spacing = 0.6f;
+        const float startX = 6.5f;
+        const float startY = 14.5f;
+
+        UnitSimulation simulation = new UnitSimulation(columns * rows, 256);
+        UnitId[] ids = new UnitId[columns * rows];
+        Vector3[] starts = new Vector3[ids.Length];
+
+        for (int row = 0; row < rows; row++)
+        {
+            for (int column = 0; column < columns; column++)
+            {
+                int index = row * columns + column;
+                Vector3 start = new Vector3(
+                    startX + column * spacing,
+                    startY + row * spacing,
+                    1f);
+                starts[index] = start;
+                ids[index] = simulation.Spawn(
+                    UnitType.Colonist,
+                    start,
+                    Vector3.UnitX,
+                    Vector3.UnitX,
+                    factionTag: 1);
+            }
+        }
+
+        for (int row = 0; row < rows; row++)
+        {
+            for (int column = 0; column < columns; column++)
+            {
+                int index = row * columns + column;
+                simulation.Units.SetTarget(
+                    ids[index],
+                    new Vector3(28.5f + column * spacing, starts[index].Y, 1f));
+            }
+        }
+
+        UnitMovementSystem movement = new UnitMovementSystem();
+        for (int tick = 0; tick < 240; tick++)
+            movement.Update(simulation.Units, map, TestDeltaTime);
+
+        float totalProgress = 0f;
+        int progressingUnits = 0;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            Vector3 position = simulation.Units.Position[ids[i].Index];
+            Vector3 velocity = simulation.Units.Velocity[ids[i].Index];
+            if (!float.IsFinite(position.X) ||
+                !float.IsFinite(position.Y) ||
+                !float.IsFinite(velocity.X) ||
+                !float.IsFinite(velocity.Y))
+                return false;
+
+            float progress = position.X - starts[i].X;
+            totalProgress += progress;
+            if (progress > 2f)
+                progressingUnits++;
+        }
+
+        // A dense but mobile group should continue to advance despite soft
+        // contacts and route-following; a crowd-wide deadlock fails this check.
+        return progressingUnits >= ids.Length * 3 / 4 &&
+               totalProgress / ids.Length > 3.5f;
+    }
+
     public static bool OpposingUnitsSteerAroundOneAnother()
     {
         WorldMap map = CreateFlatWorld();
