@@ -15,7 +15,9 @@ public enum UnitNavigationStatus : byte
     GoalBlocked = 5,
     DisconnectedTerrain = 6,
     PathNotFound = 7,
-    NoUsableWaypoints = 8
+    NoUsableWaypoints = 8,
+    FollowingPartialRoute = 9,
+    MovingTowardGoalWhileWaitingForRoute = 10
 }
 
 /// <summary>
@@ -28,7 +30,8 @@ public sealed class UnitNavigationSystem
     private const float HeightCost = 0.15f;
     private const int MinRouteBuildsPerUpdate = 2;
     private const int MaxRouteBuildsPerUpdate = 8;
-    private const int MaxExpandedNodesPerSearch = 16_384;
+    private const int MaxExpandedNodesPerSearch = 2_048;
+    private const float DirectFallbackDistance = 3f;
     private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
     private const float RouteReuseCostPerUnit = 0.10f;
@@ -67,6 +70,7 @@ public sealed class UnitNavigationSystem
     private long[] _failedRetryAfterUpdate = Array.Empty<long>();
     private long[] _routeTerrainVersion = Array.Empty<long>();
     private bool[] _routeTrafficRegistered = Array.Empty<bool>();
+    private bool[] _routeIsPartial = Array.Empty<bool>();
 
     private int[] _routeTraffic = Array.Empty<int>();
     private long _routeTrafficTerrainVersion = long.MinValue;
@@ -236,7 +240,8 @@ public sealed class UnitNavigationSystem
         float distanceToGoalY = position.Y - target.Y;
         bool repositionedAwayFromFinishedRoute =
             routeFinished &&
-            distanceToGoalX * distanceToGoalX + distanceToGoalY * distanceToGoalY > 2.25f;
+            (_routeIsPartial[unitIndex] ||
+             distanceToGoalX * distanceToGoalX + distanceToGoalY * distanceToGoalY > 2.25f);
 
         bool deviatedFromRoute = false;
         if (sameOwner && waypointCursor < waypoints.Length)
@@ -288,7 +293,8 @@ public sealed class UnitNavigationSystem
                     targetY,
                     footprintX,
                     footprintY,
-                    out int[] path);
+                    out int[] path,
+                    out bool partialRoute);
 
                 SearchesThisUpdate++;
                 SearchMillisecondsThisUpdate +=
@@ -320,6 +326,7 @@ public sealed class UnitNavigationSystem
                     _routeFootprintY[unitIndex] = footprintY;
                     _routeOwner[unitIndex] = owner;
                     _routeTerrainVersion[unitIndex] = worldMap.TerrainVersion;
+                    _routeIsPartial[unitIndex] = partialRoute;
                     RoutesBuilt++;
                     RoutesBuiltThisUpdate++;
                     _failedGoalX[unitIndex] = int.MinValue;
@@ -341,6 +348,7 @@ public sealed class UnitNavigationSystem
                 else
                 {
                     _lastStatuses[unitIndex] = _lastBuildFailureStatus;
+                    _routeIsPartial[unitIndex] = false;
                     _paths[unitIndex] = Array.Empty<int>();
                     _pathCursor[unitIndex] = 0;
                     _waypoints[unitIndex] = Array.Empty<int>();
@@ -361,6 +369,13 @@ public sealed class UnitNavigationSystem
                         _updateSequence + FailedRouteRetryUpdates;
                     RoutesFailed++;
                     RoutesFailedThisUpdate++;
+                    if (TryGetDirectFallbackWaypoint(
+                            worldMap, position, target, footprintX, footprintY, out waypoint))
+                    {
+                        _lastStatuses[unitIndex] =
+                            UnitNavigationStatus.MovingTowardGoalWhileWaitingForRoute;
+                        return true;
+                    }
                     waypoint = default;
                     return false;
                 }
@@ -371,6 +386,13 @@ public sealed class UnitNavigationSystem
                 _lastStatuses[unitIndex] = failedAlready
                     ? UnitNavigationStatus.CachedFailure
                     : UnitNavigationStatus.WaitingForRouteBudget;
+                if (TryGetDirectFallbackWaypoint(
+                        worldMap, position, target, footprintX, footprintY, out waypoint))
+                {
+                    _lastStatuses[unitIndex] =
+                        UnitNavigationStatus.MovingTowardGoalWhileWaitingForRoute;
+                    return true;
+                }
                 waypoint = default;
                 return false;
             }
@@ -395,13 +417,28 @@ public sealed class UnitNavigationSystem
             waypoint = new Vector2(
                 cell % _width + 0.5f,
                 cell / _width + 0.5f);
-            _lastStatuses[unitIndex] = UnitNavigationStatus.FollowingRoute;
+            _lastStatuses[unitIndex] = _routeIsPartial[unitIndex]
+                ? UnitNavigationStatus.FollowingPartialRoute
+                : UnitNavigationStatus.FollowingRoute;
             return true;
         }
 
-        // Once the route reaches the goal cell, finish the remaining sub-tile
-        // distance to the requested target. A moving target is replanned above.
-        if (targetX == _routeGoalX[unitIndex] &&
+        // A partial route ends at a safe search frontier, not the final goal.
+        // Try a short validated step while a fresh local chunk is queued.
+        if (_routeIsPartial[unitIndex] &&
+            TryGetDirectFallbackWaypoint(
+                worldMap, position, target, footprintX, footprintY, out waypoint))
+        {
+            _lastStatuses[unitIndex] =
+                UnitNavigationStatus.MovingTowardGoalWhileWaitingForRoute;
+            return true;
+        }
+
+        // Once a complete route reaches the goal cell, finish the remaining sub-tile
+        // distance to the requested target. Partial routes must never cut across
+        // unsearched terrain to the final destination.
+        if (!_routeIsPartial[unitIndex] &&
+            targetX == _routeGoalX[unitIndex] &&
             targetY == _routeGoalY[unitIndex])
         {
             waypoint = new Vector2(target.X, target.Y);
@@ -434,6 +471,45 @@ public sealed class UnitNavigationSystem
             end,
             GetFootprintRadius(units.Width[unitIndex]),
             GetFootprintRadius(units.Length[unitIndex]));
+    }
+
+    private bool TryGetDirectFallbackWaypoint(
+        WorldMap worldMap,
+        Vector3 position,
+        Vector3 target,
+        int footprintX,
+        int footprintY,
+        out Vector2 waypoint)
+    {
+        Vector2 start = new(position.X, position.Y);
+        Vector2 goal = new(target.X, target.Y);
+        Vector2 delta = goal - start;
+        float distance = delta.Length();
+
+        if (distance <= 0.05f)
+        {
+            waypoint = goal;
+            return true;
+        }
+
+        float stepDistance = MathF.Min(DirectFallbackDistance, distance);
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            Vector2 candidate = start + delta * (stepDistance / distance);
+            if (HasClearStraightRouteToPoint(
+                    worldMap, start, candidate, footprintX, footprintY))
+            {
+                waypoint = candidate;
+                return true;
+            }
+
+            stepDistance *= 0.5f;
+            if (stepDistance < 0.25f)
+                break;
+        }
+
+        waypoint = default;
+        return false;
     }
 
     /// <summary>
@@ -689,6 +765,7 @@ public sealed class UnitNavigationSystem
         _failedGoalX[unitIndex] = int.MinValue;
         _failedGoalY[unitIndex] = int.MinValue;
         _failedRetryAfterUpdate[unitIndex] = 0;
+        _routeIsPartial[unitIndex] = false;
     }
 
     private bool TryBuildPath(
@@ -699,9 +776,11 @@ public sealed class UnitNavigationSystem
         int targetY,
         int footprintRadiusX,
         int footprintRadiusY,
-        out int[] path)
+        out int[] path,
+        out bool partialRoute)
     {
         path = Array.Empty<int>();
+        partialRoute = false;
         _lastSearchCellsExpanded = 0;
         _lastSearchTrafficCellsConsidered = 0;
         _lastBuildFailureStatus = UnitNavigationStatus.PathNotFound;
@@ -748,11 +827,28 @@ public sealed class UnitNavigationSystem
         _fScore[start] = Heuristic(startX, startY, targetX, targetY);
         HeapPush(start);
 
+        // Choose the furthest useful frontier from the nodes A* has explored.
+        // The slight goal bias keeps progress toward the command without refusing
+        // to move around an obstacle that temporarily increases goal distance.
+        int bestPartialCell = start;
+        float bestPartialScore =
+            _gScore[start] - 0.35f * Heuristic(startX, startY, targetX, targetY);
+
         while (_heapCount > 0 &&
                _lastSearchCellsExpanded < MaxExpandedNodesPerSearch)
         {
             int current = HeapPop();
             _lastSearchCellsExpanded++;
+
+            int x = current % _width;
+            int y = current / _width;
+            float partialScore =
+                _gScore[current] - 0.35f * Heuristic(x, y, targetX, targetY);
+            if (partialScore > bestPartialScore + 0.0001f)
+            {
+                bestPartialScore = partialScore;
+                bestPartialCell = current;
+            }
 
             if (current == goal)
             {
@@ -761,9 +857,6 @@ public sealed class UnitNavigationSystem
             }
 
             _closedStamp[current] = stamp;
-
-            int x = current % _width;
-            int y = current / _width;
 
             for (int direction = 0; direction < DirectionX.Length; direction++)
             {
@@ -824,6 +917,22 @@ public sealed class UnitNavigationSystem
                     HeapPush(neighbor);
                 else
                     SiftUp(_heapPosition[neighbor]);
+            }
+        }
+
+        // If the search ran out of its per-unit budget, return a route to the
+        // best validated frontier instead of making the unit wait for a full
+        // start-to-goal search. The next request continues from that new position.
+        if (_heapCount > 0 &&
+            _lastSearchCellsExpanded >= MaxExpandedNodesPerSearch &&
+            bestPartialCell != start)
+        {
+            int[] partialPath = ReconstructPath(start, bestPartialCell);
+            if (partialPath.Length > 1)
+            {
+                path = partialPath;
+                partialRoute = true;
+                return true;
             }
         }
 
@@ -1421,6 +1530,7 @@ public sealed class UnitNavigationSystem
         Array.Resize(ref _failedRetryAfterUpdate, newCapacity);
         Array.Resize(ref _routeTerrainVersion, newCapacity);
         Array.Resize(ref _routeTrafficRegistered, newCapacity);
+        Array.Resize(ref _routeIsPartial, newCapacity);
 
         for (int i = 0; i < newCapacity; i++)
         {
