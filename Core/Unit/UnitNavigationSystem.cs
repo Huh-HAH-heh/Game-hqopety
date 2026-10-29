@@ -30,7 +30,7 @@ public sealed class UnitNavigationSystem
     private const float HeightCost = 0.15f;
     private const int MinRouteBuildsPerUpdate = 2;
     private const int MaxRouteBuildsPerUpdate = 8;
-    private const int MaxExpandedNodesPerSearch = 2_048;
+    private const int MaxExpandedNodesPerSearch = 16_384;
     private const float DirectFallbackDistance = 3f;
     private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
@@ -369,13 +369,9 @@ public sealed class UnitNavigationSystem
                         _updateSequence + FailedRouteRetryUpdates;
                     RoutesFailed++;
                     RoutesFailedThisUpdate++;
-                    if (TryGetDirectFallbackWaypoint(
-                            worldMap, position, target, footprintX, footprintY, out waypoint))
-                    {
-                        _lastStatuses[unitIndex] =
-                            UnitNavigationStatus.MovingTowardGoalWhileWaitingForRoute;
-                        return true;
-                    }
+                    // A completed search failure is not a reason to blindly
+                    // approach an unreachable target. Fallback movement is used
+                    // only when route building is queued, or a partial route ends.
                     waypoint = default;
                     return false;
                 }
@@ -386,7 +382,8 @@ public sealed class UnitNavigationSystem
                 _lastStatuses[unitIndex] = failedAlready
                     ? UnitNavigationStatus.CachedFailure
                     : UnitNavigationStatus.WaitingForRouteBudget;
-                if (TryGetDirectFallbackWaypoint(
+                if (!failedAlready &&
+                    TryGetDirectFallbackWaypoint(
                         worldMap, position, target, footprintX, footprintY, out waypoint))
                 {
                     _lastStatuses[unitIndex] =
