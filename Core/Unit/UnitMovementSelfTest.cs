@@ -54,6 +54,48 @@ public static class UnitMovementSelfTest
                float.IsFinite(finalPosition.Y);
     }
 
+    public static bool UnitsMoveWhileWaitingForRouteBudget()
+    {
+        WorldMap map = CreateFlatWorld();
+        const int unitCount = 4;
+        UnitSimulation simulation = new UnitSimulation(8, 64);
+        UnitId[] ids = new UnitId[unitCount];
+        Vector3[] starts = new Vector3[unitCount];
+
+        for (int i = 0; i < unitCount; i++)
+        {
+            Vector3 start = new Vector3(5.5f, 5.5f + i * 7f, 1f);
+            starts[i] = start;
+            ids[i] = simulation.Spawn(
+                UnitType.Colonist,
+                start,
+                Vector3.UnitX,
+                Vector3.UnitX,
+                factionTag: 1);
+            simulation.Units.SetTarget(
+                ids[i],
+                new Vector3(35.5f, start.Y, 1f));
+        }
+
+        // Small formations only receive two route builds per update. The last
+        // units must still take a short safe step instead of standing idle.
+        UnitMovementSystem movement = new UnitMovementSystem();
+        movement.Update(simulation.Units, map, TestDeltaTime);
+
+        for (int i = 2; i < unitCount; i++)
+        {
+            Vector3 position = simulation.Units.Position[ids[i].Index];
+            if (!float.IsFinite(position.X) ||
+                !float.IsFinite(position.Y) ||
+                PlanarDistance(starts[i], position) <= 0.0001f)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public static bool CancellingCommandAppliesGradualBraking()
     {
         WorldMap map = CreateFlatWorld();
