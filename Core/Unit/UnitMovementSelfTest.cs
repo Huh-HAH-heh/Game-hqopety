@@ -151,6 +151,62 @@ public static class UnitMovementSelfTest
         return false;
     }
 
+    public static bool OpposingUnitsSteerAroundOneAnother()
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        Vector3 firstStart = new Vector3(14.5f, 20.5f, 1f);
+        Vector3 secondStart = new Vector3(18.5f, 20.5f, 1f);
+
+        UnitId first = simulation.Spawn(
+            UnitType.Colonist, firstStart, Vector3.UnitX, Vector3.UnitX, factionTag: 1);
+        UnitId second = simulation.Spawn(
+            UnitType.Colonist, secondStart, -Vector3.UnitX, -Vector3.UnitX, factionTag: 1);
+
+        Vector3 firstTarget = new Vector3(21.5f, 20.5f, 1f);
+        Vector3 secondTarget = new Vector3(11.5f, 20.5f, 1f);
+        simulation.Units.SetTarget(first, firstTarget);
+        simulation.Units.SetTarget(second, secondTarget);
+
+        float radiusSum =
+            simulation.Units.Radius[first.Index] + simulation.Units.Radius[second.Index];
+        UnitMovementSystem movement = new UnitMovementSystem();
+        float minimumSeparation = float.PositiveInfinity;
+        float maximumLateralDeviation = 0f;
+
+        for (int tick = 0; tick < 240; tick++)
+        {
+            movement.Update(simulation.Units, map, TestDeltaTime);
+
+            Vector3 firstPosition = simulation.Units.Position[first.Index];
+            Vector3 secondPosition = simulation.Units.Position[second.Index];
+            minimumSeparation = MathF.Min(
+                minimumSeparation, PlanarDistance(firstPosition, secondPosition));
+            maximumLateralDeviation = MathF.Max(
+                maximumLateralDeviation,
+                MathF.Max(
+                    MathF.Abs(firstPosition.Y - firstStart.Y),
+                    MathF.Abs(secondPosition.Y - secondStart.Y)));
+
+            if (!float.IsFinite(firstPosition.X) ||
+                !float.IsFinite(firstPosition.Y) ||
+                !float.IsFinite(secondPosition.X) ||
+                !float.IsFinite(secondPosition.Y))
+                return false;
+        }
+
+        Vector3 firstEnd = simulation.Units.Position[first.Index];
+        Vector3 secondEnd = simulation.Units.Position[second.Index];
+
+        // The pair should pass on different sides and keep moving. The contact
+        // solver remains the final safety net; predictive steering should reduce
+        // head-on contact instead of replacing contact resolution.
+        return firstEnd.X > secondStart.X &&
+               secondEnd.X < firstStart.X &&
+               maximumLateralDeviation > 0.05f &&
+               minimumSeparation > radiusSum * 0.5f;
+    }
+
     public static bool ContactsUseReducedRadiusWithoutExplosiveSeparation()
     {
         WorldMap map = CreateFlatWorld();
