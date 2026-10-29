@@ -15,6 +15,7 @@ public sealed class UnitStore
     private Vector3[] _headNormal;
 
     private float[] _moveSpeed;
+    private float[] _bodyMassKg;
     private float[] _width;
     private float[] _length;
     private float[] _height;
@@ -64,6 +65,9 @@ public sealed class UnitStore
 
     public float[] MoveSpeed =>
         _moveSpeed;
+
+    public float[] BodyMassKg =>
+        _bodyMassKg;
 
     public float[] Width =>
         _width;
@@ -126,6 +130,7 @@ public sealed class UnitStore
         _headNormal = new Vector3[initialCapacity];
 
         _moveSpeed = new float[initialCapacity];
+        _bodyMassKg = new float[initialCapacity];
         _width = new float[initialCapacity];
         _length = new float[initialCapacity];
         _height = new float[initialCapacity];
@@ -196,6 +201,7 @@ public sealed class UnitStore
         _headNormal[index] = headNormal;
 
         _moveSpeed[index] = definition.MoveSpeed;
+        _bodyMassKg[index] = MathF.Max(1f, definition.BodyMassKg);
         _width[index] = definition.Width;
         _length[index] = definition.Length;
         _height[index] = definition.Height;
@@ -330,7 +336,6 @@ public sealed class UnitStore
         }
 
         _hasTarget[index] = false;
-        _velocity[index] = Vector3.Zero;
     }
 
     public void SetFactionTag(
@@ -421,6 +426,10 @@ public sealed class UnitStore
 
         Array.Resize(
             ref _moveSpeed,
+            newCapacity);
+
+        Array.Resize(
+            ref _bodyMassKg,
             newCapacity);
 
         Array.Resize(

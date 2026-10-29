@@ -44,6 +44,8 @@ public static class CombatSelfTest
         RunTest("Behaviac: lost visual target causes search at last known position", PerceptionMemorySelfTest.BehaviacInvestigatesLastKnownPositionWithoutCurrentTargetKnowledge, ref passed, ref failed);
         RunTest("Behaviac: no contact selects patrol instead of hold-position fallback", PerceptionMemorySelfTest.BehaviacFallsBackToPatrolWithoutAContact, ref passed, ref failed);
         RunTest("Perception: real gunshot creates anonymous contact and triggers audible investigation", TacticalHearingSelfTest.Run, ref passed, ref failed);
+        RunTest("Hearing: merges nearby gunshots in 50 ms acoustic cells", TacticalHearingSelfTest.CoalescesGunshotsInSpaceAndTime, ref passed, ref failed);
+        RunTest("Hearing: urgent danger bypasses acoustic batching", TacticalHearingSelfTest.UrgentDangerBypassesAcousticBatchWindow, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("AI: last Behaviac intent resets on unit lifecycle", TestAiIntentLifecycle, ref passed, ref failed);
         RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
@@ -58,6 +60,14 @@ public static class CombatSelfTest
         RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
+        RunTest("Movement: accelerates and stops at commanded target", UnitMovementSelfTest.AcceleratesAndStopsAtCommandedTarget, ref passed, ref failed);
+        RunTest("Movement: units advance while waiting for route budget", UnitMovementSelfTest.UnitsMoveWhileWaitingForRouteBudget, ref passed, ref failed);
+        RunTest("Movement: cancelling a command applies gradual braking", UnitMovementSelfTest.CancellingCommandAppliesGradualBraking, ref passed, ref failed);
+        RunTest("Movement: direction changes respect inertia", UnitMovementSelfTest.DirectionChangesRespectInertia, ref passed, ref failed);
+        RunTest("Movement: follows route around wall without crossing it", UnitMovementSelfTest.FollowsRouteAroundWallWithoutCrossingIt, ref passed, ref failed);
+        RunTest("Movement: contacts use reduced radius without explosive separation", UnitMovementSelfTest.ContactsUseReducedRadiusWithoutExplosiveSeparation, ref passed, ref failed);
+        RunTest("Movement: dense moving crowd continues to advance", UnitMovementSelfTest.DenseMovingCrowdContinuesToAdvance, ref passed, ref failed);
+        RunTest("Movement: opposing units steer around one another", UnitMovementSelfTest.OpposingUnitsSteerAroundOneAnother, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: candidate sampling bounds pair work", TestVisionBoundedCandidateSampling, ref passed, ref failed);
