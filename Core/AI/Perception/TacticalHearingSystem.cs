@@ -42,6 +42,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private Vector3[] _bestGunshotEstimateByObserver = Array.Empty<Vector3>();
     private float[] _bestGunshotConfidenceByObserver = Array.Empty<float>();
     private float[] _bestGunshotErrorByObserver = Array.Empty<float>();
+    private float[] _gunshotAlertAccumulationByObserver = Array.Empty<float>();
     private bool[] _hasBestGunshotByObserver = Array.Empty<bool>();
     private float[] _lastGunshotMemoryPublishedAt = Array.Empty<float>();
     private bool[] _hasPublishedGunshotMemory = Array.Empty<bool>();
@@ -313,6 +314,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     {
         ReadOnlySpan<int> active = units.ActiveIndices;
         Array.Clear(_hasBestGunshotByObserver);
+        Array.Clear(_gunshotAlertAccumulationByObserver);
         LastListenerCellsVisited = 0;
 
         bool useListenerGrid = worldMap != null && _pendingPulses.Count > 0;
@@ -392,12 +394,20 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 continue;
 
             float lastPublished = _lastGunshotMemoryPublishedAt[observer];
+            SoundPulse pulse = _bestGunshotPulseByObserver[observer];
+            Vector3 estimate = _bestGunshotEstimateByObserver[observer];
+
+            // Several shots can arrive in one update. Apply their combined
+            // alertness once, using diminishing returns rather than one mutation
+            // per heard pulse.
+            float alertContribution = _gunshotAlertAccumulationByObserver[observer];
+            if (alertContribution > 0f)
+                response.AddAlertness(observer, alertContribution, estimate);
+
             if (_hasPublishedGunshotMemory[observer] &&
                 nowSeconds - lastPublished < GunshotMemoryPublishIntervalSeconds)
                 continue;
 
-            SoundPulse pulse = _bestGunshotPulseByObserver[observer];
-            Vector3 estimate = _bestGunshotEstimateByObserver[observer];
             if (_memoryStore.Record(
                     observer,
                     new TacticalStimulus(
@@ -468,12 +478,15 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             TacticalStimulusType.Explosion => 0.70f,
             _ => 0.18f
         };
-        response.AddAlertness(observer, alertFactor * confidence, estimate);
-
         if (pulse.Type == TacticalStimulusType.Gunshot)
         {
-            // Hearing still affects alertness for every cluster, but we keep
-            // only the strongest uncertain gunshot contact per observer/tick.
+            // Coalesce multiple heard cells into one listener-side response.
+            float contribution = Math.Clamp(alertFactor * confidence, 0f, 1f);
+            float accumulated = _gunshotAlertAccumulationByObserver[observer];
+            _gunshotAlertAccumulationByObserver[observer] =
+                1f - (1f - accumulated) * (1f - contribution);
+
+            // Keep the strongest uncertain source estimate for memory and search.
             if (!_hasBestGunshotByObserver[observer] ||
                 confidence >= _bestGunshotConfidenceByObserver[observer])
             {
@@ -487,6 +500,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             return;
         }
 
+        response.AddAlertness(observer, alertFactor * confidence, estimate);
         if (_memoryStore.Record(
                 observer,
                 new TacticalStimulus(
@@ -813,6 +827,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             Array.Resize(ref _bestGunshotEstimateByObserver, capacity);
             Array.Resize(ref _bestGunshotConfidenceByObserver, capacity);
             Array.Resize(ref _bestGunshotErrorByObserver, capacity);
+            Array.Resize(ref _gunshotAlertAccumulationByObserver, capacity);
             Array.Resize(ref _hasBestGunshotByObserver, capacity);
             Array.Resize(ref _lastGunshotMemoryPublishedAt, capacity);
             Array.Resize(ref _hasPublishedGunshotMemory, capacity);
