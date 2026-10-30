@@ -53,6 +53,41 @@ public static class TacticalHearingSelfTest
                !contact.SubjectUnit.HasValue;
     }
 
+
+    public static bool CoalescesFootstepsInLargerSpatialAndTimeCells()
+    {
+        var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
+        var simulation = new UnitSimulation(4, 64) { VisionEnabled = false };
+        UnitId first = simulation.Spawn(
+            UnitType.Colonist, new Vector3(10.5f, 10.5f, 0.1f), factionTag: 1);
+        UnitId second = simulation.Spawn(
+            UnitType.Colonist, new Vector3(12.5f, 10.5f, 0.1f), factionTag: 1);
+        UnitId listener = simulation.Spawn(
+            UnitType.Colonist, new Vector3(26.5f, 10.5f, 0.1f), factionTag: 2);
+
+        simulation.Units.Velocity[first.Index] = Vector3.UnitX;
+        simulation.Units.Velocity[second.Index] = Vector3.UnitX;
+
+        simulation.Update(worldMap, 0.05f);
+        if (simulation.HearingSystem.PendingAcousticBatchCount != 1 ||
+            simulation.HearingSystem.LastContactsRecorded != 0)
+            return false;
+
+        simulation.Update(worldMap, 0.05f);
+        if (simulation.HearingSystem.PendingAcousticBatchCount != 1 ||
+            simulation.HearingSystem.LastContactsRecorded != 0)
+            return false;
+
+        simulation.Update(worldMap, 0.05f);
+
+        return simulation.HearingSystem.PendingAcousticBatchCount == 0 &&
+               simulation.HearingSystem.LastQueuedPulseCount == 1 &&
+               simulation.HearingSystem.LastContactsRecorded == 1 &&
+               simulation.HearingSystem.TryGetBestInvestigableContact(
+                   listener.Index, out TacticalContact contact) &&
+               contact.LastStimulusType == TacticalStimulusType.Footstep;
+    }
+
     public static bool UrgentDangerBypassesAcousticBatchWindow()
     {
         var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
