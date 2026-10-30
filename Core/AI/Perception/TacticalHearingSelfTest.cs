@@ -88,6 +88,38 @@ public static class TacticalHearingSelfTest
                contact.LastStimulusType == TacticalStimulusType.Footstep;
     }
 
+    public static bool SharedAcousticEventsKeepListenerContactsIndependent()
+    {
+        var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
+        var simulation = new UnitSimulation(4, 64) { VisionEnabled = false };
+        UnitId source = simulation.Spawn(
+            UnitType.Colonist, new Vector3(10.5f, 10.5f, 0.1f), factionTag: 1);
+        UnitId eastListener = simulation.Spawn(
+            UnitType.Colonist, new Vector3(20.5f, 10.5f, 0.1f), factionTag: 2);
+        UnitId northListener = simulation.Spawn(
+            UnitType.Colonist, new Vector3(10.5f, 20.5f, 0.1f), factionTag: 3);
+        simulation.Units.Velocity[source.Index] = Vector3.UnitX;
+
+        simulation.Update(worldMap, 0.05f);
+        simulation.Update(worldMap, 0.05f);
+        simulation.Update(worldMap, 0.05f);
+
+        if (!simulation.HearingSystem.TryGetBestInvestigableContact(
+                eastListener.Index, out TacticalContact eastContact) ||
+            !simulation.HearingSystem.TryGetBestInvestigableContact(
+                northListener.Index, out TacticalContact northContact))
+            return false;
+
+        // Both listeners hear the same event, but neither gains its source identity.
+        // Their local estimates differ because each observer has a distinct bearing estimate.
+        return !eastContact.SubjectUnit.HasValue &&
+               !northContact.SubjectUnit.HasValue &&
+               eastContact.LastStimulusType == TacticalStimulusType.Footstep &&
+               northContact.LastStimulusType == TacticalStimulusType.Footstep &&
+               Vector3.DistanceSquared(
+                   eastContact.EstimatedPosition, northContact.EstimatedPosition) > 0.01f;
+    }
+
     public static bool UrgentDangerBypassesAcousticBatchWindow()
     {
         var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
