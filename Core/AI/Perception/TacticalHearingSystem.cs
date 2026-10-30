@@ -22,15 +22,16 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private const float GunshotMemorySeconds = 8f;
     private const float GunshotMemoryPublishIntervalSeconds = 0.15f;
     private const float AcousticBatchWindowSeconds = 0.05f;
+    private const float FootstepBatchWindowSeconds = 0.15f;
     private const float GunshotMergeCellSize = 24f;
-    private const float FootstepMergeCellSize = 8f;
+    private const float FootstepMergeCellSize = 16f;
     private const float FootstepMemorySeconds = 3f;
     private const float ConfidenceHalfLifeSeconds = 2.5f;
     private const float MinimumContactConfidence = 0.12f;
     private const float DebugEventLifetimeSeconds = 2.25f;
     private const int MaxRecentLoudDebugEvents = 96;
     private const int MaxRecentFootstepDebugEvents = 48;
-    private const int ListenerGridCellSize = 32;
+    private const int ListenerGridCellSize = 16;
     private const int PulseBufferTrimThreshold = 4096;
     private const int PulseBufferRetainedCapacity = 128;
     private const float PulseBufferTrimQuietSeconds = 2f;
@@ -698,8 +699,9 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         if (batchable && pulse.SourceFaction != 0)
         {
             float cellSize = gunshot ? GunshotMergeCellSize : FootstepMergeCellSize;
+            float batchWindow = gunshot ? AcousticBatchWindowSeconds : FootstepBatchWindowSeconds;
             long timeBucket = (long)MathF.Floor(
-                pulse.OccurredAtSeconds / AcousticBatchWindowSeconds);
+                pulse.OccurredAtSeconds / batchWindow);
             var key = new AcousticCellKey(
                 (int)MathF.Floor(pulse.Position.X / cellSize),
                 (int)MathF.Floor(pulse.Position.Y / cellSize),
@@ -748,8 +750,11 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         _acousticBatchKeysToFlush.Clear();
         foreach (KeyValuePair<AcousticCellKey, AcousticBatch> entry in _pendingAcousticBatches)
         {
+            float batchWindow = entry.Key.Type == TacticalStimulusType.Gunshot
+                ? AcousticBatchWindowSeconds
+                : FootstepBatchWindowSeconds;
             double bucketEnd =
-                (entry.Key.TimeBucket + 1d) * AcousticBatchWindowSeconds;
+                (entry.Key.TimeBucket + 1d) * batchWindow;
             if (bucketEnd <= nowSeconds + 0.0001d)
                 _acousticBatchKeysToFlush.Add(entry.Key);
         }
