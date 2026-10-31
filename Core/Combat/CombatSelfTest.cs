@@ -63,6 +63,14 @@ public static class CombatSelfTest
         RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
+        RunTest("Movement: accelerates and stops at commanded target", UnitMovementSelfTest.AcceleratesAndStopsAtCommandedTarget, ref passed, ref failed);
+        RunTest("Movement: units advance while waiting for route budget", UnitMovementSelfTest.UnitsMoveWhileWaitingForRouteBudget, ref passed, ref failed);
+        RunTest("Movement: cancelling a command applies gradual braking", UnitMovementSelfTest.CancellingCommandAppliesGradualBraking, ref passed, ref failed);
+        RunTest("Movement: direction changes respect inertia", UnitMovementSelfTest.DirectionChangesRespectInertia, ref passed, ref failed);
+        RunTest("Movement: follows route around wall without crossing it", UnitMovementSelfTest.FollowsRouteAroundWallWithoutCrossingIt, ref passed, ref failed);
+        RunTest("Movement: contacts use reduced radius without explosive separation", UnitMovementSelfTest.ContactsUseReducedRadiusWithoutExplosiveSeparation, ref passed, ref failed);
+        RunTest("Movement: dense moving crowd continues to advance", UnitMovementSelfTest.DenseMovingCrowdContinuesToAdvance, ref passed, ref failed);
+        RunTest("Movement: opposing units steer around one another", UnitMovementSelfTest.OpposingUnitsSteerAroundOneAnother, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: candidate sampling bounds pair work", TestVisionBoundedCandidateSampling, ref passed, ref failed);
