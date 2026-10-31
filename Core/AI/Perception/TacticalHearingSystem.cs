@@ -29,7 +29,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private const int MaxRecentFootstepDebugEvents = 48;
     private const int ListenerGridCellSize = 16;
     private const int MaxFootstepClustersPerObserver = 8;
-    private const float FootstepListenerClusterRadius = 11.5f;
+    private const float FootstepListenerClusterRadius = 10.5f;
     private readonly AcousticEventStore _acousticEvents = new();
     // Structure-of-arrays scratch storage: no per-listener/per-event heap objects.
     private AcousticEvent[] _footstepPulseByObserver = Array.Empty<AcousticEvent>();
