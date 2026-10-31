@@ -388,6 +388,7 @@ public sealed class SquadMovementStore
             !squad.HasMoveOrder ||
             link.Slot >= squad.MemberGoals.Length ||
             !units.HasTarget[unitIndex] ||
+            !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
             IsDetachedFromCollective(units, ai, unitIndex))
         {
             return false;
@@ -519,6 +520,23 @@ public sealed class SquadMovementStore
                 ? SquadFormationRigidity.Organized
                 : rigidity;
         }
+    }
+
+    private static bool HasMatchingGroupMoveOrder(
+        UnitAiStore? ai,
+        int unit,
+        Vector2 expectedGoal)
+    {
+        if (ai == null)
+            return true;
+
+        if (ai.PlayerOrderType[unit] != UnitAiOrderType.Move)
+            return false;
+
+        Vector3 order = ai.PlayerOrderPosition[unit];
+        float dx = order.X - expectedGoal.X;
+        float dy = order.Y - expectedGoal.Y;
+        return dx * dx + dy * dy <= 0.01f;
     }
 
     private bool IsDetachedFromCollective(UnitStore units, UnitAiStore? ai, int unit)
