@@ -123,17 +123,21 @@ public static class TacticalHearingSelfTest
     public static bool FootstepListenerWorkIsBoundedAndKeepsDistinctDirections()
     {
         var worldMap = new WorldMap(regionsX: 2, regionsY: 2, layerCount: 64);
-        var simulation = new UnitSimulation(8, 64) { VisionEnabled = false };
+        var simulation = new UnitSimulation(12, 64) { VisionEnabled = false };
         UnitId listener = simulation.Spawn(
             UnitType.Colonist, new Vector3(48f, 48f, 0.1f), factionTag: 2);
 
         Vector3[] sourcePositions =
         {
             new(66f, 48f, 0.1f),
-            new(54f, 65f, 0.1f),
-            new(33f, 59f, 0.1f),
-            new(33f, 37f, 0.1f),
-            new(54f, 31f, 0.1f)
+            new(62f, 60f, 0.1f),
+            new(51f, 66f, 0.1f),
+            new(39f, 64f, 0.1f),
+            new(31f, 54f, 0.1f),
+            new(31f, 42f, 0.1f),
+            new(39f, 32f, 0.1f),
+            new(51f, 30f, 0.1f),
+            new(62f, 36f, 0.1f)
         };
 
         for (int i = 0; i < sourcePositions.Length; i++)

@@ -28,8 +28,8 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private const int MaxRecentLoudDebugEvents = 96;
     private const int MaxRecentFootstepDebugEvents = 48;
     private const int ListenerGridCellSize = 16;
-    private const int MaxFootstepClustersPerObserver = 4;
-    private const float FootstepListenerClusterRadius = 12f;
+    private const int MaxFootstepClustersPerObserver = 8;
+    private const float FootstepListenerClusterRadius = 11.5f;
     private readonly AcousticEventStore _acousticEvents = new();
     // Structure-of-arrays scratch storage: no per-listener/per-event heap objects.
     private AcousticEvent[] _footstepPulseByObserver = Array.Empty<AcousticEvent>();
@@ -621,7 +621,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         }
 
         // A listener cannot maintain an unbounded number of simultaneous footstep
-        // hypotheses. Preserve the four strongest spatially distinct estimates.
+        // hypotheses. Preserve the eight strongest spatially distinct estimates.
         int weakestSlot = baseSlot;
         float weakestConfidence = _footstepConfidenceByObserver[baseSlot];
         for (int i = 1; i < MaxFootstepClustersPerObserver; i++)

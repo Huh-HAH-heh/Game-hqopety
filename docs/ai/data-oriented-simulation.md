@@ -35,6 +35,6 @@ Keep object-oriented code at orchestration and low-frequency boundaries (systems
 ## Current implementation
 
 AcousticEventStore owns value-type acoustic events and their spatial/time batches.
-TacticalHearingSystem uses per-observer arrays to accumulate footstep alertness and up to four spatially distinct footstep hypotheses per update. Memory is written after event dispatch rather than once for every heard pulse. Gunshots retain their existing strongest-contact aggregation and urgent danger events remain immediate.
+TacticalHearingSystem uses per-observer arrays to accumulate footstep alertness and up to eight spatially distinct footstep hypotheses per update. Memory is written after event dispatch rather than once for every heard pulse. Gunshots retain their existing strongest-contact aggregation and urgent danger events remain immediate.
 
-This is a throughput bound, not a global sound-drop rule: the four retained footstep estimates are selected by confidence, and a new spatial hypothesis replaces the weakest only when it is stronger.
+This is a throughput bound, not a global sound-drop rule: the eight retained footstep estimates are selected by confidence, and a new spatial hypothesis replaces the weakest only when it is stronger.
