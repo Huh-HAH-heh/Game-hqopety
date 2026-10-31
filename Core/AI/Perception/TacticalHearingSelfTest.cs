@@ -120,6 +120,46 @@ public static class TacticalHearingSelfTest
                    eastContact.EstimatedPosition, northContact.EstimatedPosition) > 0.01f;
     }
 
+    public static bool FootstepListenerWorkIsBoundedAndKeepsDistinctDirections()
+    {
+        var worldMap = new WorldMap(regionsX: 2, regionsY: 2, layerCount: 64);
+        var simulation = new UnitSimulation(8, 64) { VisionEnabled = false };
+        UnitId listener = simulation.Spawn(
+            UnitType.Colonist, new Vector3(48f, 48f, 0.1f), factionTag: 2);
+
+        Vector3[] sourcePositions =
+        {
+            new(66f, 48f, 0.1f),
+            new(54f, 65f, 0.1f),
+            new(31f, 59f, 0.1f),
+            new(31f, 37f, 0.1f),
+            new(54f, 31f, 0.1f)
+        };
+
+        for (int i = 0; i < sourcePositions.Length; i++)
+        {
+            UnitId source = simulation.Spawn(
+                UnitType.Colonist, sourcePositions[i], factionTag: 1);
+            simulation.Units.Velocity[source.Index] = Vector3.UnitX;
+        }
+
+        simulation.Update(worldMap, 0.05f);
+        simulation.Update(worldMap, 0.05f);
+        simulation.Update(worldMap, 0.05f);
+
+        return simulation.HearingSystem.PendingSoundEventCount == 0 &&
+               simulation.HearingSystem.LastQueuedPulseCount == sourcePositions.Length &&
+               simulation.HearingSystem.LastFootstepClustersPublished ==
+                   simulation.HearingSystem.FootstepClustersPerObserver &&
+               simulation.HearingSystem.LastFootstepEventsCoalesced == 1 &&
+               simulation.HearingSystem.LastContactsRecorded ==
+                   simulation.HearingSystem.FootstepClustersPerObserver &&
+               simulation.HearingSystem.TryGetBestInvestigableContact(
+                   listener.Index, out TacticalContact contact) &&
+               !contact.SubjectUnit.HasValue &&
+               contact.LastStimulusType == TacticalStimulusType.Footstep;
+    }
+
     public static bool UrgentDangerBypassesAcousticBatchWindow()
     {
         var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);

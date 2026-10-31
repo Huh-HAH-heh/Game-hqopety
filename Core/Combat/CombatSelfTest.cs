@@ -47,6 +47,7 @@ public static class CombatSelfTest
         RunTest("Hearing: merges nearby gunshots in 50 ms acoustic cells", TacticalHearingSelfTest.CoalescesGunshotsInSpaceAndTime, ref passed, ref failed);
         RunTest("Hearing: coalesces footsteps over a wider space/time window", TacticalHearingSelfTest.CoalescesFootstepsInLargerSpatialAndTimeCells, ref passed, ref failed);
         RunTest("Hearing: shared acoustic events keep listener contacts anonymous and independent", TacticalHearingSelfTest.SharedAcousticEventsKeepListenerContactsIndependent, ref passed, ref failed);
+        RunTest("Hearing: footsteps use bounded per-listener data buffers", TacticalHearingSelfTest.FootstepListenerWorkIsBoundedAndKeepsDistinctDirections, ref passed, ref failed);
         RunTest("Hearing: urgent danger bypasses acoustic batching", TacticalHearingSelfTest.UrgentDangerBypassesAcousticBatchWindow, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("AI: last Behaviac intent resets on unit lifecycle", TestAiIntentLifecycle, ref passed, ref failed);
