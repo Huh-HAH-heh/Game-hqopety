@@ -33,6 +33,10 @@ public static class CombatSelfTest
         RunTest("Perception: detection and identity stay separate", PerceptionMemorySelfTest.DetectionAndIdentityAreSeparate, ref passed, ref failed);
         RunTest("Perception: independent senses fuse anonymous contacts", PerceptionMemorySelfTest.IndependentSensesFuseAnonymousContact, ref passed, ref failed);
         RunTest("Perception: repeated same-sense evidence is bounded", PerceptionMemorySelfTest.RepeatedSameSenseEvidenceIsBounded, ref passed, ref failed);
+        RunTest("Perception: contact handles cannot alias reused slots", PerceptionMemorySelfTest.ContactHandlesCannotAliasReusedSlots, ref passed, ref failed);
+        RunTest("Perception: evidence pool reuses released nodes", PerceptionMemorySelfTest.EvidencePoolReusesReleasedNodes, ref passed, ref failed);
+        RunTest("Perception: clearing memory keeps its view usable", PerceptionMemorySelfTest.ClearingMemoryKeepsItsViewUsable, ref passed, ref failed);
+        RunTest("Perception: unit initialization invalidates old memory views", PerceptionMemorySelfTest.UnitInitializationInvalidatesOldMemoryViews, ref passed, ref failed);
         RunTest("Perception: explicit correlation can identify an anonymous contact", PerceptionMemorySelfTest.ExplicitCorrelationCanIdentifyAnonymousContact, ref passed, ref failed);
         RunTest("Perception: conflicting identity cannot hijack a correlated contact", PerceptionMemorySelfTest.ConflictingIdentityCannotHijackCorrelatedContact, ref passed, ref failed);
         RunTest("Perception: expired observations are rejected", PerceptionMemorySelfTest.ExpiredObservationIsRejected, ref passed, ref failed);

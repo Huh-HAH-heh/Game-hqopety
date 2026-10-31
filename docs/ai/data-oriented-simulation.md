@@ -38,3 +38,9 @@ AcousticEventStore owns value-type acoustic events and their spatial/time batche
 TacticalHearingSystem uses per-observer arrays to accumulate footstep alertness and up to eight spatially distinct footstep hypotheses per update. Memory is written after event dispatch rather than once for every heard pulse. Gunshots retain their existing strongest-contact aggregation and urgent danger events remain immediate.
 
 This is a throughput bound, not a global sound-drop rule: the eight retained footstep estimates are selected by confidence, and a new spatial hypothesis replaces the weakest only when it is stronger.
+
+PerceptionMemoryStore owns one shared PerceptionContactStorage for all observers. TacticalContactMemory is a value view over an observer slice; it is not a per-unit heap object. Contact state is stored in structure-of-arrays buffers and exposed through readonly slot/generation handles. Each observer's contacts are linked by integer indices, while sensor evidence lives in one shared reusable node pool. Contacts keep at most four recent evidence records per sensory channel.
+
+The custom contact/evidence views and their struct enumerators avoid per-contact lists and interface-backed enumeration in AI and hearing scans. Generation checks prevent cached handles from accidentally referring to a different contact after slot reuse.
+
+The current observer-scoped lookup for known subjects and anonymous nearby contacts is still a linear scan. A spatial index for anonymous-contact correlation is a separate next optimization, to be justified against profiling. Shared pools intentionally retain their high-water capacity to avoid recurring allocations; their memory footprint still needs measurement under large battles.

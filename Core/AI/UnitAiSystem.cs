@@ -1359,8 +1359,9 @@ public sealed class UnitAiSystem
         TacticalContact? contextContact = _rememberedEnemyContextByUnit[unit];
         bool hasStoredTarget = Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f;
         if (!hasStoredTarget &&
-            (contextContact == null ||
-             contextContact.ExpiresAtSeconds <= (_perceptionMemory?.CurrentTimeSeconds ?? 0f)))
+            (!contextContact.HasValue ||
+             !contextContact.Value.IsValid ||
+             contextContact.Value.ExpiresAtSeconds <= (_perceptionMemory?.CurrentTimeSeconds ?? 0f)))
         {
             _rememberedEnemyContextByUnit[unit] = null;
             return false;
@@ -1369,7 +1370,7 @@ public sealed class UnitAiSystem
         UnitId storedTarget = hasStoredTarget ? Store.Target[unit] : default;
         Vector3 estimate = hasStoredTarget
             ? Store.LastSeenPosition[unit]
-            : contextContact!.EstimatedPosition;
+            : contextContact.Value.EstimatedPosition;
 
         if (!float.IsFinite(estimate.X) ||
             !float.IsFinite(estimate.Y) ||
@@ -1382,10 +1383,12 @@ public sealed class UnitAiSystem
 
         if (_perceptionMemory?.TryGetMemory(unit, out TacticalContactMemory memory) == true)
         {
-            if (contextContact != null)
+            if (contextContact.HasValue && contextContact.Value.IsValid)
             {
-                memory.MarkInvestigated(contextContact.ContactId);
-                if (ReferenceEquals(_cachedRememberedEnemyContextByUnit[unit], contextContact))
+                TacticalContact rememberedContext = contextContact.Value;
+                memory.MarkInvestigated(rememberedContext.ContactId);
+                TacticalContact? cachedContext = _cachedRememberedEnemyContextByUnit[unit];
+                if (cachedContext.HasValue && cachedContext.Value.Equals(rememberedContext))
                     _cachedRememberedEnemyContextByUnit[unit] = null;
                 _nextRememberedEnemyQuerySecondsByUnit[unit] = _perceptionMemory.CurrentTimeSeconds;
             }
@@ -1454,17 +1457,15 @@ public sealed class UnitAiSystem
         out TacticalContact bestContact,
         out float bestUtility)
     {
-        bestContact = null!;
+        bestContact = default;
         bestUtility = 0f;
         if (_perceptionMemory == null ||
             !_perceptionMemory.TryGetMemory(unit, out TacticalContactMemory memory))
             return false;
 
         float now = _perceptionMemory.CurrentTimeSeconds;
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact candidate in memory.Contacts)
         {
-            TacticalContact candidate = contacts[i];
             if (candidate.IsInvestigated ||
                 candidate.ExpiresAtSeconds <= now ||
                 candidate.Kind == TacticalContactKind.VisualConfirmed ||
@@ -1486,7 +1487,7 @@ public sealed class UnitAiSystem
             bestUtility = utility;
         }
 
-        return bestContact != null;
+        return bestContact.IsValid;
     }
 
     private bool HasPerceivedSignal(
@@ -1500,10 +1501,8 @@ public sealed class UnitAiSystem
             return false;
 
         float now = _perceptionMemory.CurrentTimeSeconds;
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact contact in memory.Contacts)
         {
-            TacticalContact contact = contacts[i];
             if (contact.ExpiresAtSeconds <= now ||
                 (contact.GetActiveSignals(now) & signal) == 0)
                 continue;
@@ -1617,7 +1616,7 @@ public sealed class UnitAiSystem
             }
         }
 
-        TacticalContact? rememberedEnemyContext = null;
+        TacticalContact rememberedEnemyContext = default;
         float lastKnownTargetUtility = 0f;
         bool hasActiveTargetMemory = Store.HasTarget[unit] && Store.TargetMemory[unit] > 0f;
         bool hasRecentTarget = hasActiveTargetMemory;
@@ -2191,7 +2190,7 @@ public sealed class UnitAiSystem
         int observer,
         out TacticalContact bestContact)
     {
-        bestContact = null!;
+        bestContact = default;
         if (_perceptionMemory == null ||
             !_perceptionMemory.TryGetMemory(observer, out TacticalContactMemory memory))
         {
@@ -2201,13 +2200,13 @@ public sealed class UnitAiSystem
 
         float now = _perceptionMemory.CurrentTimeSeconds;
         TacticalContact? cached = _cachedRememberedEnemyContextByUnit[observer];
-        if (cached != null &&
+        if (cached.HasValue && cached.Value.IsValid &&
             now < _nextRememberedEnemyQuerySecondsByUnit[observer])
         {
             if (IsUsableRememberedHostileContact(
-                    units, health, vision, observer, cached, now, out _))
+                    units, health, vision, observer, cached.Value, now, out _))
             {
-                bestContact = cached;
+                bestContact = cached.Value;
                 return true;
             }
 
@@ -2220,10 +2219,8 @@ public sealed class UnitAiSystem
         _nextRememberedEnemyQuerySecondsByUnit[observer] = now + RememberedEnemyRefreshInterval;
 
         float bestUtility = GetBalanceProfile(observer, units.FactionTag[observer]).MinimumInvestigationUtility;
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact candidate in memory.Contacts)
         {
-            TacticalContact candidate = contacts[i];
             if (!IsUsableRememberedHostileContact(
                     units, health, vision, observer, candidate, now, out float utility) ||
                 utility <= bestUtility)
@@ -2235,8 +2232,9 @@ public sealed class UnitAiSystem
             bestContact = candidate;
         }
 
-        _cachedRememberedEnemyContextByUnit[observer] = bestContact;
-        return bestContact != null;
+        _cachedRememberedEnemyContextByUnit[observer] =
+            bestContact.IsValid ? bestContact : null;
+        return bestContact.IsValid;
     }
 
     private bool IsUsableRememberedHostileContact(
@@ -2249,7 +2247,8 @@ public sealed class UnitAiSystem
         out float utility)
     {
         utility = 0f;
-        if (contact.IsInvestigated ||
+        if (!contact.IsValid ||
+            contact.IsInvestigated ||
             contact.ExpiresAtSeconds <= now ||
             contact.LastVisualAtSeconds < 0f ||
             contact.SubjectUnit is not UnitId subject ||

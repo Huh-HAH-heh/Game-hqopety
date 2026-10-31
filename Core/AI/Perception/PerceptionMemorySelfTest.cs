@@ -12,7 +12,7 @@ public static class PerceptionMemorySelfTest
     public static bool DetectionAndIdentityAreSeparate()
     {
         var memory = new TacticalContactMemory();
-        TacticalContact? contact = memory.Record(Observation(
+        TacticalContact? result = memory.Record(Observation(
             PerceptionSense.Auditory,
             TacticalStimulusType.Gunshot,
             new Vector3(10f, 10f, 0.1f),
@@ -20,8 +20,11 @@ public static class PerceptionMemorySelfTest
             receivedAt: 1f,
             confidence: 0.8f,
             positionError: 3f));
+        if (!result.HasValue)
+            return false;
 
-        return contact != null &&
+        TacticalContact contact = result.Value;
+        return contact.IsValid &&
                !contact.SubjectUnit.HasValue &&
                contact.GetDetectionLevel(1f) == PerceptionDetectionLevel.Detected &&
                contact.GetIdentificationLevel(1f) == PerceptionIdentificationLevel.Unknown &&
@@ -31,22 +34,25 @@ public static class PerceptionMemorySelfTest
     public static bool IndependentSensesFuseAnonymousContact()
     {
         var memory = new TacticalContactMemory();
-        TacticalContact? sound = memory.Record(Observation(
+        TacticalContact? soundResult = memory.Record(Observation(
             PerceptionSense.Auditory,
             TacticalStimulusType.Gunshot,
             new Vector3(10f, 10f, 0.1f),
             1f, 1f, 0.4f, 1.2f));
-        if (sound == null)
+        if (!soundResult.HasValue)
             return false;
+        TacticalContact sound = soundResult.Value;
 
-        TacticalContact? sight = memory.Record(Observation(
+        TacticalContact? sightResult = memory.Record(Observation(
             PerceptionSense.Visual,
             TacticalStimulusType.VisualContact,
             new Vector3(10.5f, 10f, 0.1f),
             1.2f, 1.2f, 0.7f, 0.5f));
+        if (!sightResult.HasValue)
+            return false;
+        TacticalContact sight = sightResult.Value;
 
-        return sight != null &&
-               sight.ContactId == sound.ContactId &&
+        return sight.ContactId == sound.ContactId &&
                memory.Contacts.Count == 1 &&
                sight.Observations.Count == 2 &&
                !sight.SubjectUnit.HasValue &&
@@ -57,20 +63,22 @@ public static class PerceptionMemorySelfTest
     public static bool RepeatedSameSenseEvidenceIsBounded()
     {
         var memory = new TacticalContactMemory();
-        TacticalContact? contact = null;
+        TacticalContact contact = default;
         for (int i = 0; i < 5; i++)
         {
             float time = 1f + i * 0.1f;
-            contact = memory.Record(Observation(
+            TacticalContact? updated = memory.Record(Observation(
                 PerceptionSense.Auditory,
                 TacticalStimulusType.Gunshot,
                 new Vector3(10f, 10f, 0.1f),
                 time, time, 0.1f + i * 0.1f, 1f));
-            if (contact == null)
+            if (!updated.HasValue)
                 return false;
+            contact = updated.Value;
         }
 
-        return memory.Contacts.Count == 1 &&
+        return contact.IsValid &&
+               memory.Contacts.Count == 1 &&
                contact.Observations.Count == 4 &&
                MathF.Abs(contact.Confidence - 0.5f) < 0.002f;
     }
@@ -78,24 +86,27 @@ public static class PerceptionMemorySelfTest
     public static bool ExplicitCorrelationCanIdentifyAnonymousContact()
     {
         var memory = new TacticalContactMemory();
-        TacticalContact? anonymous = memory.Record(Observation(
+        TacticalContact? anonymousResult = memory.Record(Observation(
             PerceptionSense.Auditory,
             TacticalStimulusType.Gunshot,
             new Vector3(10f, 10f, 0.1f),
             1f, 1f, 0.5f, 2f));
-        if (anonymous == null)
+        if (!anonymousResult.HasValue)
             return false;
+        TacticalContact anonymous = anonymousResult.Value;
 
         UnitId subject = new(7, 1);
-        TacticalContact? identified = memory.Record(Observation(
+        TacticalContact? identifiedResult = memory.Record(Observation(
             PerceptionSense.Visual,
             TacticalStimulusType.VisualContact,
             new Vector3(10.25f, 10f, 0.1f),
             1.1f, 1.1f, 0.9f, 0.25f, subject),
             anonymous.ContactId);
+        if (!identifiedResult.HasValue)
+            return false;
+        TacticalContact identified = identifiedResult.Value;
 
-        return identified != null &&
-               identified.ContactId == anonymous.ContactId &&
+        return identified.ContactId == anonymous.ContactId &&
                identified.SubjectUnit == subject &&
                identified.Kind == TacticalContactKind.VisualConfirmed &&
                identified.Observations.Count == 2 &&
@@ -107,13 +118,14 @@ public static class PerceptionMemorySelfTest
         var memory = new TacticalContactMemory();
         UnitId firstSubject = new(7, 1);
         UnitId differentSubject = new(8, 1);
-        TacticalContact? original = memory.Record(Observation(
+        TacticalContact? originalResult = memory.Record(Observation(
             PerceptionSense.Visual,
             TacticalStimulusType.VisualContact,
             new Vector3(10f, 10f, 0.1f),
             1f, 1f, 0.9f, 0.25f, firstSubject));
-        if (original == null)
+        if (!originalResult.HasValue)
             return false;
+        TacticalContact original = originalResult.Value;
 
         TacticalContact? rejected = memory.Record(Observation(
             PerceptionSense.Visual,
@@ -122,7 +134,7 @@ public static class PerceptionMemorySelfTest
             1.1f, 1.1f, 0.9f, 0.25f, differentSubject),
             original.ContactId);
 
-        return rejected == null &&
+        return !rejected.HasValue &&
                memory.Contacts.Count == 1 &&
                original.SubjectUnit == firstSubject;
     }
@@ -141,7 +153,7 @@ public static class PerceptionMemorySelfTest
             lifetime: 0.5f);
 
         TacticalContact? contact = store.RecordObservation(0, expired);
-        return contact == null &&
+        return !contact.HasValue &&
                store.TryGetMemory(0, out TacticalContactMemory memory) &&
                memory.Contacts.Count == 0 &&
                MathF.Abs(store.CurrentTimeSeconds - 2f) < 0.0001f;
@@ -150,7 +162,7 @@ public static class PerceptionMemorySelfTest
     public static bool ConfidenceDecaysWithEvidenceAge()
     {
         var memory = new TacticalContactMemory();
-        TacticalContact? contact = memory.Record(Observation(
+        TacticalContact? result = memory.Record(Observation(
             PerceptionSense.Auditory,
             TacticalStimulusType.Gunshot,
             new Vector3(10f, 10f, 0.1f),
@@ -160,8 +172,121 @@ public static class PerceptionMemorySelfTest
             positionError: 2f,
             lifetime: 10f));
 
-        return contact != null &&
-               MathF.Abs(contact.GetEffectiveConfidence(3f, 2f) - 0.4f) < 0.002f;
+        return result.HasValue &&
+               MathF.Abs(result.Value.GetEffectiveConfidence(3f, 2f) - 0.4f) < 0.002f;
+    }
+
+    public static bool ContactHandlesCannotAliasReusedSlots()
+    {
+        var memory = new TacticalContactMemory();
+        UnitId firstSubject = new(3, 1);
+        UnitId secondSubject = new(4, 1);
+
+        TacticalContact? firstResult = memory.Record(Observation(
+            PerceptionSense.Visual,
+            TacticalStimulusType.VisualContact,
+            new Vector3(4f, 4f, 0.1f),
+            1f, 1f, 1f, 0.25f, firstSubject));
+        if (!firstResult.HasValue)
+            return false;
+        TacticalContact first = firstResult.Value;
+
+        if (!memory.Forget(firstSubject))
+            return false;
+
+        TacticalContact? secondResult = memory.Record(Observation(
+            PerceptionSense.Visual,
+            TacticalStimulusType.VisualContact,
+            new Vector3(8f, 4f, 0.1f),
+            1.1f, 1.1f, 1f, 0.25f, secondSubject));
+        if (!secondResult.HasValue)
+            return false;
+        TacticalContact second = secondResult.Value;
+
+        return first.Slot == second.Slot &&
+               !first.IsValid &&
+               first.ContactId == 0L &&
+               second.IsValid &&
+               second.SubjectUnit == secondSubject;
+    }
+
+    public static bool EvidencePoolReusesReleasedNodes()
+    {
+        var memory = new TacticalContactMemory();
+        UnitId firstSubject = new(5, 1);
+        UnitId secondSubject = new(6, 1);
+
+        if (!memory.Record(Observation(
+                PerceptionSense.Visual,
+                TacticalStimulusType.VisualContact,
+                new Vector3(4f, 4f, 0.1f),
+                1f, 1f, 1f, 0.25f, firstSubject)).HasValue ||
+            memory.EvidenceInUse != 1 ||
+            !memory.Forget(firstSubject) ||
+            memory.EvidenceInUse != 0)
+        {
+            return false;
+        }
+
+        return memory.Record(Observation(
+                   PerceptionSense.Visual,
+                   TacticalStimulusType.VisualContact,
+                   new Vector3(8f, 4f, 0.1f),
+                   1.1f, 1.1f, 1f, 0.25f, secondSubject)).HasValue &&
+               memory.EvidenceInUse == 1;
+    }
+
+    public static bool ClearingMemoryKeepsItsViewUsable()
+    {
+        var store = new PerceptionMemoryStore(1);
+        TacticalContactMemory memory = store.GetOrCreateMemory(0);
+
+        if (!memory.Record(Observation(
+                PerceptionSense.Auditory,
+                TacticalStimulusType.Gunshot,
+                new Vector3(4f, 4f, 0.1f),
+                1f, 1f, 0.8f, 2f)).HasValue ||
+            memory.Contacts.Count != 1)
+        {
+            return false;
+        }
+
+        memory.Clear();
+        if (!memory.IsValid || memory.Contacts.Count != 0)
+            return false;
+
+        return memory.Record(Observation(
+                   PerceptionSense.Auditory,
+                   TacticalStimulusType.Gunshot,
+                   new Vector3(8f, 4f, 0.1f),
+                   1.1f, 1.1f, 0.8f, 2f)).HasValue &&
+               memory.Contacts.Count == 1;
+    }
+
+    public static bool UnitInitializationInvalidatesOldMemoryViews()
+    {
+        var store = new PerceptionMemoryStore(1);
+        TacticalContactMemory oldMemory = store.GetOrCreateMemory(0);
+        if (!oldMemory.Record(Observation(
+                PerceptionSense.Auditory,
+                TacticalStimulusType.Gunshot,
+                new Vector3(4f, 4f, 0.1f),
+                1f, 1f, 0.8f, 2f)).HasValue)
+        {
+            return false;
+        }
+
+        store.InitializeUnit(0);
+        if (oldMemory.IsValid ||
+            store.TryGetMemory(0, out _))
+        {
+            return false;
+        }
+
+        TacticalContactMemory newMemory = store.GetOrCreateMemory(0);
+        return newMemory.IsValid &&
+               newMemory.Contacts.Count == 0 &&
+               !oldMemory.IsValid;
     }
 
     public static bool HearingPublishesToSharedMemoryWithAiDisabled()
@@ -358,9 +483,9 @@ public static class PerceptionMemorySelfTest
             signals: PerceptionSignalFlags.Investigate);
         TacticalContact? contact = memory.Record(observation);
 
-        return contact != null &&
-               (contact.GetActiveSignals(2f) & PerceptionSignalFlags.Investigate) != 0 &&
-               (contact.GetActiveSignals(3f) & PerceptionSignalFlags.Investigate) == 0;
+        return contact.HasValue &&
+               (contact.Value.GetActiveSignals(2f) & PerceptionSignalFlags.Investigate) != 0 &&
+               (contact.Value.GetActiveSignals(3f) & PerceptionSignalFlags.Investigate) == 0;
     }
 
     public static bool UtilityAiInvestigatesNonAuditoryContactFromSharedMemory()

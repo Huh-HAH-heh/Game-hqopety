@@ -222,14 +222,12 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
 
     public bool TryGetBestInvestigableContact(int observerIndex, out TacticalContact contact)
     {
-        contact = null!;
+        contact = default;
         if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
             return false;
         float bestScore = 0f;
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact candidate in memory.Contacts)
         {
-            TacticalContact candidate = contacts[i];
             if (candidate.IsInvestigated ||
                 candidate.ExpiresAtSeconds <= CurrentTimeSeconds ||
                 candidate.LastStimulusType is not (TacticalStimulusType.Gunshot or TacticalStimulusType.Footstep))
@@ -253,15 +251,13 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
 
     public bool TryGetBestImmediateDangerContact(int observerIndex, out TacticalContact contact)
     {
-        contact = null!;
+        contact = default;
         if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
             return false;
 
         float bestScore = 0f;
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact candidate in memory.Contacts)
         {
-            TacticalContact candidate = contacts[i];
             if (candidate.IsInvestigated ||
                 candidate.ExpiresAtSeconds <= CurrentTimeSeconds ||
                 candidate.LastStimulusType is not (TacticalStimulusType.NearMiss or
