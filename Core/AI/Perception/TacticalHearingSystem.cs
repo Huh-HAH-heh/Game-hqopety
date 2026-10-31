@@ -377,6 +377,13 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 for (int i = 0; i < active.Length; i++)
                 {
                     int observer = active[i];
+                    if (health.OverallHitPoints[observer] <= 0f ||
+                        units.GetId(observer).Equals(pulse.SourceUnitId) ||
+                        (pulse.SourceFaction != 0 && units.FactionTag[observer] == pulse.SourceFaction))
+                    {
+                        continue;
+                    }
+
                     LastListenerChecks++;
                     DeliverPulseToObserver(
                         pulse, lifetime, observer, units, health, response,
@@ -405,6 +412,12 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                     for (int listener = start; listener < end; listener++)
                     {
                         int observer = _listenerUnits[listener];
+                        if (units.GetId(observer).Equals(pulse.SourceUnitId) ||
+                            (pulse.SourceFaction != 0 && units.FactionTag[observer] == pulse.SourceFaction))
+                        {
+                            continue;
+                        }
+
                         LastListenerChecks++;
                         DeliverPulseToObserver(
                             pulse, lifetime, observer, units, health, response,
@@ -527,16 +540,6 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         WorldMap? worldMap,
         VisionSystem? vision)
     {
-        if (health.OverallHitPoints[observer] <= 0f ||
-            units.GetId(observer).Equals(pulse.SourceUnitId))
-        {
-            return;
-        }
-
-        ushort observerFaction = units.FactionTag[observer];
-        if (pulse.SourceFaction != 0 && pulse.SourceFaction == observerFaction)
-            return;
-
         Vector3 observerPosition = units.Position[observer];
         float dx = pulse.Position.X - observerPosition.X;
         float dy = pulse.Position.Y - observerPosition.Y;
