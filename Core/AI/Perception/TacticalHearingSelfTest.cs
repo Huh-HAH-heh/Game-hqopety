@@ -131,8 +131,8 @@ public static class TacticalHearingSelfTest
         {
             new(66f, 48f, 0.1f),
             new(54f, 65f, 0.1f),
-            new(31f, 59f, 0.1f),
-            new(31f, 37f, 0.1f),
+            new(33f, 59f, 0.1f),
+            new(33f, 37f, 0.1f),
             new(54f, 31f, 0.1f)
         };
 
