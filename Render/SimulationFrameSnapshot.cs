@@ -302,19 +302,17 @@ public sealed class SimulationFrameSnapshot
 
             RenderAuditoryContact best0 = default, best1 = default, best2 = default;
             float bestTime0 = -1f, bestTime1 = -1f, bestTime2 = -1f;
-            IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-            for (int contactIndex = 0; contactIndex < contacts.Count; contactIndex++)
+            TacticalContactCollection contacts = memory.Contacts;
+            foreach (TacticalContact contact in contacts)
             {
-                TacticalContact contact = contacts[contactIndex];
                 if (contact.ExpiresAtSeconds <= nowSeconds)
                     continue;
 
                 PerceptionObservation latest = default;
                 bool foundAuditory = false;
-                IReadOnlyList<PerceptionObservation> observations = contact.Observations;
-                for (int observationIndex = 0; observationIndex < observations.Count; observationIndex++)
+                PerceptionEvidenceCollection observations = contact.Observations;
+                foreach (PerceptionObservation observation in observations)
                 {
-                    PerceptionObservation observation = observations[observationIndex];
                     if (observation.Sense != PerceptionSense.Auditory ||
                         observation.ExpiresAtSeconds <= nowSeconds)
                         continue;
@@ -391,12 +389,11 @@ public sealed class SimulationFrameSnapshot
         float nowSeconds = simulation.PerceptionMemory.CurrentTimeSeconds;
         ushort observerFaction = units.FactionTag[observerIndex];
         Vector3 observerPosition = units.Position[observerIndex];
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        TacticalContactCollection contacts = memory.Contacts;
         List<RenderMemoryContact> captured = new(Math.Min(contacts.Count, 32));
 
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact contact in contacts)
         {
-            TacticalContact contact = contacts[i];
             if (contact.ExpiresAtSeconds <= nowSeconds)
                 continue;
 
@@ -404,10 +401,9 @@ public sealed class SimulationFrameSnapshot
             bool hasAuditoryEvidence = false;
             bool hasCommunicationEvidence =
                 contact.LastStimulusType == TacticalStimulusType.AllyContactReport;
-            IReadOnlyList<PerceptionObservation> observations = contact.Observations;
-            for (int observationIndex = 0; observationIndex < observations.Count; observationIndex++)
+            PerceptionEvidenceCollection observations = contact.Observations;
+            foreach (PerceptionObservation observation in observations)
             {
-                PerceptionObservation observation = observations[observationIndex];
                 if (observation.ExpiresAtSeconds <= nowSeconds)
                     continue;
 
