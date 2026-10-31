@@ -572,7 +572,7 @@ public sealed class SquadMovementStore
         int unit,
         SquadMemberMovementState state)
     {
-        EnsureUnitCapacity(units.Capacity);
+        EnsureMemberCapacity(units.Capacity);
         EnsureMemberIdentity(units, unit);
         _memberStates[unit] = state;
         _rejoinElapsed[unit] = 0f;
