@@ -50,11 +50,13 @@ public sealed class UnitMovementSystem
         UnitHealthStore? health = null,
         MeleeCombatSystem? meleeCombat = null,
         UnitAiStore? ai = null,
-        UnitInventoryStore? inventory = null)
+        UnitInventoryStore? inventory = null,
+        SquadMovementStore? squadMovement = null)
     {
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f || units.ActiveCount == 0)
             return;
 
+        squadMovement?.BeginUpdate(units, health, ai, worldMap, deltaTime);
         _navigation.BeginUpdate(units, worldMap);
         _traceElapsedSeconds += deltaTime;
         bool traceThisUpdate = _traceUnitIndex >= 0 && _traceElapsedSeconds >= 1f;
@@ -181,17 +183,52 @@ public sealed class UnitMovementSystem
                 if (steeringActive && moveSpeed > 0f)
                 {
                     float speedBeforeSteering = velocity.Length();
-                    hasWaypoint = _navigation.TryGetLookAheadWaypoint(
-                        units,
-                        unit,
-                        worldMap,
-                        position,
-                        target,
-                        speedBeforeSteering,
-                        out steeringPoint,
-                        out distanceToGoal,
-                        out distanceToNextTurn,
-                        out turnSeverity);
+                    bool hasSquadWaypoint = squadMovement != null &&
+                        squadMovement.TryGetSteering(
+                            units,
+                            unit,
+                            worldMap,
+                            position,
+                            speedBeforeSteering,
+                            ai,
+                            out steeringPoint,
+                            out distanceToGoal);
+
+                    // A blended Flow Field direction may cut a corner when
+                    // sampled near an obstacle. Keep the shared field when its
+                    // short look-ahead is traversable; otherwise use footprint-
+                    // aware A* for this pawn until the local segment is clear.
+                    if (hasSquadWaypoint &&
+                        !_navigation.CanMoveDirectly(
+                            units,
+                            unit,
+                            worldMap,
+                            new Vector2(position.X, position.Y),
+                            steeringPoint))
+                    {
+                        hasSquadWaypoint = false;
+                    }
+
+                    if (hasSquadWaypoint)
+                    {
+                        distanceToNextTurn = float.PositiveInfinity;
+                        turnSeverity = 0f;
+                        hasWaypoint = true;
+                    }
+                    else
+                    {
+                        hasWaypoint = _navigation.TryGetLookAheadWaypoint(
+                            units,
+                            unit,
+                            worldMap,
+                            position,
+                            target,
+                            speedBeforeSteering,
+                            out steeringPoint,
+                            out distanceToGoal,
+                            out distanceToNextTurn,
+                            out turnSeverity);
+                    }
                 }
                 else
                 {

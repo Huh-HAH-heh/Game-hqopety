@@ -1,7 +1,9 @@
 using Core.Items;
 using Core.Map;
+using Core.AI;
 using Core.AI.Perception;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 
@@ -10,6 +12,7 @@ namespace Core.Unit;
 public sealed class UnitSimulation
 {
     private readonly UnitMovementSystem _movementSystem;
+    private readonly SquadMovementStore _squadMovementStore;
     private readonly UnitBodySystem _bodySystem;
     private readonly UnitHealthSystem _healthSystem;
     private readonly UnitMetabolismSystem _metabolismSystem;
@@ -28,6 +31,7 @@ public sealed class UnitSimulation
     public UnitStore Units { get; }
     public UnitSkillStore Skills { get; }
     public UnitNavigationSystem Navigation => _movementSystem.Navigation;
+    public SquadMovementStore SquadMovement => _squadMovementStore;
     public UnitBodyStore Bodies { get; }
     public UnitHitRegionStore HitRegions { get; }
     public UnitHealthStore Health { get; }
@@ -135,6 +139,7 @@ public sealed class UnitSimulation
 
         _movementSystem =
             new UnitMovementSystem();
+        _squadMovementStore = new SquadMovementStore();
 
         _bodySystem = new UnitBodySystem();
 
@@ -401,6 +406,7 @@ public sealed class UnitSimulation
         }
 
         _aiSystem.InvalidateSquadUnit(id);
+        _squadMovementStore.InvalidateUnit(id);
         _movementSystem.Navigation.ClearRoute(index);
         Perception.ClearUnit(index);
         _deathHandled[index] = false;
@@ -697,6 +703,29 @@ public sealed class UnitSimulation
         return result;
     }
 
+    public void SynchronizeSquadMovementMemberships(
+        IReadOnlyList<SquadMembershipSnapshot> squads) =>
+        _squadMovementStore.SynchronizeMemberships(squads);
+
+    public bool IssueSquadMoveOrder(
+        int squadId,
+        IReadOnlyList<UnitId> members,
+        Vector3 destination,
+        InfantryFormationType formation,
+        WorldMap worldMap) =>
+        _squadMovementStore.IssueMoveOrder(
+            Units, Health, _aiSystem.Store, squadId, members, destination, formation, worldMap);
+
+    public bool TryGetSquadMovementInformation(
+        int squadId,
+        out SquadMovementInformation information) =>
+        _squadMovementStore.TryGetInformation(squadId, out information);
+
+    public bool TryGetSquadMemberMovementState(
+        UnitId member,
+        out SquadMemberMovementState state) =>
+        _squadMovementStore.TryGetMemberState(member, out state);
+
     public void SetTarget(
         UnitId id,
         Vector3 target)
@@ -988,7 +1017,8 @@ public sealed class UnitSimulation
 
         phaseStarted = Stopwatch.GetTimestamp();
         _movementSystem.Update(
-            Units, worldMap, deltaTime, Health, _meleeCombatSystem, _aiSystem.Store, Inventory);
+            Units, worldMap, deltaTime, Health, _meleeCombatSystem, _aiSystem.Store, Inventory,
+            _squadMovementStore);
         _meleeCombatSystem.UpdateMovementLocks(Units, deltaTime);
         LastMovementUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
@@ -1159,6 +1189,7 @@ public sealed class UnitSimulation
         _deathHandled[unitIndex] = true;
         UnitId deadId = Units.GetId(unitIndex);
         _aiSystem.InvalidateSquadUnit(deadId);
+        _squadMovementStore.InvalidateUnit(deadId);
 
         // Do not leave live units' AI or weapon state pointing at the corpse.
         ReadOnlySpan<int> active = Units.ActiveIndices;

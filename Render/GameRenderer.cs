@@ -66,10 +66,9 @@ public sealed class GameRenderer
 
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
-    // Squad creation/assignment is temporarily disabled while individual pawn AI is stabilized.
-    private static readonly bool SquadControlsEnabled = false;
+    private static readonly bool SquadControlsEnabled = true;
     private readonly InfantrySquadManager _squadManager = new();
-    private InfantryFormationType _infantryFormation = InfantryFormationType.Line;
+    private InfantryFormationType _infantryFormation = InfantryFormationType.Free;
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
     private bool _isPlacingMoveLine;
@@ -1437,15 +1436,29 @@ public sealed class GameRenderer
     private void IssueMoveOrder(
         UnitId[] memberIds,
         Vector3 destination,
-        InfantryFormationType formation)
+        InfantryFormationType formation,
+        int squadId)
     {
+        if (_unitSimulation.IssueSquadMoveOrder(
+                squadId, memberIds, destination, formation, _worldMap))
+        {
+            Console.WriteLine(
+                $"[SQUAD] {InfantryFormation.GetName(formation)} shared-flow move order " +
+                $"issued to squad {squadId} ({memberIds.Length} soldiers).");
+            return;
+        }
+
+        // Safe fallback for a stale/partially synchronized selection: keep one
+        // shared objective rather than recreating hard-coded member destinations.
         UnitStore units = _unitSimulation.Units;
         UnitAiStore ai = _unitSimulation.AI.Store;
-        List<(UnitId Id, int Index)> members = new(memberIds.Length);
-        float centerX = 0f;
-        float centerY = 0f;
-        float spacing = 1.15f;
+        float x = Math.Clamp(destination.X, 0.5f, _worldMap.MaxTileX - 0.5f);
+        float y = Math.Clamp(destination.Y, 0.5f, _worldMap.MaxTileY - 0.5f);
+        int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
+        int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
+        Vector3 target = new(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
 
+        int issued = 0;
         for (int i = 0; i < memberIds.Length; i++)
         {
             UnitId id = memberIds[i];
@@ -1455,58 +1468,13 @@ public sealed class GameRenderer
                 continue;
             }
 
-            members.Add((id, index));
-            Vector3 position = units.Position[index];
-            centerX += position.X;
-            centerY += position.Y;
-            spacing = MathF.Max(spacing, units.Radius[index] * 2.25f);
-        }
-
-        if (members.Count == 0)
-            return;
-
-        centerX /= members.Count;
-        centerY /= members.Count;
-
-        float forwardX = destination.X - centerX;
-        float forwardY = destination.Y - centerY;
-        float directionLength = MathF.Sqrt(forwardX * forwardX + forwardY * forwardY);
-        if (directionLength < 0.001f)
-        {
-            forwardX = 1f;
-            forwardY = 0f;
-        }
-        else
-        {
-            forwardX /= directionLength;
-            forwardY /= directionLength;
-        }
-
-        // Formation slots are destinations for AI tasks, not direct movement calls.
-        Vector2 offsetSum = Vector2.Zero;
-        for (int i = 0; i < members.Count; i++)
-            offsetSum += InfantryFormation.GetOffset(i, members.Count, formation, spacing);
-        Vector2 meanOffset = offsetSum / members.Count;
-
-        float sideX = -forwardY;
-        float sideY = forwardX;
-        for (int i = 0; i < members.Count; i++)
-        {
-            var member = members[i];
-            Vector2 offset = InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset;
-            float x = destination.X + sideX * offset.X - forwardX * offset.Y;
-            float y = destination.Y + sideY * offset.X - forwardY * offset.Y;
-            x = Math.Clamp(x, 0.5f, _worldMap.MaxTileX - 0.5f);
-            y = Math.Clamp(y, 0.5f, _worldMap.MaxTileY - 0.5f);
-
-            int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
-            int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
-            Vector3 target = new(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
-            ai.SetPlayerOrder(member.Index, UnitAiOrderType.Move, target);
+            ai.SetPlayerOrder(index, UnitAiOrderType.Move, target);
+            units.SetTarget(id, target);
+            issued++;
         }
 
         Console.WriteLine(
-            $"[SQUAD] Issued {InfantryFormation.GetName(formation)} move task to {members.Count} soldiers.");
+            $"[SQUAD] Flow state unavailable; issued shared objective to {issued} soldiers.");
     }
 
     private void IssueAttackOrder(UnitId[] memberIds, UnitId targetId)
@@ -2635,6 +2603,8 @@ public sealed class GameRenderer
         foreach (InfantrySquad squad in _squadManager.Squads)
             squads.Add(new SquadMembershipSnapshot(squad.Id, squad.Members.ToArray()));
         _unitSimulation.AI.SynchronizeSquadMemberships(squads);
+        ExecuteSimulationCommand(() =>
+            _unitSimulation.SynchronizeSquadMovementMemberships(squads));
     }
 
     private void PruneSquadState(SimulationFrameSnapshot snapshot)
@@ -3381,8 +3351,9 @@ public sealed class GameRenderer
                                     GetFullySelectedSquadId() != 0)
                                 {
                                     InfantryFormationType formation = _infantryFormation;
+                                    int squadId = GetFullySelectedSquadId();
                                     ExecuteSimulationCommand(() =>
-                                        IssueMoveOrder(moveUnits, destination, formation));
+                                        IssueMoveOrder(moveUnits, destination, formation, squadId));
                                 }
                                 break;
                             }
@@ -3838,8 +3809,50 @@ public sealed class GameRenderer
 
         if (key == Keyboard.Key.J)
         {
-            _infantryFormation = (InfantryFormationType)(((int)_infantryFormation + 1) % 3);
+            _infantryFormation = _infantryFormation switch
+            {
+                InfantryFormationType.Free => InfantryFormationType.Wedge,
+                InfantryFormationType.Wedge => InfantryFormationType.DispersedLine,
+                InfantryFormationType.DispersedLine => InfantryFormationType.Column,
+                InfantryFormationType.Column => InfantryFormationType.Perimeter,
+                InfantryFormationType.Perimeter => InfantryFormationType.Line,
+                _ => InfantryFormationType.Free
+            };
             Console.WriteLine($"[INFANTRY] Formation: {InfantryFormation.GetName(_infantryFormation)}");
+            return;
+        }
+
+        if (key == Keyboard.Key.U)
+        {
+            int squadId = GetSelectedSquadId();
+            if (squadId == 0)
+            {
+                Console.WriteLine("[SQUAD INFO] Select a squad first.");
+                return;
+            }
+
+            // Read movement state on the simulation command path. The store is
+            // updated by the simulation thread and is intentionally not locked.
+            ExecuteSimulationCommand(() =>
+            {
+                if (_unitSimulation.TryGetSquadMovementInformation(
+                        squadId, out SquadMovementInformation information))
+                {
+                    Console.WriteLine(
+                        $"[SQUAD INFO] id={information.SquadId} phase={information.Phase} " +
+                        $"formation={InfantryFormation.GetName(information.Formation)} " +
+                        $"rigidity={information.Rigidity} members={information.MemberCount} " +
+                        $"following={information.FollowingCount} engaged={information.EngagedCount} " +
+                        $"rejoining={information.RejoiningCount} separated={information.SeparatedCount} " +
+                        $"flowReady={information.FlowFieldReady} terrain={information.TerrainVersion} " +
+                        $"objective=({information.Objective.X:0.0},{information.Objective.Y:0.0})");
+                }
+                else
+                {
+                    Console.WriteLine("[SQUAD INFO] The selected squad has no active movement state.");
+                }
+            });
+
             return;
         }
 
