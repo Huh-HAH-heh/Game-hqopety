@@ -182,6 +182,28 @@ public static class TacticalHearingSelfTest
                simulation.HearingSystem.HasImmediateDangerContact(listener.Index);
     }
 
+    public static bool CoalescesDangerMemoryWritesPerListener()
+    {
+        var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
+        var simulation = new UnitSimulation(4, 64) { VisionEnabled = false };
+        UnitId source = simulation.Spawn(
+            UnitType.Colonist, new Vector3(10.5f, 10.5f, 0.1f), factionTag: 1);
+        UnitId listener = simulation.Spawn(
+            UnitType.Colonist, new Vector3(12.5f, 10.5f, 0.1f), factionTag: 2);
+
+        for (int i = 0; i < 32; i++)
+        {
+            simulation.HearingSystem.EmitDanger(
+                source, 1, TacticalStimulusType.NearMiss,
+                new Vector3(12f, 10.5f, 0.1f), intensity: 1f, audibleRange: 40f);
+        }
+
+        simulation.Update(worldMap, 0.05f);
+
+        return simulation.HearingSystem.LastContactsRecorded == 1 &&
+               simulation.HearingSystem.HasImmediateDangerContact(listener.Index);
+    }
+
     public static bool Run()
     {
         var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);

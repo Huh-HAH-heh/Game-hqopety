@@ -29,6 +29,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private const int MaxRecentFootstepDebugEvents = 48;
     private const int ListenerGridCellSize = 16;
     private const int MaxFootstepClustersPerObserver = 8;
+    private const int MaxDangerClustersPerObserver = 8;
     private const float FootstepListenerClusterRadius = 10.5f;
     private readonly AcousticEventStore _acousticEvents = new();
     // Structure-of-arrays scratch storage: no per-listener/per-event heap objects.
@@ -48,6 +49,13 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private bool[] _hasBestGunshotByObserver = Array.Empty<bool>();
     private float[] _lastGunshotMemoryPublishedAt = Array.Empty<float>();
     private bool[] _hasPublishedGunshotMemory = Array.Empty<bool>();
+    private AcousticEvent[] _dangerPulseByObserver = Array.Empty<AcousticEvent>();
+    private Vector3[] _dangerEstimateByObserver = Array.Empty<Vector3>();
+    private float[] _dangerConfidenceByObserver = Array.Empty<float>();
+    private float[] _dangerErrorByObserver = Array.Empty<float>();
+    private int[] _dangerClusterCountByObserver = Array.Empty<int>();
+    private float[] _dangerAlertAccumulationByObserver = Array.Empty<float>();
+    private Vector3[] _dangerAlertEstimateByObserver = Array.Empty<Vector3>();
     private readonly Queue<TacticalSoundDebugEvent> _recentLoudDebugEvents = new();
     private readonly Queue<TacticalSoundDebugEvent> _recentFootstepDebugEvents = new();
     private readonly PerceptionMemoryStore _memoryStore;
@@ -196,6 +204,9 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         _hasBestGunshotByObserver[unitIndex] = false;
         _lastGunshotMemoryPublishedAt[unitIndex] = 0f;
         _hasPublishedGunshotMemory[unitIndex] = false;
+        _dangerClusterCountByObserver[unitIndex] = 0;
+        _dangerAlertAccumulationByObserver[unitIndex] = 0f;
+        _dangerAlertEstimateByObserver[unitIndex] = Vector3.Zero;
     }
 
     public void ClearUnit(int unitIndex)
@@ -214,6 +225,9 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             _hasBestGunshotByObserver[unitIndex] = false;
             _lastGunshotMemoryPublishedAt[unitIndex] = 0f;
             _hasPublishedGunshotMemory[unitIndex] = false;
+            _dangerClusterCountByObserver[unitIndex] = 0;
+            _dangerAlertAccumulationByObserver[unitIndex] = 0f;
+            _dangerAlertEstimateByObserver[unitIndex] = Vector3.Zero;
         }
     }
 
@@ -326,6 +340,8 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         Array.Clear(_footstepClusterCountByObserver);
         Array.Clear(_footstepAlertAccumulationByObserver);
         Array.Clear(_footstepAlertBestConfidenceByObserver);
+        Array.Clear(_dangerClusterCountByObserver);
+        Array.Clear(_dangerAlertAccumulationByObserver);
         LastFootstepEventsCoalesced = 0;
         LastFootstepClustersPublished = 0;
         LastListenerCellsVisited = 0;
@@ -404,6 +420,41 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         for (int i = 0; i < active.Length; i++)
         {
             int observer = active[i];
+
+            float dangerAlert = _dangerAlertAccumulationByObserver[observer];
+            if (dangerAlert > 0f)
+            {
+                response.AddAlertness(
+                    observer, dangerAlert, _dangerAlertEstimateByObserver[observer]);
+            }
+
+            int dangerCount = _dangerClusterCountByObserver[observer];
+            int dangerStart = observer * MaxDangerClustersPerObserver;
+            for (int cluster = 0; cluster < dangerCount; cluster++)
+            {
+                int slot = dangerStart + cluster;
+                AcousticEvent danger = _dangerPulseByObserver[slot];
+                float lifetime = danger.Type switch
+                {
+                    TacticalStimulusType.NearMiss => 5f,
+                    TacticalStimulusType.CoverImpact => 6f,
+                    TacticalStimulusType.Explosion => 10f,
+                    _ => 4f
+                };
+
+                if (_memoryStore.RecordObservation(
+                        observer,
+                        CreateAuditoryObservation(
+                            danger,
+                            _dangerEstimateByObserver[slot],
+                            _dangerConfidenceByObserver[slot],
+                            _dangerErrorByObserver[slot],
+                            nowSeconds,
+                            lifetime)) != null)
+                {
+                    LastContactsRecorded++;
+                }
+            }
 
             if (_hasBestGunshotByObserver[observer])
             {
@@ -547,18 +598,99 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             return;
         }
 
-        response.AddAlertness(observer, alertFactor * confidence, estimate);
-        if (_memoryStore.RecordObservation(
-                observer,
-                CreateAuditoryObservation(
-                    pulse, estimate, confidence, error, nowSeconds, lifetime)) != null)
-        {
-            LastContactsRecorded++;
-        }
+        AccumulateDangerForObserver(
+            observer, pulse, estimate, confidence, error, alertFactor);
 
+        // Every close event still drives its immediate physical reaction. Only
+        // the slower tactical-memory write is coalesced per listener and location.
         ApplyImmediateDangerResponse(
             response, units, vision, worldMap, observer, pulse.Type,
             pulse.Position, pulse.Range, confidence, estimate);
+    }
+
+    private void AccumulateDangerForObserver(
+        int observer,
+        AcousticEvent pulse,
+        Vector3 estimate,
+        float confidence,
+        float positionError,
+        float alertFactor)
+    {
+        // AddAlertness is a positive, clamped sum. Accumulating here preserves its
+        // final value and the last heard source while avoiding one write per pulse.
+        _dangerAlertAccumulationByObserver[observer] = Math.Clamp(
+            _dangerAlertAccumulationByObserver[observer] + alertFactor * confidence,
+            0f,
+            1f);
+        _dangerAlertEstimateByObserver[observer] = estimate;
+
+        int count = _dangerClusterCountByObserver[observer];
+        int baseSlot = observer * MaxDangerClustersPerObserver;
+
+        for (int i = 0; i < count; i++)
+        {
+            int slot = baseSlot + i;
+            if (_dangerPulseByObserver[slot].Type != pulse.Type)
+                continue;
+
+            Vector3 existingEstimate = _dangerEstimateByObserver[slot];
+            float dx = estimate.X - existingEstimate.X;
+            float dy = estimate.Y - existingEstimate.Y;
+            float dz = estimate.Z - existingEstimate.Z;
+            float mergeRadius = MathF.Max(
+                1.5f,
+                _dangerErrorByObserver[slot] + positionError);
+
+            if (dx * dx + dy * dy + dz * dz > mergeRadius * mergeRadius)
+                continue;
+
+            if (pulse.OccurredAtSeconds >= _dangerPulseByObserver[slot].OccurredAtSeconds)
+                _dangerPulseByObserver[slot] = pulse;
+
+            float existingConfidence = _dangerConfidenceByObserver[slot];
+            if (positionError <= _dangerErrorByObserver[slot] ||
+                confidence > existingConfidence)
+            {
+                _dangerEstimateByObserver[slot] = estimate;
+                _dangerErrorByObserver[slot] = positionError;
+            }
+
+            if (confidence > existingConfidence)
+                _dangerConfidenceByObserver[slot] = confidence;
+            return;
+        }
+
+        if (count < MaxDangerClustersPerObserver)
+        {
+            int slot = baseSlot + count;
+            _dangerPulseByObserver[slot] = pulse;
+            _dangerEstimateByObserver[slot] = estimate;
+            _dangerConfidenceByObserver[slot] = confidence;
+            _dangerErrorByObserver[slot] = positionError;
+            _dangerClusterCountByObserver[observer] = count + 1;
+            return;
+        }
+
+        // Keep the eight strongest spatially distinct danger hypotheses for one
+        // listener and simulation step. Close reactions above are never discarded.
+        int weakestSlot = baseSlot;
+        float weakestConfidence = _dangerConfidenceByObserver[baseSlot];
+        for (int i = 1; i < MaxDangerClustersPerObserver; i++)
+        {
+            int slot = baseSlot + i;
+            if (_dangerConfidenceByObserver[slot] >= weakestConfidence)
+                continue;
+            weakestConfidence = _dangerConfidenceByObserver[slot];
+            weakestSlot = slot;
+        }
+
+        if (confidence <= weakestConfidence)
+            return;
+
+        _dangerPulseByObserver[weakestSlot] = pulse;
+        _dangerEstimateByObserver[weakestSlot] = estimate;
+        _dangerConfidenceByObserver[weakestSlot] = confidence;
+        _dangerErrorByObserver[weakestSlot] = positionError;
     }
 
     private void AccumulateFootstepForObserver(
@@ -742,10 +874,13 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         }
 
         // Sound can travel vertically, but danger radius is physical 3D proximity.
-        float dangerDistance = Vector3.Distance(units.Position[observer], sourcePosition);
-        if (!float.IsFinite(dangerDistance) ||
-            dangerDistance > dangerRadius ||
-            confidence < minimumConfidence)
+        if (confidence < minimumConfidence)
+            return;
+
+        Vector3 dangerOffset = units.Position[observer] - sourcePosition;
+        float dangerDistanceSquared = dangerOffset.LengthSquared();
+        if (!float.IsFinite(dangerDistanceSquared) ||
+            dangerDistanceSquared > dangerRadius * dangerRadius)
             return;
 
         bool hasDirectExposure = true;
@@ -907,6 +1042,15 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             Array.Resize(ref _footstepAlertAccumulationByObserver, capacity);
             Array.Resize(ref _footstepAlertBestConfidenceByObserver, capacity);
             Array.Resize(ref _footstepAlertEstimateByObserver, capacity);
+
+            int dangerClusterCapacity = checked(capacity * MaxDangerClustersPerObserver);
+            Array.Resize(ref _dangerPulseByObserver, dangerClusterCapacity);
+            Array.Resize(ref _dangerEstimateByObserver, dangerClusterCapacity);
+            Array.Resize(ref _dangerConfidenceByObserver, dangerClusterCapacity);
+            Array.Resize(ref _dangerErrorByObserver, dangerClusterCapacity);
+            Array.Resize(ref _dangerClusterCountByObserver, capacity);
+            Array.Resize(ref _dangerAlertAccumulationByObserver, capacity);
+            Array.Resize(ref _dangerAlertEstimateByObserver, capacity);
         }
     }
 
