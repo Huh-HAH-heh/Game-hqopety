@@ -61,6 +61,8 @@ public sealed class GameRenderer
     private CombatStatusOverlay? _combatStatusOverlay;
     private SimulationControlOverlay? _simulationControlOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
+    private readonly MovementTestScene _movementTestScene = new();
+    private int _movementTestSquadId;
     private readonly LiveAiEvolutionTrainer _liveAiEvolutionTrainer = new();
     private AiEvolutionOverlay? _aiEvolutionOverlay;
 
@@ -181,6 +183,7 @@ public sealed class GameRenderer
     private bool _showAttackLinks = true;
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
+    private bool _movementTestMode;
     private volatile bool _simulationPaused;
     private volatile float _simulationSpeed = 1f;
     private int _singleStepRequested;
@@ -669,7 +672,7 @@ public sealed class GameRenderer
             if (_simulationThread == null && (!_simulationPaused || singleStepRequested))
             {
                 float updateDeltaTime = singleStepRequested ? 1f / 60f : simulationDeltaTime;
-                if (!_terrainStressMode && !_massCombatMode)
+                if (!_terrainStressMode && !_massCombatMode && !_movementTestMode)
                 {
                     _visionTestScene.UpdateAiDemo(
                         _unitSimulation,
@@ -4171,6 +4174,12 @@ public sealed class GameRenderer
             return;
         }
 
+        if (key == Keyboard.Key.F7)
+        {
+            ToggleMovementTestScene();
+            return;
+        }
+
         if (key == Keyboard.Key.F8)
         {
             if (!_massCombatMode)
@@ -4565,6 +4574,97 @@ public sealed class GameRenderer
                 _visibleMaxLayer + direction,
                 0,
                 _worldMap.LayerCount - 1);
+    }
+
+    private void ToggleMovementTestScene()
+    {
+        if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
+        {
+            Console.WriteLine("[MOVE TEST] Stop live AI evolution with F5 before switching scenes.");
+            return;
+        }
+
+        StopSimulationThread();
+
+        if (_movementTestMode)
+        {
+            _movementTestScene.Stop(_unitSimulation);
+            _movementTestMode = false;
+            _movementTestSquadId = 0;
+            PruneSquadState(SimulationFrameSnapshot.Capture(_unitSimulation));
+
+            _showSquadFlowWeights = false;
+            _showMovementVectors = false;
+            _showMovementForces = false;
+            _showSquadFormation = false;
+            _showSquadStates = false;
+            _showSquadContacts = false;
+
+            EnterMassCombatMode();
+            StartSimulationThread();
+            Console.WriteLine("[MOVE TEST] Returned to mass-combat scene.");
+            return;
+        }
+
+        if (_massCombatMode)
+            _massCombatTestScene.Stop(_unitSimulation);
+
+        _massCombatMode = false;
+        _terrainStressMode = false;
+        _movementTestMode = true;
+        _simulationPaused = false;
+        _simulationSpeed = 1f;
+        _unitSimulation.AI.Enabled = false;
+        _unitSimulation.VisionEnabled = false;
+        _unitSimulation.Projectiles.Clear();
+
+        // The old battle's squads reference units that have just been destroyed.
+        PruneSquadState(SimulationFrameSnapshot.Capture(_unitSimulation));
+
+        _movementTestScene.Start(_unitSimulation, _worldMap);
+        UnitId[] members = _movementTestScene.Units.ToArray();
+        _movementTestSquadId = _squadManager.Create(members);
+        SyncSquadTactics();
+
+        _selectedUnits.Clear();
+        _selectedUnit = default;
+        SelectSquad(_movementTestSquadId, false);
+        if (members.Length > 0)
+            _selectedUnit = members[0];
+
+        _mapRenderer.ResetVisualSettings();
+        _visibleMaxLayer = 0;
+        _showDebugGrid = false;
+        _showTerrainExtrema = false;
+        _showHeightContours = true;
+        _showContourLabels = true;
+        _showSquadFlowWeights = true;
+        _showMovementVectors = false;
+        _showMovementForces = false;
+        _showSquadFormation = false;
+        _showSquadStates = false;
+        _showSquadContacts = false;
+        _debugLayersOverlay?.Close();
+        _contextMenuOverlay?.Close();
+        _menuPage = GameMenuPage.Closed;
+
+        int squadId = _movementTestSquadId;
+        IssueMoveOrder(
+            members,
+            _movementTestScene.InitialDestination,
+            InfantryFormationType.Free,
+            squadId);
+
+        int centerX = _worldMap.TileWidth / 2;
+        int centerY = _worldMap.TileHeight / 2;
+        _camera.CenterOnPosition(new Vector2f(
+            centerX * TerrainTilePixelSize,
+            centerY * TerrainTilePixelSize));
+
+        Console.WriteLine(
+            $"[MOVE TEST] {_movementTestScene.GetStatus()}. " +
+            "F7 returns to mass combat; select units and RMB on the ground to issue new destinations. " +
+            "V controls movement and Flow Field debug layers.");
     }
 
     private void ToggleTerrainCombatTest()
