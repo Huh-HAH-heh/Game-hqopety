@@ -35,7 +35,7 @@ public enum GameMenuActionType
     ToggleContourLabels,
     ToggleUnitRig,
     ResetTerrainSettings,
-    OpenInfoLayers
+    OpenInformation
 }
 
 public readonly record struct GameMenuAction(
@@ -283,7 +283,7 @@ void main()
             OutlineThickness = 1f
         };
     private readonly RectangleShape _infoLayersButton =
-        new RectangleShape(new Vector2f(110f, MenuButtonSize))
+        new RectangleShape(new Vector2f(72f, MenuButtonSize))
         {
             Position = new Vector2f(60f, 12f),
             FillColor = new Color(19, 25, 34, 245),
@@ -505,7 +505,7 @@ void main()
         _menuButtonLabel = CreateText(
             "•••", 16, Color.White, new Vector2f(21f, 17f), Text.Styles.Bold);
         _infoLayersLabel = CreateText(
-            "ИНФОСЛОИ", 11, Color.White, new Vector2f(72f, 23f), Text.Styles.Bold);
+            "ИНФО", 11, Color.White, new Vector2f(81f, 23f), Text.Styles.Bold);
 
         _mainTitle = CreateText(
             "ГЛАВНОЕ МЕНЮ", 19, new Color(241, 245, 250),
@@ -658,7 +658,7 @@ void main()
         int layerCount)
     {
         if (_infoLayersButton.GetGlobalBounds().Contains(point))
-            return new GameMenuAction(GameMenuActionType.OpenInfoLayers);
+            return new GameMenuAction(GameMenuActionType.OpenInformation);
 
         if (_menuButton.GetGlobalBounds().Contains(point))
         {

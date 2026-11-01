@@ -848,7 +848,7 @@ public sealed class GameRenderer
 
         if (informationSnapshot != null)
         {
-            _informationLayersRenderer?.Draw(
+            _informationLayersRenderer?.DrawWorld(
                 _window,
                 _camera.View,
                 informationSnapshot,
@@ -883,6 +883,22 @@ public sealed class GameRenderer
         if (_uiView != null)
         {
             _window.SetView(_uiView);
+
+            if (informationSnapshot != null)
+            {
+                _informationLayersRenderer?.DrawHud(
+                    _window,
+                    _window.Size.X,
+                    _window.Size.Y,
+                    informationSnapshot,
+                    Volatile.Read(ref _selectedInfoSquadId),
+                    _showMovementVectors,
+                    _showMovementForces,
+                    _showSquadFlowWeights,
+                    _showSquadFormation,
+                    _showSquadStates,
+                    _showSquadContacts);
+            }
 
             AiEvolutionStatus? evolutionStatus = _liveAiEvolutionTrainer.Status;
             if (evolutionStatus?.HasStarted == true)
@@ -1090,8 +1106,8 @@ public sealed class GameRenderer
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
             "LMB drag=select units; RMB=menu; Shift+click=add selection; Attack=selected units; S=hold | " +
-            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug-layers " +
-            "F6=vision F8=scale I=AI-states T=tracers F9=HUD | time controls: visual card | " +
+            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=инфо " +
+            "F6=vision F8=scale T=tracers F9=HUD | time controls: visual card | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
@@ -1267,8 +1283,8 @@ public sealed class GameRenderer
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug-layers " +
-            $"F6=vision F8=scale I=AI-states T=tracers F9=HUD | time controls: visual card";
+            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=инфо " +
+            $"F6=vision F8=scale T=tracers F9=HUD | time controls: visual card";
     }
 
     private void StartSimulationThread()
@@ -3874,6 +3890,12 @@ public sealed class GameRenderer
         if (key == Keyboard.Key.K && TryDisbandSelectedSquads())
             return;
 
+        if (key == Keyboard.Key.V)
+        {
+            _debugLayersOverlay?.Toggle();
+            return;
+        }
+
         if (TryHandleSquadHotkey(key))
             return;
 
@@ -3962,13 +3984,6 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.G)
-        {
-            _showDebugGrid =
-                !_showDebugGrid;
-            return;
-        }
-
         if (key == Keyboard.Key.F2)
         {
             CloseUnitCards();
@@ -4044,13 +4059,6 @@ public sealed class GameRenderer
             _showCombatHud = !_showCombatHud;
             if (_combatStatusOverlay != null)
                 _combatStatusOverlay.Visible = _showCombatHud;
-            return;
-        }
-
-        if (key == Keyboard.Key.I)
-        {
-            _showAiStateDebug = !_showAiStateDebug;
-            Console.WriteLine($"[TEST] AI state markers={_showAiStateDebug}");
             return;
         }
 

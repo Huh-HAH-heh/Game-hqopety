@@ -50,19 +50,19 @@ public sealed class DebugLayersOverlay : IDisposable
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, Height))
     {
-        FillColor = new Color(15, 21, 30, 248),
-        OutlineColor = new Color(82, 105, 131, 245),
+        FillColor = new Color(17, 22, 30, 250),
+        OutlineColor = new Color(76, 94, 116, 255),
         OutlineThickness = 1f
     };
 
     private readonly RectangleShape _header = new(new Vector2f(Width - 2f, HeaderHeight))
     {
-        FillColor = new Color(31, 42, 56, 255)
+        FillColor = new Color(31, 40, 52, 255)
     };
 
     private readonly RectangleShape _accent = new(new Vector2f(3f, Height - 2f))
     {
-        FillColor = new Color(90, 175, 225, 235)
+        FillColor = new Color(112, 164, 218, 245)
     };
 
     private readonly RectangleShape _closeButton = new(new Vector2f(24f, 24f))
@@ -111,9 +111,10 @@ public sealed class DebugLayersOverlay : IDisposable
         if (_font == null)
             return;
 
-        _title = new Text(_font, "ИНФОРМАЦИОННЫЕ СЛОИ", 13)
+        _title = new Text(_font, "ИНФО", 14)
         {
-            FillColor = new Color(235, 241, 249)
+            FillColor = new Color(239, 243, 249),
+            Style = Text.Styles.Bold
         };
         _closeLabel = new Text(_font, "×", 17)
         {
