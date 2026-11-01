@@ -4330,7 +4330,7 @@ public sealed class GameRenderer
     {
         switch (action.Type)
         {
-            case GameMenuActionType.OpenInfoLayers:
+            case GameMenuActionType.OpenInformation:
                 _menuPage = GameMenuPage.Closed;
                 if (_debugLayersOverlay?.IsOpen != true)
                     _debugLayersOverlay?.Toggle();
