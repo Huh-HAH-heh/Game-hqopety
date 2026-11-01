@@ -294,13 +294,29 @@ public sealed class InformationLayersRenderer : IDisposable
 
         if (formation && count > 0)
         {
-            Vector2f centroid = new(center.X * tilePixels, center.Y * tilePixels);
+            SquadMovementInformation info = squad.Information;
+            Vector2 forward = info.Forward.LengthSquared() > 0.0001f
+                ? Vector2.Normalize(info.Forward)
+                : Vector2.UnitX;
+            Vector2 side = new(-forward.Y, forward.X);
+
             foreach (RenderUnitState unit in snapshot.Units)
             {
-                if (unit.SquadId != squadId || unit.HitPoints <= 0f)
+                if (unit.SquadId != squadId || unit.HitPoints <= 0f ||
+                    !unit.HasSquadFormationData)
                     continue;
-                Vector2f member = new(unit.Position.X * tilePixels, unit.Position.Y * tilePixels);
-                Line(_squadLines, centroid, member, new Color(100, 190, 255, 105));
+
+                Vector2 preferred = info.Center +
+                    side * unit.SquadFormationOffset.X -
+                    forward * unit.SquadFormationOffset.Y;
+                Vector2f preferredPixel = new(preferred.X * tilePixels, preferred.Y * tilePixels);
+                Vector2f actualPixel = new(unit.Position.X * tilePixels, unit.Position.Y * tilePixels);
+
+                // Connect the pawn to the actual soft formation preference. It is
+                // deliberately a preference marker, not a locked movement slot.
+                Line(_squadLines, actualPixel, preferredPixel, new Color(100, 190, 255, 155));
+                Cross(_squadLines, preferredPixel, MathF.Max(3f, tilePixels * 0.15f),
+                    new Color(100, 190, 255, 190));
             }
         }
 

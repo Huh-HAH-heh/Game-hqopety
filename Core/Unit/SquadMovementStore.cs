@@ -50,7 +50,10 @@ public readonly record struct SquadMovementInformation(
     int RejoiningCount,
     int SeparatedCount,
     bool FlowFieldReady,
-    long TerrainVersion);
+    long TerrainVersion,
+    Vector2 Center,
+    Vector2 Forward,
+    float Spacing);
 
 /// <summary>Immutable render-thread view of a squad's cached Flow Field.</summary>
 public readonly record struct SquadMovementDebugSnapshot(
@@ -507,6 +510,29 @@ public sealed class SquadMovementStore
         return false;
     }
 
+    public bool TryGetMemberFormationData(
+        UnitId member,
+        out Vector2 preferredOffset,
+        out Vector2 terminalGoal)
+    {
+        preferredOffset = Vector2.Zero;
+        terminalGoal = Vector2.Zero;
+
+        if (!member.IsValid ||
+            !_membership.TryGetValue(member, out MemberLink link) ||
+            !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
+            !squad.HasMoveOrder ||
+            (uint)link.Slot >= (uint)squad.MemberOffsets.Length ||
+            (uint)link.Slot >= (uint)squad.MemberGoals.Length)
+        {
+            return false;
+        }
+
+        preferredOffset = squad.MemberOffsets[link.Slot];
+        terminalGoal = squad.MemberGoals[link.Slot];
+        return true;
+    }
+
     public SquadMovementDebugSnapshot[] CaptureDebugSnapshots()
     {
         SquadMovementDebugSnapshot[] snapshots =
@@ -571,7 +597,10 @@ public sealed class SquadMovementStore
             squad.RejoiningCount,
             squad.SeparatedCount,
             squad.FlowField.IsReady,
-            squad.FlowField.TerrainVersion);
+            squad.FlowField.TerrainVersion,
+            squad.Center,
+            squad.Forward,
+            squad.Spacing);
         return true;
     }
 

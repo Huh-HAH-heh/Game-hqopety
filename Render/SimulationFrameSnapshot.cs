@@ -76,7 +76,10 @@ public readonly record struct RenderUnitState(
     Vector2 MotorForce,
     int SquadId,
     SquadMemberMovementState SquadMovementState,
-    bool HasSquadMovementState);
+    bool HasSquadMovementState,
+    Vector2 SquadFormationOffset,
+    Vector2 SquadMemberGoal,
+    bool HasSquadFormationData);
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
@@ -759,11 +762,16 @@ public sealed class SimulationFrameSnapshot
             int squadId = 0;
             SquadMemberMovementState memberMovementState = SquadMemberMovementState.Following;
             bool hasMemberMovementState = false;
+            Vector2 formationOffset = Vector2.Zero;
+            Vector2 memberGoal = Vector2.Zero;
+            bool hasFormationData = false;
             if (includeSquadDebug)
             {
                 simulation.SquadMovement.TryGetMemberSquadId(unitId, out squadId);
                 hasMemberMovementState = simulation.SquadMovement.TryGetMemberState(
                     unitId, out memberMovementState);
+                hasFormationData = simulation.SquadMovement.TryGetMemberFormationData(
+                    unitId, out formationOffset, out memberGoal);
             }
 
             unitStates[i] = new RenderUnitState(
@@ -813,7 +821,10 @@ public sealed class SimulationFrameSnapshot
                 simulation.GetMovementMotorForce(index),
                 squadId,
                 memberMovementState,
-                hasMemberMovementState);
+                hasMemberMovementState,
+                formationOffset,
+                memberGoal,
+                hasFormationData);
 
             bool alive = hp > 0f;
             if (faction == 1)

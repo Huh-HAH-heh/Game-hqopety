@@ -42,7 +42,7 @@ Formation profiles describe where the group prefers to distribute itself. They a
 | Perimeter | Ring-like distribution around the objective |
 | Line | Shallow multi-row front |
 
-The formation offsets influence steering weakly. Navigation, collision avoidance, blocked terrain, inertia and individual tactical decisions may override them. In particular, narrow passages can compress the group naturally; there is no requirement that all members preserve their nominal width.
+The formation offsets influence steering weakly. The information layer draws each pawn's actual preferred offset relative to the squad center and heading, alongside its current position. Navigation, collision avoidance, blocked terrain, inertia and individual tactical decisions may override that preference. In particular, narrow passages can compress the group naturally; there is no requirement that all members preserve their nominal width.
 
 `SquadFormationRigidity` is an extension point: `Free` is the default and `Organized` slightly increases cohesion. `Strict` is reserved and currently behaves like `Organized`; strict slot locking is deliberately not implemented.
 
