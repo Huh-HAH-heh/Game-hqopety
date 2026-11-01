@@ -2746,16 +2746,6 @@ public sealed class GameRenderer
             MathF.Max(0.13f, footprint * 0.125f));
     }
 
-    private static float GetMarkerWorldRadius(
-        in RenderUnitState unit,
-        float minimumMarkerRadius)
-    {
-        float footprint = MathF.Max(unit.Width, unit.Length);
-        return MathF.Max(
-            minimumMarkerRadius,
-            MathF.Max(0.13f, footprint * 0.125f));
-    }
-
     private void SyncSquadTactics()
     {
         List<SquadMembershipSnapshot> squads = new(_squadManager.Squads.Count);
