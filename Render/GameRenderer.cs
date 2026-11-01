@@ -2602,9 +2602,13 @@ public sealed class GameRenderer
         List<SquadMembershipSnapshot> squads = new(_squadManager.Squads.Count);
         foreach (InfantrySquad squad in _squadManager.Squads)
             squads.Add(new SquadMembershipSnapshot(squad.Id, squad.Members.ToArray()));
-        _unitSimulation.AI.SynchronizeSquadMemberships(squads);
+
+        SquadMembershipSnapshot[] snapshot = squads.ToArray();
         ExecuteSimulationCommand(() =>
-            _unitSimulation.SynchronizeSquadMovementMemberships(squads));
+        {
+            _unitSimulation.AI.SynchronizeSquadMemberships(snapshot);
+            _unitSimulation.SynchronizeSquadMovementMemberships(snapshot);
+        });
     }
 
     private void PruneSquadState(SimulationFrameSnapshot snapshot)

@@ -192,7 +192,9 @@ public sealed class UnitMovementSystem
                             speedBeforeSteering,
                             ai,
                             out steeringPoint,
-                            out distanceToGoal);
+                            out distanceToGoal,
+                            out distanceToNextTurn,
+                            out turnSeverity);
 
                     // A blended Flow Field direction may cut a corner when
                     // sampled near an obstacle. Keep the shared field when its
@@ -211,8 +213,6 @@ public sealed class UnitMovementSystem
 
                     if (hasSquadWaypoint)
                     {
-                        distanceToNextTurn = float.PositiveInfinity;
-                        turnSeverity = 0f;
                         hasWaypoint = true;
                     }
                     else

@@ -27,7 +27,7 @@ The original objective stays active while members temporarily react to combat. I
 
 The field is common to squad members, while individual route navigation remains available for units outside squads and as a fallback when the field cannot be sampled or its short look-ahead segment is not traversable for that pawn's footprint.
 
-The first implementation builds a squad field synchronously when its first follower requests steering. It does not yet have a background build budget or cross-squad field deduplication; those are future performance improvements if profiling shows a need.
+The first implementation builds a squad field synchronously when its first follower requests steering. The cache key includes both terrain version and requested destination. It does not yet have a background build budget or cross-squad field deduplication; those remain performance improvements to consider if profiling shows a need.
 
 ### 3. Formation-envelope layer
 
@@ -52,7 +52,7 @@ The squad layer does not replace the pawn AI. The existing AI may choose combat,
 
 A pawn is temporarily detached from collective steering while it has an attack order, an active combat target, or an individual attack/cover/flank/injured state. The shared squad objective remains intact. Once the individual action ends, the pawn resumes the group move order and blends back into the common flow. A separate per-pawn Move/StealthMove destination is not overwritten by the squad field. No position or velocity teleport is used.
 
-The final motion still passes through `UnitMovementSystem`: acceleration, braking, inertia, look-ahead steering, predictive avoidance, terrain constraints and contact resolution remain authoritative.
+The final motion still passes through `UnitMovementSystem`: acceleration, braking, inertia, look-ahead steering, predictive avoidance, terrain constraints and contact resolution remain authoritative. The Flow Field also samples its upcoming direction changes along the route and supplies the next-turn distance/severity to the same braking model used by individual A* navigation. This lets the physical controller reduce speed before a bend instead of discovering the turn only after its heading changes.
 
 ### 5. Regroup and membership state layer
 

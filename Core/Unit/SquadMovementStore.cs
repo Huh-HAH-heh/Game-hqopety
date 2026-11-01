@@ -374,10 +374,14 @@ public sealed class SquadMovementStore
         float currentSpeed,
         UnitAiStore? ai,
         out Vector2 steeringPoint,
-        out float distanceToGoal)
+        out float distanceToGoal,
+        out float distanceToNextTurn,
+        out float turnSeverity)
     {
         steeringPoint = default;
         distanceToGoal = float.PositiveInfinity;
+        distanceToNextTurn = float.PositiveInfinity;
+        turnSeverity = 0f;
 
         if ((uint)unitIndex >= (uint)units.Capacity)
             return false;
@@ -412,6 +416,19 @@ public sealed class SquadMovementStore
             (terminalApproachRadius - terminalDistance) / terminalApproachRadius,
             0f,
             1f);
+
+        // The physical controller needs to know about an upcoming bend before
+        // inertia carries the pawn past it. Close to a member's terminal point,
+        // the direct terminal approach takes priority over the shared route.
+        if (terminalBlend < 0.25f)
+        {
+            squad.FlowField.TryGetTurnConstraint(
+                position.X,
+                position.Y,
+                flowDirection,
+                out distanceToNextTurn,
+                out turnSeverity);
+        }
 
         Vector2 direction = flowDirection;
         if (terminalBlend > 0.001f && terminalDistance > 0.001f)
@@ -837,6 +854,7 @@ internal sealed class SquadFlowField
     private int _width;
     private int _height;
     private int _goalCell = -1;
+    private int _requestedGoalCell = -1;
     private long _terrainVersion = long.MinValue;
     private bool _hasBuild;
 
@@ -846,6 +864,7 @@ internal sealed class SquadFlowField
     public void Invalidate()
     {
         _goalCell = -1;
+        _requestedGoalCell = -1;
         _terrainVersion = long.MinValue;
         _hasBuild = false;
         IsReady = false;
@@ -865,6 +884,7 @@ internal sealed class SquadFlowField
         int requestedGoal = goalX + goalY * width;
 
         if (_hasBuild &&
+            _requestedGoalCell == requestedGoal &&
             _terrainVersion == map.TerrainVersion &&
             _width == width &&
             _height == height)
@@ -880,6 +900,7 @@ internal sealed class SquadFlowField
 
         _width = width;
         _height = height;
+        _requestedGoalCell = requestedGoal;
         _terrainVersion = map.TerrainVersion;
         _goalCell = FindNearestPassableGoal(requestedGoal, goalX, goalY, workspace);
         IsReady = _goalCell >= 0;
@@ -972,6 +993,61 @@ internal sealed class SquadFlowField
 
         direction = sum / MathF.Sqrt(lengthSquared);
         return true;
+    }
+
+    public void TryGetTurnConstraint(
+        float x,
+        float y,
+        Vector2 initialDirection,
+        out float distanceToTurn,
+        out float turnSeverity)
+    {
+        distanceToTurn = float.PositiveInfinity;
+        turnSeverity = 0f;
+
+        float initialLengthSquared = initialDirection.LengthSquared();
+        if (!IsReady || initialLengthSquared < 0.0001f)
+            return;
+
+        initialDirection /= MathF.Sqrt(initialLengthSquared);
+        Vector2 probeDirection = initialDirection;
+        Vector2 probePosition = new(x, y);
+
+        const float sampleStep = 0.8f;
+        const int sampleCount = 6;
+        const float turnDotThreshold = 0.8660254f; // cos(30 degrees)
+
+        for (int i = 1; i <= sampleCount; i++)
+        {
+            probePosition += probeDirection * sampleStep;
+            if (!TrySample(
+                    probePosition.X,
+                    probePosition.Y,
+                    out Vector2 nextDirection,
+                    out _))
+            {
+                return;
+            }
+
+            float alignment = Math.Clamp(
+                Vector2.Dot(initialDirection, nextDirection),
+                -1f,
+                1f);
+            if (alignment < turnDotThreshold)
+            {
+                float angle = MathF.Acos(alignment);
+                distanceToTurn = (i - 1) * sampleStep;
+                turnSeverity = Math.Clamp(
+                    angle / (MathF.PI * 0.5f),
+                    0.15f,
+                    1f);
+                return;
+            }
+
+            // Follow the field itself instead of probing a straight ray. This
+            // makes gradual bends visible to the controller as well as sharp corners.
+            probeDirection = nextDirection;
+        }
     }
 
     private int FindNearestPassableGoal(
