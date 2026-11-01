@@ -14,26 +14,38 @@ public enum DebugLayerType
     AiState,
     Suppression,
     Memory,
-    UtilityAi
+    UtilityAi,
+    MovementVectors,
+    MovementForces,
+    SquadFlowWeights,
+    SquadFormation,
+    SquadStates,
+    SquadContacts
 }
 
 public sealed class DebugLayersOverlay : IDisposable
 {
-    private const float Width = 292f;
+    private const float Width = 360f;
     private const float HeaderHeight = 34f;
     private const float RowHeight = 34f;
-    private const int LayerCount = 7;
+    private const int LayerCount = 13;
     private const float Height = HeaderHeight + LayerCount * RowHeight + 30f;
 
     private static readonly string[] LayerLabels =
     {
-        "Зрение — конус и видимые зоны",
+        "Зрение — конусы и видимые зоны",
         "Слух — звуки и оценки бойцов",
         "Прицеливание — линии к цели",
-        "ИИ — цели и маршруты",
+        "ИИ — состояния и маршруты",
         "Подавление — стресс и паника",
-        "Память выбранной пешки",
-        "Utility AI — оценки и причины выбора"
+        "Память — контакты выбранной пешки",
+        "Utility AI — оценки",
+        "Движение — векторы скорости",
+        "Движение — силы мотора",
+        "Отряд — веса Flow Field",
+        "Отряд — формация и связность",
+        "Отряд — состояния участников",
+        "Отряд — общие контакты"
     };
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, Height))
@@ -99,7 +111,7 @@ public sealed class DebugLayersOverlay : IDisposable
         if (_font == null)
             return;
 
-        _title = new Text(_font, "СЛОИ ОТЛАДКИ  •  V", 13)
+        _title = new Text(_font, "ИНФОРМАЦИОННЫЕ СЛОИ", 13)
         {
             FillColor = new Color(235, 241, 249)
         };
@@ -115,7 +127,7 @@ public sealed class DebugLayersOverlay : IDisposable
         {
             FillColor = new Color(14, 24, 33)
         };
-        _footer = new Text(_font, "Галочки управляют слоями независимо", 10)
+        _footer = new Text(_font, "Вес поля: стоимость до цели  •  Скорость / сила мотора", 9)
         {
             FillColor = new Color(145, 160, 178)
         };
@@ -214,7 +226,13 @@ public sealed class DebugLayersOverlay : IDisposable
         bool showAiState,
         bool showSuppression,
         bool showMemory,
-        bool showUtilityAi)
+        bool showUtilityAi,
+        bool showMovementVectors,
+        bool showMovementForces,
+        bool showSquadFlowWeights,
+        bool showSquadFormation,
+        bool showSquadStates,
+        bool showSquadContacts)
     {
         if (!IsOpen)
             return;
@@ -237,7 +255,13 @@ public sealed class DebugLayersOverlay : IDisposable
             showAiState,
             showSuppression,
             showMemory,
-            showUtilityAi
+            showUtilityAi,
+            showMovementVectors,
+            showMovementForces,
+            showSquadFlowWeights,
+            showSquadFormation,
+            showSquadStates,
+            showSquadContacts
         };
 
         float firstRowY = _panel.Position.Y + HeaderHeight + 3f;

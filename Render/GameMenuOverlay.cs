@@ -34,7 +34,8 @@ public enum GameMenuActionType
     ToggleHeightContours,
     ToggleContourLabels,
     ToggleUnitRig,
-    ResetTerrainSettings
+    ResetTerrainSettings,
+    OpenInfoLayers
 }
 
 public readonly record struct GameMenuAction(
@@ -281,6 +282,15 @@ void main()
             OutlineColor = new Color(80, 93, 108),
             OutlineThickness = 1f
         };
+    private readonly RectangleShape _infoLayersButton =
+        new RectangleShape(new Vector2f(110f, MenuButtonSize))
+        {
+            Position = new Vector2f(60f, 12f),
+            FillColor = new Color(19, 25, 34, 245),
+            OutlineColor = new Color(80, 93, 108),
+            OutlineThickness = 1f
+        };
+    private readonly Text? _infoLayersLabel;
 
     private readonly RectangleShape _panel =
         new RectangleShape(new Vector2f(SettingsWidth, SettingsHeight))
@@ -494,6 +504,8 @@ void main()
 
         _menuButtonLabel = CreateText(
             "•••", 16, Color.White, new Vector2f(21f, 17f), Text.Styles.Bold);
+        _infoLayersLabel = CreateText(
+            "ИНФОСЛОИ", 11, Color.White, new Vector2f(72f, 23f), Text.Styles.Bold);
 
         _mainTitle = CreateText(
             "ГЛАВНОЕ МЕНЮ", 19, new Color(241, 245, 250),
@@ -645,6 +657,9 @@ void main()
         GameMenuPage page,
         int layerCount)
     {
+        if (_infoLayersButton.GetGlobalBounds().Contains(point))
+            return new GameMenuAction(GameMenuActionType.OpenInfoLayers);
+
         if (_menuButton.GetGlobalBounds().Contains(point))
         {
             return new GameMenuAction(GameMenuActionType.OpenMainMenu);
@@ -1347,6 +1362,13 @@ void main()
         if (_menuButtonLabel != null)
             window.Draw(_menuButtonLabel);
 
+        _infoLayersButton.FillColor = _infoLayersButton.GetGlobalBounds().Contains(mousePosition)
+            ? new Color(38, 47, 60, 250)
+            : new Color(19, 25, 34, 245);
+        window.Draw(_infoLayersButton);
+        if (_infoLayersLabel != null)
+            window.Draw(_infoLayersLabel);
+
         if (page == GameMenuPage.Closed)
             return;
 
@@ -1739,6 +1761,7 @@ void main()
 
         _font?.Dispose();
         _backdrop.Dispose();
+        _infoLayersButton.Dispose();
         _menuButton.Dispose();
         _panel.Dispose();
         _accent.Dispose();
