@@ -1063,28 +1063,71 @@ internal sealed class SquadFlowField
         float tx = Math.Clamp(x - x0, 0f, 1f);
         float ty = Math.Clamp(y - y0, 0f, 1f);
 
-        Vector2 sum = Vector2.Zero;
-        AddDirection(x0 + y0 * _width, (1f - tx) * (1f - ty), ref sum);
-        AddDirection(x1 + y0 * _width, tx * (1f - ty), ref sum);
-        AddDirection(x0 + y1 * _width, (1f - tx) * ty, ref sum);
-        AddDirection(x1 + y1 * _width, tx * ty, ref sum);
+        int cell00 = x0 + y0 * _width;
+        int cell10 = x1 + y0 * _width;
+        int cell01 = x0 + y1 * _width;
+        int cell11 = x1 + y1 * _width;
 
-        int cell = x0 + y0 * _width;
-        distance = _distance[cell];
+        float cost00 = _distance[cell00];
+        float cost10 = _distance[cell10];
+        float cost01 = _distance[cell01];
+        float cost11 = _distance[cell11];
+
+        // Interpolate the scalar cost surface, then follow its downhill
+        // gradient. This is smoother and more stable than averaging eight
+        // discrete direction codes, especially when a route bends around a ridge.
+        if (float.IsFinite(cost00) &&
+            float.IsFinite(cost10) &&
+            float.IsFinite(cost01) &&
+            float.IsFinite(cost11))
+        {
+            float topCost = cost00 + (cost10 - cost00) * tx;
+            float bottomCost = cost01 + (cost11 - cost01) * tx;
+            distance = topCost + (bottomCost - topCost) * ty;
+
+            float gradientX =
+                (cost10 - cost00) * (1f - ty) +
+                (cost11 - cost01) * ty;
+            float gradientY =
+                (cost01 - cost00) * (1f - tx) +
+                (cost11 - cost10) * tx;
+            Vector2 downhill = new(-gradientX, -gradientY);
+            float gradientLengthSquared = downhill.LengthSquared();
+            if (gradientLengthSquared > 0.0001f)
+            {
+                direction = downhill / MathF.Sqrt(gradientLengthSquared);
+                return true;
+            }
+
+            if (distance <= 0.25f)
+                return true;
+        }
+
+        // At map edges and beside disconnected terrain the four-cell cost
+        // stencil may contain infinity. Fall back to the validated Dijkstra
+        // predecessor directions instead of inventing a gradient through it.
+        distance = _distance[cell00];
         if (!float.IsFinite(distance))
             return false;
 
+        Vector2 sum = Vector2.Zero;
+        AddDirection(cell00, (1f - tx) * (1f - ty), ref sum);
+        AddDirection(cell10, tx * (1f - ty), ref sum);
+        AddDirection(cell01, (1f - tx) * ty, ref sum);
+        AddDirection(cell11, tx * ty, ref sum);
+
         float lengthSquared = sum.LengthSquared();
-        if (lengthSquared < 0.0001f)
+        if (lengthSquared > 0.0001f)
         {
-            byte code = _direction[cell];
-            if (code == 0)
-                return false;
-            direction = GetDirection(code);
+            direction = sum / MathF.Sqrt(lengthSquared);
             return true;
         }
 
-        direction = sum / MathF.Sqrt(lengthSquared);
+        byte code = _direction[cell00];
+        if (code == 0)
+            return distance <= 0.25f;
+
+        direction = GetDirection(code);
         return true;
     }
 
