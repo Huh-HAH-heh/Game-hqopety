@@ -27,7 +27,7 @@ public enum UnitNavigationStatus : byte
 public sealed class UnitNavigationSystem
 {
     private const float MaxStepHeight = 1.5f;
-    private const float HeightCost = 0.15f;
+    private const float HeightCost = 0.35f;
     private const int MinRouteBuildsPerUpdate = 2;
     private const int MaxRouteBuildsPerUpdate = 8;
     private const int MaxExpandedNodesPerSearch = 16_384;
