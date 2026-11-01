@@ -66,6 +66,7 @@ public sealed class GameRenderer
 
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
+    private int _selectedInfoSquadId;
     private static readonly bool SquadControlsEnabled = true;
     private readonly InfantrySquadManager _squadManager = new();
     private InfantryFormationType _infantryFormation = InfantryFormationType.Free;
@@ -147,6 +148,7 @@ public sealed class GameRenderer
     private GameMenuOverlay? _gameMenuOverlay;
     private ContextMenuOverlay? _contextMenuOverlay;
     private DebugLayersOverlay? _debugLayersOverlay;
+    private InformationLayersRenderer? _informationLayersRenderer;
     private UtilityAiDebugOverlay? _utilityAiDebugOverlay;
     private UnitGroupCardOverlay? _unitGroupCardOverlay;
     private UnitBodyRigEditorOverlay? _bodyRigEditorOverlay;
@@ -170,6 +172,12 @@ public sealed class GameRenderer
     private volatile bool _showHearingDebug;
     private volatile bool _showMemoryDebug;
     private volatile bool _showUtilityAiDebug;
+    private volatile bool _showMovementVectors;
+    private volatile bool _showMovementForces;
+    private volatile bool _showSquadFlowWeights;
+    private volatile bool _showSquadFormation;
+    private volatile bool _showSquadStates;
+    private volatile bool _showSquadContacts;
     private bool _showAttackLinks = true;
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
@@ -423,6 +431,7 @@ public sealed class GameRenderer
             _gameMenuOverlay?.Dispose();
             _contextMenuOverlay?.Dispose();
             _debugLayersOverlay?.Dispose();
+            _informationLayersRenderer?.Dispose();
             _utilityAiDebugOverlay?.Dispose();
             CloseUnitCards();
             _unitGroupCardOverlay?.Dispose();
@@ -755,6 +764,7 @@ public sealed class GameRenderer
                 _window);
         }
 
+        Volatile.Write(ref _selectedInfoSquadId, GetSelectedSquadId());
         SimulationFrameSnapshot? renderSnapshot = _simulationThread != null
             ? Volatile.Read(ref _latestSnapshot)
             : null;
@@ -824,6 +834,32 @@ public sealed class GameRenderer
                 DrawSquadMarkers(renderSnapshot);
             else if (_simulationThread == null)
                 DrawSquadMarkers(SimulationFrameSnapshot.Capture(_unitSimulation));
+        }
+
+        bool includeSquadDebug = ShouldCaptureSquadDebug;
+        SimulationFrameSnapshot? informationSnapshot = renderSnapshot;
+        if (informationSnapshot == null &&
+            (includeSquadDebug || _showMovementVectors || _showMovementForces))
+        {
+            informationSnapshot = SimulationFrameSnapshot.Capture(
+                _unitSimulation,
+                includeSquadDebug: includeSquadDebug);
+        }
+
+        if (informationSnapshot != null)
+        {
+            _informationLayersRenderer?.Draw(
+                _window,
+                _camera.View,
+                informationSnapshot,
+                TerrainTilePixelSize,
+                Volatile.Read(ref _selectedInfoSquadId),
+                _showMovementVectors,
+                _showMovementForces,
+                _showSquadFlowWeights,
+                _showSquadFormation,
+                _showSquadStates,
+                _showSquadContacts);
         }
 
         if (_isSelectingUnits && IsSelectionDrag())
@@ -1001,7 +1037,13 @@ public sealed class GameRenderer
                 _showAiStateDebug,
                 _showSuppressionDebug,
                 _showMemoryDebug,
-                _showUtilityAiDebug);
+                _showUtilityAiDebug,
+                _showMovementVectors,
+                _showMovementForces,
+                _showSquadFlowWeights,
+                _showSquadFormation,
+                _showSquadStates,
+                _showSquadContacts);
         }
 
         _bodyRigEditorOverlay?.Draw(_window, _window.Size.X, _window.Size.Y);
@@ -2895,7 +2937,8 @@ public sealed class GameRenderer
                         _showMemoryDebug,
                         _showMemoryDebug ? _selectedUnit : default,
                         _showUtilityAiDebug,
-                        _showUtilityAiDebug ? _selectedUnit : default));
+                        _showUtilityAiDebug ? _selectedUnit : default,
+                        ShouldCaptureSquadDebug));
             }
             catch (Exception exception)
             {
@@ -2949,6 +2992,7 @@ public sealed class GameRenderer
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
         _debugLayersOverlay = new DebugLayersOverlay();
+        _informationLayersRenderer = new InformationLayersRenderer();
         _utilityAiDebugOverlay = new UtilityAiDebugOverlay();
         _unitGroupCardOverlay = new UnitGroupCardOverlay();
         _bodyRigEditorOverlay = new UnitBodyRigEditorOverlay(
@@ -3713,8 +3757,30 @@ public sealed class GameRenderer
             case DebugLayerType.UtilityAi:
                 _showUtilityAiDebug = !_showUtilityAiDebug;
                 break;
+            case DebugLayerType.MovementVectors:
+                _showMovementVectors = !_showMovementVectors;
+                break;
+            case DebugLayerType.MovementForces:
+                _showMovementForces = !_showMovementForces;
+                break;
+            case DebugLayerType.SquadFlowWeights:
+                _showSquadFlowWeights = !_showSquadFlowWeights;
+                break;
+            case DebugLayerType.SquadFormation:
+                _showSquadFormation = !_showSquadFormation;
+                break;
+            case DebugLayerType.SquadStates:
+                _showSquadStates = !_showSquadStates;
+                break;
+            case DebugLayerType.SquadContacts:
+                _showSquadContacts = !_showSquadContacts;
+                break;
         }
     }
+
+    private bool ShouldCaptureSquadDebug =>
+        _showSquadFlowWeights || _showSquadFormation ||
+        _showSquadStates || _showSquadContacts;
 
     private void RecordSimulationStep(float deltaTime)
     {
@@ -4081,12 +4147,6 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.V)
-        {
-            _debugLayersOverlay?.Toggle();
-            return;
-        }
-
         if (key == Keyboard.Key.Tab)
         {
             if (_massCombatMode)
@@ -4296,6 +4356,13 @@ public sealed class GameRenderer
     {
         switch (action.Type)
         {
+            case GameMenuActionType.OpenInfoLayers:
+                _menuPage = GameMenuPage.Closed;
+                if (_debugLayersOverlay?.IsOpen != true)
+                    _debugLayersOverlay?.Toggle();
+                _draggingMenuSlider = null;
+                break;
+
             case GameMenuActionType.OpenMainMenu:
                 _menuPage = GameMenuPage.Main;
                 _draggingMenuSlider = null;

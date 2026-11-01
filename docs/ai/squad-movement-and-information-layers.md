@@ -102,7 +102,9 @@ This keeps the data domains distinct:
 Squad creation and assignment are enabled again. A selected squad can receive a shared move order through the existing context-menu command.
 
 - `J` cycles the six formation profiles.
-- `U` prints the selected squad's movement information snapshot to the debug console.
+The always-visible `ИНФОСЛОИ` button beside the top-left menu opens the information panel. Independent checkboxes control vision, hearing, aiming links, AI state, suppression, pawn memory, Utility AI, unit velocity, motor force, Flow Field cost/directions, squad cohesion, member states and shared tactical contacts. Flow Field costs are drawn for the currently selected squad; select a squad before enabling that layer.
+
+Velocity arrows show current horizontal velocity. Motor-force arrows show the last resultant drive/braking/lateral force calculated by the movement controller; they do not include gravity or collision impulses.
 - Individual attack and cover behaviour remains active during a squad move.
 
 ## Current boundaries
