@@ -27,6 +27,8 @@ public sealed class InformationLayersRenderer : IDisposable
     private readonly Text? _label;
     private readonly Text? _legend;
     private readonly Text? _flowCostLabel;
+    private readonly Text? _contactLabel;
+    private readonly Text? _stateLegend;
 
     public InformationLayersRenderer()
     {
@@ -50,6 +52,19 @@ public sealed class InformationLayersRenderer : IDisposable
             FillColor = Color.White,
             OutlineColor = new Color(10, 15, 22, 230),
             OutlineThickness = 1f
+        };
+        _contactLabel = new Text(_font, string.Empty, 10)
+        {
+            FillColor = new Color(255, 225, 165, 245),
+            OutlineColor = new Color(10, 15, 22, 225),
+            OutlineThickness = 1f
+        };
+        _stateLegend = new Text(
+            _font,
+            "FOLLOW — зелёный  |  ENGAGED — красный  |  REJOIN — жёлтый  |  SEPARATED — серый",
+            10)
+        {
+            FillColor = new Color(238, 242, 247, 235)
         };
     }
 
@@ -92,12 +107,22 @@ public sealed class InformationLayersRenderer : IDisposable
             window.Draw(_label);
         }
 
+        float legendY = view.Center.Y - view.Size.Y * 0.5f + 12f;
         if (_legend != null && (movementVectors || movementForces || flowWeights))
         {
             _legend.Position = new Vector2f(
                 view.Center.X - view.Size.X * 0.5f + 12f,
-                view.Center.Y - view.Size.Y * 0.5f + 12f);
+                legendY);
             window.Draw(_legend);
+            legendY += 18f;
+        }
+
+        if (_stateLegend != null && memberStates)
+        {
+            _stateLegend.Position = new Vector2f(
+                view.Center.X - view.Size.X * 0.5f + 12f,
+                legendY);
+            window.Draw(_stateLegend);
         }
     }
 
@@ -317,6 +342,12 @@ public sealed class InformationLayersRenderer : IDisposable
                 Line(_squadLines, actualPixel, preferredPixel, new Color(100, 190, 255, 155));
                 Cross(_squadLines, preferredPixel, MathF.Max(3f, tilePixels * 0.15f),
                     new Color(100, 190, 255, 190));
+
+                Vector2f terminalPixel = new(
+                    unit.SquadMemberGoal.X * tilePixels,
+                    unit.SquadMemberGoal.Y * tilePixels);
+                Cross(_squadLines, terminalPixel, MathF.Max(3f, tilePixels * 0.13f),
+                    new Color(190, 145, 255, 210));
             }
         }
 
@@ -343,6 +374,15 @@ public sealed class InformationLayersRenderer : IDisposable
 
             float radius = Math.Clamp(contact.ErrorRadius * tilePixels, 3f, 180f);
             Circle(_contactLines, to, radius, new Color(255, 185, 70, alpha), 24);
+
+            if (_contactLabel != null)
+            {
+                _contactLabel.DisplayedString =
+                    $"Report {contact.Reporter}  Q={contact.Confidence:0.00}  " +
+                    $"{contact.AgeSeconds:0.0}s  ±{contact.ErrorRadius:0.0}";
+                _contactLabel.Position = new Vector2f(to.X + 8f, to.Y + 8f);
+                window.Draw(_contactLabel);
+            }
         }
         if (_contactLines.VertexCount > 0)
             window.Draw(_contactLines);
@@ -415,6 +455,8 @@ public sealed class InformationLayersRenderer : IDisposable
 
     public void Dispose()
     {
+        _stateLegend?.Dispose();
+        _contactLabel?.Dispose();
         _flowCostLabel?.Dispose();
         _legend?.Dispose();
         _label?.Dispose();
