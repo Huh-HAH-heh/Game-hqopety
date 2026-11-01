@@ -14,7 +14,12 @@ public sealed class SquadMembershipSnapshot
 }
 
 public readonly record struct SquadTacticalContact(
-    long Sequence, Vector3 EstimatedPosition, float PositionErrorRadius, float Confidence, UnitId Reporter);
+    long Sequence,
+    Vector3 EstimatedPosition,
+    float PositionErrorRadius,
+    float Confidence,
+    UnitId Reporter,
+    float AgeSeconds);
 
 public sealed class SquadTacticalCoordinator
 {
@@ -250,7 +255,8 @@ public sealed class SquadTacticalCoordinator
             if (age >= ContactLifetimeSeconds) return false;
             float confidence = value.InitialConfidence * MathF.Pow(0.5f, age / ContactConfidenceHalfLifeSeconds);
             if (confidence < MinimumContactConfidence) return false;
-            contact = new SquadTacticalContact(value.Sequence, value.Position, value.ErrorRadius, confidence, value.Reporter);
+            contact = new SquadTacticalContact(
+                value.Sequence, value.Position, value.ErrorRadius, confidence, value.Reporter, age);
             return true;
         }
     }

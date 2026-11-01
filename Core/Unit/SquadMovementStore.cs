@@ -52,6 +52,14 @@ public readonly record struct SquadMovementInformation(
     bool FlowFieldReady,
     long TerrainVersion);
 
+/// <summary>Immutable render-thread view of a squad's cached Flow Field.</summary>
+public readonly record struct SquadMovementDebugSnapshot(
+    SquadMovementInformation Information,
+    int Width,
+    int Height,
+    float[] Costs,
+    byte[] Directions);
+
 /// <summary>
 /// Owns collective movement intent while every pawn remains an autonomous physical unit.
 /// The flow field describes the common route; formation offsets are weak spatial preferences.
@@ -485,6 +493,45 @@ public sealed class SquadMovementStore
         return true;
     }
 
+    public bool TryGetMemberSquadId(UnitId member, out int squadId)
+    {
+        if (member.IsValid &&
+            _membership.TryGetValue(member, out MemberLink link) &&
+            _squads.ContainsKey(link.SquadId))
+        {
+            squadId = link.SquadId;
+            return true;
+        }
+
+        squadId = 0;
+        return false;
+    }
+
+    public SquadMovementDebugSnapshot[] CaptureDebugSnapshots()
+    {
+        SquadMovementDebugSnapshot[] snapshots =
+            new SquadMovementDebugSnapshot[_squads.Count];
+        int write = 0;
+
+        foreach (SquadState squad in _squads.Values)
+        {
+            TryGetInformation(squad.Id, out SquadMovementInformation information);
+            if (squad.FlowField.TryGetDebugData(
+                    out int width, out int height, out float[] costs, out byte[] directions))
+            {
+                snapshots[write++] = new SquadMovementDebugSnapshot(
+                    information, width, height, costs, directions);
+            }
+            else
+            {
+                snapshots[write++] = new SquadMovementDebugSnapshot(
+                    information, 0, 0, Array.Empty<float>(), Array.Empty<byte>());
+            }
+        }
+
+        return snapshots;
+    }
+
     public bool TryGetMemberState(
         UnitId member,
         out SquadMemberMovementState state)
@@ -892,11 +939,10 @@ internal sealed class SquadFlowField
             return IsReady;
         }
 
-        if (_distance.Length != count)
-        {
-            _distance = new float[count];
-            _direction = new byte[count];
-        }
+        // Build into fresh buffers; published render snapshots retain the
+        // previous field until this entire Dijkstra pass finishes.
+        float[] distance = new float[count];
+        byte[] directionField = new byte[count];
 
         _width = width;
         _height = height;
@@ -908,10 +954,9 @@ internal sealed class SquadFlowField
         if (!IsReady)
             return false;
 
-        Array.Fill(_distance, float.PositiveInfinity, 0, count);
-        Array.Clear(_direction, 0, count);
-        workspace.Begin(_distance, count);
-        _distance[_goalCell] = 0f;
+        Array.Fill(distance, float.PositiveInfinity, 0, count);
+        workspace.Begin(distance, count);
+        distance[_goalCell] = 0f;
         workspace.PushOrDecrease(_goalCell);
 
         while (!workspace.IsEmpty)
@@ -936,12 +981,12 @@ internal sealed class SquadFlowField
                 float stepCost = dx != 0 && dy != 0 ? 1.41421356f : 1f;
                 stepCost += MathF.Abs(workspace.Heights[cell] - workspace.Heights[next]) *
                     HeightCost;
-                float candidate = _distance[cell] + stepCost;
-                if (candidate >= _distance[next] - 0.0001f)
+                float candidate = distance[cell] + stepCost;
+                if (candidate >= distance[next] - 0.0001f)
                     continue;
 
-                _distance[next] = candidate;
-                _direction[next] = EncodeDirection(-dx, -dy);
+                distance[next] = candidate;
+                directionField[next] = EncodeDirection(-dx, -dy);
                 workspace.PushOrDecrease(next);
             }
 
@@ -949,7 +994,26 @@ internal sealed class SquadFlowField
                 break;
         }
 
+        _distance = distance;
+        _direction = directionField;
         return true;
+    }
+
+    public bool TryGetDebugData(
+        out int width,
+        out int height,
+        out float[] costs,
+        out byte[] directions)
+    {
+        width = _width;
+        height = _height;
+        costs = _distance;
+        directions = _direction;
+        return IsReady &&
+            width > 0 &&
+            height > 0 &&
+            costs.Length == width * height &&
+            directions.Length == costs.Length;
     }
 
     public bool TrySample(

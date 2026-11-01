@@ -32,6 +32,8 @@ public sealed class UnitSimulation
     public UnitSkillStore Skills { get; }
     public UnitNavigationSystem Navigation => _movementSystem.Navigation;
     public SquadMovementStore SquadMovement => _squadMovementStore;
+    public Vector2 GetMovementMotorForce(int unitIndex) =>
+        _movementSystem.GetLastMotorForce(unitIndex);
     public UnitBodyStore Bodies { get; }
     public UnitHitRegionStore HitRegions { get; }
     public UnitHealthStore Health { get; }

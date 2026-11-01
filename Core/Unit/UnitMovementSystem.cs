@@ -8,6 +8,7 @@ namespace Core.Unit;
 public sealed class UnitMovementSystem
 {
     private readonly UnitNavigationSystem _navigation = new UnitNavigationSystem();
+    private Vector2[] _lastMotorForce = Array.Empty<Vector2>();
     private int _collisionWidth;
     private int _collisionHeight;
     private int[] _collisionCellHeads = Array.Empty<int>();
@@ -19,6 +20,11 @@ public sealed class UnitMovementSystem
     private float _traceElapsedSeconds;
 
     public UnitNavigationSystem Navigation => _navigation;
+
+    public Vector2 GetLastMotorForce(int unitIndex) =>
+        (uint)unitIndex < (uint)_lastMotorForce.Length
+            ? _lastMotorForce[unitIndex]
+            : Vector2.Zero;
 
     private static int ReadTraceUnitIndex()
     {
@@ -56,6 +62,9 @@ public sealed class UnitMovementSystem
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f || units.ActiveCount == 0)
             return;
 
+        if (_lastMotorForce.Length < units.Capacity)
+            Array.Resize(ref _lastMotorForce, units.Capacity);
+
         squadMovement?.BeginUpdate(units, health, ai, worldMap, deltaTime);
         _navigation.BeginUpdate(units, worldMap);
         _traceElapsedSeconds += deltaTime;
@@ -88,6 +97,7 @@ public sealed class UnitMovementSystem
         {
             int unit = active[i];
             bool traceUnit = traceThisUpdate && unit == _traceUnitIndex;
+            _lastMotorForce[unit] = Vector2.Zero;
 
             if (health != null && health.OverallHitPoints[unit] <= 0f)
             {
@@ -303,6 +313,7 @@ public sealed class UnitMovementSystem
                     lateralForce *= maxLateralForce / lateralForceLength;
 
                 Vector2 netForce = forward * longitudinalForce + lateralForce;
+                _lastMotorForce[unit] = netForce;
                 Vector2 previousVelocity = velocity;
                 Vector2 acceleration = netForce / mass;
                 velocity += acceleration * substepDelta;
