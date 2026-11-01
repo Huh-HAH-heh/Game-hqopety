@@ -490,7 +490,7 @@ public sealed class SquadMovementStore
             direction /= directionLength;
         }
 
-        float lookAhead = Math.Clamp(1.25f + currentSpeed * 0.72f, 1.4f, 5f);
+        float lookAhead = Math.Clamp(1.2f + currentSpeed * 0.62f, 1.4f, 4f);
         steeringPoint = new Vector2(position.X, position.Y) + direction * lookAhead;
         distanceToGoal = finalDistance;
         return true;
@@ -920,7 +920,7 @@ internal sealed class SquadFlowFieldWorkspace
 internal sealed class SquadFlowField
 {
     private const float MaxStepHeight = 1.5f;
-    private const float HeightCost = 0.15f;
+    private const float HeightCost = 0.35f;
 
     private static readonly int[] DirectionX = { 1, -1, 0, 0, 1, 1, -1, -1 };
     private static readonly int[] DirectionY = { 0, 0, 1, -1, 1, -1, 1, -1 };
