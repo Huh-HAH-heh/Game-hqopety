@@ -4,6 +4,7 @@ using System.Numerics;
 using Core.Unit;
 using SFML.Graphics;
 using SFML.System;
+using SFML.Window;
 
 namespace RimClone.Render;
 
@@ -25,6 +26,7 @@ public sealed class InformationLayersRenderer : IDisposable
     private readonly Font? _font;
     private readonly Text? _label;
     private readonly Text? _legend;
+    private readonly Text? _flowCostLabel;
 
     public InformationLayersRenderer()
     {
@@ -42,6 +44,12 @@ public sealed class InformationLayersRenderer : IDisposable
             10)
         {
             FillColor = new Color(238, 242, 247, 235)
+        };
+        _flowCostLabel = new Text(_font, string.Empty, 11)
+        {
+            FillColor = Color.White,
+            OutlineColor = new Color(10, 15, 22, 230),
+            OutlineThickness = 1f
         };
     }
 
@@ -108,6 +116,7 @@ public sealed class InformationLayersRenderer : IDisposable
             return;
 
         SquadMovementDebugSnapshot field = selected.Value;
+        Vector2f mouseWorld = window.MapPixelToCoords(Mouse.GetPosition(window), view);
         if (field.Width <= 0 || field.Height <= 0 ||
             field.Costs.Length != field.Width * field.Height ||
             field.Directions.Length != field.Costs.Length)
@@ -185,6 +194,20 @@ public sealed class InformationLayersRenderer : IDisposable
             objective.Y * tilePixels - tilePixels * 0.45f);
         _objectiveRing.Scale = new Vector2f(tilePixels, tilePixels);
         window.Draw(_objectiveRing);
+
+        int mouseX = (int)MathF.Floor(mouseWorld.X / tilePixels);
+        int mouseY = (int)MathF.Floor(mouseWorld.Y / tilePixels);
+        if (_flowCostLabel != null &&
+            (uint)mouseX < (uint)field.Width &&
+            (uint)mouseY < (uint)field.Height)
+        {
+            float hoveredCost = field.Costs[mouseX + mouseY * field.Width];
+            _flowCostLabel.DisplayedString = float.IsFinite(hoveredCost)
+                ? $"Flow cost ({mouseX},{mouseY}): {hoveredCost:0.00}"
+                : $"Flow cost ({mouseX},{mouseY}): unreachable";
+            _flowCostLabel.Position = new Vector2f(mouseWorld.X + 12f, mouseWorld.Y + 12f);
+            window.Draw(_flowCostLabel);
+        }
     }
 
     private void DrawUnitVectors(
@@ -376,6 +399,7 @@ public sealed class InformationLayersRenderer : IDisposable
 
     public void Dispose()
     {
+        _flowCostLabel?.Dispose();
         _legend?.Dispose();
         _label?.Dispose();
         _font?.Dispose();
