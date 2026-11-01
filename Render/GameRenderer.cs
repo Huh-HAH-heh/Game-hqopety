@@ -2621,28 +2621,126 @@ public sealed class GameRenderer
     {
         selected = default;
         bool found = false;
+        float bestDistanceSquared = float.PositiveInfinity;
 
-        // World selection follows the visible gameplay marker at the live unit
-        // position. Static anatomy is for inspection/damage, never a pick target.
+        // Resolve overlaps by proximity to the pawn root, not snapshot/render
+        // order. Pick against the visible body as well as its root marker so
+        // RMB on a head, torso or limb cannot be mistaken for a ground command.
         for (int i = 0; i < snapshot.Units.Length; i++)
         {
             RenderUnitState unit = snapshot.Units[i];
-            if (unit.HitPoints <= 0f)
+            if (unit.HitPoints <= 0f ||
+                !IsUnitVisualHit(snapshot, unit, worldX, worldY, padding, minimumMarkerRadius,
+                    out float centerDistanceSquared))
+            {
+                continue;
+            }
+
+            if (centerDistanceSquared >= bestDistanceSquared)
                 continue;
 
-            float radius = GetMarkerWorldRadius(unit, minimumMarkerRadius) + padding;
-            float dx = worldX - unit.Position.X;
-            float dy = worldY - unit.Position.Y;
-
-            if (dx * dx + dy * dy > radius * radius)
-                continue;
-
-            // Draw order is snapshot order, so the last overlapping marker wins.
             selected = unit;
+            bestDistanceSquared = centerDistanceSquared;
             found = true;
         }
 
         return found;
+    }
+
+    private static bool IsUnitVisualHit(
+        SimulationFrameSnapshot snapshot,
+        in RenderUnitState unit,
+        float worldX,
+        float worldY,
+        float padding,
+        float minimumMarkerRadius,
+        out float centerDistanceSquared)
+    {
+        float rootDx = worldX - unit.Position.X;
+        float rootDy = worldY - unit.Position.Y;
+        centerDistanceSquared = rootDx * rootDx + rootDy * rootDy;
+
+        float rootRadius = GetMarkerWorldRadius(unit, minimumMarkerRadius) + padding;
+        bool hit = centerDistanceSquared <= rootRadius * rootRadius;
+
+        RenderBodyPart[] bodyParts = snapshot.BodyParts;
+        int start = Math.Clamp(unit.BodyPartStart, 0, bodyParts.Length);
+        int count = Math.Clamp(unit.BodyPartCount, 0, bodyParts.Length - start);
+        if (count == 0)
+            return hit;
+
+        // Match the scale used by UnitRenderSystem: gameplay zones are reduced
+        // around the root, while the informational body rig uses its own scale.
+        float visualScale = unit.Type == UnitType.Colonist &&
+            unit.BodyPartCount == UnitGameplayZoneSystem.ZoneCount
+                ? 0.64f
+                : 0.8f;
+
+        for (int i = start; i < start + count; i++)
+        {
+            RenderBodyPart part = bodyParts[i];
+            if (part.Role == BodyPartRole.Internal)
+                continue;
+
+            float partX = unit.Position.X +
+                (part.Position.X - unit.Position.X) * visualScale;
+            float partY = unit.Position.Y +
+                (part.Position.Y - unit.Position.Y) * visualScale;
+            float dx = worldX - partX;
+            float dy = worldY - partY;
+            float cosine = MathF.Cos(part.Rotation);
+            float sine = MathF.Sin(part.Rotation);
+            float localX = dx * cosine + dy * sine;
+            float localY = -dx * sine + dy * cosine;
+            float radiusX = MathF.Abs(part.Scale.X) * visualScale;
+            float radiusY = MathF.Abs(part.Scale.Y) * visualScale;
+
+            if (radiusX <= 0.001f)
+                continue;
+
+            if (part.Primitive == BodyPrimitive.Line)
+            {
+                float closestX = Math.Clamp(localX, -radiusX, radiusX);
+                float lineDx = localX - closestX;
+                float lineTolerance = padding + 0.045f;
+                hit |= lineDx * lineDx + localY * localY <=
+                    lineTolerance * lineTolerance;
+                continue;
+            }
+
+            if (radiusY <= 0.001f)
+                continue;
+
+            if (part.Primitive == BodyPrimitive.Box)
+            {
+                float outsideX = MathF.Max(0f, MathF.Abs(localX) - radiusX);
+                float outsideY = MathF.Max(0f, MathF.Abs(localY) - radiusY);
+                hit |= outsideX * outsideX + outsideY * outsideY <= padding * padding;
+            }
+            else
+            {
+                float expandedX = radiusX + padding;
+                float expandedY = radiusY + padding;
+                float normalizedX = localX / expandedX;
+                float normalizedY = localY / expandedY;
+                hit |= normalizedX * normalizedX + normalizedY * normalizedY <= 1f;
+            }
+
+            if (hit)
+                break;
+        }
+
+        return hit;
+    }
+
+    private static float GetMarkerWorldRadius(
+        in RenderUnitState unit,
+        float minimumMarkerRadius)
+    {
+        float footprint = MathF.Max(unit.Width, unit.Length);
+        return MathF.Max(
+            minimumMarkerRadius,
+            MathF.Max(0.13f, footprint * 0.125f));
     }
 
     private static float GetMarkerWorldRadius(
