@@ -16,7 +16,8 @@ public enum ContextMenuActionType
     OpenSelectionOverview,
     CreateSquad,
     SendSquad,
-    AttackTarget
+    AttackTarget,
+    MoveSelectedHere
 }
 
 public sealed class ContextMenuOverlay : IDisposable
@@ -93,7 +94,8 @@ public sealed class ContextMenuOverlay : IDisposable
         bool hasMultipleUnits,
         bool canCreateSquad,
         bool canSendSquad,
-        bool canAttackTarget)
+        bool canAttackTarget,
+        bool canMoveSelected)
     {
         if (IsOpen && _panel.GetGlobalBounds().Contains(position))
         {
@@ -109,7 +111,8 @@ public sealed class ContextMenuOverlay : IDisposable
             hasMultipleUnits,
             canCreateSquad,
             canSendSquad,
-            canAttackTarget);
+            canAttackTarget,
+            canMoveSelected);
     }
 
     public void OpenAt(
@@ -120,7 +123,8 @@ public sealed class ContextMenuOverlay : IDisposable
         bool hasMultipleUnits,
         bool canCreateSquad,
         bool canSendSquad,
-        bool canAttackTarget)
+        bool canAttackTarget,
+        bool canMoveSelected)
     {
         _actions.Clear();
         _labels.Clear();
@@ -136,6 +140,9 @@ public sealed class ContextMenuOverlay : IDisposable
 
         if (canAttackTarget)
             AddAction(ContextMenuActionType.AttackTarget, "Атаковать цель");
+
+        if (canMoveSelected)
+            AddAction(ContextMenuActionType.MoveSelectedHere, "Переместить выделенных сюда");
 
         if (canSendSquad)
             AddAction(ContextMenuActionType.SendSquad, "Отправить отряд сюда");

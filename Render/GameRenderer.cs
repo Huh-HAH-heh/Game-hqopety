@@ -69,7 +69,7 @@ public sealed class GameRenderer
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
     private int _selectedInfoSquadId;
-    private static readonly bool SquadControlsEnabled = true;
+    private static readonly bool SquadControlsEnabled = false;
     private readonly InfantrySquadManager _squadManager = new();
     private InfantryFormationType _infantryFormation = InfantryFormationType.Free;
     private bool _isSelectingUnits;
@@ -1108,7 +1108,7 @@ public sealed class GameRenderer
             $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
             $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
             "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "LMB drag=select units; RMB=menu; Shift+click=add selection; Attack=selected units; S=hold | " +
+            "LMB drag=select units; RMB=move/attack; Shift+RMB=menu; Shift+click=add selection; S=hold | " +
             "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=инфо " +
             "F6=vision F8=scale T=tracers F9=HUD | time controls: visual card | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
@@ -2748,6 +2748,9 @@ public sealed class GameRenderer
 
     private void SyncSquadTactics()
     {
+        if (!SquadControlsEnabled)
+            return;
+
         List<SquadMembershipSnapshot> squads = new(_squadManager.Squads.Count);
         foreach (InfantrySquad squad in _squadManager.Squads)
             squads.Add(new SquadMembershipSnapshot(squad.Id, squad.Members.ToArray()));
@@ -3258,6 +3261,10 @@ public sealed class GameRenderer
 
                 if (e.Button == Mouse.Button.Right)
                 {
+                    bool shiftPressed =
+                        Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                        Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+
                     _isSelectingUnits = false;
                     _selectionBox.Size = new Vector2f(0f, 0f);
 
@@ -3314,6 +3321,7 @@ public sealed class GameRenderer
                             selectedIds.Length > 0 &&
                             inputSnapshot != null &&
                             IsHostileToSelection(inputSnapshot, contextUnit);
+                        bool canMoveSelected = !hasUnit && selectedIds.Length > 0;
 
                         float destinationX = Math.Clamp(
                             worldPosition.X / TerrainTilePixelSize,
@@ -3336,7 +3344,7 @@ public sealed class GameRenderer
                             ? new UnitId(contextUnit.Index, contextUnit.Generation)
                             : default;
 
-                        if (hasUnit && canAttackTarget)
+                        if (hasUnit && canAttackTarget && !shiftPressed)
                         {
                             UnitId[] attackUnits = selectedIds;
                             UnitId attackTarget = new(contextUnit.Index, contextUnit.Generation);
@@ -3347,9 +3355,11 @@ public sealed class GameRenderer
                             return;
                         }
 
-                        if (!hasUnit && selectedIds.Length > 0)
+                        if (!hasUnit && selectedIds.Length > 0 && !shiftPressed)
                         {
-                            if (selectedIds.Length > 1 && TryBeginMoveLine(e.Position))
+                            if (SquadControlsEnabled &&
+                                selectedIds.Length > 1 &&
+                                TryBeginMoveLine(e.Position))
                                 return;
 
                             UnitId[] moveUnits = selectedIds;
@@ -3369,7 +3379,8 @@ public sealed class GameRenderer
                             selectedIds.Length > 1,
                             canCreateSquad,
                             canSendSquad,
-                            canAttackTarget);
+                            canAttackTarget,
+                            canMoveSelected);
 
                         if (!_contextMenuOverlay.IsOpen)
                             _contextMenuUnit = default;
@@ -3488,6 +3499,21 @@ public sealed class GameRenderer
                                         _unitSimulation.DrinkWater(contextUnit, 0.5f));
                                 }
                                 break;
+
+                            case ContextMenuActionType.MoveSelectedHere:
+                            {
+                                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+                                UnitId[] moveUnits = snapshot == null
+                                    ? Array.Empty<UnitId>()
+                                    : CaptureSelectedUnitIds(snapshot);
+                                if (moveUnits.Length > 0)
+                                {
+                                    Vector3 moveDestination = destination;
+                                    ExecuteSimulationCommand(() =>
+                                        IssueMoveOrderToPoint(moveUnits, moveDestination));
+                                }
+                                break;
+                            }
 
                             case ContextMenuActionType.CreateSquad:
                                 if (SquadControlsEnabled)
@@ -3871,23 +3897,28 @@ public sealed class GameRenderer
                 _showMovementForces = !_showMovementForces;
                 break;
             case DebugLayerType.SquadFlowWeights:
-                _showSquadFlowWeights = !_showSquadFlowWeights;
+                if (SquadControlsEnabled)
+                    _showSquadFlowWeights = !_showSquadFlowWeights;
                 break;
             case DebugLayerType.SquadFormation:
-                _showSquadFormation = !_showSquadFormation;
+                if (SquadControlsEnabled)
+                    _showSquadFormation = !_showSquadFormation;
                 break;
             case DebugLayerType.SquadStates:
-                _showSquadStates = !_showSquadStates;
+                if (SquadControlsEnabled)
+                    _showSquadStates = !_showSquadStates;
                 break;
             case DebugLayerType.SquadContacts:
-                _showSquadContacts = !_showSquadContacts;
+                if (SquadControlsEnabled)
+                    _showSquadContacts = !_showSquadContacts;
                 break;
         }
     }
 
     private bool ShouldCaptureSquadDebug =>
-        _showSquadFlowWeights || _showSquadFormation ||
-        _showSquadStates || _showSquadContacts;
+        SquadControlsEnabled &&
+        (_showSquadFlowWeights || _showSquadFormation ||
+         _showSquadStates || _showSquadContacts);
 
     private void RecordSimulationStep(float deltaTime)
     {
@@ -3990,7 +4021,7 @@ public sealed class GameRenderer
         if (TryHandleSquadHotkey(key))
             return;
 
-        if (key == Keyboard.Key.J)
+        if (SquadControlsEnabled && key == Keyboard.Key.J)
         {
             _infantryFormation = _infantryFormation switch
             {
@@ -4613,14 +4644,16 @@ public sealed class GameRenderer
 
         _movementTestScene.Start(_unitSimulation, _worldMap);
         UnitId[] members = _movementTestScene.Units.ToArray();
-        _movementTestSquadId = _squadManager.Create(members);
-        SyncSquadTactics();
+        _movementTestSquadId = 0;
 
         _selectedUnits.Clear();
         _selectedUnit = default;
-        SelectSquad(_movementTestSquadId, false);
-        if (members.Length > 0)
-            _selectedUnit = members[0];
+        for (int i = 0; i < members.Length; i++)
+        {
+            _selectedUnits.Add(members[i]);
+            if (!_selectedUnit.IsValid)
+                _selectedUnit = members[i];
+        }
 
         _mapRenderer.ResetVisualSettings();
         _visibleMaxLayer = 0;
@@ -4628,7 +4661,7 @@ public sealed class GameRenderer
         _showTerrainExtrema = false;
         _showHeightContours = true;
         _showContourLabels = true;
-        _showSquadFlowWeights = true;
+        _showSquadFlowWeights = false;
         _showMovementVectors = false;
         _showMovementForces = false;
         _showSquadFormation = false;
@@ -4638,12 +4671,9 @@ public sealed class GameRenderer
         _contextMenuOverlay?.Close();
         _menuPage = GameMenuPage.Closed;
 
-        int squadId = _movementTestSquadId;
-        IssueMoveOrder(
+        IssueMoveOrderToPoint(
             members,
-            _movementTestScene.InitialDestination,
-            InfantryFormationType.Free,
-            squadId);
+            _movementTestScene.InitialDestination);
 
         int centerX = _worldMap.TileWidth / 2;
         int centerY = _worldMap.TileHeight / 2;
