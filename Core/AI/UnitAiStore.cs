@@ -274,6 +274,7 @@ public sealed class UnitAiStore
         _playerOrderPosition[unitIndex] = Vector3.Zero;
         _playerOrderTarget[unitIndex] = default;
         _hasTarget[unitIndex] = false;
+        _autonomousMovementDisabled[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
         _lastSeenAimPoint[unitIndex] = Vector3.Zero;
