@@ -4678,7 +4678,7 @@ public sealed class GameRenderer
         _showHeightContours = true;
         _showContourLabels = true;
         _debugLayersOverlay?.Close();
-        _utilityAiDebugOverlay?.Close();
+        _showUtilityAiDebug = false;
         _unitGroupCardOverlay?.Close();
         _contextMenuOverlay?.Close();
         CloseUnitCards();
