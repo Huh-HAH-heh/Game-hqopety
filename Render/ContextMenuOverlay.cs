@@ -114,7 +114,8 @@ public sealed class ContextMenuOverlay : IDisposable
             canCreateSquad,
             canSendSquad,
             canAttackTarget,
-            canMoveSelected);
+            canMoveSelected,
+            autonomousMovementLabel);
     }
 
     public void OpenAt(
