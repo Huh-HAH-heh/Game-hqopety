@@ -3290,17 +3290,6 @@ public sealed class GameRenderer
                     return;
                 }
 
-                bool shiftPressed =
-                    Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                    Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-
-                if (shiftPressed)
-                {
-                    ScrollTerrainLayers(
-                        e.Delta > 0f ? 1 : -1);
-                    return;
-                }
-
                 Vector2f zoomAnchorBefore = _window.MapPixelToCoords(
                     wheelPixels,
                     _camera.View);
@@ -3381,10 +3370,6 @@ public sealed class GameRenderer
 
                 if (e.Button == Mouse.Button.Right)
                 {
-                    bool shiftPressed =
-                        Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                        Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-
                     _isSelectingUnits = false;
                     _selectionBox.Size = new Vector2f(0f, 0f);
 
@@ -3399,7 +3384,10 @@ public sealed class GameRenderer
                         _simulationControlOverlay?.Contains(contextPosition) == true ||
                         _combatStatusOverlay?.Contains(contextPosition) == true ||
                         _debugLayersOverlay?.Contains(contextPosition) == true ||
-                        (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(contextPosition) == true))
+                        (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(contextPosition) == true) ||
+                        (_liveAiEvolutionTrainer.Status?.HasStarted == true &&
+                         _aiEvolutionOverlay?.Contains(contextPosition) == true) ||
+                        _informationLayersRenderer?.ContainsHud(contextPosition) == true)
                     {
                         return;
                     }
@@ -3492,7 +3480,7 @@ public sealed class GameRenderer
                             ? new UnitId(contextUnit.Index, contextUnit.Generation)
                             : default;
 
-                        if (hasUnit && canAttackTarget && !shiftPressed)
+                        if (hasUnit && canAttackTarget)
                         {
                             UnitId[] attackUnits = selectedIds;
                             UnitId attackTarget = new(contextUnit.Index, contextUnit.Generation);
@@ -3503,7 +3491,7 @@ public sealed class GameRenderer
                             return;
                         }
 
-                        if (!hasUnit && selectedIds.Length > 0 && !shiftPressed)
+                        if (!hasUnit && selectedIds.Length > 0)
                         {
                             if (!_movementTestMode &&
                                 SquadControlsEnabled &&
@@ -3763,6 +3751,15 @@ public sealed class GameRenderer
                     _contextMenuUnit = default;
                 }
 
+                if (_gameMenuOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y,
+                        _menuPage) == true)
+                {
+                    return;
+                }
+
                 if (_gameMenuOverlay != null &&
                     _gameMenuOverlay.IsSliderHit(
                         _menuPage,
@@ -3789,6 +3786,24 @@ public sealed class GameRenderer
                 if (action.HasValue)
                 {
                     ApplyGameMenuAction(action.Value);
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _aiEvolutionOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _informationLayersRenderer?.HandleHudMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
                     return;
                 }
 
@@ -3829,6 +3844,33 @@ public sealed class GameRenderer
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
                     _bodyRigEditorOverlay.HandleMouseMoved(dragUiPosition);
+                    return;
+                }
+
+                if (_menuPage != GameMenuPage.Closed &&
+                    _gameMenuOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _aiEvolutionOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _informationLayersRenderer?.HandleHudMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
                     return;
                 }
 
@@ -3993,6 +4035,15 @@ public sealed class GameRenderer
                 }
 
                 if (e.Button != Mouse.Button.Left)
+                    return;
+
+                if (_gameMenuOverlay?.HandleMouseReleased() == true)
+                    return;
+
+                if (_aiEvolutionOverlay?.HandleMouseReleased() == true)
+                    return;
+
+                if (_informationLayersRenderer?.HandleHudMouseReleased() == true)
                     return;
 
                 if (_debugLayersOverlay?.HandleMouseReleased() == true)
