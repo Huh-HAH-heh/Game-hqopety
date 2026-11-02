@@ -69,7 +69,14 @@ public sealed class InformationLayersRenderer : IDisposable
     private readonly Text? _flowCostLabel;
     private readonly Text? _contactLabel;
 
-    private string _flowStatus = "Flow Field: отряд не выбран";
+    private string _flowStatus = "Flow Field: отключён";
+    private float _hudX = 18f;
+    private float _hudY = 72f;
+    private float _hudHeight = 118f;
+    private float _hudDragOffsetX;
+    private float _hudDragOffsetY;
+    private bool _hudDragging;
+    private bool _hudPositionInitialized;
 
     public InformationLayersRenderer()
     {
@@ -145,7 +152,45 @@ public sealed class InformationLayersRenderer : IDisposable
             DrawContacts(window, snapshot, tilePixels, selectedSquadId);
     }
 
-    /// <summary>Draw a fixed-size, draggable-card-style legend while the UI view is active.</summary>
+    public bool ContainsHud(Vector2i position) =>
+        _hudPanel.GetGlobalBounds().Contains(position);
+
+    public bool HandleHudMousePressed(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!ContainsHud(position))
+            return false;
+
+        if (_hudHeader.GetGlobalBounds().Contains(position))
+        {
+            _hudDragging = true;
+            _hudDragOffsetX = position.X - _hudPanel.Position.X;
+            _hudDragOffsetY = position.Y - _hudPanel.Position.Y;
+        }
+
+        return true;
+    }
+
+    public bool HandleHudMouseMoved(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!_hudDragging)
+            return false;
+
+        _hudX = Math.Clamp(position.X - _hudDragOffsetX, 8f,
+            Math.Max(8f, windowWidth - HudWidth - 8f));
+        _hudY = Math.Clamp(position.Y - _hudDragOffsetY, 8f,
+            Math.Max(8f, windowHeight - _hudHeight - 8f));
+        return true;
+    }
+
+    public bool HandleHudMouseReleased()
+    {
+        if (!_hudDragging)
+            return false;
+        _hudDragging = false;
+        return true;
+    }
+
+    /// <summary>Draw a movable screen-space information panel.</summary>
     public void DrawHud(
         RenderWindow window,
         uint windowWidth,
@@ -206,8 +251,18 @@ public sealed class InformationLayersRenderer : IDisposable
             AddRow("Доклады: жёлтая оценка позиции; круг — радиус ошибки; яркость — доверие.");
 
         float panelHeight = HudHeaderHeight + 12f + rows * 13f + 8f;
-        float x = 18f;
-        float y = 72f;
+        if (!_hudPositionInitialized)
+        {
+            _hudX = 18f;
+            _hudY = 72f;
+            _hudPositionInitialized = true;
+        }
+
+        _hudHeight = panelHeight;
+        _hudX = Math.Clamp(_hudX, 8f, Math.Max(8f, windowWidth - HudWidth - 8f));
+        _hudY = Math.Clamp(_hudY, 8f, Math.Max(8f, windowHeight - panelHeight - 8f));
+        float x = _hudX;
+        float y = _hudY;
 
         _hudPanel.Size = new Vector2f(HudWidth, panelHeight);
         _hudPanel.Position = new Vector2f(x, y);
