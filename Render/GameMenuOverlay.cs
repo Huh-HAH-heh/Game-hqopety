@@ -1876,11 +1876,17 @@ void main()
         _sceneName.DisplayedString = GetTestSceneName(settings.SelectedTestSceneIndex);
         _sceneActiveLabel.DisplayedString =
             $"Активная сцена: {GetTestSceneName(settings.ActiveTestSceneIndex)}";
-        _sceneScaleLabel.DisplayedString = settings.UnitsPerCombatFaction > 0
-            ? $"МАСШТАБ БОЯ: {settings.UnitsPerCombatFaction} НА СТОРОНУ"
-            : "МАСШТАБ БОЯ: доступен в дальнем бою";
-        _sceneEvolutionLabel.DisplayedString =
-            settings.AiEvolutionRunning ? "ОСТАНОВИТЬ ЭВОЛЮЦИЮ ИИ" : "ЗАПУСТИТЬ ЭВОЛЮЦИЮ ИИ";
+        _sceneScaleLabel.DisplayedString = settings.ActiveTestSceneIndex switch
+        {
+            2 => $"МАСШТАБ ДАЛЬНЕГО БОЯ: {settings.UnitsPerCombatFaction} НА СТОРОНУ",
+            4 => "МАСШТАБ: ФИКСИРОВАНО 80 НА СТОРОНУ",
+            _ => "МАСШТАБ ДОСТУПЕН НА КАРТЕ ДАЛЬНЕГО БОЯ"
+        };
+        _sceneEvolutionLabel.DisplayedString = settings.ActiveTestSceneIndex == 2
+            ? settings.AiEvolutionRunning
+                ? "ОСТАНОВИТЬ ЭВОЛЮЦИЮ ИИ"
+                : "ЗАПУСТИТЬ ЭВОЛЮЦИЮ ИИ"
+            : "ЭВОЛЮЦИЯ ДОСТУПНА НА КАРТЕ ДАЛЬНЕГО БОЯ";
         _sceneVisionLabel.DisplayedString = settings.VisionEnabled ? "ЗРЕНИЕ: ВКЛ" : "ЗРЕНИЕ: ВЫКЛ";
         _sceneTracersLabel.DisplayedString = settings.ShowCombatTracers ? "ТРАССЕРЫ: ВКЛ" : "ТРАССЕРЫ: ВЫКЛ";
         _sceneCombatHudLabel.DisplayedString = settings.ShowCombatHud ? "БОЕВОЙ HUD: ВКЛ" : "БОЕВОЙ HUD: ВЫКЛ";
