@@ -6,8 +6,8 @@ using Core.Unit;
 namespace RimClone.Render;
 
 /// <summary>
-/// Dedicated terrain course for checking physical route following and shared
-/// squad Flow Field movement without the mass-combat scene or autonomous AI.
+/// Dedicated no-enemy terrain course for checking physical route following
+/// and per-unit footprint-aware A* movement without mass combat or autonomous AI.
 /// </summary>
 public sealed class MovementTestScene
 {
@@ -75,7 +75,7 @@ public sealed class MovementTestScene
     }
 
     public string GetStatus() =>
-        $"Movement course | {_units.Length} colonists | S-pass ridges, gullies, terraces and narrow gates";
+        $"Курс A*: {_units.Length} колонистов без противников | гряды, овраги, террасы и узкие проходы";
 
     private static void BuildTerrain(WorldMap worldMap)
     {
@@ -147,9 +147,9 @@ public sealed class MovementTestScene
             }
         }
 
-        // Keep the course as a bounded navigation island. Besides preventing
-        // units from bypassing the S-ridges around their ends, this limits the
-        // one-time shared Flow Field build to the test area instead of the map.
+        // Keep the course as a bounded navigation island. This prevents
+        // units from bypassing the S-ridges around their ends and keeps the
+        // A* pathfinding test focused on the intended gates.
         for (int y = minY - 1; y <= maxY + 1; y++)
         {
             worldMap.SetNavigationBlocked(minX - 1, y, true);
