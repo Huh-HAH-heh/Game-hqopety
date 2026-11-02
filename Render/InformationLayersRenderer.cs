@@ -102,6 +102,7 @@ public sealed class InformationLayersRenderer : IDisposable
         View view,
         SimulationFrameSnapshot snapshot,
         float tilePixels,
+        float zoomLevel,
         int selectedSquadId,
         bool movementVectors,
         bool movementForces,
@@ -135,6 +136,7 @@ public sealed class InformationLayersRenderer : IDisposable
                 snapshot,
                 squad.Value,
                 tilePixels,
+                zoomLevel,
                 formation,
                 memberStates);
         }
@@ -447,6 +449,7 @@ public sealed class InformationLayersRenderer : IDisposable
         SimulationFrameSnapshot snapshot,
         SquadMovementDebugSnapshot squad,
         float tilePixels,
+        float zoomLevel,
         bool formation,
         bool states)
     {
@@ -512,21 +515,36 @@ public sealed class InformationLayersRenderer : IDisposable
                     unit.SquadMemberGoal.X * tilePixels,
                     unit.SquadMemberGoal.Y * tilePixels);
 
-                // Soft preferred positions are diagnostics, never rigid slots.
-                Line(
-                    _squadGeometry,
-                    actualPixel,
-                    preferredPixel,
-                    new Color(100, 190, 255, 190));
+                // Keep world-space diagnostics readable at every zoom:
+                // distant views omit tiny correction links, while slot markers
+                // retain a stable screen size.
+                Vector2 correction = preferred - new Vector2(
+                    unit.Position.X, unit.Position.Y);
+                float minimumLinkLength = 7f * zoomLevel / MathF.Max(0.01f, tilePixels);
+                float markerRadius = Math.Clamp(3f * zoomLevel, 0.65f, 7f);
+
+                if (correction.Length() >= minimumLinkLength)
+                {
+                    byte alpha = (byte)Math.Clamp(
+                        95f + correction.Length() * 10f,
+                        95f,
+                        190f);
+                    Line(
+                        _squadGeometry,
+                        actualPixel,
+                        preferredPixel,
+                        new Color(100, 190, 255, alpha));
+                }
+
                 Cross(
                     _squadGeometry,
                     preferredPixel,
-                    MathF.Max(3f, tilePixels * 0.15f),
+                    markerRadius,
                     new Color(100, 190, 255, 220));
                 Cross(
                     _squadGeometry,
                     terminalPixel,
-                    MathF.Max(3f, tilePixels * 0.13f),
+                    markerRadius * 0.82f,
                     new Color(190, 145, 255, 225));
             }
         }
