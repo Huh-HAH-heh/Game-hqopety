@@ -17,7 +17,8 @@ public enum ContextMenuActionType
     CreateSquad,
     SendSquad,
     AttackTarget,
-    MoveSelectedHere
+    MoveSelectedHere,
+    ToggleAutonomousMovement
 }
 
 public sealed class ContextMenuOverlay : IDisposable
@@ -95,7 +96,8 @@ public sealed class ContextMenuOverlay : IDisposable
         bool canCreateSquad,
         bool canSendSquad,
         bool canAttackTarget,
-        bool canMoveSelected)
+        bool canMoveSelected,
+        string? autonomousMovementLabel = null)
     {
         if (IsOpen && _panel.GetGlobalBounds().Contains(position))
         {
@@ -124,7 +126,8 @@ public sealed class ContextMenuOverlay : IDisposable
         bool canCreateSquad,
         bool canSendSquad,
         bool canAttackTarget,
-        bool canMoveSelected)
+        bool canMoveSelected,
+        string? autonomousMovementLabel = null)
     {
         _actions.Clear();
         _labels.Clear();
@@ -149,6 +152,9 @@ public sealed class ContextMenuOverlay : IDisposable
 
         if (canCreateSquad)
             AddAction(ContextMenuActionType.CreateSquad, "Создать отряд");
+
+        if (autonomousMovementLabel != null)
+            AddAction(ContextMenuActionType.ToggleAutonomousMovement, autonomousMovementLabel);
 
         if (hasMultipleUnits)
             AddAction(ContextMenuActionType.OpenSelectionOverview, "Обзор выделенных");
