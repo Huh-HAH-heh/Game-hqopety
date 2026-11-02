@@ -13,7 +13,8 @@ public enum GameMenuPage
 {
     Closed,
     Main,
-    Settings
+    Settings,
+    TestScenes
 }
 
 public enum GameMenuActionType
@@ -35,13 +36,25 @@ public enum GameMenuActionType
     ToggleContourLabels,
     ToggleUnitRig,
     ResetTerrainSettings,
-    OpenInformation
+    OpenInformation,
+    OpenTestScenes,
+    PreviousTestScene,
+    NextTestScene,
+    ApplyTestScene,
+    RestartTestScene,
+    ToggleAiEvolution,
+    CycleCombatScale,
+    ToggleVision,
+    ToggleCombatTracers,
+    ToggleCombatHud,
+    OpenBodyRigEditor
 }
 
 public readonly record struct GameMenuAction(
     GameMenuActionType Type,
     float Value = 0f,
-    int Layer = 0);
+    int Layer = 0,
+    int Index = 0);
 
 public readonly record struct GameSettingsSnapshot(
     int VisibleMaxLayer,
@@ -55,7 +68,14 @@ public readonly record struct GameSettingsSnapshot(
     int SelectedResolutionIndex,
     uint CurrentWidth,
     uint CurrentHeight,
-    bool ShowUnitRig);
+    bool ShowUnitRig,
+    int SelectedTestSceneIndex,
+    int ActiveTestSceneIndex,
+    bool AiEvolutionRunning,
+    bool VisionEnabled,
+    bool ShowCombatTracers,
+    bool ShowCombatHud,
+    int UnitsPerCombatFaction);
 
 public readonly record struct GameResolution(
     uint Width,
@@ -181,7 +201,7 @@ public sealed class GameMenuOverlay : IDisposable
     private const float SettingsWidth = 620f;
     private const float SettingsHeight = 650f;
     private const float MainWidth = 390f;
-    private const float MainHeight = 310f;
+    private const float MainHeight = 360f;
     private const float MaxContourLabelZoom = 2.5f;
 
     private readonly record struct HeightContourChunkKey(int RegionIndex);
@@ -322,6 +342,7 @@ void main()
 
     private readonly RectangleShape _resumeButton = ButtonShape();
     private readonly RectangleShape _settingsButton = ButtonShape();
+    private readonly RectangleShape _bodyEditorButton = ButtonShape();
     private readonly RectangleShape _exitButton = ButtonShape();
 
     private readonly RectangleShape _closeButton = ButtonShape(34f, 32f);
@@ -335,6 +356,24 @@ void main()
     private readonly RectangleShape _contoursButton = ButtonShape(136f, 34f);
     private readonly RectangleShape _contourLabelsButton = ButtonShape(136f, 34f);
     private readonly RectangleShape _unitRigButton = ButtonShape(576f, 32f);
+
+    private readonly RectangleShape _scenePrevious = ButtonShape(34f, 36f);
+    private readonly RectangleShape _sceneNext = ButtonShape(34f, 36f);
+    private readonly RectangleShape _sceneApply = ButtonShape(140f, 36f);
+    private readonly RectangleShape _sceneRestart = ButtonShape(270f, 36f);
+    private readonly RectangleShape _sceneScale = ButtonShape(270f, 36f);
+    private readonly RectangleShape _sceneEvolution = ButtonShape(270f, 36f);
+    private readonly RectangleShape _sceneVision = ButtonShape(270f, 36f);
+    private readonly RectangleShape _sceneTracers = ButtonShape(180f, 36f);
+    private readonly RectangleShape _sceneCombatHud = ButtonShape(180f, 36f);
+    private readonly RectangleShape _sceneUnitRig = ButtonShape(180f, 36f);
+    private readonly RectangleShape _sceneNameBox =
+        new RectangleShape(new Vector2f(340f, 36f))
+        {
+            FillColor = new Color(24, 31, 42),
+            OutlineColor = new Color(77, 91, 109),
+            OutlineThickness = 1f
+        };
 
     private readonly RectangleShape _resolutionBox =
         new RectangleShape(new Vector2f(232f, 36f))
@@ -382,6 +421,7 @@ void main()
     private readonly Text? _mainSubtitle;
     private readonly Text? _resumeLabel;
     private readonly Text? _settingsLabel;
+    private readonly Text? _bodyEditorLabel;
     private readonly Text? _exitLabel;
 
     private readonly Text? _settingsTitle;
@@ -404,6 +444,21 @@ void main()
     private readonly Text? _resetLabel;
     private readonly Text? _backLabel;
     private readonly Text? _keyboardHelp;
+    private readonly Text? _sceneHeading;
+    private readonly Text? _sceneName;
+    private readonly Text? _sceneActiveLabel;
+    private readonly Text? _sceneDescription;
+    private readonly Text? _scenePreviousLabel;
+    private readonly Text? _sceneNextLabel;
+    private readonly Text? _sceneApplyLabel;
+    private readonly Text? _sceneRestartLabel;
+    private readonly Text? _sceneScaleLabel;
+    private readonly Text? _sceneEvolutionLabel;
+    private readonly Text? _sceneVisionLabel;
+    private readonly Text? _sceneTracersLabel;
+    private readonly Text? _sceneCombatHudLabel;
+    private readonly Text? _sceneUnitRigLabel;
+    private Text?[] _testSceneTexts = Array.Empty<Text?>();
 
     private string _lastGridLabel = string.Empty;
     private string _lastExtremaLabel = string.Empty;
@@ -517,6 +572,8 @@ void main()
             "ПРОДОЛЖИТЬ", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _settingsLabel = CreateText(
             "НАСТРОЙКИ", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _bodyEditorLabel = CreateText(
+            "РЕДАКТОР ТЕЛА И АРХЕТИПОВ", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _exitLabel = CreateText(
             "ВЫХОД", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
 
@@ -562,8 +619,23 @@ void main()
         _backLabel = CreateText(
             "НАЗАД", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _keyboardHelp = CreateText(
-            "F2 — настройки   PgUp/PgDn — срез Z   Shift+PgUp/PgDn — 1 м   Shift+колесо — Z   Колесо — масштаб   WASD — камера",
+            "Колесо — масштаб   •   Средняя кнопка мыши — панорама",
             10, new Color(145, 157, 173), new Vector2f(0f, 0f));
+
+        _sceneHeading = CreateText("ТЕСТОВЫЕ СЦЕНЫ", 13, new Color(216, 224, 234), new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneName = CreateText("", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneActiveLabel = CreateText("", 11, new Color(154, 168, 185), new Vector2f(0f, 0f));
+        _sceneDescription = CreateText("Смена сцены пересоздаёт окружение. Курс движения по умолчанию не содержит врагов.", 10, new Color(170, 184, 201), new Vector2f(0f, 0f));
+        _scenePreviousLabel = CreateText("‹", 22, Color.White, new Vector2f(0f, 0f));
+        _sceneNextLabel = CreateText("›", 22, Color.White, new Vector2f(0f, 0f));
+        _sceneApplyLabel = CreateText("ЗАПУСТИТЬ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneRestartLabel = CreateText("ПЕРЕЗАПУСТИТЬ СЦЕНУ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneScaleLabel = CreateText("", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneEvolutionLabel = CreateText("", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneVisionLabel = CreateText("", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneTracersLabel = CreateText("", 10, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneCombatHudLabel = CreateText("", 10, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneUnitRigLabel = CreateText("", 10, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
 
         _mainMenuTexts = new Text?[]
         {
@@ -571,6 +643,7 @@ void main()
             _mainSubtitle,
             _resumeLabel,
             _settingsLabel,
+            _bodyEditorLabel,
             _exitLabel
         };
 
@@ -596,6 +669,15 @@ void main()
             _resetLabel,
             _backLabel,
             _keyboardHelp
+        };
+
+        _testSceneTexts = new Text?[]
+        {
+            _settingsTitle, _settingsSubtitle, _closeLabel, _sceneHeading,
+            _sceneName, _sceneActiveLabel, _sceneDescription, _scenePreviousLabel,
+            _sceneNextLabel, _sceneApplyLabel, _sceneRestartLabel, _sceneScaleLabel,
+            _sceneEvolutionLabel, _sceneVisionLabel, _sceneTracersLabel,
+            _sceneCombatHudLabel, _sceneUnitRigLabel, _backLabel
         };
     }
 
@@ -676,9 +758,41 @@ void main()
             if (_settingsButton.GetGlobalBounds().Contains(point))
                 return new GameMenuAction(GameMenuActionType.OpenSettings);
 
+            if (_bodyEditorButton.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.OpenBodyRigEditor);
+
             if (_exitButton.GetGlobalBounds().Contains(point))
                 return new GameMenuAction(GameMenuActionType.Exit);
 
+            return null;
+        }
+
+        if (page == GameMenuPage.TestScenes)
+        {
+            if (_closeButton.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.BackToMainMenu);
+            if (_backButton.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.BackToSettings);
+            if (_scenePrevious.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.PreviousTestScene);
+            if (_sceneNext.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.NextTestScene);
+            if (_sceneApply.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.ApplyTestScene);
+            if (_sceneRestart.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.RestartTestScene);
+            if (_sceneScale.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.CycleCombatScale);
+            if (_sceneEvolution.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.ToggleAiEvolution);
+            if (_sceneVision.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.ToggleVision);
+            if (_sceneTracers.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.ToggleCombatTracers);
+            if (_sceneCombatHud.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.ToggleCombatHud);
+            if (_sceneUnitRig.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.ToggleUnitRig);
             return null;
         }
 
@@ -725,7 +839,7 @@ void main()
 
         if (_unitRigButton.GetGlobalBounds().Contains(point))
         {
-            return new GameMenuAction(GameMenuActionType.ToggleUnitRig);
+            return new GameMenuAction(GameMenuActionType.OpenTestScenes);
         }
 
         if (_resetButton.GetGlobalBounds().Contains(point))
@@ -1381,6 +1495,12 @@ void main()
             return;
         }
 
+        if (page == GameMenuPage.TestScenes)
+        {
+            DrawTestScenes(window, settings, mousePosition);
+            return;
+        }
+
         DrawSettings(window, settings, mousePosition);
     }
 
@@ -1408,8 +1528,10 @@ void main()
             mainX + 24f, mainY + 94f, MainWidth - 48f, 40f, "ПРОДОЛЖИТЬ");
         SetButtonLayout(_settingsButton, _settingsLabel!,
             mainX + 24f, mainY + 146f, MainWidth - 48f, 40f, "НАСТРОЙКИ");
+        SetButtonLayout(_bodyEditorButton, _bodyEditorLabel!,
+            mainX + 24f, mainY + 198f, MainWidth - 48f, 40f, "РЕДАКТОР ТЕЛА И АРХЕТИПОВ");
         SetButtonLayout(_exitButton, _exitLabel!,
-            mainX + 24f, mainY + 198f, MainWidth - 48f, 40f, "ВЫХОД");
+            mainX + 24f, mainY + 250f, MainWidth - 48f, 40f, "ВЫХОД");
 
         _panel.Position = new Vector2f(settingsX, settingsY);
         _accent.Position = new Vector2f(settingsX + 1f, settingsY + 1f);
@@ -1428,6 +1550,32 @@ void main()
         _resolutionValue!.Position = new Vector2f(settingsX + 107f, settingsY + 111f);
         _applyResolutionLabel!.Position = new Vector2f(settingsX + 398f, settingsY + 113f);
         _resolutionCurrent!.Position = new Vector2f(settingsX + 22f, settingsY + 145f);
+
+        _sceneHeading.Position = new Vector2f(settingsX + 22f, settingsY + 82f);
+        _scenePrevious.Position = new Vector2f(settingsX + 22f, settingsY + 111f);
+        _sceneNameBox.Position = new Vector2f(settingsX + 62f, settingsY + 111f);
+        _sceneNext.Position = new Vector2f(settingsX + 410f, settingsY + 111f);
+        _sceneApply.Position = new Vector2f(settingsX + 454f, settingsY + 111f);
+        _scenePreviousLabel.Position = new Vector2f(settingsX + 31f, settingsY + 109f);
+        _sceneNextLabel.Position = new Vector2f(settingsX + 419f, settingsY + 109f);
+        _sceneName.Position = new Vector2f(settingsX + 74f, settingsY + 121f);
+        _sceneActiveLabel.Position = new Vector2f(settingsX + 22f, settingsY + 158f);
+        _sceneDescription.Position = new Vector2f(settingsX + 22f, settingsY + 180f);
+        _sceneRestart.Position = new Vector2f(settingsX + 22f, settingsY + 222f);
+        _sceneScale.Position = new Vector2f(settingsX + 310f, settingsY + 222f);
+        _sceneEvolution.Position = new Vector2f(settingsX + 22f, settingsY + 270f);
+        _sceneVision.Position = new Vector2f(settingsX + 310f, settingsY + 270f);
+        _sceneTracers.Position = new Vector2f(settingsX + 22f, settingsY + 318f);
+        _sceneCombatHud.Position = new Vector2f(settingsX + 214f, settingsY + 318f);
+        _sceneUnitRig.Position = new Vector2f(settingsX + 406f, settingsY + 318f);
+        _sceneApplyLabel.Position = new Vector2f(settingsX + 470f, settingsY + 122f);
+        _sceneRestartLabel.Position = new Vector2f(settingsX + 30f, settingsY + 233f);
+        _sceneScaleLabel.Position = new Vector2f(settingsX + 318f, settingsY + 233f);
+        _sceneEvolutionLabel.Position = new Vector2f(settingsX + 30f, settingsY + 281f);
+        _sceneVisionLabel.Position = new Vector2f(settingsX + 318f, settingsY + 281f);
+        _sceneTracersLabel.Position = new Vector2f(settingsX + 22f, settingsY + 329f);
+        _sceneCombatHudLabel.Position = new Vector2f(settingsX + 214f, settingsY + 329f);
+        _sceneUnitRigLabel.Position = new Vector2f(settingsX + 406f, settingsY + 329f);
 
         _divider.Position = new Vector2f(settingsX + 18f, settingsY + 168f);
 
@@ -1505,7 +1653,7 @@ void main()
         SetText(
             _unitRigLabel,
             ref _lastUnitRigLabel,
-            settings.ShowUnitRig ? "ЮНИТЫ: ХИТБОКСЫ" : "ЮНИТЫ: ТОЛЬКО МАРКЕР");
+            "ТЕСТОВЫЕ СЦЕНЫ И ПАРАМЕТРЫ ЗАПУСКА");
 
         CenterButtonLabel(_gridButton, _gridLabel!);
         CenterButtonLabel(_extremaButton, _extremaLabel!);
@@ -1526,12 +1674,14 @@ void main()
     {
         UpdateHover(_resumeButton, mouse);
         UpdateHover(_settingsButton, mouse);
+        UpdateHover(_bodyEditorButton, mouse);
         UpdateHover(_exitButton, mouse);
 
         window.Draw(_mainPanel);
         window.Draw(_mainAccent);
         window.Draw(_resumeButton);
         window.Draw(_settingsButton);
+        window.Draw(_bodyEditorButton);
         window.Draw(_exitButton);
 
         DrawText(window, _mainMenuTexts);
@@ -1614,8 +1764,66 @@ void main()
         DrawText(window, _settingsTexts);
     }
 
+    private void DrawTestScenes(RenderWindow window, GameSettingsSnapshot settings, Vector2i mouse)
+    {
+        UpdateHover(_closeButton, mouse);
+        UpdateHover(_backButton, mouse);
+        UpdateHover(_scenePrevious, mouse);
+        UpdateHover(_sceneNext, mouse);
+        UpdateHover(_sceneApply, mouse);
+        UpdateHover(_sceneRestart, mouse);
+        UpdateHover(_sceneScale, mouse);
+        UpdateHover(_sceneEvolution, mouse);
+        UpdateHover(_sceneVision, mouse);
+        UpdateHover(_sceneTracers, mouse);
+        UpdateHover(_sceneCombatHud, mouse);
+        UpdateHover(_sceneUnitRig, mouse);
+
+        _sceneName.DisplayedString = GetTestSceneName(settings.SelectedTestSceneIndex);
+        _sceneActiveLabel.DisplayedString =
+            $"Активная сцена: {GetTestSceneName(settings.ActiveTestSceneIndex)}";
+        _sceneScaleLabel.DisplayedString = settings.UnitsPerCombatFaction > 0
+            ? $"МАСШТАБ БОЯ: {settings.UnitsPerCombatFaction} НА СТОРОНУ"
+            : "МАСШТАБ БОЯ: доступен в дальнем бою";
+        _sceneEvolutionLabel.DisplayedString =
+            settings.AiEvolutionRunning ? "ОСТАНОВИТЬ ЭВОЛЮЦИЮ ИИ" : "ЗАПУСТИТЬ ЭВОЛЮЦИЮ ИИ";
+        _sceneVisionLabel.DisplayedString = settings.VisionEnabled ? "ЗРЕНИЕ: ВКЛ" : "ЗРЕНИЕ: ВЫКЛ";
+        _sceneTracersLabel.DisplayedString = settings.ShowCombatTracers ? "ТРАССЕРЫ: ВКЛ" : "ТРАССЕРЫ: ВЫКЛ";
+        _sceneCombatHudLabel.DisplayedString = settings.ShowCombatHud ? "БОЕВОЙ HUD: ВКЛ" : "БОЕВОЙ HUD: ВЫКЛ";
+        _sceneUnitRigLabel.DisplayedString = settings.ShowUnitRig ? "ХИТБОКСЫ: ВКЛ" : "ХИТБОКСЫ: ВЫКЛ";
+
+        window.Draw(_panel);
+        window.Draw(_accent);
+        window.Draw(_closeButton);
+        window.Draw(_backButton);
+        window.Draw(_scenePrevious);
+        window.Draw(_sceneNameBox);
+        window.Draw(_sceneNext);
+        window.Draw(_sceneApply);
+        window.Draw(_sceneRestart);
+        window.Draw(_sceneScale);
+        window.Draw(_sceneEvolution);
+        window.Draw(_sceneVision);
+        window.Draw(_sceneTracers);
+        window.Draw(_sceneCombatHud);
+        window.Draw(_sceneUnitRig);
+        DrawText(window, _testSceneTexts);
+    }
+
+    public static int TestSceneCount => 4;
+
+    public static string GetTestSceneName(int index) =>
+        Math.Clamp(index, 0, TestSceneCount - 1) switch
+        {
+            0 => "Курс движения — без врагов",
+            1 => "Восприятие и укрытия",
+            2 => "Дальний бой",
+            _ => "Рельеф и генерация мира"
+        };
+
     public bool IsSettingsPanelHit(Vector2i point, GameMenuPage page) =>
-        page == GameMenuPage.Settings && _panel.GetGlobalBounds().Contains(point);
+        page is GameMenuPage.Settings or GameMenuPage.TestScenes &&
+        _panel.GetGlobalBounds().Contains(point);
 
     public void SetExtremes(
         ushort minimumHeightUnits,
@@ -1751,6 +1959,19 @@ void main()
 
     public void Dispose()
     {
+        _sceneNameBox.Dispose();
+        _sceneUnitRig.Dispose();
+        _sceneCombatHud.Dispose();
+        _sceneTracers.Dispose();
+        _sceneVision.Dispose();
+        _sceneEvolution.Dispose();
+        _sceneScale.Dispose();
+        _sceneRestart.Dispose();
+        _sceneApply.Dispose();
+        _sceneNext.Dispose();
+        _scenePrevious.Dispose();
+        _bodyEditorButton.Dispose();
+
         for (int i = 0; i < _texts.Count; i++)
             _texts[i].Dispose();
 
