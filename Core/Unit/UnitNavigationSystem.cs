@@ -32,8 +32,8 @@ public sealed class UnitNavigationSystem
     private const int MinRouteBuildsPerUpdate = 2;
     private const int MaxRouteBuildsPerUpdate = 8;
     private const int MaxExpandedNodesPerSearch = 16_384;
-    private const float MaxRouteChunkCost = 14f;
-    private const float RouteRefreshIntervalSeconds = 2.25f;
+    private const float MaxRouteChunkCost = 28f;
+    private const float RouteRefreshIntervalSeconds = 5f;
     private const float RouteRefreshRetrySeconds = 0.5f;
     private const float DirectFallbackDistance = 3f;
     private const int FailedRouteRetryUpdates = 120;

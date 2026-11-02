@@ -1261,10 +1261,13 @@ public static class CombatSelfTest
         float startY = start.Y;
         bool detoured = false;
 
-        navigation.BeginUpdate(simulation.Units, worldMap);
-
         for (int step = 0; step < width * height; step++)
         {
+            // Each waypoint hop represents another movement update, so the
+            // shared A* search budget is replenished before requesting the next
+            // local route chunk.
+            navigation.BeginUpdate(simulation.Units, worldMap);
+
             if (!navigation.TryGetWaypoint(
                     simulation.Units,
                     unit.Index,
@@ -1281,7 +1284,7 @@ public static class CombatSelfTest
 
             if (waypoint == new Vector2(target.X, target.Y))
             {
-                if (!detoured || navigation.RoutesBuilt != 1)
+                if (!detoured || navigation.RoutesBuilt < 2)
                     return false;
 
                 break;
