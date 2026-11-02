@@ -42,7 +42,7 @@ public sealed class DebugLayersOverlay : IDisposable
         "Utility AI — оценки",
         "Движение — векторы скорости",
         "Движение — силы мотора",
-        "Отряд — веса Flow Field",
+        "Отряд — Flow Field (отключён)",
         "Отряд — формация и связность",
         "Отряд — состояния участников",
         "Отряд — общие контакты"
@@ -128,7 +128,7 @@ public sealed class DebugLayersOverlay : IDisposable
         {
             FillColor = new Color(14, 24, 33)
         };
-        _footer = new Text(_font, "Вес поля: стоимость до цели  •  Скорость / сила мотора", 9)
+        _footer = new Text(_font, "Flow Field отключён  •  Скорость / сила мотора", 9)
         {
             FillColor = new Color(145, 160, 178)
         };
