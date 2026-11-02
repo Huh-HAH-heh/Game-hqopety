@@ -3328,7 +3328,15 @@ public sealed class GameRenderer
                     return;
                 }
 
+                Vector2f zoomAnchorBefore = _window.MapPixelToCoords(
+                    wheelPixels,
+                    _camera.View);
                 _camera.HandleZoom(e.Delta);
+                Vector2f zoomAnchorAfter = _window.MapPixelToCoords(
+                    wheelPixels,
+                    _camera.View);
+                _camera.CenterOnPosition(
+                    _camera.View.Center + zoomAnchorBefore - zoomAnchorAfter);
             };
 
         _window.MouseButtonPressed +=
