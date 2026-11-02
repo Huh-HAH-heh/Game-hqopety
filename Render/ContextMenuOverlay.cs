@@ -26,7 +26,12 @@ public enum ContextMenuActionType
     SetFormationDispersedLine,
     SetFormationPerimeter,
     ToggleKeepFormationInCombat,
-    ToggleAutonomousMovement
+    ToggleAutonomousMovement,
+    HoldSelected,
+    CycleFireMode,
+    CycleAimMode,
+    CycleTargetMode,
+    CycleAmmunition
 }
 
 public sealed class ContextMenuOverlay : IDisposable
@@ -108,7 +113,9 @@ public sealed class ContextMenuOverlay : IDisposable
         string? autonomousMovementLabel = null,
         bool canConfigureFormation = false,
         string? selectedFormationLabel = null,
-        string? keepFormationLabel = null)
+        string? keepFormationLabel = null,
+        bool canHoldSelected = false,
+        bool canConfigureWeapons = false)
     {
         if (IsOpen && _panel.GetGlobalBounds().Contains(position))
         {
@@ -129,7 +136,9 @@ public sealed class ContextMenuOverlay : IDisposable
             autonomousMovementLabel,
             canConfigureFormation,
             selectedFormationLabel,
-            keepFormationLabel);
+            keepFormationLabel,
+            canHoldSelected,
+            canConfigureWeapons);
     }
 
     public void OpenAt(
@@ -145,7 +154,9 @@ public sealed class ContextMenuOverlay : IDisposable
         string? autonomousMovementLabel = null,
         bool canConfigureFormation = false,
         string? selectedFormationLabel = null,
-        string? keepFormationLabel = null)
+        string? keepFormationLabel = null,
+        bool canHoldSelected = false,
+        bool canConfigureWeapons = false)
     {
         _actions.Clear();
         _labels.Clear();
@@ -157,6 +168,17 @@ public sealed class ContextMenuOverlay : IDisposable
             AddAction(ContextMenuActionType.OpenUnitAnatomy, "Органы / части тела");
             AddAction(ContextMenuActionType.GiveFood, "Рацион (+700 ккал)");
             AddAction(ContextMenuActionType.GiveWater, "Вода (+0,5 л)");
+        }
+
+        if (canHoldSelected)
+            AddAction(ContextMenuActionType.HoldSelected, "Удерживать позицию");
+
+        if (canConfigureWeapons)
+        {
+            AddAction(ContextMenuActionType.CycleFireMode, "Переключить режим огня");
+            AddAction(ContextMenuActionType.CycleAimMode, "Переключить режим прицеливания");
+            AddAction(ContextMenuActionType.CycleTargetMode, "Переключить режим выбора цели");
+            AddAction(ContextMenuActionType.CycleAmmunition, "Следующий тип боеприпаса");
         }
 
         if (canConfigureFormation)
