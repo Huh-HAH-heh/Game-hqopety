@@ -44,6 +44,7 @@ public enum GameMenuActionType
     ApplyTestScene,
     RestartTestScene,
     ToggleAiEvolution,
+    ToggleAi,
     CycleCombatScale,
     ToggleVision,
     ToggleCombatTracers,
@@ -73,6 +74,7 @@ public readonly record struct GameSettingsSnapshot(
     int SelectedTestSceneIndex,
     int ActiveTestSceneIndex,
     bool AiEvolutionRunning,
+    bool AiEnabled,
     bool VisionEnabled,
     bool ShowCombatTracers,
     bool ShowCombatHud,
@@ -364,6 +366,7 @@ void main()
     private readonly RectangleShape _sceneRestart = ButtonShape(270f, 36f);
     private readonly RectangleShape _sceneScale = ButtonShape(270f, 36f);
     private readonly RectangleShape _sceneEvolution = ButtonShape(270f, 36f);
+    private readonly RectangleShape _sceneAi = ButtonShape(270f, 36f);
     private readonly RectangleShape _sceneVision = ButtonShape(270f, 36f);
     private readonly RectangleShape _sceneTracers = ButtonShape(180f, 36f);
     private readonly RectangleShape _sceneCombatHud = ButtonShape(180f, 36f);
@@ -455,6 +458,7 @@ void main()
     private readonly Text? _sceneRestartLabel;
     private readonly Text? _sceneScaleLabel;
     private readonly Text? _sceneEvolutionLabel;
+    private readonly Text? _sceneAiLabel;
     private readonly Text? _sceneVisionLabel;
     private readonly Text? _sceneTracersLabel;
     private readonly Text? _sceneCombatHudLabel;
@@ -644,6 +648,7 @@ void main()
         _sceneRestartLabel = CreateText("ПЕРЕЗАПУСТИТЬ СЦЕНУ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _sceneScaleLabel = CreateText("", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _sceneEvolutionLabel = CreateText("", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _sceneAiLabel = CreateText("", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _sceneVisionLabel = CreateText("", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _sceneTracersLabel = CreateText("", 10, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _sceneCombatHudLabel = CreateText("", 10, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
@@ -688,7 +693,7 @@ void main()
             _settingsTitle, _settingsSubtitle, _closeLabel, _sceneHeading,
             _sceneName, _sceneActiveLabel, _sceneDescription, _scenePreviousLabel,
             _sceneNextLabel, _sceneApplyLabel, _sceneRestartLabel, _sceneScaleLabel,
-            _sceneEvolutionLabel, _sceneVisionLabel, _sceneTracersLabel,
+            _sceneEvolutionLabel, _sceneAiLabel, _sceneVisionLabel, _sceneTracersLabel,
             _sceneCombatHudLabel, _sceneUnitRigLabel, _backLabel
         };
     }
@@ -797,6 +802,8 @@ void main()
                 return new GameMenuAction(GameMenuActionType.CycleCombatScale);
             if (_sceneEvolution.GetGlobalBounds().Contains(point))
                 return new GameMenuAction(GameMenuActionType.ToggleAiEvolution);
+            if (_sceneAi.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.ToggleAi);
             if (_sceneVision.GetGlobalBounds().Contains(point))
                 return new GameMenuAction(GameMenuActionType.ToggleVision);
             if (_sceneTracers.GetGlobalBounds().Contains(point))
@@ -1659,6 +1666,8 @@ void main()
         _sceneScaleLabel.Position = new Vector2f(settingsX + 318f, settingsY + 233f);
         _sceneEvolutionLabel.Position = new Vector2f(settingsX + 30f, settingsY + 281f);
         _sceneVisionLabel.Position = new Vector2f(settingsX + 318f, settingsY + 281f);
+        _sceneAi.Position = new Vector2f(settingsX + 22f, settingsY + 366f);
+        _sceneAiLabel!.Position = new Vector2f(settingsX + 30f, settingsY + 377f);
         _sceneTracersLabel.Position = new Vector2f(settingsX + 22f, settingsY + 329f);
         _sceneCombatHudLabel.Position = new Vector2f(settingsX + 214f, settingsY + 329f);
         _sceneUnitRigLabel.Position = new Vector2f(settingsX + 406f, settingsY + 329f);
@@ -1868,6 +1877,7 @@ void main()
         UpdateHover(_sceneRestart, mouse);
         UpdateHover(_sceneScale, mouse);
         UpdateHover(_sceneEvolution, mouse);
+        UpdateHover(_sceneAi, mouse);
         UpdateHover(_sceneVision, mouse);
         UpdateHover(_sceneTracers, mouse);
         UpdateHover(_sceneCombatHud, mouse);
@@ -1887,6 +1897,7 @@ void main()
                 ? "ОСТАНОВИТЬ ЭВОЛЮЦИЮ ИИ"
                 : "ЗАПУСТИТЬ ЭВОЛЮЦИЮ ИИ"
             : "ЭВОЛЮЦИЯ ДОСТУПНА НА КАРТЕ ДАЛЬНЕГО БОЯ";
+        _sceneAiLabel!.DisplayedString = settings.AiEnabled ? "ИИ: ВКЛ" : "ИИ: ВЫКЛ";
         _sceneVisionLabel.DisplayedString = settings.VisionEnabled ? "ЗРЕНИЕ: ВКЛ" : "ЗРЕНИЕ: ВЫКЛ";
         _sceneTracersLabel.DisplayedString = settings.ShowCombatTracers ? "ТРАССЕРЫ: ВКЛ" : "ТРАССЕРЫ: ВЫКЛ";
         _sceneCombatHudLabel.DisplayedString = settings.ShowCombatHud ? "БОЕВОЙ HUD: ВКЛ" : "БОЕВОЙ HUD: ВЫКЛ";
@@ -1903,6 +1914,7 @@ void main()
         window.Draw(_sceneRestart);
         window.Draw(_sceneScale);
         window.Draw(_sceneEvolution);
+        window.Draw(_sceneAi);
         window.Draw(_sceneVision);
         window.Draw(_sceneTracers);
         window.Draw(_sceneCombatHud);
@@ -2066,6 +2078,7 @@ void main()
         _sceneTracers.Dispose();
         _sceneVision.Dispose();
         _sceneEvolution.Dispose();
+        _sceneAi.Dispose();
         _sceneScale.Dispose();
         _sceneRestart.Dispose();
         _sceneApply.Dispose();
