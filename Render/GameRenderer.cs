@@ -3073,13 +3073,14 @@ public sealed class GameRenderer
 
         while (true)
         {
-            // Terrain generation and spawning are deferred until the window exists;
-            // Draw() displays a responsive loading frame during this one-off work.
+            // Long-range combat creates a large roster; do it on the worker
+            // while Draw() keeps the render window responsive.
             if (_massCombatMode && !Volatile.Read(ref _massCombatWorldReady))
             {
                 try
                 {
                     _massCombatTestScene.Start(_unitSimulation, _worldMap);
+                    _startupMassCombatSelectionApplied = false;
                     Volatile.Write(ref _massCombatWorldReady, true);
                 }
                 catch (Exception exception)
@@ -3122,10 +3123,16 @@ public sealed class GameRenderer
                 try
                 {
                     _unitSimulation.BeginMetricsFrame();
-                    _massCombatTestScene.Update(
-                        _unitSimulation,
-                        _worldMap,
-                        updateDeltaTime);
+                    if (_visionTestMode)
+                        _visionTestScene.UpdateAiDemo(
+                            _unitSimulation,
+                            _worldMap,
+                            updateDeltaTime);
+                    if (_massCombatMode)
+                        _massCombatTestScene.Update(
+                            _unitSimulation,
+                            _worldMap,
+                            updateDeltaTime);
                     _unitSimulation.Update(_worldMap, updateDeltaTime);
                     _liveAiEvolutionTrainer.Update(
                         _unitSimulation,
@@ -4632,7 +4639,14 @@ public sealed class GameRenderer
             _selectedResolutionIndex,
             currentSize.X,
             currentSize.Y,
-            _showUnitRig);
+            _showUnitRig,
+            _selectedTestSceneIndex,
+            _activeTestSceneIndex,
+            _liveAiEvolutionTrainer.Status?.IsRunning == true,
+            _unitSimulation.VisionEnabled,
+            _showCombatTracers,
+            _showCombatHud,
+            _massCombatMode ? _massCombatTestScene.UnitsPerFaction : 0);
     }
 
     private void ApplyGameMenuAction(GameMenuAction action)
@@ -4644,6 +4658,83 @@ public sealed class GameRenderer
                 if (_debugLayersOverlay?.IsOpen != true)
                     _debugLayersOverlay?.Toggle();
                 _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.OpenTestScenes:
+                _menuPage = GameMenuPage.TestScenes;
+                _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.BackToSettings:
+                _menuPage = GameMenuPage.Settings;
+                _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.PreviousTestScene:
+                _selectedTestSceneIndex =
+                    (_selectedTestSceneIndex - 1 + GameMenuOverlay.TestSceneCount) %
+                    GameMenuOverlay.TestSceneCount;
+                break;
+
+            case GameMenuActionType.NextTestScene:
+                _selectedTestSceneIndex =
+                    (_selectedTestSceneIndex + 1) % GameMenuOverlay.TestSceneCount;
+                break;
+
+            case GameMenuActionType.ApplyTestScene:
+            case GameMenuActionType.RestartTestScene:
+                ActivateTestScene(_selectedTestSceneIndex);
+                _menuPage = GameMenuPage.Closed;
+                break;
+
+            case GameMenuActionType.ToggleAiEvolution:
+                if (_massCombatMode)
+                {
+                    ExecuteSimulationCommand(() =>
+                        _liveAiEvolutionTrainer.Toggle(
+                            _unitSimulation, _massCombatTestScene, _worldMap));
+                }
+                else
+                {
+                    Console.WriteLine("[EVOLVE LIVE] Доступно только на карте дальнего боя.");
+                }
+                break;
+
+            case GameMenuActionType.CycleCombatScale:
+                if (_massCombatMode &&
+                    _liveAiEvolutionTrainer.Status?.IsRunning != true)
+                {
+                    StopSimulationThread();
+                    _massCombatTestScene.CycleScale(_unitSimulation, _worldMap);
+                    SetSelectedUnit(_massCombatTestScene.FirstMeleeUnit);
+                    CenterOnMeleeBattle();
+                    StartSimulationThread();
+                }
+                break;
+
+            case GameMenuActionType.ToggleVision:
+                ExecuteSimulationCommand(() =>
+                    _unitSimulation.VisionEnabled = !_unitSimulation.VisionEnabled);
+                break;
+
+            case GameMenuActionType.ToggleCombatTracers:
+                _showCombatTracers = !_showCombatTracers;
+                break;
+
+            case GameMenuActionType.ToggleCombatHud:
+                _showCombatHud = !_showCombatHud;
+                if (_combatStatusOverlay != null)
+                    _combatStatusOverlay.Visible = _showCombatHud;
+                break;
+
+            case GameMenuActionType.OpenBodyRigEditor:
+                CloseUnitCards();
+                _unitGroupCardOverlay?.Close();
+                _contextMenuOverlay?.Close();
+                _contextMenuUnit = default;
+                _menuPage = GameMenuPage.Closed;
+                _draggingMenuSlider = null;
+                _bodyRigEditorOverlay?.Open();
                 break;
 
             case GameMenuActionType.OpenMainMenu:
@@ -4776,6 +4867,142 @@ public sealed class GameRenderer
                 _visibleMaxLayer + direction,
                 0,
                 _worldMap.LayerCount - 1);
+    }
+
+    private void ActivateTestScene(int sceneIndex)
+    {
+        sceneIndex = Math.Clamp(sceneIndex, 0, GameMenuOverlay.TestSceneCount - 1);
+        if (_liveAiEvolutionTrainer.Status?.IsRunning == true &&
+            sceneIndex != 2)
+        {
+            Console.WriteLine("[SCENE] Останови эволюцию ИИ перед сменой тестовой карты.");
+            return;
+        }
+
+        StopSimulationThread();
+
+        if (_massCombatTestScene.Initialized)
+            _massCombatTestScene.Stop(_unitSimulation);
+        if (_movementTestScene.Initialized)
+            _movementTestScene.Stop(_unitSimulation);
+
+        // Test scenes own different unit sets. Clear anything left by a prior
+        // scene before rebuilding terrain or spawning the next roster.
+        ReadOnlySpan<int> activeIndices = _unitSimulation.Units.ActiveIndices;
+        UnitId[] previousUnits = new UnitId[activeIndices.Length];
+        for (int i = 0; i < activeIndices.Length; i++)
+            previousUnits[i] = _unitSimulation.Units.GetId(activeIndices[i]);
+        for (int i = 0; i < previousUnits.Length; i++)
+            _unitSimulation.Destroy(previousUnits[i]);
+
+        _unitSimulation.Projectiles.Clear();
+        _unitSimulation.AI.Enabled = false;
+        _unitSimulation.VisionEnabled = false;
+        _massCombatMode = false;
+        _movementTestMode = false;
+        _visionTestMode = false;
+        _terrainStressMode = false;
+        _movementTestSquadId = 0;
+        _massCombatWorldReady = false;
+        _startupMassCombatSelectionApplied = false;
+        _simulationPaused = false;
+        _simulationSpeed = 1f;
+        _selectedUnits.Clear();
+        _selectedUnit = default;
+        _showVisionDebug = false;
+        _showHearingDebug = false;
+        _showMemoryDebug = false;
+        _showMovementVectors = false;
+        _showMovementForces = false;
+        _showSquadFlowWeights = false;
+        _showSquadFormation = false;
+        _showSquadStates = false;
+        _showSquadContacts = false;
+        _showAttackLinks = false;
+        _showSuppressionDebug = false;
+        _showAiStateDebug = false;
+        _showCombatTracers = true;
+        _showCombatHud = true;
+        if (_combatStatusOverlay != null)
+            _combatStatusOverlay.Visible = true;
+
+        WorldGenerator.Generate(_worldMap);
+        _mapRenderer.ResetVisualSettings();
+        _visibleMaxLayer = 0;
+        _showDebugGrid = false;
+        _showTerrainExtrema = false;
+        _showHeightContours = true;
+        _showContourLabels = true;
+        _debugLayersOverlay?.Close();
+        _utilityAiDebugOverlay?.Close();
+        _unitGroupCardOverlay?.Close();
+        _contextMenuOverlay?.Close();
+        CloseUnitCards();
+        PruneSquadState(SimulationFrameSnapshot.Capture(_unitSimulation));
+
+        switch (sceneIndex)
+        {
+            case 0:
+            {
+                _movementTestMode = true;
+                _unitSimulation.AI.Enabled = false;
+                _unitSimulation.VisionEnabled = false;
+                _movementTestScene.Start(_unitSimulation, _worldMap);
+
+                UnitId[] members = _movementTestScene.Units.ToArray();
+                _selectedUnits.Clear();
+                for (int i = 0; i < members.Length; i++)
+                    _selectedUnits.Add(members[i]);
+                _selectedUnit = members.Length > 0 ? members[0] : default;
+
+                int centerX = _worldMap.TileWidth / 2;
+                int centerY = _worldMap.TileHeight / 2;
+                _camera.CenterOnPosition(new Vector2f(
+                    centerX * TerrainTilePixelSize,
+                    centerY * TerrainTilePixelSize));
+                if (members.Length > 0)
+                    IssueMovementTestMoveOrder(members, _movementTestScene.InitialDestination);
+                StartSimulationThread();
+                break;
+            }
+
+            case 1:
+                _visionTestMode = true;
+                _unitSimulation.AI.Enabled = true;
+                _unitSimulation.VisionEnabled = true;
+                CreateVisionTestScene();
+                if (_unitSimulation.Units.TryGetIndex(_selectedUnit, out int observerIndex))
+                {
+                    Vector3 position = _unitSimulation.Units.Position[observerIndex];
+                    _camera.CenterOnPosition(new Vector2f(
+                        position.X * TerrainTilePixelSize,
+                        position.Y * TerrainTilePixelSize));
+                }
+                StartSimulationThread();
+                break;
+
+            case 2:
+                _massCombatMode = true;
+                _unitSimulation.AI.Enabled = true;
+                _unitSimulation.VisionEnabled = true;
+                _selectedTestSceneIndex = sceneIndex;
+                StartSimulationThread();
+                break;
+
+            default:
+                _terrainStressMode = true;
+                _unitSimulation.AI.Enabled = false;
+                _unitSimulation.VisionEnabled = false;
+                _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
+                Volatile.Write(
+                    ref _latestSnapshot,
+                    SimulationFrameSnapshot.Capture(_unitSimulation));
+                break;
+        }
+
+        _activeTestSceneIndex = sceneIndex;
+        _selectedTestSceneIndex = sceneIndex;
+        Console.WriteLine($"[SCENE] Активна тестовая карта: {GameMenuOverlay.GetTestSceneName(sceneIndex)}.");
     }
 
     private void ToggleMovementTestScene()
