@@ -18,12 +18,20 @@ public enum ContextMenuActionType
     SendSquad,
     AttackTarget,
     MoveSelectedHere,
+    SetFormationFree,
+    SetFormationNone,
+    SetFormationLine,
+    SetFormationColumn,
+    SetFormationWedge,
+    SetFormationDispersedLine,
+    SetFormationPerimeter,
+    ToggleKeepFormationInCombat,
     ToggleAutonomousMovement
 }
 
 public sealed class ContextMenuOverlay : IDisposable
 {
-    private const float Width = 224f;
+    private const float Width = 268f;
     private const float EmptyHeight = 58f;
     private const float HeaderHeight = 26f;
     private const float RowHeight = 30f;
@@ -97,7 +105,10 @@ public sealed class ContextMenuOverlay : IDisposable
         bool canSendSquad,
         bool canAttackTarget,
         bool canMoveSelected,
-        string? autonomousMovementLabel = null)
+        string? autonomousMovementLabel = null,
+        bool canConfigureFormation = false,
+        string? selectedFormationLabel = null,
+        string? keepFormationLabel = null)
     {
         if (IsOpen && _panel.GetGlobalBounds().Contains(position))
         {
@@ -115,7 +126,10 @@ public sealed class ContextMenuOverlay : IDisposable
             canSendSquad,
             canAttackTarget,
             canMoveSelected,
-            autonomousMovementLabel);
+            autonomousMovementLabel,
+            canConfigureFormation,
+            selectedFormationLabel,
+            keepFormationLabel);
     }
 
     public void OpenAt(
@@ -128,7 +142,10 @@ public sealed class ContextMenuOverlay : IDisposable
         bool canSendSquad,
         bool canAttackTarget,
         bool canMoveSelected,
-        string? autonomousMovementLabel = null)
+        string? autonomousMovementLabel = null,
+        bool canConfigureFormation = false,
+        string? selectedFormationLabel = null,
+        string? keepFormationLabel = null)
     {
         _actions.Clear();
         _labels.Clear();
@@ -140,6 +157,20 @@ public sealed class ContextMenuOverlay : IDisposable
             AddAction(ContextMenuActionType.OpenUnitAnatomy, "Органы / части тела");
             AddAction(ContextMenuActionType.GiveFood, "Рацион (+700 ккал)");
             AddAction(ContextMenuActionType.GiveWater, "Вода (+0,5 л)");
+        }
+
+        if (canConfigureFormation)
+        {
+            AddFormationAction(ContextMenuActionType.SetFormationFree, "Свободное движение", selectedFormationLabel);
+            AddFormationAction(ContextMenuActionType.SetFormationNone, "Без строя", selectedFormationLabel);
+            AddFormationAction(ContextMenuActionType.SetFormationLine, "Линия", selectedFormationLabel);
+            AddFormationAction(ContextMenuActionType.SetFormationColumn, "Колонна", selectedFormationLabel);
+            AddFormationAction(ContextMenuActionType.SetFormationWedge, "Клин", selectedFormationLabel);
+            AddFormationAction(ContextMenuActionType.SetFormationDispersedLine, "Рассредоточенная линия", selectedFormationLabel);
+            AddFormationAction(ContextMenuActionType.SetFormationPerimeter, "Периметр", selectedFormationLabel);
+
+            if (keepFormationLabel != null)
+                AddAction(ContextMenuActionType.ToggleKeepFormationInCombat, keepFormationLabel);
         }
 
         if (canAttackTarget)
@@ -182,6 +213,17 @@ public sealed class ContextMenuOverlay : IDisposable
     {
         _actions.Add(action);
         _labels.Add(label);
+    }
+
+    private void AddFormationAction(
+        ContextMenuActionType action,
+        string label,
+        string? selectedFormationLabel)
+    {
+        if (string.Equals(label, selectedFormationLabel, StringComparison.Ordinal))
+            label = $"✓ {label}";
+
+        AddAction(action, label);
     }
 
     public bool HandleMousePressed(Vector2i position, uint windowWidth, uint windowHeight)
