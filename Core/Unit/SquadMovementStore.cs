@@ -457,6 +457,7 @@ public sealed class SquadMovementStore
             squad.RejoiningCount = 0;
             squad.SeparatedCount = 0;
             squad.MovingCount = 0;
+            squad.VelocityAccumulator = Vector2.Zero;
             squad.SlowestMoveSpeed = float.PositiveInfinity;
         }
 
@@ -491,6 +492,8 @@ public sealed class SquadMovementStore
 
                 squad.CenterAccumulator += new Vector2(
                     units.Position[unit].X, units.Position[unit].Y);
+                squad.VelocityAccumulator += new Vector2(
+                    units.Velocity[unit].X, units.Velocity[unit].Y);
                 squad.CenterMemberCount++;
                 continue;
             }
@@ -547,8 +550,31 @@ public sealed class SquadMovementStore
             Vector2 toObjective = new(
                 squad.Objective.X - squad.Center.X,
                 squad.Objective.Y - squad.Center.Y);
-            if (toObjective.LengthSquared() > 0.0001f)
+
+            bool hasRouteHeading =
+                squad.IsAStarFormation &&
+                squad.Formation != InfantryFormationType.None &&
+                squad.FlowField.EnsureBuilt(worldMap, squad.Objective, _flowWorkspace) &&
+                squad.FlowField.TrySample(
+                    squad.Center.X,
+                    squad.Center.Y,
+                    out Vector2 routeDirection,
+                    out _);
+
+            if (hasRouteHeading && routeDirection.LengthSquared() > 0.0001f)
+            {
+                squad.Forward = Vector2.Normalize(routeDirection);
+            }
+            else if (squad.IsAStarFormation &&
+                     squad.Formation != InfantryFormationType.None &&
+                     squad.VelocityAccumulator.LengthSquared() > 0.04f)
+            {
+                squad.Forward = Vector2.Normalize(squad.VelocityAccumulator);
+            }
+            else if (toObjective.LengthSquared() > 0.0001f)
+            {
                 squad.Forward = Vector2.Normalize(toObjective);
+            }
 
             if (squad.IsAStarFormation &&
                 !squad.KeepFormationInCombat &&
@@ -594,7 +620,7 @@ public sealed class SquadMovementStore
         if (!_membership.TryGetValue(id, out MemberLink link) ||
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
             !squad.HasMoveOrder ||
-            squad.IsAStarFormation ||
+            (squad.IsAStarFormation && squad.Formation == InfantryFormationType.None) ||
             link.Slot >= squad.MemberGoals.Length ||
             !units.HasTarget[unitIndex] ||
             !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
@@ -651,9 +677,15 @@ public sealed class SquadMovementStore
         if (cohesionLength > MaxCohesionCorrection)
             cohesion *= MaxCohesionCorrection / cohesionLength;
 
-        float cohesionStrength = squad.Rigidity == SquadFormationRigidity.Organized
-            ? 0.25f
-            : 0.18f;
+        // A formed A* cohort follows one shared route direction while this
+        // correction keeps each pawn attached to its moving slot, not just its
+        // terminal destination. Keep it bounded so obstacles can still deform
+        // the formation temporarily instead of producing rigid lockstep.
+        float cohesionStrength = squad.IsAStarFormation
+            ? 0.68f
+            : squad.Rigidity == SquadFormationRigidity.Organized
+                ? 0.25f
+                : 0.18f;
 
         if (_memberStates[unitIndex] == SquadMemberMovementState.Rejoining)
         {
@@ -1059,6 +1091,7 @@ public sealed class SquadMovementStore
         public Vector3 Objective;
         public Vector2 Center;
         public Vector2 CenterAccumulator;
+        public Vector2 VelocityAccumulator;
         public Vector2 Forward = Vector2.UnitX;
         public float Spacing = 1.15f;
         public InfantryFormationType Formation = InfantryFormationType.Free;
