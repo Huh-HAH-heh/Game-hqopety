@@ -168,6 +168,7 @@ public sealed class SquadMovementStore
         UnitStore units,
         UnitHealthStore health,
         UnitAiStore ai,
+        UnitNavigationSystem navigation,
         int squadId,
         IReadOnlyList<UnitId> requestedMembers,
         Vector3 destination,
@@ -258,6 +259,8 @@ public sealed class SquadMovementStore
         Vector2 side = new(-forward.Y, forward.X);
 
         Vector2[] offsets = new Vector2[members.Count];
+        Vector2[] goals = new Vector2[members.Count];
+        HashSet<int> reservedGoalCells = new();
         Vector2 offsetSum = Vector2.Zero;
         for (int i = 0; i < members.Count; i++)
         {
@@ -268,15 +271,29 @@ public sealed class SquadMovementStore
         Vector2 meanOffset = offsetSum / members.Count;
         squad.MemberOffsets = new Vector2[members.Count];
         squad.MemberGoals = new Vector2[members.Count];
-        HashSet<int> reservedGoalCells = new();
-
         for (int i = 0; i < members.Count; i++)
         {
             UnitId id = members[i];
             Vector2 localOffset = offsets[i] - meanOffset;
             Vector2 worldOffset = side * localOffset.X - forward * localOffset.Y;
-            Vector2 terminal = ResolveNavigablePoint(
-                worldMap, goal + worldOffset, reservedGoalCells);
+            Vector2 requestedGoal = goal + worldOffset;
+            if (!navigation.TryResolveAStarGoal(
+                    units, id.Index, worldMap, requestedGoal, reservedGoalCells, out Vector2 terminal))
+            {
+                // Keep this cohort member in a valid surface cell when a wide
+                // footprint cannot fit near the preferred formation slot.
+                terminal = ResolveNavigablePoint(worldMap, requestedGoal);
+            }
+            goals[i] = terminal;
+        }
+
+        // Destinations are resolved before assigning orders, so a failed or
+        // partially blocked formation cannot leave only some units commanded.
+        for (int i = 0; i < members.Count; i++)
+        {
+            UnitId id = members[i];
+            Vector2 localOffset = offsets[i] - meanOffset;
+            Vector2 terminal = goals[i];
             int tileX = Math.Clamp((int)MathF.Floor(terminal.X), 0, worldMap.MaxTileX);
             int tileY = Math.Clamp((int)MathF.Floor(terminal.Y), 0, worldMap.MaxTileY);
             Vector3 memberTarget = new(
@@ -871,6 +888,7 @@ public sealed class SquadMovementStore
             return;
 
         HashSet<int> reservedDestinations = new();
+        HashSet<int> reservedDestinations = new();
         for (int slot = 0; slot < squad.Members.Count; slot++)
         {
             UnitId id = squad.Members[slot];
@@ -881,10 +899,14 @@ public sealed class SquadMovementStore
                 continue;
             }
 
-            Vector2 individualGoal = ResolveNavigablePoint(
-                worldMap,
-                new Vector2(squad.Objective.X, squad.Objective.Y),
-                reservedDestinations);
+            Vector2 requestedGoal = new(squad.Objective.X, squad.Objective.Y);
+            Vector2 individualGoal;
+            if (!navigation.TryResolveAStarGoal(
+                    units, index, worldMap, requestedGoal, reservedDestinations, out individualGoal))
+            {
+                individualGoal = ResolveNavigablePoint(
+                    worldMap, requestedGoal, reservedDestinations);
+            }
             int tileX = Math.Clamp((int)MathF.Floor(individualGoal.X), 0, worldMap.MaxTileX);
             int tileY = Math.Clamp((int)MathF.Floor(individualGoal.Y), 0, worldMap.MaxTileY);
             Vector3 destination = new(
