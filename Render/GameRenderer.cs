@@ -3461,7 +3461,7 @@ public sealed class GameRenderer
                             }
                         }
                         string? autonomousMovementLabel =
-                            clickedSelectedUnit && selectedIds.Length > 0
+                            shiftPressed && clickedSelectedUnit && selectedIds.Length > 0
                                 ? (AreAllAutonomousMovementDisabled(selectedIds)
                                     ? "Разрешить самостоятельное движение"
                                     : "Запретить самостоятельное движение")
