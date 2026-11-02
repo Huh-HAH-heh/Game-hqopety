@@ -185,6 +185,9 @@ public sealed class GameRenderer
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
     private bool _movementTestMode;
+    private bool _visionTestMode;
+    private int _selectedTestSceneIndex;
+    private int _activeTestSceneIndex = -1;
     private volatile bool _simulationPaused;
     private volatile float _simulationSpeed = 1f;
     private int _singleStepRequested;
@@ -285,10 +288,13 @@ public sealed class GameRenderer
         _showVisionDebug = false;
         _showHearingDebug = false;
 
-        // Show the window before constructing the combat scene (up to 3,224 units).
-        // The simulation thread builds the scene after the first frame.
+        // Start with a quiet terrain course. Test scenes are selected from
+        // ESC -> Settings -> Test scenes.
         _terrainStressMode = false;
-        _massCombatMode = true;
+        _massCombatMode = false;
+        _movementTestMode = false;
+        _visionTestMode = false;
+        _selectedTestSceneIndex = 0;
 
         // The default camera starts focused on the isolated melee arena, so
         // begin closer than the old 1,600-unit overview setting.
@@ -396,8 +402,7 @@ public sealed class GameRenderer
                 TerrainTilePixelSize,
                 _worldMap);
 
-            if (_massCombatMode)
-                StartSimulationThread();
+            ActivateTestScene(_selectedTestSceneIndex);
 
             Clock clock = new Clock();
 
@@ -673,7 +678,7 @@ public sealed class GameRenderer
             if (_simulationThread == null && (!_simulationPaused || singleStepRequested))
             {
                 float updateDeltaTime = singleStepRequested ? 1f / 60f : simulationDeltaTime;
-                if (!_terrainStressMode && !_massCombatMode && !_movementTestMode)
+                if (_visionTestMode)
                 {
                     _visionTestScene.UpdateAiDemo(
                         _unitSimulation,
@@ -1289,14 +1294,12 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=инфо " +
-            $"F6=vision F8=scale T=tracers F9=HUD | time controls: visual card";
+            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0} м  •  ESC=меню  •••=главное меню  СКМ=панорама  Колесо=масштаб";
     }
 
     private void StartSimulationThread()
     {
-        if (_simulationThread != null || !_massCombatMode)
+        if (_simulationThread != null)
             return;
 
         _stopSimulationThread = false;
