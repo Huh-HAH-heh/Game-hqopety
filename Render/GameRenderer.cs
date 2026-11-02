@@ -1114,12 +1114,9 @@ public sealed class GameRenderer
             $"States I={snapshot.IdleCount} A={snapshot.AttackCount} C={snapshot.CoverCount} " +
             $"S={snapshot.SearchCount} D={snapshot.DeadCount} | " +
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
-            $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
-            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
-            "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "LMB drag=select units; RMB=move/attack; Shift+RMB=menu; Shift+click=add selection; S=hold | " +
-            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=инфо " +
-            "F6=vision F8=scale T=tracers F9=HUD | time controls: visual card | " +
+            $"LastHit={snapshot.LastHitPart} | " +
+            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0} м | " +
+            "RMB=движение/атака  Shift+click=добавить выделение  СКМ=панорама  Колесо=масштаб  ESC=меню | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
@@ -4258,8 +4255,7 @@ public sealed class GameRenderer
             return;
         }
 
-        if (_utilityAiDebugOverlay?.Contains(
-                new Vector2i((int)_window.Size.X / 2, (int)_window.Size.Y / 2)) == true)
+        if (_showUtilityAiDebug)
         {
             _showUtilityAiDebug = false;
             return;
