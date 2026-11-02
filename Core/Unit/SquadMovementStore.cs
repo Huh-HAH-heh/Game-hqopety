@@ -69,8 +69,8 @@ public readonly record struct SquadMovementDebugSnapshot(
     byte[] Directions);
 
 /// <summary>
-/// Owns collective movement intent while every pawn remains an autonomous physical unit.
-/// The flow field describes the common route; formation offsets are weak spatial preferences.
+/// Owns collective spatial intent while every pawn remains an autonomous physical unit.
+/// Individual A* stays authoritative; the envelope supplies only soft steering constraints.
 /// </summary>
 public sealed class SquadMovementStore
 {
@@ -749,20 +749,25 @@ public sealed class SquadMovementStore
         float cohesionScale = inContact
             ? squad.KeepFormationInCombat ? 0.65f : 0.35f
             : 1f;
+        bool rejoining =
+            _memberOwners[unitIndex] == id &&
+            _memberStates[unitIndex] == SquadMemberMovementState.Rejoining;
+        float preferredExtent = rejoining ? 0.72f : 1f;
 
-        // Cohesion stays inactive inside the envelope. Beyond its boundary,
-        // gently bias the pawn's own route back toward the region.
-        if (normalizedExtent > 1f)
+        // Ordinary members are left free inside the envelope. A rejoining
+        // member is softly guided into its inner area before it becomes Following.
+        if (normalizedExtent > preferredExtent)
         {
-            Vector2 boundaryPoint = squad.Center +
-                squad.Forward * (forwardDistance / normalizedExtent) +
-                side * (lateralDistance / normalizedExtent);
-            Vector2 inward = boundaryPoint - current;
+            float targetScale = preferredExtent / normalizedExtent;
+            Vector2 targetPoint = squad.Center +
+                squad.Forward * (forwardDistance * targetScale) +
+                side * (lateralDistance * targetScale);
+            Vector2 inward = targetPoint - current;
             float inwardLength = inward.Length();
             if (inwardLength > 0.001f)
             {
                 float cohesionWeight = Math.Clamp(
-                    (normalizedExtent - 1f) * 0.22f,
+                    (normalizedExtent - preferredExtent) * 0.22f,
                     0f,
                     MaxCohesionCorrection) * cohesionScale;
                 direction += inward * (cohesionWeight / inwardLength);
