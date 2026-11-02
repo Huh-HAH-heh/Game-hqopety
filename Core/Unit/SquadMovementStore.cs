@@ -608,13 +608,27 @@ public sealed class SquadMovementStore
             squad.CoreMemberCount = coreMemberCount;
             if (coreMemberCount > 0)
             {
-                squad.Center = squad.CenterAccumulator / coreMemberCount;
-                squad.CenterVelocity = coreVelocity / coreMemberCount;
+                Vector2 observedCenter = squad.CenterAccumulator / coreMemberCount;
+                float coreInfluence = allMemberCount > 0
+                    ? Math.Clamp((float)coreMemberCount / allMemberCount, 0.15f, 1f)
+                    : 1f;
+                squad.Center = squad.HasCenter
+                    ? Vector2.Lerp(squad.Center, observedCenter, coreInfluence)
+                    : observedCenter;
+
+                Vector2 observedVelocity = coreVelocity / coreMemberCount;
+                squad.CenterVelocity = Vector2.Lerp(
+                    squad.CenterVelocity,
+                    observedVelocity,
+                    Math.Clamp(deltaTime * 3f * coreInfluence, 0f, 1f));
                 squad.HasCenter = true;
             }
             else
             {
-                squad.CenterVelocity = Vector2.Zero;
+                squad.CenterVelocity = Vector2.Lerp(
+                    squad.CenterVelocity,
+                    Vector2.Zero,
+                    Math.Clamp(deltaTime * 1.2f, 0f, 1f));
                 if (!squad.HasCenter && allMemberCount > 0)
                 {
                     squad.Center = allCenter / allMemberCount;
@@ -646,7 +660,7 @@ public sealed class SquadMovementStore
             // A soft spatial envelope replaces continuous pulling toward fixed
             // member slots. It stretches along travel during the march and opens
             // laterally during contact.
-            float effectiveCoreCount = Math.Max(1, coreMemberCount);
+            float effectiveCoreCount = Math.Max(1, allMemberCount);
             float baseRadius = MathF.Max(
                 squad.Spacing * 1.75f,
                 MathF.Sqrt(effectiveCoreCount) * squad.Spacing * 1.1f);
@@ -709,11 +723,7 @@ public sealed class SquadMovementStore
         UnitId id = units.GetId(unitIndex);
         if (!_membership.TryGetValue(id, out MemberLink link) ||
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
-            !squad.HasMoveOrder ||
-            (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
-            !units.HasTarget[unitIndex] ||
-            !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
-            IsDetachedFromCollective(units, ai, unitIndex))
+            !units.HasTarget[unitIndex])
         {
             return false;
         }
@@ -735,8 +745,13 @@ public sealed class SquadMovementStore
             lateralDistance * lateralDistance /
                 MathF.Max(0.01f, squad.EnvelopeWidth * squad.EnvelopeWidth));
 
+        bool inContact = squad.EngagedCount > 0;
+        float cohesionScale = inContact
+            ? squad.KeepFormationInCombat ? 0.65f : 0.35f
+            : 1f;
+
         // Cohesion stays inactive inside the envelope. Beyond its boundary,
-        // the pawn is gently steered toward the radial boundary point.
+        // gently bias the pawn's own route back toward the region.
         if (normalizedExtent > 1f)
         {
             Vector2 boundaryPoint = squad.Center +
@@ -749,14 +764,14 @@ public sealed class SquadMovementStore
                 float cohesionWeight = Math.Clamp(
                     (normalizedExtent - 1f) * 0.22f,
                     0f,
-                    MaxCohesionCorrection);
+                    MaxCohesionCorrection) * cohesionScale;
                 direction += inward * (cohesionWeight / inwardLength);
             }
         }
 
-        // Alignment affects travel direction only; weapon/body orientation is
-        // untouched. Do not fight a route that is turning against group velocity.
-        if (squad.CenterVelocity.LengthSquared() > 0.04f)
+        // Marchers align their travel direction. During contact, this is
+        // intentionally disabled so flanking and cover movement stay individual.
+        if (!inContact && squad.CenterVelocity.LengthSquared() > 0.04f)
         {
             Vector2 groupDirection = Vector2.Normalize(squad.CenterVelocity);
             if (Vector2.Dot(direction, groupDirection) > 0.1f)
@@ -832,6 +847,7 @@ public sealed class SquadMovementStore
             (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
             !HasMatchingGroupMoveOrder(ai, member.Index, squad.MemberGoals[link.Slot]) ||
             IsDetachedFromCollective(units, ai, member.Index) ||
+            IsMemberTacticallyEngaged(member) ||
             !float.IsFinite(squad.SlowestMoveSpeed))
         {
             return false;
@@ -994,6 +1010,14 @@ public sealed class SquadMovementStore
             (ai.PlayerOrderType[unit] == UnitAiOrderType.Attack ||
              ai.State[unit] is UnitAiState.Attack or UnitAiState.SeekCover or
                  UnitAiState.Flank or UnitAiState.Injured);
+    }
+
+    private bool IsMemberTacticallyEngaged(UnitId member)
+    {
+        return member.IsValid &&
+            (uint)member.Index < (uint)_memberOwners.Length &&
+            _memberOwners[member.Index] == member &&
+            _memberStates[member.Index] == SquadMemberMovementState.Engaged;
     }
 
     private bool IsDetachedFromCollective(UnitStore units, UnitAiStore? ai, int unit)

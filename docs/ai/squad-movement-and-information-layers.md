@@ -39,9 +39,9 @@ Formation offsets are used only to give members distinct local terminal navigati
 
 The squad layer does not replace the pawn AI. The existing AI may choose combat, cover, flank, injury response or other local actions.
 
-A pawn is temporarily detached only from soft collective steering while it has an attack order, an active combat target, panic, or an individual attack/cover/flank/injured state. Its membership and the shared squad objective remain intact. The squad does not cancel the other members' movement orders on contact. When the local action ends, the member is marked as rejoining; the movement correction can guide it back only while its active movement order still matches the squad order. No position or velocity teleport is used.
+A pawn is temporarily detached only from soft collective steering while it has an attack order, an active combat target, panic, or an individual attack/cover/flank/injured state. Its membership and the shared squad objective remain intact. The squad does not cancel the other members' movement orders on contact. While a member handles a local combat action, its own A* route remains the primary direction; the envelope adds only a weak outer-boundary and neighbor-spacing bias. After the action, its member state transitions through rejoining before returning to the core. No position or velocity teleport is used.
 
-The final motion still passes through `UnitMovementSystem`: acceleration, braking, inertia, look-ahead steering, predictive avoidance, terrain constraints and contact resolution remain authoritative. Route look-ahead, acceleration, braking, inertia, predictive avoidance, terrain constraints and contact resolution remain authoritative in `UnitMovementSystem`.
+The final motion still passes through `UnitMovementSystem`: acceleration, braking, inertia, look-ahead steering, predictive avoidance, terrain constraints and contact resolution remain authoritative.
 
 ### 5. Regroup and membership state layer
 
