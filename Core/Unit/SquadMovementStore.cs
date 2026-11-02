@@ -265,13 +265,15 @@ public sealed class SquadMovementStore
         Vector2 meanOffset = offsetSum / members.Count;
         squad.MemberOffsets = new Vector2[members.Count];
         squad.MemberGoals = new Vector2[members.Count];
+        HashSet<int> reservedGoalCells = new();
 
         for (int i = 0; i < members.Count; i++)
         {
             UnitId id = members[i];
             Vector2 localOffset = offsets[i] - meanOffset;
             Vector2 worldOffset = side * localOffset.X - forward * localOffset.Y;
-            Vector2 terminal = ResolveNavigablePoint(worldMap, goal + worldOffset);
+            Vector2 terminal = ResolveNavigablePoint(
+                worldMap, goal + worldOffset, reservedGoalCells);
             int tileX = Math.Clamp((int)MathF.Floor(terminal.X), 0, worldMap.MaxTileX);
             int tileY = Math.Clamp((int)MathF.Floor(terminal.Y), 0, worldMap.MaxTileY);
             Vector3 memberTarget = new(
@@ -418,7 +420,8 @@ public sealed class SquadMovementStore
         UnitAiStore? ai,
         WorldMap worldMap,
         float deltaTime,
-        UnitNavigationSystem navigation)
+        UnitNavigationSystem navigation,
+        UnitSuppressionStore? suppression)
     {
         EnsureMemberCapacity(units.Capacity);
         _flowWorkspace.EnsureMap(worldMap);
@@ -454,10 +457,12 @@ public sealed class SquadMovementStore
 
             if (squad.IsAStarFormation)
             {
+                float memberSpeed = MathF.Max(0.1f, units.MoveSpeed[unit]);
+                if (units.Posture[unit] == UnitPosture.Lying)
+                    memberSpeed *= 0.45f;
                 squad.SlowestMoveSpeed = MathF.Min(
-                    squad.SlowestMoveSpeed,
-                    MathF.Max(0.1f, units.MoveSpeed[unit]));
-                if (IsCombatEngaged(units, ai, unit))
+                    squad.SlowestMoveSpeed, memberSpeed);
+                if (IsCombatEngaged(units, ai, suppression, unit))
                     squad.EngagedCount++;
                 else
                     squad.FollowingCount++;
@@ -527,7 +532,7 @@ public sealed class SquadMovementStore
                 !squad.KeepFormationInCombat &&
                 squad.EngagedCount > 0)
             {
-                BreakAStarFormation(units, health, ai, navigation, squad);
+                BreakAStarFormation(units, health, ai, navigation, suppression, squad);
             }
 
             if (!squad.HasMoveOrder)
@@ -826,24 +831,19 @@ public sealed class SquadMovementStore
         return dx * dx + dy * dy <= 0.01f;
     }
 
-    private static bool IsCombatEngaged(UnitStore units, UnitAiStore? ai, int unit)
+    private static bool IsCombatEngaged(
+        UnitStore units,
+        UnitAiStore? ai,
+        UnitSuppressionStore? suppression,
+        int unit)
     {
-        if (ai == null)
-            return false;
-
-        if (ai.PlayerOrderType[unit] == UnitAiOrderType.Attack ||
-            ai.State[unit] is UnitAiState.Attack or UnitAiState.SeekCover or
-                UnitAiState.Flank or UnitAiState.Injured)
-        {
+        if (suppression?.GetState(unit) == UnitSuppressionState.Panicked)
             return true;
-        }
 
-        UnitId target = ai.Target[unit];
-        return ai.HasTarget[unit] &&
-            target.IsValid &&
-            units.TryGetIndex(target, out int targetIndex) &&
-            targetIndex != unit &&
-            FactionRules.ShouldAttack(units.FactionTag[unit], units.FactionTag[targetIndex]);
+        return ai != null &&
+            (ai.PlayerOrderType[unit] == UnitAiOrderType.Attack ||
+             ai.State[unit] is UnitAiState.Attack or UnitAiState.SeekCover or
+                 UnitAiState.Flank or UnitAiState.Injured);
     }
 
     private static void BreakAStarFormation(
@@ -851,6 +851,7 @@ public sealed class SquadMovementStore
         UnitHealthStore? health,
         UnitAiStore? ai,
         UnitNavigationSystem navigation,
+        UnitSuppressionStore? suppression,
         SquadState squad)
     {
         squad.HasMoveOrder = false;
@@ -861,23 +862,16 @@ public sealed class SquadMovementStore
         if (ai == null)
             return;
 
-        int objectiveX = Math.Clamp(
-            (int)MathF.Floor(squad.Objective.X), 0, units.ActiveCount > 0 ? int.MaxValue : 0);
-        int objectiveY = Math.Clamp(
-            (int)MathF.Floor(squad.Objective.Y), 0, int.MaxValue);
-
         for (int slot = 0; slot < squad.Members.Count; slot++)
         {
             UnitId id = squad.Members[slot];
             if (!units.TryGetIndex(id, out int index) ||
                 (health != null && health.OverallHitPoints[index] <= 0f) ||
-                IsCombatEngaged(units, ai, index))
+                IsCombatEngaged(units, ai, suppression, index))
             {
                 continue;
             }
 
-            int tileX = Math.Clamp((int)MathF.Floor(squad.Objective.X), 0, 1_000_000);
-            int tileY = Math.Clamp((int)MathF.Floor(squad.Objective.Y), 0, 1_000_000);
             Vector3 destination = new(
                 squad.Objective.X,
                 squad.Objective.Y,
@@ -942,7 +936,10 @@ public sealed class SquadMovementStore
         Array.Resize(ref _rejoinElapsed, capacity);
     }
 
-    private static Vector2 ResolveNavigablePoint(WorldMap worldMap, Vector2 requested)
+    private static Vector2 ResolveNavigablePoint(
+        WorldMap worldMap,
+        Vector2 requested,
+        HashSet<int>? reservedCells = null)
     {
         int centerX = Math.Clamp((int)MathF.Floor(requested.X), 0, worldMap.MaxTileX);
         int centerY = Math.Clamp((int)MathF.Floor(requested.Y), 0, worldMap.MaxTileY);
@@ -957,9 +954,11 @@ public sealed class SquadMovementStore
                 for (int x = Math.Max(0, centerX - radius);
                      x <= Math.Min(worldMap.MaxTileX, centerX + radius); x++)
                 {
+                    int cell = x + y * worldMap.TileWidth;
                     if (Math.Max(Math.Abs(x - centerX), Math.Abs(y - centerY)) != radius ||
                         worldMap.IsNavigationBlocked(x, y) ||
-                        worldMap.GetSurfaceLayer(x, y) < 0)
+                        worldMap.GetSurfaceLayer(x, y) < 0 ||
+                        (reservedCells != null && reservedCells.Contains(cell)))
                     {
                         continue;
                     }
@@ -976,7 +975,12 @@ public sealed class SquadMovementStore
             }
 
             if (float.IsFinite(bestDistance))
+            {
+                int bestX = (int)MathF.Floor(best.X);
+                int bestY = (int)MathF.Floor(best.Y);
+                reservedCells?.Add(bestX + bestY * worldMap.TileWidth);
                 return best;
+            }
         }
 
         return new Vector2(centerX + 0.5f, centerY + 0.5f);
