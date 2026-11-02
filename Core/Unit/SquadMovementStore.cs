@@ -417,7 +417,8 @@ public sealed class SquadMovementStore
         UnitHealthStore? health,
         UnitAiStore? ai,
         WorldMap worldMap,
-        float deltaTime)
+        float deltaTime,
+        UnitNavigationSystem navigation)
     {
         EnsureMemberCapacity(units.Capacity);
         _flowWorkspace.EnsureMap(worldMap);
@@ -431,6 +432,7 @@ public sealed class SquadMovementStore
             squad.RejoiningCount = 0;
             squad.SeparatedCount = 0;
             squad.MovingCount = 0;
+            squad.SlowestMoveSpeed = float.PositiveInfinity;
         }
 
         ReadOnlySpan<int> active = units.ActiveIndices;
@@ -449,6 +451,22 @@ public sealed class SquadMovementStore
             EnsureMemberIdentity(units, unit);
             if (units.HasTarget[unit])
                 squad.MovingCount++;
+
+            if (squad.IsAStarFormation)
+            {
+                squad.SlowestMoveSpeed = MathF.Min(
+                    squad.SlowestMoveSpeed,
+                    MathF.Max(0.1f, units.MoveSpeed[unit]));
+                if (IsCombatEngaged(units, ai, unit))
+                    squad.EngagedCount++;
+                else
+                    squad.FollowingCount++;
+
+                squad.CenterAccumulator += new Vector2(
+                    units.Position[unit].X, units.Position[unit].Y);
+                squad.CenterMemberCount++;
+                continue;
+            }
 
             if (IsDetachedFromCollective(units, ai, unit))
             {
@@ -505,6 +523,13 @@ public sealed class SquadMovementStore
             if (toObjective.LengthSquared() > 0.0001f)
                 squad.Forward = Vector2.Normalize(toObjective);
 
+            if (squad.IsAStarFormation &&
+                !squad.KeepFormationInCombat &&
+                squad.EngagedCount > 0)
+            {
+                BreakAStarFormation(units, health, ai, navigation, squad);
+            }
+
             if (!squad.HasMoveOrder)
                 squad.Phase = SquadMovementPhase.Idle;
             else if (squad.EngagedCount > 0)
@@ -542,6 +567,7 @@ public sealed class SquadMovementStore
         if (!_membership.TryGetValue(id, out MemberLink link) ||
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
             !squad.HasMoveOrder ||
+            squad.IsAStarFormation ||
             link.Slot >= squad.MemberGoals.Length ||
             !units.HasTarget[unitIndex] ||
             !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
@@ -640,6 +666,28 @@ public sealed class SquadMovementStore
         steeringPoint = new Vector2(position.X, position.Y) + direction * lookAhead;
         distanceToGoal = finalDistance;
         return true;
+    }
+
+    public bool TryGetAStarFormationSpeedLimit(
+        UnitId member,
+        UnitAiStore? ai,
+        out float speedLimit)
+    {
+        speedLimit = 0f;
+        if (!member.IsValid ||
+            !_membership.TryGetValue(member, out MemberLink link) ||
+            !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
+            !squad.HasMoveOrder ||
+            !squad.IsAStarFormation ||
+            (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
+            !HasMatchingGroupMoveOrder(ai, member.Index, squad.MemberGoals[link.Slot]) ||
+            !float.IsFinite(squad.SlowestMoveSpeed))
+        {
+            return false;
+        }
+
+        speedLimit = squad.SlowestMoveSpeed;
+        return speedLimit > 0f;
     }
 
     public bool TryGetMemberSquadId(UnitId member, out int squadId)
@@ -778,6 +826,72 @@ public sealed class SquadMovementStore
         return dx * dx + dy * dy <= 0.01f;
     }
 
+    private static bool IsCombatEngaged(UnitStore units, UnitAiStore? ai, int unit)
+    {
+        if (ai == null)
+            return false;
+
+        if (ai.PlayerOrderType[unit] == UnitAiOrderType.Attack ||
+            ai.State[unit] is UnitAiState.Attack or UnitAiState.SeekCover or
+                UnitAiState.Flank or UnitAiState.Injured)
+        {
+            return true;
+        }
+
+        UnitId target = ai.Target[unit];
+        return ai.HasTarget[unit] &&
+            target.IsValid &&
+            units.TryGetIndex(target, out int targetIndex) &&
+            targetIndex != unit &&
+            FactionRules.ShouldAttack(units.FactionTag[unit], units.FactionTag[targetIndex]);
+    }
+
+    private static void BreakAStarFormation(
+        UnitStore units,
+        UnitHealthStore? health,
+        UnitAiStore? ai,
+        UnitNavigationSystem navigation,
+        SquadState squad)
+    {
+        squad.HasMoveOrder = false;
+        squad.IsAStarFormation = false;
+        squad.SlowestMoveSpeed = float.PositiveInfinity;
+        squad.Phase = SquadMovementPhase.Contact;
+
+        if (ai == null)
+            return;
+
+        int objectiveX = Math.Clamp(
+            (int)MathF.Floor(squad.Objective.X), 0, units.ActiveCount > 0 ? int.MaxValue : 0);
+        int objectiveY = Math.Clamp(
+            (int)MathF.Floor(squad.Objective.Y), 0, int.MaxValue);
+
+        for (int slot = 0; slot < squad.Members.Count; slot++)
+        {
+            UnitId id = squad.Members[slot];
+            if (!units.TryGetIndex(id, out int index) ||
+                (health != null && health.OverallHitPoints[index] <= 0f) ||
+                IsCombatEngaged(units, ai, index))
+            {
+                continue;
+            }
+
+            int tileX = Math.Clamp((int)MathF.Floor(squad.Objective.X), 0, 1_000_000);
+            int tileY = Math.Clamp((int)MathF.Floor(squad.Objective.Y), 0, 1_000_000);
+            Vector3 destination = new(
+                squad.Objective.X,
+                squad.Objective.Y,
+                squad.Objective.Z);
+            if (float.IsFinite(destination.X) && float.IsFinite(destination.Y))
+            {
+                ai.SetPlayerOrder(index, UnitAiOrderType.Move, destination);
+                ai.ClearGoal(index);
+                units.SetTarget(id, destination);
+                navigation.ClearRoute(index);
+            }
+        }
+    }
+
     private bool IsDetachedFromCollective(UnitStore units, UnitAiStore? ai, int unit)
     {
         if (ai == null)
@@ -913,6 +1027,9 @@ public sealed class SquadMovementStore
         public Vector2[] MemberOffsets = Array.Empty<Vector2>();
         public Vector2[] MemberGoals = Array.Empty<Vector2>();
         public bool HasMoveOrder;
+        public bool IsAStarFormation;
+        public bool KeepFormationInCombat;
+        public float SlowestMoveSpeed = float.PositiveInfinity;
         public int CenterMemberCount;
         public int FollowingCount;
         public int EngagedCount;
