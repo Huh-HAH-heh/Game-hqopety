@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using Core.Map;
@@ -468,6 +469,97 @@ public sealed class UnitNavigationSystem
             end,
             GetFootprintRadius(units.Width[unitIndex]),
             GetFootprintRadius(units.Length[unitIndex]));
+    }
+
+    public bool TryResolveAStarGoal(
+        UnitStore units,
+        int unitIndex,
+        WorldMap worldMap,
+        Vector2 requested,
+        HashSet<int> reservedFootprintCells,
+        out Vector2 goal)
+    {
+        goal = default;
+        if ((uint)unitIndex >= (uint)units.Capacity)
+            return false;
+
+        EnsureUnitCapacity(units.Capacity);
+        EnsureWorkspace(worldMap);
+        EnsureNavigationGrid(worldMap);
+
+        int radiusX = GetFootprintRadius(units.Width[unitIndex]);
+        int radiusY = GetFootprintRadius(units.Length[unitIndex]);
+        int centerX = Math.Clamp((int)MathF.Floor(requested.X), 0, worldMap.MaxTileX);
+        int centerY = Math.Clamp((int)MathF.Floor(requested.Y), 0, worldMap.MaxTileY);
+
+        // Resolve against the exact footprint and step-height rules used by A*.
+        // Reserve the whole footprint so large units do not receive overlapping slots.
+        const int maximumSearchRadius = 24;
+        for (int radius = 0; radius <= maximumSearchRadius; radius++)
+        {
+            float bestDistance = float.PositiveInfinity;
+            int bestX = -1;
+            int bestY = -1;
+
+            for (int y = Math.Max(radiusY, centerY - radius);
+                 y <= Math.Min(worldMap.MaxTileY - radiusY, centerY + radius); y++)
+            {
+                for (int x = Math.Max(radiusX, centerX - radius);
+                     x <= Math.Min(worldMap.MaxTileX - radiusX, centerX + radius); x++)
+                {
+                    if (Math.Max(Math.Abs(x - centerX), Math.Abs(y - centerY)) != radius)
+                        continue;
+
+                    int cell = x + y * _width;
+                    bool reserved = false;
+                    for (int offsetY = -radiusY; offsetY <= radiusY && !reserved; offsetY++)
+                    {
+                        for (int offsetX = -radiusX; offsetX <= radiusX; offsetX++)
+                        {
+                            int occupied = x + offsetX + (y + offsetY) * _width;
+                            if (reservedFootprintCells.Contains(occupied))
+                            {
+                                reserved = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (reserved ||
+                        !IsFootprintPassable(worldMap, x, y, radiusX, radiusY))
+                    {
+                        continue;
+                    }
+
+                    float dx = x + 0.5f - requested.X;
+                    float dy = y + 0.5f - requested.Y;
+                    float score = dx * dx + dy * dy;
+                    if (score >= bestDistance)
+                        continue;
+
+                    bestDistance = score;
+                    bestX = x;
+                    bestY = y;
+                }
+            }
+
+            if (bestX < 0)
+                continue;
+
+            goal = new Vector2(bestX + 0.5f, bestY + 0.5f);
+            for (int offsetY = -radiusY; offsetY <= radiusY; offsetY++)
+            {
+                for (int offsetX = -radiusX; offsetX <= radiusX; offsetX++)
+                {
+                    reservedFootprintCells.Add(
+                        bestX + offsetX + (bestY + offsetY) * _width);
+                }
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryGetDirectFallbackWaypoint(
