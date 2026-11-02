@@ -109,7 +109,7 @@ public sealed class AiEvolutionOverlay : IDisposable
         _genes = CreateText("", 9, false);
         _lastCandidate = CreateText("", 9, true);
         _message = CreateText("", 9, false);
-        _controls = CreateText("F5 — остановить и применить лучшую версию", 9, true);
+        _controls = CreateText("Остановка и применение профиля — меню тестовых сцен", 9, true);
     }
 
     public void Draw(RenderWindow window, uint windowWidth, uint windowHeight, AiEvolutionStatus status)
@@ -194,7 +194,7 @@ public sealed class AiEvolutionOverlay : IDisposable
 
         _controls.Position = new Vector2f(x + 12f, y + 231f);
         _controls.DisplayedString = status.IsRunning
-            ? $"F5 — остановить и применить лучшую версию  ·  файл: {Path.GetFileName(status.BestProfilePath)}"
+            ? $"Остановка — меню тестовых сцен  ·  файл: {Path.GetFileName(status.BestProfilePath)}"
             : $"Лучший профиль сохранён отдельно  ·  файл: {Path.GetFileName(status.BestProfilePath)}";
 
         window.Draw(_panel);
