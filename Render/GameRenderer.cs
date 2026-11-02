@@ -773,7 +773,7 @@ public sealed class GameRenderer
 
         Volatile.Write(
             ref _selectedInfoSquadId,
-            _movementTestMode ? _movementTestSquadId : GetSelectedSquadId());
+            _movementTestMode ? 0 : GetSelectedSquadId());
         SimulationFrameSnapshot? renderSnapshot = _simulationThread != null
             ? Volatile.Read(ref _latestSnapshot)
             : null;
@@ -1409,20 +1409,6 @@ public sealed class GameRenderer
         SelectSquad(squadId, false);
         Console.WriteLine(
             $"[SQUAD] Created/merged squad {squadId} with {members.Length} soldiers.");
-    }
-
-    private bool TryDisbandSelectedSquads()
-    {
-        if (!SquadControlsEnabled || _selectedUnits.Count == 0)
-            return false;
-
-        int disbanded = _squadManager.DisbandContaining(_selectedUnits);
-        if (disbanded == 0)
-            return false;
-
-        SyncSquadTactics();
-        Console.WriteLine($"[SQUAD] Disbanded {disbanded} squad(s). Soldiers remain on the field.");
-        return true;
     }
 
     private UnitId[] CaptureSelectedUnitIds(SimulationFrameSnapshot snapshot)
