@@ -1576,6 +1576,51 @@ public sealed class GameRenderer
             $"[SQUAD] Attack task replaced previous orders for {assigned} soldiers; nearest-threat switching enabled.");
     }
 
+    private void IssueMovementTestMoveOrder(
+        UnitId[] memberIds,
+        Vector3 destination)
+    {
+        if (IsCompleteMovementTestSelection(memberIds) &&
+            _movementTestSquadId > 0)
+        {
+            IssueMoveOrder(
+                memberIds,
+                destination,
+                InfantryFormationType.Free,
+                _movementTestSquadId);
+            return;
+        }
+
+        // Partial selections keep their own A* routes, but the test scene has
+        // AI disabled, so the physical movement targets must be written here too.
+        IssueMoveOrderToPoint(memberIds, destination);
+    }
+
+    private bool IsCompleteMovementTestSelection(UnitId[] memberIds)
+    {
+        if (!_movementTestMode || memberIds.Length != _movementTestScene.Units.Length)
+            return false;
+
+        ReadOnlySpan<UnitId> expected = _movementTestScene.Units;
+        for (int i = 0; i < expected.Length; i++)
+        {
+            bool found = false;
+            for (int j = 0; j < memberIds.Length; j++)
+            {
+                if (memberIds[j] == expected[i])
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+                return false;
+        }
+
+        return true;
+    }
+
     private void IssueHoldOrder(UnitId[] memberIds)
     {
         UnitStore units = _unitSimulation.Units;
@@ -1594,6 +1639,8 @@ public sealed class GameRenderer
                 unitIndex,
                 UnitAiOrderType.Stop,
                 units.Position[unitIndex]);
+            if (_movementTestMode)
+                units.ClearTarget(memberIds[i]);
             assigned++;
         }
 
@@ -2279,15 +2326,20 @@ public sealed class GameRenderer
 
             if (TryFindAvailableMoveCell(desiredX, desiredY, reserved, out int tileX, out int tileY))
             {
-                ai.SetPlayerOrder(unit, orderType, new Vector3(
+                Vector3 target = new(
                     tileX + 0.5f,
                     tileY + 0.5f,
-                    _worldMap.GetSurfaceHeight(tileX, tileY)));
+                    _worldMap.GetSurfaceHeight(tileX, tileY));
+                ai.SetPlayerOrder(unit, orderType, target);
+                if (_movementTestMode && orderType == UnitAiOrderType.Move)
+                    units.SetTarget(units.GetId(unit), target);
                 assigned++;
             }
             else
             {
                 ai.SetPlayerOrder(unit, orderType, destination);
+                if (_movementTestMode && orderType == UnitAiOrderType.Move)
+                    units.SetTarget(units.GetId(unit), destination);
                 assigned++;
             }
         }
@@ -3357,7 +3409,8 @@ public sealed class GameRenderer
 
                         if (!hasUnit && selectedIds.Length > 0 && !shiftPressed)
                         {
-                            if (SquadControlsEnabled &&
+                            if (!_movementTestMode &&
+                                SquadControlsEnabled &&
                                 selectedIds.Length > 1 &&
                                 TryBeginMoveLine(e.Position))
                                 return;
@@ -3367,7 +3420,12 @@ public sealed class GameRenderer
                             _contextMenuUnit = default;
                             _contextMenuOverlay.Close();
                             ExecuteSimulationCommand(() =>
-                                IssueMoveOrderToPoint(moveUnits, destination));
+                            {
+                                if (_movementTestMode)
+                                    IssueMovementTestMoveOrder(moveUnits, destination);
+                                else
+                                    IssueMoveOrderToPoint(moveUnits, destination);
+                            });
                             return;
                         }
 
@@ -3897,7 +3955,7 @@ public sealed class GameRenderer
                 _showMovementForces = !_showMovementForces;
                 break;
             case DebugLayerType.SquadFlowWeights:
-                if (SquadControlsEnabled)
+                if (SquadControlsEnabled || _movementTestMode)
                     _showSquadFlowWeights = !_showSquadFlowWeights;
                 break;
             case DebugLayerType.SquadFormation:
@@ -3916,9 +3974,10 @@ public sealed class GameRenderer
     }
 
     private bool ShouldCaptureSquadDebug =>
-        SquadControlsEnabled &&
-        (_showSquadFlowWeights || _showSquadFormation ||
-         _showSquadStates || _showSquadContacts);
+        _movementTestMode ||
+        (SquadControlsEnabled &&
+         (_showSquadFlowWeights || _showSquadFormation ||
+          _showSquadStates || _showSquadContacts));
 
     private void RecordSimulationStep(float deltaTime)
     {
@@ -4644,7 +4703,16 @@ public sealed class GameRenderer
 
         _movementTestScene.Start(_unitSimulation, _worldMap);
         UnitId[] members = _movementTestScene.Units.ToArray();
-        _movementTestSquadId = 0;
+
+        // Squad controls remain disabled in the game. Register a private
+        // movement-only cohort for this scene so the real shared Flow Field
+        // can be exercised without re-enabling squad menus or tactical AI.
+        _movementTestSquadId = 1;
+        _unitSimulation.SynchronizeSquadMovementMemberships(
+            new[]
+            {
+                new SquadMembershipSnapshot(_movementTestSquadId, members)
+            });
 
         _selectedUnits.Clear();
         _selectedUnit = default;
@@ -4661,19 +4729,21 @@ public sealed class GameRenderer
         _showTerrainExtrema = false;
         _showHeightContours = true;
         _showContourLabels = true;
-        _showSquadFlowWeights = false;
-        _showMovementVectors = false;
+        _showSquadFlowWeights = true;
+        _showMovementVectors = true;
         _showMovementForces = false;
         _showSquadFormation = false;
-        _showSquadStates = false;
+        _showSquadStates = true;
         _showSquadContacts = false;
         _debugLayersOverlay?.Close();
         _contextMenuOverlay?.Close();
         _menuPage = GameMenuPage.Closed;
 
-        IssueMoveOrderToPoint(
+        IssueMoveOrder(
             members,
-            _movementTestScene.InitialDestination);
+            _movementTestScene.InitialDestination,
+            InfantryFormationType.Free,
+            _movementTestSquadId);
 
         int centerX = _worldMap.TileWidth / 2;
         int centerY = _worldMap.TileHeight / 2;
@@ -4683,7 +4753,8 @@ public sealed class GameRenderer
 
         Console.WriteLine(
             $"[MOVE TEST] {_movementTestScene.GetStatus()}. " +
-            "F7 returns to mass combat; select units and RMB on the ground to issue new destinations. " +
+            "F7 returns to mass combat; RMB on the ground sends the selected units. " +
+            "The full test group uses shared Flow Field; partial selections use individual A*. " +
             "V controls movement and Flow Field debug layers.");
     }
 
