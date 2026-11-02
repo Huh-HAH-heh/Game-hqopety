@@ -65,8 +65,8 @@ public sealed class UnitMovementSystem
         if (_lastMotorForce.Length < units.Capacity)
             Array.Resize(ref _lastMotorForce, units.Capacity);
 
-        squadMovement?.BeginUpdate(units, health, ai, worldMap, deltaTime);
         _navigation.BeginUpdate(units, worldMap);
+        squadMovement?.BeginUpdate(units, health, ai, worldMap, deltaTime, _navigation);
         _traceElapsedSeconds += deltaTime;
         bool traceThisUpdate = _traceUnitIndex >= 0 && _traceElapsedSeconds >= 1f;
         if (traceThisUpdate)
@@ -162,6 +162,13 @@ public sealed class UnitMovementSystem
             float moveSpeed = MathF.Max(0f, speeds[unit]);
             if (postures[unit] == UnitPosture.Lying)
                 moveSpeed *= 0.45f;
+
+            if (squadMovement != null &&
+                squadMovement.TryGetAStarFormationSpeedLimit(
+                    units.GetId(unit), ai, out float formationSpeedLimit))
+            {
+                moveSpeed = MathF.Min(moveSpeed, formationSpeedLimit);
+            }
 
             float mass = MathF.Max(1f, masses[unit]);
             // Motor/traction force grows roughly with muscle cross-section (mass^(2/3)),
