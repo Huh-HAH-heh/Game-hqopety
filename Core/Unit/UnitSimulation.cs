@@ -709,6 +709,31 @@ public sealed class UnitSimulation
         IReadOnlyList<SquadMembershipSnapshot> squads) =>
         _squadMovementStore.SynchronizeMemberships(squads);
 
+    private int _nextAStarMovementGroupId = 1_000_000;
+
+    public bool IssueAStarFormationMoveOrder(
+        IReadOnlyList<UnitId> members,
+        Vector3 destination,
+        InfantryFormationType formation,
+        bool keepFormationInCombat,
+        WorldMap worldMap)
+    {
+        int groupId = _nextAStarMovementGroupId++;
+        if (_nextAStarMovementGroupId <= 0)
+            _nextAStarMovementGroupId = 1_000_000;
+
+        return _squadMovementStore.IssueAStarFormationMoveOrder(
+            Units,
+            Health,
+            _aiSystem.Store,
+            groupId,
+            members,
+            destination,
+            formation,
+            keepFormationInCombat,
+            worldMap);
+    }
+
     public bool IssueSquadMoveOrder(
         int squadId,
         IReadOnlyList<UnitId> members,
@@ -1010,6 +1035,7 @@ public sealed class UnitSimulation
             deltaTime);
         double aiUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
+        _aiSystem.EnforceAutonomousMovementLocks(Units, Suppression);
         // The profiler samples once per second while the AI think cadence is 150 ms.
         // Keep the last full think-pass duration so it isn't replaced by an idle-frame zero.
         if (!_aiSystem.Enabled || Units.ActiveCount == 0)
