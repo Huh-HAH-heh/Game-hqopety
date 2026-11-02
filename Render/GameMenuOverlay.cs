@@ -461,6 +461,17 @@ void main()
     private readonly Text? _sceneUnitRigLabel;
     private Text?[] _testSceneTexts = Array.Empty<Text?>();
 
+    private float _mainX;
+    private float _mainY;
+    private float _settingsX;
+    private float _settingsY;
+    private float _dragOffsetX;
+    private float _dragOffsetY;
+    private bool _hasPanelPositions;
+    private bool _draggingMain;
+    private bool _draggingSettings;
+    private GameSettingsSnapshot _lastLayoutSettings;
+
     private string _lastGridLabel = string.Empty;
     private string _lastExtremaLabel = string.Empty;
     private string _lastContoursLabel = string.Empty;
@@ -1459,6 +1470,66 @@ void main()
         _cachedTerrainVersion = worldMap.TerrainVersion;
     }
 
+    public bool HandleMousePressed(
+        Vector2i position,
+        uint windowWidth,
+        uint windowHeight,
+        GameMenuPage page)
+    {
+        if (page == GameMenuPage.Closed)
+            return false;
+
+        FloatRect panel = page == GameMenuPage.Main
+            ? _mainPanel.GetGlobalBounds()
+            : _panel.GetGlobalBounds();
+        if (!panel.Contains(position))
+            return false;
+
+        float headerBottom = panel.Position.Y + (page == GameMenuPage.Main ? 82f : 70f);
+        if (position.Y > headerBottom)
+            return false;
+
+        _draggingMain = page == GameMenuPage.Main;
+        _draggingSettings = page is GameMenuPage.Settings or GameMenuPage.TestScenes;
+        _dragOffsetX = position.X - panel.Position.X;
+        _dragOffsetY = position.Y - panel.Position.Y;
+        return _draggingMain || _draggingSettings;
+    }
+
+    public bool HandleMouseMoved(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!_draggingMain && !_draggingSettings)
+            return false;
+
+        if (_draggingMain)
+        {
+            _mainX = Math.Clamp(position.X - _dragOffsetX, 8f,
+                Math.Max(8f, windowWidth - MainWidth - 8f));
+            _mainY = Math.Clamp(position.Y - _dragOffsetY, 8f,
+                Math.Max(8f, windowHeight - MainHeight - 8f));
+        }
+        else
+        {
+            _settingsX = Math.Clamp(position.X - _dragOffsetX, 8f,
+                Math.Max(8f, windowWidth - SettingsWidth - 8f));
+            _settingsY = Math.Clamp(position.Y - _dragOffsetY, 8f,
+                Math.Max(8f, windowHeight - SettingsHeight - 8f));
+        }
+
+        Layout(windowWidth, windowHeight, _lastLayoutSettings);
+        return true;
+    }
+
+    public bool HandleMouseReleased()
+    {
+        if (!_draggingMain && !_draggingSettings)
+            return false;
+
+        _draggingMain = false;
+        _draggingSettings = false;
+        return true;
+    }
+
     public void Draw(
         RenderWindow window,
         uint width,
@@ -1467,6 +1538,7 @@ void main()
         GameSettingsSnapshot settings,
         Vector2i mousePosition)
     {
+        _lastLayoutSettings = settings;
         Layout(width, height, settings);
 
         _menuButton.FillColor = _menuButton.GetGlobalBounds().Contains(mousePosition)
@@ -1515,10 +1587,23 @@ void main()
 
         float centerX = width * 0.5f;
         float centerY = height * 0.5f;
-        float mainX = centerX - MainWidth * 0.5f;
-        float mainY = centerY - MainHeight * 0.5f;
-        float settingsX = centerX - SettingsWidth * 0.5f;
-        float settingsY = centerY - SettingsHeight * 0.5f;
+        if (!_hasPanelPositions)
+        {
+            _mainX = centerX - MainWidth * 0.5f;
+            _mainY = centerY - MainHeight * 0.5f;
+            _settingsX = centerX - SettingsWidth * 0.5f;
+            _settingsY = centerY - SettingsHeight * 0.5f;
+            _hasPanelPositions = true;
+        }
+
+        _mainX = Math.Clamp(_mainX, 8f, Math.Max(8f, width - MainWidth - 8f));
+        _mainY = Math.Clamp(_mainY, 8f, Math.Max(8f, height - MainHeight - 8f));
+        _settingsX = Math.Clamp(_settingsX, 8f, Math.Max(8f, width - SettingsWidth - 8f));
+        _settingsY = Math.Clamp(_settingsY, 8f, Math.Max(8f, height - SettingsHeight - 8f));
+        float mainX = _mainX;
+        float mainY = _mainY;
+        float settingsX = _settingsX;
+        float settingsY = _settingsY;
 
         _mainPanel.Position = new Vector2f(mainX, mainY);
         _mainAccent.Position = new Vector2f(mainX + 1f, mainY + 1f);
