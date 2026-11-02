@@ -1904,7 +1904,7 @@ void main()
         DrawText(window, _testSceneTexts);
     }
 
-    public static int TestSceneCount => 4;
+    public static int TestSceneCount => 5;
 
     public static string GetTestSceneName(int index) =>
         Math.Clamp(index, 0, TestSceneCount - 1) switch
@@ -1912,7 +1912,8 @@ void main()
             0 => "Курс движения — без врагов",
             1 => "Восприятие и укрытия",
             2 => "Дальний бой",
-            _ => "Рельеф и генерация мира"
+            3 => "Рельеф и генерация мира",
+            _ => "Массовый бой — 160 юнитов"
         };
 
     public bool IsSettingsPanelHit(Vector2i point, GameMenuPage page) =>
