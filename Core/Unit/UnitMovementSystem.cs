@@ -167,7 +167,7 @@ public sealed class UnitMovementSystem
 
             if (squadMovement != null &&
                 squadMovement.TryGetAStarFormationSpeedLimit(
-                    units.GetId(unit), ai, out float formationSpeedLimit))
+                    units, units.GetId(unit), ai, out float formationSpeedLimit))
             {
                 moveSpeed = MathF.Min(moveSpeed, formationSpeedLimit);
             }

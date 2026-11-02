@@ -2,7 +2,7 @@
 
 ## Goal
 
-A squad is a collective task with autonomous physical members. It is not a large composite pawn, and members do not receive mandatory world-space slots. The squad supplies a shared objective, a common navigation field and a preferred spatial envelope. Each pawn still owns perception, tactical decisions, combat, cover selection and physical movement.
+A squad is a collective task with autonomous physical members. It is not a large composite pawn, and members do not receive mandatory world-space slots. The squad supplies a shared objective and a dynamic spatial envelope. Each pawn keeps its own footprint-aware A* route and still owns perception, tactical decisions, combat, cover selection and physical movement.
 
 The first implementation targets ground infantry on the existing tile surface. It preserves the current Move / waypoint contract and the force-driven movement controller.
 
@@ -10,24 +10,13 @@ The first implementation targets ground infantry on the existing tile surface. I
 
 ### 1. Command and objective layer
 
-A move order is issued to a complete squad selection. The squad stores one shared world objective and one formation profile. Member-specific terminal points are only soft preferences around the objective, so the group does not collapse into one destination.
+A move order is issued to a complete squad selection. The squad stores one shared world objective and one distribution profile. Members receive distinct local terminal navigation points around that objective; these are endpoint goals, not persistent world-space slots that the group tries to preserve during the route.
 
 The original objective stays active while members temporarily react to combat. It is not replaced by an enemy's current position.
 
-### 2. Collective navigation layer
+### 2. Individual navigation layer
 
-`SquadFlowField` builds a reverse weighted Dijkstra field from the shared objective over the map's walkable surface.
-
-- Passability follows the navigation-blocked flag and existence of a surface.
-- Adjacent cells respect the current 1.5 m step-height limit.
-- Diagonal movement cannot cut across blocked orthogonal corners.
-- Height differences add a small traversal cost.
-- The field is cached against `WorldMap.TerrainVersion` and its destination.
-- Each follower samples a local direction instead of receiving a copied A* waypoint list.
-
-The field is common to squad members, while individual route navigation remains available for units outside squads and as a fallback when the field cannot be sampled or its short look-ahead segment is not traversable for that pawn's footprint.
-
-The first implementation builds a squad field synchronously when its first follower requests steering. The cache key includes both terrain version and requested destination. It does not yet have a background build budget or cross-squad field deduplication; those remain performance improvements to consider if profiling shows a need.
+Squad members use their own footprint-aware A* routes. The Flow Field path is currently disabled on this branch; the shared movement layer does not replace navigation or issue copied waypoint lists. It only adjusts a safe look-ahead point when the spatial envelope, group velocity or member spacing requires a weak steering preference.
 
 ### 3. Formation-envelope layer
 
@@ -42,7 +31,7 @@ Formation profiles describe where the group prefers to distribute itself. They a
 | Perimeter | Ring-like distribution around the objective |
 | Line | Shallow multi-row front |
 
-The formation offsets influence steering weakly. The information layer draws each pawn's actual preferred offset relative to the squad center and heading, alongside its current position. Navigation, collision avoidance, blocked terrain, inertia and individual tactical decisions may override that preference. In particular, narrow passages can compress the group naturally; there is no requirement that all members preserve their nominal width.
+Formation offsets are used only to give members distinct local terminal navigation points for a move order. They no longer pull every member toward a persistent world-space slot while travelling. The live envelope is an oriented ellipse around the collective core: it is longer along the travel axis on the march and expands laterally during contact. Cohesion is inactive inside the envelope and begins only when a member crosses its boundary. Alignment gently biases travel direction toward the core's average velocity; separation supplies a small preferred-distance correction while physical collision resolution remains authoritative. Navigation, blocked terrain, inertia and individual tactical decisions may override all of these preferences. Narrow passages can compress the group naturally.
 
 `SquadFormationRigidity` is an extension point: `Free` is the default and `Organized` slightly increases cohesion. `Strict` is reserved and currently behaves like `Organized`; strict slot locking is deliberately not implemented.
 
@@ -50,9 +39,9 @@ The formation offsets influence steering weakly. The information layer draws eac
 
 The squad layer does not replace the pawn AI. The existing AI may choose combat, cover, flank, injury response or other local actions.
 
-A pawn is temporarily detached from collective steering while it has an attack order, an active combat target, or an individual attack/cover/flank/injured state. The shared squad objective remains intact. Once the individual action ends, the pawn resumes the group move order and blends back into the common flow. A separate per-pawn Move/StealthMove destination is not overwritten by the squad field. No position or velocity teleport is used.
+A pawn is temporarily detached only from soft collective steering while it has an attack order, an active combat target, panic, or an individual attack/cover/flank/injured state. Its membership and the shared squad objective remain intact. The squad does not cancel the other members' movement orders on contact. When the local action ends, the member is marked as rejoining; the movement correction can guide it back only while its active movement order still matches the squad order. No position or velocity teleport is used.
 
-The final motion still passes through `UnitMovementSystem`: acceleration, braking, inertia, look-ahead steering, predictive avoidance, terrain constraints and contact resolution remain authoritative. The Flow Field also samples its upcoming direction changes along the route and supplies the next-turn distance/severity to the same braking model used by individual A* navigation. This lets the physical controller reduce speed before a bend instead of discovering the turn only after its heading changes.
+The final motion still passes through `UnitMovementSystem`: acceleration, braking, inertia, look-ahead steering, predictive avoidance, terrain constraints and contact resolution remain authoritative. Route look-ahead, acceleration, braking, inertia, predictive avoidance, terrain constraints and contact resolution remain authoritative in `UnitMovementSystem`.
 
 ### 5. Regroup and membership state layer
 
@@ -63,7 +52,7 @@ The movement layer tracks a coarse state per member:
 - `Rejoining`: returning to the collective movement stream after that action.
 - `Separated`: currently too far from the group's moving center to count as part of its cohesion center.
 
-The squad exposes a phase:
+The squad exposes a phase, updated even when there is no active Move order:
 
 - `Idle`
 - `Advancing`
@@ -71,7 +60,7 @@ The squad exposes a phase:
 - `Regrouping`
 - `Arrived`
 
-These are movement summaries, not replacements for the detailed per-pawn AI state machine. A separated pawn continues to navigate toward the squad's shared objective; it is not forcibly pulled or teleported toward a leader.
+These are movement summaries, not replacements for the detailed per-pawn AI state machine. Tactical members are excluded from the cohesion center but remain in the squad. `Rejoining` is a tracked state, not an automatic new order: a member whose AI has replaced its original Move order needs a later regroup command or AI order restoration.
 
 ### 6. Tactical information and shared knowledge layer
 
@@ -84,7 +73,7 @@ The existing `SquadTacticalCoordinator` remains the information-sharing path for
 - confidence decays and the report expires;
 - investigation and flank claims prevent every member from duplicating the same local task.
 
-The new movement snapshot is a separate information channel. `SquadMovementInformation` exposes the squad objective, movement phase, formation, rigidity, member-state counts, Flow Field readiness and terrain version. `UnitSimulation.TryGetSquadMovementInformation` exposes the squad summary, while `UnitSimulation.TryGetSquadMemberMovementState` exposes a specific member's movement state for a HUD, debug overlay, telemetry or AI diagnostics.
+The new movement snapshot is a separate information channel. `SquadMovementInformation` exposes the squad objective, movement phase, formation, rigidity, member-state counts, core velocity and the current envelope radii. `UnitSimulation.TryGetSquadMovementInformation` exposes the squad summary, while `UnitSimulation.TryGetSquadMemberMovementState` exposes a specific member's movement state for a HUD, debug overlay, telemetry or AI diagnostics.
 
 This keeps the data domains distinct:
 
@@ -102,7 +91,7 @@ This keeps the data domains distinct:
 Squad creation and assignment are enabled again. A selected squad can receive a shared move order through the existing context-menu command.
 
 - `J` cycles the six formation profiles.
-The always-visible `ИНФОСЛОИ` button beside the top-left menu opens the information panel. Independent checkboxes control vision, hearing, aiming links, AI state, suppression, pawn memory, Utility AI, unit velocity, motor force, Flow Field cost/directions, squad cohesion, member states and shared tactical contacts. Flow Field costs are drawn for the currently selected squad; select a squad before enabling that layer.
+The always-visible `ИНФОСЛОИ` button beside the top-left menu opens the information panel. Independent checkboxes control vision, hearing, aiming links, AI state, suppression, pawn memory, Utility AI, unit velocity, motor force, Flow Field diagnostics, squad envelope, member states and shared tactical contacts. Flow Field movement is disabled; its diagnostics may remain empty. Select a squad to inspect its envelope and member states.
 
 Velocity arrows show current horizontal velocity. Motor-force arrows show the last resultant drive/braking/lateral force calculated by the movement controller; they do not include gravity or collision impulses.
 - Individual attack and cover behaviour remains active during a squad move.
@@ -112,6 +101,7 @@ Velocity arrows show current horizontal velocity. Motor-force arrows show the la
 This is the first playable collective-movement pass, not the final squad simulation.
 
 Not implemented yet:
+- automatic restoration of a member's original Move order after the combat AI replaces it;
 - dedicated squad-wide attack/support roles;
 - automatic tactical regroup orders after a prolonged firefight;
 - explicit player-facing controls for rigidity;

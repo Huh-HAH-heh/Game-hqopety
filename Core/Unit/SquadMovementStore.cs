@@ -53,7 +53,12 @@ public readonly record struct SquadMovementInformation(
     long TerrainVersion,
     Vector2 Center,
     Vector2 Forward,
-    float Spacing);
+    float Spacing,
+    Vector2 Velocity,
+    float EnvelopeWidth,
+    float EnvelopeDepth,
+    int CoreMemberCount,
+    bool HasMoveOrder);
 
 /// <summary>Immutable render-thread view of a squad's cached Flow Field.</summary>
 public readonly record struct SquadMovementDebugSnapshot(
@@ -69,9 +74,10 @@ public readonly record struct SquadMovementDebugSnapshot(
 /// </summary>
 public sealed class SquadMovementStore
 {
-    private const float RejoinDistance = 16f;
     private const float RejoinBlendSeconds = 1.8f;
-    private const float MaxCohesionCorrection = 5f;
+    private const float MaxCohesionCorrection = 0.62f;
+    private const float AlignmentWeight = 0.12f;
+    private const float MaxSeparationWeight = 0.28f;
 
     private Dictionary<int, SquadState> _squads = new();
     private Dictionary<UnitId, MemberLink> _membership = new();
@@ -311,6 +317,7 @@ public sealed class SquadMovementStore
 
         squad.Objective = new Vector3(goal.X, goal.Y, destination.Z);
         squad.Center = center;
+        squad.HasCenter = true;
         squad.Forward = forward;
         squad.Spacing = spacing;
         squad.Formation = formation;
@@ -422,6 +429,7 @@ public sealed class SquadMovementStore
 
         squad.Objective = new Vector3(goal.X, goal.Y, destination.Z);
         squad.Center = center;
+        squad.HasCenter = true;
         squad.Forward = forward;
         squad.Spacing = spacing;
         squad.Formation = formation;
@@ -451,148 +459,213 @@ public sealed class SquadMovementStore
         foreach (SquadState squad in _squads.Values)
         {
             squad.CenterAccumulator = Vector2.Zero;
-            squad.CenterMemberCount = 0;
             squad.FollowingCount = 0;
             squad.EngagedCount = 0;
             squad.RejoiningCount = 0;
             squad.SeparatedCount = 0;
             squad.MovingCount = 0;
-            squad.VelocityAccumulator = Vector2.Zero;
             squad.SlowestMoveSpeed = float.PositiveInfinity;
-        }
 
-        ReadOnlySpan<int> active = units.ActiveIndices;
-        for (int i = 0; i < active.Length; i++)
-        {
-            int unit = active[i];
-            UnitId id = units.GetId(unit);
-            if (!_membership.TryGetValue(id, out MemberLink link) ||
-                !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
-                !squad.HasMoveOrder ||
-                (health != null && health.OverallHitPoints[unit] <= 0f))
+            Vector2 allCenter = Vector2.Zero;
+            Vector2 previousCoreCenter = Vector2.Zero;
+            int allMemberCount = 0;
+            int previousCoreCount = 0;
+
+            // Use the previous core as the reference, keeping newly detached
+            // tactical members from shifting the collective center.
+            for (int slot = 0; slot < squad.Members.Count; slot++)
             {
-                continue;
+                UnitId id = squad.Members[slot];
+                if (!units.TryGetIndex(id, out int unit) ||
+                    (health != null && health.OverallHitPoints[unit] <= 0f))
+                {
+                    continue;
+                }
+
+                EnsureMemberIdentity(units, unit);
+                Vector3 position = units.Position[unit];
+                Vector2 planarPosition = new(position.X, position.Y);
+                allCenter += planarPosition;
+                allMemberCount++;
+
+                if (_memberStates[unit] == SquadMemberMovementState.Following)
+                {
+                    previousCoreCenter += planarPosition;
+                    previousCoreCount++;
+                }
+
+                if (units.HasTarget[unit])
+                    squad.MovingCount++;
             }
 
-            EnsureMemberIdentity(units, unit);
-            if (units.HasTarget[unit])
-                squad.MovingCount++;
+            Vector2 referenceCenter = previousCoreCount > 0
+                ? previousCoreCenter / previousCoreCount
+                : squad.HasCenter
+                    ? squad.Center
+                    : allMemberCount > 0
+                        ? allCenter / allMemberCount
+                        : squad.Center;
 
-            if (squad.IsAStarFormation)
+            Vector2 coreVelocity = Vector2.Zero;
+            int coreMemberCount = 0;
+
+            // Tactical actions change steering participation, not persistent
+            // squad membership or the shared movement objective.
+            for (int slot = 0; slot < squad.Members.Count; slot++)
             {
-                float memberSpeed = MathF.Max(0.1f, units.MoveSpeed[unit]);
-                if (units.Posture[unit] == UnitPosture.Lying)
-                    memberSpeed *= 0.45f;
-                squad.SlowestMoveSpeed = MathF.Min(
-                    squad.SlowestMoveSpeed, memberSpeed);
-                if (IsCombatEngaged(units, ai, suppression, unit))
+                UnitId id = squad.Members[slot];
+                if (!units.TryGetIndex(id, out int unit) ||
+                    (health != null && health.OverallHitPoints[unit] <= 0f))
+                {
+                    continue;
+                }
+
+                bool tacticallyDetached =
+                    IsCombatEngaged(units, ai, suppression, unit) ||
+                    IsDetachedFromCollective(units, ai, unit);
+
+                if (tacticallyDetached)
+                {
+                    _memberStates[unit] = SquadMemberMovementState.Engaged;
+                    _rejoinElapsed[unit] = 0f;
                     squad.EngagedCount++;
+                    continue;
+                }
+
+                if (_memberStates[unit] == SquadMemberMovementState.Engaged)
+                {
+                    _memberStates[unit] = SquadMemberMovementState.Rejoining;
+                    _rejoinElapsed[unit] = 0f;
+                }
+
+                Vector3 worldPosition = units.Position[unit];
+                Vector2 position = new(worldPosition.X, worldPosition.Y);
+                float distanceFromGroup = Vector2.Distance(position, referenceCenter);
+                float rejoinDistance = MathF.Max(
+                    8f,
+                    squad.EnvelopeWidth + squad.Spacing * 2.5f);
+
+                if (distanceFromGroup > rejoinDistance)
+                {
+                    _memberStates[unit] = SquadMemberMovementState.Separated;
+                }
+                else if (_memberStates[unit] == SquadMemberMovementState.Separated)
+                {
+                    _memberStates[unit] = SquadMemberMovementState.Rejoining;
+                    _rejoinElapsed[unit] = 0f;
+                }
+
+                if (_memberStates[unit] == SquadMemberMovementState.Rejoining)
+                {
+                    bool insideCore = distanceFromGroup <= MathF.Max(
+                        squad.Spacing * 2f,
+                        MathF.Min(squad.EnvelopeWidth, squad.EnvelopeDepth) * 0.85f);
+                    if (!insideCore)
+                    {
+                        squad.RejoiningCount++;
+                        continue;
+                    }
+
+                    _rejoinElapsed[unit] += Math.Clamp(deltaTime, 0f, 0.25f);
+                    if (_rejoinElapsed[unit] >= RejoinBlendSeconds)
+                    {
+                        _memberStates[unit] = SquadMemberMovementState.Following;
+                        _rejoinElapsed[unit] = 0f;
+                        squad.FollowingCount++;
+                    }
+                    else
+                    {
+                        squad.RejoiningCount++;
+                    }
+                }
+                else if (_memberStates[unit] == SquadMemberMovementState.Separated)
+                {
+                    squad.SeparatedCount++;
+                    continue;
+                }
                 else
+                {
+                    _memberStates[unit] = SquadMemberMovementState.Following;
                     squad.FollowingCount++;
+                }
 
-                squad.CenterAccumulator += new Vector2(
-                    units.Position[unit].X, units.Position[unit].Y);
-                squad.VelocityAccumulator += new Vector2(
-                    units.Velocity[unit].X, units.Velocity[unit].Y);
-                squad.CenterMemberCount++;
-                continue;
+                squad.CenterAccumulator += position;
+                coreVelocity += new Vector2(
+                    units.Velocity[unit].X,
+                    units.Velocity[unit].Y);
+                coreMemberCount++;
+
+                if (squad.IsAStarFormation)
+                {
+                    float memberSpeed = MathF.Max(0.1f, units.MoveSpeed[unit]);
+                    if (units.Posture[unit] == UnitPosture.Lying)
+                        memberSpeed *= 0.45f;
+                    squad.SlowestMoveSpeed = MathF.Min(
+                        squad.SlowestMoveSpeed, memberSpeed);
+                }
             }
 
-            if (IsDetachedFromCollective(units, ai, unit))
+            squad.CoreMemberCount = coreMemberCount;
+            if (coreMemberCount > 0)
             {
-                _memberStates[unit] = SquadMemberMovementState.Engaged;
-                _rejoinElapsed[unit] = 0f;
-                squad.EngagedCount++;
-                continue;
-            }
-
-            if (_memberStates[unit] == SquadMemberMovementState.Engaged)
-            {
-                _memberStates[unit] = SquadMemberMovementState.Rejoining;
-                _rejoinElapsed[unit] = 0f;
-            }
-
-            Vector2 position = new(units.Position[unit].X, units.Position[unit].Y);
-            float distanceFromGroup = Vector2.Distance(position, squad.Center);
-            if (distanceFromGroup > RejoinDistance)
-                _memberStates[unit] = SquadMemberMovementState.Separated;
-            else if (_memberStates[unit] == SquadMemberMovementState.Separated)
-            {
-                _memberStates[unit] = SquadMemberMovementState.Rejoining;
-                _rejoinElapsed[unit] = 0f;
-            }
-
-            if (_memberStates[unit] == SquadMemberMovementState.Rejoining)
-            {
-                _rejoinElapsed[unit] += Math.Clamp(deltaTime, 0f, 0.25f);
-                squad.RejoiningCount++;
-            }
-            else if (_memberStates[unit] == SquadMemberMovementState.Separated)
-            {
-                squad.SeparatedCount++;
-                continue;
+                squad.Center = squad.CenterAccumulator / coreMemberCount;
+                squad.CenterVelocity = coreVelocity / coreMemberCount;
+                squad.HasCenter = true;
             }
             else
             {
-                _memberStates[unit] = SquadMemberMovementState.Following;
-                squad.FollowingCount++;
+                squad.CenterVelocity = Vector2.Zero;
+                if (!squad.HasCenter && allMemberCount > 0)
+                {
+                    squad.Center = allCenter / allMemberCount;
+                    squad.HasCenter = true;
+                }
             }
-
-            squad.CenterAccumulator += position;
-            squad.CenterMemberCount++;
-        }
-
-        foreach (SquadState squad in _squads.Values)
-        {
-            if (squad.CenterMemberCount > 0)
-                squad.Center = squad.CenterAccumulator / squad.CenterMemberCount;
 
             Vector2 toObjective = new(
                 squad.Objective.X - squad.Center.X,
                 squad.Objective.Y - squad.Center.Y);
-
-            Vector2 desiredForward = toObjective;
-            if (squad.IsAStarFormation &&
-                squad.Formation != InfantryFormationType.None &&
-                squad.VelocityAccumulator.LengthSquared() > 0.04f)
-            {
-                desiredForward = squad.VelocityAccumulator;
-            }
+            Vector2 desiredForward = squad.CenterVelocity.LengthSquared() > 0.04f
+                ? squad.CenterVelocity
+                : squad.HasMoveOrder
+                    ? toObjective
+                    : Vector2.Zero;
 
             if (desiredForward.LengthSquared() > 0.0001f)
             {
                 desiredForward = Vector2.Normalize(desiredForward);
-                if (squad.IsAStarFormation &&
-                    squad.Formation != InfantryFormationType.None &&
-                    squad.Forward.LengthSquared() > 0.0001f)
-                {
-                    Vector2 smoothedForward = Vector2.Lerp(
-                        squad.Forward,
-                        desiredForward,
-                        Math.Clamp(deltaTime * 8f, 0f, 1f));
-                    squad.Forward = smoothedForward.LengthSquared() > 0.0001f
-                        ? Vector2.Normalize(smoothedForward)
-                        : desiredForward;
-                }
-                else
-                {
-                    squad.Forward = desiredForward;
-                }
+                Vector2 smoothedForward = Vector2.Lerp(
+                    squad.Forward,
+                    desiredForward,
+                    Math.Clamp(deltaTime * 6f, 0f, 1f));
+                squad.Forward = smoothedForward.LengthSquared() > 0.0001f
+                    ? Vector2.Normalize(smoothedForward)
+                    : desiredForward;
             }
 
-            if (squad.IsAStarFormation &&
-                !squad.KeepFormationInCombat &&
-                squad.EngagedCount > 0)
-            {
-                BreakAStarFormation(units, health, ai, navigation, suppression, worldMap, squad);
-            }
+            // A soft spatial envelope replaces continuous pulling toward fixed
+            // member slots. It stretches along travel during the march and opens
+            // laterally during contact.
+            float effectiveCoreCount = Math.Max(1, coreMemberCount);
+            float baseRadius = MathF.Max(
+                squad.Spacing * 1.75f,
+                MathF.Sqrt(effectiveCoreCount) * squad.Spacing * 1.1f);
+            if (squad.Rigidity == SquadFormationRigidity.Organized)
+                baseRadius *= 0.92f;
 
-            if (!squad.HasMoveOrder)
-                squad.Phase = SquadMovementPhase.Idle;
-            else if (squad.EngagedCount > 0)
+            bool inContact = squad.EngagedCount > 0;
+            squad.EnvelopeWidth = baseRadius *
+                (inContact
+                    ? squad.KeepFormationInCombat ? 1.35f : 1.75f
+                    : 1f);
+            squad.EnvelopeDepth = baseRadius * (inContact ? 1.25f : 1.55f);
+
+            if (squad.EngagedCount > 0)
                 squad.Phase = SquadMovementPhase.Contact;
             else if (squad.RejoiningCount > 0 || squad.SeparatedCount > 0)
                 squad.Phase = SquadMovementPhase.Regrouping;
+            else if (!squad.HasMoveOrder)
+                squad.Phase = SquadMovementPhase.Idle;
             else if (squad.MovingCount == 0)
                 squad.Phase = SquadMovementPhase.Arrived;
             else
@@ -637,9 +710,6 @@ public sealed class SquadMovementStore
         if (!_membership.TryGetValue(id, out MemberLink link) ||
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
             !squad.HasMoveOrder ||
-            !squad.IsAStarFormation ||
-            squad.Formation == InfantryFormationType.None ||
-            (uint)link.Slot >= (uint)squad.MemberOffsets.Length ||
             (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
             !units.HasTarget[unitIndex] ||
             !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
@@ -654,26 +724,89 @@ public sealed class SquadMovementStore
         if (pathDistance < 0.05f)
             return false;
 
-        Vector2 localOffset = squad.MemberOffsets[link.Slot];
+        Vector2 direction = pathDelta / pathDistance;
         Vector2 side = new(-squad.Forward.Y, squad.Forward.X);
-        Vector2 preferredPosition = squad.Center +
-            side * localOffset.X - squad.Forward * localOffset.Y;
-        Vector2 correction = preferredPosition - current;
-        float correctionLength = correction.Length();
-        if (correctionLength < 0.1f)
-            return false;
+        Vector2 fromCenter = current - squad.Center;
+        float forwardDistance = Vector2.Dot(fromCenter, squad.Forward);
+        float lateralDistance = Vector2.Dot(fromCenter, side);
+        float normalizedExtent = MathF.Sqrt(
+            forwardDistance * forwardDistance /
+                MathF.Max(0.01f, squad.EnvelopeDepth * squad.EnvelopeDepth) +
+            lateralDistance * lateralDistance /
+                MathF.Max(0.01f, squad.EnvelopeWidth * squad.EnvelopeWidth));
 
-        if (correctionLength > MaxCohesionCorrection)
+        // Cohesion stays inactive inside the envelope. Beyond its boundary,
+        // the pawn is gently steered toward the radial boundary point.
+        if (normalizedExtent > 1f)
         {
-            correction *= MaxCohesionCorrection / correctionLength;
-            correctionLength = MaxCohesionCorrection;
+            Vector2 boundaryPoint = squad.Center +
+                squad.Forward * (forwardDistance / normalizedExtent) +
+                side * (lateralDistance / normalizedExtent);
+            Vector2 inward = boundaryPoint - current;
+            float inwardLength = inward.Length();
+            if (inwardLength > 0.001f)
+            {
+                float cohesionWeight = Math.Clamp(
+                    (normalizedExtent - 1f) * 0.22f,
+                    0f,
+                    MaxCohesionCorrection);
+                direction += inward * (cohesionWeight / inwardLength);
+            }
         }
 
-        // Preserve each unit's own footprint-aware A* route, but bend its
-        // look-ahead toward the moving formation slot. The movement system
-        // accepts this correction only when a direct segment is traversable.
-        Vector2 direction = pathDelta / pathDistance +
-            correction * (0.68f / MathF.Max(1f, correctionLength));
+        // Alignment affects travel direction only; weapon/body orientation is
+        // untouched. Do not fight a route that is turning against group velocity.
+        if (squad.CenterVelocity.LengthSquared() > 0.04f)
+        {
+            Vector2 groupDirection = Vector2.Normalize(squad.CenterVelocity);
+            if (Vector2.Dot(direction, groupDirection) > 0.1f)
+                direction += groupDirection * AlignmentWeight;
+        }
+
+        // Prefer breathing room before physical collision resolution is needed.
+        Vector2 separation = Vector2.Zero;
+        for (int otherSlot = 0; otherSlot < squad.Members.Count; otherSlot++)
+        {
+            UnitId otherId = squad.Members[otherSlot];
+            if (otherId == id || !units.TryGetIndex(otherId, out int other))
+                continue;
+
+            Vector3 otherPosition = units.Position[other];
+            Vector2 away = current - new Vector2(otherPosition.X, otherPosition.Y);
+            float distanceSquared = away.LengthSquared();
+            float preferredDistance = MathF.Max(
+                1f,
+                (units.Radius[unitIndex] + units.Radius[other]) * 1.5f);
+            if (distanceSquared >= preferredDistance * preferredDistance)
+                continue;
+
+            float distance;
+            if (distanceSquared < 0.000001f)
+            {
+                float angle = ((unitIndex * 37 + other * 17) % 360) *
+                    (MathF.PI / 180f);
+                away = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+                distance = 0f;
+            }
+            else
+            {
+                distance = MathF.Sqrt(distanceSquared);
+                away /= distance;
+            }
+
+            separation += away * ((preferredDistance - distance) / preferredDistance);
+        }
+
+        float separationLength = separation.Length();
+        if (separationLength > 0.001f)
+        {
+            float separationWeight = Math.Clamp(
+                separationLength * 0.16f,
+                0f,
+                MaxSeparationWeight);
+            direction += separation * (separationWeight / separationLength);
+        }
+
         float directionLength = direction.Length();
         if (directionLength < 0.001f)
             return false;
@@ -684,6 +817,7 @@ public sealed class SquadMovementStore
     }
 
     public bool TryGetAStarFormationSpeedLimit(
+        UnitStore units,
         UnitId member,
         UnitAiStore? ai,
         out float speedLimit)
@@ -697,6 +831,7 @@ public sealed class SquadMovementStore
             !squad.EnforceGroupSpeed ||
             (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
             !HasMatchingGroupMoveOrder(ai, member.Index, squad.MemberGoals[link.Slot]) ||
+            IsDetachedFromCollective(units, ai, member.Index) ||
             !float.IsFinite(squad.SlowestMoveSpeed))
         {
             return false;
@@ -776,7 +911,6 @@ public sealed class SquadMovementStore
         if (!member.IsValid ||
             !_membership.TryGetValue(member, out MemberLink link) ||
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
-            !squad.HasMoveOrder ||
             (uint)member.Index >= (uint)_memberStates.Length ||
             _memberOwners[member.Index] != member)
         {
@@ -810,7 +944,12 @@ public sealed class SquadMovementStore
             squad.FlowField.TerrainVersion,
             squad.Center,
             squad.Forward,
-            squad.Spacing);
+            squad.Spacing,
+            squad.CenterVelocity,
+            squad.EnvelopeWidth,
+            squad.EnvelopeDepth,
+            squad.CoreMemberCount,
+            squad.HasMoveOrder);
         return true;
     }
 
@@ -855,59 +994,6 @@ public sealed class SquadMovementStore
             (ai.PlayerOrderType[unit] == UnitAiOrderType.Attack ||
              ai.State[unit] is UnitAiState.Attack or UnitAiState.SeekCover or
                  UnitAiState.Flank or UnitAiState.Injured);
-    }
-
-    private static void BreakAStarFormation(
-        UnitStore units,
-        UnitHealthStore? health,
-        UnitAiStore? ai,
-        UnitNavigationSystem navigation,
-        UnitSuppressionStore? suppression,
-        WorldMap worldMap,
-        SquadState squad)
-    {
-        squad.HasMoveOrder = false;
-        squad.IsAStarFormation = false;
-        squad.EnforceGroupSpeed = false;
-        squad.SlowestMoveSpeed = float.PositiveInfinity;
-        squad.Phase = SquadMovementPhase.Contact;
-
-        if (ai == null)
-            return;
-
-        HashSet<int> reservedDestinations = new();
-        for (int slot = 0; slot < squad.Members.Count; slot++)
-        {
-            UnitId id = squad.Members[slot];
-            if (!units.TryGetIndex(id, out int index) ||
-                (health != null && health.OverallHitPoints[index] <= 0f) ||
-                IsCombatEngaged(units, ai, suppression, index))
-            {
-                continue;
-            }
-
-            Vector2 requestedGoal = new(squad.Objective.X, squad.Objective.Y);
-            Vector2 individualGoal;
-            if (!navigation.TryResolveAStarGoal(
-                    units, index, worldMap, requestedGoal, reservedDestinations, out individualGoal))
-            {
-                individualGoal = ResolveNavigablePoint(
-                    worldMap, requestedGoal, reservedDestinations);
-            }
-            int tileX = Math.Clamp((int)MathF.Floor(individualGoal.X), 0, worldMap.MaxTileX);
-            int tileY = Math.Clamp((int)MathF.Floor(individualGoal.Y), 0, worldMap.MaxTileY);
-            Vector3 destination = new(
-                individualGoal.X,
-                individualGoal.Y,
-                worldMap.GetSurfaceHeight(tileX, tileY));
-            if (float.IsFinite(destination.X) && float.IsFinite(destination.Y))
-            {
-                ai.SetPlayerOrder(index, UnitAiOrderType.Move, destination);
-                ai.ClearGoal(index);
-                units.SetTarget(id, destination);
-                navigation.ClearRoute(index);
-            }
-        }
     }
 
     private bool IsDetachedFromCollective(UnitStore units, UnitAiStore? ai, int unit)
@@ -1061,7 +1147,11 @@ public sealed class SquadMovementStore
         public Vector3 Objective;
         public Vector2 Center;
         public Vector2 CenterAccumulator;
-        public Vector2 VelocityAccumulator;
+        public Vector2 CenterVelocity;
+        public float EnvelopeWidth;
+        public float EnvelopeDepth;
+        public int CoreMemberCount;
+        public bool HasCenter;
         public Vector2 Forward = Vector2.UnitX;
         public float Spacing = 1.15f;
         public InfantryFormationType Formation = InfantryFormationType.Free;
@@ -1074,7 +1164,6 @@ public sealed class SquadMovementStore
         public bool EnforceGroupSpeed;
         public bool KeepFormationInCombat;
         public float SlowestMoveSpeed = float.PositiveInfinity;
-        public int CenterMemberCount;
         public int FollowingCount;
         public int EngagedCount;
         public int RejoiningCount;

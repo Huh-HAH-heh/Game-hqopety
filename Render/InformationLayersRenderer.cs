@@ -228,7 +228,9 @@ public sealed class InformationLayersRenderer : IDisposable
             _hudTitle.DisplayedString =
                 $"ИНФО  •  ОТРЯД {info.SquadId}  •  {info.Phase}  •  {InfantryFormation.GetName(info.Formation)}";
             AddRow(
-                $"Участники {info.MemberCount}  •  Следуют {info.FollowingCount}  •  В бою {info.EngagedCount}  •  Возвращаются {info.RejoiningCount}  •  Отделены {info.SeparatedCount}");
+                $"Участники {info.MemberCount}  •  Ядро {info.CoreMemberCount}  •  В бою {info.EngagedCount}  •  Возвращаются {info.RejoiningCount}  •  Отделены {info.SeparatedCount}");
+            AddRow(
+                $"Центр ({info.Center.X:0.0}; {info.Center.Y:0.0})  •  Скорость группы {info.Velocity.Length():0.0}  •  Область {info.EnvelopeWidth * 2f:0.0} × {info.EnvelopeDepth * 2f:0.0}");
         }
         else
         {
@@ -244,7 +246,7 @@ public sealed class InformationLayersRenderer : IDisposable
         if (flowWeights)
             AddRow(_flowStatus);
         if (formation)
-            AddRow("Формация — голубая линия: позиция → мягкое предпочтение; фиолетовый крест — цель.");
+            AddRow("Область отряда — контур: голубой марш • оранжевый контакт • жёлтая перегруппировка; фиолетовые кресты — локальные цели A*.");
         if (memberStates)
             AddRow("Состояния: FOLLOW — зелёный • ENGAGED — красный • REJOIN — жёлтый • SEPARATED — серый.");
         if (squadContacts)
@@ -545,6 +547,38 @@ public sealed class InformationLayersRenderer : IDisposable
                 ? Vector2.Normalize(info.Forward)
                 : Vector2.UnitX;
             Vector2 side = new(-forward.Y, forward.X);
+            Vector2 center = info.Center;
+            float width = MathF.Max(info.EnvelopeWidth, info.Spacing);
+            float depth = MathF.Max(info.EnvelopeDepth, info.Spacing);
+            Color envelopeColor = info.Phase switch
+            {
+                SquadMovementPhase.Contact => new Color(255, 175, 105, 210),
+                SquadMovementPhase.Regrouping => new Color(255, 210, 105, 205),
+                _ => new Color(100, 190, 255, 190)
+            };
+
+            const int segments = 40;
+            Vector2 previous = center + side * width;
+            for (int i = 1; i <= segments; i++)
+            {
+                float angle = MathF.Tau * i / segments;
+                Vector2 point = center +
+                    side * (MathF.Cos(angle) * width) +
+                    forward * (MathF.Sin(angle) * depth);
+                Line(
+                    _squadGeometry,
+                    new Vector2f(previous.X * tilePixels, previous.Y * tilePixels),
+                    new Vector2f(point.X * tilePixels, point.Y * tilePixels),
+                    envelopeColor);
+                previous = point;
+            }
+
+            Vector2f centerPixel = new(center.X * tilePixels, center.Y * tilePixels);
+            Cross(
+                _squadGeometry,
+                centerPixel,
+                Math.Clamp(4f * zoomLevel, 1f, 8f),
+                envelopeColor);
 
             foreach (RenderUnitState unit in snapshot.Units)
             {
@@ -555,51 +589,14 @@ public sealed class InformationLayersRenderer : IDisposable
                     continue;
                 }
 
-                Vector2 preferred =
-                    info.Center +
-                    side * unit.SquadFormationOffset.X -
-                    forward * unit.SquadFormationOffset.Y;
-
-                Vector2f actualPixel = new(
-                    unit.Position.X * tilePixels,
-                    unit.Position.Y * tilePixels);
-                Vector2f preferredPixel = new(
-                    preferred.X * tilePixels,
-                    preferred.Y * tilePixels);
+                // Purple crosses are individual A* terminal points, not formation slots.
                 Vector2f terminalPixel = new(
                     unit.SquadMemberGoal.X * tilePixels,
                     unit.SquadMemberGoal.Y * tilePixels);
-
-                // Keep world-space diagnostics readable at every zoom:
-                // distant views omit tiny correction links, while slot markers
-                // retain a stable screen size.
-                Vector2 correction = preferred - new Vector2(
-                    unit.Position.X, unit.Position.Y);
-                float minimumLinkLength = 7f * zoomLevel / MathF.Max(0.01f, tilePixels);
-                float markerRadius = Math.Clamp(3f * zoomLevel, 0.65f, 7f);
-
-                if (correction.Length() >= minimumLinkLength)
-                {
-                    byte alpha = (byte)Math.Clamp(
-                        95f + correction.Length() * 10f,
-                        95f,
-                        190f);
-                    Line(
-                        _squadGeometry,
-                        actualPixel,
-                        preferredPixel,
-                        new Color(100, 190, 255, alpha));
-                }
-
-                Cross(
-                    _squadGeometry,
-                    preferredPixel,
-                    markerRadius,
-                    new Color(100, 190, 255, 220));
                 Cross(
                     _squadGeometry,
                     terminalPixel,
-                    markerRadius * 0.82f,
+                    Math.Clamp(2.5f * zoomLevel, 0.7f, 5f),
                     new Color(190, 145, 255, 225));
             }
         }
