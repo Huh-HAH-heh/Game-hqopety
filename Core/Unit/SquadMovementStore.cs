@@ -240,7 +240,10 @@ public sealed class SquadMovementStore
             Vector3 position = units.Position[index];
             center += new Vector2(position.X, position.Y);
             spacing = MathF.Max(spacing, MathF.Max(units.Width[index], units.Length[index]) * 1.15f);
-            slowestSpeed = MathF.Min(slowestSpeed, MathF.Max(0.1f, units.MoveSpeed[index]));
+            float effectiveSpeed = MathF.Max(0.1f, units.MoveSpeed[index]);
+            if (units.Posture[index] == UnitPosture.Lying)
+                effectiveSpeed *= 0.45f;
+            slowestSpeed = MathF.Min(slowestSpeed, effectiveSpeed);
         }
 
         center /= members.Count;
@@ -297,6 +300,7 @@ public sealed class SquadMovementStore
         squad.Rigidity = SquadFormationRigidity.Organized;
         squad.HasMoveOrder = true;
         squad.IsAStarFormation = true;
+        squad.EnforceGroupSpeed = formation != InfantryFormationType.None;
         squad.KeepFormationInCombat = keepFormationInCombat;
         squad.SlowestMoveSpeed = slowestSpeed;
         squad.Phase = SquadMovementPhase.Advancing;
@@ -407,6 +411,7 @@ public sealed class SquadMovementStore
         squad.Rigidity = SquadFormationRigidity.Free;
         squad.HasMoveOrder = true;
         squad.IsAStarFormation = false;
+        squad.EnforceGroupSpeed = false;
         squad.KeepFormationInCombat = false;
         squad.SlowestMoveSpeed = float.PositiveInfinity;
         squad.Phase = SquadMovementPhase.Advancing;
@@ -684,6 +689,7 @@ public sealed class SquadMovementStore
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
             !squad.HasMoveOrder ||
             !squad.IsAStarFormation ||
+            !squad.EnforceGroupSpeed ||
             (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
             !HasMatchingGroupMoveOrder(ai, member.Index, squad.MemberGoals[link.Slot]) ||
             !float.IsFinite(squad.SlowestMoveSpeed))
@@ -856,6 +862,7 @@ public sealed class SquadMovementStore
     {
         squad.HasMoveOrder = false;
         squad.IsAStarFormation = false;
+        squad.EnforceGroupSpeed = false;
         squad.SlowestMoveSpeed = float.PositiveInfinity;
         squad.Phase = SquadMovementPhase.Contact;
 
@@ -1032,6 +1039,7 @@ public sealed class SquadMovementStore
         public Vector2[] MemberGoals = Array.Empty<Vector2>();
         public bool HasMoveOrder;
         public bool IsAStarFormation;
+        public bool EnforceGroupSpeed;
         public bool KeepFormationInCombat;
         public float SlowestMoveSpeed = float.PositiveInfinity;
         public int CenterMemberCount;
