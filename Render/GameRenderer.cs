@@ -1673,13 +1673,62 @@ public sealed class GameRenderer
                 unitIndex,
                 UnitAiOrderType.Stop,
                 units.Position[unitIndex]);
-            if (_movementTestMode)
-                units.ClearTarget(memberIds[i]);
+            units.ClearTarget(memberIds[i]);
+            _unitSimulation.Navigation.ClearRoute(unitIndex);
             assigned++;
         }
 
         Console.WriteLine(
             $"[SQUAD] Hold-position task replaced previous orders for {assigned} soldiers.");
+    }
+
+    private void ApplyWeaponContextAction(
+        UnitId[] memberIds,
+        ContextMenuActionType action)
+    {
+        UnitStore units = _unitSimulation.Units;
+        for (int i = 0; i < memberIds.Length; i++)
+        {
+            UnitId id = memberIds[i];
+            if (!units.TryGetIndex(id, out int unitIndex) ||
+                _unitSimulation.Health.OverallHitPoints[unitIndex] <= 0f)
+            {
+                continue;
+            }
+
+            switch (action)
+            {
+                case ContextMenuActionType.CycleFireMode:
+                    _unitSimulation.Weapons.CycleFireMode(unitIndex, UnitWeaponSlot.Primary);
+                    break;
+
+                case ContextMenuActionType.CycleAimMode:
+                    _unitSimulation.Weapons.CycleAimMode(unitIndex, UnitWeaponSlot.Primary);
+                    break;
+
+                case ContextMenuActionType.CycleTargetMode:
+                    _unitSimulation.Weapons.CycleTargetMode(unitIndex, UnitWeaponSlot.Primary);
+                    break;
+
+                case ContextMenuActionType.CycleAmmunition:
+                {
+                    int weaponState = UnitWeaponStore.GetIndex(unitIndex, UnitWeaponSlot.Primary);
+                    int nextAmmo = _unitSimulation.Weapons.CurrentAmmoType[weaponState] + 1;
+                    short inventorySlot = _unitSimulation.Inventory.GetWeaponEquipment(
+                        unitIndex, UnitWeaponSlot.Primary);
+                    if (inventorySlot >= 0)
+                    {
+                        RangedWeaponConfig? weapon =
+                            _unitSimulation.Inventory.GetItem(unitIndex, inventorySlot) as RangedWeaponConfig;
+                        int ammoCount = weapon?.AmmoSet?.Count ?? 1;
+                        nextAmmo = ammoCount <= 0 ? 0 : nextAmmo % ammoCount;
+                    }
+
+                    _unitSimulation.SelectAmmunition(id, UnitWeaponSlot.Primary, nextAmmo);
+                    break;
+                }
+            }
+        }
     }
 
     private bool IsHostileToSelection(
@@ -3455,6 +3504,8 @@ public sealed class GameRenderer
                             : _keepFormationInCombat
                                 ? "Сохранять строй в бою: ВКЛ"
                                 : "Сохранять строй в бою: ВЫКЛ";
+                        bool canHoldSelected = selectedIds.Length > 0;
+                        bool canConfigureWeapons = clickedSelectedUnit && selectedIds.Length > 0;
 
                         float destinationX = Math.Clamp(
                             worldPosition.X / TerrainTilePixelSize,
@@ -3523,7 +3574,9 @@ public sealed class GameRenderer
                             autonomousMovementLabel,
                             selectedFormationLabel != null,
                             selectedFormationLabel,
-                            keepFormationLabel);
+                            keepFormationLabel,
+                            canHoldSelected,
+                            canConfigureWeapons);
 
                         if (!_contextMenuOverlay.IsOpen)
                             _contextMenuUnit = default;
@@ -3694,6 +3747,30 @@ public sealed class GameRenderer
                                     ExecuteSimulationCommand(() =>
                                         IssueAttackOrder(attackUnits, attackTarget));
                                 }
+                                break;
+                            }
+
+                            case ContextMenuActionType.HoldSelected:
+                            case ContextMenuActionType.CycleFireMode:
+                            case ContextMenuActionType.CycleAimMode:
+                            case ContextMenuActionType.CycleTargetMode:
+                            case ContextMenuActionType.CycleAmmunition:
+                            {
+                                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+                                UnitId[] commandUnits = snapshot == null
+                                    ? Array.Empty<UnitId>()
+                                    : CaptureSelectedUnitIds(snapshot);
+                                if (commandUnits.Length == 0)
+                                    break;
+
+                                ContextMenuActionType selectedAction = contextAction;
+                                ExecuteSimulationCommand(() =>
+                                {
+                                    if (selectedAction == ContextMenuActionType.HoldSelected)
+                                        IssueHoldOrder(commandUnits);
+                                    else
+                                        ApplyWeaponContextAction(commandUnits, selectedAction);
+                                });
                                 break;
                             }
 
