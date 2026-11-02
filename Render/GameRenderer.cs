@@ -4298,6 +4298,7 @@ public sealed class GameRenderer
             _selectedTestSceneIndex,
             _activeTestSceneIndex,
             _liveAiEvolutionTrainer.Status?.IsRunning == true,
+            _unitSimulation.AI.Enabled,
             _unitSimulation.VisionEnabled,
             _showCombatTracers,
             _showCombatHud,
@@ -4369,6 +4370,11 @@ public sealed class GameRenderer
                     CenterOnMeleeBattle();
                     StartSimulationThread();
                 }
+                break;
+
+            case GameMenuActionType.ToggleAi:
+                ExecuteSimulationCommand(() =>
+                    _unitSimulation.AI.Enabled = !_unitSimulation.AI.Enabled);
                 break;
 
             case GameMenuActionType.ToggleVision:
