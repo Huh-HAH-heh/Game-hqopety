@@ -1541,6 +1541,19 @@ public sealed class GameRenderer
             $"[SQUAD] Flow state unavailable; issued shared objective to {issued} soldiers.");
     }
 
+    private static string GetFormationMenuLabel(InfantryFormationType formation) =>
+        formation switch
+        {
+            InfantryFormationType.Free => "Свободное движение",
+            InfantryFormationType.None => "Без строя",
+            InfantryFormationType.Line => "Линия",
+            InfantryFormationType.Column => "Колонна",
+            InfantryFormationType.Wedge => "Клин",
+            InfantryFormationType.DispersedLine => "Рассредоточенная линия",
+            InfantryFormationType.Perimeter => "Периметр",
+            _ => "Свободное движение"
+        };
+
     private bool AreAllAutonomousMovementDisabled(UnitId[] memberIds)
     {
         bool found = false;
@@ -3461,11 +3474,20 @@ public sealed class GameRenderer
                             }
                         }
                         string? autonomousMovementLabel =
-                            shiftPressed && clickedSelectedUnit && selectedIds.Length > 0
+                            clickedSelectedUnit && selectedIds.Length > 0
                                 ? (AreAllAutonomousMovementDisabled(selectedIds)
                                     ? "Разрешить самостоятельное движение"
                                     : "Запретить самостоятельное движение")
                                 : null;
+                        string? selectedFormationLabel =
+                            clickedSelectedUnit && selectedIds.Length > 1
+                                ? GetFormationMenuLabel(_infantryFormation)
+                                : null;
+                        string? keepFormationLabel = selectedFormationLabel == null
+                            ? null
+                            : _keepFormationInCombat
+                                ? "Сохранять строй в бою: ВКЛ"
+                                : "Сохранять строй в бою: ВЫКЛ";
 
                         float destinationX = Math.Clamp(
                             worldPosition.X / TerrainTilePixelSize,
@@ -3531,7 +3553,10 @@ public sealed class GameRenderer
                             canSendSquad,
                             canAttackTarget,
                             canMoveSelected,
-                            autonomousMovementLabel);
+                            autonomousMovementLabel,
+                            selectedFormationLabel != null,
+                            selectedFormationLabel,
+                            keepFormationLabel);
 
                         if (!_contextMenuOverlay.IsOpen)
                             _contextMenuUnit = default;
@@ -3704,6 +3729,35 @@ public sealed class GameRenderer
                                 }
                                 break;
                             }
+
+                            case ContextMenuActionType.SetFormationFree:
+                            case ContextMenuActionType.SetFormationNone:
+                            case ContextMenuActionType.SetFormationLine:
+                            case ContextMenuActionType.SetFormationColumn:
+                            case ContextMenuActionType.SetFormationWedge:
+                            case ContextMenuActionType.SetFormationDispersedLine:
+                            case ContextMenuActionType.SetFormationPerimeter:
+                                _infantryFormation = contextAction switch
+                                {
+                                    ContextMenuActionType.SetFormationFree => InfantryFormationType.Free,
+                                    ContextMenuActionType.SetFormationNone => InfantryFormationType.None,
+                                    ContextMenuActionType.SetFormationLine => InfantryFormationType.Line,
+                                    ContextMenuActionType.SetFormationColumn => InfantryFormationType.Column,
+                                    ContextMenuActionType.SetFormationWedge => InfantryFormationType.Wedge,
+                                    ContextMenuActionType.SetFormationDispersedLine => InfantryFormationType.DispersedLine,
+                                    ContextMenuActionType.SetFormationPerimeter => InfantryFormationType.Perimeter,
+                                    _ => _infantryFormation
+                                };
+                                Console.WriteLine(
+                                    $"[FORMATION] Next group move: {GetFormationMenuLabel(_infantryFormation)}.");
+                                break;
+
+                            case ContextMenuActionType.ToggleKeepFormationInCombat:
+                                _keepFormationInCombat = !_keepFormationInCombat;
+                                Console.WriteLine(_keepFormationInCombat
+                                    ? "[FORMATION] Formation will be kept in combat."
+                                    : "[FORMATION] Formation will break on combat contact.");
+                                break;
 
                             case ContextMenuActionType.ToggleAutonomousMovement:
                             {
@@ -4187,37 +4241,6 @@ public sealed class GameRenderer
 
         if (TryHandleSquadHotkey(key))
             return;
-
-        if (key == Keyboard.Key.J && _selectedUnits.Count > 1)
-        {
-            bool shiftPressed =
-                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-            if (shiftPressed)
-            {
-                _keepFormationInCombat = !_keepFormationInCombat;
-                Console.WriteLine(_keepFormationInCombat
-                    ? "[FORMATION] Keep formation during combat: ON."
-                    : "[FORMATION] Break formation on combat contact: ON.");
-            }
-            else
-            {
-                _infantryFormation = _infantryFormation switch
-                {
-                    InfantryFormationType.None => InfantryFormationType.Line,
-                    InfantryFormationType.Line => InfantryFormationType.Column,
-                    InfantryFormationType.Column => InfantryFormationType.Wedge,
-                    InfantryFormationType.Wedge => InfantryFormationType.DispersedLine,
-                    InfantryFormationType.DispersedLine => InfantryFormationType.Perimeter,
-                    InfantryFormationType.Perimeter => InfantryFormationType.Free,
-                    _ => InfantryFormationType.None
-                };
-                Console.WriteLine(
-                    $"[FORMATION] Next group move: {InfantryFormation.GetName(_infantryFormation)}. " +
-                    "Shift+J toggles keep-formation-in-combat.");
-            }
-            return;
-        }
 
         if (key == Keyboard.Key.S &&
             (Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
