@@ -38,6 +38,7 @@ public enum GameMenuActionType
     ResetTerrainSettings,
     OpenInformation,
     OpenTestScenes,
+    BackToSettings,
     PreviousTestScene,
     NextTestScene,
     ApplyTestScene,
@@ -1766,6 +1767,14 @@ void main()
 
     private void DrawTestScenes(RenderWindow window, GameSettingsSnapshot settings, Vector2i mouse)
     {
+        if (_font == null || _sceneName == null || _sceneActiveLabel == null)
+            return;
+
+        _settingsTitle!.DisplayedString = "ТЕСТОВЫЕ СЦЕНЫ И РЕЖИМЫ";
+        _settingsSubtitle!.DisplayedString = "Выбор карты, тестов и параметров запуска";
+        _backLabel!.DisplayedString = "К НАСТРОЙКАМ";
+        _sceneHeading!.DisplayedString = "ВЫБЕРИ ТЕСТОВОЕ ОКРУЖЕНИЕ";
+
         UpdateHover(_closeButton, mouse);
         UpdateHover(_backButton, mouse);
         UpdateHover(_scenePrevious, mouse);
