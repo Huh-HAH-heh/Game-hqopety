@@ -1482,7 +1482,7 @@ void main()
         FloatRect panel = page == GameMenuPage.Main
             ? _mainPanel.GetGlobalBounds()
             : _panel.GetGlobalBounds();
-        if (!panel.Contains(position))
+        if (!panel.Contains(position) || _closeButton.GetGlobalBounds().Contains(position))
             return false;
 
         float headerBottom = panel.Position.Y + (page == GameMenuPage.Main ? 82f : 70f);
