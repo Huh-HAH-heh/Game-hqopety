@@ -62,7 +62,6 @@ public sealed class GameRenderer
     private SimulationControlOverlay? _simulationControlOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
     private readonly MovementTestScene _movementTestScene = new();
-    private int _movementTestSquadId;
     private readonly LiveAiEvolutionTrainer _liveAiEvolutionTrainer = new();
     private AiEvolutionOverlay? _aiEvolutionOverlay;
 
@@ -195,7 +194,6 @@ public sealed class GameRenderer
     private bool _showCombatTracers = true;
     private bool _showCombatHud = true;
     private bool _showAiStateDebug = false;
-    private int _visionTestIndex;
 
     private float _perfTimer;
     private long _simulationUpdatesSample;
@@ -1328,61 +1326,6 @@ public sealed class GameRenderer
         _selectedUnit = unit;
         _selectedUnits.Clear();
         _selectedUnits.Add(unit);
-    }
-
-    private static int GetNumberKey(Keyboard.Key key) => key switch
-    {
-        Keyboard.Key.Num1 or Keyboard.Key.Numpad1 => 1,
-        Keyboard.Key.Num2 or Keyboard.Key.Numpad2 => 2,
-        Keyboard.Key.Num3 or Keyboard.Key.Numpad3 => 3,
-        Keyboard.Key.Num4 or Keyboard.Key.Numpad4 => 4,
-        Keyboard.Key.Num5 or Keyboard.Key.Numpad5 => 5,
-        Keyboard.Key.Num6 or Keyboard.Key.Numpad6 => 6,
-        Keyboard.Key.Num7 or Keyboard.Key.Numpad7 => 7,
-        Keyboard.Key.Num8 or Keyboard.Key.Numpad8 => 8,
-        Keyboard.Key.Num9 or Keyboard.Key.Numpad9 => 9,
-        _ => 0
-    };
-
-    private bool TryHandleSquadHotkey(Keyboard.Key key)
-    {
-        if (!SquadControlsEnabled)
-            return false;
-
-        int number = GetNumberKey(key);
-        if (number == 0)
-            return false;
-
-        bool controlPressed =
-            Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
-            Keyboard.IsKeyPressed(Keyboard.Key.RControl);
-        bool shiftPressed =
-            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-
-        if (controlPressed)
-            return false;
-
-        if (shiftPressed)
-        {
-            int squadId = GetFullySelectedSquadId();
-            if (squadId == 0)
-            {
-                Console.WriteLine("[SQUAD] Create a squad from the RMB context menu, then select it before binding a number.");
-                return true;
-            }
-
-            if (_squadManager.AssignHotkey(number, squadId))
-                Console.WriteLine($"[SQUAD] Squad {squadId} bound to {number}.");
-            return true;
-        }
-
-        int assignedSquadId = _squadManager.GetHotkeySquadId(number);
-        if (assignedSquadId == 0)
-            return false;
-
-        SelectSquad(assignedSquadId, false);
-        return true;
     }
 
     private int GetSelectedSquadId()
@@ -3060,32 +3003,6 @@ public sealed class GameRenderer
         }
     }
 
-    private void CycleMassCombatSelection()
-    {
-        SimulationFrameSnapshot? snapshot = Volatile.Read(ref _latestSnapshot);
-        if (snapshot == null || snapshot.Units.Length == 0)
-            return;
-
-        RenderUnitState[] units = snapshot.Units;
-        int current = -1;
-        for (int i = 0; i < units.Length; i++)
-        {
-            if (units[i].Index == _selectedUnit.Index &&
-                units[i].Generation == _selectedUnit.Generation)
-            {
-                current = i;
-                break;
-            }
-        }
-
-        int next = current < 0 ? 0 : (current + 1) % units.Length;
-        RenderUnitState selected = units[next];
-        SetSelectedUnit(new UnitId(selected.Index, selected.Generation));
-        _camera.CenterOnPosition(new Vector2f(
-            selected.Position.X * TerrainTilePixelSize,
-            selected.Position.Y * TerrainTilePixelSize));
-    }
-
     private void StopSimulationThread()
     {
         Thread? thread = _simulationThread;
@@ -4603,16 +4520,6 @@ public sealed class GameRenderer
         _uiView = CreateUiView(size);
     }
 
-    private void ScrollTerrainLayers(
-        int direction)
-    {
-        _visibleMaxLayer =
-            Math.Clamp(
-                _visibleMaxLayer + direction,
-                0,
-                _worldMap.LayerCount - 1);
-    }
-
     private void ActivateTestScene(int sceneIndex)
     {
         sceneIndex = Math.Clamp(sceneIndex, 0, GameMenuOverlay.TestSceneCount - 1);
@@ -4646,7 +4553,6 @@ public sealed class GameRenderer
         _movementTestMode = false;
         _visionTestMode = false;
         _terrainStressMode = false;
-        _movementTestSquadId = 0;
         _massCombatWorldReady = false;
         _startupMassCombatSelectionApplied = false;
         _simulationPaused = false;
@@ -4747,183 +4653,6 @@ public sealed class GameRenderer
         _activeTestSceneIndex = sceneIndex;
         _selectedTestSceneIndex = sceneIndex;
         Console.WriteLine($"[SCENE] Активна тестовая карта: {GameMenuOverlay.GetTestSceneName(sceneIndex)}.");
-    }
-
-    private void ToggleMovementTestScene()
-    {
-        if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
-        {
-            Console.WriteLine("[MOVE TEST] Stop live AI evolution with F5 before switching scenes.");
-            return;
-        }
-
-        StopSimulationThread();
-
-        if (_movementTestMode)
-        {
-            _movementTestScene.Stop(_unitSimulation);
-            _movementTestMode = false;
-            _movementTestSquadId = 0;
-            PruneSquadState(SimulationFrameSnapshot.Capture(_unitSimulation));
-
-            _showSquadFlowWeights = false;
-            _showMovementVectors = false;
-            _showMovementForces = false;
-            _showSquadFormation = false;
-            _showSquadStates = false;
-            _showSquadContacts = false;
-
-            EnterMassCombatMode();
-            StartSimulationThread();
-            Console.WriteLine("[MOVE TEST] Returned to mass-combat scene.");
-            return;
-        }
-
-        if (_massCombatMode)
-            _massCombatTestScene.Stop(_unitSimulation);
-
-        _massCombatMode = false;
-        _terrainStressMode = false;
-        _movementTestMode = true;
-        _simulationPaused = false;
-        _simulationSpeed = 1f;
-        _unitSimulation.AI.Enabled = false;
-        _unitSimulation.VisionEnabled = false;
-        _unitSimulation.Projectiles.Clear();
-
-        // The old battle's squads reference units that have just been destroyed.
-        PruneSquadState(SimulationFrameSnapshot.Capture(_unitSimulation));
-
-        _movementTestScene.Start(_unitSimulation, _worldMap);
-        UnitId[] members = _movementTestScene.Units.ToArray();
-
-        // Squad controls remain disabled in the game. Register a private
-        // movement-only cohort for this scene so the real shared Flow Field
-        // can be exercised without re-enabling squad menus or tactical AI.
-        _movementTestSquadId = 1;
-        _unitSimulation.SynchronizeSquadMovementMemberships(
-            new[]
-            {
-                new SquadMembershipSnapshot(_movementTestSquadId, members)
-            });
-
-        _selectedUnits.Clear();
-        _selectedUnit = default;
-        for (int i = 0; i < members.Length; i++)
-        {
-            _selectedUnits.Add(members[i]);
-            if (!_selectedUnit.IsValid)
-                _selectedUnit = members[i];
-        }
-
-        _mapRenderer.ResetVisualSettings();
-        _visibleMaxLayer = 0;
-        _showDebugGrid = false;
-        _showTerrainExtrema = false;
-        _showHeightContours = true;
-        _showContourLabels = true;
-        _showSquadFlowWeights = true;
-        _showMovementVectors = true;
-        _showMovementForces = false;
-        _showSquadFormation = false;
-        _showSquadStates = true;
-        _showSquadContacts = false;
-        _debugLayersOverlay?.Close();
-        _contextMenuOverlay?.Close();
-        _menuPage = GameMenuPage.Closed;
-
-        IssueMoveOrder(
-            members,
-            _movementTestScene.InitialDestination,
-            InfantryFormationType.Free,
-            _movementTestSquadId);
-
-        int centerX = _worldMap.TileWidth / 2;
-        int centerY = _worldMap.TileHeight / 2;
-        _camera.CenterOnPosition(new Vector2f(
-            centerX * TerrainTilePixelSize,
-            centerY * TerrainTilePixelSize));
-
-        Console.WriteLine(
-            $"[MOVE TEST] {_movementTestScene.GetStatus()}. " +
-            "F7 returns to mass combat; RMB on the ground sends the selected units. " +
-            "The full test group uses shared Flow Field; partial selections use individual A*. " +
-            "V controls movement and Flow Field debug layers.");
-    }
-
-    private void ToggleTerrainCombatTest()
-    {
-        if (_terrainStressMode)
-        {
-            _terrainStressMode = false;
-            EnterMassCombatMode();
-            return;
-        }
-
-        if (!_massCombatMode)
-            return;
-
-        _massCombatTestScene.Stop(_unitSimulation);
-        _massCombatMode = false;
-        _terrainStressMode = true;
-        _showVisionDebug = false;
-
-        _unitSimulation.AI.Enabled = false;
-        _unitSimulation.VisionEnabled = false;
-        _unitSimulation.Projectiles.Clear();
-
-        WorldGenerator.Generate(_worldMap);
-
-        _visibleMaxLayer = 0;
-
-        _mapRenderer.ResetVisualSettings();
-        _showDebugGrid = false;
-        _showTerrainExtrema = false;
-        _showHeightContours = true;
-        _menuPage = GameMenuPage.Closed;
-        _draggingMenuSlider = null;
-
-        SetSelectedUnit(default);
-
-        _camera.CenterOnWorld(
-            TerrainTilePixelSize,
-            _worldMap);
-    }
-
-    private void EnterMassCombatMode()
-    {
-        if (!_massCombatMode)
-        {
-            ReadOnlySpan<UnitId> testUnits =
-                _visionTestScene.Units;
-
-            for (int i = 0;
-                 i < testUnits.Length;
-                 i++)
-            {
-                if (_unitSimulation.Units.IsAlive(
-                        testUnits[i]))
-                {
-                    _unitSimulation.Destroy(
-                        testUnits[i]);
-                }
-            }
-
-            _unitSimulation.Projectiles.Clear();
-            _massCombatMode = true;
-            _showVisionDebug = false;
-        }
-
-        _unitSimulation.VisionEnabled = true;
-        _unitSimulation.AI.Enabled = true;
-        _massCombatTestScene.Start(
-            _unitSimulation,
-            _worldMap);
-        Volatile.Write(ref _massCombatWorldReady, true);
-        _startupMassCombatSelectionApplied = true;
-
-        SetSelectedUnit(_massCombatTestScene.FirstMeleeUnit);
-        CenterOnMeleeBattle();
     }
 
     private void CenterOnMeleeBattle()
