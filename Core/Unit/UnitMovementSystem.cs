@@ -57,7 +57,8 @@ public sealed class UnitMovementSystem
         MeleeCombatSystem? meleeCombat = null,
         UnitAiStore? ai = null,
         UnitInventoryStore? inventory = null,
-        SquadMovementStore? squadMovement = null)
+        SquadMovementStore? squadMovement = null,
+        UnitSuppressionStore? suppression = null)
     {
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f || units.ActiveCount == 0)
             return;
@@ -66,7 +67,8 @@ public sealed class UnitMovementSystem
             Array.Resize(ref _lastMotorForce, units.Capacity);
 
         _navigation.BeginUpdate(units, worldMap);
-        squadMovement?.BeginUpdate(units, health, ai, worldMap, deltaTime, _navigation);
+        squadMovement?.BeginUpdate(
+            units, health, ai, worldMap, deltaTime, _navigation, suppression);
         _traceElapsedSeconds += deltaTime;
         bool traceThisUpdate = _traceUnitIndex >= 0 && _traceElapsedSeconds >= 1f;
         if (traceThisUpdate)
