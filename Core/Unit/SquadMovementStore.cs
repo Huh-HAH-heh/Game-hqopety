@@ -929,6 +929,13 @@ public sealed class SquadMovementStore
 
     private void EnsureMemberIdentity(UnitStore units, int unit)
     {
+        if ((uint)unit >= (uint)units.Capacity)
+            throw new ArgumentOutOfRangeException(nameof(unit));
+
+        // A* formation orders can initialize member state before the first
+        // simulation update, so storage must grow at the point of first use.
+        EnsureMemberCapacity(units.Capacity);
+
         UnitId id = units.GetId(unit);
         if (_memberOwners[unit] == id)
             return;
@@ -951,10 +958,17 @@ public sealed class SquadMovementStore
 
     private void EnsureMemberCapacity(int required)
     {
-        if (_memberStates.Length >= required)
+        if (_memberStates.Length >= required &&
+            _memberOwners.Length >= required &&
+            _rejoinElapsed.Length >= required)
+        {
             return;
+        }
 
-        int capacity = Math.Max(required, Math.Max(16, _memberStates.Length * 2));
+        int currentCapacity = Math.Max(
+            _memberStates.Length,
+            Math.Max(_memberOwners.Length, _rejoinElapsed.Length));
+        int capacity = Math.Max(required, Math.Max(16, currentCapacity * 2));
         Array.Resize(ref _memberStates, capacity);
         Array.Resize(ref _memberOwners, capacity);
         Array.Resize(ref _rejoinElapsed, capacity);
