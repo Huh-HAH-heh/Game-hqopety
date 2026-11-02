@@ -66,7 +66,7 @@ public sealed class UnitMovementSystem
         if (_lastMotorForce.Length < units.Capacity)
             Array.Resize(ref _lastMotorForce, units.Capacity);
 
-        _navigation.BeginUpdate(units, worldMap);
+        _navigation.BeginUpdate(units, worldMap, deltaTime);
         squadMovement?.BeginUpdate(
             units, health, ai, worldMap, deltaTime, _navigation, suppression);
         _traceElapsedSeconds += deltaTime;

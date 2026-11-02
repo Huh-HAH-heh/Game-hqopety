@@ -32,6 +32,9 @@ public sealed class UnitNavigationSystem
     private const int MinRouteBuildsPerUpdate = 2;
     private const int MaxRouteBuildsPerUpdate = 8;
     private const int MaxExpandedNodesPerSearch = 16_384;
+    private const float MaxRouteChunkCost = 14f;
+    private const float RouteRefreshIntervalSeconds = 2.25f;
+    private const float RouteRefreshRetrySeconds = 0.5f;
     private const float DirectFallbackDistance = 3f;
     private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
@@ -72,6 +75,7 @@ public sealed class UnitNavigationSystem
     private long[] _routeTerrainVersion = Array.Empty<long>();
     private bool[] _routeTrafficRegistered = Array.Empty<bool>();
     private bool[] _routeIsPartial = Array.Empty<bool>();
+    private float[] _routeRefreshAtSeconds = Array.Empty<float>();
 
     private int[] _routeTraffic = Array.Empty<int>();
     private long _routeTrafficTerrainVersion = long.MinValue;
@@ -140,6 +144,7 @@ public sealed class UnitNavigationSystem
     private int _searchStamp;
     private int _routeBuildsRemaining;
     private long _updateSequence;
+    private float _navigationTimeSeconds;
 
     private float[] _gScore = Array.Empty<float>();
     private float[] _fScore = Array.Empty<float>();
@@ -158,9 +163,11 @@ public sealed class UnitNavigationSystem
     private int[] _reversePath = Array.Empty<int>();
     private int _heapCount;
 
-    public void BeginUpdate(UnitStore units, WorldMap worldMap)
+    public void BeginUpdate(UnitStore units, WorldMap worldMap, float deltaTime = 0f)
     {
         _updateSequence++;
+        if (float.IsFinite(deltaTime) && deltaTime > 0f)
+            _navigationTimeSeconds += deltaTime;
         EnsureUnitCapacity(units.Capacity);
         EnsureWorkspace(worldMap);
         EnsureRouteTrafficVersion(worldMap);
@@ -256,7 +263,7 @@ public sealed class UnitNavigationSystem
                 footprintY);
         }
 
-        bool needsRoute =
+        bool routeInvalid =
             !sameOwner ||
             length == 0 ||
             targetFarMoved ||
@@ -266,9 +273,20 @@ public sealed class UnitNavigationSystem
             footprintChanged ||
             (sameOwner && _routeTerrainVersion[unitIndex] != worldMap.TerrainVersion);
 
+        // Periodically refresh a still-valid local path. When the A* budget is
+        // busy, keep following the validated route rather than stopping.
+        bool refreshDue =
+            !routeInvalid &&
+            sameOwner &&
+            length > 0 &&
+            waypointCursor < waypoints.Length &&
+            _navigationTimeSeconds >= _routeRefreshAtSeconds[unitIndex];
+
+        bool needsRoute = routeInvalid || refreshDue;
         if (needsRoute)
         {
-            // A stale path must not continue reserving cells while its replacement waits.
+            // Exclude this pawn's own cached corridor from route reuse costs.
+            // A periodic refresh restores the old corridor if no replacement is ready.
             RemoveRouteTraffic(unitIndex);
 
             bool failedAlready =
@@ -328,6 +346,8 @@ public sealed class UnitNavigationSystem
                     _routeOwner[unitIndex] = owner;
                     _routeTerrainVersion[unitIndex] = worldMap.TerrainVersion;
                     _routeIsPartial[unitIndex] = partialRoute;
+                    _routeRefreshAtSeconds[unitIndex] =
+                        _navigationTimeSeconds + RouteRefreshIntervalSeconds;
                     RoutesBuilt++;
                     RoutesBuiltThisUpdate++;
                     _failedGoalX[unitIndex] = int.MinValue;
@@ -346,6 +366,16 @@ public sealed class UnitNavigationSystem
                     if (_lastSearchTrafficCellsConsidered > 0)
                         RoutesBuiltUsingPriorRoutesThisUpdate++;
                 }
+                else if (refreshDue)
+                {
+                    // A failed refresh does not invalidate a route that was
+                    // already validated against the current terrain.
+                    _routeRefreshAtSeconds[unitIndex] =
+                        _navigationTimeSeconds + RouteRefreshRetrySeconds;
+                    RegisterRouteTraffic(unitIndex);
+                    RoutesFailed++;
+                    RoutesFailedThisUpdate++;
+                }
                 else
                 {
                     _lastStatuses[unitIndex] = _lastBuildFailureStatus;
@@ -360,6 +390,7 @@ public sealed class UnitNavigationSystem
                     _routeFootprintX[unitIndex] = footprintX;
                     _routeFootprintY[unitIndex] = footprintY;
                     _routeOwner[unitIndex] = owner;
+                    _routeRefreshAtSeconds[unitIndex] = 0f;
                     _failedGoalX[unitIndex] = targetX;
                     _failedGoalY[unitIndex] = targetY;
                     _failedStartCell[unitIndex] = startCell;
@@ -371,15 +402,22 @@ public sealed class UnitNavigationSystem
                     RoutesFailed++;
                     RoutesFailedThisUpdate++;
                     // A completed search failure is not a reason to blindly
-                    // approach an unreachable target. Fallback movement is used
-                    // only when route building is queued, or a partial route ends.
+                    // approach an unreachable target.
                     waypoint = default;
                     return false;
                 }
             }
+            else if (refreshDue)
+            {
+                // Search budget is shared across pawns. Preserve the old safe
+                // route and try again after a short delay.
+                _routeRefreshAtSeconds[unitIndex] =
+                    _navigationTimeSeconds + RouteRefreshRetrySeconds;
+                RegisterRouteTraffic(unitIndex);
+            }
             else
             {
-                // Do not follow a stale route while waiting for the pathfinding budget.
+                // Do not follow an invalid route while waiting for a replacement.
                 _lastStatuses[unitIndex] = failedAlready
                     ? UnitNavigationStatus.CachedFailure
                     : UnitNavigationStatus.WaitingForRouteBudget;
@@ -421,8 +459,8 @@ public sealed class UnitNavigationSystem
             return true;
         }
 
-        // A partial route ends at a safe search frontier, not the final goal.
-        // Try a short validated step while a fresh local chunk is queued.
+        // A partial route ends at a safe search frontier. The next A* request
+        // rebuilds from the pawn's new position.
         if (_routeIsPartial[unitIndex] &&
             TryGetDirectFallbackWaypoint(
                 worldMap, position, target, footprintX, footprintY, out waypoint))
@@ -432,9 +470,7 @@ public sealed class UnitNavigationSystem
             return true;
         }
 
-        // Once a complete route reaches the goal cell, finish the remaining sub-tile
-        // distance to the requested target. Partial routes must never cut across
-        // unsearched terrain to the final destination.
+        // A complete path finishes the remaining sub-tile distance to the goal.
         if (!_routeIsPartial[unitIndex] &&
             targetX == _routeGoalX[unitIndex] &&
             targetY == _routeGoalY[unitIndex])
@@ -865,6 +901,7 @@ public sealed class UnitNavigationSystem
         _failedGoalY[unitIndex] = int.MinValue;
         _failedRetryAfterUpdate[unitIndex] = 0;
         _routeIsPartial[unitIndex] = false;
+        _routeRefreshAtSeconds[unitIndex] = 0f;
     }
 
     private bool TryBuildPath(
@@ -937,6 +974,9 @@ public sealed class UnitNavigationSystem
                _lastSearchCellsExpanded < MaxExpandedNodesPerSearch)
         {
             int current = HeapPop();
+            if (_gScore[current] > MaxRouteChunkCost)
+                continue;
+
             _lastSearchCellsExpanded++;
 
             int x = current % _width;
@@ -1004,7 +1044,10 @@ public sealed class UnitNavigationSystem
                     _navigationEdgeCost[neighbor] +
                     routeReuseCost;
 
-                if (tentativeG >= _gScore[neighbor])
+                // Search only a bounded path-cost horizon. The final target
+                // remains A*'s heuristic, so the selected frontier still bends
+                // toward the command and can detour around nearby obstacles.
+                if (tentativeG > MaxRouteChunkCost || tentativeG >= _gScore[neighbor])
                     continue;
 
                 _parent[neighbor] = current;
@@ -1019,12 +1062,10 @@ public sealed class UnitNavigationSystem
             }
         }
 
-        // If the search ran out of its per-unit budget, return a route to the
-        // best validated frontier instead of making the unit wait for a full
-        // start-to-goal search. The next request continues from that new position.
-        if (_heapCount > 0 &&
-            _lastSearchCellsExpanded >= MaxExpandedNodesPerSearch &&
-            bestPartialCell != start)
+        // A distant command is approached as a rolling sequence of local A*
+        // chunks. The next search starts at the new position and can choose a
+        // different curve as nearby obstacles and route traffic change.
+        if (bestPartialCell != start)
         {
             int[] partialPath = ReconstructPath(start, bestPartialCell);
             if (partialPath.Length > 1)
@@ -1630,6 +1671,7 @@ public sealed class UnitNavigationSystem
         Array.Resize(ref _routeTerrainVersion, newCapacity);
         Array.Resize(ref _routeTrafficRegistered, newCapacity);
         Array.Resize(ref _routeIsPartial, newCapacity);
+        Array.Resize(ref _routeRefreshAtSeconds, newCapacity);
 
         for (int i = 0; i < newCapacity; i++)
         {
