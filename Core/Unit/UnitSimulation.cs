@@ -722,7 +722,7 @@ public sealed class UnitSimulation
         if (_nextAStarMovementGroupId <= 0)
             _nextAStarMovementGroupId = 1_000_000;
 
-        return _squadMovementStore.IssueAStarFormationMoveOrder(
+        bool issued = _squadMovementStore.IssueAStarFormationMoveOrder(
             Units,
             Health,
             _aiSystem.Store,
@@ -732,6 +732,16 @@ public sealed class UnitSimulation
             formation,
             keepFormationInCombat,
             worldMap);
+        if (issued)
+        {
+            for (int i = 0; i < members.Count; i++)
+            {
+                if (Units.TryGetIndex(members[i], out int unitIndex))
+                    _movementSystem.Navigation.ClearRoute(unitIndex);
+            }
+        }
+
+        return issued;
     }
 
     public bool IssueSquadMoveOrder(
