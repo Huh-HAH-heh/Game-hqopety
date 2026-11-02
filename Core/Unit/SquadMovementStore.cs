@@ -612,123 +612,13 @@ public sealed class SquadMovementStore
         out float distanceToNextTurn,
         out float turnSeverity)
     {
+        // Shared Flow Field movement is intentionally disabled. Every unit,
+        // including test-scene cohorts, follows its own footprint-aware A* route.
         steeringPoint = default;
         distanceToGoal = float.PositiveInfinity;
         distanceToNextTurn = float.PositiveInfinity;
         turnSeverity = 0f;
-
-        if ((uint)unitIndex >= (uint)units.Capacity)
-            return false;
-
-        UnitId id = units.GetId(unitIndex);
-        if (!_membership.TryGetValue(id, out MemberLink link) ||
-            !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
-            !squad.HasMoveOrder ||
-            squad.IsAStarFormation ||
-            link.Slot >= squad.MemberGoals.Length ||
-            !units.HasTarget[unitIndex] ||
-            !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
-            IsDetachedFromCollective(units, ai, unitIndex))
-        {
-            return false;
-        }
-
-        if (!squad.FlowField.EnsureBuilt(worldMap, squad.Objective, _flowWorkspace) ||
-            !squad.FlowField.TrySample(position.X, position.Y,
-                out Vector2 flowDirection, out float routeDistance))
-        {
-            return false;
-        }
-
-        Vector2 terminal = squad.MemberGoals[link.Slot];
-        Vector2 terminalDelta = terminal - new Vector2(position.X, position.Y);
-        float terminalDistance = terminalDelta.Length();
-        float terminalApproachRadius = Math.Clamp(
-            squad.Spacing * 3f,
-            3f,
-            8f);
-        float terminalBlend = Math.Clamp(
-            (terminalApproachRadius - terminalDistance) / terminalApproachRadius,
-            0f,
-            1f);
-
-        // The physical controller needs to know about an upcoming bend before
-        // inertia carries the pawn past it. Close to a member's terminal point,
-        // the direct terminal approach takes priority over the shared route.
-        if (terminalBlend < 0.25f)
-        {
-            squad.FlowField.TryGetTurnConstraint(
-                position.X,
-                position.Y,
-                flowDirection,
-                out distanceToNextTurn,
-                out turnSeverity);
-        }
-
-        Vector2 direction = flowDirection;
-        if (terminalBlend > 0.001f && terminalDistance > 0.001f)
-        {
-            Vector2 terminalDirection = terminalDelta / terminalDistance;
-            direction = Vector2.Lerp(flowDirection, terminalDirection, terminalBlend);
-        }
-
-        Vector2 localOffset = squad.MemberOffsets[link.Slot];
-        Vector2 side = new(-squad.Forward.Y, squad.Forward.X);
-        Vector2 preferredPosition = squad.Center +
-            side * localOffset.X - squad.Forward * localOffset.Y;
-        Vector2 cohesion = preferredPosition - new Vector2(position.X, position.Y);
-        float cohesionLength = cohesion.Length();
-        if (cohesionLength > MaxCohesionCorrection)
-            cohesion *= MaxCohesionCorrection / cohesionLength;
-
-        // A formed A* cohort follows one shared route direction while this
-        // correction keeps each pawn attached to its moving slot, not just its
-        // terminal destination. Keep it bounded so obstacles can still deform
-        // the formation temporarily instead of producing rigid lockstep.
-        float cohesionStrength = squad.IsAStarFormation
-            ? 0.68f
-            : squad.Rigidity == SquadFormationRigidity.Organized
-                ? 0.25f
-                : 0.18f;
-
-        if (_memberStates[unitIndex] == SquadMemberMovementState.Rejoining)
-        {
-            float rejoinProgress = Math.Clamp(
-                _rejoinElapsed[unitIndex] / RejoinBlendSeconds,
-                0.08f,
-                1f);
-            cohesionStrength *= rejoinProgress;
-        }
-
-        // Keep the member's own destination as a braking-distance floor.
-        // The shared field ends at the squad objective, which can be reached before
-        // an offset member goal. Blending both distances down can make that pawn
-        // brake to a stop while its physical Move target is still several metres away.
-        float finalDistance = MathF.Max(
-            routeDistance * (1f - terminalBlend),
-            terminalDistance);
-        if (cohesionLength > 0.001f && finalDistance > 0.5f)
-            direction += cohesion * (cohesionStrength / MathF.Max(1f, cohesionLength));
-
-        float directionLength = direction.Length();
-        if (directionLength < 0.001f)
-        {
-            if (terminalDistance < 0.35f)
-                direction = Vector2.Zero;
-            else if (terminalDistance > 0.001f)
-                direction = terminalDelta / terminalDistance;
-            else
-                return false;
-        }
-        else
-        {
-            direction /= directionLength;
-        }
-
-        float lookAhead = Math.Clamp(1.2f + currentSpeed * 0.62f, 1.4f, 4f);
-        steeringPoint = new Vector2(position.X, position.Y) + direction * lookAhead;
-        distanceToGoal = finalDistance;
-        return true;
+        return false;
     }
 
     public bool TryAdjustAStarFormationWaypoint(
