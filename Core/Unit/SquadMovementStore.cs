@@ -551,6 +551,7 @@ public sealed class SquadMovementStore
                 squad.Objective.X - squad.Center.X,
                 squad.Objective.Y - squad.Center.Y);
 
+            Vector2 routeDirection = Vector2.Zero;
             bool hasRouteHeading =
                 squad.IsAStarFormation &&
                 squad.Formation != InfantryFormationType.None &&
@@ -558,7 +559,7 @@ public sealed class SquadMovementStore
                 squad.FlowField.TrySample(
                     squad.Center.X,
                     squad.Center.Y,
-                    out Vector2 routeDirection,
+                    out routeDirection,
                     out _);
 
             if (hasRouteHeading && routeDirection.LengthSquared() > 0.0001f)
