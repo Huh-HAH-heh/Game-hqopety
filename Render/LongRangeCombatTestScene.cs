@@ -16,7 +16,7 @@ public sealed class LongRangeCombatTestScene
     private const float FormationSpacing = 2.5f;
 
     private int _unitsPerFaction = InitialUnitsPerFaction;
-    private int UnitsPerFaction => _unitsPerFaction;
+    public int UnitsPerFaction => _unitsPerFaction;
     private int TotalUnits => _unitsPerFaction * 2;
     private int Rows => _unitsPerFaction / Columns;
     private const float CombatDistance = 200f;
