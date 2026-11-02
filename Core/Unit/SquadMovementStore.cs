@@ -282,7 +282,7 @@ public sealed class SquadMovementStore
             {
                 // Keep this cohort member in a valid surface cell when a wide
                 // footprint cannot fit near the preferred formation slot.
-                terminal = ResolveNavigablePoint(worldMap, requestedGoal);
+                terminal = ResolveNavigablePoint(worldMap, requestedGoal, reservedGoalCells);
             }
             goals[i] = terminal;
         }
@@ -887,7 +887,6 @@ public sealed class SquadMovementStore
         if (ai == null)
             return;
 
-        HashSet<int> reservedDestinations = new();
         HashSet<int> reservedDestinations = new();
         for (int slot = 0; slot < squad.Members.Count; slot++)
         {
