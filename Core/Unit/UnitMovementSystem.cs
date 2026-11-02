@@ -210,15 +210,36 @@ public sealed class UnitMovementSystem
                     // sampled near an obstacle. Keep the shared field when its
                     // short look-ahead is traversable; otherwise use footprint-
                     // aware A* for this pawn until the local segment is clear.
-                    if (hasSquadWaypoint &&
-                        !_navigation.CanMoveDirectly(
-                            units,
-                            unit,
-                            worldMap,
-                            new Vector2(position.X, position.Y),
-                            steeringPoint))
+                    if (hasSquadWaypoint)
                     {
-                        hasSquadWaypoint = false;
+                        Vector2 currentPosition = new(position.X, position.Y);
+                        if (!_navigation.CanMoveDirectly(
+                                units, unit, worldMap, currentPosition, steeringPoint))
+                        {
+                            // A field direction can be valid while its full look-ahead
+                            // clips a corner for this pawn's footprint. Shorten the
+                            // same direction first; do not instantly abandon the shared
+                            // route and brake while an individual A* route is requested.
+                            Vector2 offset = steeringPoint - currentPosition;
+                            bool foundSafeLookAhead = false;
+                            for (int attempt = 0; attempt < 5; attempt++)
+                            {
+                                offset *= 0.65f;
+                                Vector2 candidate = currentPosition + offset;
+                                if (!_navigation.CanMoveDirectly(
+                                        units, unit, worldMap, currentPosition, candidate))
+                                {
+                                    continue;
+                                }
+
+                                steeringPoint = candidate;
+                                foundSafeLookAhead = true;
+                                break;
+                            }
+
+                            if (!foundSafeLookAhead)
+                                hasSquadWaypoint = false;
+                        }
                     }
 
                     if (hasSquadWaypoint)
