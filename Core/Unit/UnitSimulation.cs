@@ -726,6 +726,7 @@ public sealed class UnitSimulation
             Units,
             Health,
             _aiSystem.Store,
+            _movementSystem.Navigation,
             groupId,
             members,
             destination,
