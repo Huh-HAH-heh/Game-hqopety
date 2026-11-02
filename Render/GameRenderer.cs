@@ -4262,10 +4262,11 @@ public sealed class GameRenderer
 
         _menuPage = _menuPage switch
         {
+            GameMenuPage.Closed => GameMenuPage.Main,
             GameMenuPage.TestScenes => GameMenuPage.Settings,
             GameMenuPage.Settings => GameMenuPage.Main,
             GameMenuPage.Main => GameMenuPage.Closed,
-            _ => GameMenuPage.Closed
+            _ => GameMenuPage.Main
         };
         _draggingMenuSlider = null;
     }
@@ -4509,10 +4510,9 @@ public sealed class GameRenderer
     private void ActivateTestScene(int sceneIndex)
     {
         sceneIndex = Math.Clamp(sceneIndex, 0, GameMenuOverlay.TestSceneCount - 1);
-        if (_liveAiEvolutionTrainer.Status?.IsRunning == true &&
-            sceneIndex != 2)
+        if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
         {
-            Console.WriteLine("[SCENE] Останови эволюцию ИИ перед сменой тестовой карты.");
+            Console.WriteLine("[SCENE] Останови эволюцию ИИ перед сменой или перезапуском тестовой карты.");
             return;
         }
 
