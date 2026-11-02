@@ -551,30 +551,33 @@ public sealed class SquadMovementStore
                 squad.Objective.X - squad.Center.X,
                 squad.Objective.Y - squad.Center.Y);
 
-            Vector2 routeDirection = Vector2.Zero;
-            bool hasRouteHeading =
-                squad.IsAStarFormation &&
+            Vector2 desiredForward = toObjective;
+            if (squad.IsAStarFormation &&
                 squad.Formation != InfantryFormationType.None &&
-                squad.FlowField.EnsureBuilt(worldMap, squad.Objective, _flowWorkspace) &&
-                squad.FlowField.TrySample(
-                    squad.Center.X,
-                    squad.Center.Y,
-                    out routeDirection,
-                    out _);
+                squad.VelocityAccumulator.LengthSquared() > 0.04f)
+            {
+                desiredForward = squad.VelocityAccumulator;
+            }
 
-            if (hasRouteHeading && routeDirection.LengthSquared() > 0.0001f)
+            if (desiredForward.LengthSquared() > 0.0001f)
             {
-                squad.Forward = Vector2.Normalize(routeDirection);
-            }
-            else if (squad.IsAStarFormation &&
-                     squad.Formation != InfantryFormationType.None &&
-                     squad.VelocityAccumulator.LengthSquared() > 0.04f)
-            {
-                squad.Forward = Vector2.Normalize(squad.VelocityAccumulator);
-            }
-            else if (toObjective.LengthSquared() > 0.0001f)
-            {
-                squad.Forward = Vector2.Normalize(toObjective);
+                desiredForward = Vector2.Normalize(desiredForward);
+                if (squad.IsAStarFormation &&
+                    squad.Formation != InfantryFormationType.None &&
+                    squad.Forward.LengthSquared() > 0.0001f)
+                {
+                    Vector2 smoothedForward = Vector2.Lerp(
+                        squad.Forward,
+                        desiredForward,
+                        Math.Clamp(deltaTime * 8f, 0f, 1f));
+                    squad.Forward = smoothedForward.LengthSquared() > 0.0001f
+                        ? Vector2.Normalize(smoothedForward)
+                        : desiredForward;
+                }
+                else
+                {
+                    squad.Forward = desiredForward;
+                }
             }
 
             if (squad.IsAStarFormation &&
@@ -621,7 +624,7 @@ public sealed class SquadMovementStore
         if (!_membership.TryGetValue(id, out MemberLink link) ||
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
             !squad.HasMoveOrder ||
-            (squad.IsAStarFormation && squad.Formation == InfantryFormationType.None) ||
+            squad.IsAStarFormation ||
             link.Slot >= squad.MemberGoals.Length ||
             !units.HasTarget[unitIndex] ||
             !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
@@ -725,6 +728,68 @@ public sealed class SquadMovementStore
         float lookAhead = Math.Clamp(1.2f + currentSpeed * 0.62f, 1.4f, 4f);
         steeringPoint = new Vector2(position.X, position.Y) + direction * lookAhead;
         distanceToGoal = finalDistance;
+        return true;
+    }
+
+    public bool TryAdjustAStarFormationWaypoint(
+        UnitStore units,
+        int unitIndex,
+        Vector3 position,
+        Vector2 pathWaypoint,
+        UnitAiStore? ai,
+        out Vector2 adjustedWaypoint)
+    {
+        adjustedWaypoint = pathWaypoint;
+        if ((uint)unitIndex >= (uint)units.Capacity)
+            return false;
+
+        UnitId id = units.GetId(unitIndex);
+        if (!_membership.TryGetValue(id, out MemberLink link) ||
+            !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
+            !squad.HasMoveOrder ||
+            !squad.IsAStarFormation ||
+            squad.Formation == InfantryFormationType.None ||
+            (uint)link.Slot >= (uint)squad.MemberOffsets.Length ||
+            (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
+            !units.HasTarget[unitIndex] ||
+            !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
+            IsDetachedFromCollective(units, ai, unitIndex))
+        {
+            return false;
+        }
+
+        Vector2 current = new(position.X, position.Y);
+        Vector2 pathDelta = pathWaypoint - current;
+        float pathDistance = pathDelta.Length();
+        if (pathDistance < 0.05f)
+            return false;
+
+        Vector2 localOffset = squad.MemberOffsets[link.Slot];
+        Vector2 side = new(-squad.Forward.Y, squad.Forward.X);
+        Vector2 preferredPosition = squad.Center +
+            side * localOffset.X - squad.Forward * localOffset.Y;
+        Vector2 correction = preferredPosition - current;
+        float correctionLength = correction.Length();
+        if (correctionLength < 0.1f)
+            return false;
+
+        if (correctionLength > MaxCohesionCorrection)
+        {
+            correction *= MaxCohesionCorrection / correctionLength;
+            correctionLength = MaxCohesionCorrection;
+        }
+
+        // Preserve each unit's own footprint-aware A* route, but bend its
+        // look-ahead toward the moving formation slot. The movement system
+        // accepts this correction only when a direct segment is traversable.
+        Vector2 direction = pathDelta / pathDistance +
+            correction * (0.68f / MathF.Max(1f, correctionLength));
+        float directionLength = direction.Length();
+        if (directionLength < 0.001f)
+            return false;
+
+        float lookAhead = Math.Clamp(pathDistance, 0.75f, 4f);
+        adjustedWaypoint = current + direction * (lookAhead / directionLength);
         return true;
     }
 
