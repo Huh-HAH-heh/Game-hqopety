@@ -470,8 +470,13 @@ public sealed class SquadMovementStore
             cohesionStrength *= rejoinProgress;
         }
 
-        float finalDistance = routeDistance * (1f - terminalBlend) +
-            terminalDistance * terminalBlend;
+        // Keep the member's own destination as a braking-distance floor.
+        // The shared field ends at the squad objective, which can be reached before
+        // an offset member goal. Blending both distances down can make that pawn
+        // brake to a stop while its physical Move target is still several metres away.
+        float finalDistance = MathF.Max(
+            routeDistance * (1f - terminalBlend),
+            terminalDistance);
         if (cohesionLength > 0.001f && finalDistance > 0.5f)
             direction += cohesion * (cohesionStrength / MathF.Max(1f, cohesionLength));
 
