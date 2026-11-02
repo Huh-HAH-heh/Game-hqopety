@@ -10,7 +10,8 @@ public enum InfantryFormationType : byte
     Wedge = 2,
     Free = 3,
     DispersedLine = 4,
-    Perimeter = 5
+    Perimeter = 5,
+    None = 6
 }
 
 /// <summary>
@@ -30,6 +31,7 @@ public static class InfantryFormation
         InfantryFormationType.Wedge => "Wedge",
         InfantryFormationType.DispersedLine => "Dispersed line",
         InfantryFormationType.Perimeter => "Perimeter",
+        InfantryFormationType.None => "Без строя",
         _ => "Free"
     };
 
@@ -43,7 +45,8 @@ public static class InfantryFormation
         InfantryFormationType formation,
         float spacing)
     {
-        if (index < 0 || count <= 0 || index >= count)
+        if (index < 0 || count <= 0 || index >= count ||
+            formation == InfantryFormationType.None)
             return Vector2.Zero;
 
         spacing = Math.Clamp(spacing, 0.65f, 4f);
