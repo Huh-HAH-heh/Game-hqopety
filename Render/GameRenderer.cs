@@ -1504,42 +1504,17 @@ public sealed class GameRenderer
         InfantryFormationType formation,
         int squadId)
     {
-        if (_unitSimulation.IssueSquadMoveOrder(
-                squadId, memberIds, destination, formation, _worldMap))
+        // The squad API is kept for compatibility with persistent squad data,
+        // but movement is always executed through per-unit A* navigation.
+        if (!_unitSimulation.IssueAStarFormationMoveOrder(
+                memberIds,
+                destination,
+                formation,
+                _keepFormationInCombat,
+                _worldMap))
         {
-            Console.WriteLine(
-                $"[SQUAD] {InfantryFormation.GetName(formation)} shared-flow move order " +
-                $"issued to squad {squadId} ({memberIds.Length} soldiers).");
-            return;
+            IssueMoveOrderToPoint(memberIds, destination);
         }
-
-        // Safe fallback for a stale/partially synchronized selection: keep one
-        // shared objective rather than recreating hard-coded member destinations.
-        UnitStore units = _unitSimulation.Units;
-        UnitAiStore ai = _unitSimulation.AI.Store;
-        float x = Math.Clamp(destination.X, 0.5f, _worldMap.MaxTileX - 0.5f);
-        float y = Math.Clamp(destination.Y, 0.5f, _worldMap.MaxTileY - 0.5f);
-        int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
-        int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
-        Vector3 target = new(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
-
-        int issued = 0;
-        for (int i = 0; i < memberIds.Length; i++)
-        {
-            UnitId id = memberIds[i];
-            if (!units.TryGetIndex(id, out int index) ||
-                _unitSimulation.Health.OverallHitPoints[index] <= 0f)
-            {
-                continue;
-            }
-
-            ai.SetPlayerOrder(index, UnitAiOrderType.Move, target);
-            units.SetTarget(id, target);
-            issued++;
-        }
-
-        Console.WriteLine(
-            $"[SQUAD] Flow state unavailable; issued shared objective to {issued} soldiers.");
     }
 
     private static string GetFormationMenuLabel(InfantryFormationType formation) =>
@@ -1650,19 +1625,8 @@ public sealed class GameRenderer
         UnitId[] memberIds,
         Vector3 destination)
     {
-        if (IsCompleteMovementTestSelection(memberIds) &&
-            _movementTestSquadId > 0)
-        {
-            IssueMoveOrder(
-                memberIds,
-                destination,
-                InfantryFormationType.Free,
-                _movementTestSquadId);
-            return;
-        }
-
-        // Partial selections keep their own A* routes, but the test scene has
-        // AI disabled, so the physical movement targets must be written here too.
+        // The movement course uses the same per-unit A* route follower as the
+        // playable scene; it no longer exercises the disabled shared Flow Field.
         IssueMoveOrderToPoint(memberIds, destination);
     }
 
@@ -2379,7 +2343,6 @@ public sealed class GameRenderer
         UnitAiOrderType orderType)
     {
         if (orderType == UnitAiOrderType.Move &&
-            !_movementTestMode &&
             memberIds.Length > 1 &&
             _unitSimulation.IssueAStarFormationMoveOrder(
                 memberIds,
