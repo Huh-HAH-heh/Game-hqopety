@@ -146,6 +146,21 @@ public sealed class MovementTestScene
                 worldMap.SetSolidHeight(x, y, heightUnits, material);
             }
         }
+
+        // Keep the course as a bounded navigation island. Besides preventing
+        // units from bypassing the S-ridges around their ends, this limits the
+        // one-time shared Flow Field build to the test area instead of the map.
+        for (int y = minY - 1; y <= maxY + 1; y++)
+        {
+            worldMap.SetNavigationBlocked(minX - 1, y, true);
+            worldMap.SetNavigationBlocked(maxX + 1, y, true);
+        }
+
+        for (int x = minX - 1; x <= maxX + 1; x++)
+        {
+            worldMap.SetNavigationBlocked(x, minY - 1, true);
+            worldMap.SetNavigationBlocked(x, maxY + 1, true);
+        }
     }
 
     private static float GateOpening(float y, float center, float halfWidth)
