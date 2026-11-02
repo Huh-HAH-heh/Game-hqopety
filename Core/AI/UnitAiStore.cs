@@ -129,6 +129,7 @@ public sealed class UnitAiStore
     private Vector3[] _playerOrderPosition;
     private UnitId[] _playerOrderTarget;
     private bool[] _hasTarget;
+    private bool[] _autonomousMovementDisabled;
     private UnitId[] _target;
     private Vector3[] _lastSeenPosition;
     private Vector3[] _lastSeenAimPoint;
@@ -170,6 +171,9 @@ public sealed class UnitAiStore
 
     public bool[] HasTarget =>
         _hasTarget;
+
+    public bool[] AutonomousMovementDisabled =>
+        _autonomousMovementDisabled;
 
     public UnitId[] Target =>
         _target;
@@ -214,6 +218,7 @@ public sealed class UnitAiStore
         _playerOrderPosition = new Vector3[initialUnitCapacity];
         _playerOrderTarget = new UnitId[initialUnitCapacity];
         _hasTarget = new bool[initialUnitCapacity];
+        _autonomousMovementDisabled = new bool[initialUnitCapacity];
         _target = new UnitId[initialUnitCapacity];
         _lastSeenPosition = new Vector3[initialUnitCapacity];
         _lastSeenAimPoint = new Vector3[initialUnitCapacity];
@@ -239,6 +244,7 @@ public sealed class UnitAiStore
         _playerOrderPosition[unitIndex] = Vector3.Zero;
         _playerOrderTarget[unitIndex] = default;
         _hasTarget[unitIndex] = false;
+        _autonomousMovementDisabled[unitIndex] = false;
         _target[unitIndex] = default;
         _lastSeenPosition[unitIndex] = Vector3.Zero;
         _lastSeenAimPoint[unitIndex] = Vector3.Zero;
@@ -408,6 +414,7 @@ public sealed class UnitAiStore
         Array.Resize(
             ref _hasTarget,
             newCapacity);
+        Array.Resize(ref _autonomousMovementDisabled, newCapacity);
 
         Array.Resize(
             ref _target,
