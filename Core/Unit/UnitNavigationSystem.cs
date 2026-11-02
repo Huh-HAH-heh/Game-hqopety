@@ -510,7 +510,6 @@ public sealed class UnitNavigationSystem
                     if (Math.Max(Math.Abs(x - centerX), Math.Abs(y - centerY)) != radius)
                         continue;
 
-                    int cell = x + y * _width;
                     bool reserved = false;
                     for (int offsetY = -radiusY; offsetY <= radiusY && !reserved; offsetY++)
                     {
