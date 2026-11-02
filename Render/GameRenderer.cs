@@ -767,7 +767,9 @@ public sealed class GameRenderer
                 _window);
         }
 
-        Volatile.Write(ref _selectedInfoSquadId, GetSelectedSquadId());
+        Volatile.Write(
+            ref _selectedInfoSquadId,
+            _movementTestMode ? _movementTestSquadId : GetSelectedSquadId());
         SimulationFrameSnapshot? renderSnapshot = _simulationThread != null
             ? Volatile.Read(ref _latestSnapshot)
             : null;
