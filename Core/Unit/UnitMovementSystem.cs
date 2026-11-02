@@ -268,6 +268,25 @@ public sealed class UnitMovementSystem
                             out distanceToGoal,
                             out distanceToNextTurn,
                             out turnSeverity);
+
+                        if (hasWaypoint &&
+                            squadMovement != null &&
+                            squadMovement.TryAdjustAStarFormationWaypoint(
+                                units,
+                                unit,
+                                position,
+                                steeringPoint,
+                                ai,
+                                out Vector2 formationWaypoint) &&
+                            _navigation.CanMoveDirectly(
+                                units,
+                                unit,
+                                worldMap,
+                                new Vector2(position.X, position.Y),
+                                formationWaypoint))
+                        {
+                            steeringPoint = formationWaypoint;
+                        }
                     }
                 }
                 else
