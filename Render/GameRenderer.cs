@@ -72,6 +72,7 @@ public sealed class GameRenderer
     private static readonly bool SquadControlsEnabled = false;
     private readonly InfantrySquadManager _squadManager = new();
     private InfantryFormationType _infantryFormation = InfantryFormationType.Free;
+    private bool _keepFormationInCombat;
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
     private bool _isPlacingMoveLine;
@@ -1540,6 +1541,59 @@ public sealed class GameRenderer
             $"[SQUAD] Flow state unavailable; issued shared objective to {issued} soldiers.");
     }
 
+    private bool AreAllAutonomousMovementDisabled(UnitId[] memberIds)
+    {
+        bool found = false;
+        bool[] disabled = _unitSimulation.AI.Store.AutonomousMovementDisabled;
+        for (int i = 0; i < memberIds.Length; i++)
+        {
+            int index = memberIds[i].Index;
+            if ((uint)index >= (uint)disabled.Length)
+                continue;
+            found = true;
+            if (!disabled[index])
+                return false;
+        }
+
+        return found;
+    }
+
+    private void SetAutonomousMovementDisabled(UnitId[] memberIds, bool disabled)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        int changed = 0;
+        for (int i = 0; i < memberIds.Length; i++)
+        {
+            UnitId id = memberIds[i];
+            if (!units.TryGetIndex(id, out int index) ||
+                _unitSimulation.Health.OverallHitPoints[index] <= 0f)
+            {
+                continue;
+            }
+
+            ai.AutonomousMovementDisabled[index] = disabled;
+            if (disabled &&
+                ai.PlayerOrderType[index] is UnitAiOrderType.Move or UnitAiOrderType.StealthMove)
+            {
+                Vector3 position = units.Position[index];
+                ai.SetPlayerOrder(index, UnitAiOrderType.Stop, position);
+                ai.ClearGoal(index);
+                units.ClearTarget(id);
+            }
+            else if (!disabled && ai.PlayerOrderType[index] == UnitAiOrderType.Stop)
+            {
+                ai.ClearPlayerOrder(index);
+            }
+
+            changed++;
+        }
+
+        Console.WriteLine(disabled
+            ? $"[MOVE LOCK] Autonomous movement disabled for {changed} units. Panic can still override."
+            : $"[MOVE LOCK] Autonomous movement restored for {changed} units.");
+    }
+
     private void IssueAttackOrder(UnitId[] memberIds, UnitId targetId)
     {
         UnitStore units = _unitSimulation.Units;
@@ -2310,6 +2364,23 @@ public sealed class GameRenderer
         Vector3 destination,
         UnitAiOrderType orderType)
     {
+        if (orderType == UnitAiOrderType.Move &&
+            !_movementTestMode &&
+            memberIds.Length > 1 &&
+            _unitSimulation.IssueAStarFormationMoveOrder(
+                memberIds,
+                destination,
+                _infantryFormation,
+                _keepFormationInCombat,
+                _worldMap))
+        {
+            Console.WriteLine(
+                $"[FORMATION] {InfantryFormation.GetName(_infantryFormation)} " +
+                $"A* order for {memberIds.Length} units; speed capped by slowest member. " +
+                (_keepFormationInCombat ? "Formation kept in combat." : "Formation breaks on contact."));
+            return;
+        }
+
         if (orderType is not (UnitAiOrderType.Move or UnitAiOrderType.StealthMove))
             throw new ArgumentOutOfRangeException(nameof(orderType));
         UnitStore units = _unitSimulation.Units;
@@ -3376,6 +3447,25 @@ public sealed class GameRenderer
                             inputSnapshot != null &&
                             IsHostileToSelection(inputSnapshot, contextUnit);
                         bool canMoveSelected = !hasUnit && selectedIds.Length > 0;
+                        bool clickedSelectedUnit = false;
+                        if (hasUnit)
+                        {
+                            UnitId clickedId = new(contextUnit.Index, contextUnit.Generation);
+                            for (int i = 0; i < selectedIds.Length; i++)
+                            {
+                                if (selectedIds[i] == clickedId)
+                                {
+                                    clickedSelectedUnit = true;
+                                    break;
+                                }
+                            }
+                        }
+                        string? autonomousMovementLabel =
+                            clickedSelectedUnit && selectedIds.Length > 0
+                                ? (AreAllAutonomousMovementDisabled(selectedIds)
+                                    ? "Разрешить самостоятельное движение"
+                                    : "Запретить самостоятельное движение")
+                                : null;
 
                         float destinationX = Math.Clamp(
                             worldPosition.X / TerrainTilePixelSize,
@@ -3440,7 +3530,8 @@ public sealed class GameRenderer
                             canCreateSquad,
                             canSendSquad,
                             canAttackTarget,
-                            canMoveSelected);
+                            canMoveSelected,
+                            autonomousMovementLabel);
 
                         if (!_contextMenuOverlay.IsOpen)
                             _contextMenuUnit = default;
@@ -3610,6 +3701,21 @@ public sealed class GameRenderer
                                     UnitId attackTarget = contextUnit;
                                     ExecuteSimulationCommand(() =>
                                         IssueAttackOrder(attackUnits, attackTarget));
+                                }
+                                break;
+                            }
+
+                            case ContextMenuActionType.ToggleAutonomousMovement:
+                            {
+                                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+                                UnitId[] moveUnits = snapshot == null
+                                    ? Array.Empty<UnitId>()
+                                    : CaptureSelectedUnitIds(snapshot);
+                                if (moveUnits.Length > 0)
+                                {
+                                    bool disable = !AreAllAutonomousMovementDisabled(moveUnits);
+                                    ExecuteSimulationCommand(() =>
+                                        SetAutonomousMovementDisabled(moveUnits, disable));
                                 }
                                 break;
                             }
@@ -4082,18 +4188,34 @@ public sealed class GameRenderer
         if (TryHandleSquadHotkey(key))
             return;
 
-        if (SquadControlsEnabled && key == Keyboard.Key.J)
+        if (key == Keyboard.Key.J && _selectedUnits.Count > 1)
         {
-            _infantryFormation = _infantryFormation switch
+            bool shiftPressed =
+                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+            if (shiftPressed)
             {
-                InfantryFormationType.Free => InfantryFormationType.Wedge,
-                InfantryFormationType.Wedge => InfantryFormationType.DispersedLine,
-                InfantryFormationType.DispersedLine => InfantryFormationType.Column,
-                InfantryFormationType.Column => InfantryFormationType.Perimeter,
-                InfantryFormationType.Perimeter => InfantryFormationType.Line,
-                _ => InfantryFormationType.Free
-            };
-            Console.WriteLine($"[INFANTRY] Formation: {InfantryFormation.GetName(_infantryFormation)}");
+                _keepFormationInCombat = !_keepFormationInCombat;
+                Console.WriteLine(_keepFormationInCombat
+                    ? "[FORMATION] Keep formation during combat: ON."
+                    : "[FORMATION] Break formation on combat contact: ON.");
+            }
+            else
+            {
+                _infantryFormation = _infantryFormation switch
+                {
+                    InfantryFormationType.None => InfantryFormationType.Line,
+                    InfantryFormationType.Line => InfantryFormationType.Column,
+                    InfantryFormationType.Column => InfantryFormationType.Wedge,
+                    InfantryFormationType.Wedge => InfantryFormationType.DispersedLine,
+                    InfantryFormationType.DispersedLine => InfantryFormationType.Perimeter,
+                    InfantryFormationType.Perimeter => InfantryFormationType.Free,
+                    _ => InfantryFormationType.None
+                };
+                Console.WriteLine(
+                    $"[FORMATION] Next group move: {InfantryFormation.GetName(_infantryFormation)}. " +
+                    "Shift+J toggles keep-formation-in-combat.");
+            }
             return;
         }
 
