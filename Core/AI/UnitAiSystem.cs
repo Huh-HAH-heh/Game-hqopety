@@ -1145,6 +1145,39 @@ public sealed class UnitAiSystem
         }
     }
 
+    public void EnforceAutonomousMovementLocks(
+        UnitStore units,
+        UnitSuppressionStore suppression)
+    {
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int unit = active[i];
+            if (!Store.AutonomousMovementDisabled[unit] ||
+                suppression.GetState(unit) == UnitSuppressionState.Panicked ||
+                Store.PlayerOrderType[unit] is UnitAiOrderType.Move or
+                    UnitAiOrderType.StealthMove or UnitAiOrderType.Attack)
+            {
+                continue;
+            }
+
+            // Keep perception/target memory and combat execution intact. Only
+            // autonomous locomotion (cover, flank, investigation, patrol) is
+            // suppressed. Panic is the existing critical morale-break response
+            // and deliberately bypasses this lock.
+            Store.ClearGoal(unit);
+            units.HasTarget[unit] = false;
+            units.Target[unit] = units.Position[unit];
+
+            if (Store.State[unit] is UnitAiState.SeekCover or UnitAiState.Flank or UnitAiState.Search)
+            {
+                Store.State[unit] = Store.HasTarget[unit]
+                    ? UnitAiState.Attack
+                    : UnitAiState.Idle;
+            }
+        }
+    }
+
     private bool TryExecutePlayerOrderIntent(
         UnitStore units,
         UnitHealthStore health,
