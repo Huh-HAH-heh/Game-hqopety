@@ -289,7 +289,7 @@ public sealed class InformationLayersRenderer : IDisposable
     {
         _flowHeat.Clear();
         _flowDirections.Clear();
-        _flowStatus = "Flow Field: отряд не выбран";
+        _flowStatus = "Flow Field отключён: используется индивидуальный A*";
 
         SquadMovementDebugSnapshot? selected =
             FindSquad(snapshot.SquadMovement, selectedSquadId);
@@ -299,7 +299,7 @@ public sealed class InformationLayersRenderer : IDisposable
         SquadMovementDebugSnapshot field = selected.Value;
         if (!field.Information.FlowFieldReady)
         {
-            _flowStatus = "Flow Field ещё не построен: выдай отряду общий приказ Move.";
+            _flowStatus = "Flow Field отключён. Каждый боец использует собственный маршрут A*.";
             return;
         }
 
