@@ -859,6 +859,7 @@ public sealed class GameRenderer
                 _camera.View,
                 informationSnapshot,
                 TerrainTilePixelSize,
+                _camera.ZoomLevel,
                 Volatile.Read(ref _selectedInfoSquadId),
                 _showMovementVectors,
                 _showMovementForces,
