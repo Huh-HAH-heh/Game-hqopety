@@ -164,6 +164,144 @@ public sealed class SquadMovementStore
             _membership[squad.Members[i]] = new MemberLink(link.SquadId, i);
     }
 
+    public bool IssueAStarFormationMoveOrder(
+        UnitStore units,
+        UnitHealthStore health,
+        UnitAiStore ai,
+        int squadId,
+        IReadOnlyList<UnitId> requestedMembers,
+        Vector3 destination,
+        InfantryFormationType formation,
+        bool keepFormationInCombat,
+        WorldMap worldMap)
+    {
+        if (squadId <= 0 || requestedMembers == null || requestedMembers.Count == 0)
+            return false;
+
+        List<UnitId> members = new(requestedMembers.Count);
+        HashSet<UnitId> unique = new();
+        for (int i = 0; i < requestedMembers.Count; i++)
+        {
+            UnitId id = requestedMembers[i];
+            if (id.IsValid &&
+                unique.Add(id) &&
+                units.TryGetIndex(id, out int index) &&
+                health.OverallHitPoints[index] > 0f)
+            {
+                members.Add(id);
+            }
+        }
+
+        if (members.Count == 0)
+            return false;
+
+        // A new movement order replaces any older temporary cohort that overlaps
+        // these units. Persistent squad UI/membership remains independent of orders.
+        HashSet<int> replacedSquads = new();
+        if (_squads.ContainsKey(squadId))
+            replacedSquads.Add(squadId);
+        for (int i = 0; i < members.Count; i++)
+        {
+            if (_membership.TryGetValue(members[i], out MemberLink oldLink))
+                replacedSquads.Add(oldLink.SquadId);
+        }
+
+        foreach (int oldSquadId in replacedSquads)
+        {
+            if (!_squads.Remove(oldSquadId, out SquadState? oldSquad))
+                continue;
+
+            for (int i = 0; i < oldSquad.Members.Count; i++)
+            {
+                UnitId oldMember = oldSquad.Members[i];
+                if (_membership.TryGetValue(oldMember, out MemberLink oldLink) &&
+                    oldLink.SquadId == oldSquadId)
+                {
+                    _membership.Remove(oldMember);
+                }
+            }
+        }
+
+        SquadState squad = new(squadId, members);
+        _squads.Add(squadId, squad);
+        for (int i = 0; i < members.Count; i++)
+        {
+            _membership[members[i]] = new MemberLink(squadId, i);
+            EnsureMemberIdentity(units, members[i].Index);
+        }
+
+        Vector2 center = Vector2.Zero;
+        float spacing = 1.15f;
+        float slowestSpeed = float.PositiveInfinity;
+        for (int i = 0; i < members.Count; i++)
+        {
+            UnitId id = members[i];
+            int index = id.Index;
+            Vector3 position = units.Position[index];
+            center += new Vector2(position.X, position.Y);
+            spacing = MathF.Max(spacing, MathF.Max(units.Width[index], units.Length[index]) * 1.15f);
+            slowestSpeed = MathF.Min(slowestSpeed, MathF.Max(0.1f, units.MoveSpeed[index]));
+        }
+
+        center /= members.Count;
+        Vector2 goal = new(
+            Math.Clamp(destination.X, 0.5f, worldMap.MaxTileX - 0.5f),
+            Math.Clamp(destination.Y, 0.5f, worldMap.MaxTileY - 0.5f));
+        Vector2 forward = goal - center;
+        if (forward.LengthSquared() < 0.0001f)
+            forward = Vector2.UnitX;
+        else
+            forward = Vector2.Normalize(forward);
+        Vector2 side = new(-forward.Y, forward.X);
+
+        Vector2[] offsets = new Vector2[members.Count];
+        Vector2 offsetSum = Vector2.Zero;
+        for (int i = 0; i < members.Count; i++)
+        {
+            offsets[i] = InfantryFormation.GetOffset(i, members.Count, formation, spacing);
+            offsetSum += offsets[i];
+        }
+
+        Vector2 meanOffset = offsetSum / members.Count;
+        squad.MemberOffsets = new Vector2[members.Count];
+        squad.MemberGoals = new Vector2[members.Count];
+
+        for (int i = 0; i < members.Count; i++)
+        {
+            UnitId id = members[i];
+            Vector2 localOffset = offsets[i] - meanOffset;
+            Vector2 worldOffset = side * localOffset.X - forward * localOffset.Y;
+            Vector2 terminal = ResolveNavigablePoint(worldMap, goal + worldOffset);
+            int tileX = Math.Clamp((int)MathF.Floor(terminal.X), 0, worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(terminal.Y), 0, worldMap.MaxTileY);
+            Vector3 memberTarget = new(
+                terminal.X,
+                terminal.Y,
+                worldMap.GetSurfaceHeight(tileX, tileY));
+
+            squad.MemberOffsets[i] = localOffset;
+            squad.MemberGoals[i] = terminal;
+            ai.SetPlayerOrder(id.Index, UnitAiOrderType.Move, memberTarget);
+            ai.ClearGoal(id.Index);
+            units.SetTarget(id, memberTarget);
+            SetMemberState(units, id.Index, SquadMemberMovementState.Following);
+        }
+
+        squad.Objective = new Vector3(goal.X, goal.Y, destination.Z);
+        squad.Center = center;
+        squad.Forward = forward;
+        squad.Spacing = spacing;
+        squad.Formation = formation;
+        squad.Rigidity = SquadFormationRigidity.Organized;
+        squad.HasMoveOrder = true;
+        squad.IsAStarFormation = true;
+        squad.KeepFormationInCombat = keepFormationInCombat;
+        squad.SlowestMoveSpeed = slowestSpeed;
+        squad.Phase = SquadMovementPhase.Advancing;
+        squad.FlowField.Invalidate();
+        return true;
+    }
+
     public bool IssueMoveOrder(
         UnitStore units,
         UnitHealthStore health,
@@ -266,6 +404,9 @@ public sealed class SquadMovementStore
         squad.Formation = formation;
         squad.Rigidity = SquadFormationRigidity.Free;
         squad.HasMoveOrder = true;
+        squad.IsAStarFormation = false;
+        squad.KeepFormationInCombat = false;
+        squad.SlowestMoveSpeed = float.PositiveInfinity;
         squad.Phase = SquadMovementPhase.Advancing;
         squad.FlowField.Invalidate();
         return true;
