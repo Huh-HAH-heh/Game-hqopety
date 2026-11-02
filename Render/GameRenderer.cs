@@ -61,6 +61,7 @@ public sealed class GameRenderer
     private CombatStatusOverlay? _combatStatusOverlay;
     private SimulationControlOverlay? _simulationControlOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
+    private readonly MassCombatTestScene _classicMassCombatTestScene = new();
     private readonly MovementTestScene _movementTestScene = new();
     private readonly LiveAiEvolutionTrainer _liveAiEvolutionTrainer = new();
     private AiEvolutionOverlay? _aiEvolutionOverlay;
@@ -183,6 +184,7 @@ public sealed class GameRenderer
     private bool _showAttackLinks = true;
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
+    private bool _classicMassCombatMode;
     private bool _movementTestMode;
     private bool _visionTestMode;
     private int _selectedTestSceneIndex;
@@ -3082,6 +3084,11 @@ public sealed class GameRenderer
                             _unitSimulation,
                             _worldMap,
                             updateDeltaTime);
+                    if (_classicMassCombatMode)
+                        _classicMassCombatTestScene.Update(
+                            _unitSimulation,
+                            _worldMap,
+                            updateDeltaTime);
                     _unitSimulation.Update(_worldMap, updateDeltaTime);
                     _liveAiEvolutionTrainer.Update(
                         _unitSimulation,
@@ -4294,7 +4301,11 @@ public sealed class GameRenderer
             _unitSimulation.VisionEnabled,
             _showCombatTracers,
             _showCombatHud,
-            _massCombatMode ? _massCombatTestScene.UnitsPerFaction : 0);
+            _massCombatMode
+                ? _massCombatTestScene.UnitsPerFaction
+                : _classicMassCombatMode
+                    ? _classicMassCombatTestScene.UnitCount / 2
+                    : 0);
     }
 
     private void ApplyGameMenuAction(GameMenuAction action)
@@ -4520,6 +4531,8 @@ public sealed class GameRenderer
 
         if (_massCombatTestScene.Initialized)
             _massCombatTestScene.Stop(_unitSimulation);
+        if (_classicMassCombatTestScene.Initialized)
+            _classicMassCombatTestScene.Stop(_unitSimulation);
         if (_movementTestScene.Initialized)
             _movementTestScene.Stop(_unitSimulation);
 
@@ -4536,6 +4549,7 @@ public sealed class GameRenderer
         _unitSimulation.AI.Enabled = false;
         _unitSimulation.VisionEnabled = false;
         _massCombatMode = false;
+        _classicMassCombatMode = false;
         _movementTestMode = false;
         _visionTestMode = false;
         _terrainStressMode = false;
@@ -4625,7 +4639,7 @@ public sealed class GameRenderer
                 StartSimulationThread();
                 break;
 
-            default:
+            case 3:
                 _terrainStressMode = true;
                 _unitSimulation.AI.Enabled = false;
                 _unitSimulation.VisionEnabled = false;
@@ -4634,6 +4648,25 @@ public sealed class GameRenderer
                     ref _latestSnapshot,
                     SimulationFrameSnapshot.Capture(_unitSimulation));
                 break;
+
+            case 4:
+            {
+                _classicMassCombatMode = true;
+                _unitSimulation.AI.Enabled = true;
+                _unitSimulation.VisionEnabled = true;
+                _classicMassCombatTestScene.Start(_unitSimulation, _worldMap);
+                SetSelectedUnit(_classicMassCombatTestScene.FirstUnit);
+                if (_unitSimulation.Units.TryGetIndex(
+                        _classicMassCombatTestScene.FirstUnit, out int firstClassicUnit))
+                {
+                    Vector3 firstPosition = _unitSimulation.Units.Position[firstClassicUnit];
+                    _camera.CenterOnPosition(new Vector2f(
+                        firstPosition.X * TerrainTilePixelSize,
+                        firstPosition.Y * TerrainTilePixelSize));
+                }
+                StartSimulationThread();
+                break;
+            }
         }
 
         _activeTestSceneIndex = sceneIndex;
