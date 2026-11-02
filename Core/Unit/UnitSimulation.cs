@@ -1046,7 +1046,7 @@ public sealed class UnitSimulation
         phaseStarted = Stopwatch.GetTimestamp();
         _movementSystem.Update(
             Units, worldMap, deltaTime, Health, _meleeCombatSystem, _aiSystem.Store, Inventory,
-            _squadMovementStore);
+            _squadMovementStore, Suppression);
         _meleeCombatSystem.UpdateMovementLocks(Units, deltaTime);
         LastMovementUpdateMilliseconds =
             Stopwatch.GetElapsedTime(phaseStarted).TotalMilliseconds;
