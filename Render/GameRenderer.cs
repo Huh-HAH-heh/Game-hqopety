@@ -4181,30 +4181,16 @@ public sealed class GameRenderer
         }
     }
 
-    private void HandleKey(
-        Keyboard.Key key)
+    private void HandleKey(Keyboard.Key key)
     {
-        if (key == Keyboard.Key.F10)
-        {
-            if (_bodyRigEditorOverlay?.IsOpen == true)
-            {
-                _bodyRigEditorOverlay.Close();
-            }
-            else
-            {
-                CloseUnitCards();
-                _unitGroupCardOverlay?.Close();
-                _contextMenuOverlay?.Close();
-                _contextMenuUnit = default;
-                _menuPage = GameMenuPage.Closed;
-                _bodyRigEditorOverlay?.Open();
-            }
-
-            return;
-        }
-
         if (_bodyRigEditorOverlay?.IsOpen == true)
         {
+            if (key == Keyboard.Key.Escape)
+            {
+                _bodyRigEditorOverlay.Close();
+                return;
+            }
+
             bool controlPressed =
                 Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
                 Keyboard.IsKeyPressed(Keyboard.Key.RControl);
@@ -4212,415 +4198,49 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.K && TryDisbandSelectedSquads())
+        if (key != Keyboard.Key.Escape)
             return;
 
-        if (key == Keyboard.Key.V)
+        if (_debugLayersOverlay?.IsOpen == true)
         {
-            _debugLayersOverlay?.Toggle();
+            _debugLayersOverlay.Close();
             return;
         }
 
-        if (TryHandleSquadHotkey(key))
-            return;
-
-        if (key == Keyboard.Key.S &&
-            (Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
-             Keyboard.IsKeyPressed(Keyboard.Key.RControl)))
+        if (_utilityAiDebugOverlay?.Contains(
+                new Vector2i((int)_window.Size.X / 2, (int)_window.Size.Y / 2)) == true)
         {
-            SimulationFrameSnapshot? stealthSnapshot = GetInputSnapshot();
-            if (stealthSnapshot != null)
-            {
-                UnitId[] stealthUnits = CaptureSelectedUnitIds(stealthSnapshot);
-                if (stealthUnits.Length > 0)
-                {
-                    SFML.System.Vector2f mouseWorld =
-                        _window.MapPixelToCoords(Mouse.GetPosition(_window), _camera.View);
-                    float x = Math.Clamp(mouseWorld.X, 0.5f, _worldMap.TileWidth - 0.5f);
-                    float y = Math.Clamp(mouseWorld.Y, 0.5f, _worldMap.TileHeight - 0.5f);
-                    int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
-                    int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
-                    Vector3 destination = new(
-                        x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
-                    ExecuteSimulationCommand(() =>
-                        IssueStealthMoveOrderToPoint(stealthUnits, destination));
-                }
-                else
-                {
-                    Console.WriteLine("[AI-STEALTH] Select one or more living units first.");
-                }
-            }
-
+            _showUtilityAiDebug = false;
             return;
         }
 
-        if (key == Keyboard.Key.S)
+        if (_unitGroupCardOverlay?.IsOpen == true)
         {
-            SimulationFrameSnapshot? snapshot = GetInputSnapshot();
-            if (snapshot != null)
-            {
-                UnitId[] holdUnits = CaptureSelectedUnitIds(snapshot);
-                if (holdUnits.Length > 0)
-                {
-                    ExecuteSimulationCommand(() =>
-                        IssueHoldOrder(holdUnits));
-                }
-            }
-
+            _unitGroupCardOverlay.Close();
             return;
         }
 
-        if (key == Keyboard.Key.PageUp)
+        if (_unitCards.Count > 0)
         {
-            int step =
-                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                Keyboard.IsKeyPressed(Keyboard.Key.RShift)
-                    ? 10
-                    : 1;
-
-            ScrollTerrainLayers(step);
+            CloseTopUnitCard();
             return;
         }
 
-        if (key == Keyboard.Key.PageDown)
+        if (_contextMenuOverlay?.IsOpen == true)
         {
-            int step =
-                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                Keyboard.IsKeyPressed(Keyboard.Key.RShift)
-                    ? 10
-                    : 1;
-
-            ScrollTerrainLayers(-step);
-            return;
-        }
-
-        if (key == Keyboard.Key.F2)
-        {
-            CloseUnitCards();
-            _unitGroupCardOverlay?.Close();
-            _contextMenuOverlay?.Close();
+            _contextMenuOverlay.Close();
             _contextMenuUnit = default;
-            _menuPage = _menuPage == GameMenuPage.Settings
-                ? GameMenuPage.Closed
-                : GameMenuPage.Settings;
-            _draggingMenuSlider = null;
             return;
         }
 
-        if (key == Keyboard.Key.Escape)
+        _menuPage = _menuPage switch
         {
-            if (_debugLayersOverlay?.IsOpen == true)
-            {
-                _debugLayersOverlay.Close();
-                return;
-            }
-
-            if (_unitGroupCardOverlay?.IsOpen == true)
-            {
-                _unitGroupCardOverlay.Close();
-                return;
-            }
-
-            if (_unitCards.Count > 0)
-            {
-                CloseTopUnitCard();
-                return;
-            }
-
-            if (_contextMenuOverlay?.IsOpen == true)
-            {
-                _contextMenuOverlay.Close();
-                _contextMenuUnit = default;
-                return;
-            }
-
-            _menuPage = _menuPage switch
-            {
-                GameMenuPage.Settings => GameMenuPage.Main,
-                GameMenuPage.Main => GameMenuPage.Closed,
-                _ => GameMenuPage.Closed
-            };
-            _draggingMenuSlider = null;
-            return;
-        }
-
-        if (key == Keyboard.Key.T)
-        {
-            _showCombatTracers = !_showCombatTracers;
-            Console.WriteLine($"[TEST] Tracers={_showCombatTracers}");
-            return;
-        }
-
-        if (key == Keyboard.Key.F5)
-        {
-            if (!_massCombatMode)
-            {
-                Console.WriteLine("[EVOLVE LIVE] Switch to the mass-combat scene (C) before starting live evolution.");
-                return;
-            }
-
-            ExecuteSimulationCommand(() =>
-                _liveAiEvolutionTrainer.Toggle(_unitSimulation, _massCombatTestScene, _worldMap));
-            return;
-        }
-
-        if (key == Keyboard.Key.F9)
-        {
-            _showCombatHud = !_showCombatHud;
-            if (_combatStatusOverlay != null)
-                _combatStatusOverlay.Visible = _showCombatHud;
-            return;
-        }
-
-        if (key == Keyboard.Key.F6)
-        {
-            ExecuteSimulationCommand(() =>
-            {
-                _unitSimulation.VisionEnabled = !_unitSimulation.VisionEnabled;
-                Console.WriteLine(
-                    $"[TEST] Vision simulation={_unitSimulation.VisionEnabled}");
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.F7)
-        {
-            ToggleMovementTestScene();
-            return;
-        }
-
-        if (key == Keyboard.Key.F8)
-        {
-            if (!_massCombatMode)
-                return;
-            if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
-            {
-                Console.WriteLine("[EVOLVE LIVE] Stop training with F5 before changing battle scale.");
-                return;
-            }
-
-            // Scale changes rebuild both terrain and units, so perform them
-            // with the simulation worker stopped rather than racing the map renderer.
-            StopSimulationThread();
-            _massCombatTestScene.CycleScale(_unitSimulation, _worldMap);
-            SetSelectedUnit(_massCombatTestScene.FirstMeleeUnit);
-            CenterOnMeleeBattle();
-            Console.WriteLine($"[TEST] {_massCombatTestScene.GetStatus(_unitSimulation)}");
-            StartSimulationThread();
-            return;
-        }
-
-        if (key == Keyboard.Key.C)
-        {
-            if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
-            {
-                Console.WriteLine("[EVOLVE LIVE] Stop training with F5 before switching scenes.");
-                return;
-            }
-
-            StopSimulationThread();
-            ToggleTerrainCombatTest();
-            if (_massCombatMode)
-                StartSimulationThread();
-            return;
-        }
-
-
-        if (key == Keyboard.Key.Y)
-        {
-            if (_terrainStressMode || _massCombatMode)
-                return;
-
-            _visionTestScene.ResetAiDemo(
-                _unitSimulation,
-                _worldMap);
-            return;
-        }
-
-        if (key == Keyboard.Key.Tab)
-        {
-            if (_massCombatMode)
-            {
-                CycleMassCombatSelection();
-                return;
-            }
-
-            _visionTestIndex =
-                (_visionTestIndex + 1) %
-                _visionTestScene.UnitCount;
-
-            SetSelectedUnit(_visionTestScene.GetUnit(_visionTestIndex));
-
-            return;
-        }
-
-        if (key == Keyboard.Key.R)
-        {
-            _visionTestIndex = 0;
-            SetSelectedUnit(_visionTestScene.Observer);
-            return;
-        }
-
-        if (key == Keyboard.Key.F)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int shooterIndex))
-                    return;
-
-                _unitSimulation.FireWeapon(
-                    selected,
-                    UnitWeaponSlot.Primary,
-                    _unitSimulation.Units.HeadNormal[shooterIndex]);
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.B)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int shooterIndex) ||
-                    !_unitSimulation.AI.Store.HasTarget[shooterIndex])
-                {
-                    return;
-                }
-
-                UnitId target = _unitSimulation.AI.Store.Target[shooterIndex];
-                if (_unitSimulation.Units.IsAlive(target))
-                {
-                    _unitSimulation.FireWeaponAt(
-                        selected,
-                        UnitWeaponSlot.Primary,
-                        target);
-                }
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.H)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-                _unitSimulation.ApplyDamage(
-                    selected,
-                    UnitHealthPartId.Torso,
-                    70f));
-            return;
-        }
-
-        if (key == Keyboard.Key.M)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int unitIndex))
-                    return;
-
-                _unitSimulation.Weapons.CycleFireMode(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                int stateIndex = UnitWeaponStore.GetIndex(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                Console.WriteLine(
-                    $"[FIRE CONTROL] Unit[{unitIndex}] " +
-                    $"Fire={_unitSimulation.Weapons.CurrentFireMode[stateIndex]} " +
-                    $"Aim={_unitSimulation.Weapons.CurrentAimMode[stateIndex]}");
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.N)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int unitIndex))
-                    return;
-
-                _unitSimulation.Weapons.CycleAimMode(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                int stateIndex = UnitWeaponStore.GetIndex(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                Console.WriteLine(
-                    $"[FIRE CONTROL] Unit[{unitIndex}] " +
-                    $"Fire={_unitSimulation.Weapons.CurrentFireMode[stateIndex]} " +
-                    $"Aim={_unitSimulation.Weapons.CurrentAimMode[stateIndex]}");
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.K)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (_unitSimulation.Units.TryGetIndex(selected, out int unitIndex))
-                {
-                    _unitSimulation.Weapons.CycleTargetMode(
-                        unitIndex,
-                        UnitWeaponSlot.Primary);
-                }
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.L)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int unitIndex))
-                    return;
-
-                int stateIndex = UnitWeaponStore.GetIndex(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-                int nextAmmo = _unitSimulation.Weapons.CurrentAmmoType[stateIndex] + 1;
-                short inventorySlot = _unitSimulation.Inventory.GetWeaponEquipment(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                if (inventorySlot >= 0)
-                {
-                    RangedWeaponConfig? weapon =
-                        _unitSimulation.Inventory.GetItem(unitIndex, inventorySlot) as RangedWeaponConfig;
-                    int ammoCount = weapon?.AmmoSet?.Count ?? 1;
-                    nextAmmo = ammoCount <= 0 ? 0 : nextAmmo % ammoCount;
-                }
-
-                _unitSimulation.SelectAmmunition(
-                    selected,
-                    UnitWeaponSlot.Primary,
-                    nextAmmo);
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.T)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.IsAlive(selected))
-                    return;
-
-                float centerX = _worldMap.TileWidth * 0.5f;
-                float centerY = _worldMap.TileHeight * 0.5f;
-                _unitSimulation.SetTarget(
-                    selected,
-                    new System.Numerics.Vector3(centerX, centerY - 20f, 0f));
-            });
-        }
+            GameMenuPage.TestScenes => GameMenuPage.Settings,
+            GameMenuPage.Settings => GameMenuPage.Main,
+            GameMenuPage.Main => GameMenuPage.Closed,
+            _ => GameMenuPage.Closed
+        };
+        _draggingMenuSlider = null;
     }
 
     private GameSettingsSnapshot GetGameSettingsSnapshot()
