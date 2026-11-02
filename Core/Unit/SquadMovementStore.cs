@@ -537,7 +537,7 @@ public sealed class SquadMovementStore
                 !squad.KeepFormationInCombat &&
                 squad.EngagedCount > 0)
             {
-                BreakAStarFormation(units, health, ai, navigation, suppression, squad);
+                BreakAStarFormation(units, health, ai, navigation, suppression, worldMap, squad);
             }
 
             if (!squad.HasMoveOrder)
@@ -858,6 +858,7 @@ public sealed class SquadMovementStore
         UnitAiStore? ai,
         UnitNavigationSystem navigation,
         UnitSuppressionStore? suppression,
+        WorldMap worldMap,
         SquadState squad)
     {
         squad.HasMoveOrder = false;
@@ -869,6 +870,7 @@ public sealed class SquadMovementStore
         if (ai == null)
             return;
 
+        HashSet<int> reservedDestinations = new();
         for (int slot = 0; slot < squad.Members.Count; slot++)
         {
             UnitId id = squad.Members[slot];
@@ -879,10 +881,16 @@ public sealed class SquadMovementStore
                 continue;
             }
 
+            Vector2 individualGoal = ResolveNavigablePoint(
+                worldMap,
+                new Vector2(squad.Objective.X, squad.Objective.Y),
+                reservedDestinations);
+            int tileX = Math.Clamp((int)MathF.Floor(individualGoal.X), 0, worldMap.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(individualGoal.Y), 0, worldMap.MaxTileY);
             Vector3 destination = new(
-                squad.Objective.X,
-                squad.Objective.Y,
-                squad.Objective.Z);
+                individualGoal.X,
+                individualGoal.Y,
+                worldMap.GetSurfaceHeight(tileX, tileY));
             if (float.IsFinite(destination.X) && float.IsFinite(destination.Y))
             {
                 ai.SetPlayerOrder(index, UnitAiOrderType.Move, destination);
