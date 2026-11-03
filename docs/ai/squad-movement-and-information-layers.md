@@ -27,7 +27,7 @@ Formation profiles describe how the squad moves, not a set of coordinates:
 | Группа (`Free`) | Loose rounded crowd; members keep breathing room without packing tightly |
 | Колонна (`Column`) | Narrow moving centreline; members may stagger forward/back to avoid one another |
 | Линия (`Line`) | Members tend toward a shared front perpendicular to the travel direction |
-| Wedge / dispersed line / perimeter | Retain their existing profiles; not the primary supported movement modes yet |
+| Wedge / dispersed line / perimeter | Experimental profiles; currently use the generic group envelope without their own dynamic steering behaviour |
 
 The group heading follows its smoothed collective velocity, falling back to the shared objective while starting or turning. Column movement softly corrects lateral drift toward the travel axis. Line movement softly corrects depth drift toward a front across the travel axis. The loose group uses a broad rounded envelope with no forced axis. These are live steering preferences, not member slots: members can reorder, spread around obstacles and compress through narrow passages. A* remains individual and validates every suggested steering segment against the member footprint. Inertia and physical collision resolution remain authoritative. A `Rejoining` member receives a weak bias toward the inner envelope; members handling their own combat action are not pulled back into the formation.
 
@@ -79,7 +79,7 @@ This keeps the data domains distinct:
 |---|---|---|
 | Command | Where is the squad trying to go? | Decide every pawn's combat action |
 | Navigation | Which way is traversable from here? | Reveal enemy locations |
-| Formation | How should members be distributed? | Force exact slots at all costs |
+| Formation | How should members move relative to the group? | Force exact slots or override navigation |
 | Member state | Who is following, fighting or returning? | Replace individual AI state |
 | Tactical contacts | What did this pawn or an ally report? | Provide perfect global truth |
 | Diagnostics | What is the collective system currently doing? | Become a second source of gameplay truth |
@@ -88,7 +88,7 @@ This keeps the data domains distinct:
 
 Squad creation and assignment are enabled again. A selected squad can receive a shared move order through the existing context-menu command.
 
-- `J` cycles the available movement profiles: group, column, line and the additional experimental profiles.
+- The primary movement profiles are `Группа`, `Колонна` and `Линия`; the remaining profiles are experimental.
 The always-visible `ИНФОСЛОИ` button beside the top-left menu opens the information panel. Independent checkboxes control vision, hearing, aiming links, AI state, suppression, pawn memory, Utility AI, unit velocity, motor force, Flow Field diagnostics, squad envelope, member states and shared tactical contacts. Flow Field movement is disabled; its diagnostics may remain empty. Select a squad to inspect its envelope and member states.
 
 Velocity arrows show current horizontal velocity. Motor-force arrows show the last resultant drive/braking/lateral force calculated by the movement controller; they do not include gravity or collision impulses.
