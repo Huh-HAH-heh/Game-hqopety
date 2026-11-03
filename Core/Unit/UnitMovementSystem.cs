@@ -165,12 +165,23 @@ public sealed class UnitMovementSystem
             if (postures[unit] == UnitPosture.Lying)
                 moveSpeed *= 0.45f;
 
+            UnitId movementUnitId = units.GetId(unit);
             if (squadMovement != null &&
                 squadMovement.TryGetAStarFormationSpeedLimit(
-                    units, units.GetId(unit), ai, out float formationSpeedLimit))
+                    units, movementUnitId, ai, out float formationSpeedLimit))
             {
                 moveSpeed = MathF.Min(moveSpeed, formationSpeedLimit);
             }
+            if (squadMovement != null &&
+                squadMovement.TryGetFormationSpeedLimit(
+                    units, movementUnitId, ai, moveSpeed, out float followerSpeedLimit))
+            {
+                moveSpeed = MathF.Min(moveSpeed, followerSpeedLimit);
+            }
+
+            bool hasCollectiveMove = squadMovement != null &&
+                squadMovement.IsExecutingCollectiveMove(
+                    units, movementUnitId, ai);
 
             float mass = MathF.Max(1f, masses[unit]);
             // Motor/traction force grows roughly with muscle cross-section (mass^(2/3)),
@@ -269,6 +280,7 @@ public sealed class UnitMovementSystem
                             out distanceToNextTurn,
                             out turnSeverity);
 
+                        Vector2 aStarWaypoint = steeringPoint;
                         if (hasWaypoint &&
                             squadMovement != null &&
                             squadMovement.TryAdjustAStarFormationWaypoint(
@@ -277,15 +289,30 @@ public sealed class UnitMovementSystem
                                 position,
                                 steeringPoint,
                                 ai,
-                                out Vector2 formationWaypoint) &&
-                            _navigation.CanMoveDirectly(
-                                units,
-                                unit,
-                                worldMap,
-                                new Vector2(position.X, position.Y),
-                                formationWaypoint))
+                                out Vector2 formationWaypoint))
                         {
-                            steeringPoint = formationWaypoint;
+                            Vector2 currentPosition = new(position.X, position.Y);
+                            Vector2 correction = formationWaypoint - currentPosition;
+                            bool foundSafeFormationPoint = false;
+                            for (int attempt = 0; attempt < 5; attempt++)
+                            {
+                                if (correction.LengthSquared() < 0.04f)
+                                    break;
+
+                                Vector2 candidate = currentPosition + correction;
+                                if (_navigation.CanMoveDirectly(
+                                        units, unit, worldMap, currentPosition, candidate))
+                                {
+                                    steeringPoint = candidate;
+                                    foundSafeFormationPoint = true;
+                                    break;
+                                }
+
+                                correction *= 0.5f;
+                            }
+
+                            if (!foundSafeFormationPoint)
+                                steeringPoint = aStarWaypoint;
                         }
                     }
                 }
@@ -445,7 +472,7 @@ public sealed class UnitMovementSystem
             velocities[unit] = new Vector3(velocity.X, velocity.Y, 0f);
             positions[unit] = position;
 
-            if (hasTarget[unit])
+            if (hasTarget[unit] && !hasCollectiveMove)
             {
                 Vector2 toGoal = new(targets[unit].X - position.X, targets[unit].Y - position.Y);
                 if (toGoal.LengthSquared() <= ArrivalRadius * ArrivalRadius &&

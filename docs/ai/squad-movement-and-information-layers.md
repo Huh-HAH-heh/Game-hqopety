@@ -20,6 +20,18 @@ Squad members use their own footprint-aware A* routes. The Flow Field path is cu
 
 ### 3. Formation-envelope layer
 
+The moving group uses a virtual anchor (smoothed core center, average velocity,
+heading and shared objective). A behavior-based controller builds a dynamic
+adjacency graph once per movement update. Column members are initially ordered
+across the compact starting group, then switch to forward ordering after enough
+depth has formed. Each follower tracks a moving point behind its current
+predecessor and adapts speed to the predecessor's gap and velocity. Line members
+are ordered laterally; immediate left/right neighbors maintain intervals while
+members align to one shared front. Free groups retain a rounded envelope.
+Separation reuses the existing predictive-avoidance and physical-contact systems.
+Graph buffers are reused per squad: no second spatial grid, no per-substep
+rebuild, and no all-pairs member scan.
+
 Formation profiles describe how the squad moves, not a set of coordinates:
 
 | Profile | Movement behaviour |
@@ -29,7 +41,7 @@ Formation profiles describe how the squad moves, not a set of coordinates:
 | Линия (`Line`) | Members tend toward a shared front perpendicular to the travel direction |
 | Wedge / dispersed line / perimeter | Experimental profiles; currently use the generic group envelope without their own dynamic steering behaviour |
 
-The group heading follows its smoothed collective velocity, falling back to the shared objective while starting or turning. Column movement softly corrects lateral drift toward the travel axis. Line movement softly corrects depth drift toward a front across the travel axis. The loose group uses a broad rounded envelope with no forced axis. These are live steering preferences, not member slots: members can reorder, spread around obstacles and compress through narrow passages. A* remains individual and validates every suggested steering segment against the member footprint. Inertia and physical collision resolution remain authoritative. A `Rejoining` member receives a weak bias toward the inner envelope; members handling their own combat action are not pulled back into the formation.
+The group heading follows its smoothed collective velocity, falling back to the shared anchor objective while starting or turning. Column followers track the live trail point behind their current predecessor and adapt speed to preserve a longitudinal gap; the head follows its own A* route. Line neighbors maintain lateral intervals and equalize depth around the moving anchor. The loose group retains its rounded envelope. Separation remains in the existing predictive-avoidance and physical-contact systems. Neighbor relationships are rebuilt from current projections, not fixed world positions. In narrow passages, formation corrections that A* cannot validate are shortened or rejected; after the passage, the graph reforms. The motor retains acceleration, inertia and braking. A `Rejoining` member receives a weak bias toward the inner envelope; members executing their own combat action are not pulled back into the formation.
 
 `SquadFormationRigidity` is an extension point: `Free` is the default and `Organized` slightly increases cohesion. `Strict` is reserved and currently behaves like `Organized`; strict slot locking is deliberately not implemented.
 
@@ -107,5 +119,7 @@ Not implemented yet:
 - visual HUD panels for every information channel;
 - budgeted/asynchronous Flow Field construction and sharing fields across squads with identical destinations;
 - dedicated flow-field movement for multi-floor/space navigation.
+
+Collective arrival is anchor-based. For a column, the anchor target is offset behind the clicked objective by half the intended column depth, while the clicked objective remains unchanged for the HUD. A leader that reaches the clicked point remains in the neighbor graph as a stationary predecessor. When the anchor reaches its target and no members remain detached or rejoining, the cohort receives a Stop order so AI does not reissue the old Move order.
 
 The current system is intended to be inspected in-game before those layers are expanded.

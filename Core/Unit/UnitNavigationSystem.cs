@@ -512,7 +512,7 @@ public sealed class UnitNavigationSystem
         int unitIndex,
         WorldMap worldMap,
         Vector2 requested,
-        HashSet<int> reservedFootprintCells,
+        HashSet<int>? reservedFootprintCells,
         out Vector2 goal)
     {
         goal = default;
@@ -547,15 +547,18 @@ public sealed class UnitNavigationSystem
                         continue;
 
                     bool reserved = false;
-                    for (int offsetY = -radiusY; offsetY <= radiusY && !reserved; offsetY++)
+                    if (reservedFootprintCells != null)
                     {
-                        for (int offsetX = -radiusX; offsetX <= radiusX; offsetX++)
+                        for (int offsetY = -radiusY; offsetY <= radiusY && !reserved; offsetY++)
                         {
-                            int occupied = x + offsetX + (y + offsetY) * _width;
-                            if (reservedFootprintCells.Contains(occupied))
+                            for (int offsetX = -radiusX; offsetX <= radiusX; offsetX++)
                             {
-                                reserved = true;
-                                break;
+                                int occupied = x + offsetX + (y + offsetY) * _width;
+                                if (reservedFootprintCells.Contains(occupied))
+                                {
+                                    reserved = true;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -582,12 +585,15 @@ public sealed class UnitNavigationSystem
                 continue;
 
             goal = new Vector2(bestX + 0.5f, bestY + 0.5f);
-            for (int offsetY = -radiusY; offsetY <= radiusY; offsetY++)
+            if (reservedFootprintCells != null)
             {
-                for (int offsetX = -radiusX; offsetX <= radiusX; offsetX++)
+                for (int offsetY = -radiusY; offsetY <= radiusY; offsetY++)
                 {
-                    reservedFootprintCells.Add(
-                        bestX + offsetX + (bestY + offsetY) * _width);
+                    for (int offsetX = -radiusX; offsetX <= radiusX; offsetX++)
+                    {
+                        reservedFootprintCells.Add(
+                            bestX + offsetX + (bestY + offsetY) * _width);
+                    }
                 }
             }
 
