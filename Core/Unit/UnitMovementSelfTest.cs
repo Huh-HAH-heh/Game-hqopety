@@ -465,12 +465,27 @@ public static class UnitMovementSelfTest
             new Vector2(destination.X - initialCenter.X, destination.Y - initialCenter.Y));
         Vector2 side = new(-forward.Y, forward.X);
 
-        if (!simulation.IssueAStarFormationMoveOrder(
-                ids,
-                destination,
-                formation,
-                keepFormationInCombat: false,
-                worldMap: map))
+        int validCount = 0;
+        float initialHealth = 0f;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            if (ids[i].IsValid &&
+                simulation.Units.TryGetIndex(ids[i], out int unitIndex))
+            {
+                validCount++;
+                initialHealth += simulation.Health.OverallHitPoints[unitIndex];
+            }
+        }
+        bool issued = simulation.IssueAStarFormationMoveOrder(
+            ids,
+            destination,
+            formation,
+            keepFormationInCombat: false,
+            worldMap: map);
+        Console.WriteLine(
+            $"[Squad formation issue] mode={formation}, spawned={ids.Length}, " +
+            $"valid={validCount}, avgHp={initialHealth / Math.Max(1, validCount):0.0}, issued={issued}");
+        if (!issued)
         {
             initialForward = 0f;
             initialLateral = 0f;
