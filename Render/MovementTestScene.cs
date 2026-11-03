@@ -79,6 +79,18 @@ public sealed class MovementTestScene
 
     private static void BuildTerrain(WorldMap worldMap)
     {
+        // This course represents obstacles through terrain height only.
+        // Clear navigation-only blockers left by earlier test runs/scenarios:
+        // they are not rendered and therefore appear as invisible walls.
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < worldMap.TileWidth; x++)
+            {
+                if (worldMap.IsNavigationBlocked(x, y))
+                    worldMap.SetNavigationBlocked(x, y, false);
+            }
+        }
+
         worldMap.Water.Clear();
 
         int centerX = worldMap.TileWidth / 2;
@@ -105,8 +117,8 @@ public sealed class MovementTestScene
                 float gullyDistance = MathF.Abs(dy - gullyCenterY);
                 height -= 2.7f * MathF.Max(0f, 1f - gullyDistance / 4.5f);
 
-                // Two staggered S-shaped ridges. Their crests are closed except
-                // for offset gates, forcing a route with two substantial bends.
+                // Two staggered S-shaped ridges. Their lower passes are
+                // encoded in the height profile, not hidden navigation blockers.
                 float ridgeOneX = -14f + 7f * MathF.Sin(dy * 0.047f);
                 float ridgeTwoX = 24f + 8f * MathF.Sin(dy * 0.038f + 1.1f);
                 float ridgeOneDistance = MathF.Abs(dx - ridgeOneX);
@@ -129,17 +141,6 @@ public sealed class MovementTestScene
                 height = Math.Clamp(height, 0.8f, 30f);
                 ushort heightUnits = checked((ushort)MathF.Round(height * WorldMap.HeightUnitsPerMeter));
 
-                bool onClosedRidgeCrest =
-                    (ridgeOneDistance < 0.65f && northGate < 0.82f) ||
-                    (ridgeTwoDistance < 0.65f && southGate < 0.82f);
-
-                // Clear stale blockers in the edited course, then restore only
-                // the two deliberate crest barriers and their traversable gates.
-                if (worldMap.IsNavigationBlocked(x, y))
-                    worldMap.SetNavigationBlocked(x, y, false);
-                if (onClosedRidgeCrest)
-                    worldMap.SetNavigationBlocked(x, y, true);
-
                 ushort material = ridgeOne + ridgeTwo > 5f
                     ? RockMaterialId
                     : GroundMaterialId;
@@ -147,20 +148,8 @@ public sealed class MovementTestScene
             }
         }
 
-        // Keep the course as a bounded navigation island. This prevents
-        // units from bypassing the S-ridges around their ends and keeps the
-        // A* pathfinding test focused on the intended gates.
-        for (int y = minY - 1; y <= maxY + 1; y++)
-        {
-            worldMap.SetNavigationBlocked(minX - 1, y, true);
-            worldMap.SetNavigationBlocked(maxX + 1, y, true);
-        }
-
-        for (int x = minX - 1; x <= maxX + 1; x++)
-        {
-            worldMap.SetNavigationBlocked(x, minY - 1, true);
-            worldMap.SetNavigationBlocked(x, maxY + 1, true);
-        }
+        // No navigation-only walls or hidden course boundary are added.
+        // A* and physical movement read the same visible terrain profile.
     }
 
     private static float GateOpening(float y, float center, float halfWidth)
