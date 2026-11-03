@@ -524,6 +524,102 @@ public static class UnitMovementSelfTest
         return MathF.Sqrt(radiusSquared / ids.Length);
     }
 
+    public static bool CollectiveMoveKeepsSoftSpacingAtArrival()
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(16, 256);
+        simulation.AI.Enabled = false;
+
+        const int columns = 4;
+        const int rows = 3;
+        const float startSpacing = 0.72f;
+        UnitId[] ids = new UnitId[columns * rows];
+        Vector2 initialCenter = Vector2.Zero;
+
+        for (int row = 0; row < rows; row++)
+        {
+            for (int column = 0; column < columns; column++)
+            {
+                int index = row * columns + column;
+                Vector3 start = new(
+                    6.5f + column * startSpacing,
+                    20.5f + row * startSpacing,
+                    1f);
+                ids[index] = simulation.Spawn(
+                    UnitType.Colonist,
+                    start,
+                    Vector3.UnitX,
+                    Vector3.UnitX,
+                    factionTag: 1);
+                initialCenter += new Vector2(start.X, start.Y);
+            }
+        }
+
+        initialCenter /= ids.Length;
+        Vector3 destination = new(35.5f, 21.5f, 1f);
+        Vector2 forward = Vector2.Normalize(
+            new Vector2(destination.X - initialCenter.X, destination.Y - initialCenter.Y));
+        bool issued = simulation.IssueAStarFormationMoveOrder(
+            ids,
+            destination,
+            InfantryFormationType.Free,
+            keepFormationInCombat: false,
+            worldMap: map);
+        if (!issued)
+            return false;
+
+        for (int tick = 0; tick < 1800; tick++)
+        {
+            simulation.Update(map, TestDeltaTime);
+            bool anyMoving = false;
+            for (int i = 0; i < ids.Length; i++)
+                anyMoving |= simulation.Units.HasTarget[ids[i].Index];
+            if (!anyMoving)
+                break;
+        }
+
+        float minimumDistance = float.PositiveInfinity;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            Vector3 first = simulation.Units.Position[ids[i].Index];
+            if (!float.IsFinite(first.X) || !float.IsFinite(first.Y))
+                return false;
+
+            for (int j = i + 1; j < ids.Length; j++)
+            {
+                Vector3 second = simulation.Units.Position[ids[j].Index];
+                minimumDistance = MathF.Min(
+                    minimumDistance,
+                    PlanarDistance(first, second));
+            }
+        }
+
+        Vector2 finalCenter = Vector2.Zero;
+        int activeTargets = 0;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            int unit = ids[i].Index;
+            Vector3 position = simulation.Units.Position[unit];
+            finalCenter += new Vector2(position.X, position.Y);
+            if (simulation.Units.HasTarget[unit])
+                activeTargets++;
+        }
+
+        finalCenter /= ids.Length;
+        float progress = Vector2.Dot(finalCenter - initialCenter, forward);
+        simulation.SquadMovement.TryGetInformation(
+            1_000_000, out SquadMovementInformation information);
+        Console.WriteLine(
+            $"[Squad arrival spacing] minimum={minimumDistance:0.00}, " +
+            $"progress={progress:0.00}, activeTargets={activeTargets}/{ids.Length}, " +
+            $"phase={information.Phase}");
+
+        return progress > 12f &&
+               minimumDistance >= 0.82f &&
+               activeTargets == 0 &&
+               !information.HasMoveOrder;
+    }
+
     private static bool TryMeasureFormation(
         InfantryFormationType formation,
         out float initialForward,

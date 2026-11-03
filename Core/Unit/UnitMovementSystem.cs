@@ -375,6 +375,13 @@ public sealed class UnitMovementSystem
                     }
                 }
 
+                if (hasCollectiveMove && squadMovement != null)
+                {
+                    desiredVelocity = ApplySoftSquadPersonalSpace(
+                        units, health, ai, squadMovement, unit, position,
+                        velocity, desiredVelocity, moveSpeed);
+                }
+
                 if (desiredVelocity.LengthSquared() > 0.0025f)
                 {
                     desiredVelocity = ApplyPredictiveAvoidance(
@@ -574,6 +581,144 @@ public sealed class UnitMovementSystem
             $"moveDist={movementDistance:0.0} goal={hasGoal}:{(hasGoal ? goal.ToString() : "-")} " +
             $"nav={_navigation.GetLastStatus(unit)} " +
             $"waypoint={(hasWaypoint ? waypoint.ToString() : "-")}");
+    }
+
+    /// <summary>
+    /// Soft AI personal-space behaviour for members of the same moving squad.
+    /// It is inactive outside the comfort radius, never reserves positions and
+    /// only changes the requested steering direction/small final reposition speed.
+    /// </summary>
+    private Vector2 ApplySoftSquadPersonalSpace(
+        UnitStore units,
+        UnitHealthStore? health,
+        UnitAiStore? ai,
+        SquadMovementStore squadMovement,
+        int unit,
+        Vector3 position,
+        Vector2 currentVelocity,
+        Vector2 desiredVelocity,
+        float moveSpeed)
+    {
+        UnitId member = units.GetId(unit);
+        if (!squadMovement.TryGetMemberSquadId(member, out int squadId) ||
+            _collisionTouchedCount == 0)
+        {
+            return desiredVelocity;
+        }
+
+        int cellX = Math.Clamp((int)MathF.Floor(position.X), 0, _collisionWidth - 1);
+        int cellY = Math.Clamp((int)MathF.Floor(position.Y), 0, _collisionHeight - 1);
+        int searchRadius = Math.Clamp(
+            (int)MathF.Ceiling(units.Radius[unit] + _collisionMaxRadius + 0.5f),
+            1,
+            4);
+
+        float nearestDistanceSquared = float.PositiveInfinity;
+        float nearestComfortDistance = 0f;
+        Vector2 nearestAway = Vector2.Zero;
+        for (int y = Math.Max(0, cellY - searchRadius);
+             y <= Math.Min(_collisionHeight - 1, cellY + searchRadius);
+             y++)
+        {
+            for (int x = Math.Max(0, cellX - searchRadius);
+                 x <= Math.Min(_collisionWidth - 1, cellX + searchRadius);
+                 x++)
+            {
+                int other = _collisionCellHeads[x + y * _collisionWidth];
+                while (other >= 0)
+                {
+                    int next = _collisionNextUnit[other];
+                    if (other == unit ||
+                        (health != null && health.OverallHitPoints[other] <= 0f))
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    UnitId otherId = units.GetId(other);
+                    if (!squadMovement.TryGetMemberSquadId(otherId, out int otherSquadId) ||
+                        otherSquadId != squadId ||
+                        !squadMovement.IsExecutingCollectiveMove(units, otherId, ai))
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    Vector3 otherPosition = units.Position[other];
+                    if (otherPosition.Z >= position.Z + units.Height[unit] ||
+                        position.Z >= otherPosition.Z + units.Height[other])
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    Vector2 delta = new(
+                        position.X - otherPosition.X,
+                        position.Y - otherPosition.Y);
+                    float distanceSquared = delta.LengthSquared();
+                    float comfortDistance = MathF.Max(
+                        0.9f,
+                        (units.Radius[unit] + units.Radius[other]) * 1.12f);
+                    if (distanceSquared >= comfortDistance * comfortDistance ||
+                        distanceSquared >= nearestDistanceSquared)
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    nearestDistanceSquared = distanceSquared;
+                    nearestComfortDistance = comfortDistance;
+                    if (distanceSquared > 0.0001f)
+                    {
+                        nearestAway = delta / MathF.Sqrt(distanceSquared);
+                    }
+                    else
+                    {
+                        float angle = ((unit * 37 + other * 17) % 360) *
+                            (MathF.PI / 180f);
+                        nearestAway = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+                    }
+
+                    other = next;
+                }
+            }
+        }
+
+        if (nearestComfortDistance <= 0f)
+            return desiredVelocity;
+
+        float distance = MathF.Sqrt(MathF.Max(0f, nearestDistanceSquared));
+        float pressure = Math.Clamp(
+            (nearestComfortDistance - distance) / nearestComfortDistance,
+            0f,
+            1f);
+        if (pressure <= 0.001f)
+            return desiredVelocity;
+
+        float routeSpeed = desiredVelocity.Length();
+        Vector2 routeDirection = routeSpeed > 0.05f
+            ? desiredVelocity / routeSpeed
+            : currentVelocity.LengthSquared() > 0.0025f
+                ? Vector2.Normalize(currentVelocity)
+                : nearestAway;
+
+        // Maximum 55% steering influence: route-following remains dominant.
+        // There is no attraction at long range and no hard minimum-distance clamp.
+        float separationWeight = Math.Clamp(pressure * 0.55f, 0f, 0.55f);
+        Vector2 blendedDirection =
+            routeDirection * (1f - separationWeight) +
+            nearestAway * separationWeight;
+        float blendedLengthSquared = blendedDirection.LengthSquared();
+        if (blendedLengthSquared <= 0.0001f)
+            blendedDirection = nearestAway;
+        else
+            blendedDirection /= MathF.Sqrt(blendedLengthSquared);
+
+        // Near the shared endpoint the route controller may already be braking
+        // to zero. Permit only a small, pressure-scaled shuffle to leave a pile-up.
+        float spacingSpeed = MathF.Min(0.45f, moveSpeed * 0.18f) * pressure;
+        float outputSpeed = MathF.Max(routeSpeed, spacingSpeed);
+        return blendedDirection * outputSpeed;
     }
 
     private Vector2 ApplyPredictiveAvoidance(
