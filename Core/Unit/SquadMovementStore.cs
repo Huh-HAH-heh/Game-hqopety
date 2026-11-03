@@ -266,28 +266,51 @@ public sealed class SquadMovementStore
             forward = Vector2.UnitX;
         else
             forward = Vector2.Normalize(forward);
-        // The squad is a moving body, not a set of endpoint slots.
-        // Resolve the common objective independently for each footprint so
-        // every member still gets a valid A* destination without reserving
-        // a different cell for every pawn.
+        // Line and wedge use the individual landing positions that made these
+        // formations readable before the shared-objective movement rewrite.
+        // Column keeps its predecessor chain; Free keeps a common crowd objective.
+        bool usesIndividualFormationSlots =
+            formation is InfantryFormationType.Line or InfantryFormationType.Wedge;
+        Vector2 side = new(-forward.Y, forward.X);
+        Vector2 meanOffset = Vector2.Zero;
+        if (usesIndividualFormationSlots)
+        {
+            for (int i = 0; i < members.Count; i++)
+                meanOffset += InfantryFormation.GetOffset(i, members.Count, formation, spacing);
+            meanOffset /= members.Count;
+        }
+
         Vector2[] goals = new Vector2[members.Count];
+        Vector2[] memberOffsets = new Vector2[members.Count];
         for (int i = 0; i < members.Count; i++)
         {
             UnitId id = members[i];
+            Vector2 localOffset = usesIndividualFormationSlots
+                ? InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset
+                : Vector2.Zero;
+            Vector2 requestedGoal = goal +
+                side * localOffset.X -
+                forward * localOffset.Y;
+            requestedGoal.X = Math.Clamp(
+                requestedGoal.X, 0.5f, worldMap.MaxTileX - 0.5f);
+            requestedGoal.Y = Math.Clamp(
+                requestedGoal.Y, 0.5f, worldMap.MaxTileY - 0.5f);
+
             if (!navigation.TryResolveAStarGoal(
-                    units, id.Index, worldMap, goal, null, out Vector2 terminal))
+                    units, id.Index, worldMap, requestedGoal, null, out Vector2 terminal))
             {
-                terminal = ResolveNavigablePoint(worldMap, goal);
+                terminal = ResolveNavigablePoint(worldMap, requestedGoal);
             }
+
             goals[i] = terminal;
+            memberOffsets[i] = localOffset;
         }
 
-        squad.MemberOffsets = new Vector2[members.Count];
+        squad.MemberOffsets = memberOffsets;
         squad.MemberGoals = new Vector2[members.Count];
         for (int i = 0; i < members.Count; i++)
         {
             UnitId id = members[i];
-            Vector2 localOffset = Vector2.Zero;
             Vector2 terminal = goals[i];
             int tileX = Math.Clamp((int)MathF.Floor(terminal.X), 0, worldMap.MaxTileX);
             int tileY = Math.Clamp((int)MathF.Floor(terminal.Y), 0, worldMap.MaxTileY);
@@ -296,7 +319,6 @@ public sealed class SquadMovementStore
                 terminal.Y,
                 worldMap.GetSurfaceHeight(tileX, tileY));
 
-            squad.MemberOffsets[i] = localOffset;
             squad.MemberGoals[i] = terminal;
             ai.SetPlayerOrder(id.Index, UnitAiOrderType.Move, memberTarget);
             ai.ClearGoal(id.Index);
@@ -961,6 +983,7 @@ public sealed class SquadMovementStore
             squad.Formation is InfantryFormationType.None ||
             !units.HasTarget[unitIndex] ||
             (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
+            (uint)link.Slot >= (uint)squad.MemberOffsets.Length ||
             !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
             IsDetachedFromCollective(units, ai, unitIndex) ||
             IsMemberTacticallyEngaged(id))
@@ -1044,23 +1067,24 @@ public sealed class SquadMovementStore
                 1.25f);
             shapeWeight = squad.FormationBootstrap ? 0.28f : 0.62f;
         }
-        else if (squad.Formation == InfantryFormationType.Line)
+        else if (squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge)
         {
-            float targetLateral = squad.FormationLateralOffsets[link.Slot];
-            float lateralError = targetLateral - lateralDistance;
-            float depthError = -forwardDistance;
+            // Keep the authored line/wedge shape around the moving group center.
+            // Individual A* routes still solve obstacles and the formation force
+            // stays elastic rather than teleporting pawns into fixed positions.
+            Vector2 localOffset = squad.MemberOffsets[link.Slot];
+            Vector2 formationPoint =
+                squad.Center + side * localOffset.X - squad.Forward * localOffset.Y;
+            Vector2 toFormationPoint = formationPoint - current;
+            float formationDistance = toFormationPoint.Length();
+            if (formationDistance <= 0.05f)
+                return false;
 
-            // Lateral ranks spread the group into one front while depth alignment
-            // keeps that front shallow. Rank assignment is recomputed every frame.
-            shapeForce += side * Math.Clamp(
-                lateralError * 0.5f,
-                -1.5f,
-                1.5f);
-            shapeForce += squad.Forward * Math.Clamp(
-                depthError * 0.52f,
-                -1.5f,
-                1.5f);
-            shapeWeight = 0.7f;
+            shapeForce = toFormationPoint / formationDistance *
+                Math.Clamp(formationDistance * 0.7f, 0.15f, 1.25f);
+            shapeWeight = squad.Formation == InfantryFormationType.Line
+                ? 0.68f
+                : 0.62f;
         }
         else if (squad.Formation == InfantryFormationType.Free)
         {

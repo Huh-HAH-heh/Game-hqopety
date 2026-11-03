@@ -424,6 +424,117 @@ public static class UnitMovementSelfTest
                finalLateral > initialLateral + 0.8f;
     }
 
+    public static bool LineKeepsItsFormationSlotsAtArrival() =>
+        FormationSlotsRemainDistinctAtArrival(InfantryFormationType.Line);
+
+    public static bool WedgeKeepsItsFormationSlotsAtArrival() =>
+        FormationSlotsRemainDistinctAtArrival(InfantryFormationType.Wedge);
+
+    private static bool FormationSlotsRemainDistinctAtArrival(
+        InfantryFormationType formation)
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(16, 256);
+        simulation.AI.Enabled = false;
+
+        const int columns = 4;
+        const int rows = 3;
+        const float startSpacing = 1.35f;
+        UnitId[] ids = new UnitId[columns * rows];
+        Vector2 initialCenter = Vector2.Zero;
+        float spacing = 1.15f;
+
+        for (int row = 0; row < rows; row++)
+        {
+            for (int column = 0; column < columns; column++)
+            {
+                int index = row * columns + column;
+                Vector3 start = new(
+                    6.5f + column * startSpacing,
+                    20f + row * startSpacing,
+                    1f);
+                ids[index] = simulation.Spawn(
+                    UnitType.Colonist,
+                    start,
+                    Vector3.UnitX,
+                    Vector3.UnitX,
+                    factionTag: 1);
+                initialCenter += new Vector2(start.X, start.Y);
+                spacing = MathF.Max(
+                    spacing,
+                    MathF.Max(
+                        simulation.Units.Width[ids[index].Index],
+                        simulation.Units.Length[ids[index].Index]) * 1.15f);
+            }
+        }
+
+        initialCenter /= ids.Length;
+        Vector3 destination = new(42.5f, 21.1f, 1f);
+        Vector2 toDestination = new(destination.X - initialCenter.X,
+            destination.Y - initialCenter.Y);
+        Vector2 forward = toDestination.LengthSquared() > 0.0001f
+            ? Vector2.Normalize(toDestination)
+            : Vector2.UnitX;
+        Vector2 side = new(-forward.Y, forward.X);
+
+        Vector2 meanOffset = Vector2.Zero;
+        for (int i = 0; i < ids.Length; i++)
+            meanOffset += InfantryFormation.GetOffset(i, ids.Length, formation, spacing);
+        meanOffset /= ids.Length;
+
+        if (!simulation.IssueAStarFormationMoveOrder(
+                ids,
+                destination,
+                formation,
+                keepFormationInCombat: false,
+                worldMap: map))
+        {
+            return false;
+        }
+
+        for (int tick = 0; tick < 1800; tick++)
+        {
+            simulation.Update(map, TestDeltaTime);
+            bool anyMoving = false;
+            for (int i = 0; i < ids.Length; i++)
+                anyMoving |= simulation.Units.HasTarget[ids[i].Index];
+            if (!anyMoving)
+                break;
+        }
+
+        float totalSlotError = 0f;
+        float maximumSlotError = 0f;
+        int activeTargets = 0;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            int unit = ids[i].Index;
+            Vector3 actual = simulation.Units.Position[unit];
+            if (!float.IsFinite(actual.X) || !float.IsFinite(actual.Y))
+                return false;
+
+            Vector2 localOffset =
+                InfantryFormation.GetOffset(i, ids.Length, formation, spacing) - meanOffset;
+            Vector2 expected = new Vector2(destination.X, destination.Y) +
+                side * localOffset.X -
+                forward * localOffset.Y;
+            float error = Vector2.Distance(
+                new Vector2(actual.X, actual.Y), expected);
+            totalSlotError += error;
+            maximumSlotError = MathF.Max(maximumSlotError, error);
+            if (simulation.Units.HasTarget[unit])
+                activeTargets++;
+        }
+
+        float averageSlotError = totalSlotError / ids.Length;
+        Console.WriteLine(
+            $"[Squad {formation} arrival] slotError avg={averageSlotError:0.00}, " +
+            $"max={maximumSlotError:0.00}, active={activeTargets}/{ids.Length}");
+
+        return averageSlotError < 0.8f &&
+               maximumSlotError < 1.6f &&
+               activeTargets == 0;
+    }
+
     public static bool FreeGroupGathersIntoCrowdWhileMoving()
     {
         WorldMap map = CreateFlatWorld();
