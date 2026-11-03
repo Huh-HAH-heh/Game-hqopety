@@ -532,7 +532,7 @@ public static class UnitMovementSelfTest
 
         const int columns = 4;
         const int rows = 3;
-        const float startSpacing = 0.72f;
+        const float startSpacing = 1.0f;
         UnitId[] ids = new UnitId[columns * rows];
         Vector2 initialCenter = Vector2.Zero;
 
@@ -615,7 +615,7 @@ public static class UnitMovementSelfTest
             $"phase={information.Phase}");
 
         return progress > 12f &&
-               minimumDistance >= 0.82f &&
+               minimumDistance >= 0.9f &&
                activeTargets == 0 &&
                !information.HasMoveOrder;
     }

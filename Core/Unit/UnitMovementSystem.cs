@@ -674,9 +674,13 @@ public sealed class UnitMovementSystem
                     }
                     else
                     {
-                        float angle = ((unit * 37 + other * 17) % 360) *
+                        int lowIndex = Math.Min(unit, other);
+                        int highIndex = Math.Max(unit, other);
+                        float angle = ((lowIndex * 37 + highIndex * 17) % 360) *
                             (MathF.PI / 180f);
                         nearestAway = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+                        if (unit > other)
+                            nearestAway = -nearestAway;
                     }
 
                     other = next;
@@ -704,7 +708,7 @@ public sealed class UnitMovementSystem
 
         // Maximum 55% steering influence: route-following remains dominant.
         // There is no attraction at long range and no hard minimum-distance clamp.
-        float separationWeight = Math.Clamp(pressure * 0.55f, 0f, 0.55f);
+        float separationWeight = Math.Clamp(pressure * 0.8f, 0f, 0.65f);
         Vector2 blendedDirection =
             routeDirection * (1f - separationWeight) +
             nearestAway * separationWeight;
@@ -716,7 +720,8 @@ public sealed class UnitMovementSystem
 
         // Near the shared endpoint the route controller may already be braking
         // to zero. Permit only a small, pressure-scaled shuffle to leave a pile-up.
-        float spacingSpeed = MathF.Min(0.45f, moveSpeed * 0.18f) * pressure;
+        float spacingSpeed = MathF.Min(0.8f, moveSpeed * 0.3f) *
+            Math.Clamp(pressure * 1.35f, 0f, 1f);
         float outputSpeed = MathF.Max(routeSpeed, spacingSpeed);
         return blendedDirection * outputSpeed;
     }

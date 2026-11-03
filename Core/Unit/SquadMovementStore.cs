@@ -82,7 +82,7 @@ public sealed class SquadMovementStore
     private const float FormationAnchorWeight = 0.42f;
     private const int MaxFormationNeighborCandidates = 8;
     private const float MinimumFormationForwardGap = 0.35f;
-    private const float ArrivalSettleTimeoutSeconds = 1.25f;
+    private const float ArrivalSettleTimeoutSeconds = 2.25f;
 
     private Dictionary<int, SquadState> _squads = new();
     private Dictionary<UnitId, MemberLink> _membership = new();
@@ -768,6 +768,12 @@ public sealed class SquadMovementStore
                 }
 
                 Vector3 secondPosition = units.Position[second];
+                if (secondPosition.Z >= firstPosition.Z + units.Height[first] ||
+                    firstPosition.Z >= secondPosition.Z + units.Height[second])
+                {
+                    continue;
+                }
+
                 float dx = firstPosition.X - secondPosition.X;
                 float dy = firstPosition.Y - secondPosition.Y;
                 float minimumDistance = MathF.Max(
