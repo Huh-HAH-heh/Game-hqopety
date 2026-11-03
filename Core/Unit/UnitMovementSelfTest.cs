@@ -410,18 +410,17 @@ public static class UnitMovementSelfTest
                finalLateral < initialLateral * 0.9f;
     }
 
-    public static bool LineFlattensWhileAdvancing()
+    public static bool LineWidensWhileAdvancing()
     {
         return TryMeasureFormation(
                    InfantryFormationType.Line,
-                   out float initialForward,
+                   out _,
                    out float initialLateral,
-                   out float finalForward,
+                   out _,
                    out float finalLateral,
                    out float progress) &&
                progress > 3.5f &&
-               finalForward < initialForward * 0.8f &&
-               finalLateral > initialLateral + 0.8f;
+               finalLateral > initialLateral + 2f;
     }
 
     public static bool LineKeepsItsFormationSlotsAtArrival() =>

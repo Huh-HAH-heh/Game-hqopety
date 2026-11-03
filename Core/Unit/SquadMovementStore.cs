@@ -1285,6 +1285,16 @@ public sealed class SquadMovementStore
         return true;
     }
 
+    public bool HasIndividualFormationGoal(UnitId member)
+    {
+        return member.IsValid &&
+            _membership.TryGetValue(member, out MemberLink link) &&
+            _squads.TryGetValue(link.SquadId, out SquadState? squad) &&
+            squad.HasMoveOrder &&
+            squad.IsAStarFormation &&
+            squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge;
+    }
+
     public bool TryGetMemberSquadId(UnitId member, out int squadId)
     {
         if (member.IsValid &&

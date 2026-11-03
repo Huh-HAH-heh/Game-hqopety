@@ -183,6 +183,9 @@ public sealed class UnitMovementSystem
                 squadMovement.IsExecutingCollectiveMove(
                     units, movementUnitId, ai);
 
+            bool completeIndividualFormationGoal = hasCollectiveMove &&
+                squadMovement!.HasIndividualFormationGoal(movementUnitId);
+
             float mass = MathF.Max(1f, masses[unit]);
             // Motor/traction force grows roughly with muscle cross-section (mass^(2/3)),
             // not linearly with body mass. Heavier bodies therefore accelerate more slowly.
@@ -486,7 +489,8 @@ public sealed class UnitMovementSystem
             velocities[unit] = new Vector3(velocity.X, velocity.Y, 0f);
             positions[unit] = position;
 
-            if (hasTarget[unit] && !hasCollectiveMove)
+            if (hasTarget[unit] &&
+                (!hasCollectiveMove || completeIndividualFormationGoal))
             {
                 Vector2 toGoal = new(targets[unit].X - position.X, targets[unit].Y - position.Y);
                 if (toGoal.LengthSquared() <= ArrivalRadius * ArrivalRadius &&

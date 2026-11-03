@@ -77,7 +77,7 @@ public static class CombatSelfTest
         RunTest("Movement: dense moving crowd continues to advance", UnitMovementSelfTest.DenseMovingCrowdContinuesToAdvance, ref passed, ref failed);
         RunTest("Movement: opposing units steer around one another", UnitMovementSelfTest.OpposingUnitsSteerAroundOneAnother, ref passed, ref failed);
         RunTest("Squad movement: column narrows while advancing", UnitMovementSelfTest.ColumnNarrowsWhileAdvancing, ref passed, ref failed);
-        RunTest("Squad movement: line flattens while advancing", UnitMovementSelfTest.LineFlattensWhileAdvancing, ref passed, ref failed);
+        RunTest("Squad movement: line widens while advancing", UnitMovementSelfTest.LineWidensWhileAdvancing, ref passed, ref failed);
         RunTest("Squad movement: line keeps its landing slots", UnitMovementSelfTest.LineKeepsItsFormationSlotsAtArrival, ref passed, ref failed);
         RunTest("Squad movement: wedge keeps its landing slots", UnitMovementSelfTest.WedgeKeepsItsFormationSlotsAtArrival, ref passed, ref failed);
         RunTest("Squad movement: free group gathers into a moving crowd", UnitMovementSelfTest.FreeGroupGathersIntoCrowdWhileMoving, ref passed, ref failed);
