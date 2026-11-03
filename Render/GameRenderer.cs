@@ -1451,7 +1451,7 @@ public sealed class GameRenderer
     private static string GetFormationMenuLabel(InfantryFormationType formation) =>
         formation switch
         {
-            InfantryFormationType.Free => "Свободное движение",
+            InfantryFormationType.Free => "Группа",
             InfantryFormationType.None => "Без строя",
             InfantryFormationType.Line => "Линия",
             InfantryFormationType.Column => "Колонна",
@@ -2334,7 +2334,7 @@ public sealed class GameRenderer
             Console.WriteLine(
                 $"[FORMATION] {InfantryFormation.GetName(_infantryFormation)} " +
                 $"A* order for {memberIds.Length} units; speed capped by slowest member. " +
-                (_keepFormationInCombat ? "Formation kept in combat." : "Formation breaks on contact."));
+                (_keepFormationInCombat ? "Formation kept in combat." : "Formation steering relaxed in combat."));
             return;
         }
 
