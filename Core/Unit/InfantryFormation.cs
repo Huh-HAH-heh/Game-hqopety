@@ -15,9 +15,8 @@ public enum InfantryFormationType : byte
 }
 
 /// <summary>
-/// Describes preferred spatial distributions, not locked pawn slots.
-/// Offsets are soft steering targets and may be ignored while avoiding hazards
-/// or responding to individual combat decisions.
+/// Names squad movement profiles. Runtime orders use a shared objective and
+/// dynamic group steering; they do not assign the offsets returned by GetOffset.
 /// </summary>
 public static class InfantryFormation
 {
@@ -32,12 +31,12 @@ public static class InfantryFormation
         InfantryFormationType.DispersedLine => "Рассыпная линия",
         InfantryFormationType.Perimeter => "Периметр",
         InfantryFormationType.None => "Без строя",
-        _ => "Free"
+        _ => "Группа"
     };
 
     /// <summary>
-    /// Returns a preferred offset: X is lateral, Y is behind the group heading.
-    /// The movement controller applies it as a low-strength spatial preference.
+    /// Returns legacy preview geometry for tools. Live squad movement does not
+    /// use per-member offsets or fixed destination slots.
     /// </summary>
     public static Vector2 GetOffset(
         int index,
