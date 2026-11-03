@@ -262,43 +262,28 @@ public sealed class SquadMovementStore
             forward = Vector2.UnitX;
         else
             forward = Vector2.Normalize(forward);
-        Vector2 side = new(-forward.Y, forward.X);
-
-        Vector2[] offsets = new Vector2[members.Count];
+        // The squad is a moving body, not a set of endpoint slots.
+        // Resolve the common objective independently for each footprint so
+        // every member still gets a valid A* destination without reserving
+        // a different cell for every pawn.
         Vector2[] goals = new Vector2[members.Count];
-        HashSet<int> reservedGoalCells = new();
-        Vector2 offsetSum = Vector2.Zero;
         for (int i = 0; i < members.Count; i++)
         {
-            offsets[i] = InfantryFormation.GetOffset(i, members.Count, formation, spacing);
-            offsetSum += offsets[i];
+            UnitId id = members[i];
+            if (!navigation.TryResolveAStarGoal(
+                    units, id.Index, worldMap, goal, new HashSet<int>(), out Vector2 terminal))
+            {
+                terminal = ResolveNavigablePoint(worldMap, goal);
+            }
+            goals[i] = terminal;
         }
 
-        Vector2 meanOffset = offsetSum / members.Count;
         squad.MemberOffsets = new Vector2[members.Count];
         squad.MemberGoals = new Vector2[members.Count];
         for (int i = 0; i < members.Count; i++)
         {
             UnitId id = members[i];
-            Vector2 localOffset = offsets[i] - meanOffset;
-            Vector2 worldOffset = side * localOffset.X - forward * localOffset.Y;
-            Vector2 requestedGoal = goal + worldOffset;
-            if (!navigation.TryResolveAStarGoal(
-                    units, id.Index, worldMap, requestedGoal, reservedGoalCells, out Vector2 terminal))
-            {
-                // Keep this cohort member in a valid surface cell when a wide
-                // footprint cannot fit near the preferred formation slot.
-                terminal = ResolveNavigablePoint(worldMap, requestedGoal, reservedGoalCells);
-            }
-            goals[i] = terminal;
-        }
-
-        // Destinations are resolved before assigning orders, so a failed or
-        // partially blocked formation cannot leave only some units commanded.
-        for (int i = 0; i < members.Count; i++)
-        {
-            UnitId id = members[i];
-            Vector2 localOffset = offsets[i] - meanOffset;
+            Vector2 localOffset = Vector2.Zero;
             Vector2 terminal = goals[i];
             int tileX = Math.Clamp((int)MathF.Floor(terminal.X), 0, worldMap.MaxTileX);
             int tileY = Math.Clamp((int)MathF.Floor(terminal.Y), 0, worldMap.MaxTileY);
@@ -388,29 +373,14 @@ public sealed class SquadMovementStore
         else
             forward = Vector2.Normalize(forward);
 
-        Vector2 side = new(-forward.Y, forward.X);
-        Vector2 offsetSum = Vector2.Zero;
-        Vector2[] rawOffsets = new Vector2[activeMembers.Count];
-
-        for (int i = 0; i < activeMembers.Count; i++)
-        {
-            rawOffsets[i] = InfantryFormation.GetOffset(
-                i, activeMembers.Count, formation, spacing);
-            offsetSum += rawOffsets[i];
-        }
-
-        Vector2 meanOffset = offsetSum / activeMembers.Count;
+        Vector2 terminal = ResolveNavigablePoint(worldMap, goal);
         squad.MemberOffsets = new Vector2[squad.Members.Count];
         squad.MemberGoals = new Vector2[squad.Members.Count];
 
         for (int i = 0; i < activeMembers.Count; i++)
         {
             (UnitId id, int index, int slot) = activeMembers[i];
-            Vector2 localOffset = rawOffsets[i] - meanOffset;
-            Vector2 worldOffset = side * localOffset.X - forward * localOffset.Y;
-            Vector2 terminal = ResolveNavigablePoint(
-                worldMap,
-                goal + worldOffset);
+            Vector2 localOffset = Vector2.Zero;
 
             squad.MemberOffsets[slot] = localOffset;
             squad.MemberGoals[slot] = terminal;
@@ -660,7 +630,7 @@ public sealed class SquadMovementStore
             // A soft spatial envelope replaces continuous pulling toward fixed
             // member slots. It stretches along travel during the march and opens
             // laterally during contact.
-            float effectiveCoreCount = Math.Max(1, allMemberCount);
+            float effectiveCoreCount = Math.Max(1, coreMemberCount);
             float baseRadius = MathF.Max(
                 squad.Spacing * 1.75f,
                 MathF.Sqrt(effectiveCoreCount) * squad.Spacing * 1.1f);
@@ -668,11 +638,44 @@ public sealed class SquadMovementStore
                 baseRadius *= 0.92f;
 
             bool inContact = squad.EngagedCount > 0;
-            squad.EnvelopeWidth = baseRadius *
-                (inContact
-                    ? squad.KeepFormationInCombat ? 1.35f : 1.75f
-                    : 1f);
-            squad.EnvelopeDepth = baseRadius * (inContact ? 1.25f : 1.55f);
+            float contactScale = !inContact
+                ? 1f
+                : squad.KeepFormationInCombat ? 1.35f : 1.75f;
+
+            // The live envelope is the shape the group travels in:
+            // Column is narrow and deep, Line is wide and shallow,
+            // Free is a loose rounded crowd.
+            switch (squad.Formation)
+            {
+                case InfantryFormationType.Column:
+                    squad.EnvelopeWidth = MathF.Max(0.7f, squad.Spacing * 0.75f) *
+                        contactScale;
+                    squad.EnvelopeDepth = MathF.Max(
+                        baseRadius * 1.2f,
+                        effectiveCoreCount * squad.Spacing * 0.48f) *
+                        (inContact ? 1.12f : 1f);
+                    break;
+
+                case InfantryFormationType.Line:
+                    squad.EnvelopeWidth = MathF.Max(
+                        baseRadius * 1.2f,
+                        effectiveCoreCount * squad.Spacing * 0.48f) *
+                        contactScale;
+                    squad.EnvelopeDepth = MathF.Max(0.65f, squad.Spacing * 0.65f) *
+                        (inContact ? 1.25f : 1f);
+                    break;
+
+                case InfantryFormationType.Free:
+                    float crowdRadius = baseRadius * 1.15f * contactScale;
+                    squad.EnvelopeWidth = crowdRadius;
+                    squad.EnvelopeDepth = crowdRadius;
+                    break;
+
+                default:
+                    squad.EnvelopeWidth = baseRadius * contactScale;
+                    squad.EnvelopeDepth = baseRadius * (inContact ? 1.25f : 1.55f);
+                    break;
+            }
 
             if (squad.EngagedCount > 0)
                 squad.Phase = SquadMovementPhase.Contact;
@@ -723,7 +726,10 @@ public sealed class SquadMovementStore
         UnitId id = units.GetId(unitIndex);
         if (!_membership.TryGetValue(id, out MemberLink link) ||
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
-            !units.HasTarget[unitIndex])
+            !squad.HasMoveOrder ||
+            squad.Formation == InfantryFormationType.None ||
+            !units.HasTarget[unitIndex] ||
+            IsMemberTacticallyEngaged(id))
         {
             return false;
         }
@@ -771,6 +777,48 @@ public sealed class SquadMovementStore
                     0f,
                     MaxCohesionCorrection) * cohesionScale;
                 direction += inward * (cohesionWeight / inwardLength);
+            }
+        }
+
+        // Formation is maintained while travelling, relative to the live
+        // heading. No member is pulled toward an assigned world-space slot.
+        // Column: correct lateral drift toward a narrow moving centreline.
+        // Line: correct depth drift toward a front perpendicular to movement.
+        // Free: keep a broad, rounded envelope without axis alignment.
+        if (squad.Formation == InfantryFormationType.Column)
+        {
+            float columnHalfWidth = MathF.Max(
+                squad.Spacing * 0.55f,
+                units.Radius[unitIndex] * 0.85f);
+            float lateralError = MathF.Abs(lateralDistance) - columnHalfWidth;
+            if (lateralError > 0f)
+            {
+                float strength = inContact
+                    ? squad.KeepFormationInCombat ? 0.18f : 0.07f
+                    : 0.24f;
+                float correction = Math.Clamp(
+                    lateralError / MathF.Max(1f, squad.Spacing * 2f),
+                    0f,
+                    1f) * strength;
+                direction -= side * (MathF.Sign(lateralDistance) * correction);
+            }
+        }
+        else if (squad.Formation == InfantryFormationType.Line)
+        {
+            float lineHalfDepth = MathF.Max(
+                squad.Spacing * 0.35f,
+                units.Radius[unitIndex] * 0.7f);
+            float depthError = MathF.Abs(forwardDistance) - lineHalfDepth;
+            if (depthError > 0f)
+            {
+                float strength = inContact
+                    ? squad.KeepFormationInCombat ? 0.16f : 0.06f
+                    : 0.22f;
+                float correction = Math.Clamp(
+                    depthError / MathF.Max(1f, squad.Spacing * 2f),
+                    0f,
+                    1f) * strength;
+                direction -= squad.Forward * (MathF.Sign(forwardDistance) * correction);
             }
         }
 
