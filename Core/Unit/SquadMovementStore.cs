@@ -1077,24 +1077,45 @@ public sealed class SquadMovementStore
                 1.25f);
             shapeWeight = squad.FormationBootstrap ? 0.28f : 0.62f;
         }
-        else if (squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge)
+        else if (squad.Formation == InfantryFormationType.Line)
         {
-            // Keep the authored line/wedge shape around the moving group center.
-            // Individual A* routes still solve obstacles and the formation force
-            // stays elastic rather than teleporting pawns into fixed positions.
-            Vector2 localOffset = squad.MemberOffsets[link.Slot];
-            Vector2 formationPoint =
-                squad.Center + side * localOffset.X - squad.Forward * localOffset.Y;
-            Vector2 toFormationPoint = formationPoint - current;
-            float formationDistance = toFormationPoint.Length();
-            if (formationDistance <= 0.05f)
-                return false;
+            // Reuse the proven dynamic rank assignment: align one shallow front,
+            // but let the A* route carry the squad forward instead of chasing
+            // a moving per-member point.
+            float targetLateral = squad.FormationLateralOffsets[link.Slot];
+            float lateralError = targetLateral - lateralDistance;
+            float depthError = -forwardDistance;
 
-            shapeForce = toFormationPoint / formationDistance *
-                Math.Clamp(formationDistance * 0.7f, 0.15f, 1.25f);
-            shapeWeight = squad.Formation == InfantryFormationType.Line
-                ? 0.68f
-                : 0.62f;
+            shapeForce += side * Math.Clamp(
+                lateralError * 0.5f,
+                -1.5f,
+                1.5f);
+            shapeForce += squad.Forward * Math.Clamp(
+                depthError * 0.52f,
+                -1.5f,
+                1.5f);
+            shapeWeight = 0.7f;
+        }
+        else if (squad.Formation == InfantryFormationType.Wedge)
+        {
+            // A wedge is a flexible two-axis shape around the live center.
+            // Correct lateral wings strongly and depth more gently so the
+            // formation does not oppose the group's A* progress.
+            Vector2 localOffset = squad.MemberOffsets[link.Slot];
+            float targetLateral = localOffset.X;
+            float targetForward = -localOffset.Y;
+            float lateralError = targetLateral - lateralDistance;
+            float forwardError = targetForward - forwardDistance;
+
+            shapeForce += side * Math.Clamp(
+                lateralError * 0.42f,
+                -1.25f,
+                1.25f);
+            shapeForce += squad.Forward * Math.Clamp(
+                forwardError * 0.3f,
+                -0.9f,
+                0.9f);
+            shapeWeight = 0.48f;
         }
         else if (squad.Formation == InfantryFormationType.Free)
         {
