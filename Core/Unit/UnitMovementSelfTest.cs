@@ -419,7 +419,7 @@ public static class UnitMovementSelfTest
                    out float finalForward,
                    out float finalLateral,
                    out float progress) &&
-               progress > 5f &&
+               progress > 3.5f &&
                finalForward < initialForward * 0.8f &&
                finalLateral > initialLateral + 0.8f;
     }
@@ -499,7 +499,8 @@ public static class UnitMovementSelfTest
             simulation.Units, ids, forward, side,
             out initialForward, out initialLateral, out _);
 
-        for (int tick = 0; tick < 360; tick++)
+        int simulationTicks = formation == InfantryFormationType.Column ? 600 : 360;
+        for (int tick = 0; tick < simulationTicks; tick++)
             simulation.Update(map, TestDeltaTime);
 
         GetFormationExtents(

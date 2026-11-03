@@ -769,8 +769,8 @@ public sealed class SquadMovementStore
             float minForward = float.PositiveInfinity;
             float maxForward = float.NegativeInfinity;
 
-            // One pass collects the active steering cohort. Detached combatants
-            // keep squad membership, but temporarily stop shaping the moving body.
+            // Build one compact live cohort. Tactical detachments retain membership
+            // but do not distort the geometry of the moving core.
             for (int slot = 0; slot < memberCount; slot++)
             {
                 UnitId id = squad.Members[slot];
@@ -787,9 +787,9 @@ public sealed class SquadMovementStore
 
                 Vector3 position = units.Position[unit];
                 Vector2 memberPosition = new(position.X, position.Y);
-                Vector2 toMemberGoal = squad.MemberGoals[slot] - memberPosition;
+                Vector2 toGoal = squad.MemberGoals[slot] - memberPosition;
                 bool reachedSharedTerminal = !units.HasTarget[unit] &&
-                    toMemberGoal.LengthSquared() <= 0.85f * 0.85f;
+                    toGoal.LengthSquared() <= 0.85f * 0.85f;
                 bool followingGroupOrder = units.HasTarget[unit] &&
                     HasMatchingGroupMoveOrder(ai, unit, squad.MemberGoals[slot]);
                 if (!reachedSharedTerminal && !followingGroupOrder)
@@ -811,8 +811,6 @@ public sealed class SquadMovementStore
 
             if (squad.Formation == InfantryFormationType.Column)
             {
-                // Bootstrap from the existing lateral spread, then switch to a
-                // front-to-back predecessor chain once the group has stretched.
                 float desiredGap = MathF.Max(1.3f, squad.Spacing * ColumnGapScale);
                 float targetDepth = desiredGap * (activeCount - 1);
                 float currentDepth = maxForward - minForward;
@@ -824,6 +822,9 @@ public sealed class SquadMovementStore
                 squad.FormationBootstrap = false;
             }
 
+            // A column is always ordered by actual forward projection. A follower
+            // never receives a neighbour that happens to be next in a side-sorted
+            // array but is physically behind it. Line ranks remain lateral.
             for (int i = 0; i < activeCount; i++)
             {
                 int slot = squad.FormationSortSlots[i];
@@ -837,10 +838,10 @@ public sealed class SquadMovementStore
                 float forward = Vector2.Dot(fromCenter, squad.Forward);
                 float lateral = Vector2.Dot(fromCenter, side);
                 float primary = squad.Formation == InfantryFormationType.Column
-                    ? squad.FormationBootstrap ? lateral : forward
+                    ? forward
                     : lateral;
                 float secondary = squad.Formation == InfantryFormationType.Column
-                    ? squad.FormationBootstrap ? forward : lateral
+                    ? lateral
                     : forward;
 
                 squad.FormationSortKeys[i] =
@@ -855,8 +856,6 @@ public sealed class SquadMovementStore
 
             if (squad.Formation == InfantryFormationType.Line)
             {
-                // Dynamic lateral ranks are recalculated from live positions each
-                // update. They are soft moving offsets, not persistent soldier slots.
                 float desiredSideGap = MathF.Max(1.3f, squad.Spacing * 1.2f);
                 for (int i = 0; i < activeCount; i++)
                 {
@@ -868,20 +867,48 @@ public sealed class SquadMovementStore
                     if (i + 1 < activeCount)
                         squad.FormationNeighborAfter[slot] = squad.FormationSortSlots[i + 1];
                 }
+
+                continue;
             }
-            else
+
+            // Find the closest actual member ahead, with a bounded forward scan.
+            // The scan is linear in the small sorted neighbour window, not all pairs.
+            float maximumForwardGap = MathF.Max(4f, squad.Spacing * 4.5f);
+            for (int i = 0; i < activeCount; i++)
             {
-                // For a column, 'after' is always the current predecessor. During
-                // bootstrap it converts the initial cluster to a snake; afterward
-                // it follows the nearest unit ahead in the direction of travel.
-                for (int i = 0; i < activeCount; i++)
+                int slot = squad.FormationSortSlots[i];
+                if (!units.TryGetIndex(squad.Members[slot], out int unit))
+                    continue;
+
+                Vector3 current3 = units.Position[unit];
+                Vector2 current = new(current3.X, current3.Y);
+                float bestDistanceSquared = float.PositiveInfinity;
+                int bestAheadSlot = -1;
+                int end = Math.Min(activeCount, i + 1 + MaxFormationNeighborCandidates);
+
+                for (int j = i + 1; j < end; j++)
                 {
-                    int slot = squad.FormationSortSlots[i];
-                    if (i > 0)
-                        squad.FormationNeighborBefore[slot] = squad.FormationSortSlots[i - 1];
-                    if (i + 1 < activeCount)
-                        squad.FormationNeighborAfter[slot] = squad.FormationSortSlots[i + 1];
+                    int candidateSlot = squad.FormationSortSlots[j];
+                    if (!units.TryGetIndex(squad.Members[candidateSlot], out int candidate))
+                        continue;
+
+                    Vector3 candidate3 = units.Position[candidate];
+                    Vector2 delta = new(candidate3.X - current.X, candidate3.Y - current.Y);
+                    float forwardGap = Vector2.Dot(delta, squad.Forward);
+                    if (forwardGap < MinimumFormationForwardGap)
+                        continue;
+                    if (forwardGap > maximumForwardGap)
+                        break;
+
+                    float distanceSquared = delta.LengthSquared();
+                    if (distanceSquared >= bestDistanceSquared)
+                        continue;
+
+                    bestDistanceSquared = distanceSquared;
+                    bestAheadSlot = candidateSlot;
                 }
+
+                squad.FormationNeighborAfter[slot] = bestAheadSlot;
             }
         }
     }
@@ -989,14 +1016,15 @@ public sealed class SquadMovementStore
                 Vector2 trailPoint = aheadPosition - trailHeading * desiredGap;
                 Vector2 followDelta = trailPoint - current;
                 float followDistance = followDelta.Length();
-                if (followDistance > 0.12f &&
+                float followForward = Vector2.Dot(followDelta, squad.Forward);
+                if (followForward > 0.08f &&
                     followDistance < desiredGap * 5f)
                 {
                     float followGain = Math.Clamp(
-                        followDistance / MathF.Max(0.5f, desiredGap * 1.5f),
-                        0.25f,
-                        1f);
-                    shapeForce += followDelta / followDistance * followGain;
+                        followForward / MathF.Max(0.5f, desiredGap * 1.5f),
+                        0.12f,
+                        0.8f);
+                    shapeForce += followDelta / MathF.Max(0.08f, followDistance) * followGain;
                 }
             }
 
@@ -1006,7 +1034,7 @@ public sealed class SquadMovementStore
                 lateralDistance * (squad.FormationBootstrap ? 0.24f : 0.38f),
                 -1.25f,
                 1.25f);
-            shapeWeight = squad.FormationBootstrap ? 0.62f : 0.76f;
+            shapeWeight = squad.FormationBootstrap ? 0.28f : 0.62f;
         }
         else if (squad.Formation == InfantryFormationType.Line)
         {
@@ -1137,7 +1165,6 @@ public sealed class SquadMovementStore
             !squad.HasMoveOrder ||
             !squad.IsAStarFormation ||
             squad.Formation != InfantryFormationType.Column ||
-            squad.FormationBootstrap ||
             (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
             !HasMatchingGroupMoveOrder(ai, currentUnit, squad.MemberGoals[link.Slot]) ||
             IsDetachedFromCollective(units, ai, currentUnit) ||
