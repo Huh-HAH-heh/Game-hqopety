@@ -80,6 +80,8 @@ public sealed class SquadMovementStore
     private const float ColumnGapScale = 1.35f;
     private const float FormationCorrectionLimit = 1.25f;
     private const float FormationAnchorWeight = 0.32f;
+    private const int MaxFormationNeighborCandidates = 8;
+    private const float MinimumFormationForwardGap = 0.35f;
 
     private Dictionary<int, SquadState> _squads = new();
     private Dictionary<UnitId, MemberLink> _membership = new();
