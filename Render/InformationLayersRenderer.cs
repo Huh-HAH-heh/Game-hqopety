@@ -580,25 +580,16 @@ public sealed class InformationLayersRenderer : IDisposable
                 Math.Clamp(4f * zoomLevel, 1f, 8f),
                 envelopeColor);
 
-            foreach (RenderUnitState unit in snapshot.Units)
-            {
-                if (unit.SquadId != squadId ||
-                    unit.HitPoints <= 0f ||
-                    !unit.HasSquadFormationData)
-                {
-                    continue;
-                }
-
-                // Purple crosses are individual A* terminal points, not formation slots.
-                Vector2f terminalPixel = new(
-                    unit.SquadMemberGoal.X * tilePixels,
-                    unit.SquadMemberGoal.Y * tilePixels);
-                Cross(
-                    _squadGeometry,
-                    terminalPixel,
-                    Math.Clamp(2.5f * zoomLevel, 0.7f, 5f),
-                    new Color(190, 145, 255, 225));
-            }
+            // One marker shows the shared squad objective. Members no longer
+            // receive separate formation-slot destinations.
+            Vector2f objectivePixel = new(
+                info.Objective.X * tilePixels,
+                info.Objective.Y * tilePixels);
+            Cross(
+                _squadGeometry,
+                objectivePixel,
+                Math.Clamp(3f * zoomLevel, 0.8f, 6f),
+                new Color(190, 145, 255, 225));
         }
 
         if (_squadGeometry.VertexCount > 0)
