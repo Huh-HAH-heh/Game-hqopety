@@ -25,12 +25,12 @@ public static class InfantryFormation
 
     public static string GetName(InfantryFormationType formation) => formation switch
     {
-        InfantryFormationType.Free => "Free",
-        InfantryFormationType.Line => "Line",
-        InfantryFormationType.Column => "Column",
-        InfantryFormationType.Wedge => "Wedge",
-        InfantryFormationType.DispersedLine => "Dispersed line",
-        InfantryFormationType.Perimeter => "Perimeter",
+        InfantryFormationType.Free => "Группа",
+        InfantryFormationType.Line => "Линия",
+        InfantryFormationType.Column => "Колонна",
+        InfantryFormationType.Wedge => "Клин",
+        InfantryFormationType.DispersedLine => "Рассыпная линия",
+        InfantryFormationType.Perimeter => "Периметр",
         InfantryFormationType.None => "Без строя",
         _ => "Free"
     };
