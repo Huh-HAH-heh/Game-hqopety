@@ -491,6 +491,27 @@ public static class UnitMovementSelfTest
             simulation.Units, ids, forward, side,
             out finalForward, out finalLateral, out Vector2 finalCenter);
         progress = Vector2.Dot(finalCenter - initialCenter, forward);
+        simulation.SquadMovement.TryGetInformation(1_000_000, out SquadMovementInformation info);
+        int activeTargets = 0;
+        float averageSpeed = 0f;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            int unit = ids[i].Index;
+            if (simulation.Units.HasTarget[unit])
+                activeTargets++;
+            Vector3 velocity = simulation.Units.Velocity[unit];
+            averageSpeed += MathF.Sqrt(
+                velocity.X * velocity.X + velocity.Y * velocity.Y);
+        }
+        averageSpeed /= ids.Length;
+        Console.WriteLine(
+            $"[Squad formation measure] mode={formation}, " +
+            $"forward={initialForward:0.00}->{finalForward:0.00}, " +
+            $"lateral={initialLateral:0.00}->{finalLateral:0.00}, " +
+            $"progress={progress:0.00}, targets={activeTargets}/{ids.Length}, " +
+            $"speed={averageSpeed:0.00}, phase={info.Phase}, center={info.Center}, " +
+            $"velocity={info.Velocity}, following={info.FollowingCount}, " +
+            $"rejoining={info.RejoiningCount}, separated={info.SeparatedCount}");
         return true;
     }
 
