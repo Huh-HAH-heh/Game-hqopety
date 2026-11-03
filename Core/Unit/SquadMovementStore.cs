@@ -266,14 +266,13 @@ public sealed class SquadMovementStore
             forward = Vector2.UnitX;
         else
             forward = Vector2.Normalize(forward);
-        // Line and wedge use the individual landing positions that made these
-        // formations readable before the shared-objective movement rewrite.
-        // Column keeps its predecessor chain; Free keeps a common crowd objective.
-        bool usesIndividualFormationSlots =
+        // Every member follows the same A* objective. Line and wedge are
+        // expressed as soft offsets from the moving cohort center, not separate
+        // routes or fixed destination reservations.
+        bool usesMovingFormationShape =
             formation is InfantryFormationType.Line or InfantryFormationType.Wedge;
-        Vector2 side = new(-forward.Y, forward.X);
         Vector2 meanOffset = Vector2.Zero;
-        if (usesIndividualFormationSlots)
+        if (usesMovingFormationShape)
         {
             for (int i = 0; i < members.Count; i++)
                 meanOffset += InfantryFormation.GetOffset(i, members.Count, formation, spacing);
@@ -285,25 +284,16 @@ public sealed class SquadMovementStore
         for (int i = 0; i < members.Count; i++)
         {
             UnitId id = members[i];
-            Vector2 localOffset = usesIndividualFormationSlots
-                ? InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset
-                : Vector2.Zero;
-            Vector2 requestedGoal = goal +
-                side * localOffset.X -
-                forward * localOffset.Y;
-            requestedGoal.X = Math.Clamp(
-                requestedGoal.X, 0.5f, worldMap.MaxTileX - 0.5f);
-            requestedGoal.Y = Math.Clamp(
-                requestedGoal.Y, 0.5f, worldMap.MaxTileY - 0.5f);
-
             if (!navigation.TryResolveAStarGoal(
-                    units, id.Index, worldMap, requestedGoal, null, out Vector2 terminal))
+                    units, id.Index, worldMap, goal, null, out Vector2 terminal))
             {
-                terminal = ResolveNavigablePoint(worldMap, requestedGoal);
+                terminal = ResolveNavigablePoint(worldMap, goal);
             }
 
             goals[i] = terminal;
-            memberOffsets[i] = localOffset;
+            memberOffsets[i] = usesMovingFormationShape
+                ? InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset
+                : Vector2.Zero;
         }
 
         squad.MemberOffsets = memberOffsets;

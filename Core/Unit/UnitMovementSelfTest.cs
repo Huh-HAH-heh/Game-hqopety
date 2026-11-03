@@ -502,8 +502,7 @@ public static class UnitMovementSelfTest
                 break;
         }
 
-        float totalSlotError = 0f;
-        float maximumSlotError = 0f;
+        Vector2 finalCenter = Vector2.Zero;
         int activeTargets = 0;
         for (int i = 0; i < ids.Length; i++)
         {
@@ -512,27 +511,42 @@ public static class UnitMovementSelfTest
             if (!float.IsFinite(actual.X) || !float.IsFinite(actual.Y))
                 return false;
 
+            finalCenter += new Vector2(actual.X, actual.Y);
+            if (simulation.Units.HasTarget[unit])
+                activeTargets++;
+        }
+
+        finalCenter /= ids.Length;
+        float totalSlotError = 0f;
+        float maximumSlotError = 0f;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            Vector3 actual = simulation.Units.Position[ids[i].Index];
             Vector2 localOffset =
                 InfantryFormation.GetOffset(i, ids.Length, formation, spacing) - meanOffset;
-            Vector2 expected = new Vector2(destination.X, destination.Y) +
+            Vector2 expected = finalCenter +
                 side * localOffset.X -
                 forward * localOffset.Y;
             float error = Vector2.Distance(
                 new Vector2(actual.X, actual.Y), expected);
             totalSlotError += error;
             maximumSlotError = MathF.Max(maximumSlotError, error);
-            if (simulation.Units.HasTarget[unit])
-                activeTargets++;
         }
 
         float averageSlotError = totalSlotError / ids.Length;
+        float progress = Vector2.Dot(finalCenter - initialCenter, forward);
+        simulation.SquadMovement.TryGetInformation(
+            1_000_000, out SquadMovementInformation information);
         Console.WriteLine(
-            $"[Squad {formation} arrival] slotError avg={averageSlotError:0.00}, " +
-            $"max={maximumSlotError:0.00}, active={activeTargets}/{ids.Length}");
+            $"[Squad {formation} arrival] progress={progress:0.00}, " +
+            $"slotError avg={averageSlotError:0.00}, max={maximumSlotError:0.00}, " +
+            $"active={activeTargets}/{ids.Length}, phase={information.Phase}");
 
-        return averageSlotError < 0.8f &&
-               maximumSlotError < 1.6f &&
-               activeTargets == 0;
+        return progress > 12f &&
+               averageSlotError < 1.0f &&
+               maximumSlotError < 1.8f &&
+               activeTargets == 0 &&
+               !information.HasMoveOrder;
     }
 
     public static bool FreeGroupGathersIntoCrowdWhileMoving()
