@@ -10,7 +10,7 @@ The first implementation targets ground infantry on the existing tile surface. I
 
 ### 1. Command and objective layer
 
-A move order is issued to a complete squad selection. The squad stores one shared world objective and one distribution profile. Members receive distinct local terminal navigation points around that objective; these are endpoint goals, not persistent world-space slots that the group tries to preserve during the route.
+A move order is issued to a complete squad selection. The squad stores one shared world objective and one movement profile. Every member navigates toward that shared objective; formation is produced by continuous collective steering during travel, not by assigning each pawn a separate destination slot.
 
 The original objective stays active while members temporarily react to combat. It is not replaced by an enemy's current position.
 
@@ -20,18 +20,16 @@ Squad members use their own footprint-aware A* routes. The Flow Field path is cu
 
 ### 3. Formation-envelope layer
 
-Formation profiles describe where the group prefers to distribute itself. They are not enforced coordinates:
+Formation profiles describe how the squad moves, not a set of coordinates:
 
-| Profile | Intended distribution |
+| Profile | Movement behaviour |
 |---|---|
-| Free | Loose, organic spread; default |
-| Wedge | Loose forward wedge |
-| Dispersed line | Wide, staggered front |
-| Column | Narrow depth-oriented spread |
-| Perimeter | Ring-like distribution around the objective |
-| Line | Shallow multi-row front |
+| Группа (`Free`) | Loose rounded crowd; members keep breathing room without packing tightly |
+| Колонна (`Column`) | Narrow moving centreline; members may stagger forward/back to avoid one another |
+| Линия (`Line`) | Members tend toward a shared front perpendicular to the travel direction |
+| Wedge / dispersed line / perimeter | Retain their existing profiles; not the primary supported movement modes yet |
 
-Formation offsets are used only to give members distinct local terminal navigation points for a move order. They no longer pull every member toward a persistent world-space slot while travelling. The live envelope is an oriented ellipse around the collective core: it is longer along the travel axis on the march and expands laterally during contact. Cohesion is inactive inside the envelope for ordinary members and begins when they cross its boundary. A `Rejoining` member receives a weak bias toward the inner portion of the envelope until it is close enough to return to the core. Alignment gently biases travel direction toward the core's average velocity; separation supplies a small preferred-distance correction while physical collision resolution remains authoritative. Navigation, blocked terrain, inertia and individual tactical decisions may override all of these preferences. Narrow passages can compress the group naturally.
+The group heading follows its smoothed collective velocity, falling back to the shared objective while starting or turning. Column movement softly corrects lateral drift toward the travel axis. Line movement softly corrects depth drift toward a front across the travel axis. The loose group uses a broad rounded envelope with no forced axis. These are live steering preferences, not member slots: members can reorder, spread around obstacles and compress through narrow passages. A* remains individual and validates every suggested steering segment against the member footprint. Inertia and physical collision resolution remain authoritative. A `Rejoining` member receives a weak bias toward the inner envelope; members handling their own combat action are not pulled back into the formation.
 
 `SquadFormationRigidity` is an extension point: `Free` is the default and `Organized` slightly increases cohesion. `Strict` is reserved and currently behaves like `Organized`; strict slot locking is deliberately not implemented.
 
@@ -90,7 +88,7 @@ This keeps the data domains distinct:
 
 Squad creation and assignment are enabled again. A selected squad can receive a shared move order through the existing context-menu command.
 
-- `J` cycles the six formation profiles.
+- `J` cycles the available movement profiles: group, column, line and the additional experimental profiles.
 The always-visible `ИНФОСЛОИ` button beside the top-left menu opens the information panel. Independent checkboxes control vision, hearing, aiming links, AI state, suppression, pawn memory, Utility AI, unit velocity, motor force, Flow Field diagnostics, squad envelope, member states and shared tactical contacts. Flow Field movement is disabled; its diagnostics may remain empty. Select a squad to inspect its envelope and member states.
 
 Velocity arrows show current horizontal velocity. Motor-force arrows show the last resultant drive/braking/lateral force calculated by the movement controller; they do not include gravity or collision impulses.
