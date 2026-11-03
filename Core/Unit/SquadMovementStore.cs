@@ -79,7 +79,7 @@ public sealed class SquadMovementStore
     private const float AlignmentWeight = 0.12f;
     private const float ColumnGapScale = 1.35f;
     private const float FormationCorrectionLimit = 1.25f;
-    private const float FormationAnchorWeight = 0.32f;
+    private const float FormationAnchorWeight = 0.42f;
     private const int MaxFormationNeighborCandidates = 8;
     private const float MinimumFormationForwardGap = 0.35f;
 
@@ -680,7 +680,11 @@ public sealed class SquadMovementStore
                     break;
 
                 case InfantryFormationType.Free:
-                    float crowdRadius = baseRadius * 1.15f * contactScale;
+                    // Free movement is a compact moving crowd, not a dispersed cloud.
+                    float crowdRadius = MathF.Max(
+                        squad.Spacing * 1.3f,
+                        MathF.Sqrt(effectiveCoreCount) * squad.Spacing * 0.55f) *
+                        contactScale;
                     squad.EnvelopeWidth = crowdRadius;
                     squad.EnvelopeDepth = crowdRadius;
                     break;
@@ -1058,22 +1062,25 @@ public sealed class SquadMovementStore
         }
         else if (squad.Formation == InfantryFormationType.Free)
         {
-            // A loose group stays together as a cloud, but members are not
-            // pulled to offsets or fixed positions inside the comfortable radius.
+            // Cohesion uses one predicted virtual anchor. Pawns keep individual
+            // A* routes and collision avoidance; this only pulls outer members
+            // inward enough to make the moving group read as one crowd.
             float preferredRadius = MathF.Max(
-                squad.Spacing * 2.1f,
-                MathF.Sqrt(Math.Max(1, squad.CoreMemberCount)) * squad.Spacing * 0.9f);
-            Vector2 toAnchor = squad.Center - current;
+                squad.Spacing * 1.3f,
+                MathF.Sqrt(Math.Max(1, squad.CoreMemberCount)) * squad.Spacing * 0.5f);
+            Vector2 predictedCenter = squad.Center + squad.CenterVelocity * 0.25f;
+            Vector2 toAnchor = predictedCenter - current;
             float anchorDistance = toAnchor.Length();
-            if (anchorDistance <= preferredRadius * 0.72f || anchorDistance <= 0.05f)
+            float cohesionStart = preferredRadius * 0.72f;
+            if (anchorDistance <= cohesionStart || anchorDistance <= 0.05f)
                 return false;
 
+            float excessDistance = anchorDistance - cohesionStart;
             shapeForce = toAnchor / anchorDistance;
             shapeWeight = Math.Clamp(
-                FormationAnchorWeight +
-                (anchorDistance - preferredRadius * 0.72f) * 0.035f,
+                FormationAnchorWeight + excessDistance * 0.075f,
                 FormationAnchorWeight,
-                0.48f);
+                0.62f);
         }
         else
         {

@@ -424,6 +424,106 @@ public static class UnitMovementSelfTest
                finalLateral > initialLateral + 0.8f;
     }
 
+    public static bool FreeGroupGathersIntoCrowdWhileMoving()
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(16, 256);
+        simulation.AI.Enabled = false;
+
+        const int columns = 4;
+        const int rows = 3;
+        const float spacing = 1.7f;
+        UnitId[] ids = new UnitId[columns * rows];
+        Vector2 initialCenter = Vector2.Zero;
+
+        for (int row = 0; row < rows; row++)
+        {
+            for (int column = 0; column < columns; column++)
+            {
+                int index = row * columns + column;
+                Vector3 start = new(
+                    6.5f + column * spacing,
+                    20f + row * spacing,
+                    1f);
+                ids[index] = simulation.Spawn(
+                    UnitType.Colonist,
+                    start,
+                    Vector3.UnitX,
+                    Vector3.UnitX,
+                    factionTag: 1);
+                initialCenter += new Vector2(start.X, start.Y);
+            }
+        }
+
+        initialCenter /= ids.Length;
+        Vector3 destination = new(42.5f, 21.1f, 1f);
+        Vector2 forward = Vector2.Normalize(
+            new Vector2(destination.X - initialCenter.X, destination.Y - initialCenter.Y));
+        float initialSpread = MeasureGroupRadius(simulation.Units, ids);
+
+        bool issued = simulation.IssueAStarFormationMoveOrder(
+            ids,
+            destination,
+            InfantryFormationType.Free,
+            keepFormationInCombat: false,
+            worldMap: map);
+        if (!issued)
+            return false;
+
+        for (int tick = 0; tick < 420; tick++)
+            simulation.Update(map, TestDeltaTime);
+
+        float finalSpread = MeasureGroupRadius(
+            simulation.Units, ids, out Vector2 finalCenter);
+        float progress = Vector2.Dot(finalCenter - initialCenter, forward);
+        int movingMembers = 0;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            Vector3 position = simulation.Units.Position[ids[i].Index];
+            if (!float.IsFinite(position.X) || !float.IsFinite(position.Y))
+                return false;
+            if (simulation.Units.HasTarget[ids[i].Index])
+                movingMembers++;
+        }
+
+        Console.WriteLine(
+            $"[Squad crowd measure] spread={initialSpread:0.00}->{finalSpread:0.00}, " +
+            $"progress={progress:0.00}, moving={movingMembers}/{ids.Length}");
+
+        return progress > 4.5f &&
+               finalSpread < initialSpread * 0.88f &&
+               movingMembers >= ids.Length * 3 / 4;
+    }
+
+    private static float MeasureGroupRadius(
+        UnitStore units,
+        UnitId[] ids) =>
+        MeasureGroupRadius(units, ids, out _);
+
+    private static float MeasureGroupRadius(
+        UnitStore units,
+        UnitId[] ids,
+        out Vector2 center)
+    {
+        center = Vector2.Zero;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            Vector3 position = units.Position[ids[i].Index];
+            center += new Vector2(position.X, position.Y);
+        }
+
+        center /= ids.Length;
+        float radiusSquared = 0f;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            Vector3 position = units.Position[ids[i].Index];
+            Vector2 offset = new Vector2(position.X, position.Y) - center;
+            radiusSquared += offset.LengthSquared();
+        }
+
+        return MathF.Sqrt(radiusSquared / ids.Length);
+    }
+
     private static bool TryMeasureFormation(
         InfantryFormationType formation,
         out float initialForward,
