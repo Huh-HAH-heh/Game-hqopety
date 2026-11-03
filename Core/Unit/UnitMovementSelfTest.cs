@@ -498,7 +498,10 @@ public static class UnitMovementSelfTest
             bool anyMoving = false;
             for (int i = 0; i < ids.Length; i++)
                 anyMoving |= simulation.Units.HasTarget[ids[i].Index];
-            if (!anyMoving)
+
+            simulation.SquadMovement.TryGetInformation(
+                1_000_000, out SquadMovementInformation currentInformation);
+            if (!anyMoving && !currentInformation.HasMoveOrder)
                 break;
         }
 

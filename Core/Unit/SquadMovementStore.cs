@@ -755,7 +755,9 @@ public sealed class SquadMovementStore
                 squad.EngagedCount == 0 &&
                 squad.RejoiningCount == 0 &&
                 squad.SeparatedCount == 0 &&
-                squad.MovingCount == 0 &&
+                (squad.Formation is not (
+                    InfantryFormationType.Line or InfantryFormationType.Wedge) ||
+                 squad.MovingCount == 0) &&
                 reachedAnchor)
             {
                 CompleteSquadMove(squad, units, ai, navigation);
