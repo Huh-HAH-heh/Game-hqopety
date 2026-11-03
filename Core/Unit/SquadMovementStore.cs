@@ -266,34 +266,54 @@ public sealed class SquadMovementStore
             forward = Vector2.UnitX;
         else
             forward = Vector2.Normalize(forward);
-        // Every member follows the same A* objective. Line and wedge are
-        // expressed as soft offsets from the moving cohort center, not separate
-        // routes or fixed destination reservations.
-        bool usesMovingFormationShape =
+        // Line and wedge retain the old individual landing positions. Each
+        // pawn gets its own footprint-valid A* goal; no second steering force
+        // tries to pull it away from that route.
+        bool usesIndividualFormationGoals =
             formation is InfantryFormationType.Line or InfantryFormationType.Wedge;
         Vector2 meanOffset = Vector2.Zero;
-        if (usesMovingFormationShape)
+        if (usesIndividualFormationGoals)
         {
             for (int i = 0; i < members.Count; i++)
                 meanOffset += InfantryFormation.GetOffset(i, members.Count, formation, spacing);
             meanOffset /= members.Count;
         }
 
+        HashSet<int> reservedGoals = usesIndividualFormationGoals
+            ? new HashSet<int>()
+            : null!;
         Vector2[] goals = new Vector2[members.Count];
         Vector2[] memberOffsets = new Vector2[members.Count];
         for (int i = 0; i < members.Count; i++)
         {
             UnitId id = members[i];
+            Vector2 localOffset = usesIndividualFormationGoals
+                ? InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset
+                : Vector2.Zero;
+            Vector2 requestedGoal = goal +
+                side * localOffset.X -
+                forward * localOffset.Y;
+            requestedGoal.X = Math.Clamp(
+                requestedGoal.X, 0.5f, worldMap.MaxTileX - 0.5f);
+            requestedGoal.Y = Math.Clamp(
+                requestedGoal.Y, 0.5f, worldMap.MaxTileY - 0.5f);
+
             if (!navigation.TryResolveAStarGoal(
-                    units, id.Index, worldMap, goal, null, out Vector2 terminal))
+                    units,
+                    id.Index,
+                    worldMap,
+                    requestedGoal,
+                    usesIndividualFormationGoals ? reservedGoals : null,
+                    out Vector2 terminal))
             {
-                terminal = ResolveNavigablePoint(worldMap, goal);
+                terminal = ResolveNavigablePoint(
+                    worldMap,
+                    requestedGoal,
+                    usesIndividualFormationGoals ? reservedGoals : null);
             }
 
             goals[i] = terminal;
-            memberOffsets[i] = usesMovingFormationShape
-                ? InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset
-                : Vector2.Zero;
+            memberOffsets[i] = localOffset;
         }
 
         squad.MemberOffsets = memberOffsets;
@@ -735,6 +755,7 @@ public sealed class SquadMovementStore
                 squad.EngagedCount == 0 &&
                 squad.RejoiningCount == 0 &&
                 squad.SeparatedCount == 0 &&
+                squad.MovingCount == 0 &&
                 reachedAnchor)
             {
                 CompleteSquadMove(squad, units, ai, navigation);
@@ -1077,45 +1098,10 @@ public sealed class SquadMovementStore
                 1.25f);
             shapeWeight = squad.FormationBootstrap ? 0.28f : 0.62f;
         }
-        else if (squad.Formation == InfantryFormationType.Line)
+        else if (squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge)
         {
-            // Reuse the proven dynamic rank assignment: align one shallow front,
-            // but let the A* route carry the squad forward instead of chasing
-            // a moving per-member point.
-            float targetLateral = squad.FormationLateralOffsets[link.Slot];
-            float lateralError = targetLateral - lateralDistance;
-            float depthError = -forwardDistance;
-
-            shapeForce += side * Math.Clamp(
-                lateralError * 0.5f,
-                -1.5f,
-                1.5f);
-            shapeForce += squad.Forward * Math.Clamp(
-                depthError * 0.52f,
-                -1.5f,
-                1.5f);
-            shapeWeight = 0.7f;
-        }
-        else if (squad.Formation == InfantryFormationType.Wedge)
-        {
-            // A wedge is a flexible two-axis shape around the live center.
-            // Correct lateral wings strongly and depth more gently so the
-            // formation does not oppose the group's A* progress.
-            Vector2 localOffset = squad.MemberOffsets[link.Slot];
-            float targetLateral = localOffset.X;
-            float targetForward = -localOffset.Y;
-            float lateralError = targetLateral - lateralDistance;
-            float forwardError = targetForward - forwardDistance;
-
-            shapeForce += side * Math.Clamp(
-                lateralError * 0.42f,
-                -1.25f,
-                1.25f);
-            shapeForce += squad.Forward * Math.Clamp(
-                forwardError * 0.3f,
-                -0.9f,
-                0.9f);
-            shapeWeight = 0.48f;
+            // Their A* destinations already encode the requested shape.
+            return false;
         }
         else if (squad.Formation == InfantryFormationType.Free)
         {

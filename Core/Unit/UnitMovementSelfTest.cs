@@ -503,6 +503,8 @@ public static class UnitMovementSelfTest
         }
 
         Vector2 finalCenter = Vector2.Zero;
+        float totalSlotError = 0f;
+        float maximumSlotError = 0f;
         int activeTargets = 0;
         for (int i = 0; i < ids.Length; i++)
         {
@@ -512,27 +514,20 @@ public static class UnitMovementSelfTest
                 return false;
 
             finalCenter += new Vector2(actual.X, actual.Y);
-            if (simulation.Units.HasTarget[unit])
-                activeTargets++;
-        }
-
-        finalCenter /= ids.Length;
-        float totalSlotError = 0f;
-        float maximumSlotError = 0f;
-        for (int i = 0; i < ids.Length; i++)
-        {
-            Vector3 actual = simulation.Units.Position[ids[i].Index];
             Vector2 localOffset =
                 InfantryFormation.GetOffset(i, ids.Length, formation, spacing) - meanOffset;
-            Vector2 expected = finalCenter +
+            Vector2 expected = new Vector2(destination.X, destination.Y) +
                 side * localOffset.X -
                 forward * localOffset.Y;
             float error = Vector2.Distance(
                 new Vector2(actual.X, actual.Y), expected);
             totalSlotError += error;
             maximumSlotError = MathF.Max(maximumSlotError, error);
+            if (simulation.Units.HasTarget[unit])
+                activeTargets++;
         }
 
+        finalCenter /= ids.Length;
         float averageSlotError = totalSlotError / ids.Length;
         float progress = Vector2.Dot(finalCenter - initialCenter, forward);
         simulation.SquadMovement.TryGetInformation(
