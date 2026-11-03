@@ -76,6 +76,8 @@ public static class CombatSelfTest
         RunTest("Movement: contacts use reduced radius without explosive separation", UnitMovementSelfTest.ContactsUseReducedRadiusWithoutExplosiveSeparation, ref passed, ref failed);
         RunTest("Movement: dense moving crowd continues to advance", UnitMovementSelfTest.DenseMovingCrowdContinuesToAdvance, ref passed, ref failed);
         RunTest("Movement: opposing units steer around one another", UnitMovementSelfTest.OpposingUnitsSteerAroundOneAnother, ref passed, ref failed);
+        RunTest("Squad movement: column narrows while advancing", UnitMovementSelfTest.ColumnNarrowsWhileAdvancing, ref passed, ref failed);
+        RunTest("Squad movement: line flattens while advancing", UnitMovementSelfTest.LineFlattensWhileAdvancing, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: candidate sampling bounds pair work", TestVisionBoundedCandidateSampling, ref passed, ref failed);

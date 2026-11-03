@@ -396,6 +396,141 @@ public static class UnitMovementSelfTest
                float.IsFinite(simulation.Units.Velocity[second.Index].X);
     }
 
+    public static bool ColumnNarrowsWhileAdvancing()
+    {
+        return TryMeasureFormation(
+                   InfantryFormationType.Column,
+                   out float initialForward,
+                   out float initialLateral,
+                   out float finalForward,
+                   out float finalLateral,
+                   out float progress) &&
+               progress > 5f &&
+               finalForward > initialForward + 1.5f &&
+               finalLateral < initialLateral * 0.9f;
+    }
+
+    public static bool LineFlattensWhileAdvancing()
+    {
+        return TryMeasureFormation(
+                   InfantryFormationType.Line,
+                   out float initialForward,
+                   out float initialLateral,
+                   out float finalForward,
+                   out float finalLateral,
+                   out float progress) &&
+               progress > 5f &&
+               finalForward < initialForward * 0.8f &&
+               finalLateral > initialLateral + 0.8f;
+    }
+
+    private static bool TryMeasureFormation(
+        InfantryFormationType formation,
+        out float initialForward,
+        out float initialLateral,
+        out float finalForward,
+        out float finalLateral,
+        out float progress)
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(16, 256);
+        simulation.AI.Enabled = false;
+
+        const int columns = 4;
+        const int rows = 3;
+        UnitId[] ids = new UnitId[columns * rows];
+        Vector2 initialCenter = Vector2.Zero;
+        for (int row = 0; row < rows; row++)
+        {
+            for (int column = 0; column < columns; column++)
+            {
+                Vector3 start = new(
+                    6.5f + column * 1.3f,
+                    20f + row * 1.35f,
+                    1f);
+                int index = row * columns + column;
+                ids[index] = simulation.Spawn(
+                    UnitType.Colonist,
+                    start,
+                    Vector3.UnitX,
+                    Vector3.UnitX,
+                    factionTag: 1);
+                initialCenter += new Vector2(start.X, start.Y);
+            }
+        }
+
+        initialCenter /= ids.Length;
+        Vector3 destination = new(42.5f, 21.1f, 1f);
+        Vector2 forward = Vector2.Normalize(
+            new Vector2(destination.X - initialCenter.X, destination.Y - initialCenter.Y));
+        Vector2 side = new(-forward.Y, forward.X);
+
+        if (!simulation.IssueAStarFormationMoveOrder(
+                ids,
+                destination,
+                formation,
+                keepFormationInCombat: false,
+                worldMap: map))
+        {
+            initialForward = 0f;
+            initialLateral = 0f;
+            finalForward = 0f;
+            finalLateral = 0f;
+            progress = 0f;
+            return false;
+        }
+
+        GetFormationExtents(
+            simulation.Units, ids, forward, side,
+            out initialForward, out initialLateral, out _);
+
+        for (int tick = 0; tick < 360; tick++)
+            simulation.Update(map, TestDeltaTime);
+
+        GetFormationExtents(
+            simulation.Units, ids, forward, side,
+            out finalForward, out finalLateral, out Vector2 finalCenter);
+        progress = Vector2.Dot(finalCenter - initialCenter, forward);
+        return true;
+    }
+
+    private static void GetFormationExtents(
+        UnitStore units,
+        UnitId[] ids,
+        Vector2 forward,
+        Vector2 side,
+        out float forwardExtent,
+        out float lateralExtent,
+        out Vector2 center)
+    {
+        center = Vector2.Zero;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            Vector3 position = units.Position[ids[i].Index];
+            center += new Vector2(position.X, position.Y);
+        }
+        center /= ids.Length;
+
+        float minForward = float.PositiveInfinity;
+        float maxForward = float.NegativeInfinity;
+        float minLateral = float.PositiveInfinity;
+        float maxLateral = float.NegativeInfinity;
+        for (int i = 0; i < ids.Length; i++)
+        {
+            Vector3 position = units.Position[ids[i].Index];
+            Vector2 offset = new(position.X, position.Y) - center;
+            float along = Vector2.Dot(offset, forward);
+            float across = Vector2.Dot(offset, side);
+            minForward = MathF.Min(minForward, along);
+            maxForward = MathF.Max(maxForward, along);
+            minLateral = MathF.Min(minLateral, across);
+            maxLateral = MathF.Max(maxLateral, across);
+        }
+
+        forwardExtent = maxForward - minForward;
+        lateralExtent = maxLateral - minLateral;
+    }
+
     private static WorldMap CreateFlatWorld()
     {
         WorldMap map = new WorldMap(

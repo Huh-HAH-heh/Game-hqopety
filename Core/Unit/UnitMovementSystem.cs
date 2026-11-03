@@ -292,14 +292,14 @@ public sealed class UnitMovementSystem
                                 out Vector2 formationWaypoint))
                         {
                             Vector2 currentPosition = new(position.X, position.Y);
-                            Vector2 correction = formationWaypoint - currentPosition;
                             bool foundSafeFormationPoint = false;
-                            for (int attempt = 0; attempt < 5; attempt++)
+                            float formationBlend = 1f;
+                            for (int attempt = 0; attempt < 6; attempt++)
                             {
-                                if (correction.LengthSquared() < 0.04f)
-                                    break;
-
-                                Vector2 candidate = currentPosition + correction;
+                                Vector2 candidate = Vector2.Lerp(
+                                    aStarWaypoint,
+                                    formationWaypoint,
+                                    formationBlend);
                                 if (_navigation.CanMoveDirectly(
                                         units, unit, worldMap, currentPosition, candidate))
                                 {
@@ -308,11 +308,25 @@ public sealed class UnitMovementSystem
                                     break;
                                 }
 
-                                correction *= 0.5f;
+                                formationBlend *= 0.5f;
                             }
 
                             if (!foundSafeFormationPoint)
+                            {
                                 steeringPoint = aStarWaypoint;
+                            }
+                            else if (hasCollectiveMove)
+                            {
+                                // The shared click is the cohort objective, not a
+                                // per-member stop point. Keep enough braking distance
+                                // to reach the local formation steering target.
+                                float localSteeringDistance = Vector2.Distance(
+                                    currentPosition,
+                                    steeringPoint);
+                                distanceToGoal = MathF.Max(
+                                    distanceToGoal,
+                                    localSteeringDistance + ArrivalRadius);
+                            }
                         }
                     }
                 }

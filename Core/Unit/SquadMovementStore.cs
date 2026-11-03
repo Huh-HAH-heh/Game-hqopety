@@ -78,7 +78,8 @@ public sealed class SquadMovementStore
     private const float MaxCohesionCorrection = 0.62f;
     private const float AlignmentWeight = 0.12f;
     private const float ColumnGapScale = 1.35f;
-    private const float FormationCorrectionLimit = 0.42f;
+    private const float FormationCorrectionLimit = 1.25f;
+    private const float FormationAnchorWeight = 0.32f;
 
     private Dictionary<int, SquadState> _squads = new();
     private Dictionary<UnitId, MemberLink> _membership = new();
@@ -755,6 +756,7 @@ public sealed class SquadMovementStore
             squad.EnsureFormationBuffers(memberCount);
             Array.Fill(squad.FormationNeighborBefore, -1, 0, memberCount);
             Array.Fill(squad.FormationNeighborAfter, -1, 0, memberCount);
+            Array.Clear(squad.FormationLateralOffsets, 0, memberCount);
 
             if (!squad.HasMoveOrder ||
                 squad.Formation is not (InfantryFormationType.Column or InfantryFormationType.Line))
@@ -767,6 +769,8 @@ public sealed class SquadMovementStore
             float minForward = float.PositiveInfinity;
             float maxForward = float.NegativeInfinity;
 
+            // One pass collects the active steering cohort. Detached combatants
+            // keep squad membership, but temporarily stop shaping the moving body.
             for (int slot = 0; slot < memberCount; slot++)
             {
                 UnitId id = squad.Members[slot];
@@ -774,14 +778,16 @@ public sealed class SquadMovementStore
                     (health != null && health.OverallHitPoints[unit] <= 0f) ||
                     (uint)slot >= (uint)squad.MemberGoals.Length ||
                     IsDetachedFromCollective(units, ai, unit) ||
-                    IsMemberTacticallyEngaged(id))
+                    IsMemberTacticallyEngaged(id) ||
+                    (_memberOwners[unit] == id &&
+                     _memberStates[unit] == SquadMemberMovementState.Separated))
                 {
                     continue;
                 }
 
                 Vector3 position = units.Position[unit];
-                Vector2 toMemberGoal = squad.MemberGoals[slot] -
-                    new Vector2(position.X, position.Y);
+                Vector2 memberPosition = new(position.X, position.Y);
+                Vector2 toMemberGoal = squad.MemberGoals[slot] - memberPosition;
                 bool reachedSharedTerminal = !units.HasTarget[unit] &&
                     toMemberGoal.LengthSquared() <= 0.85f * 0.85f;
                 bool followingGroupOrder = units.HasTarget[unit] &&
@@ -789,9 +795,7 @@ public sealed class SquadMovementStore
                 if (!reachedSharedTerminal && !followingGroupOrder)
                     continue;
 
-                Vector2 fromCenter = new(
-                    position.X - squad.Center.X,
-                    position.Y - squad.Center.Y);
+                Vector2 fromCenter = memberPosition - squad.Center;
                 float forward = Vector2.Dot(fromCenter, squad.Forward);
                 minForward = MathF.Min(minForward, forward);
                 maxForward = MathF.Max(maxForward, forward);
@@ -800,18 +804,25 @@ public sealed class SquadMovementStore
 
             int activeCount = squad.FormationMemberCount;
             if (activeCount < 2)
+            {
+                squad.FormationBootstrap = false;
                 continue;
+            }
 
-            bool bootstrap = false;
             if (squad.Formation == InfantryFormationType.Column)
             {
+                // Bootstrap from the existing lateral spread, then switch to a
+                // front-to-back predecessor chain once the group has stretched.
                 float desiredGap = MathF.Max(1.3f, squad.Spacing * ColumnGapScale);
                 float targetDepth = desiredGap * (activeCount - 1);
                 float currentDepth = maxForward - minForward;
                 float threshold = squad.FormationBootstrap ? 0.68f : 0.28f;
-                bootstrap = currentDepth < targetDepth * threshold;
+                squad.FormationBootstrap = currentDepth < targetDepth * threshold;
             }
-            squad.FormationBootstrap = bootstrap;
+            else
+            {
+                squad.FormationBootstrap = false;
+            }
 
             for (int i = 0; i < activeCount; i++)
             {
@@ -826,10 +837,10 @@ public sealed class SquadMovementStore
                 float forward = Vector2.Dot(fromCenter, squad.Forward);
                 float lateral = Vector2.Dot(fromCenter, side);
                 float primary = squad.Formation == InfantryFormationType.Column
-                    ? bootstrap ? lateral : forward
+                    ? squad.FormationBootstrap ? lateral : forward
                     : lateral;
                 float secondary = squad.Formation == InfantryFormationType.Column
-                    ? bootstrap ? forward : lateral
+                    ? squad.FormationBootstrap ? forward : lateral
                     : forward;
 
                 squad.FormationSortKeys[i] =
@@ -842,13 +853,35 @@ public sealed class SquadMovementStore
                 0,
                 activeCount);
 
-            for (int i = 0; i < activeCount; i++)
+            if (squad.Formation == InfantryFormationType.Line)
             {
-                int slot = squad.FormationSortSlots[i];
-                if (i > 0)
-                    squad.FormationNeighborBefore[slot] = squad.FormationSortSlots[i - 1];
-                if (i + 1 < activeCount)
-                    squad.FormationNeighborAfter[slot] = squad.FormationSortSlots[i + 1];
+                // Dynamic lateral ranks are recalculated from live positions each
+                // update. They are soft moving offsets, not persistent soldier slots.
+                float desiredSideGap = MathF.Max(1.3f, squad.Spacing * 1.2f);
+                for (int i = 0; i < activeCount; i++)
+                {
+                    int slot = squad.FormationSortSlots[i];
+                    squad.FormationLateralOffsets[slot] =
+                        (i - (activeCount - 1) * 0.5f) * desiredSideGap;
+                    if (i > 0)
+                        squad.FormationNeighborBefore[slot] = squad.FormationSortSlots[i - 1];
+                    if (i + 1 < activeCount)
+                        squad.FormationNeighborAfter[slot] = squad.FormationSortSlots[i + 1];
+                }
+            }
+            else
+            {
+                // For a column, 'after' is always the current predecessor. During
+                // bootstrap it converts the initial cluster to a snake; afterward
+                // it follows the nearest unit ahead in the direction of travel.
+                for (int i = 0; i < activeCount; i++)
+                {
+                    int slot = squad.FormationSortSlots[i];
+                    if (i > 0)
+                        squad.FormationNeighborBefore[slot] = squad.FormationSortSlots[i - 1];
+                    if (i + 1 < activeCount)
+                        squad.FormationNeighborAfter[slot] = squad.FormationSortSlots[i + 1];
+                }
             }
         }
     }
@@ -890,7 +923,7 @@ public sealed class SquadMovementStore
         if (!_membership.TryGetValue(id, out MemberLink link) ||
             !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
             !squad.HasMoveOrder ||
-            squad.Formation == InfantryFormationType.None ||
+            squad.Formation is InfantryFormationType.None ||
             !units.HasTarget[unitIndex] ||
             (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
             !HasMatchingGroupMoveOrder(ai, unitIndex, squad.MemberGoals[link.Slot]) ||
@@ -903,174 +936,162 @@ public sealed class SquadMovementStore
         Vector2 current = new(position.X, position.Y);
         Vector2 pathDelta = pathWaypoint - current;
         float pathDistance = pathDelta.Length();
-        if (pathDistance < 0.05f &&
-            squad.Formation is not (InfantryFormationType.Column or InfantryFormationType.Line))
-        {
-            return false;
-        }
-
-        Vector2 direction = pathDistance > 0.05f
+        Vector2 routeDirection = pathDistance > 0.05f
             ? pathDelta / pathDistance
             : squad.Forward;
         Vector2 side = new(-squad.Forward.Y, squad.Forward.X);
         Vector2 fromCenter = current - squad.Center;
         float forwardDistance = Vector2.Dot(fromCenter, squad.Forward);
         float lateralDistance = Vector2.Dot(fromCenter, side);
-        float normalizedExtent = MathF.Sqrt(
-            forwardDistance * forwardDistance /
-                MathF.Max(0.01f, squad.EnvelopeDepth * squad.EnvelopeDepth) +
-            lateralDistance * lateralDistance /
-                MathF.Max(0.01f, squad.EnvelopeWidth * squad.EnvelopeWidth));
 
         bool inContact = squad.EngagedCount > 0;
-        float cohesionScale = inContact
-            ? squad.KeepFormationInCombat ? 0.65f : 0.35f
-            : 1f;
         bool rejoining =
             _memberOwners[unitIndex] == id &&
-            _memberStates[unitIndex] == SquadMemberMovementState.Rejoining;
-        float preferredExtent = rejoining ? 0.72f : 1f;
+            _memberStates[unitIndex] is SquadMemberMovementState.Rejoining or
+                SquadMemberMovementState.Separated;
 
-        // Ordinary members are left free inside the envelope. A rejoining
-        // member is softly guided into its inner area before it becomes Following.
-        if (normalizedExtent > preferredExtent)
+        Vector2 shapeForce = Vector2.Zero;
+        float shapeWeight;
+
+        if (rejoining)
         {
-            float targetScale = preferredExtent / normalizedExtent;
-            Vector2 targetPoint = squad.Center +
-                squad.Forward * (forwardDistance * targetScale) +
-                side * (lateralDistance * targetScale);
-            Vector2 inward = targetPoint - current;
-            float inwardLength = inward.Length();
-            if (inwardLength > 0.001f)
-            {
-                float cohesionWeight = Math.Clamp(
-                    (normalizedExtent - preferredExtent) * 0.22f,
-                    0f,
-                    MaxCohesionCorrection) * cohesionScale;
-                direction += inward * (cohesionWeight / inwardLength);
-            }
+            // The virtual anchor brings a detached pawn back without changing
+            // its identity or assigning it a permanent formation slot.
+            Vector2 toAnchor = squad.Center - current;
+            if (toAnchor.LengthSquared() <= 0.04f)
+                return false;
+
+            shapeForce = Vector2.Normalize(toAnchor);
+            shapeWeight = 0.58f;
         }
-
-        float steeringDistance = pathDistance;
-        int aheadSlot = link.Slot < squad.FormationNeighborAfter.Length
-            ? squad.FormationNeighborAfter[link.Slot]
-            : -1;
-        int beforeSlot = link.Slot < squad.FormationNeighborBefore.Length
-            ? squad.FormationNeighborBefore[link.Slot]
-            : -1;
-
-        if (squad.Formation == InfantryFormationType.Column)
+        else if (squad.Formation == InfantryFormationType.Column)
         {
+            float desiredGap = MathF.Max(
+                squad.Spacing * 1.2f,
+                (units.Radius[unitIndex] * 2f) * ColumnGapScale);
+            int aheadSlot = squad.FormationNeighborAfter[link.Slot];
+
             if ((uint)aheadSlot < (uint)squad.Members.Count &&
                 units.TryGetIndex(squad.Members[aheadSlot], out int ahead))
             {
-                // Follow a moving trail point behind the current predecessor.
-                // The graph is rebuilt from current projections, not fixed slots.
                 Vector3 aheadPosition3 = units.Position[ahead];
                 Vector2 aheadPosition = new(aheadPosition3.X, aheadPosition3.Y);
                 Vector3 aheadVelocity3 = units.Velocity[ahead];
                 Vector2 aheadVelocity = new(aheadVelocity3.X, aheadVelocity3.Y);
-                Vector2 trailHeading = aheadVelocity.LengthSquared() > 0.04f
-                    ? Vector2.Normalize(aheadVelocity)
-                    : squad.Forward;
-                float desiredGap = MathF.Max(
-                    squad.Spacing * 1.2f,
-                    (units.Radius[unitIndex] + units.Radius[ahead]) * ColumnGapScale);
-                Vector2 followPoint = aheadPosition - trailHeading * desiredGap;
-                Vector2 followDelta = followPoint - current;
-                float followDistance = followDelta.Length();
-
-                if (followDistance <= 0.18f)
+                Vector2 trailHeading = squad.Forward;
+                if (aheadVelocity.LengthSquared() > 0.04f)
                 {
-                    adjustedWaypoint = current;
-                    return true;
+                    Vector2 movingHeading = Vector2.Normalize(aheadVelocity);
+                    if (Vector2.Dot(movingHeading, squad.Forward) > 0.2f)
+                        trailHeading = movingHeading;
                 }
 
-                direction = followDelta / followDistance;
-                steeringDistance = followDistance;
+                Vector2 trailPoint = aheadPosition - trailHeading * desiredGap;
+                Vector2 followDelta = trailPoint - current;
+                float followDistance = followDelta.Length();
+                if (followDistance > 0.12f &&
+                    followDistance < desiredGap * 5f)
+                {
+                    float followGain = Math.Clamp(
+                        followDistance / MathF.Max(0.5f, desiredGap * 1.5f),
+                        0.25f,
+                        1f);
+                    shapeForce += followDelta / followDistance * followGain;
+                }
             }
-            else if (pathDistance < 0.05f)
-            {
-                return false;
-            }
+
+            // Keep the chain near its virtual centerline. The predecessor
+            // behaviour controls longitudinal spacing; this term removes lanes.
+            shapeForce -= side * Math.Clamp(
+                lateralDistance * (squad.FormationBootstrap ? 0.24f : 0.38f),
+                -1.25f,
+                1.25f);
+            shapeWeight = squad.FormationBootstrap ? 0.62f : 0.76f;
         }
         else if (squad.Formation == InfantryFormationType.Line)
         {
-            float depthError = Vector2.Dot(current - squad.Center, squad.Forward);
-            Vector2 correction = -squad.Forward * Math.Clamp(
-                depthError * 0.18f,
-                -FormationCorrectionLimit,
-                FormationCorrectionLimit);
-            float desiredSideGap = MathF.Max(
-                1.3f,
-                units.Radius[unitIndex] * 2f * 1.25f);
+            float targetLateral = squad.FormationLateralOffsets[link.Slot];
+            float lateralError = targetLateral - lateralDistance;
+            float depthError = -forwardDistance;
 
-            if ((uint)beforeSlot < (uint)squad.Members.Count &&
-                units.TryGetIndex(squad.Members[beforeSlot], out int left))
-            {
-                Vector3 left3 = units.Position[left];
-                Vector2 leftPosition = new(left3.X, left3.Y);
-                float gap = Vector2.Dot(current - leftPosition, side);
-                correction += side * (
-                    Math.Clamp(desiredSideGap - gap, -1.5f, 1.5f) * 0.16f);
-            }
+            // Lateral ranks spread the group into one front while depth alignment
+            // keeps that front shallow. Rank assignment is recomputed every frame.
+            shapeForce += side * Math.Clamp(
+                lateralError * 0.5f,
+                -1.5f,
+                1.5f);
+            shapeForce += squad.Forward * Math.Clamp(
+                depthError * 0.52f,
+                -1.5f,
+                1.5f);
+            shapeWeight = 0.7f;
+        }
+        else if (squad.Formation == InfantryFormationType.Free)
+        {
+            // A loose group stays together as a cloud, but members are not
+            // pulled to offsets or fixed positions inside the comfortable radius.
+            float preferredRadius = MathF.Max(
+                squad.Spacing * 2.1f,
+                MathF.Sqrt(Math.Max(1, squad.CoreMemberCount)) * squad.Spacing * 0.9f);
+            Vector2 toAnchor = squad.Center - current;
+            float anchorDistance = toAnchor.Length();
+            if (anchorDistance <= preferredRadius * 0.72f || anchorDistance <= 0.05f)
+                return false;
 
-            if ((uint)aheadSlot < (uint)squad.Members.Count &&
-                units.TryGetIndex(squad.Members[aheadSlot], out int right))
-            {
-                Vector3 right3 = units.Position[right];
-                Vector2 rightPosition = new(right3.X, right3.Y);
-                float gap = Vector2.Dot(rightPosition - current, side);
-                correction += side * (
-                    Math.Clamp(gap - desiredSideGap, -1.5f, 1.5f) * 0.16f);
-            }
-
-            if (pathDistance < 0.05f)
-            {
-                if (correction.LengthSquared() < 0.0025f)
-                    return false;
-                direction = Vector2.Normalize(correction);
-                steeringDistance = Math.Clamp(correction.Length(), 0.25f, 0.8f);
-            }
-            else
-            {
-                direction += correction;
-            }
+            shapeForce = toAnchor / anchorDistance;
+            shapeWeight = Math.Clamp(
+                FormationAnchorWeight +
+                (anchorDistance - preferredRadius * 0.72f) * 0.035f,
+                FormationAnchorWeight,
+                0.48f);
         }
         else
         {
-            if (normalizedExtent > preferredExtent)
-            {
-                float targetScale = preferredExtent / normalizedExtent;
-                Vector2 targetPoint = squad.Center +
-                    squad.Forward * (forwardDistance * targetScale) +
-                    side * (lateralDistance * targetScale);
-                Vector2 inward = targetPoint - current;
-                float inwardLength = inward.Length();
-                if (inwardLength > 0.001f)
-                {
-                    float cohesionWeight = Math.Clamp(
-                        (normalizedExtent - preferredExtent) * 0.22f,
-                        0f,
-                        MaxCohesionCorrection) * cohesionScale;
-                    direction += inward * (cohesionWeight / inwardLength);
-                }
-            }
+            return false;
         }
 
-        if (!inContact && squad.CenterVelocity.LengthSquared() > 0.04f)
-        {
-            Vector2 groupDirection = Vector2.Normalize(squad.CenterVelocity);
-            if (Vector2.Dot(direction, groupDirection) > 0.1f)
-                direction += groupDirection * AlignmentWeight;
-        }
-
-        float directionLength = direction.Length();
-        if (directionLength < 0.001f)
+        if (shapeForce.LengthSquared() < 0.0025f)
             return false;
 
-        float lookAhead = Math.Clamp(steeringDistance, 0.25f, 4f);
-        adjustedWaypoint = current + direction * (lookAhead / directionLength);
+        if (squad.CenterVelocity.LengthSquared() > 0.04f)
+        {
+            Vector2 groupDirection = Vector2.Normalize(squad.CenterVelocity);
+            if (Vector2.Dot(groupDirection, routeDirection) > 0.1f)
+                shapeForce += groupDirection * AlignmentWeight;
+        }
+
+        // Adaptive weights: when A* turns around terrain, let its validated
+        // route dominate. Combat also relaxes the body unless the order says
+        // explicitly to preserve formation in contact.
+        float routeAgreement = Vector2.Dot(routeDirection, squad.Forward);
+        float obstacleAdaptation = Math.Clamp(
+            (routeAgreement + 0.2f) / 0.9f,
+            0.2f,
+            1f);
+        float contactAdaptation = !inContact
+            ? 1f
+            : squad.KeepFormationInCombat ? 0.72f : 0.42f;
+        shapeWeight *= obstacleAdaptation * contactAdaptation;
+        shapeWeight = Math.Clamp(shapeWeight, 0f, 0.82f);
+
+        float shapeLengthSquared = shapeForce.LengthSquared();
+        if (shapeLengthSquared < 0.0001f || shapeWeight <= 0.001f)
+            return false;
+
+        Vector2 shapeDirection = shapeForce / MathF.Sqrt(shapeLengthSquared);
+        Vector2 blendedDirection =
+            routeDirection * (1f - shapeWeight) +
+            shapeDirection * shapeWeight;
+        float blendedLengthSquared = blendedDirection.LengthSquared();
+        if (blendedLengthSquared < 0.0001f)
+            blendedDirection = routeDirection;
+        else
+            blendedDirection /= MathF.Sqrt(blendedLengthSquared);
+
+        float lookAhead = pathDistance > 0.05f
+            ? Math.Clamp(pathDistance, 0.75f, 3.2f)
+            : 1f;
+        adjustedWaypoint = current + blendedDirection * lookAhead;
         return true;
     }
 
@@ -1525,6 +1546,7 @@ public sealed class SquadMovementStore
         public int[] FormationSortSlots = Array.Empty<int>();
         public int[] FormationNeighborBefore = Array.Empty<int>();
         public int[] FormationNeighborAfter = Array.Empty<int>();
+        public float[] FormationLateralOffsets = Array.Empty<float>();
 
         public SquadState(int id, List<UnitId> members)
         {
@@ -1535,13 +1557,17 @@ public sealed class SquadMovementStore
 
         public void EnsureFormationBuffers(int memberCount)
         {
-            if (FormationSortSlots.Length >= memberCount)
+            if (FormationSortSlots.Length >= memberCount &&
+                FormationLateralOffsets.Length >= memberCount)
+            {
                 return;
+            }
 
             Array.Resize(ref FormationSortSlots, memberCount);
             Array.Resize(ref FormationSortKeys, memberCount);
             Array.Resize(ref FormationNeighborBefore, memberCount);
             Array.Resize(ref FormationNeighborAfter, memberCount);
+            Array.Resize(ref FormationLateralOffsets, memberCount);
         }
     }
 }
