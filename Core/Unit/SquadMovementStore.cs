@@ -701,6 +701,26 @@ public sealed class SquadMovementStore
                         (inContact ? 1.25f : 1f);
                     break;
 
+                case InfantryFormationType.Wedge:
+                {
+                    float halfWidth = baseRadius;
+                    float halfDepth = baseRadius;
+                    for (int slot = 0; slot < squad.MemberOffsets.Length; slot++)
+                    {
+                        Vector2 offset = squad.MemberOffsets[slot];
+                        halfWidth = MathF.Max(
+                            halfWidth, MathF.Abs(offset.X) + squad.Spacing * 0.5f);
+                        halfDepth = MathF.Max(
+                            halfDepth, MathF.Abs(offset.Y) + squad.Spacing * 0.5f);
+                    }
+
+                    // A wedge naturally has a larger diagonal footprint than a
+                    // generic crowd. Its wing members must remain part of the core.
+                    squad.EnvelopeWidth = halfWidth * contactScale;
+                    squad.EnvelopeDepth = halfDepth * contactScale;
+                    break;
+                }
+
                 case InfantryFormationType.Free:
                     // Free movement is a compact moving crowd, not a dispersed cloud.
                     float crowdRadius = MathF.Max(
