@@ -82,7 +82,6 @@ public sealed class SquadMovementStore
     private const float FormationAnchorWeight = 0.42f;
     private const int MaxFormationNeighborCandidates = 8;
     private const float MinimumFormationForwardGap = 0.35f;
-    private const float ArrivalSettleTimeoutSeconds = 2.25f;
 
     private Dictionary<int, SquadState> _squads = new();
     private Dictionary<UnitId, MemberLink> _membership = new();
@@ -324,7 +323,6 @@ public sealed class SquadMovementStore
             formation is not (InfantryFormationType.None or InfantryFormationType.Column);
         squad.KeepFormationInCombat = keepFormationInCombat;
         squad.SlowestMoveSpeed = slowestSpeed;
-        squad.ArrivalSettleElapsed = 0f;
         squad.Phase = SquadMovementPhase.Advancing;
         squad.FlowField.Invalidate();
         return true;
@@ -707,20 +705,7 @@ public sealed class SquadMovementStore
                 squad.SeparatedCount == 0 &&
                 reachedAnchor)
             {
-                if (HasCompressedMembers(squad, units, health))
-                {
-                    squad.ArrivalSettleElapsed += Math.Clamp(deltaTime, 0f, 0.25f);
-                    if (squad.ArrivalSettleElapsed >= ArrivalSettleTimeoutSeconds)
-                        CompleteSquadMove(squad, units, ai, navigation);
-                }
-                else
-                {
-                    CompleteSquadMove(squad, units, ai, navigation);
-                }
-            }
-            else if (toAnchor.LengthSquared() > 1f)
-            {
-                squad.ArrivalSettleElapsed = 0f;
+                CompleteSquadMove(squad, units, ai, navigation);
             }
 
             if (squad.EngagedCount > 0)
@@ -738,53 +723,6 @@ public sealed class SquadMovementStore
         }
 
         BuildFormationGraph(units, health, ai);
-    }
-
-    private static bool HasCompressedMembers(
-        SquadState squad,
-        UnitStore units,
-        UnitHealthStore? health)
-    {
-        // Completion checks run only at the destination. Keep the pair scan
-        // bounded for unusually large cohorts; normal infantry squads are small.
-        if (squad.Members.Count > 64)
-            return false;
-
-        for (int i = 0; i < squad.Members.Count; i++)
-        {
-            if (!units.TryGetIndex(squad.Members[i], out int first) ||
-                (health != null && health.OverallHitPoints[first] <= 0f))
-            {
-                continue;
-            }
-
-            Vector3 firstPosition = units.Position[first];
-            for (int j = i + 1; j < squad.Members.Count; j++)
-            {
-                if (!units.TryGetIndex(squad.Members[j], out int second) ||
-                    (health != null && health.OverallHitPoints[second] <= 0f))
-                {
-                    continue;
-                }
-
-                Vector3 secondPosition = units.Position[second];
-                if (secondPosition.Z >= firstPosition.Z + units.Height[first] ||
-                    firstPosition.Z >= secondPosition.Z + units.Height[second])
-                {
-                    continue;
-                }
-
-                float dx = firstPosition.X - secondPosition.X;
-                float dy = firstPosition.Y - secondPosition.Y;
-                float minimumDistance = MathF.Max(
-                    0.82f,
-                    (units.Radius[first] + units.Radius[second]) * 0.92f);
-                if (dx * dx + dy * dy < minimumDistance * minimumDistance)
-                    return true;
-            }
-        }
-
-        return false;
     }
 
     private void CompleteSquadMove(
@@ -811,7 +749,6 @@ public sealed class SquadMovementStore
         squad.KeepFormationInCombat = false;
         squad.MovingCount = 0;
         squad.FormationBootstrap = false;
-        squad.ArrivalSettleElapsed = 0f;
         squad.Phase = SquadMovementPhase.Arrived;
     }
 
@@ -1642,7 +1579,6 @@ public sealed class SquadMovementStore
         public int MovingCount;
         public int FormationMemberCount;
         public bool FormationBootstrap;
-        public float ArrivalSettleElapsed;
         public Vector2 AnchorTarget;
         public float[] FormationSortKeys = Array.Empty<float>();
         public int[] FormationSortSlots = Array.Empty<int>();

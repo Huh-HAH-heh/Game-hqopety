@@ -524,7 +524,7 @@ public static class UnitMovementSelfTest
         return MathF.Sqrt(radiusSquared / ids.Length);
     }
 
-    public static bool CollectiveMoveKeepsSoftSpacingAtArrival()
+    public static bool CollectiveMoveCompletesWithoutArtificialSpacingHold()
     {
         WorldMap map = CreateFlatWorld();
         UnitSimulation simulation = new UnitSimulation(16, 256);
@@ -578,12 +578,19 @@ public static class UnitMovementSelfTest
                 break;
         }
 
+        Vector2 finalCenter = Vector2.Zero;
         float minimumDistance = float.PositiveInfinity;
+        int activeTargets = 0;
         for (int i = 0; i < ids.Length; i++)
         {
-            Vector3 first = simulation.Units.Position[ids[i].Index];
+            int unit = ids[i].Index;
+            Vector3 first = simulation.Units.Position[unit];
             if (!float.IsFinite(first.X) || !float.IsFinite(first.Y))
                 return false;
+
+            finalCenter += new Vector2(first.X, first.Y);
+            if (simulation.Units.HasTarget[unit])
+                activeTargets++;
 
             for (int j = i + 1; j < ids.Length; j++)
             {
@@ -594,28 +601,18 @@ public static class UnitMovementSelfTest
             }
         }
 
-        Vector2 finalCenter = Vector2.Zero;
-        int activeTargets = 0;
-        for (int i = 0; i < ids.Length; i++)
-        {
-            int unit = ids[i].Index;
-            Vector3 position = simulation.Units.Position[unit];
-            finalCenter += new Vector2(position.X, position.Y);
-            if (simulation.Units.HasTarget[unit])
-                activeTargets++;
-        }
-
         finalCenter /= ids.Length;
         float progress = Vector2.Dot(finalCenter - initialCenter, forward);
         simulation.SquadMovement.TryGetInformation(
             1_000_000, out SquadMovementInformation information);
         Console.WriteLine(
-            $"[Squad arrival spacing] minimum={minimumDistance:0.00}, " +
+            $"[Squad arrival] minNeighbor={minimumDistance:0.00}, " +
             $"progress={progress:0.00}, activeTargets={activeTargets}/{ids.Length}, " +
             $"phase={information.Phase}");
 
+        // Spacing is diagnostic only. The group must finish its order without
+        // being held to an artificial interpersonal radius.
         return progress > 12f &&
-               minimumDistance >= 0.9f &&
                activeTargets == 0 &&
                !information.HasMoveOrder;
     }

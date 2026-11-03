@@ -79,7 +79,7 @@ public static class CombatSelfTest
         RunTest("Squad movement: column narrows while advancing", UnitMovementSelfTest.ColumnNarrowsWhileAdvancing, ref passed, ref failed);
         RunTest("Squad movement: line flattens while advancing", UnitMovementSelfTest.LineFlattensWhileAdvancing, ref passed, ref failed);
         RunTest("Squad movement: free group gathers into a moving crowd", UnitMovementSelfTest.FreeGroupGathersIntoCrowdWhileMoving, ref passed, ref failed);
-        RunTest("Squad movement: soft personal space prevents arrival pile-up", UnitMovementSelfTest.CollectiveMoveKeepsSoftSpacingAtArrival, ref passed, ref failed);
+        RunTest("Squad movement: free group completes without artificial spacing hold", UnitMovementSelfTest.CollectiveMoveCompletesWithoutArtificialSpacingHold, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: candidate sampling bounds pair work", TestVisionBoundedCandidateSampling, ref passed, ref failed);
