@@ -518,7 +518,7 @@ public static class UnitMovementSelfTest
         for (int i = 0; i < ids.Length; i++)
         {
             Vector3 position = units.Position[ids[i].Index];
-            Vector2 offset = new(position.X, position.Y) - center;
+            Vector2 offset = new Vector2(position.X, position.Y) - center;
             float along = Vector2.Dot(offset, forward);
             float across = Vector2.Dot(offset, side);
             minForward = MathF.Min(minForward, along);
