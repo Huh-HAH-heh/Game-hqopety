@@ -166,19 +166,6 @@ public sealed class UnitMovementSystem
                 moveSpeed *= 0.45f;
 
             UnitId movementUnitId = units.GetId(unit);
-            if (squadMovement != null &&
-                squadMovement.TryGetAStarFormationSpeedLimit(
-                    units, movementUnitId, ai, out float formationSpeedLimit))
-            {
-                moveSpeed = MathF.Min(moveSpeed, formationSpeedLimit);
-            }
-            if (squadMovement != null &&
-                squadMovement.TryGetFormationSpeedLimit(
-                    units, movementUnitId, ai, moveSpeed, out float followerSpeedLimit))
-            {
-                moveSpeed = MathF.Min(moveSpeed, followerSpeedLimit);
-            }
-
             bool hasCollectiveMove = squadMovement != null &&
                 squadMovement.IsExecutingCollectiveMove(
                     units, movementUnitId, ai);
