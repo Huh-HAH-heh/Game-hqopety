@@ -42,6 +42,8 @@ public sealed class UnitNavigationSystem
     private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
     private const float RouteReuseCostPerUnit = 0.10f;
+    private const float HotPathCostPenalty = 0.18f;
+    private const float ShortcutCostTolerance = 0.05f;
     private const int MovingGoalTolerance = 4;
     private const float WaypointRadius = 0.12f;
     private const int MaxWaypointShortcutCells = 16;
@@ -133,6 +135,25 @@ public sealed class UnitNavigationSystem
                     ? routeCount - 1
                     : (int)MathF.Round(i * (routeCount - 1f) / (count - 1f));
             int cell = path[start + sourceOffset];
+            destination[i] = new Vector2(
+                cell % _width + 0.5f,
+                cell / _width + 0.5f);
+        }
+
+        return count;
+    }
+
+    public int CopyWaypointPoints(int unitIndex, Span<Vector2> destination)
+    {
+        if ((uint)unitIndex >= (uint)_waypoints.Length || _width <= 0)
+            return 0;
+
+        int[] waypoints = _waypoints[unitIndex] ?? Array.Empty<int>();
+        int start = Math.Clamp(_waypointCursor[unitIndex], 0, waypoints.Length);
+        int count = Math.Min(destination.Length, waypoints.Length - start);
+        for (int i = 0; i < count; i++)
+        {
+            int cell = waypoints[start + i];
             destination[i] = new Vector2(
                 cell % _width + 0.5f,
                 cell / _width + 0.5f);
@@ -1106,7 +1127,8 @@ public sealed class UnitNavigationSystem
             float lateralDrift = MathF.Abs(
                 offsetX * goalSide.X + offsetY * goalSide.Y);
             float hotPathScore =
-                forwardProgress - lateralDrift * 0.35f - _gScore[current] * 0.06f;
+                forwardProgress - lateralDrift * 0.35f -
+                _gScore[current] * HotPathCostPenalty;
             if (hotPathScore > bestHotPathScore + 0.0001f)
             {
                 bestHotPathScore = hotPathScore;
@@ -1234,11 +1256,13 @@ public sealed class UnitNavigationSystem
         int lastCandidate = Math.Min(path.Length - 1, MaxWaypointShortcutCells);
         for (int candidate = lastCandidate; candidate >= 1; candidate--)
         {
-            if (!HasClearStraightRoute(
+            if (!CanShortcutPreservingPathCost(
                     worldMap,
                     startX,
                     startY,
-                    path[candidate],
+                    path,
+                    0,
+                    candidate,
                     footprintRadiusX,
                     footprintRadiusY))
             {
@@ -1264,10 +1288,13 @@ public sealed class UnitNavigationSystem
 
             for (int candidate = lastCandidate; candidate > anchor + 1; candidate--)
             {
-                if (!CanTravelBetweenCells(
+                if (!CanShortcutPreservingPathCost(
                         worldMap,
-                        path[anchor],
-                        path[candidate],
+                        path[anchor] % _width + 0.5f,
+                        path[anchor] / _width + 0.5f,
+                        path,
+                        anchor,
+                        candidate,
                         footprintRadiusX,
                         footprintRadiusY))
                 {
@@ -1341,6 +1368,64 @@ public sealed class UnitNavigationSystem
             footprintRadiusY);
     }
 
+    private bool CanShortcutPreservingPathCost(
+        WorldMap worldMap,
+        float startX,
+        float startY,
+        int[] path,
+        int anchor,
+        int candidate,
+        int footprintRadiusX,
+        int footprintRadiusY)
+    {
+        if (candidate <= anchor ||
+            !CanTravelStraightToPoint(
+                worldMap,
+                startX,
+                startY,
+                ClampCell((int)MathF.Floor(startX), _width),
+                ClampCell((int)MathF.Floor(startY), _height),
+                path[candidate] % _width,
+                path[candidate] / _width,
+                path[candidate] % _width + 0.5f,
+                path[candidate] / _width + 0.5f,
+                footprintRadiusX,
+                footprintRadiusY,
+                out float shortcutCost))
+        {
+            return false;
+        }
+
+        float originalPathCost = 0f;
+        for (int i = anchor + 1; i <= candidate; i++)
+        {
+            int from = path[i - 1];
+            int to = path[i];
+            int dx = to % _width - from % _width;
+            int dy = to / _width - from / _width;
+            originalPathCost += GetStepCost(from, to, dx, dy);
+        }
+
+        // String-pulling may remove bends, but it must not replace the A* route
+        // with a geometrically shorter segment that crosses more expensive cells.
+        return shortcutCost <= originalPathCost + ShortcutCostTolerance;
+    }
+
+    private float GetStepCost(int fromCell, int toCell, int dx, int dy)
+    {
+        float heightDifference = MathF.Abs(
+            _navigationHeights[fromCell] - _navigationHeights[toCell]);
+        int priorRouteCount = _routeTraffic[toCell];
+        float routeReuseCost = Math.Min(
+            priorRouteCount,
+            RouteCohortSize - 1) * RouteReuseCostPerUnit;
+
+        return (dx != 0 && dy != 0 ? DiagonalCost : 1f) +
+            heightDifference * HeightCost +
+            _navigationEdgeCost[toCell] +
+            routeReuseCost;
+    }
+
     private bool CanTravelStraight(
         WorldMap worldMap,
         float startX,
@@ -1383,8 +1468,26 @@ public sealed class UnitNavigationSystem
         float endX,
         float endY,
         int footprintRadiusX,
-        int footprintRadiusY)
+        int footprintRadiusY) =>
+        CanTravelStraightToPoint(
+            worldMap, startX, startY, x, y, targetX, targetY,
+            endX, endY, footprintRadiusX, footprintRadiusY, out _);
+
+    private bool CanTravelStraightToPoint(
+        WorldMap worldMap,
+        float startX,
+        float startY,
+        int x,
+        int y,
+        int targetX,
+        int targetY,
+        float endX,
+        float endY,
+        int footprintRadiusX,
+        int footprintRadiusY,
+        out float travelCost)
     {
+        travelCost = 0f;
         if (!IsInside(x, y) ||
             !IsInside(targetX, targetY) ||
             !IsFootprintPassable(worldMap, x, y, footprintRadiusX, footprintRadiusY) ||
@@ -1460,6 +1563,10 @@ public sealed class UnitNavigationSystem
             {
                 return false;
             }
+
+            int fromCell = x + y * _width;
+            int toCell = nextX + nextY * _width;
+            travelCost += GetStepCost(fromCell, toCell, moveX, moveY);
 
             x = nextX;
             y = nextY;
