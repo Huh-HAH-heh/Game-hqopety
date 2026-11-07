@@ -65,6 +65,42 @@ public static class UnitIntentUtilitySelfTest
             decision.SuppressiveFireScore == 0f;
     }
 
+    public static bool FriendlyFireRiskReducesButDoesNotForbidEngagement()
+    {
+        UnitIntentUtilityContext safeContext = new()
+        {
+            IsAlive = true,
+            HasVisibleTarget = true,
+            HasRangedWeapon = true,
+            HealthRatio = 0.95f,
+            EnergyRatio = 1f,
+            HydrationRatio = 1f,
+            ShootingSkill = 0.85f,
+            SuppressionResistance = 0.8f,
+            Caution = 0.6f,
+            Aggression = 0.65f,
+            Discipline = 0.75f,
+            CombatUtility = 0.72f
+        };
+
+        UnitIntentUtilityContext blockedLaneContext = safeContext with
+        {
+            FriendlyFireRisk = 1f
+        };
+
+        UnitIntentUtilityBreakdown safeDecision = UnitIntentUtilityScorer.Select(
+            in safeContext,
+            BehaviacUnitIntent.None,
+            0f);
+        UnitIntentUtilityBreakdown riskyDecision = UnitIntentUtilityScorer.Select(
+            in blockedLaneContext,
+            BehaviacUnitIntent.None,
+            0f);
+
+        return riskyDecision.EngageScore < safeDecision.EngageScore &&
+               riskyDecision.EngageScore > 0f;
+    }
+
     public static bool SuppressedPawnCanChooseAvailableCover()
     {
         UnitIntentUtilityContext context = new()
