@@ -149,6 +149,7 @@ public static class UnitIntentUtilityScorer
                 !context.IsSuppressed &&
                 !context.IsPanicked &&
                 !context.IsLowHealth &&
+                !context.IsInImmediateDanger &&
                 context.CombatUtility <= balance.VisibleCombatFarScore)
             {
                 float longRangeBias = 1f - Clamp01(
