@@ -13,6 +13,64 @@ namespace Core.AI.Perception;
 /// </summary>
 public static class TacticalHearingSelfTest
 {
+    public static bool CoalescesGunshotsInSpaceAndTime()
+    {
+        var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
+        var simulation = new UnitSimulation(4, 64) { VisionEnabled = false };
+        UnitId shooter = simulation.Spawn(
+            UnitType.Colonist, new Vector3(3.5f, 4.5f, 0.1f), factionTag: 1);
+        UnitId listener = simulation.Spawn(
+            UnitType.Colonist, new Vector3(12.5f, 8.5f, 0.1f), factionTag: 2);
+
+        for (int i = 0; i < 8; i++)
+        {
+            simulation.HearingSystem.EmitGunshot(
+                shooter, new Vector3(3.5f + i * 0.15f, 4.5f, 0.1f), 1);
+        }
+
+        // A distinct spatial cluster stays distinct even in the same 50 ms window.
+        for (int i = 0; i < 2; i++)
+        {
+            simulation.HearingSystem.EmitGunshot(
+                shooter, new Vector3(45.5f + i * 0.1f, 4.5f, 0.1f), 1);
+        }
+
+        simulation.Update(worldMap, 0.025f);
+        if (simulation.HearingSystem.PendingAcousticBatchCount != 2 ||
+            simulation.HearingSystem.LastGunshotEventsQueued != 0 ||
+            simulation.HearingSystem.HasInvestigableContact(listener.Index))
+            return false;
+
+        simulation.Update(worldMap, 0.025f);
+
+        return simulation.HearingSystem.LastGunshotEventsQueued == 10 &&
+               simulation.HearingSystem.LastGunshotBatchesQueued == 2 &&
+               simulation.HearingSystem.LastGunshotsMerged == 8 &&
+               simulation.HearingSystem.PendingAcousticBatchCount == 0 &&
+               simulation.HearingSystem.TryGetBestInvestigableContact(
+                   listener.Index, out TacticalContact contact) &&
+               contact.LastStimulusType == TacticalStimulusType.Gunshot &&
+               !contact.SubjectUnit.HasValue;
+    }
+
+    public static bool UrgentDangerBypassesAcousticBatchWindow()
+    {
+        var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);
+        var simulation = new UnitSimulation(4, 64) { VisionEnabled = false };
+        UnitId source = simulation.Spawn(
+            UnitType.Colonist, new Vector3(10.5f, 10.5f, 0.1f), factionTag: 1);
+        UnitId listener = simulation.Spawn(
+            UnitType.Colonist, new Vector3(12.5f, 10.5f, 0.1f), factionTag: 2);
+
+        simulation.HearingSystem.EmitDanger(
+            source, 1, TacticalStimulusType.NearMiss,
+            new Vector3(12f, 10.5f, 0.1f), intensity: 1f, audibleRange: 40f);
+        simulation.Update(worldMap, 0.025f);
+
+        return simulation.HearingSystem.PendingAcousticBatchCount == 0 &&
+               simulation.HearingSystem.HasImmediateDangerContact(listener.Index);
+    }
+
     public static bool Run()
     {
         var worldMap = new WorldMap(regionsX: 1, regionsY: 1, layerCount: 64);

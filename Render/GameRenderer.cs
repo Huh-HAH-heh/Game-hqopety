@@ -274,7 +274,7 @@ public sealed class GameRenderer
         _showVisionDebug = false;
         _showHearingDebug = false;
 
-        // Show the window before constructing the 1,600-unit combat scene.
+        // Show the window before constructing the combat scene (up to 3,224 units).
         // The simulation thread builds the scene after the first frame.
         _terrainStressMode = false;
         _massCombatMode = true;

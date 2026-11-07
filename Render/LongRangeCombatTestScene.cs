@@ -9,8 +9,8 @@ namespace RimClone.Render;
 
 public sealed class LongRangeCombatTestScene
 {
-    // Starts with 400 units per faction; the two isolated squads use the same ranged-combat loop. F8 cycles 80/400/800 per side.
-    private const int InitialUnitsPerFaction = 400;
+    // Starts with 800 units per faction. F8 cycles 160/800/1600 per side (up to 3,224 total including the isolated melee group).
+    private const int InitialUnitsPerFaction = 800;
     private const bool EnableScriptedFallbackVolleys = false;
     private const int Columns = 40;
     private const float FormationSpacing = 2.5f;
@@ -94,9 +94,9 @@ public sealed class LongRangeCombatTestScene
     {
         int nextUnitsPerFaction = _unitsPerFaction switch
         {
-            80 => 400,
-            400 => 800,
-            _ => 80
+            160 => 800,
+            800 => 1600,
+            _ => 160
         };
 
         Stop(simulation);
