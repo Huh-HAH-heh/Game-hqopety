@@ -14,20 +14,15 @@ public enum InfantryFormationType : byte
     None = 6
 }
 
+/// <summary>Column movement keeps the historical independent A* destination slots.</summary>
 public enum ColumnMovementVariant : byte
 {
     HistoricalSlots = 0
 }
 
-public static class ColumnMovementVariantInfo
-{
-    public static string GetName(ColumnMovementVariant variant) =>
-        "Колонна · исторические слоты";
-}
-
 /// <summary>
-/// Names squad movement profiles. The column comparison can use independent
-/// destination slots, weak centre-relative steering, a loose corridor or a linked trail.
+/// Movement labels and legacy offset helpers. Active move commands expose only
+/// independent travel, a loose crowd, and the historical A* column slots.
 /// </summary>
 public static class InfantryFormation
 {
@@ -35,7 +30,7 @@ public static class InfantryFormation
 
     public static string GetName(InfantryFormationType formation) => formation switch
     {
-        InfantryFormationType.Free => "Группа",
+        InfantryFormationType.Free => "Толпа",
         InfantryFormationType.Line => "Линия",
         InfantryFormationType.Column => "Колонна",
         InfantryFormationType.Wedge => "Клин",
