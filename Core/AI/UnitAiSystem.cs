@@ -2149,11 +2149,11 @@ public sealed class UnitAiSystem
         float thinkDelta)
     {
         _nearestVisibleEnemyByUnit[unit] = -1;
-        _hasSuppressionCoverByUnit[unit] = false;
 
         if (health.OverallMaxHitPoints[unit] <= 0f ||
             health.OverallHitPoints[unit] <= 0f)
         {
+            _hasSuppressionCoverByUnit[unit] = false;
             return;
         }
 
@@ -2162,7 +2162,10 @@ public sealed class UnitAiSystem
 
         UnitSuppressionState state = suppression.GetState(unit);
         if (Store.HasGoal[unit] && Store.State[unit] == UnitAiState.SeekCover)
+        {
+            _hasSuppressionCoverByUnit[unit] = false;
             return;
+        }
 
         int visibleEnemy = _nearestVisibleEnemyByUnit[unit];
         bool isPanicked = state == UnitSuppressionState.Panicked;
@@ -2172,7 +2175,10 @@ public sealed class UnitAiSystem
             visibleEnemy >= 0;
         bool suppressedNeedsCover = state == UnitSuppressionState.Suppressed;
         if (!isPanicked && !lowHealthHoldNeedsCover && !suppressedNeedsCover)
+        {
+            _hasSuppressionCoverByUnit[unit] = false;
             return;
+        }
 
         bool useVisibleEnemyForCover =
             visibleEnemy >= 0 &&
@@ -2188,7 +2194,7 @@ public sealed class UnitAiSystem
         // The sequential phase subtracts thinkDelta before checking the timer.
         // Precompute cover only when that same check would request a new search.
         if (Store.SuppressionCoverRetry[unit] > thinkDelta && !threatChanged)
-            return;
+            return; // Keep the cached cover candidate until the retry is due.
 
         Vector3 cover;
         AiBalanceProfile balance = GetBalanceProfile(unit, units.FactionTag[unit]);
@@ -2203,12 +2209,17 @@ public sealed class UnitAiSystem
         {
             _suppressionCoverByUnit[unit] = cover;
             _hasSuppressionCoverByUnit[unit] = true;
-        }
-        else if (!isPanicked)
-        {
-            // A failed suppressed/panicked cover search must not redo its LOS
-            // scan every AI tick; retry after the existing short cooldown.
             Store.SuppressionCoverRetry[unit] = 1f;
+        }
+        else
+        {
+            _hasSuppressionCoverByUnit[unit] = false;
+            if (!isPanicked)
+            {
+                // A failed suppressed cover search must not redo its LOS scan
+                // every AI tick; retry after the existing short cooldown.
+                Store.SuppressionCoverRetry[unit] = 1f;
+            }
         }
     }
 
