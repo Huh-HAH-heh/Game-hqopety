@@ -1619,13 +1619,24 @@ public sealed class UnitAiSystem
         if (!hasAttackOrder && Store.HasTarget[unit])
         {
             UnitId currentTarget = Store.Target[unit];
-            if (ShouldKeepCurrentVisibleTarget(
-                    units, health, vision, inventory, unit, currentTarget, visibleTargetIndex))
+            bool keepCurrentTarget = ShouldKeepCurrentVisibleTarget(
+                units, health, vision, inventory, unit, currentTarget, visibleTargetIndex);
+            if (keepCurrentTarget &&
+                visibleTargetIndex >= 0 &&
+                visibleTargetIndex != currentTarget.Index &&
+                HasRangedWeapon(units, inventory, unit))
             {
-                // The same close-contact override used by target memory also feeds
-                // the utility scorer, so it cannot plan around a distant target this tick.
-                visibleTargetIndex = currentTarget.Index;
+                float currentRisk = EvaluateFriendlyFireRisk(
+                    units, health, vision, unit, currentTarget.Index);
+                float alternativeRisk = EvaluateFriendlyFireRisk(
+                    units, health, vision, unit, visibleTargetIndex);
+                // Give up target stickiness when another visible hostile has
+                // a meaningfully clearer firing lane.
+                keepCurrentTarget = alternativeRisk + 0.18f >= currentRisk;
             }
+
+            if (keepCurrentTarget)
+                visibleTargetIndex = currentTarget.Index;
         }
 
         bool hasVisibleTarget = visibleTargetIndex >= 0;
@@ -2421,14 +2432,14 @@ public sealed class UnitAiSystem
                 delta.X * delta.X +
                 delta.Y * delta.Y;
 
-            if (distanceSquared >=
-                bestDistanceSquared)
-            {
+            float friendlyFireRisk = EvaluateFriendlyFireRisk(
+                units, health, vision, observer, target);
+            float targetScore = distanceSquared *
+                (1f + friendlyFireRisk * 0.8f);
+            if (targetScore >= bestDistanceSquared)
                 continue;
-            }
 
-            bestDistanceSquared =
-                distanceSquared;
+            bestDistanceSquared = targetScore;
 
             bestTarget =
                 target;
