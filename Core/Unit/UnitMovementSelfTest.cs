@@ -100,7 +100,7 @@ public static class UnitMovementSelfTest
         UnitSimulation simulation = new UnitSimulation(4, 64);
         UnitId id = simulation.Spawn(
             UnitType.Colonist,
-            new Vector3(wallX - 0.5f, corridorY + 0.5f, 1f),
+            new Vector3(wallX - 0.25f, corridorY + 0.5f, 1f),
             Vector3.UnitX,
             Vector3.UnitX,
             factionTag: 1);
