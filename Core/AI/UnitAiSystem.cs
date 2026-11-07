@@ -1845,6 +1845,10 @@ public sealed class UnitAiSystem
             ? _skills.GetLevel(unit, UnitSkill.Melee) / (float)UnitSkillStore.MaxLevel
             : 0.5f;
 
+        float friendlyFireRisk = hasVisibleTarget && hasRangedWeapon
+            ? EvaluateFriendlyFireRisk(units, health, vision, unit, visibleTargetIndex)
+            : 0f;
+
         var utilityContext = new UnitIntentUtilityContext
         {
             IsAlive = isAlive,
@@ -1882,6 +1886,7 @@ public sealed class UnitAiSystem
             Alertness = suppression.GetAlertness(unit),
             MoveOrderUtility = moveOrderUtility,
             CombatUtility = combatUtility,
+            FriendlyFireRisk = friendlyFireRisk,
             CoverUtility = coverUtility,
             FlankUtility = flankUtility,
             ProneCombatUtility = proneUtility,
@@ -1905,6 +1910,63 @@ public sealed class UnitAiSystem
         }
 
         return utilityDecision.SuggestedIntent;
+    }
+
+    private static float EvaluateFriendlyFireRisk(
+        UnitStore units,
+        UnitHealthStore health,
+        VisionSystem vision,
+        int shooter,
+        int target)
+    {
+        if (shooter == target)
+            return 0f;
+
+        ushort faction = units.FactionTag[shooter];
+        Vector3 start = vision.GetEyePosition(units, shooter);
+        Vector3 end = vision.GetEyePosition(units, target);
+        Vector3 segment = end - start;
+        float segmentLengthSquared = segment.LengthSquared();
+        if (segmentLengthSquared <= 0.01f)
+            return 0f;
+
+        float risk = 0f;
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int ally = active[i];
+            if (ally == shooter || ally == target ||
+                units.FactionTag[ally] != faction ||
+                health.OverallHitPoints[ally] <= 0f ||
+                units.Posture[ally] == UnitPosture.Injured)
+            {
+                continue;
+            }
+
+            Vector3 allyEye = vision.GetEyePosition(units, ally);
+            float along = Vector3.Dot(allyEye - start, segment) /
+                segmentLengthSquared;
+            if (along <= 0.04f || along >= 0.96f)
+                continue;
+
+            Vector3 closestPoint = start + segment * along;
+            float distance = Vector3.Distance(allyEye, closestPoint);
+            float safetyRadius = MathF.Max(
+                0.18f,
+                units.Radius[ally] * 0.8f + 0.12f);
+            if (distance >= safetyRadius)
+                continue;
+
+            float localRisk = Math.Clamp(
+                1f - distance / safetyRadius,
+                0f,
+                1f);
+            risk = 1f - (1f - risk) * (1f - localRisk);
+            if (risk >= 0.98f)
+                return 1f;
+        }
+
+        return Math.Clamp(risk, 0f, 1f);
     }
 
     private static bool TryFindFlankWaypoint(
