@@ -1454,6 +1454,42 @@ public sealed class GameRenderer
         }
     }
 
+    private ContextMenuMovementMode GetSelectionMovementMode(IEnumerable<UnitId> memberIds)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        bool[] holdPosition = ai.AutonomousMovementDisabled;
+        bool hasLivingMember = false;
+        bool selectedHoldPosition = false;
+
+        foreach (UnitId id in memberIds)
+        {
+            if (!units.TryGetIndex(id, out int index) ||
+                _unitSimulation.Health.OverallHitPoints[index] <= 0f)
+            {
+                continue;
+            }
+
+            bool memberHoldsPosition = holdPosition[index];
+            if (!hasLivingMember)
+            {
+                selectedHoldPosition = memberHoldsPosition;
+                hasLivingMember = true;
+            }
+            else if (selectedHoldPosition != memberHoldsPosition)
+            {
+                return ContextMenuMovementMode.Mixed;
+            }
+        }
+
+        if (!hasLivingMember)
+            return ContextMenuMovementMode.None;
+
+        return selectedHoldPosition
+            ? ContextMenuMovementMode.HoldPosition
+            : ContextMenuMovementMode.MoveAtWill;
+    }
+
     private bool AreAllAutonomousMovementDisabled(IEnumerable<UnitId> memberIds)
     {
         bool found = false;
@@ -3411,6 +3447,8 @@ public sealed class GameRenderer
                         }
                         bool canHoldSelected = selectedIds.Length > 0;
                         bool canConfigureWeapons = clickedSelectedUnit && selectedIds.Length > 0;
+                        ContextMenuMovementMode movementMode =
+                            GetSelectionMovementMode(selectedIds);
 
                         float destinationX = Math.Clamp(
                             worldPosition.X / TerrainTilePixelSize,
@@ -3481,7 +3519,8 @@ public sealed class GameRenderer
                             canAttackTarget,
                             canMoveSelected,
                             canHoldSelected,
-                            canConfigureWeapons);
+                            canConfigureWeapons,
+                            movementMode);
 
                         if (!_contextMenuOverlay.IsOpen)
                             _contextMenuUnit = default;
