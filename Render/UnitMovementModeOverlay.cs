@@ -58,8 +58,6 @@ public sealed class UnitMovementModeOverlay : IDisposable
 
     public bool HandleMousePressed(
         Vector2i position,
-        uint windowWidth,
-        uint windowHeight,
         bool hasSelection,
         Action toggle)
     {
