@@ -681,7 +681,7 @@ public sealed class SquadMovementStore
                     squad.EnvelopeWidth = MathF.Max(0.7f, squad.Spacing * 0.75f) *
                         contactScale;
                     squad.EnvelopeDepth = MathF.Max(
-                        baseRadius * 1.2f,
+                        squad.Spacing * 1.2f,
                         effectiveCoreCount * squad.Spacing * 0.72f) *
                         (inContact ? 1.12f : 1f);
                     break;
