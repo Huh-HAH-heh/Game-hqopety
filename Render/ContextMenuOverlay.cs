@@ -18,9 +18,8 @@ public enum ContextMenuActionType
     SendSquad,
     AttackTarget,
     MoveSelectedHere,
-    SetMovementModeIndividual,
-    SetMovementModeCrowd,
-    SetMovementModeColumn,
+    MoveSelectedHereAsCrowd,
+    MoveSelectedHereAsColumn,
     ToggleKeepFormationInCombat,
     ToggleAutonomousMovement,
     HoldSelected,
@@ -177,27 +176,17 @@ public sealed class ContextMenuOverlay : IDisposable
             AddAction(ContextMenuActionType.CycleAmmunition, "Следующий тип боеприпаса");
         }
 
-        if (canConfigureFormation)
-        {
-            AddFormationAction(
-                ContextMenuActionType.SetMovementModeIndividual,
-                "Движение · индивидуально",
-                selectedFormationLabel);
-            AddFormationAction(
-                ContextMenuActionType.SetMovementModeCrowd,
-                "Движение · толпой",
-                selectedFormationLabel);
-            AddFormationAction(
-                ContextMenuActionType.SetMovementModeColumn,
-                "Движение · колонной",
-                selectedFormationLabel);
-        }
-
         if (canAttackTarget)
             AddAction(ContextMenuActionType.AttackTarget, "Атаковать цель");
 
         if (canMoveSelected)
-            AddAction(ContextMenuActionType.MoveSelectedHere, "Переместить выделенных сюда");
+            AddAction(ContextMenuActionType.MoveSelectedHere, "Переместить по отдельности");
+
+        if (canMoveSelected && hasMultipleUnits)
+        {
+            AddAction(ContextMenuActionType.MoveSelectedHereAsCrowd, "Переместить толпой");
+            AddAction(ContextMenuActionType.MoveSelectedHereAsColumn, "Переместить колонной");
+        }
 
         if (canSendSquad)
             AddAction(ContextMenuActionType.SendSquad, "Отправить отряд сюда");
