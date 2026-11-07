@@ -716,7 +716,8 @@ public sealed class UnitSimulation
         Vector3 destination,
         InfantryFormationType formation,
         bool keepFormationInCombat,
-        WorldMap worldMap)
+        WorldMap worldMap,
+        ColumnMovementVariant columnVariant = ColumnMovementVariant.LinkedTrail)
     {
         int groupId = _nextAStarMovementGroupId++;
         if (_nextAStarMovementGroupId <= 0)
@@ -732,7 +733,8 @@ public sealed class UnitSimulation
             destination,
             formation,
             keepFormationInCombat,
-            worldMap);
+            worldMap,
+            columnVariant);
         if (issued)
         {
             for (int i = 0; i < members.Count; i++)
