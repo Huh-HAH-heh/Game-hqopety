@@ -36,6 +36,9 @@ public sealed class UnitNavigationSystem
     private const float MaxRouteChunkCost = 28f;
     private const float RouteRefreshIntervalSeconds = 5f;
     private const float RouteRefreshRetrySeconds = 0.5f;
+    private const float LocalTetherRefreshIntervalSeconds = 0.18f;
+    private const float LocalTetherRefreshDistance = 1.2f;
+    private const float LocalTetherMaxLaneOffset = 0.36f;
     private const float DirectFallbackDistance = 3f;
     private const float HotPathLookAheadDistance = 5f;
     private const float HotPathMinimumProgress = 0.45f;
@@ -48,7 +51,7 @@ public sealed class UnitNavigationSystem
     private const float ShortcutCostTolerance = 0.05f;
     private const int MovingGoalTolerance = 4;
     private const float WaypointRadius = 0.12f;
-    private const int MaxWaypointShortcutCells = 16;
+    private const int MaxWaypointShortcutCells = 24;
 
     private static readonly int[] DirectionX =
         { 1, -1, 0, 0, 1, 1, -1, -1 };
@@ -83,6 +86,14 @@ public sealed class UnitNavigationSystem
     private bool[] _routeTrafficRegistered = Array.Empty<bool>();
     private bool[] _routeIsPartial = Array.Empty<bool>();
     private float[] _routeRefreshAtSeconds = Array.Empty<float>();
+    private Vector2[] _localTetherPoints = Array.Empty<Vector2>();
+    private Vector2[] _localTetherGoals = Array.Empty<Vector2>();
+    private UnitId[] _localTetherOwners = Array.Empty<UnitId>();
+    private int[] _localTetherPathCursors = Array.Empty<int>();
+    private int[] _localTetherWaypointCursors = Array.Empty<int>();
+    private long[] _localTetherTerrainVersions = Array.Empty<long>();
+    private float[] _localTetherRefreshAtSeconds = Array.Empty<float>();
+    private bool[] _localTetherValid = Array.Empty<bool>();
 
     private int[] _routeTraffic = Array.Empty<int>();
     private long _routeTrafficTerrainVersion = long.MinValue;
@@ -321,7 +332,7 @@ public sealed class UnitNavigationSystem
                 out bool obstacleAhead) &&
             (routeInvalid || !obstacleAhead))
         {
-            ClearRoute(unitIndex);
+            ClearRoute(unitIndex, preserveLocalTether: true);
             _lastStatuses[unitIndex] = UnitNavigationStatus.FollowingHotPath;
             waypoint = hotPathWaypoint;
             return true;
@@ -377,6 +388,7 @@ public sealed class UnitNavigationSystem
                         out int[] smoothedWaypoints,
                         out int[] waypointIndices);
 
+                    InvalidateLocalTether(unitIndex);
                     _paths[unitIndex] = path;
                     _pathCursor[unitIndex] = 0;
                     _waypoints[unitIndex] = smoothedWaypoints;
@@ -424,6 +436,7 @@ public sealed class UnitNavigationSystem
                 else
                 {
                     _lastStatuses[unitIndex] = _lastBuildFailureStatus;
+                    InvalidateLocalTether(unitIndex);
                     _routeIsPartial[unitIndex] = false;
                     _paths[unitIndex] = Array.Empty<int>();
                     _pathCursor[unitIndex] = 0;
@@ -629,7 +642,17 @@ public sealed class UnitNavigationSystem
             if (bestX < 0)
                 continue;
 
-            goal = new Vector2(bestX + 0.5f, bestY + 0.5f);
+            float requestedOffsetX = requested.X - MathF.Floor(requested.X);
+            float requestedOffsetY = requested.Y - MathF.Floor(requested.Y);
+            float resolvedOffsetX = bestX == centerX
+                ? requested.X - bestX
+                : requestedOffsetX;
+            float resolvedOffsetY = bestY == centerY
+                ? requested.Y - bestY
+                : requestedOffsetY;
+            goal = new Vector2(
+                bestX + Math.Clamp(resolvedOffsetX, 0.12f, 0.88f),
+                bestY + Math.Clamp(resolvedOffsetY, 0.12f, 0.88f));
             if (reservedFootprintCells != null)
             {
                 for (int offsetY = -radiusY; offsetY <= radiusY; offsetY++)
@@ -854,9 +877,38 @@ public sealed class UnitNavigationSystem
 
         distanceToGoal = walked;
 
-        float lookAheadDistance = Math.Clamp(1.75f + MathF.Max(0f, currentSpeed) * 0.7f, 2f, 5f);
         int footprintX = GetFootprintRadius(units.Width[unitIndex]);
         int footprintY = GetFootprintRadius(units.Length[unitIndex]);
+        UnitId owner = units.GetId(unitIndex);
+        Vector2 cachedOffset = _localTetherPoints[unitIndex] - position2;
+        bool cachedTetherMatches =
+            _localTetherValid[unitIndex] &&
+            _localTetherOwners[unitIndex] == owner &&
+            _localTetherTerrainVersions[unitIndex] == worldMap.TerrainVersion &&
+            Vector2.DistanceSquared(_localTetherGoals[unitIndex], finalTarget) <= 0.0004f &&
+            _localTetherPathCursors[unitIndex] == _pathCursor[unitIndex] &&
+            _localTetherWaypointCursors[unitIndex] == cursor;
+        bool cachedTetherAhead =
+            currentSpeed <= 0.05f ||
+            Vector2.Dot(cachedOffset, new Vector2(
+                units.Velocity[unitIndex].X,
+                units.Velocity[unitIndex].Y)) >= -0.05f;
+        if (cachedTetherMatches &&
+            _navigationTimeSeconds < _localTetherRefreshAtSeconds[unitIndex] &&
+            cachedOffset.LengthSquared() >
+                LocalTetherRefreshDistance * LocalTetherRefreshDistance &&
+            cachedTetherAhead &&
+            HasClearStraightRouteToPoint(
+                worldMap, position2, _localTetherPoints[unitIndex], footprintX, footprintY))
+        {
+            waypoint = _localTetherPoints[unitIndex];
+            return true;
+        }
+
+        float lookAheadDistance = Math.Clamp(
+            2.6f + MathF.Max(0f, currentSpeed) * 0.48f,
+            2.6f,
+            4.8f);
         for (int attempt = 0; attempt < 6; attempt++)
         {
             Vector2 candidate = GetPointAlongRoute(
@@ -864,6 +916,18 @@ public sealed class UnitNavigationSystem
             if (HasClearStraightRouteToPoint(
                     worldMap, position2, candidate, footprintX, footprintY))
             {
+                candidate = OffsetLocalTetherInsideCorridor(
+                    worldMap, unitIndex, position2, candidate, footprintX, footprintY);
+
+                _localTetherPoints[unitIndex] = candidate;
+                _localTetherGoals[unitIndex] = finalTarget;
+                _localTetherOwners[unitIndex] = owner;
+                _localTetherPathCursors[unitIndex] = _pathCursor[unitIndex];
+                _localTetherWaypointCursors[unitIndex] = cursor;
+                _localTetherTerrainVersions[unitIndex] = worldMap.TerrainVersion;
+                _localTetherRefreshAtSeconds[unitIndex] =
+                    _navigationTimeSeconds + LocalTetherRefreshIntervalSeconds;
+                _localTetherValid[unitIndex] = true;
                 waypoint = candidate;
                 return true;
             }
@@ -873,8 +937,54 @@ public sealed class UnitNavigationSystem
 
         // The current waypoint is the conservative fallback. It is part of the
         // already validated route and keeps the controller outside blocked corners.
+        InvalidateLocalTether(unitIndex);
         waypoint = currentWaypoint;
         return true;
+    }
+
+    private Vector2 OffsetLocalTetherInsideCorridor(
+        WorldMap worldMap,
+        int unitIndex,
+        Vector2 start,
+        Vector2 centerlinePoint,
+        int footprintX,
+        int footprintY)
+    {
+        Vector2 direction = centerlinePoint - start;
+        float lengthSquared = direction.LengthSquared();
+        if (lengthSquared <= 0.01f)
+            return centerlinePoint;
+
+        direction /= MathF.Sqrt(lengthSquared);
+        Vector2 side = new(-direction.Y, direction.X);
+        float laneOffset = GetStableLaneOffset(unitIndex);
+        for (int attempt = 0; attempt < 5 && MathF.Abs(laneOffset) >= 0.035f; attempt++)
+        {
+            Vector2 candidate = centerlinePoint + side * laneOffset;
+            if (IsWeightedStraightRouteAcceptable(
+                    worldMap, start, candidate, footprintX, footprintY))
+            {
+                return candidate;
+            }
+
+            laneOffset *= 0.55f;
+        }
+
+        return centerlinePoint;
+    }
+
+    private static float GetStableLaneOffset(int unitIndex)
+    {
+        // Golden-ratio spacing distributes nearby unit indices across the
+        // corridor without allocating per-unit random state or frame noise.
+        float phase = (unitIndex * 0.61803398875f) % 1f;
+        return (phase * 2f - 1f) * LocalTetherMaxLaneOffset;
+    }
+
+    private void InvalidateLocalTether(int unitIndex)
+    {
+        if ((uint)unitIndex < (uint)_localTetherValid.Length)
+            _localTetherValid[unitIndex] = false;
     }
 
     private Vector2 GetWaypointPosition(int cell) =>
@@ -1011,13 +1121,19 @@ public sealed class UnitNavigationSystem
             _routeTrafficRegistered[unitIndex] = false;
     }
 
-    public void ClearRoute(int unitIndex)
+    public void ClearRoute(int unitIndex) =>
+        ClearRoute(unitIndex, preserveLocalTether: false);
+
+    private void ClearRoute(int unitIndex, bool preserveLocalTether)
     {
         if ((uint)unitIndex >= (uint)_paths.Length ||
             _paths[unitIndex] == null)
         {
             return;
         }
+
+        if (!preserveLocalTether)
+            InvalidateLocalTether(unitIndex);
 
         RemoveRouteTraffic(unitIndex);
         _paths[unitIndex] = Array.Empty<int>();
@@ -1979,6 +2095,14 @@ public sealed class UnitNavigationSystem
         Array.Resize(ref _routeTrafficRegistered, newCapacity);
         Array.Resize(ref _routeIsPartial, newCapacity);
         Array.Resize(ref _routeRefreshAtSeconds, newCapacity);
+        Array.Resize(ref _localTetherPoints, newCapacity);
+        Array.Resize(ref _localTetherGoals, newCapacity);
+        Array.Resize(ref _localTetherOwners, newCapacity);
+        Array.Resize(ref _localTetherPathCursors, newCapacity);
+        Array.Resize(ref _localTetherWaypointCursors, newCapacity);
+        Array.Resize(ref _localTetherTerrainVersions, newCapacity);
+        Array.Resize(ref _localTetherRefreshAtSeconds, newCapacity);
+        Array.Resize(ref _localTetherValid, newCapacity);
 
         for (int i = 0; i < newCapacity; i++)
         {
@@ -2036,6 +2160,7 @@ public sealed class UnitNavigationSystem
         Array.Clear(_waypointPathIndices);
         Array.Clear(_waypointCursor);
         Array.Clear(_routeOwner);
+        Array.Clear(_localTetherValid);
         _searchStamp = 0;
     }
 
