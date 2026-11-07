@@ -714,6 +714,20 @@ public sealed class UnitSimulation
 
     private int _nextAStarMovementGroupId = 1_000_000;
 
+    // Compatibility entry point for existing navigation self-tests and callers.
+    public bool IssueAStarFormationMoveOrder(
+        IReadOnlyList<UnitId> members,
+        Vector3 destination,
+        InfantryFormationType formation,
+        bool keepFormationInCombat,
+        WorldMap worldMap) =>
+        IssueGroupMoveOrder(
+            members,
+            destination,
+            formation,
+            keepFormationInCombat,
+            worldMap);
+
     public bool IssueGroupMoveOrder(
         IReadOnlyList<UnitId> members,
         Vector3 destination,
