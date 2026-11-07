@@ -28,6 +28,9 @@ public enum UnitNavigationStatus : byte
 /// </summary>
 public sealed class UnitNavigationSystem
 {
+    public const int NavigationCellsPerMeter = 2;
+    public const float NavigationCellSize = 1f / NavigationCellsPerMeter;
+
     private const float MaxStepHeight = 1.5f;
     private const float HeightCost = 0.35f;
     private const int MinRouteBuildsPerUpdate = 2;
@@ -49,9 +52,9 @@ public sealed class UnitNavigationSystem
     private const float RouteReuseCostPerUnit = 0.10f;
     private const float HotPathCostPenalty = 0.18f;
     private const float ShortcutCostTolerance = 0.05f;
-    private const int MovingGoalTolerance = 4;
+    private const int MovingGoalTolerance = 8;
     private const float WaypointRadius = 0.12f;
-    private const int MaxWaypointShortcutCells = 16;
+    private const int MaxWaypointShortcutCells = 32;
 
     private static readonly int[] DirectionX =
         { 1, -1, 0, 0, 1, 1, -1, -1 };
@@ -148,9 +151,7 @@ public sealed class UnitNavigationSystem
                     ? routeCount - 1
                     : (int)MathF.Round(i * (routeCount - 1f) / (count - 1f));
             int cell = path[start + sourceOffset];
-            destination[i] = new Vector2(
-                cell % _width + 0.5f,
-                cell / _width + 0.5f);
+            destination[i] = GetWaypointPosition(cell);
         }
 
         return count;
@@ -167,9 +168,7 @@ public sealed class UnitNavigationSystem
         for (int i = 0; i < count; i++)
         {
             int cell = waypoints[start + i];
-            destination[i] = new Vector2(
-                cell % _width + 0.5f,
-                cell / _width + 0.5f);
+            destination[i] = GetWaypointPosition(cell);
         }
 
         return count;
@@ -237,10 +236,10 @@ public sealed class UnitNavigationSystem
         EnsureNavigationGrid(worldMap);
         _lastStatuses[unitIndex] = UnitNavigationStatus.Unknown;
 
-        int startX = ClampCell((int)MathF.Floor(position.X), _width);
-        int startY = ClampCell((int)MathF.Floor(position.Y), _height);
-        int targetX = ClampCell((int)MathF.Floor(target.X), _width);
-        int targetY = ClampCell((int)MathF.Floor(target.Y), _height);
+        int startX = WorldToNavigationCell(position.X, _width);
+        int startY = WorldToNavigationCell(position.Y, _height);
+        int targetX = WorldToNavigationCell(target.X, _width);
+        int targetY = WorldToNavigationCell(target.Y, _height);
         int startCell = startX + startY * _width;
         int footprintX = GetFootprintRadius(units.Width[unitIndex]);
         int footprintY = GetFootprintRadius(units.Length[unitIndex]);
@@ -583,12 +582,11 @@ public sealed class UnitNavigationSystem
 
         int radiusX = GetFootprintRadius(units.Width[unitIndex]);
         int radiusY = GetFootprintRadius(units.Length[unitIndex]);
-        int centerX = Math.Clamp((int)MathF.Floor(requested.X), 0, worldMap.MaxTileX);
-        int centerY = Math.Clamp((int)MathF.Floor(requested.Y), 0, worldMap.MaxTileY);
+        int centerX = WorldToNavigationCell(requested.X, _width);
+        int centerY = WorldToNavigationCell(requested.Y, _height);
 
-        // Resolve against the exact footprint and step-height rules used by A*.
-        // Reserve the whole footprint so large units do not receive overlapping slots.
-        const int maximumSearchRadius = 24;
+        // Keep the same physical 24 m search radius on the finer grid.
+        const int maximumSearchRadius = 24 * NavigationCellsPerMeter;
         for (int radius = 0; radius <= maximumSearchRadius; radius++)
         {
             float bestDistance = float.PositiveInfinity;
@@ -596,10 +594,10 @@ public sealed class UnitNavigationSystem
             int bestY = -1;
 
             for (int y = Math.Max(radiusY, centerY - radius);
-                 y <= Math.Min(worldMap.MaxTileY - radiusY, centerY + radius); y++)
+                 y <= Math.Min(_height - 1 - radiusY, centerY + radius); y++)
             {
                 for (int x = Math.Max(radiusX, centerX - radius);
-                     x <= Math.Min(worldMap.MaxTileX - radiusX, centerX + radius); x++)
+                     x <= Math.Min(_width - 1 - radiusX, centerX + radius); x++)
                 {
                     if (Math.Max(Math.Abs(x - centerX), Math.Abs(y - centerY)) != radius)
                         continue;
@@ -627,8 +625,9 @@ public sealed class UnitNavigationSystem
                         continue;
                     }
 
-                    float dx = x + 0.5f - requested.X;
-                    float dy = y + 0.5f - requested.Y;
+                    Vector2 candidatePosition = GetWaypointPosition(x + y * _width);
+                    float dx = candidatePosition.X - requested.X;
+                    float dy = candidatePosition.Y - requested.Y;
                     float score = dx * dx + dy * dy;
                     if (score >= bestDistance)
                         continue;
@@ -642,17 +641,22 @@ public sealed class UnitNavigationSystem
             if (bestX < 0)
                 continue;
 
-            float requestedOffsetX = requested.X - MathF.Floor(requested.X);
-            float requestedOffsetY = requested.Y - MathF.Floor(requested.Y);
+            float cellOriginX = bestX * NavigationCellSize;
+            float cellOriginY = bestY * NavigationCellSize;
+            float requestedOffsetX = requested.X -
+                MathF.Floor(requested.X / NavigationCellSize) * NavigationCellSize;
+            float requestedOffsetY = requested.Y -
+                MathF.Floor(requested.Y / NavigationCellSize) * NavigationCellSize;
             float resolvedOffsetX = bestX == centerX
-                ? requested.X - bestX
+                ? requested.X - cellOriginX
                 : requestedOffsetX;
             float resolvedOffsetY = bestY == centerY
-                ? requested.Y - bestY
+                ? requested.Y - cellOriginY
                 : requestedOffsetY;
+            float inset = NavigationCellSize * 0.12f;
             goal = new Vector2(
-                bestX + Math.Clamp(resolvedOffsetX, 0.12f, 0.88f),
-                bestY + Math.Clamp(resolvedOffsetY, 0.12f, 0.88f));
+                cellOriginX + Math.Clamp(resolvedOffsetX, inset, NavigationCellSize - inset),
+                cellOriginY + Math.Clamp(resolvedOffsetY, inset, NavigationCellSize - inset));
             if (reservedFootprintCells != null)
             {
                 for (int offsetY = -radiusY; offsetY <= radiusY; offsetY++)
@@ -827,8 +831,8 @@ public sealed class UnitNavigationSystem
 
         // A sub-cell goal is already reachable inside the current passable tile.
         // Do not route the unit through that tile's centre before reaching the actual goal.
-        if ((int)MathF.Floor(position.X) == (int)MathF.Floor(target.X) &&
-            (int)MathF.Floor(position.Y) == (int)MathF.Floor(target.Y))
+        if (WorldToNavigationCell(position.X, _width) == WorldToNavigationCell(target.X, _width) &&
+            WorldToNavigationCell(position.Y, _height) == WorldToNavigationCell(target.Y, _height))
         {
             waypoint = new Vector2(target.X, target.Y);
             distanceToGoal = Vector2.Distance(
@@ -988,7 +992,18 @@ public sealed class UnitNavigationSystem
     }
 
     private Vector2 GetWaypointPosition(int cell) =>
-        new(cell % _width + 0.5f, cell / _width + 0.5f);
+        new(
+            (cell % _width + 0.5f) * NavigationCellSize,
+            (cell / _width + 0.5f) * NavigationCellSize);
+
+    private static int WorldToNavigationCell(float coordinate, int gridLength) =>
+        Math.Clamp(
+            (int)MathF.Floor(coordinate * NavigationCellsPerMeter),
+            0,
+            gridLength - 1);
+
+    private static int ToWorldTile(int navigationCell) =>
+        navigationCell / NavigationCellsPerMeter;
 
     private static void RecordTurn(
         Vector2 incoming,
@@ -1297,14 +1312,12 @@ public sealed class UnitNavigationSystem
                     _navigationHeights[neighbor]);
 
                 float stepCost =
-                    dx != 0 && dy != 0
-                        ? DiagonalCost
-                        : 1f;
+                    (dx != 0 && dy != 0 ? DiagonalCost : 1f) * NavigationCellSize;
 
                 int priorRouteCount = _routeTraffic[neighbor];
                 float routeReuseCost = Math.Min(
                     priorRouteCount,
-                    RouteCohortSize - 1) * RouteReuseCostPerUnit;
+                    RouteCohortSize - 1) * RouteReuseCostPerUnit * NavigationCellSize;
 
                 if (priorRouteCount > 0)
                 {
@@ -1317,15 +1330,34 @@ public sealed class UnitNavigationSystem
                     stepCost +
                     heightDifference * HeightCost +
                     _navigationEdgeCost[neighbor] +
-                    routeReuseCost;
+                    routeReuseCost * NavigationCellSize;
+                int parentCell = current;
 
-                // Search only a bounded path-cost horizon. The final target
-                // remains A*'s heuristic, so the selected frontier still bends
-                // toward the command and can detour around nearby obstacles.
+                // Theta*: bypass cell-to-cell turns when the parent's continuous
+                // segment is visible and preserves the same terrain clearance.
+                int ancestor = _parent[current];
+                if (ancestor >= 0 &&
+                    ancestor != current &&
+                    CanTravelBetweenCells(
+                        worldMap,
+                        ancestor,
+                        neighbor,
+                        footprintRadiusX,
+                        footprintRadiusY,
+                        out float anyAngleCost))
+                {
+                    float anyAngleG = _gScore[ancestor] + anyAngleCost;
+                    if (anyAngleG < tentativeG)
+                    {
+                        tentativeG = anyAngleG;
+                        parentCell = ancestor;
+                    }
+                }
+
                 if (tentativeG > MaxRouteChunkCost || tentativeG >= _gScore[neighbor])
                     continue;
 
-                _parent[neighbor] = current;
+                _parent[neighbor] = parentCell;
                 _gScore[neighbor] = tentativeG;
                 _fScore[neighbor] =
                     tentativeG + Heuristic(nx, ny, targetX, targetY);
@@ -1456,8 +1488,8 @@ public sealed class UnitNavigationSystem
         if ((uint)targetCell >= (uint)_cellCount)
             return false;
 
-        int x = ClampCell((int)MathF.Floor(startX), _width);
-        int y = ClampCell((int)MathF.Floor(startY), _height);
+        int x = WorldToNavigationCell(startX, _width);
+        int y = WorldToNavigationCell(startY, _height);
         int targetX = targetCell % _width;
         int targetY = targetCell / _width;
 
@@ -1497,6 +1529,36 @@ public sealed class UnitNavigationSystem
             footprintRadiusY);
     }
 
+    private bool CanTravelBetweenCells(
+        WorldMap worldMap,
+        int startCell,
+        int targetCell,
+        int footprintRadiusX,
+        int footprintRadiusY,
+        out float travelCost)
+    {
+        int startX = startCell % _width;
+        int startY = startCell / _width;
+        int targetX = targetCell % _width;
+        int targetY = targetCell / _width;
+        Vector2 startPosition = GetWaypointPosition(startCell);
+        Vector2 targetPosition = GetWaypointPosition(targetCell);
+
+        return CanTravelStraightToPoint(
+            worldMap,
+            startPosition.X,
+            startPosition.Y,
+            startX,
+            startY,
+            targetX,
+            targetY,
+            targetPosition.X,
+            targetPosition.Y,
+            footprintRadiusX,
+            footprintRadiusY,
+            out travelCost);
+    }
+
     private bool CanShortcutPreservingPathCost(
         WorldMap worldMap,
         float startX,
@@ -1512,12 +1574,12 @@ public sealed class UnitNavigationSystem
                 worldMap,
                 startX,
                 startY,
-                ClampCell((int)MathF.Floor(startX), _width),
-                ClampCell((int)MathF.Floor(startY), _height),
+                WorldToNavigationCell(startX, _width),
+                WorldToNavigationCell(startY, _height),
                 path[candidate] % _width,
                 path[candidate] / _width,
-                path[candidate] % _width + 0.5f,
-                path[candidate] / _width + 0.5f,
+                GetWaypointPosition(path[candidate]).X,
+                GetWaypointPosition(path[candidate]).Y,
                 footprintRadiusX,
                 footprintRadiusY,
                 out float shortcutCost))
@@ -1525,15 +1587,7 @@ public sealed class UnitNavigationSystem
             return false;
         }
 
-        float originalPathCost = 0f;
-        for (int i = anchor + 1; i <= candidate; i++)
-        {
-            int from = path[i - 1];
-            int to = path[i];
-            int dx = to % _width - from % _width;
-            int dy = to / _width - from / _width;
-            originalPathCost += GetStepCost(from, to, dx, dy);
-        }
+        float originalPathCost = _gScore[path[candidate]] - _gScore[path[anchor]];
 
         // String-pulling may remove bends, but it must not replace the A* route
         // with a geometrically shorter segment that crosses more expensive cells.
@@ -1541,7 +1595,7 @@ public sealed class UnitNavigationSystem
     }
 
     private float GetStepCost(int fromCell, int toCell, int dx, int dy) =>
-        (dx != 0 && dy != 0 ? DiagonalCost : 1f) +
+        (dx != 0 && dy != 0 ? DiagonalCost : 1f) * NavigationCellSize +
         GetStepPenalty(fromCell, toCell);
 
     private float GetStepPenalty(int fromCell, int toCell)
@@ -1551,7 +1605,7 @@ public sealed class UnitNavigationSystem
         int priorRouteCount = _routeTraffic[toCell];
         float routeReuseCost = Math.Min(
             priorRouteCount,
-            RouteCohortSize - 1) * RouteReuseCostPerUnit;
+            RouteCohortSize - 1) * RouteReuseCostPerUnit * NavigationCellSize;
 
         return heightDifference * HeightCost +
             _navigationEdgeCost[toCell] +
@@ -1565,10 +1619,10 @@ public sealed class UnitNavigationSystem
         int footprintRadiusX,
         int footprintRadiusY)
     {
-        int startX = ClampCell((int)MathF.Floor(start.X), _width);
-        int startY = ClampCell((int)MathF.Floor(start.Y), _height);
-        int targetX = ClampCell((int)MathF.Floor(end.X), _width);
-        int targetY = ClampCell((int)MathF.Floor(end.Y), _height);
+        int startX = WorldToNavigationCell(start.X, _width);
+        int startY = WorldToNavigationCell(start.Y, _height);
+        int targetX = WorldToNavigationCell(end.X, _width);
+        int targetY = WorldToNavigationCell(end.Y, _height);
 
         if (!CanTravelStraightToPoint(
                 worldMap,
@@ -1617,10 +1671,10 @@ public sealed class UnitNavigationSystem
         int footprintRadiusX,
         int footprintRadiusY)
     {
-        int startX = ClampCell((int)MathF.Floor(start.X), _width);
-        int startY = ClampCell((int)MathF.Floor(start.Y), _height);
-        int targetX = ClampCell((int)MathF.Floor(end.X), _width);
-        int targetY = ClampCell((int)MathF.Floor(end.Y), _height);
+        int startX = WorldToNavigationCell(start.X, _width);
+        int startY = WorldToNavigationCell(start.Y, _height);
+        int targetX = WorldToNavigationCell(end.X, _width);
+        int targetY = WorldToNavigationCell(end.Y, _height);
         return CanTravelStraightToPoint(
             worldMap, start.X, start.Y, startX, startY,
             targetX, targetY, end.X, end.Y, footprintRadiusX, footprintRadiusY);
@@ -1683,6 +1737,10 @@ public sealed class UnitNavigationSystem
         {
             return false;
         }
+        startX *= NavigationCellsPerMeter;
+        startY *= NavigationCellsPerMeter;
+        endX *= NavigationCellsPerMeter;
+        endY *= NavigationCellsPerMeter;
         float deltaX = endX - startX;
         float deltaY = endY - startY;
 
@@ -1814,7 +1872,7 @@ public sealed class UnitNavigationSystem
         return true;
     }
 
-    private static bool CanStepCell(
+    private bool CanStepCell(
         WorldMap worldMap,
         int x,
         int y,
@@ -1823,15 +1881,11 @@ public sealed class UnitNavigationSystem
         int dx,
         int dy)
     {
-        if (!IsSurface(worldMap, x, y) ||
-            !IsSurface(worldMap, nx, ny))
-        {
+        if (!IsSurface(worldMap, x, y) || !IsSurface(worldMap, nx, ny))
             return false;
-        }
 
-        float currentHeight = worldMap.GetSurfaceHeight(x, y);
-        float nextHeight = worldMap.GetSurfaceHeight(nx, ny);
-
+        float currentHeight = _navigationHeights[x + y * _width];
+        float nextHeight = _navigationHeights[nx + ny * _width];
         if (MathF.Abs(nextHeight - currentHeight) > MaxStepHeight)
             return false;
 
@@ -1840,41 +1894,35 @@ public sealed class UnitNavigationSystem
              !CanCardinalStep(worldMap, x, y, x, y + dy) ||
              !CanCardinalStep(worldMap, x + dx, y, nx, ny) ||
              !CanCardinalStep(worldMap, x, y + dy, nx, ny)))
-        {
             return false;
-        }
 
         return true;
     }
 
-    private static bool IsFootprintPassable(
+    private bool IsFootprintPassable(
         WorldMap worldMap,
         int x,
         int y,
         int radiusX,
         int radiusY)
     {
-        float centerHeight = worldMap.GetSurfaceHeight(x, y);
+        if (!IsInside(x, y))
+            return false;
 
+        float centerHeight = _navigationHeights[x + y * _width];
         for (int offsetY = -radiusY; offsetY <= radiusY; offsetY++)
         {
             for (int offsetX = -radiusX; offsetX <= radiusX; offsetX++)
             {
                 int cellX = x + offsetX;
                 int cellY = y + offsetY;
-
-                if (worldMap.IsNavigationBlocked(cellX, cellY) ||
-                    worldMap.GetSurfaceLayer(cellX, cellY) < 0)
-                {
+                if (!IsInside(cellX, cellY))
                     return false;
-                }
 
-                if (MathF.Abs(
-                        worldMap.GetSurfaceHeight(cellX, cellY) - centerHeight) >
-                    MaxStepHeight)
-                {
+                int index = cellX + cellY * _width;
+                if (!_navigationPassable[index] ||
+                    MathF.Abs(_navigationHeights[index] - centerHeight) > MaxStepHeight)
                     return false;
-                }
             }
         }
 
@@ -1883,33 +1931,33 @@ public sealed class UnitNavigationSystem
 
     private static int GetFootprintRadius(float size)
     {
-        return Math.Max(
+        int worldTileRadius = Math.Max(
             0,
             (int)MathF.Ceiling((MathF.Max(0.1f, size) - 1f) * 0.5f));
+        return worldTileRadius * NavigationCellsPerMeter;
     }
 
-    private static bool CanCardinalStep(
+    private bool CanCardinalStep(
         WorldMap worldMap,
         int x,
         int y,
         int nx,
         int ny)
     {
-        if (!IsSurface(worldMap, x, y) ||
-            !IsSurface(worldMap, nx, ny))
-        {
+        if (!IsSurface(worldMap, x, y) || !IsSurface(worldMap, nx, ny))
             return false;
-        }
 
         return MathF.Abs(
-            worldMap.GetSurfaceHeight(x, y) -
-            worldMap.GetSurfaceHeight(nx, ny)) <= MaxStepHeight;
+            _navigationHeights[x + y * _width] -
+            _navigationHeights[nx + ny * _width]) <= MaxStepHeight;
     }
 
-    private static bool IsSurface(WorldMap worldMap, int x, int y)
+    private bool IsSurface(WorldMap worldMap, int x, int y)
     {
-        return !worldMap.IsNavigationBlocked(x, y) &&
-               worldMap.GetSurfaceLayer(x, y) >= 0;
+        if (!IsInside(x, y))
+            return false;
+
+        return _navigationPassable[x + y * _width];
     }
 
     private bool IsInside(int x, int y)
@@ -1928,7 +1976,7 @@ public sealed class UnitNavigationSystem
         int dy = Math.Abs(targetY - y);
         int diagonal = Math.Min(dx, dy);
 
-        return diagonal * DiagonalCost + Math.Max(dx, dy) - diagonal;
+        return (diagonal * DiagonalCost + Math.Max(dx, dy) - diagonal) * NavigationCellSize;
     }
 
     private int[] ReconstructPath(int start, int goal)
@@ -2125,14 +2173,14 @@ public sealed class UnitNavigationSystem
 
     private void EnsureWorkspace(WorldMap worldMap)
     {
-        if (_width == worldMap.TileWidth &&
-            _height == worldMap.TileHeight)
+        if (_width == worldMap.TileWidth * NavigationCellsPerMeter &&
+            _height == worldMap.TileHeight * NavigationCellsPerMeter)
         {
             return;
         }
 
-        _width = worldMap.TileWidth;
-        _height = worldMap.TileHeight;
+        _width = checked(worldMap.TileWidth * NavigationCellsPerMeter);
+        _height = checked(worldMap.TileHeight * NavigationCellsPerMeter);
         _cellCount = checked(_width * _height);
 
         _gScore = new float[_cellCount];
@@ -2239,12 +2287,14 @@ public sealed class UnitNavigationSystem
             for (int x = 0; x < _width; x++)
             {
                 int cell = row + x;
+                int worldX = ToWorldTile(x);
+                int worldY = ToWorldTile(y);
                 bool passable =
-                    !worldMap.IsNavigationBlocked(x, y) &&
-                    worldMap.GetSurfaceLayer(x, y) >= 0;
+                    !worldMap.IsNavigationBlocked(worldX, worldY) &&
+                    worldMap.GetSurfaceLayer(worldX, worldY) >= 0;
 
                 _navigationPassable[cell] = passable;
-                _navigationHeights[cell] = worldMap.GetSurfaceHeight(x, y);
+                _navigationHeights[cell] = worldMap.GetSurfaceHeight(worldX, worldY);
                 _navigationNeighbors[cell] = 0;
             }
         }
@@ -2359,8 +2409,8 @@ public sealed class UnitNavigationSystem
                 }
 
                 _navigationEdgeCost[cell] =
-                    (4 - cardinalCount) * 0.32f +
-                    (4 - diagonalCount) * 0.08f;
+                    ((4 - cardinalCount) * 0.32f +
+                     (4 - diagonalCount) * 0.08f) * NavigationCellSize;
             }
         }
 

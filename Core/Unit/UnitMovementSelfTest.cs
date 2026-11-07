@@ -87,6 +87,54 @@ public static class UnitMovementSelfTest
                    tether);
     }
 
+    public static bool NavigationUsesHalfMeterCellsAndAnyAngleParents()
+    {
+        WorldMap map = CreateFlatWorld();
+        int wallX = map.TileWidth / 2;
+        int corridorY = map.TileHeight / 2;
+        for (int y = 2; y < map.TileHeight - 2; y++)
+            if (Math.Abs(y - corridorY) > 2)
+                map.SetNavigationBlocked(wallX, y, true);
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, corridorY + 0.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitNavigationSystem navigation = simulation.Navigation;
+        navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
+
+        if (!navigation.TryGetWaypoint(
+                simulation.Units,
+                id.Index,
+                map,
+                simulation.Units.Position[id.Index],
+                new Vector3(map.TileWidth - 5.5f, corridorY + 0.5f, 1f),
+                out _))
+            return false;
+
+        Span<Vector2> points = stackalloc Vector2[128];
+        int count = navigation.CopyRoutePoints(id.Index, points);
+        bool hasSubmeterPoint = false;
+        bool hasAnyAngleJump = false;
+        for (int i = 0; i < count; i++)
+        {
+            float fractionX = points[i].X - MathF.Floor(points[i].X);
+            float fractionY = points[i].Y - MathF.Floor(points[i].Y);
+            hasSubmeterPoint |=
+                MathF.Abs(fractionX - 0.25f) < 0.01f ||
+                MathF.Abs(fractionX - 0.75f) < 0.01f ||
+                MathF.Abs(fractionY - 0.25f) < 0.01f ||
+                MathF.Abs(fractionY - 0.75f) < 0.01f;
+            if (i > 0)
+                hasAnyAngleJump |= Vector2.Distance(points[i - 1], points[i]) > 0.75f;
+        }
+
+        return count > 1 && hasSubmeterPoint && hasAnyAngleJump;
+    }
+
     public static bool AcceleratesAndStopsAtCommandedTarget()
     {
         WorldMap map = CreateFlatWorld();
