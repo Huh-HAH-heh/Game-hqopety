@@ -17,10 +17,7 @@ public enum DebugLayerType
     UtilityAi,
     MovementVectors,
     MovementForces,
-    SquadFlowWeights,
-    SquadFormation,
-    SquadStates,
-    SquadContacts
+    OrderPaths
 }
 
 public sealed class DebugLayersOverlay : IDisposable
@@ -28,7 +25,7 @@ public sealed class DebugLayersOverlay : IDisposable
     private const float Width = 360f;
     private const float HeaderHeight = 34f;
     private const float RowHeight = 34f;
-    private const int LayerCount = 13;
+    private const int LayerCount = 10;
     private const float Height = HeaderHeight + LayerCount * RowHeight + 30f;
 
     private static readonly string[] LayerLabels =
@@ -42,10 +39,7 @@ public sealed class DebugLayersOverlay : IDisposable
         "Utility AI — оценки",
         "Движение — векторы скорости",
         "Движение — силы мотора",
-        "Отряд — Flow Field (отключён)",
-        "Отряд — формация и связность",
-        "Отряд — состояния участников",
-        "Отряд — общие контакты"
+        "Маршруты — текущие приказы"
     };
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, Height))
@@ -128,7 +122,7 @@ public sealed class DebugLayersOverlay : IDisposable
         {
             FillColor = new Color(14, 24, 33)
         };
-        _footer = new Text(_font, "Flow Field отключён  •  Скорость / сила мотора", 9)
+        _footer = new Text(_font, "V — слои  •  J — режим движения", 9)
         {
             FillColor = new Color(145, 160, 178)
         };
@@ -230,10 +224,7 @@ public sealed class DebugLayersOverlay : IDisposable
         bool showUtilityAi,
         bool showMovementVectors,
         bool showMovementForces,
-        bool showSquadFlowWeights,
-        bool showSquadFormation,
-        bool showSquadStates,
-        bool showSquadContacts)
+        bool showOrderPaths)
     {
         if (!IsOpen)
             return;
@@ -259,10 +250,7 @@ public sealed class DebugLayersOverlay : IDisposable
             showUtilityAi,
             showMovementVectors,
             showMovementForces,
-            showSquadFlowWeights,
-            showSquadFormation,
-            showSquadStates,
-            showSquadContacts
+            showOrderPaths
         };
 
         float firstRowY = _panel.Position.Y + HeaderHeight + 3f;
