@@ -14,12 +14,6 @@ public enum InfantryFormationType : byte
     None = 6
 }
 
-/// <summary>Column movement keeps the historical independent A* destination slots.</summary>
-public enum ColumnMovementVariant : byte
-{
-    HistoricalSlots = 0
-}
-
 /// <summary>
 /// Movement labels and legacy offset helpers. Active move commands expose only
 /// independent travel, a loose crowd, and the historical A* column slots.
@@ -41,8 +35,8 @@ public static class InfantryFormation
     };
 
     /// <summary>
-    /// Returns formation offsets. HistoricalSlots uses these as individual
-    /// destination offsets; the other column variants use their own steering model.
+    /// Returns legacy shape offsets. The active column mode uses these as
+    /// independent A* destination offsets; crowd movement does not use slots.
     /// </summary>
     public static Vector2 GetOffset(
         int index,
