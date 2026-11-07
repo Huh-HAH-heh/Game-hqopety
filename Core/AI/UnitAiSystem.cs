@@ -1961,15 +1961,16 @@ public sealed class UnitAiSystem
                 continue;
 
             Vector3 closestPoint = start + segment * along;
-            float distance = Vector3.Distance(allyEye, closestPoint);
+            float distanceSquared = Vector3.DistanceSquared(allyEye, closestPoint);
             float safetyRadius = MathF.Max(
                 0.18f,
                 units.Radius[ally] * 0.8f + 0.12f);
-            if (distance >= safetyRadius)
+            float safetyRadiusSquared = safetyRadius * safetyRadius;
+            if (distanceSquared >= safetyRadiusSquared)
                 continue;
 
             float localRisk = Math.Clamp(
-                1f - distance / safetyRadius,
+                1f - MathF.Sqrt(distanceSquared) / safetyRadius,
                 0f,
                 1f);
             risk = 1f - (1f - risk) * (1f - localRisk);
@@ -2431,6 +2432,10 @@ public sealed class UnitAiSystem
             float distanceSquared =
                 delta.X * delta.X +
                 delta.Y * delta.Y;
+            // A candidate whose raw distance already exceeds the best weighted
+            // score cannot win, even with a completely clear firing lane.
+            if (distanceSquared >= bestDistanceSquared)
+                continue;
 
             float friendlyFireRisk = EvaluateFriendlyFireRisk(
                 units, health, vision, observer, target);
