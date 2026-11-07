@@ -1728,8 +1728,7 @@ public sealed class UnitAiSystem
         // wide side/back waypoint.
         if (hasVisibleTarget &&
             isHealthyEnoughToFlank &&
-            hasRangedWeapon &&
-            unit % 8 == 0)
+            hasRangedWeapon)
         {
             Vector3 delta = units.Position[visibleTargetIndex] - units.Position[unit];
             float distanceSquared = delta.X * delta.X + delta.Y * delta.Y;
@@ -2171,13 +2170,15 @@ public sealed class UnitAiSystem
         bool lowHealthHoldNeedsCover = isHeld &&
             IsLowHealth(health, unit) &&
             visibleEnemy >= 0;
-        bool suppressedHoldNeedsCover = isHeld &&
-            state == UnitSuppressionState.Suppressed;
-        if (!isPanicked && !lowHealthHoldNeedsCover && !suppressedHoldNeedsCover)
+        bool suppressedNeedsCover = state == UnitSuppressionState.Suppressed;
+        if (!isPanicked && !lowHealthHoldNeedsCover && !suppressedNeedsCover)
             return;
 
+        bool useVisibleEnemyForCover =
+            visibleEnemy >= 0 &&
+            (lowHealthHoldNeedsCover || suppressedNeedsCover);
         Vector3 threat = suppression.Source[unit];
-        if (lowHealthHoldNeedsCover)
+        if (useVisibleEnemyForCover)
             threat = units.Position[visibleEnemy];
         Vector3 previousSource = Store.SuppressionRetrySource[unit];
         float sourceDx = threat.X - previousSource.X;
@@ -2191,7 +2192,7 @@ public sealed class UnitAiSystem
 
         Vector3 cover;
         AiBalanceProfile balance = GetBalanceProfile(unit, units.FactionTag[unit]);
-        bool foundCover = lowHealthHoldNeedsCover
+        bool foundCover = useVisibleEnemyForCover
             ? TryFindCover(units, vision, worldMap, unit, visibleEnemy, balance, out cover)
             : TryFindSuppressionCover(units, vision, worldMap, unit, threat, balance, out cover);
 
@@ -2205,8 +2206,8 @@ public sealed class UnitAiSystem
         }
         else if (!isPanicked)
         {
-            // Suppressed Hold units should not redo a costly failed cover scan
-            // every AI tick; retry after the existing short cooldown.
+            // A failed suppressed/panicked cover search must not redo its LOS
+            // scan every AI tick; retry after the existing short cooldown.
             Store.SuppressionCoverRetry[unit] = 1f;
         }
     }
