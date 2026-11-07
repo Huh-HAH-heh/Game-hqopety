@@ -4619,14 +4619,9 @@ public sealed class GameRenderer
                 _unitSimulation.VisionEnabled = true;
                 _classicMassCombatTestScene.Start(_unitSimulation, _worldMap);
                 SetSelectedUnit(_classicMassCombatTestScene.FirstUnit);
-                if (_unitSimulation.Units.TryGetIndex(
-                        _classicMassCombatTestScene.FirstUnit, out int firstClassicUnit))
-                {
-                    Vector3 firstPosition = _unitSimulation.Units.Position[firstClassicUnit];
-                    _camera.CenterOnPosition(new Vector2f(
-                        firstPosition.X * TerrainTilePixelSize,
-                        firstPosition.Y * TerrainTilePixelSize));
-                }
+                _camera.CenterOnPosition(new Vector2f(
+                    (_worldMap.TileWidth / 2f) * TerrainTilePixelSize,
+                    (_worldMap.TileHeight / 2f) * TerrainTilePixelSize));
                 StartSimulationThread();
                 break;
             }
