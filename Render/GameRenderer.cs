@@ -3682,7 +3682,7 @@ public sealed class GameRenderer
                                 break;
                             }
 
-remove global mode action block                            case ContextMenuActionType.ToggleAutonomousMovement:
+                            case ContextMenuActionType.ToggleAutonomousMovement:
                             {
                                 SimulationFrameSnapshot? snapshot = GetInputSnapshot();
                                 UnitId[] moveUnits = snapshot == null
