@@ -1439,8 +1439,7 @@ public sealed class GameRenderer
                 destination,
                 formation,
                 false,
-                _worldMap,
-                ColumnMovementVariant.HistoricalSlots))
+                _worldMap))
         {
             IssueMoveOrderToPoint(memberIds, destination);
         }
@@ -2307,8 +2306,7 @@ public sealed class GameRenderer
                 destination,
                 formation,
                 false,
-                _worldMap,
-                ColumnMovementVariant.HistoricalSlots))
+                _worldMap))
         {
             IssueMoveOrderToPoint(memberIds, destination);
             return;
