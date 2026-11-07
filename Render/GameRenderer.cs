@@ -71,8 +71,7 @@ public sealed class GameRenderer
     private int _selectedInfoSquadId;
     private static readonly bool SquadControlsEnabled = false;
     private readonly InfantrySquadManager _squadManager = new();
-    private InfantryFormationType _infantryFormation = InfantryFormationType.Column;
-    private ColumnMovementVariant _columnMovementVariant = ColumnMovementVariant.HistoricalSlots;
+    private UnitGroupMovementMode _groupMovementMode = UnitGroupMovementMode.Column;
     private bool _keepFormationInCombat;
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
@@ -178,11 +177,12 @@ public sealed class GameRenderer
     private volatile bool _showUtilityAiDebug;
     private volatile bool _showMovementVectors;
     private volatile bool _showMovementForces;
+    private volatile bool _showOrderPaths;
     private volatile bool _showSquadFlowWeights;
     private volatile bool _showSquadFormation;
     private volatile bool _showSquadStates;
     private volatile bool _showSquadContacts;
-    private bool _showAttackLinks = true;
+    private bool _showAttackLinks;
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
     private bool _classicMassCombatMode;
@@ -1438,20 +1438,20 @@ public sealed class GameRenderer
     {
         // The squad API is kept for compatibility with persistent squad data,
         // but movement is always executed through per-unit A* navigation.
-        if (!_unitSimulation.IssueAStarFormationMoveOrder(
+        if (!_unitSimulation.IssueGroupMoveOrder(
                 memberIds,
                 destination,
                 formation,
-                _keepFormationInCombat,
+                false,
                 _worldMap,
-                _columnMovementVariant))
+                ColumnMovementVariant.HistoricalSlots))
         {
             IssueMoveOrderToPoint(memberIds, destination);
         }
     }
 
-    private static string GetColumnVariantMenuLabel(ColumnMovementVariant variant) =>
-        ColumnMovementVariantInfo.GetName(variant);
+    private static string GetMovementModeMenuLabel(UnitGroupMovementMode mode) =>
+        UnitGroupMovementModeInfo.GetName(mode);
 
     private bool AreAllAutonomousMovementDisabled(UnitId[] memberIds)
     {
@@ -2316,18 +2316,25 @@ public sealed class GameRenderer
     {
         if (orderType == UnitAiOrderType.Move &&
             memberIds.Length > 1 &&
-            _unitSimulation.IssueAStarFormationMoveOrder(
-                memberIds,
-                destination,
-                _infantryFormation,
-                _keepFormationInCombat,
-                _worldMap,
-                _columnMovementVariant))
+            _groupMovementMode != UnitGroupMovementMode.Individual)
         {
-            Console.WriteLine(
-                $"[COLUMN TEST] {ColumnMovementVariantInfo.GetName(_columnMovementVariant)} " +
-                $"A* move for {memberIds.Length} units.");
-            return;
+            InfantryFormationType groupFormation =
+                _groupMovementMode == UnitGroupMovementMode.Crowd
+                    ? InfantryFormationType.Free
+                    : InfantryFormationType.Column;
+            if (_unitSimulation.IssueGroupMoveOrder(
+                    memberIds,
+                    destination,
+                    groupFormation,
+                    false,
+                    _worldMap,
+                    ColumnMovementVariant.HistoricalSlots))
+            {
+                Console.WriteLine(
+                    $"[MOVE MODE] {UnitGroupMovementModeInfo.GetName(_groupMovementMode)}; " +
+                    $"{memberIds.Length} units.");
+                return;
+            }
         }
 
         if (orderType is not (UnitAiOrderType.Move or UnitAiOrderType.StealthMove))
@@ -3399,7 +3406,7 @@ public sealed class GameRenderer
                                 : null;
                         string? selectedFormationLabel =
                             clickedSelectedUnit && selectedIds.Length > 1
-                                ? GetColumnVariantMenuLabel(_columnMovementVariant)
+                                ? GetMovementModeMenuLabel(_groupMovementMode)
                                 : null;
                         string? keepFormationLabel = null;
                         bool canHoldSelected = selectedIds.Length > 0;
@@ -3625,7 +3632,10 @@ public sealed class GameRenderer
                                 if (moveUnits.Length > 0 &&
                                     GetFullySelectedSquadId() != 0)
                                 {
-                                    InfantryFormationType formation = _infantryFormation;
+                                    InfantryFormationType formation =
+                                    _groupMovementMode == UnitGroupMovementMode.Crowd
+                                        ? InfantryFormationType.Free
+                                        : InfantryFormationType.Column;
                                     int squadId = GetFullySelectedSquadId();
                                     ExecuteSimulationCommand(() =>
                                         IssueMoveOrder(moveUnits, destination, formation, squadId));
@@ -3672,28 +3682,19 @@ public sealed class GameRenderer
                                 break;
                             }
 
-                            case ContextMenuActionType.SetColumnVariantHistoricalSlots:
-                            case ContextMenuActionType.SetColumnVariantVirtualCenterline:
-                            case ContextMenuActionType.SetColumnVariantStaggeredCenterline:
-                            case ContextMenuActionType.SetColumnVariantLooseCorridor:
-                            case ContextMenuActionType.SetColumnVariantLinkedTrail:
-                                _infantryFormation = InfantryFormationType.Column;
-                                _columnMovementVariant = contextAction switch
+                            case ContextMenuActionType.SetMovementModeIndividual:
+                            case ContextMenuActionType.SetMovementModeCrowd:
+                            case ContextMenuActionType.SetMovementModeColumn:
+                                _groupMovementMode = contextAction switch
                                 {
-                                    ContextMenuActionType.SetColumnVariantHistoricalSlots =>
-                                        ColumnMovementVariant.HistoricalSlots,
-                                    ContextMenuActionType.SetColumnVariantVirtualCenterline =>
-                                        ColumnMovementVariant.VirtualCenterline,
-                                    ContextMenuActionType.SetColumnVariantStaggeredCenterline =>
-                                        ColumnMovementVariant.StaggeredCenterline,
-                                    ContextMenuActionType.SetColumnVariantLooseCorridor =>
-                                        ColumnMovementVariant.LooseCorridor,
-                                    ContextMenuActionType.SetColumnVariantLinkedTrail =>
-                                        ColumnMovementVariant.LinkedTrail,
-                                    _ => _columnMovementVariant
+                                    ContextMenuActionType.SetMovementModeIndividual =>
+                                        UnitGroupMovementMode.Individual,
+                                    ContextMenuActionType.SetMovementModeCrowd =>
+                                        UnitGroupMovementMode.Crowd,
+                                    _ => UnitGroupMovementMode.Column
                                 };
                                 Console.WriteLine(
-                                    $"[COLUMN TEST] Next move: {ColumnMovementVariantInfo.GetName(_columnMovementVariant)}.");
+                                    $"[MOVE MODE] {UnitGroupMovementModeInfo.GetName(_groupMovementMode)}.");
                                 break;
 
                             case ContextMenuActionType.ToggleAutonomousMovement:
@@ -4216,12 +4217,17 @@ public sealed class GameRenderer
             return;
         }
 
+        if (key == Keyboard.Key.V)
+        {
+            _debugLayersOverlay?.Toggle();
+            return;
+        }
+
         if (key == Keyboard.Key.J)
         {
-            _infantryFormation = InfantryFormationType.Column;
-            _columnMovementVariant = ColumnMovementVariantInfo.Next(_columnMovementVariant);
+            _groupMovementMode = UnitGroupMovementModeInfo.Next(_groupMovementMode);
             Console.WriteLine(
-                $"[COLUMN TEST] Next move: {ColumnMovementVariantInfo.GetName(_columnMovementVariant)}.");
+                $"[MOVE MODE] {UnitGroupMovementModeInfo.GetName(_groupMovementMode)}.");
             return;
         }
 
