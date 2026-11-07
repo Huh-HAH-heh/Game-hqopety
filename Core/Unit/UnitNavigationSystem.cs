@@ -683,8 +683,9 @@ public sealed class UnitNavigationSystem
             return true;
         }
 
-        // The requested look-ahead intersects an obstacle. Find the closest
-        // safe point before it; if progress is negligible, hand control to A*.
+        // The look-ahead hits an obstacle or accumulates excessive terrain,
+        // edge, or traffic cost. Find a safe low-cost point before it; if
+        // progress is negligible, hand control to weighted A*.
         obstacleAhead = true;
         float safeDistance = 0f;
         float blockedDistance = stepDistance;
