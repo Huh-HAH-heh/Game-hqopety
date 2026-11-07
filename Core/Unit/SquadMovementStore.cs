@@ -705,13 +705,14 @@ public sealed class SquadMovementStore
             bool reachedAnchor =
                 toAnchor.LengthSquared() <= 0.65f * 0.65f &&
                 squad.CenterVelocity.LengthSquared() <= 0.18f * 0.18f;
-            bool waitsForIndividualGoals = squad.IsAStarFormation;
+            bool reachedMoveTarget = squad.IsAStarFormation
+                ? squad.MovingCount == 0
+                : reachedAnchor;
             if (squad.HasMoveOrder &&
                 squad.EngagedCount == 0 &&
                 squad.RejoiningCount == 0 &&
                 squad.SeparatedCount == 0 &&
-                (!waitsForIndividualGoals || squad.MovingCount == 0) &&
-                reachedAnchor)
+                reachedMoveTarget)
             {
                 CompleteSquadMove(squad, units, ai, navigation);
             }
