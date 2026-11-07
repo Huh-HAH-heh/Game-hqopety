@@ -14,36 +14,6 @@ public enum InfantryFormationType : byte
     None = 6
 }
 
-/// <summary>
-/// Experimental movement models for column-only comparison.
-/// HistoricalSlots preserves the original independent A* destination-slot approach.
-/// LinkedTrail is the current predecessor-following implementation.
-/// </summary>
-public enum UnitGroupMovementMode : byte
-{
-    Individual = 0,
-    Crowd = 1,
-    Column = 2
-}
-
-public static class UnitGroupMovementModeInfo
-{
-    public static string GetName(UnitGroupMovementMode mode) => mode switch
-    {
-        UnitGroupMovementMode.Individual => "Индивидуально",
-        UnitGroupMovementMode.Crowd => "Толпой",
-        UnitGroupMovementMode.Column => "Колонной",
-        _ => "Индивидуально"
-    };
-
-    public static UnitGroupMovementMode Next(UnitGroupMovementMode mode) => mode switch
-    {
-        UnitGroupMovementMode.Individual => UnitGroupMovementMode.Crowd,
-        UnitGroupMovementMode.Crowd => UnitGroupMovementMode.Column,
-        _ => UnitGroupMovementMode.Individual
-    };
-}
-
 public enum ColumnMovementVariant : byte
 {
     HistoricalSlots = 0
