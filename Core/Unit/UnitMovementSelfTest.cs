@@ -237,8 +237,8 @@ public static class UnitMovementSelfTest
         WorldMap map = CreateFlatWorld();
         int centerX = map.TileWidth / 2;
         int centerY = map.TileHeight / 2;
-        int wallStartX = centerX - 14;
-        int wallEndX = centerX + 13;
+        int wallStartX = centerX - 5;
+        int wallEndX = centerX + 4;
 
         // Keep a direct, traversable lane through the centre, but make it
         // narrow enough that its edge-cell penalties should favour the open
@@ -252,13 +252,13 @@ public static class UnitMovementSelfTest
         UnitSimulation simulation = new UnitSimulation(4, 64);
         UnitId id = simulation.Spawn(
             UnitType.Colonist,
-            new Vector3(5.5f, centerY + 0.5f, 1f),
+            new Vector3(wallStartX - 5.5f, centerY + 0.5f, 1f),
             Vector3.UnitX,
             Vector3.UnitX,
             factionTag: 1);
 
         Vector3 start = simulation.Units.Position[id.Index];
-        Vector3 target = new(map.TileWidth - 5.5f, start.Y, 1f);
+        Vector3 target = new(wallEndX + 5.5f, start.Y, 1f);
         UnitNavigationSystem navigation = simulation.Navigation;
 
         if (!navigation.CanMoveDirectly(
