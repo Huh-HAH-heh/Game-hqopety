@@ -76,7 +76,7 @@ public sealed class SquadMovementStore
 {
     private const float RejoinBlendSeconds = 1.8f;
     private const float AlignmentWeight = 0.12f;
-    private const float FormationAnchorWeight = 0.42f;
+    private const float FormationAnchorWeight = 0.18f;
 
     private Dictionary<int, SquadState> _squads = new();
     private Dictionary<UnitId, MemberLink> _membership = new();
@@ -866,21 +866,21 @@ public sealed class SquadMovementStore
             // A* routes and collision avoidance; this only pulls outer members
             // inward enough to make the moving group read as one crowd.
             float preferredRadius = MathF.Max(
-                squad.Spacing * 1.3f,
-                MathF.Sqrt(Math.Max(1, squad.CoreMemberCount)) * squad.Spacing * 0.5f);
+                squad.Spacing * 2f,
+                MathF.Sqrt(Math.Max(1, squad.CoreMemberCount)) * squad.Spacing * 0.75f);
             Vector2 predictedCenter = squad.Center + squad.CenterVelocity * 0.25f;
             Vector2 toAnchor = predictedCenter - current;
             float anchorDistance = toAnchor.Length();
-            float cohesionStart = preferredRadius * 0.72f;
+            float cohesionStart = preferredRadius * 0.85f;
             if (anchorDistance <= cohesionStart || anchorDistance <= 0.05f)
                 return false;
 
             float excessDistance = anchorDistance - cohesionStart;
             shapeForce = toAnchor / anchorDistance;
             shapeWeight = Math.Clamp(
-                FormationAnchorWeight + excessDistance * 0.075f,
+                FormationAnchorWeight + excessDistance * 0.04f,
                 FormationAnchorWeight,
-                0.62f);
+                0.38f);
         }
         else
         {
