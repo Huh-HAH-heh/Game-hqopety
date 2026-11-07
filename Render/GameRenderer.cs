@@ -60,6 +60,7 @@ public sealed class GameRenderer
     private readonly VisionTestScene _visionTestScene;
     private CombatStatusOverlay? _combatStatusOverlay;
     private SimulationControlOverlay? _simulationControlOverlay;
+    private UnitMovementModeOverlay? _unitMovementModeOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
     private readonly MassCombatTestScene _classicMassCombatTestScene = new();
     private readonly MovementTestScene _movementTestScene = new();
@@ -445,6 +446,7 @@ public sealed class GameRenderer
             _bodyRigEditorOverlay?.Dispose();
             _combatStatusOverlay?.Dispose();
             _simulationControlOverlay?.Dispose();
+            _unitMovementModeOverlay?.Dispose();
             _aiEvolutionOverlay?.Dispose();
             _camera.Dispose();
             _uiView?.Dispose();
@@ -956,6 +958,14 @@ public sealed class GameRenderer
                 _simulationUpdatesPerSecond,
                 uiMousePosition);
 
+            _unitMovementModeOverlay?.Draw(
+                _window,
+                _window.Size.X,
+                _window.Size.Y,
+                _menuPage == GameMenuPage.Closed ? _selectedUnits.Count : 0,
+                AreAllAutonomousMovementDisabled(_selectedUnits),
+                uiMousePosition);
+
             _gameMenuOverlay?.Draw(
                 _window,
                 _window.Size.X,
@@ -1444,14 +1454,14 @@ public sealed class GameRenderer
         }
     }
 
-    private bool AreAllAutonomousMovementDisabled(UnitId[] memberIds)
+    private bool AreAllAutonomousMovementDisabled(IEnumerable<UnitId> memberIds)
     {
         bool found = false;
         bool[] disabled = _unitSimulation.AI.Store.AutonomousMovementDisabled;
-        for (int i = 0; i < memberIds.Length; i++)
+        foreach (UnitId id in memberIds)
         {
-            int index = memberIds[i].Index;
-            if ((uint)index >= (uint)disabled.Length)
+            int index = id.Index;
+            if (!id.IsValid || (uint)index >= (uint)disabled.Length)
                 continue;
             found = true;
             if (!disabled[index])
@@ -1476,25 +1486,31 @@ public sealed class GameRenderer
             }
 
             ai.AutonomousMovementDisabled[index] = disabled;
-            if (disabled &&
-                ai.PlayerOrderType[index] is UnitAiOrderType.Move or UnitAiOrderType.StealthMove)
-            {
-                Vector3 position = units.Position[index];
-                ai.SetPlayerOrder(index, UnitAiOrderType.Stop, position);
-                ai.ClearGoal(index);
-                units.ClearTarget(id);
-            }
-            else if (!disabled && ai.PlayerOrderType[index] == UnitAiOrderType.Stop)
-            {
+            // This mode only governs autonomous reactions. An explicit player
+            // move/attack order must keep running even while Hold Position is on.
+            if (!disabled && ai.PlayerOrderType[index] == UnitAiOrderType.Stop)
                 ai.ClearPlayerOrder(index);
-            }
 
             changed++;
         }
 
         Console.WriteLine(disabled
-            ? $"[MOVE LOCK] Autonomous movement disabled for {changed} units. Panic can still override."
-            : $"[MOVE LOCK] Autonomous movement restored for {changed} units.");
+            ? $"[MOVE MODE] Hold Position enabled for {changed} units."
+            : $"[MOVE MODE] Move at will enabled for {changed} units.");
+    }
+
+    private void ToggleAutonomousMovementForSelection()
+    {
+        SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+        UnitId[] selected = snapshot == null
+            ? Array.Empty<UnitId>()
+            : CaptureSelectedUnitIds(snapshot);
+        if (selected.Length == 0)
+            return;
+
+        bool enableHoldPosition = !AreAllAutonomousMovementDisabled(selected);
+        ExecuteSimulationCommand(() =>
+            SetAutonomousMovementDisabled(selected, enableHoldPosition));
     }
 
     private void IssueAttackOrder(UnitId[] memberIds, UnitId targetId)
@@ -1571,6 +1587,7 @@ public sealed class GameRenderer
 
     private void IssueHoldOrder(UnitId[] memberIds)
     {
+        SetAutonomousMovementDisabled(memberIds, true);
         UnitStore units = _unitSimulation.Units;
         UnitAiStore ai = _unitSimulation.AI.Store;
         int assigned = 0;
@@ -3168,6 +3185,7 @@ public sealed class GameRenderer
             SaveProjectUnitAsset);
         _combatStatusOverlay = new CombatStatusOverlay();
         _simulationControlOverlay = new SimulationControlOverlay();
+        _unitMovementModeOverlay = new UnitMovementModeOverlay();
         _aiEvolutionOverlay = new AiEvolutionOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
@@ -3228,6 +3246,7 @@ public sealed class GameRenderer
                 }
 
                 if (_simulationControlOverlay?.Contains(wheelPosition) == true ||
+                    _unitMovementModeOverlay?.Contains(wheelPosition) == true ||
                     _combatStatusOverlay?.Contains(wheelPosition) == true ||
                     _debugLayersOverlay?.Contains(wheelPosition) == true ||
                     (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(wheelPosition) == true) ||
@@ -3294,6 +3313,7 @@ public sealed class GameRenderer
 
                         bool overUi =
                             _unitGroupCardOverlay?.Contains(middlePosition) == true ||
+                            _unitMovementModeOverlay?.Contains(middlePosition) == true ||
                             _simulationControlOverlay?.Contains(middlePosition) == true ||
                             _combatStatusOverlay?.Contains(middlePosition) == true ||
                             _debugLayersOverlay?.Contains(middlePosition) == true ||
@@ -3327,6 +3347,7 @@ public sealed class GameRenderer
                         (int)contextCoordinates.Y);
 
                     if (_unitGroupCardOverlay?.Contains(contextPosition) == true ||
+                        _unitMovementModeOverlay?.Contains(contextPosition) == true ||
                         _simulationControlOverlay?.Contains(contextPosition) == true ||
                         _combatStatusOverlay?.Contains(contextPosition) == true ||
                         _debugLayersOverlay?.Contains(contextPosition) == true ||
@@ -3389,12 +3410,6 @@ public sealed class GameRenderer
                                 }
                             }
                         }
-                        string? autonomousMovementLabel =
-                            clickedSelectedUnit && selectedIds.Length > 0
-                                ? (AreAllAutonomousMovementDisabled(selectedIds)
-                                    ? "Разрешить самостоятельное движение"
-                                    : "Запретить самостоятельное движение")
-                                : null;
                         bool canHoldSelected = selectedIds.Length > 0;
                         bool canConfigureWeapons = clickedSelectedUnit && selectedIds.Length > 0;
 
@@ -3461,12 +3476,10 @@ public sealed class GameRenderer
                             _window.Size.X,
                             _window.Size.Y,
                             hasUnit,
-                            selectedIds.Length > 1,
                             canCreateSquad,
                             canSendSquad,
                             canAttackTarget,
                             canMoveSelected,
-                            autonomousMovementLabel,
                             canHoldSelected,
                             canConfigureWeapons);
 
@@ -3493,6 +3506,17 @@ public sealed class GameRenderer
                 Vector2i uiPosition = new Vector2i(
                     (int)uiCoordinates.X,
                     (int)uiCoordinates.Y);
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _unitMovementModeOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y,
+                        _selectedUnits.Count > 0,
+                        ToggleAutonomousMovementForSelection) == true)
+                {
+                    return;
+                }
 
                 if (_showUtilityAiDebug &&
                     _utilityAiDebugOverlay?.HandleMousePressed(
@@ -3682,20 +3706,6 @@ public sealed class GameRenderer
                                 break;
                             }
 
-                            case ContextMenuActionType.ToggleAutonomousMovement:
-                            {
-                                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
-                                UnitId[] moveUnits = snapshot == null
-                                    ? Array.Empty<UnitId>()
-                                    : CaptureSelectedUnitIds(snapshot);
-                                if (moveUnits.Length > 0)
-                                {
-                                    bool disable = !AreAllAutonomousMovementDisabled(moveUnits);
-                                    ExecuteSimulationCommand(() =>
-                                        SetAutonomousMovementDisabled(moveUnits, disable));
-                                }
-                                break;
-                            }
                         }
 
                         return;
@@ -4188,6 +4198,15 @@ public sealed class GameRenderer
         if (key == Keyboard.Key.V)
         {
             _debugLayersOverlay?.Toggle();
+            return;
+        }
+
+        if (key == Keyboard.Key.F &&
+            _menuPage == GameMenuPage.Closed &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _selectedUnits.Count > 0)
+        {
+            ToggleAutonomousMovementForSelection();
             return;
         }
 
