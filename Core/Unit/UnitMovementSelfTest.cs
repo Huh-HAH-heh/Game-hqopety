@@ -232,6 +232,90 @@ public static class UnitMovementSelfTest
         return false;
     }
 
+    public static bool WeightedAStarDetourSurvivesWaypointSmoothing()
+    {
+        WorldMap map = CreateFlatWorld();
+        int centerX = map.TileWidth / 2;
+        int centerY = map.TileHeight / 2;
+        int wallStartX = centerX - 14;
+        int wallEndX = centerX + 13;
+
+        // Keep a direct, traversable lane through the centre, but make it
+        // narrow enough that its edge-cell penalties should favour the open
+        // route above or below it.
+        for (int x = wallStartX; x <= wallEndX; x++)
+        {
+            map.SetNavigationBlocked(x, centerY - 1, true);
+            map.SetNavigationBlocked(x, centerY + 1, true);
+        }
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, centerY + 0.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        Vector3 start = simulation.Units.Position[id.Index];
+        Vector3 target = new(map.TileWidth - 5.5f, start.Y, 1f);
+        UnitNavigationSystem navigation = simulation.Navigation;
+
+        if (!navigation.CanMoveDirectly(
+                simulation.Units,
+                id.Index,
+                map,
+                new Vector2(wallStartX + 0.5f, centerY + 0.5f),
+                new Vector2(wallEndX + 0.5f, centerY + 0.5f)))
+        {
+            return false;
+        }
+
+        navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
+        if (!navigation.TryGetWaypoint(
+                simulation.Units,
+                id.Index,
+                map,
+                start,
+                target,
+                out _))
+        {
+            return false;
+        }
+
+        Span<Vector2> route = stackalloc Vector2[128];
+        int routeCount = navigation.CopyRoutePoints(id.Index, route);
+        bool rawRouteUsesOpenGround = false;
+        for (int i = 0; i < routeCount; i++)
+        {
+            Vector2 point = route[i];
+            if (point.X >= wallStartX + 2f &&
+                point.X <= wallEndX - 2f &&
+                (point.Y <= centerY - 1.5f || point.Y >= centerY + 1.5f))
+            {
+                rawRouteUsesOpenGround = true;
+                break;
+            }
+        }
+
+        Span<Vector2> waypoints = stackalloc Vector2[128];
+        int waypointCount = navigation.CopyWaypointPoints(id.Index, waypoints);
+        bool smoothedRouteKeepsOpenGround = false;
+        for (int i = 0; i < waypointCount; i++)
+        {
+            Vector2 point = waypoints[i];
+            if (point.X >= wallStartX + 2f &&
+                point.X <= wallEndX - 2f &&
+                (point.Y <= centerY - 1.5f || point.Y >= centerY + 1.5f))
+            {
+                smoothedRouteKeepsOpenGround = true;
+                break;
+            }
+        }
+
+        return rawRouteUsesOpenGround && smoothedRouteKeepsOpenGround;
+    }
+
     public static bool DenseMovingCrowdContinuesToAdvance()
     {
         WorldMap map = CreateFlatWorld();
