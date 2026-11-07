@@ -207,7 +207,7 @@ public sealed class MassCombatTestScene
                     MathF.Max(arenaMinY - y, y - arenaMaxY));
                 float blend = edgeDistance <= 0f
                     ? 1f
-                    : SmoothStep(blendWidth, 0f, edgeDistance);
+                    : 1f - SmoothStep(0f, blendWidth, edgeDistance);
                 if (blend < 1f)
                 {
                     // Fade the city outskirts into the original canyon terrain.
