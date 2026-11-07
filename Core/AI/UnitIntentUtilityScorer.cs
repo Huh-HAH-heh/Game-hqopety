@@ -24,6 +24,12 @@ public static class UnitIntentUtilityScorer
         float shooting = Clamp01(context.ShootingSkill);
         float melee = Clamp01(context.MeleeSkill);
         float resistance = Clamp01(context.SuppressionResistance);
+        float friendlyFireRisk = context.HasRangedWeapon
+            ? Clamp01(context.FriendlyFireRisk)
+            : 0f;
+        float friendlyFirePenalty = friendlyFireRisk *
+            (0.24f + caution * 0.06f) *
+            (context.IsSuppressed || context.IsInImmediateDanger ? 0.65f : 1f);
         float bodyBurden = Clamp01(
             pain * 0.32f +
             fatigue * 0.24f +
@@ -72,6 +78,7 @@ public static class UnitIntentUtilityScorer
                 aggression * 0.09f +
                 tacticalSkill * 0.06f +
                 resistance * 0.04f -
+                friendlyFirePenalty -
                 caution * 0.045f -
                 pain * 0.07f -
                 fatigue * 0.045f -
@@ -83,6 +90,7 @@ public static class UnitIntentUtilityScorer
                     0.73f +
                     Clamp01(context.CombatUtility) * 0.12f +
                     discipline * 0.09f -
+                    friendlyFirePenalty * 0.65f -
                     bodyBurden * 0.05f);
                 engage = 0f;
             }
@@ -161,6 +169,7 @@ public static class UnitIntentUtilityScorer
                     caution * 0.08f +
                     shooting * 0.05f -
                     aggression * 0.025f -
+                    friendlyFireRisk * 0.10f -
                     bodyBurden * 0.05f);
                 suppressiveFire = Clamp01(
                     suppressiveFire * balance.SuppressiveFireScale);
