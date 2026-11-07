@@ -1501,12 +1501,11 @@ public sealed class GameRenderer
 
     private void ToggleAutonomousMovementForSelection()
     {
-        SimulationFrameSnapshot? snapshot = GetInputSnapshot();
-        UnitId[] selected = snapshot == null
-            ? Array.Empty<UnitId>()
-            : CaptureSelectedUnitIds(snapshot);
-        if (selected.Length == 0)
+        if (_selectedUnits.Count == 0)
             return;
+
+        UnitId[] selected = new UnitId[_selectedUnits.Count];
+        _selectedUnits.CopyTo(selected);
 
         bool enableHoldPosition = !AreAllAutonomousMovementDisabled(selected);
         ExecuteSimulationCommand(() =>
@@ -1610,7 +1609,7 @@ public sealed class GameRenderer
         }
 
         Console.WriteLine(
-            $"[SQUAD] Hold-position task replaced previous orders for {assigned} soldiers.");
+            $"[MOVE MODE] Hold-position order applied to {assigned} soldiers.");
     }
 
     private void ApplyWeaponContextAction(
@@ -3510,8 +3509,6 @@ public sealed class GameRenderer
                 if (_menuPage == GameMenuPage.Closed &&
                     _unitMovementModeOverlay?.HandleMousePressed(
                         uiPosition,
-                        _window.Size.X,
-                        _window.Size.Y,
                         _selectedUnits.Count > 0,
                         ToggleAutonomousMovementForSelection) == true)
                 {
@@ -3613,7 +3610,6 @@ public sealed class GameRenderer
                                 break;
 
                             case ContextMenuActionType.MoveSelectedHere:
-                            case ContextMenuActionType.MoveSelectedHereAsCrowd:
                             case ContextMenuActionType.MoveSelectedHereAsColumn:
                             {
                                 SimulationFrameSnapshot? snapshot = GetInputSnapshot();
@@ -3632,11 +3628,8 @@ public sealed class GameRenderer
                                         }
                                         else
                                         {
-                                            InfantryFormationType formation =
-                                                selectedAction == ContextMenuActionType.MoveSelectedHereAsCrowd
-                                                    ? InfantryFormationType.Free
-                                                    : InfantryFormationType.Column;
-                                            IssueGroupMoveOrder(moveUnits, moveDestination, formation);
+                                            IssueGroupMoveOrder(
+                                                moveUnits, moveDestination, InfantryFormationType.Column);
                                         }
                                     });
                                 }
