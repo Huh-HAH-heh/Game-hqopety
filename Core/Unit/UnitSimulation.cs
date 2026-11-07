@@ -719,8 +719,7 @@ public sealed class UnitSimulation
         Vector3 destination,
         InfantryFormationType formation,
         bool keepFormationInCombat,
-        WorldMap worldMap,
-        ColumnMovementVariant columnVariant = ColumnMovementVariant.HistoricalSlots)
+        WorldMap worldMap)
     {
         int groupId = _nextAStarMovementGroupId++;
         if (_nextAStarMovementGroupId <= 0)
@@ -736,8 +735,7 @@ public sealed class UnitSimulation
             destination,
             formation,
             keepFormationInCombat,
-            worldMap,
-            columnVariant);
+            worldMap);
         if (issued)
         {
             for (int i = 0; i < members.Count; i++)
