@@ -18,7 +18,6 @@ public enum ContextMenuActionType
     SendSquad,
     AttackTarget,
     MoveSelectedHere,
-    MoveSelectedHereAsCrowd,
     MoveSelectedHereAsColumn,
     HoldSelected,
     CycleFireMode,
