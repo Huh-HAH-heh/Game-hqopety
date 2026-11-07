@@ -27,8 +27,8 @@ public sealed record AiBalanceProfile
     public float InvestigationScale { get; init; } = 1f;
     public float SquadContactScale { get; init; } = 1f;
     public float PatrolScale { get; init; } = 1f;
-    public float ProneAdoptionMinimumUtility { get; init; } = 0.60f;
-    public float ProneContinuationUtility { get; init; } = 0.62f;
+    public float ProneAdoptionMinimumUtility { get; init; } = 0.94f;
+    public float ProneContinuationUtility { get; init; } = 0.72f;
 
     public float MoveDistanceForMaximumUtility { get; init; } = 24f;
     public float MoveOrderBaseUtility { get; init; } = 0.50f;
