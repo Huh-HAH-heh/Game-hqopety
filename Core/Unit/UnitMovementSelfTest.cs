@@ -113,7 +113,14 @@ public static class UnitMovementSelfTest
                 map,
                 simulation.Units.Position[id.Index],
                 new Vector3(wallX + 5.5f, corridorY + 0.5f, 1f),
-                out _))
+                out Vector2 firstWaypoint))
+            return false;
+
+        Span<Vector2> storedWaypoints = stackalloc Vector2[128];
+        int storedWaypointCount =
+            navigation.CopyWaypointPoints(id.Index, storedWaypoints);
+        if (storedWaypointCount == 0 ||
+            Vector2.Distance(firstWaypoint, storedWaypoints[0]) > 0.001f)
             return false;
 
         Span<Vector2> points = stackalloc Vector2[128];

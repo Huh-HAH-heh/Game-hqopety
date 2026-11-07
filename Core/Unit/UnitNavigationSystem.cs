@@ -507,9 +507,7 @@ public sealed class UnitNavigationSystem
         if (waypointCursor < waypoints.Length)
         {
             int cell = waypoints[waypointCursor];
-            waypoint = new Vector2(
-                cell % _width + 0.5f,
-                cell / _width + 0.5f);
+            waypoint = GetWaypointPosition(cell);
             _lastStatuses[unitIndex] = _routeIsPartial[unitIndex]
                 ? UnitNavigationStatus.FollowingPartialRoute
                 : UnitNavigationStatus.FollowingRoute;
@@ -1471,8 +1469,8 @@ public sealed class UnitNavigationSystem
             {
                 if (!CanShortcutPreservingPathCost(
                         worldMap,
-                        path[anchor] % _width + 0.5f,
-                        path[anchor] / _width + 0.5f,
+                        GetWaypointPosition(path[anchor]).X,
+                        GetWaypointPosition(path[anchor]).Y,
                         path,
                         anchor,
                         candidate,
@@ -1685,7 +1683,8 @@ public sealed class UnitNavigationSystem
         int footprintRadiusY) =>
         CanTravelStraightToPoint(
             worldMap, startX, startY, x, y, targetX, targetY,
-            targetX + 0.5f, targetY + 0.5f,
+            (targetX + 0.5f) * NavigationCellSize,
+            (targetY + 0.5f) * NavigationCellSize,
             footprintRadiusX, footprintRadiusY);
 
     private bool HasClearStraightRouteToPoint(
