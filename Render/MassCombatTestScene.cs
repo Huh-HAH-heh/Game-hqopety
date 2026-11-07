@@ -572,9 +572,11 @@ public sealed class MassCombatTestScene
         WorldMap worldMap,
         ref int tileX,
         ref int tileY,
-        int ignoredUnit = -1)
+        int ignoredUnit = -1,
+        bool avoidOccupied = true)
     {
-        if (IsSpawnCellUsable(simulation, worldMap, tileX, tileY, ignoredUnit))
+        if (IsSpawnCellUsable(
+                simulation, worldMap, tileX, tileY, ignoredUnit, avoidOccupied))
             return;
 
         const int maximumSearchRadius = 8;
@@ -597,7 +599,8 @@ public sealed class MassCombatTestScene
                         candidateX >= worldMap.MaxTileX ||
                         candidateY >= worldMap.MaxTileY ||
                         !IsSpawnCellUsable(
-                            simulation, worldMap, candidateX, candidateY, ignoredUnit))
+                            simulation, worldMap, candidateX, candidateY,
+                            ignoredUnit, avoidOccupied))
                     {
                         continue;
                     }
@@ -626,11 +629,15 @@ public sealed class MassCombatTestScene
         WorldMap worldMap,
         int tileX,
         int tileY,
-        int ignoredUnit)
+        int ignoredUnit,
+        bool avoidOccupied)
     {
         if (worldMap.IsNavigationBlocked(tileX, tileY) ||
             worldMap.GetSurfaceLayer(tileX, tileY) < 0)
             return false;
+
+        if (!avoidOccupied)
+            return true;
 
         Vector2 candidate = new(tileX + 0.5f, tileY + 0.5f);
         ReadOnlySpan<int> active = simulation.Units.ActiveIndices;
@@ -709,7 +716,8 @@ public sealed class MassCombatTestScene
                     1,
                     worldMap.MaxTileY - 1);
 
-            ResolveSpawnCell(simulation, worldMap, ref tileX, ref tileY, index);
+            ResolveSpawnCell(
+                simulation, worldMap, ref tileX, ref tileY, index, avoidOccupied: false);
 
             simulation.Units.Position[index] =
                 new Vector3(
