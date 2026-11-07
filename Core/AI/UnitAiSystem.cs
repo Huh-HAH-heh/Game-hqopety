@@ -1948,8 +1948,7 @@ public sealed class UnitAiSystem
             int ally = active[i];
             if (ally == shooter || ally == target ||
                 units.FactionTag[ally] != faction ||
-                health.OverallHitPoints[ally] <= 0f ||
-                units.Posture[ally] == UnitPosture.Injured)
+                health.OverallHitPoints[ally] <= 0f)
             {
                 continue;
             }
