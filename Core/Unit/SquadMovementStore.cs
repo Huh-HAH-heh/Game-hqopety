@@ -75,13 +75,8 @@ public readonly record struct SquadMovementDebugSnapshot(
 public sealed class SquadMovementStore
 {
     private const float RejoinBlendSeconds = 1.8f;
-    private const float MaxCohesionCorrection = 0.62f;
     private const float AlignmentWeight = 0.12f;
-    private const float ColumnGapScale = 1.35f;
-    private const float FormationCorrectionLimit = 1.25f;
     private const float FormationAnchorWeight = 0.42f;
-    private const int MaxFormationNeighborCandidates = 8;
-    private const float MinimumFormationForwardGap = 0.35f;
 
     private Dictionary<int, SquadState> _squads = new();
     private Dictionary<UnitId, MemberLink> _membership = new();
@@ -770,7 +765,6 @@ public sealed class SquadMovementStore
                 squad.Phase = SquadMovementPhase.Advancing;
         }
 
-        BuildFormationGraph(units, health, ai);
     }
 
     private void CompleteSquadMove(
@@ -795,177 +789,7 @@ public sealed class SquadMovementStore
         squad.IsAStarFormation = false;
         squad.KeepFormationInCombat = false;
         squad.MovingCount = 0;
-        squad.FormationBootstrap = false;
         squad.Phase = SquadMovementPhase.Arrived;
-    }
-
-    private void BuildFormationGraph(
-        UnitStore units,
-        UnitHealthStore? health,
-        UnitAiStore? ai)
-    {
-        foreach (SquadState squad in _squads.Values)
-        {
-            int memberCount = squad.Members.Count;
-            squad.FormationMemberCount = 0;
-            squad.EnsureFormationBuffers(memberCount);
-            Array.Fill(squad.FormationNeighborBefore, -1, 0, memberCount);
-            Array.Fill(squad.FormationNeighborAfter, -1, 0, memberCount);
-            Array.Clear(squad.FormationLateralOffsets, 0, memberCount);
-
-            if (!squad.HasMoveOrder ||
-                squad.Formation != InfantryFormationType.Line)
-            {
-                squad.FormationBootstrap = false;
-                continue;
-            }
-
-            Vector2 side = new(-squad.Forward.Y, squad.Forward.X);
-            float minForward = float.PositiveInfinity;
-            float maxForward = float.NegativeInfinity;
-
-            // Build one compact live cohort. Tactical detachments retain membership
-            // but do not distort the geometry of the moving core.
-            for (int slot = 0; slot < memberCount; slot++)
-            {
-                UnitId id = squad.Members[slot];
-                if (!units.TryGetIndex(id, out int unit) ||
-                    (health != null && health.OverallHitPoints[unit] <= 0f) ||
-                    (uint)slot >= (uint)squad.MemberGoals.Length ||
-                    IsDetachedFromCollective(units, ai, unit) ||
-                    IsMemberTacticallyEngaged(id) ||
-                    (_memberOwners[unit] == id &&
-                     _memberStates[unit] == SquadMemberMovementState.Separated))
-                {
-                    continue;
-                }
-
-                Vector3 position = units.Position[unit];
-                Vector2 memberPosition = new(position.X, position.Y);
-                Vector2 toGoal = squad.MemberGoals[slot] - memberPosition;
-                bool reachedSharedTerminal = !units.HasTarget[unit] &&
-                    toGoal.LengthSquared() <= 0.85f * 0.85f;
-                bool followingGroupOrder = units.HasTarget[unit] &&
-                    HasMatchingGroupMoveOrder(ai, unit, squad.MemberGoals[slot]);
-                if (!reachedSharedTerminal && !followingGroupOrder)
-                    continue;
-
-                Vector2 fromCenter = memberPosition - squad.Center;
-                float forward = Vector2.Dot(fromCenter, squad.Forward);
-                minForward = MathF.Min(minForward, forward);
-                maxForward = MathF.Max(maxForward, forward);
-                squad.FormationSortSlots[squad.FormationMemberCount++] = slot;
-            }
-
-            int activeCount = squad.FormationMemberCount;
-            if (activeCount < 2)
-            {
-                squad.FormationBootstrap = false;
-                continue;
-            }
-
-            if (squad.Formation == InfantryFormationType.Column)
-            {
-                float desiredGap = MathF.Max(1.3f, squad.Spacing * ColumnGapScale);
-                float targetDepth = desiredGap * (activeCount - 1);
-                float currentDepth = maxForward - minForward;
-                float threshold = squad.FormationBootstrap ? 0.68f : 0.28f;
-                squad.FormationBootstrap = currentDepth < targetDepth * threshold;
-            }
-            else
-            {
-                squad.FormationBootstrap = false;
-            }
-
-            // A column is always ordered by actual forward projection. A follower
-            // never receives a neighbour that happens to be next in a side-sorted
-            // array but is physically behind it. Line ranks remain lateral.
-            for (int i = 0; i < activeCount; i++)
-            {
-                int slot = squad.FormationSortSlots[i];
-                if (!units.TryGetIndex(squad.Members[slot], out int unit))
-                    continue;
-
-                Vector3 position = units.Position[unit];
-                Vector2 fromCenter = new(
-                    position.X - squad.Center.X,
-                    position.Y - squad.Center.Y);
-                float forward = Vector2.Dot(fromCenter, squad.Forward);
-                float lateral = Vector2.Dot(fromCenter, side);
-                float primary = squad.Formation == InfantryFormationType.Column
-                    ? forward
-                    : lateral;
-                float secondary = squad.Formation == InfantryFormationType.Column
-                    ? lateral
-                    : forward;
-
-                squad.FormationSortKeys[i] =
-                    primary + secondary * 0.0001f + slot * 0.000001f;
-            }
-
-            Array.Sort(
-                squad.FormationSortKeys,
-                squad.FormationSortSlots,
-                0,
-                activeCount);
-
-            if (squad.Formation == InfantryFormationType.Line)
-            {
-                float desiredSideGap = MathF.Max(1.3f, squad.Spacing * 1.2f);
-                for (int i = 0; i < activeCount; i++)
-                {
-                    int slot = squad.FormationSortSlots[i];
-                    squad.FormationLateralOffsets[slot] =
-                        (i - (activeCount - 1) * 0.5f) * desiredSideGap;
-                    if (i > 0)
-                        squad.FormationNeighborBefore[slot] = squad.FormationSortSlots[i - 1];
-                    if (i + 1 < activeCount)
-                        squad.FormationNeighborAfter[slot] = squad.FormationSortSlots[i + 1];
-                }
-
-                continue;
-            }
-
-            // Find the closest actual member ahead, with a bounded forward scan.
-            // The scan is linear in the small sorted neighbour window, not all pairs.
-            float maximumForwardGap = MathF.Max(4f, squad.Spacing * 4.5f);
-            for (int i = 0; i < activeCount; i++)
-            {
-                int slot = squad.FormationSortSlots[i];
-                if (!units.TryGetIndex(squad.Members[slot], out int unit))
-                    continue;
-
-                Vector3 current3 = units.Position[unit];
-                Vector2 current = new(current3.X, current3.Y);
-                float bestDistanceSquared = float.PositiveInfinity;
-                int bestAheadSlot = -1;
-                int end = Math.Min(activeCount, i + 1 + MaxFormationNeighborCandidates);
-
-                for (int j = i + 1; j < end; j++)
-                {
-                    int candidateSlot = squad.FormationSortSlots[j];
-                    if (!units.TryGetIndex(squad.Members[candidateSlot], out int candidate))
-                        continue;
-
-                    Vector3 candidate3 = units.Position[candidate];
-                    Vector2 delta = new(candidate3.X - current.X, candidate3.Y - current.Y);
-                    float forwardGap = Vector2.Dot(delta, squad.Forward);
-                    if (forwardGap < MinimumFormationForwardGap)
-                        continue;
-                    if (forwardGap > maximumForwardGap)
-                        break;
-
-                    float distanceSquared = delta.LengthSquared();
-                    if (distanceSquared >= bestDistanceSquared)
-                        continue;
-
-                    bestDistanceSquared = distanceSquared;
-                    bestAheadSlot = candidateSlot;
-                }
-
-                squad.FormationNeighborAfter[slot] = bestAheadSlot;
-            }
-        }
     }
 
     public bool TryAdjustAStarFormationWaypoint(
@@ -1474,36 +1298,14 @@ public sealed class SquadMovementStore
         public int RejoiningCount;
         public int SeparatedCount;
         public int MovingCount;
-        public int FormationMemberCount;
-        public bool FormationBootstrap;
         public Vector2 AnchorTarget;
-        public float[] FormationSortKeys = Array.Empty<float>();
-        public int[] FormationSortSlots = Array.Empty<int>();
-        public int[] FormationNeighborBefore = Array.Empty<int>();
-        public int[] FormationNeighborAfter = Array.Empty<int>();
-        public float[] FormationLateralOffsets = Array.Empty<float>();
 
         public SquadState(int id, List<UnitId> members)
         {
             Id = id;
             Members = members;
-            EnsureFormationBuffers(members.Count);
         }
 
-        public void EnsureFormationBuffers(int memberCount)
-        {
-            if (FormationSortSlots.Length >= memberCount &&
-                FormationLateralOffsets.Length >= memberCount)
-            {
-                return;
-            }
-
-            Array.Resize(ref FormationSortSlots, memberCount);
-            Array.Resize(ref FormationSortKeys, memberCount);
-            Array.Resize(ref FormationNeighborBefore, memberCount);
-            Array.Resize(ref FormationNeighborAfter, memberCount);
-            Array.Resize(ref FormationLateralOffsets, memberCount);
-        }
     }
 }
 
