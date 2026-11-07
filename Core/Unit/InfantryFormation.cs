@@ -32,12 +32,12 @@ public static class ColumnMovementVariantInfo
 {
     public static string GetName(ColumnMovementVariant variant) => variant switch
     {
-        ColumnMovementVariant.HistoricalSlots => "Слоты (19.10)",
-        ColumnMovementVariant.VirtualCenterline => "Виртуальный центр",
-        ColumnMovementVariant.StaggeredCenterline => "Шахматная колонна",
-        ColumnMovementVariant.LooseCorridor => "Свободный коридор",
-        ColumnMovementVariant.LinkedTrail => "Цепочка (контроль)",
-        _ => "Слоты (19.10)"
+        ColumnMovementVariant.HistoricalSlots => "Колонна · слоты (19.10)",
+        ColumnMovementVariant.VirtualCenterline => "Колонна · виртуальный центр",
+        ColumnMovementVariant.StaggeredCenterline => "Колонна · шахматная",
+        ColumnMovementVariant.LooseCorridor => "Колонна · свободный коридор",
+        ColumnMovementVariant.LinkedTrail => "Колонна · цепочка (контроль)",
+        _ => "Колонна · слоты (19.10)"
     };
 
     public static ColumnMovementVariant Next(ColumnMovementVariant variant) => variant switch
@@ -51,8 +51,8 @@ public static class ColumnMovementVariantInfo
 }
 
 /// <summary>
-/// Names squad movement profiles. Runtime orders use a shared objective and
-/// dynamic group steering; they do not assign the offsets returned by GetOffset.
+/// Names squad movement profiles. The column comparison can use independent
+/// destination slots, weak centre-relative steering, a loose corridor or a linked trail.
 /// </summary>
 public static class InfantryFormation
 {
@@ -71,8 +71,8 @@ public static class InfantryFormation
     };
 
     /// <summary>
-    /// Returns legacy preview geometry for tools. Live squad movement does not
-    /// use per-member offsets or fixed destination slots.
+    /// Returns formation offsets. HistoricalSlots uses these as individual
+    /// destination offsets; the other column variants use their own steering model.
     /// </summary>
     public static Vector2 GetOffset(
         int index,
