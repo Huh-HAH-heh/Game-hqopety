@@ -783,9 +783,6 @@ public sealed class GameRenderer
 
         if (renderSnapshot != null)
         {
-            if (_showOrderPaths)
-                DrawPlayerOrderOverlays(renderSnapshot);
-
             stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.DrawSnapshot(
                 _window,
@@ -852,12 +849,15 @@ public sealed class GameRenderer
         bool includeSquadDebug = ShouldCaptureSquadDebug;
         SimulationFrameSnapshot? informationSnapshot = renderSnapshot;
         if (informationSnapshot == null &&
-            (includeSquadDebug || _showMovementVectors || _showMovementForces))
+            (includeSquadDebug || _showMovementVectors || _showMovementForces || _showOrderPaths))
         {
             informationSnapshot = SimulationFrameSnapshot.Capture(
                 _unitSimulation,
                 includeSquadDebug: includeSquadDebug);
         }
+
+        if (_showOrderPaths && informationSnapshot != null)
+            DrawPlayerOrderOverlays(informationSnapshot);
 
         if (informationSnapshot != null)
         {
@@ -870,10 +870,7 @@ public sealed class GameRenderer
                 Volatile.Read(ref _selectedInfoSquadId),
                 _showMovementVectors,
                 _showMovementForces,
-                false,
-                false,
-                false,
-                false);
+                _showOrderPaths);
         }
 
         if (_isSelectingUnits && IsSelectionDrag())
@@ -908,10 +905,10 @@ public sealed class GameRenderer
                     Volatile.Read(ref _selectedInfoSquadId),
                     _showMovementVectors,
                     _showMovementForces,
-                    _showSquadFlowWeights,
-                    _showSquadFormation,
-                    _showSquadStates,
-                    _showSquadContacts);
+                    false,
+                    false,
+                    false,
+                    false);
             }
 
             AiEvolutionStatus? evolutionStatus = _liveAiEvolutionTrainer.Status;
