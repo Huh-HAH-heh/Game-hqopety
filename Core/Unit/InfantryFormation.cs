@@ -19,35 +19,40 @@ public enum InfantryFormationType : byte
 /// HistoricalSlots preserves the original independent A* destination-slot approach.
 /// LinkedTrail is the current predecessor-following implementation.
 /// </summary>
+public enum UnitGroupMovementMode : byte
+{
+    Individual = 0,
+    Crowd = 1,
+    Column = 2
+}
+
+public static class UnitGroupMovementModeInfo
+{
+    public static string GetName(UnitGroupMovementMode mode) => mode switch
+    {
+        UnitGroupMovementMode.Individual => "Индивидуально",
+        UnitGroupMovementMode.Crowd => "Толпой",
+        UnitGroupMovementMode.Column => "Колонной",
+        _ => "Индивидуально"
+    };
+
+    public static UnitGroupMovementMode Next(UnitGroupMovementMode mode) => mode switch
+    {
+        UnitGroupMovementMode.Individual => UnitGroupMovementMode.Crowd,
+        UnitGroupMovementMode.Crowd => UnitGroupMovementMode.Column,
+        _ => UnitGroupMovementMode.Individual
+    };
+}
+
 public enum ColumnMovementVariant : byte
 {
-    HistoricalSlots = 0,
-    VirtualCenterline = 1,
-    StaggeredCenterline = 2,
-    LooseCorridor = 3,
-    LinkedTrail = 4
+    HistoricalSlots = 0
 }
 
 public static class ColumnMovementVariantInfo
 {
-    public static string GetName(ColumnMovementVariant variant) => variant switch
-    {
-        ColumnMovementVariant.HistoricalSlots => "Колонна · слоты (19.10)",
-        ColumnMovementVariant.VirtualCenterline => "Колонна · виртуальный центр",
-        ColumnMovementVariant.StaggeredCenterline => "Колонна · шахматная",
-        ColumnMovementVariant.LooseCorridor => "Колонна · свободный коридор",
-        ColumnMovementVariant.LinkedTrail => "Колонна · цепочка (контроль)",
-        _ => "Колонна · слоты (19.10)"
-    };
-
-    public static ColumnMovementVariant Next(ColumnMovementVariant variant) => variant switch
-    {
-        ColumnMovementVariant.HistoricalSlots => ColumnMovementVariant.VirtualCenterline,
-        ColumnMovementVariant.VirtualCenterline => ColumnMovementVariant.StaggeredCenterline,
-        ColumnMovementVariant.StaggeredCenterline => ColumnMovementVariant.LooseCorridor,
-        ColumnMovementVariant.LooseCorridor => ColumnMovementVariant.LinkedTrail,
-        _ => ColumnMovementVariant.HistoricalSlots
-    };
+    public static string GetName(ColumnMovementVariant variant) =>
+        "Колонна · исторические слоты";
 }
 
 /// <summary>
