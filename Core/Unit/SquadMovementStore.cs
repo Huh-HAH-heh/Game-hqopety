@@ -174,6 +174,35 @@ public sealed class SquadMovementStore
             _membership[squad.Members[i]] = new MemberLink(link.SquadId, i);
     }
 
+    public void ClearMovementGroups(IReadOnlyList<UnitId> members)
+    {
+        if (members == null || members.Count == 0)
+            return;
+
+        HashSet<int> replacedSquads = new();
+        for (int i = 0; i < members.Count; i++)
+        {
+            if (_membership.TryGetValue(members[i], out MemberLink link))
+                replacedSquads.Add(link.SquadId);
+        }
+
+        foreach (int squadId in replacedSquads)
+        {
+            if (!_squads.Remove(squadId, out SquadState? squad))
+                continue;
+
+            for (int i = 0; i < squad.Members.Count; i++)
+            {
+                UnitId member = squad.Members[i];
+                if (_membership.TryGetValue(member, out MemberLink link) &&
+                    link.SquadId == squadId)
+                {
+                    _membership.Remove(member);
+                }
+            }
+        }
+    }
+
     public bool IssueGroupMoveOrder(
         UnitStore units,
         UnitHealthStore health,
@@ -207,31 +236,13 @@ public sealed class SquadMovementStore
         if (members.Count == 0)
             return false;
 
-        // A new movement order replaces any older temporary cohort that overlaps
-        // these units. Persistent squad UI/membership remains independent of orders.
-        HashSet<int> replacedSquads = new();
-        if (_squads.ContainsKey(squadId))
-            replacedSquads.Add(squadId);
-        for (int i = 0; i < members.Count; i++)
+        // A new movement group replaces any older temporary cohort that overlaps.
+        // Persistent squad UI/membership remains independent of movement orders.
+        ClearMovementGroups(members);
+        if (_squads.Remove(squadId, out SquadState? previousSquad))
         {
-            if (_membership.TryGetValue(members[i], out MemberLink oldLink))
-                replacedSquads.Add(oldLink.SquadId);
-        }
-
-        foreach (int oldSquadId in replacedSquads)
-        {
-            if (!_squads.Remove(oldSquadId, out SquadState? oldSquad))
-                continue;
-
-            for (int i = 0; i < oldSquad.Members.Count; i++)
-            {
-                UnitId oldMember = oldSquad.Members[i];
-                if (_membership.TryGetValue(oldMember, out MemberLink oldLink) &&
-                    oldLink.SquadId == oldSquadId)
-                {
-                    _membership.Remove(oldMember);
-                }
-            }
+            for (int i = 0; i < previousSquad.Members.Count; i++)
+                _membership.Remove(previousSquad.Members[i]);
         }
 
         SquadState squad = new(squadId, members);
@@ -349,7 +360,9 @@ public sealed class SquadMovementStore
         squad.Forward = forward;
         squad.Spacing = spacing;
         squad.Formation = formation;
-        squad.Rigidity = SquadFormationRigidity.Organized;
+        squad.Rigidity = formation == InfantryFormationType.Free
+            ? SquadFormationRigidity.Free
+            : SquadFormationRigidity.Organized;
         squad.HasMoveOrder = true;
         squad.IsAStarFormation = true;
         squad.EnforceGroupSpeed =
@@ -752,10 +765,7 @@ public sealed class SquadMovementStore
             bool reachedAnchor =
                 toAnchor.LengthSquared() <= 0.65f * 0.65f &&
                 squad.CenterVelocity.LengthSquared() <= 0.18f * 0.18f;
-            bool waitsForIndividualGoals =
-                squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge ||
-                (squad.Formation == InfantryFormationType.Column &&
-                 squad.ColumnVariant == ColumnMovementVariant.HistoricalSlots);
+            bool waitsForIndividualGoals = squad.IsAStarFormation;
             if (squad.HasMoveOrder &&
                 squad.EngagedCount == 0 &&
                 squad.RejoiningCount == 0 &&
@@ -1253,8 +1263,7 @@ public sealed class SquadMovementStore
             _membership.TryGetValue(member, out MemberLink link) &&
             _squads.TryGetValue(link.SquadId, out SquadState? squad) &&
             squad.HasMoveOrder &&
-            squad.IsAStarFormation &&
-            squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge;
+            squad.IsAStarFormation;
     }
 
     public bool TryGetMemberSquadId(UnitId member, out int squadId)
