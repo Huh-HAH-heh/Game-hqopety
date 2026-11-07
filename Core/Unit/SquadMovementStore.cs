@@ -213,6 +213,10 @@ public sealed class SquadMovementStore
         if (squadId <= 0 || requestedMembers == null || requestedMembers.Count == 0)
             return false;
 
+        formation = formation == InfantryFormationType.Column
+            ? InfantryFormationType.Column
+            : InfantryFormationType.Free;
+
         List<UnitId> members = new(requestedMembers.Count);
         HashSet<UnitId> unique = new();
         for (int i = 0; i < requestedMembers.Count; i++)
@@ -267,10 +271,8 @@ public sealed class SquadMovementStore
             forward = Vector2.UnitX;
         else
             forward = Vector2.Normalize(forward);
-        // Line, wedge and the historical column test retain individual landing
-        // positions. Each pawn gets its own footprint-valid A* goal.
-        bool usesIndividualFormationGoals =
-            formation is InfantryFormationType.Line or InfantryFormationType.Wedge or InfantryFormationType.Column;
+        // Column slots are individual A* goals; crowd targets stay unstructured.
+        bool usesIndividualFormationGoals = formation == InfantryFormationType.Column;
         Vector2 side = new(-forward.Y, forward.X);
         Vector2 meanOffset = Vector2.Zero;
         if (usesIndividualFormationGoals)
@@ -691,37 +693,8 @@ public sealed class SquadMovementStore
                         (inContact ? 1.12f : 1f);
                     break;
 
-                case InfantryFormationType.Line:
-                    squad.EnvelopeWidth = MathF.Max(
-                        baseRadius * 1.2f,
-                        effectiveCoreCount * squad.Spacing * 0.72f) *
-                        contactScale;
-                    squad.EnvelopeDepth = MathF.Max(0.65f, squad.Spacing * 0.65f) *
-                        (inContact ? 1.25f : 1f);
-                    break;
-
-                case InfantryFormationType.Wedge:
-                {
-                    float halfWidth = baseRadius;
-                    float halfDepth = baseRadius;
-                    for (int slot = 0; slot < squad.MemberOffsets.Length; slot++)
-                    {
-                        Vector2 offset = squad.MemberOffsets[slot];
-                        halfWidth = MathF.Max(
-                            halfWidth, MathF.Abs(offset.X) + squad.Spacing * 0.5f);
-                        halfDepth = MathF.Max(
-                            halfDepth, MathF.Abs(offset.Y) + squad.Spacing * 0.5f);
-                    }
-
-                    // A wedge naturally has a larger diagonal footprint than a
-                    // generic crowd. Its wing members must remain part of the core.
-                    squad.EnvelopeWidth = halfWidth * contactScale;
-                    squad.EnvelopeDepth = halfDepth * contactScale;
-                    break;
-                }
-
-                case InfantryFormationType.Free:
-                    // Free movement is a compact moving crowd, not a dispersed cloud.
+                default:
+                    // Crowd travels as one loose body of units, not fixed ranks.
                     float crowdRadius = MathF.Max(
                         squad.Spacing * 1.3f,
                         MathF.Sqrt(effectiveCoreCount) * squad.Spacing * 0.55f) *
@@ -825,11 +798,6 @@ public sealed class SquadMovementStore
         Vector2 routeDirection = pathDistance > 0.05f
             ? pathDelta / pathDistance
             : squad.Forward;
-        Vector2 side = new(-squad.Forward.Y, squad.Forward.X);
-        Vector2 fromCenter = current - squad.Center;
-        float forwardDistance = Vector2.Dot(fromCenter, squad.Forward);
-        float lateralDistance = Vector2.Dot(fromCenter, side);
-
         bool inContact = squad.EngagedCount > 0;
         bool rejoining =
             _memberOwners[unitIndex] == id &&
@@ -853,11 +821,6 @@ public sealed class SquadMovementStore
         else if (squad.Formation == InfantryFormationType.Column)
         {
             // Column movement uses independent destination slots only.
-            return false;
-        }
-        else if (squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge)
-        {
-            // Their A* destinations already encode the requested shape.
             return false;
         }
         else if (squad.Formation == InfantryFormationType.Free)
