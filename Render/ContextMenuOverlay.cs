@@ -20,7 +20,6 @@ public enum ContextMenuActionType
     MoveSelectedHere,
     MoveSelectedHereAsCrowd,
     MoveSelectedHereAsColumn,
-    ToggleAutonomousMovement,
     HoldSelected,
     CycleFireMode,
     CycleAimMode,
@@ -104,7 +103,6 @@ public sealed class ContextMenuOverlay : IDisposable
         bool canSendSquad,
         bool canAttackTarget,
         bool canMoveSelected,
-        string? autonomousMovementLabel = null,
         bool canHoldSelected = false,
         bool canConfigureWeapons = false)
     {
@@ -124,7 +122,6 @@ public sealed class ContextMenuOverlay : IDisposable
             canSendSquad,
             canAttackTarget,
             canMoveSelected,
-            autonomousMovementLabel,
             canHoldSelected,
             canConfigureWeapons);
     }
@@ -139,7 +136,6 @@ public sealed class ContextMenuOverlay : IDisposable
         bool canSendSquad,
         bool canAttackTarget,
         bool canMoveSelected,
-        string? autonomousMovementLabel = null,
         bool canHoldSelected = false,
         bool canConfigureWeapons = false)
     {
@@ -170,22 +166,13 @@ public sealed class ContextMenuOverlay : IDisposable
             AddAction(ContextMenuActionType.AttackTarget, "Атаковать цель");
 
         if (canMoveSelected)
-            AddAction(ContextMenuActionType.MoveSelectedHere, "Переместить по отдельности");
-
-        if (canMoveSelected && hasMultipleUnits)
-        {
-            AddAction(ContextMenuActionType.MoveSelectedHereAsCrowd, "Переместить толпой");
-            AddAction(ContextMenuActionType.MoveSelectedHereAsColumn, "Переместить колонной");
-        }
+            AddAction(ContextMenuActionType.MoveSelectedHere, "Переместить сюда");
 
         if (canSendSquad)
             AddAction(ContextMenuActionType.SendSquad, "Отправить отряд сюда");
 
         if (canCreateSquad)
             AddAction(ContextMenuActionType.CreateSquad, "Создать отряд");
-
-        if (autonomousMovementLabel != null)
-            AddAction(ContextMenuActionType.ToggleAutonomousMovement, autonomousMovementLabel);
 
         if (hasMultipleUnits)
             AddAction(ContextMenuActionType.OpenSelectionOverview, "Обзор выделенных");
