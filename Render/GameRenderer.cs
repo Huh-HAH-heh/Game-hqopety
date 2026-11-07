@@ -286,13 +286,13 @@ public sealed class GameRenderer
         _showVisionDebug = false;
         _showHearingDebug = false;
 
-        // Start with a quiet terrain course. Test scenes are selected from
-        // ESC -> Settings -> Test scenes.
+        // Start directly in the ruined-city close-combat arena.
+        // Other test scenes remain available from ESC -> Settings -> Test scenes.
         _terrainStressMode = false;
         _massCombatMode = false;
         _movementTestMode = false;
         _visionTestMode = false;
-        _selectedTestSceneIndex = 0;
+        _selectedTestSceneIndex = 4;
 
         // The default camera starts focused on the isolated melee arena, so
         // begin closer than the old 1,600-unit overview setting.
@@ -4540,6 +4540,7 @@ public sealed class GameRenderer
             _combatStatusOverlay.Visible = true;
 
         WorldGenerator.Generate(_worldMap);
+        ClearTestNavigationBlockers();
         _mapRenderer.ResetVisualSettings();
         _visibleMaxLayer = 0;
         _showDebugGrid = false;
@@ -4630,6 +4631,20 @@ public sealed class GameRenderer
         _activeTestSceneIndex = sceneIndex;
         _selectedTestSceneIndex = sceneIndex;
         Console.WriteLine($"[SCENE] Активна тестовая карта: {GameMenuOverlay.GetTestSceneName(sceneIndex)}.");
+    }
+
+    private void ClearTestNavigationBlockers()
+    {
+        // Test scenes use visible terrain for obstacles. Stale navigation-only
+        // blockers have no rendered geometry and look like invisible perimeter walls.
+        for (int y = 0; y < _worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < _worldMap.TileWidth; x++)
+            {
+                if (_worldMap.IsNavigationBlocked(x, y))
+                    _worldMap.SetNavigationBlocked(x, y, false);
+            }
+        }
     }
 
     private void CenterOnMeleeBattle()
