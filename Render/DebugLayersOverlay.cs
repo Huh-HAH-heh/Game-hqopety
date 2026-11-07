@@ -39,7 +39,7 @@ public sealed class DebugLayersOverlay : IDisposable
         "Utility AI — оценки",
         "Движение — векторы скорости",
         "Движение — силы мотора",
-        "Маршруты — текущие приказы"
+        "A* — путь выбранных юнитов"
     };
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, Height))
@@ -122,7 +122,7 @@ public sealed class DebugLayersOverlay : IDisposable
         {
             FillColor = new Color(14, 24, 33)
         };
-        _footer = new Text(_font, "V — слои  •  J — режим движения", 9)
+        _footer = new Text(_font, "V — слои • голубой Move • красный Attack • зелёный Stealth", 9)
         {
             FillColor = new Color(145, 160, 178)
         };
