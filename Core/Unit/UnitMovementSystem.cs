@@ -216,120 +216,64 @@ public sealed class UnitMovementSystem
                 if (steeringActive && moveSpeed > 0f)
                 {
                     float speedBeforeSteering = velocity.Length();
-                    bool hasSquadWaypoint = squadMovement != null &&
-                        squadMovement.TryGetSteering(
+                    hasWaypoint = _navigation.TryGetLookAheadWaypoint(
+                        units,
+                        unit,
+                        worldMap,
+                        position,
+                        target,
+                        speedBeforeSteering,
+                        out steeringPoint,
+                        out distanceToGoal,
+                        out distanceToNextTurn,
+                        out turnSeverity);
+
+                    Vector2 aStarWaypoint = steeringPoint;
+                    if (hasWaypoint &&
+                        squadMovement != null &&
+                        squadMovement.TryAdjustAStarFormationWaypoint(
                             units,
                             unit,
-                            worldMap,
                             position,
-                            speedBeforeSteering,
+                            steeringPoint,
                             ai,
-                            out steeringPoint,
-                            out distanceToGoal,
-                            out distanceToNextTurn,
-                            out turnSeverity);
-
-                    // A blended Flow Field direction may cut a corner when
-                    // sampled near an obstacle. Keep the shared field when its
-                    // short look-ahead is traversable; otherwise use footprint-
-                    // aware A* for this pawn until the local segment is clear.
-                    if (hasSquadWaypoint)
+                            out Vector2 formationWaypoint))
                     {
                         Vector2 currentPosition = new(position.X, position.Y);
-                        if (!_navigation.CanMoveDirectly(
-                                units, unit, worldMap, currentPosition, steeringPoint))
+                        bool foundSafeFormationPoint = false;
+                        float formationBlend = 1f;
+                        for (int attempt = 0; attempt < 6; attempt++)
                         {
-                            // A field direction can be valid while its full look-ahead
-                            // clips a corner for this pawn's footprint. Shorten the
-                            // same direction first; do not instantly abandon the shared
-                            // route and brake while an individual A* route is requested.
-                            Vector2 offset = steeringPoint - currentPosition;
-                            bool foundSafeLookAhead = false;
-                            for (int attempt = 0; attempt < 5; attempt++)
+                            Vector2 candidate = Vector2.Lerp(
+                                aStarWaypoint,
+                                formationWaypoint,
+                                formationBlend);
+                            if (_navigation.CanMoveDirectly(
+                                    units, unit, worldMap, currentPosition, candidate))
                             {
-                                offset *= 0.65f;
-                                Vector2 candidate = currentPosition + offset;
-                                if (!_navigation.CanMoveDirectly(
-                                        units, unit, worldMap, currentPosition, candidate))
-                                {
-                                    continue;
-                                }
-
                                 steeringPoint = candidate;
-                                foundSafeLookAhead = true;
+                                foundSafeFormationPoint = true;
                                 break;
                             }
 
-                            if (!foundSafeLookAhead)
-                                hasSquadWaypoint = false;
+                            formationBlend *= 0.5f;
                         }
-                    }
 
-                    if (hasSquadWaypoint)
-                    {
-                        hasWaypoint = true;
-                    }
-                    else
-                    {
-                        hasWaypoint = _navigation.TryGetLookAheadWaypoint(
-                            units,
-                            unit,
-                            worldMap,
-                            position,
-                            target,
-                            speedBeforeSteering,
-                            out steeringPoint,
-                            out distanceToGoal,
-                            out distanceToNextTurn,
-                            out turnSeverity);
-
-                        Vector2 aStarWaypoint = steeringPoint;
-                        if (hasWaypoint &&
-                            squadMovement != null &&
-                            squadMovement.TryAdjustAStarFormationWaypoint(
-                                units,
-                                unit,
-                                position,
-                                steeringPoint,
-                                ai,
-                                out Vector2 formationWaypoint))
+                        if (!foundSafeFormationPoint)
                         {
-                            Vector2 currentPosition = new(position.X, position.Y);
-                            bool foundSafeFormationPoint = false;
-                            float formationBlend = 1f;
-                            for (int attempt = 0; attempt < 6; attempt++)
-                            {
-                                Vector2 candidate = Vector2.Lerp(
-                                    aStarWaypoint,
-                                    formationWaypoint,
-                                    formationBlend);
-                                if (_navigation.CanMoveDirectly(
-                                        units, unit, worldMap, currentPosition, candidate))
-                                {
-                                    steeringPoint = candidate;
-                                    foundSafeFormationPoint = true;
-                                    break;
-                                }
-
-                                formationBlend *= 0.5f;
-                            }
-
-                            if (!foundSafeFormationPoint)
-                            {
-                                steeringPoint = aStarWaypoint;
-                            }
-                            else if (hasCollectiveMove)
-                            {
-                                // The shared click is the cohort objective, not a
-                                // per-member stop point. Keep enough braking distance
-                                // to reach the local formation steering target.
-                                float localSteeringDistance = Vector2.Distance(
-                                    currentPosition,
-                                    steeringPoint);
-                                distanceToGoal = MathF.Max(
-                                    distanceToGoal,
-                                    localSteeringDistance + ArrivalRadius);
-                            }
+                            steeringPoint = aStarWaypoint;
+                        }
+                        else if (hasCollectiveMove)
+                        {
+                            // The shared click is the cohort objective, not a
+                            // per-member stop point. Keep enough braking distance
+                            // to reach the local formation steering target.
+                            float localSteeringDistance = Vector2.Distance(
+                                currentPosition,
+                                steeringPoint);
+                            distanceToGoal = MathF.Max(
+                                distanceToGoal,
+                                localSteeringDistance + ArrivalRadius);
                         }
                     }
                 }
