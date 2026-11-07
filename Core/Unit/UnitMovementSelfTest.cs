@@ -14,6 +14,79 @@ public static class UnitMovementSelfTest
     private const float TestDeltaTime = 1f / 60f;
     private const ushort FloorHeight = 10;
 
+    public static bool NavigableGoalPreservesSubCellPosition()
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.37f, 10.62f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitNavigationSystem navigation = new UnitNavigationSystem();
+        Vector2 requested = new(20.23f, 17.71f);
+
+        return navigation.TryResolveNavigableGoal(
+                   simulation.Units,
+                   id.Index,
+                   map,
+                   requested,
+                   reservedFootprintCells: null,
+                   out Vector2 resolved) &&
+               Vector2.Distance(resolved, requested) <= 0.001f;
+    }
+
+    public static bool LocalRouteTetherUsesContinuousCorridorCoordinates()
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.23f, 10.17f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitNavigationSystem navigation = new UnitNavigationSystem();
+        navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
+
+        Vector3 start = simulation.Units.Position[id.Index];
+        Vector3 target = new(35.82f, 22.71f, 1f);
+        if (!navigation.TryGetLookAheadWaypoint(
+                simulation.Units,
+                id.Index,
+                map,
+                start,
+                target,
+                currentSpeed: 1.6f,
+                out Vector2 tether,
+                out _,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        Vector2 direction = Vector2.Normalize(
+            new Vector2(target.X - start.X, target.Y - start.Y));
+        Vector2 offset = tether - new Vector2(start.X, start.Y);
+        float crossTrackDistance = MathF.Abs(
+            offset.X * direction.Y - offset.Y * direction.X);
+        bool offGridX = MathF.Abs(
+            tether.X - (MathF.Floor(tether.X) + 0.5f)) > 0.025f;
+        bool offGridY = MathF.Abs(
+            tether.Y - (MathF.Floor(tether.Y) + 0.5f)) > 0.025f;
+
+        return crossTrackDistance > 0.08f &&
+               (offGridX || offGridY) &&
+               navigation.CanMoveDirectly(
+                   simulation.Units,
+                   id.Index,
+                   map,
+                   new Vector2(start.X, start.Y),
+                   tether);
+    }
+
     public static bool AcceleratesAndStopsAtCommandedTarget()
     {
         WorldMap map = CreateFlatWorld();
