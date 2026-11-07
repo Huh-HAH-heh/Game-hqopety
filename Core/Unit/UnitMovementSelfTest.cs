@@ -92,14 +92,15 @@ public static class UnitMovementSelfTest
         WorldMap map = CreateFlatWorld();
         int wallX = map.TileWidth / 2;
         int corridorY = map.TileHeight / 2;
+        int openingY = corridorY - 8;
         for (int y = 2; y < map.TileHeight - 2; y++)
-            if (Math.Abs(y - corridorY) > 2)
+            if (Math.Abs(y - openingY) > 2)
                 map.SetNavigationBlocked(wallX, y, true);
 
         UnitSimulation simulation = new UnitSimulation(4, 64);
         UnitId id = simulation.Spawn(
             UnitType.Colonist,
-            new Vector3(5.5f, corridorY + 0.5f, 1f),
+            new Vector3(wallX - 0.5f, corridorY + 0.5f, 1f),
             Vector3.UnitX,
             Vector3.UnitX,
             factionTag: 1);
@@ -111,7 +112,7 @@ public static class UnitMovementSelfTest
                 id.Index,
                 map,
                 simulation.Units.Position[id.Index],
-                new Vector3(map.TileWidth - 5.5f, corridorY + 0.5f, 1f),
+                new Vector3(wallX + 5.5f, corridorY + 0.5f, 1f),
                 out _))
             return false;
 

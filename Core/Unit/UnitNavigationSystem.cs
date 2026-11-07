@@ -1267,9 +1267,10 @@ public sealed class UnitNavigationSystem
             // not hard limits, so an obstacle can still force a wide detour.
             float offsetX = x - startX;
             float offsetY = y - startY;
-            float forwardProgress = offsetX * goalDirection.X + offsetY * goalDirection.Y;
+            float forwardProgress =
+                (offsetX * goalDirection.X + offsetY * goalDirection.Y) * NavigationCellSize;
             float lateralDrift = MathF.Abs(
-                offsetX * goalSide.X + offsetY * goalSide.Y);
+                offsetX * goalSide.X + offsetY * goalSide.Y) * NavigationCellSize;
             float hotPathScore =
                 forwardProgress - lateralDrift * 0.35f -
                 _gScore[current] * HotPathCostPenalty;
@@ -1330,7 +1331,7 @@ public sealed class UnitNavigationSystem
                     stepCost +
                     heightDifference * HeightCost +
                     _navigationEdgeCost[neighbor] +
-                    routeReuseCost * NavigationCellSize;
+                    routeReuseCost;
                 int parentCell = current;
 
                 // Theta*: bypass cell-to-cell turns when the parent's continuous
@@ -1517,14 +1518,18 @@ public sealed class UnitNavigationSystem
         int targetX = targetCell % _width;
         int targetY = targetCell / _width;
 
-        return CanTravelStraight(
+        Vector2 startPosition = GetWaypointPosition(startCell);
+        Vector2 targetPosition = GetWaypointPosition(targetCell);
+        return CanTravelStraightToPoint(
             worldMap,
-            startX + 0.5f,
-            startY + 0.5f,
+            startPosition.X,
+            startPosition.Y,
             startX,
             startY,
             targetX,
             targetY,
+            targetPosition.X,
+            targetPosition.Y,
             footprintRadiusX,
             footprintRadiusY);
     }
