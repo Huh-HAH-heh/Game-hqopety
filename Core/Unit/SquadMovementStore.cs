@@ -255,7 +255,6 @@ public sealed class SquadMovementStore
 
         Vector2 center = Vector2.Zero;
         float spacing = 1.15f;
-        float slowestSpeed = float.PositiveInfinity;
         for (int i = 0; i < members.Count; i++)
         {
             UnitId id = members[i];
@@ -263,10 +262,6 @@ public sealed class SquadMovementStore
             Vector3 position = units.Position[index];
             center += new Vector2(position.X, position.Y);
             spacing = MathF.Max(spacing, MathF.Max(units.Width[index], units.Length[index]) * 1.15f);
-            float effectiveSpeed = MathF.Max(0.1f, units.MoveSpeed[index]);
-            if (units.Posture[index] == UnitPosture.Lying)
-                effectiveSpeed *= 0.45f;
-            slowestSpeed = MathF.Min(slowestSpeed, effectiveSpeed);
         }
 
         center /= members.Count;
@@ -365,10 +360,7 @@ public sealed class SquadMovementStore
             : SquadFormationRigidity.Organized;
         squad.HasMoveOrder = true;
         squad.IsAStarFormation = true;
-        // The crowd keeps each pawn's own speed; no slowest-member leash.
-        squad.EnforceGroupSpeed = false;
         squad.KeepFormationInCombat = keepFormationInCombat;
-        squad.SlowestMoveSpeed = slowestSpeed;
         squad.Phase = SquadMovementPhase.Advancing;
         squad.FlowField.Invalidate();
         return true;
@@ -464,9 +456,7 @@ public sealed class SquadMovementStore
         squad.Rigidity = SquadFormationRigidity.Free;
         squad.HasMoveOrder = true;
         squad.IsAStarFormation = false;
-        squad.EnforceGroupSpeed = false;
         squad.KeepFormationInCombat = false;
-        squad.SlowestMoveSpeed = float.PositiveInfinity;
         squad.Phase = SquadMovementPhase.Advancing;
         squad.FlowField.Invalidate();
         return true;
@@ -491,7 +481,6 @@ public sealed class SquadMovementStore
             squad.RejoiningCount = 0;
             squad.SeparatedCount = 0;
             squad.MovingCount = 0;
-            squad.SlowestMoveSpeed = float.PositiveInfinity;
 
             Vector2 allCenter = Vector2.Zero;
             Vector2 previousCoreCenter = Vector2.Zero;
@@ -623,14 +612,6 @@ public sealed class SquadMovementStore
                     units.Velocity[unit].Y);
                 coreMemberCount++;
 
-                if (squad.IsAStarFormation)
-                {
-                    float memberSpeed = MathF.Max(0.1f, units.MoveSpeed[unit]);
-                    if (units.Posture[unit] == UnitPosture.Lying)
-                        memberSpeed *= 0.45f;
-                    squad.SlowestMoveSpeed = MathF.Min(
-                        squad.SlowestMoveSpeed, memberSpeed);
-                }
             }
 
             squad.CoreMemberCount = coreMemberCount;
@@ -813,7 +794,6 @@ public sealed class SquadMovementStore
 
         squad.HasMoveOrder = false;
         squad.IsAStarFormation = false;
-        squad.EnforceGroupSpeed = false;
         squad.KeepFormationInCombat = false;
         squad.MovingCount = 0;
         squad.FormationBootstrap = false;
@@ -1127,90 +1107,6 @@ public sealed class SquadMovementStore
             : 1f;
         adjustedWaypoint = current + blendedDirection * lookAhead;
         return true;
-    }
-
-    public bool TryGetAStarFormationSpeedLimit(
-        UnitStore units,
-        UnitId member,
-        UnitAiStore? ai,
-        out float speedLimit)
-    {
-        speedLimit = 0f;
-        if (!member.IsValid ||
-            !_membership.TryGetValue(member, out MemberLink link) ||
-            !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
-            !squad.HasMoveOrder ||
-            !squad.IsAStarFormation ||
-            !squad.EnforceGroupSpeed ||
-            squad.Formation == InfantryFormationType.Column ||
-            (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
-            !HasMatchingGroupMoveOrder(ai, member.Index, squad.MemberGoals[link.Slot]) ||
-            IsDetachedFromCollective(units, ai, member.Index) ||
-            IsMemberTacticallyEngaged(member) ||
-            !float.IsFinite(squad.SlowestMoveSpeed))
-        {
-            return false;
-        }
-
-        speedLimit = squad.SlowestMoveSpeed;
-        return speedLimit > 0f;
-    }
-
-    public bool TryGetFormationSpeedLimit(
-        UnitStore units,
-        UnitId member,
-        UnitAiStore? ai,
-        float currentSpeedLimit,
-        out float speedLimit)
-    {
-        speedLimit = currentSpeedLimit;
-        if (!member.IsValid ||
-            !units.TryGetIndex(member, out int currentUnit) ||
-            !_membership.TryGetValue(member, out MemberLink link) ||
-            !_squads.TryGetValue(link.SquadId, out SquadState? squad) ||
-            !squad.HasMoveOrder ||
-            !squad.IsAStarFormation ||
-            squad.Formation == InfantryFormationType.Column ||
-            (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
-            !HasMatchingGroupMoveOrder(ai, currentUnit, squad.MemberGoals[link.Slot]) ||
-            IsDetachedFromCollective(units, ai, currentUnit) ||
-            IsMemberTacticallyEngaged(member) ||
-            (uint)link.Slot >= (uint)squad.FormationNeighborAfter.Length)
-        {
-            return false;
-        }
-
-        int aheadSlot = squad.FormationNeighborAfter[link.Slot];
-        if ((uint)aheadSlot >= (uint)squad.Members.Count ||
-            !units.TryGetIndex(squad.Members[aheadSlot], out int ahead))
-        {
-            return false;
-        }
-
-        Vector3 currentPosition = units.Position[currentUnit];
-        Vector3 aheadPosition = units.Position[ahead];
-        Vector2 gapVector = new(
-            aheadPosition.X - currentPosition.X,
-            aheadPosition.Y - currentPosition.Y);
-        float gap = Vector2.Dot(gapVector, squad.Forward);
-        if (gap <= 0.1f)
-            return false;
-
-        float desiredGap = MathF.Max(
-            squad.Spacing * 1.2f,
-            (units.Radius[currentUnit] + units.Radius[ahead]) * ColumnGapScale);
-        if (gap >= desiredGap * 1.25f)
-            return false;
-
-        Vector3 aheadVelocity3 = units.Velocity[ahead];
-        float aheadSpeed = Vector2.Dot(
-            new Vector2(aheadVelocity3.X, aheadVelocity3.Y),
-            squad.Forward);
-        float allowedSpeed = MathF.Max(
-            0.15f,
-            aheadSpeed + (gap - desiredGap) * 0.7f);
-        speedLimit = MathF.Min(currentSpeedLimit, allowedSpeed);
-        return speedLimit < currentSpeedLimit;
     }
 
     public bool IsExecutingCollectiveMove(
@@ -1574,9 +1470,7 @@ public sealed class SquadMovementStore
         public Vector2[] MemberGoals = Array.Empty<Vector2>();
         public bool HasMoveOrder;
         public bool IsAStarFormation;
-        public bool EnforceGroupSpeed;
         public bool KeepFormationInCombat;
-        public float SlowestMoveSpeed = float.PositiveInfinity;
         public int FollowingCount;
         public int EngagedCount;
         public int RejoiningCount;
