@@ -768,12 +768,9 @@ public sealed class UnitAiSystem
             {
                 units.Posture[unit] = UnitPosture.Crouching;
             }
-            else if (moving && units.Posture[unit] == UnitPosture.Lying)
-            {
-                // Do not stand up mid-crawl merely because movement is active.
-            }
             else if (moving)
             {
+                // Locomotion always returns the pawn to a normal upright gait.
                 units.Posture[unit] = UnitPosture.Standing;
             }
             else if (suppressionState == UnitSuppressionState.Suppressed)
