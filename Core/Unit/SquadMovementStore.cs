@@ -989,27 +989,6 @@ public sealed class SquadMovementStore
         }
     }
 
-    public bool TryGetSteering(
-        UnitStore units,
-        int unitIndex,
-        WorldMap worldMap,
-        Vector3 position,
-        float currentSpeed,
-        UnitAiStore? ai,
-        out Vector2 steeringPoint,
-        out float distanceToGoal,
-        out float distanceToNextTurn,
-        out float turnSeverity)
-    {
-        // Shared Flow Field movement is intentionally disabled. Every unit,
-        // including test-scene cohorts, follows its own footprint-aware A* route.
-        steeringPoint = default;
-        distanceToGoal = float.PositiveInfinity;
-        distanceToNextTurn = float.PositiveInfinity;
-        turnSeverity = 0f;
-        return false;
-    }
-
     public bool TryAdjustAStarFormationWaypoint(
         UnitStore units,
         int unitIndex,
