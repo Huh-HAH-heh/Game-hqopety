@@ -103,12 +103,27 @@ public static class UnitIntentUtilityScorer
                 flank = Clamp01(flank * balance.FlankScale);
             }
 
+            // Lying is reserved for a stationary defensive firing position.
+            // Marching, stealth movement, flanking and ordinary target approach
+            // must never turn into a crawl just because the enemy is visible.
+            bool defensiveFiringPosition =
+                context.HasRangedWeapon &&
+                !context.IsMoving &&
+                !hasMoveOrder &&
+                !hasStealthOrder &&
+                (hasStopOrder || hasAttackOrder || (!hasAnyPlayerOrder && context.IsAlerted));
+            bool proneUtilityReady = context.ProneCombatUtility >=
+                MathF.Max(0.94f, balance.ProneAdoptionMinimumUtility);
+
             bool canContinueProne = context.IsProne &&
+                defensiveFiringPosition &&
+                proneUtilityReady &&
                 !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth &&
                 !context.IsFlanking &&
                 (!context.CanFlank ||
                  context.FlankUtility <= context.CombatUtility + balance.FlankUtilityAdvantage);
-            bool canAdoptProne = context.ProneCombatUtility >= balance.ProneAdoptionMinimumUtility &&
+            bool canAdoptProne = defensiveFiringPosition &&
+                proneUtilityReady &&
                 context.ProneCombatUtility > context.CombatUtility &&
                 !context.IsSuppressed && !context.IsPanicked && !context.IsLowHealth &&
                 !context.IsFlanking &&
@@ -123,8 +138,6 @@ public static class UnitIntentUtilityScorer
                     shooting * 0.025f -
                     bodyBurden * 0.025f);
                 prone = Clamp01(prone * balance.ProneScale);
-                if (hasStopOrder)
-                    prone = 0f;
             }
             engage = Clamp01(engage * balance.EngageScale);
         }
