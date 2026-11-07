@@ -18,18 +18,9 @@ public enum ContextMenuActionType
     SendSquad,
     AttackTarget,
     MoveSelectedHere,
-    SetFormationFree,
-    SetFormationNone,
-    SetFormationLine,
-    SetFormationColumn,
-    SetFormationWedge,
-    SetFormationDispersedLine,
-    SetFormationPerimeter,
-    SetColumnVariantHistoricalSlots,
-    SetColumnVariantVirtualCenterline,
-    SetColumnVariantStaggeredCenterline,
-    SetColumnVariantLooseCorridor,
-    SetColumnVariantLinkedTrail,
+    SetMovementModeIndividual,
+    SetMovementModeCrowd,
+    SetMovementModeColumn,
     ToggleKeepFormationInCombat,
     ToggleAutonomousMovement,
     HoldSelected,
@@ -189,24 +180,16 @@ public sealed class ContextMenuOverlay : IDisposable
         if (canConfigureFormation)
         {
             AddFormationAction(
-                ContextMenuActionType.SetColumnVariantHistoricalSlots,
-                "Колонна · слоты (19.10)",
+                ContextMenuActionType.SetMovementModeIndividual,
+                "Движение · индивидуально",
                 selectedFormationLabel);
             AddFormationAction(
-                ContextMenuActionType.SetColumnVariantVirtualCenterline,
-                "Колонна · виртуальный центр",
+                ContextMenuActionType.SetMovementModeCrowd,
+                "Движение · толпой",
                 selectedFormationLabel);
             AddFormationAction(
-                ContextMenuActionType.SetColumnVariantStaggeredCenterline,
-                "Колонна · шахматная",
-                selectedFormationLabel);
-            AddFormationAction(
-                ContextMenuActionType.SetColumnVariantLooseCorridor,
-                "Колонна · свободный коридор",
-                selectedFormationLabel);
-            AddFormationAction(
-                ContextMenuActionType.SetColumnVariantLinkedTrail,
-                "Колонна · цепочка (контроль)",
+                ContextMenuActionType.SetMovementModeColumn,
+                "Движение · колонной",
                 selectedFormationLabel);
         }
 
