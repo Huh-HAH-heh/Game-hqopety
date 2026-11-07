@@ -140,6 +140,30 @@ public static class UnitIntentUtilityScorer
                 prone = Clamp01(prone * balance.ProneScale);
             }
             engage = Clamp01(engage * balance.EngageScale);
+
+            // A weapon explicitly set to suppressive aim may choose to pin a
+            // distant visible contact instead of spending every burst on a
+            // direct hit attempt. Player orders and emergencies keep priority.
+            if (context.HasSuppressiveWeapon &&
+                !hasAnyPlayerOrder &&
+                !context.IsSuppressed &&
+                !context.IsPanicked &&
+                !context.IsLowHealth &&
+                context.CombatUtility <= balance.VisibleCombatFarScore)
+            {
+                float longRangeBias = 1f - Clamp01(
+                    (context.CombatUtility - balance.VisibleCombatLongScore) /
+                    MathF.Max(0.01f, balance.VisibleCombatFarScore - balance.VisibleCombatLongScore));
+                suppressiveFire = Clamp01(
+                    0.48f +
+                    longRangeBias * 0.12f +
+                    caution * 0.08f +
+                    shooting * 0.05f -
+                    aggression * 0.025f -
+                    bodyBurden * 0.05f);
+                suppressiveFire = Clamp01(
+                    suppressiveFire * balance.SuppressiveFireScale);
+            }
         }
 
         if (context.HasCover &&
