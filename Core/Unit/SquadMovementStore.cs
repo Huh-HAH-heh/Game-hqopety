@@ -288,9 +288,14 @@ public sealed class SquadMovementStore
             meanOffset /= members.Count;
         }
 
-        HashSet<int> reservedGoals = usesIndividualFormationGoals
+        // Crowd members share one objective but must not be assigned the
+        // exact same terminal cell. Reserve distinct nearby cells without
+        // imposing fixed offsets or a visible formation.
+        bool reserveSeparateGoals =
+            usesIndividualFormationGoals || formation == InfantryFormationType.Free;
+        HashSet<int>? reservedGoals = reserveSeparateGoals
             ? new HashSet<int>()
-            : null!;
+            : null;
         Vector2[] goals = new Vector2[members.Count];
         Vector2[] memberOffsets = new Vector2[members.Count];
         for (int i = 0; i < members.Count; i++)
@@ -312,13 +317,13 @@ public sealed class SquadMovementStore
                     id.Index,
                     worldMap,
                     requestedGoal,
-                    usesIndividualFormationGoals ? reservedGoals : null,
+                    reserveSeparateGoals ? reservedGoals : null,
                     out Vector2 terminal))
             {
                 terminal = ResolveNavigablePoint(
                     worldMap,
                     requestedGoal,
-                    usesIndividualFormationGoals ? reservedGoals : null);
+                    reserveSeparateGoals ? reservedGoals : null);
             }
 
             goals[i] = terminal;
