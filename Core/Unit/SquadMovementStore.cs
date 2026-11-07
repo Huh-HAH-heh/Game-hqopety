@@ -184,7 +184,8 @@ public sealed class SquadMovementStore
         Vector3 destination,
         InfantryFormationType formation,
         bool keepFormationInCombat,
-        WorldMap worldMap)
+        WorldMap worldMap,
+        ColumnMovementVariant columnVariant = ColumnMovementVariant.LinkedTrail)
     {
         if (squadId <= 0 || requestedMembers == null || requestedMembers.Count == 0)
             return false;
@@ -266,11 +267,12 @@ public sealed class SquadMovementStore
             forward = Vector2.UnitX;
         else
             forward = Vector2.Normalize(forward);
-        // Line and wedge retain the old individual landing positions. Each
-        // pawn gets its own footprint-valid A* goal; no second steering force
-        // tries to pull it away from that route.
+        // Line, wedge and the historical column test retain individual landing
+        // positions. Each pawn gets its own footprint-valid A* goal.
         bool usesIndividualFormationGoals =
-            formation is InfantryFormationType.Line or InfantryFormationType.Wedge;
+            formation is InfantryFormationType.Line or InfantryFormationType.Wedge ||
+            (formation == InfantryFormationType.Column &&
+             columnVariant == ColumnMovementVariant.HistoricalSlots);
         Vector2 side = new(-forward.Y, forward.X);
         Vector2 meanOffset = Vector2.Zero;
         if (usesIndividualFormationGoals)
@@ -337,12 +339,30 @@ public sealed class SquadMovementStore
             SetMemberState(units, id.Index, SquadMemberMovementState.Following);
         }
 
+        float columnGapScale = columnVariant switch
+        {
+            ColumnMovementVariant.HistoricalSlots => 1f,
+            ColumnMovementVariant.VirtualCenterline => 1.55f,
+            ColumnMovementVariant.StaggeredCenterline => 1.8f,
+            ColumnMovementVariant.LooseCorridor => 1.7f,
+            _ => ColumnGapScale
+        };
         float columnHalfDepth = formation == InfantryFormationType.Column
             ? MathF.Min(
-                spacing * ColumnGapScale * (members.Count - 1) * 0.5f,
+                spacing * columnGapScale * (members.Count - 1) * 0.5f,
                 Vector2.Distance(center, goal) * 0.6f)
             : 0f;
-        squad.AnchorTarget = goal - forward * columnHalfDepth;
+
+        // Slot and virtual-centre variants have a destination centred on the
+        // whole column. Only the predecessor chain needs its anchor moved back.
+        squad.AnchorTarget =
+            formation == InfantryFormationType.Column &&
+            columnVariant == ColumnMovementVariant.LinkedTrail
+                ? goal - forward * columnHalfDepth
+                : goal;
+        squad.ColumnVariant = formation == InfantryFormationType.Column
+            ? columnVariant
+            : ColumnMovementVariant.LinkedTrail;
         squad.Objective = new Vector3(goal.X, goal.Y, destination.Z);
         squad.Center = center;
         squad.HasCenter = true;
@@ -752,13 +772,15 @@ public sealed class SquadMovementStore
             bool reachedAnchor =
                 toAnchor.LengthSquared() <= 0.65f * 0.65f &&
                 squad.CenterVelocity.LengthSquared() <= 0.18f * 0.18f;
+            bool waitsForIndividualGoals =
+                squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge ||
+                (squad.Formation == InfantryFormationType.Column &&
+                 squad.ColumnVariant == ColumnMovementVariant.HistoricalSlots);
             if (squad.HasMoveOrder &&
                 squad.EngagedCount == 0 &&
                 squad.RejoiningCount == 0 &&
                 squad.SeparatedCount == 0 &&
-                (squad.Formation is not (
-                    InfantryFormationType.Line or InfantryFormationType.Wedge) ||
-                 squad.MovingCount == 0) &&
+                (!waitsForIndividualGoals || squad.MovingCount == 0) &&
                 reachedAnchor)
             {
                 CompleteSquadMove(squad, units, ai, navigation);
@@ -823,7 +845,9 @@ public sealed class SquadMovementStore
             Array.Clear(squad.FormationLateralOffsets, 0, memberCount);
 
             if (!squad.HasMoveOrder ||
-                squad.Formation is not (InfantryFormationType.Column or InfantryFormationType.Line))
+                squad.Formation is not (InfantryFormationType.Column or InfantryFormationType.Line) ||
+                (squad.Formation == InfantryFormationType.Column &&
+                 squad.ColumnVariant != ColumnMovementVariant.LinkedTrail))
             {
                 squad.FormationBootstrap = false;
                 continue;
@@ -1058,48 +1082,132 @@ public sealed class SquadMovementStore
         }
         else if (squad.Formation == InfantryFormationType.Column)
         {
-            float desiredGap = MathF.Max(
-                squad.Spacing * 1.2f,
-                (units.Radius[unitIndex] * 2f) * ColumnGapScale);
-            int aheadSlot = squad.FormationNeighborAfter[link.Slot];
-
-            if ((uint)aheadSlot < (uint)squad.Members.Count &&
-                units.TryGetIndex(squad.Members[aheadSlot], out int ahead))
+            switch (squad.ColumnVariant)
             {
-                Vector3 aheadPosition3 = units.Position[ahead];
-                Vector2 aheadPosition = new(aheadPosition3.X, aheadPosition3.Y);
-                Vector3 aheadVelocity3 = units.Velocity[ahead];
-                Vector2 aheadVelocity = new(aheadVelocity3.X, aheadVelocity3.Y);
-                Vector2 trailHeading = squad.Forward;
-                if (aheadVelocity.LengthSquared() > 0.04f)
+                case ColumnMovementVariant.HistoricalSlots:
+                    // The original 19 October implementation assigned each pawn
+                    // its own A* destination slot. Do not add a second follow force.
+                    return false;
+
+                case ColumnMovementVariant.VirtualCenterline:
+                case ColumnMovementVariant.StaggeredCenterline:
                 {
-                    Vector2 movingHeading = Vector2.Normalize(aheadVelocity);
-                    if (Vector2.Dot(movingHeading, squad.Forward) > 0.2f)
-                        trailHeading = movingHeading;
+                    // Each pawn follows its own soft position relative to the
+                    // predicted group centre. No pawn tracks another pawn.
+                    bool staggered =
+                        squad.ColumnVariant == ColumnMovementVariant.StaggeredCenterline;
+                    float gapScale = staggered ? 1.8f : 1.55f;
+                    float desiredGap = MathF.Max(1.35f, squad.Spacing * gapScale);
+                    float longitudinalOffset =
+                        ((squad.Members.Count - 1) * 0.5f - link.Slot) * desiredGap;
+                    float lateralOffset = staggered
+                        ? ((link.Slot & 1) == 0 ? -1f : 1f) * squad.Spacing * 0.28f
+                        : 0f;
+
+                    Vector2 predictedCenter = squad.Center + squad.CenterVelocity * 0.25f;
+                    Vector2 desiredPosition =
+                        predictedCenter +
+                        squad.Forward * longitudinalOffset +
+                        side * lateralOffset;
+                    Vector2 slotError = desiredPosition - current;
+                    float longitudinalError = Vector2.Dot(slotError, squad.Forward);
+                    float lateralError = Vector2.Dot(slotError, side);
+
+                    float longitudinalDeadZone = desiredGap * 0.32f;
+                    if (MathF.Abs(longitudinalError) > longitudinalDeadZone)
+                    {
+                        float correction = Math.Clamp(
+                            (MathF.Abs(longitudinalError) - longitudinalDeadZone) /
+                                MathF.Max(1f, desiredGap * 1.8f),
+                            0f,
+                            0.42f);
+                        shapeForce += squad.Forward * (MathF.Sign(longitudinalError) * correction);
+                    }
+
+                    float lateralDeadZone = staggered
+                        ? squad.Spacing * 0.38f
+                        : squad.Spacing * 0.48f;
+                    if (MathF.Abs(lateralError) > lateralDeadZone)
+                    {
+                        float correction = Math.Clamp(
+                            (MathF.Abs(lateralError) - lateralDeadZone) /
+                                MathF.Max(0.8f, squad.Spacing * 1.6f),
+                            0f,
+                            staggered ? 0.32f : 0.28f);
+                        shapeForce += side * (MathF.Sign(lateralError) * correction);
+                    }
+
+                    // Deliberately weak: A* and physical movement remain dominant.
+                    shapeWeight = staggered ? 0.13f : 0.16f;
+                    break;
                 }
 
-                Vector2 trailPoint = aheadPosition - trailHeading * desiredGap;
-                Vector2 followDelta = trailPoint - current;
-                float followDistance = followDelta.Length();
-                float followForward = Vector2.Dot(followDelta, squad.Forward);
-                if (followForward > 0.08f &&
-                    followDistance < desiredGap * 5f)
+                case ColumnMovementVariant.LooseCorridor:
                 {
-                    float followGain = Math.Clamp(
-                        followForward / MathF.Max(0.5f, desiredGap * 1.5f),
-                        0.12f,
-                        0.8f);
-                    shapeForce += followDelta / MathF.Max(0.08f, followDistance) * followGain;
+                    // No ranks, slots or predecessor. The group only discourages
+                    // members from drifting far outside a broad shared corridor.
+                    float corridorHalfWidth = MathF.Max(1f, squad.Spacing * 0.95f);
+                    float excess = MathF.Abs(lateralDistance) - corridorHalfWidth;
+                    if (excess <= 0.12f)
+                        return false;
+
+                    float correction = Math.Clamp(
+                        (excess - 0.12f) / MathF.Max(0.8f, squad.Spacing * 1.8f),
+                        0f,
+                        0.5f);
+                    shapeForce = -side * (MathF.Sign(lateralDistance) * correction);
+                    shapeWeight = 0.13f;
+                    break;
+                }
+
+                case ColumnMovementVariant.LinkedTrail:
+                default:
+                {
+                    // Control variant: preserve the current predecessor-following
+                    // behaviour so its rope-like coupling can be compared directly.
+                    float desiredGap = MathF.Max(
+                        squad.Spacing * 1.2f,
+                        (units.Radius[unitIndex] * 2f) * ColumnGapScale);
+                    int aheadSlot = squad.FormationNeighborAfter[link.Slot];
+
+                    if ((uint)aheadSlot < (uint)squad.Members.Count &&
+                        units.TryGetIndex(squad.Members[aheadSlot], out int ahead))
+                    {
+                        Vector3 aheadPosition3 = units.Position[ahead];
+                        Vector2 aheadPosition = new(aheadPosition3.X, aheadPosition3.Y);
+                        Vector3 aheadVelocity3 = units.Velocity[ahead];
+                        Vector2 aheadVelocity = new(aheadVelocity3.X, aheadVelocity3.Y);
+                        Vector2 trailHeading = squad.Forward;
+                        if (aheadVelocity.LengthSquared() > 0.04f)
+                        {
+                            Vector2 movingHeading = Vector2.Normalize(aheadVelocity);
+                            if (Vector2.Dot(movingHeading, squad.Forward) > 0.2f)
+                                trailHeading = movingHeading;
+                        }
+
+                        Vector2 trailPoint = aheadPosition - trailHeading * desiredGap;
+                        Vector2 followDelta = trailPoint - current;
+                        float followDistance = followDelta.Length();
+                        float followForward = Vector2.Dot(followDelta, squad.Forward);
+                        if (followForward > 0.08f &&
+                            followDistance < desiredGap * 5f)
+                        {
+                            float followGain = Math.Clamp(
+                                followForward / MathF.Max(0.5f, desiredGap * 1.5f),
+                                0.12f,
+                                0.8f);
+                            shapeForce += followDelta / MathF.Max(0.08f, followDistance) * followGain;
+                        }
+                    }
+
+                    shapeForce -= side * Math.Clamp(
+                        lateralDistance * (squad.FormationBootstrap ? 0.24f : 0.38f),
+                        -1.25f,
+                        1.25f);
+                    shapeWeight = squad.FormationBootstrap ? 0.28f : 0.62f;
+                    break;
                 }
             }
-
-            // Keep the chain near its virtual centerline. The predecessor
-            // behaviour controls longitudinal spacing; this term removes lanes.
-            shapeForce -= side * Math.Clamp(
-                lateralDistance * (squad.FormationBootstrap ? 0.24f : 0.38f),
-                -1.25f,
-                1.25f);
-            shapeWeight = squad.FormationBootstrap ? 0.28f : 0.62f;
         }
         else if (squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge)
         {
@@ -1220,6 +1328,7 @@ public sealed class SquadMovementStore
             !squad.HasMoveOrder ||
             !squad.IsAStarFormation ||
             squad.Formation != InfantryFormationType.Column ||
+            squad.ColumnVariant != ColumnMovementVariant.LinkedTrail ||
             (uint)link.Slot >= (uint)squad.MemberGoals.Length ||
             !HasMatchingGroupMoveOrder(ai, currentUnit, squad.MemberGoals[link.Slot]) ||
             IsDetachedFromCollective(units, ai, currentUnit) ||
@@ -1617,6 +1726,7 @@ public sealed class SquadMovementStore
         public Vector2 Forward = Vector2.UnitX;
         public float Spacing = 1.15f;
         public InfantryFormationType Formation = InfantryFormationType.Free;
+        public ColumnMovementVariant ColumnVariant = ColumnMovementVariant.LinkedTrail;
         public SquadFormationRigidity Rigidity = SquadFormationRigidity.Free;
         public SquadMovementPhase Phase = SquadMovementPhase.Idle;
         public Vector2[] MemberOffsets = Array.Empty<Vector2>();

@@ -25,6 +25,11 @@ public enum ContextMenuActionType
     SetFormationWedge,
     SetFormationDispersedLine,
     SetFormationPerimeter,
+    SetColumnVariantHistoricalSlots,
+    SetColumnVariantVirtualCenterline,
+    SetColumnVariantStaggeredCenterline,
+    SetColumnVariantLooseCorridor,
+    SetColumnVariantLinkedTrail,
     ToggleKeepFormationInCombat,
     ToggleAutonomousMovement,
     HoldSelected,
@@ -183,16 +188,26 @@ public sealed class ContextMenuOverlay : IDisposable
 
         if (canConfigureFormation)
         {
-            AddFormationAction(ContextMenuActionType.SetFormationFree, "Свободное движение", selectedFormationLabel);
-            AddFormationAction(ContextMenuActionType.SetFormationNone, "Без строя", selectedFormationLabel);
-            AddFormationAction(ContextMenuActionType.SetFormationLine, "Линия", selectedFormationLabel);
-            AddFormationAction(ContextMenuActionType.SetFormationColumn, "Колонна", selectedFormationLabel);
-            AddFormationAction(ContextMenuActionType.SetFormationWedge, "Клин", selectedFormationLabel);
-            AddFormationAction(ContextMenuActionType.SetFormationDispersedLine, "Рассредоточенная линия", selectedFormationLabel);
-            AddFormationAction(ContextMenuActionType.SetFormationPerimeter, "Периметр", selectedFormationLabel);
-
-            if (keepFormationLabel != null)
-                AddAction(ContextMenuActionType.ToggleKeepFormationInCombat, keepFormationLabel);
+            AddFormationAction(
+                ContextMenuActionType.SetColumnVariantHistoricalSlots,
+                "Колонна · слоты (19.10)",
+                selectedFormationLabel);
+            AddFormationAction(
+                ContextMenuActionType.SetColumnVariantVirtualCenterline,
+                "Колонна · виртуальный центр",
+                selectedFormationLabel);
+            AddFormationAction(
+                ContextMenuActionType.SetColumnVariantStaggeredCenterline,
+                "Колонна · шахматная",
+                selectedFormationLabel);
+            AddFormationAction(
+                ContextMenuActionType.SetColumnVariantLooseCorridor,
+                "Колонна · свободный коридор",
+                selectedFormationLabel);
+            AddFormationAction(
+                ContextMenuActionType.SetColumnVariantLinkedTrail,
+                "Колонна · цепочка (контроль)",
+                selectedFormationLabel);
         }
 
         if (canAttackTarget)
