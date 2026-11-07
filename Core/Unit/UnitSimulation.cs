@@ -709,6 +709,9 @@ public sealed class UnitSimulation
         IReadOnlyList<SquadMembershipSnapshot> squads) =>
         _squadMovementStore.SynchronizeMemberships(squads);
 
+    public void ClearSquadMovementOrders(IReadOnlyList<UnitId> members) =>
+        _squadMovementStore.ClearMovementGroups(members);
+
     private int _nextAStarMovementGroupId = 1_000_000;
 
     public bool IssueGroupMoveOrder(
