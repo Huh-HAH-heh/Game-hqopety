@@ -870,7 +870,10 @@ public sealed class GameRenderer
                 Volatile.Read(ref _selectedInfoSquadId),
                 _showMovementVectors,
                 _showMovementForces,
-                _showOrderPaths);
+                false,
+                false,
+                false,
+                false);
         }
 
         if (_isSelectingUnits && IsSelectionDrag())
@@ -1067,10 +1070,7 @@ public sealed class GameRenderer
                 _showUtilityAiDebug,
                 _showMovementVectors,
                 _showMovementForces,
-                false,
-                false,
-                false,
-                false);
+                _showOrderPaths);
         }
 
         _bodyRigEditorOverlay?.Draw(_window, _window.Size.X, _window.Size.Y);
