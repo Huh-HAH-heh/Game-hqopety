@@ -711,19 +711,19 @@ public sealed class UnitSimulation
 
     private int _nextAStarMovementGroupId = 1_000_000;
 
-    public bool IssueAStarFormationMoveOrder(
+    public bool IssueGroupMoveOrder(
         IReadOnlyList<UnitId> members,
         Vector3 destination,
         InfantryFormationType formation,
         bool keepFormationInCombat,
         WorldMap worldMap,
-        ColumnMovementVariant columnVariant = ColumnMovementVariant.LinkedTrail)
+        ColumnMovementVariant columnVariant = ColumnMovementVariant.HistoricalSlots)
     {
         int groupId = _nextAStarMovementGroupId++;
         if (_nextAStarMovementGroupId <= 0)
             _nextAStarMovementGroupId = 1_000_000;
 
-        bool issued = _squadMovementStore.IssueAStarFormationMoveOrder(
+        bool issued = _squadMovementStore.IssueGroupMoveOrder(
             Units,
             Health,
             _aiSystem.Store,
