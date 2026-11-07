@@ -176,7 +176,6 @@ public sealed class GameRenderer
     private volatile bool _showMovementVectors;
     private volatile bool _showMovementForces;
     private volatile bool _showOrderPaths;
-    private volatile bool _showSquadFlowWeights;
     private volatile bool _showSquadFormation;
     private volatile bool _showSquadStates;
     private volatile bool _showSquadContacts;
@@ -4529,7 +4528,6 @@ remove global mode action block                            case ContextMenuActio
         _showMemoryDebug = false;
         _showMovementVectors = false;
         _showMovementForces = false;
-        _showSquadFlowWeights = false;
         _showSquadFormation = false;
         _showSquadStates = false;
         _showSquadContacts = false;
