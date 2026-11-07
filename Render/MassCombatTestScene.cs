@@ -82,7 +82,7 @@ public sealed class MassCombatTestScene
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
             $"Alive {AliveUnits} | " +
-            $"LOS 26m | Broken relief | " +
+            $"RUINED CITY | Walls, rubble, craters | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
@@ -128,91 +128,79 @@ public sealed class MassCombatTestScene
                 float dx = x - centerX;
                 float dy = y - centerY;
 
-                // Low-frequency relief gives the battle area broad, uneven shoulders.
-                float roughness =
-                    0.95f * MathF.Sin(dx * 0.105f + MathF.Sin(dy * 0.061f) * 0.8f) +
-                    0.85f * MathF.Cos(dy * 0.137f - dx * 0.043f) +
-                    0.48f * MathF.Sin((dx + dy) * 0.29f) *
-                    MathF.Cos((dx - dy) * 0.21f) +
-                    0.28f * MathF.Sin(x * 0.71f) * MathF.Cos(y * 0.63f);
+                // Broken street grid: roads bend, narrow and reconnect at offset junctions.
+                float streetYNorth =
+                    -29f + MathF.Sin(dx * 0.052f + 0.3f) * 4.8f +
+                    MathF.Sin(dx * 0.13f) * 1.2f;
+                float streetYMain =
+                    1.5f + MathF.Sin(dx * 0.047f + 0.8f) * 5.5f +
+                    MathF.Sin(dx * 0.15f + 1.4f) * 1.3f;
+                float streetYSouth =
+                    29f + MathF.Sin(dx * 0.045f + 2.1f) * 4.2f;
 
-                float height = BaseTerrainHeight + roughness;
+                float streetXWest =
+                    -46f + MathF.Sin(dy * 0.055f + 0.7f) * 3.5f;
+                float streetXMidWest =
+                    -15f + MathF.Sin(dy * 0.061f + 1.4f) * 3.0f;
+                float streetXMidEast =
+                    17f + MathF.Sin(dy * 0.052f + 2.0f) * 3.6f;
+                float streetXEast =
+                    47f + MathF.Sin(dy * 0.048f + 0.4f) * 3.2f;
 
-                // Broken diagonal ridge: several high shoulders with low saddles between them.
-                float ridgeOneLine =
-                    dx * 0.34f +
-                    MathF.Sin(dx * 0.075f) * 5f +
-                    MathF.Sin(dy * 0.11f) * 2f - 4f;
-                float ridgeOneDistance = MathF.Abs(dy - ridgeOneLine);
-                float ridgeOneGate =
-                    0.16f + 0.84f * MathF.Abs(MathF.Sin(dx * 0.11f + dy * 0.035f));
-                float ridgeOne =
-                    MathF.Max(0f, 4.8f - ridgeOneDistance * 0.95f) * ridgeOneGate;
-                height += ridgeOne;
+                float streetDistance = MathF.Min(
+                    MathF.Min(
+                        MathF.Min(
+                            MathF.Abs(dy - streetYNorth),
+                            MathF.Abs(dy - streetYMain)),
+                        MathF.Abs(dy - streetYSouth)),
+                    MathF.Min(
+                        MathF.Min(
+                            MathF.Abs(dx - streetXWest),
+                            MathF.Abs(dx - streetXMidWest)),
+                        MathF.Min(
+                            MathF.Abs(dx - streetXMidEast),
+                            MathF.Abs(dx - streetXEast))));
 
-                // A second ridge crosses the first at an angle, creating blind corners.
-                float ridgeTwoLine =
-                    -dx * 0.41f +
-                    MathF.Sin(dx * 0.082f + 1.6f) * 4.5f +
-                    MathF.Sin(dy * 0.09f) * 1.8f + 9f;
-                float ridgeTwoDistance = MathF.Abs(dy - ridgeTwoLine);
-                float ridgeTwoGate =
-                    0.12f + 0.88f * MathF.Abs(MathF.Cos(dx * 0.095f - dy * 0.03f + 0.6f));
-                float ridgeTwo =
-                    MathF.Max(0f, 4.1f - ridgeTwoDistance * 0.88f) * ridgeTwoGate;
-                height += ridgeTwo;
+                // Streets sit lower than the broken building plots around them.
+                float roadCut = 1f - SmoothStep(2.1f, 5.4f, streetDistance);
+                float height =
+                    BaseTerrainHeight +
+                    0.55f * MathF.Sin(dx * 0.16f + MathF.Sin(dy * 0.08f)) +
+                    0.42f * MathF.Cos(dy * 0.19f - dx * 0.04f) -
+                    roadCut * 1.25f;
 
-                // Short broken spurs rise from the middle instead of forming one clean wall.
-                float ridgeThreeLine = 2f + MathF.Sin(dy * 0.12f) * 4.2f;
-                float ridgeThreeDistance = MathF.Abs(dx - ridgeThreeLine);
-                float ridgeThreeGate =
-                    0.20f + 0.80f * MathF.Abs(MathF.Sin(dy * 0.145f + 0.9f));
-                float ridgeThree =
-                    MathF.Max(0f, 3.4f - ridgeThreeDistance * 0.9f) * ridgeThreeGate;
-                height += ridgeThree;
+                // Surviving shells of apartment blocks. Their walls have gaps and
+                // collapsed sections; rubble aprons turn the edges into walkable ramps.
+                height += RuinedBuildingHeight(dx, dy, -32f, -15f, 9.5f, 7f, 0.12f, 0.4f);
+                height += RuinedBuildingHeight(dx, dy, -1f, -16f, 8f, 7.5f, -0.16f, 1.7f);
+                height += RuinedBuildingHeight(dx, dy, 31f, -15f, 9f, 7f, 0.10f, 2.8f);
+                height += RuinedBuildingHeight(dx, dy, -45f, 14f, 8f, 8.5f, -0.18f, 3.9f);
+                height += RuinedBuildingHeight(dx, dy, -26f, 38f, 10f, 6.5f, 0.18f, 5.1f);
+                height += RuinedBuildingHeight(dx, dy, 7f, 37f, 9f, 7f, -0.13f, 6.2f);
+                height += RuinedBuildingHeight(dx, dy, 39f, 36f, 10f, 7.5f, 0.16f, 7.3f);
+                height += RuinedBuildingHeight(dx, dy, 48f, -2f, 7f, 8f, -0.22f, 8.4f);
 
-                // Winding shallow ravines cut through the ridges and provide flank routes.
-                float gullyCenterY =
-                    dx * 0.24f +
-                    MathF.Sin(dx * 0.067f + 0.5f) * 6f -
-                    8f;
-                float gullyDistance = MathF.Abs(dy - gullyCenterY);
-                height -= MathF.Max(0f, 3.0f - gullyDistance * 0.64f);
+                // Cross-street debris and collapsed facades create staggered choke points,
+                // but leave several gaps so a squad can flank instead of hitting a wall.
+                float debrisOne = GaussianHill(dx, dy, -11f, -2f, 4.2f, 2.1f);
+                float debrisTwo = GaussianHill(dx, dy, 14f, 5f, 5.2f, 2.5f);
+                float debrisThree = GaussianHill(dx, dy, -39f, -2f, 4.8f, 2.0f);
+                float debrisFour = GaussianHill(dx, dy, 31f, 12f, 5.5f, 2.2f);
+                height += debrisOne + debrisTwo + debrisThree + debrisFour;
 
-                float crossGullyCenterX =
-                    -5f +
-                    dy * 0.28f +
-                    MathF.Sin(dy * 0.085f) * 4f;
-                float crossGullyDistance = MathF.Abs(dx - crossGullyCenterX);
-                height -= MathF.Max(0f, 2.1f - crossGullyDistance * 0.72f);
+                // Bomb craters with broken, non-circular rims.
+                height += CraterRelief(dx, dy, -18f, 18f, 8.5f, 6.5f, 0.3f);
+                height += CraterRelief(dx, dy, 22f, -35f, 7.5f, 5.5f, 1.8f);
+                height += CraterRelief(dx, dy, 51f, 20f, 6f, 8f, 2.9f);
 
-                // Isolated knolls break sight lines without becoming impassable cliffs.
-                float knolls =
-                    GaussianHill(dx, dy, -34f, -23f, 8.5f, 3.0f) +
-                    GaussianHill(dx, dy, 29f, -27f, 10f, 3.5f) +
-                    GaussianHill(dx, dy, -39f, 25f, 9f, 2.8f) +
-                    GaussianHill(dx, dy, 37f, 21f, 8f, 3.1f);
-                height += knolls;
+                // Keep slopes climbable for the movement system; silhouettes and
+                // LOS are broken by 2-5 m ruin heights, not by navigation blockers.
+                height = Math.Clamp(height, 3.5f, 17f);
 
-                // A shallow crater and its broken rim create a small close-quarters basin.
-                float craterX = (dx + 19f) / 11f;
-                float craterY = (dy - 17f) / 8f;
-                float craterDistance = MathF.Sqrt(craterX * craterX + craterY * craterY);
-                if (craterDistance < 0.62f)
-                {
-                    height -= 2.2f * (1f - craterDistance / 0.62f);
-                }
-                else if (craterDistance < 1.08f)
-                {
-                    float rim = 1f - MathF.Abs(craterDistance - 0.84f) / 0.24f;
-                    height += 2.0f * MathF.Max(0f, rim);
-                }
-
-                // Keep every slope traversable; height differences, not blockers, occlude vision.
-                height = Math.Clamp(height, 3.5f, 19f);
-
-                float rockScore = ridgeOne + ridgeTwo + ridgeThree + knolls * 0.35f;
-                ushort material = rockScore > 2.5f ? (ushort)2 : (ushort)1;
+                bool isRubble = roadCut < 0.55f &&
+                    (debrisOne + debrisTwo + debrisThree + debrisFour > 0.45f ||
+                     height > BaseTerrainHeight + 2.0f);
+                ushort material = isRubble ? (ushort)2 : (ushort)1;
                 ushort heightUnits = checked(
                     (ushort)MathF.Round(height * WorldMap.HeightUnitsPerMeter));
 
@@ -232,6 +220,82 @@ public sealed class MassCombatTestScene
             maxY);
     }
 
+    private static float RuinedBuildingHeight(
+        float dx,
+        float dy,
+        float centerX,
+        float centerY,
+        float halfWidth,
+        float halfDepth,
+        float rotation,
+        float seed)
+    {
+        float offsetX = dx - centerX;
+        float offsetY = dy - centerY;
+        float sin = MathF.Sin(rotation);
+        float cos = MathF.Cos(rotation);
+        float localX = offsetX * cos + offsetY * sin;
+        float localY = -offsetX * sin + offsetY * cos;
+
+        float edgeX = MathF.Abs(localX) - halfWidth;
+        float edgeY = MathF.Abs(localY) - halfDepth;
+        float outsideX = MathF.Max(0f, edgeX);
+        float outsideY = MathF.Max(0f, edgeY);
+        float signedDistance =
+            MathF.Sqrt(outsideX * outsideX + outsideY * outsideY) +
+            MathF.Min(MathF.Max(edgeX, edgeY), 0f);
+
+        // A broken wall ring, with some full-height stubs and several collapsed gaps.
+        float tangent = MathF.Abs(edgeX) > MathF.Abs(edgeY) ? localY : localX;
+        float wallGaps =
+            0.18f + 0.82f * MathF.Abs(MathF.Sin(tangent * 0.31f + seed));
+        float wallBand =
+            1f - SmoothStep(0.45f, 2.8f, MathF.Abs(signedDistance));
+        float walls = 4.1f * wallBand * wallGaps;
+
+        // Sloped rubble aprons connect the remaining walls to street level.
+        float apron =
+            1.55f * MathF.Exp(-(signedDistance * signedDistance) / 13f);
+
+        // Inside the footprint only broken piles remain; there is no intact roof.
+        float interior = 1f - SmoothStep(-1.5f, 1.8f, signedDistance);
+        float collapsedRoof =
+            interior * (
+                GaussianHill(localX, localY, -halfWidth * 0.32f, -halfDepth * 0.15f, 3.8f, 2.0f) +
+                GaussianHill(localX, localY, halfWidth * 0.30f, halfDepth * 0.34f, 3.2f, 1.7f));
+
+        return walls + apron + collapsedRoof;
+    }
+
+    private static float CraterRelief(
+        float dx,
+        float dy,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float seed)
+    {
+        float nx = (dx - centerX) / radiusX;
+        float ny = (dy - centerY) / radiusY;
+        float angle = MathF.Atan2(ny, nx);
+        float roughRadius =
+            MathF.Sqrt(nx * nx + ny * ny) +
+            0.09f * MathF.Sin(angle * 5f + seed) +
+            0.06f * MathF.Cos(angle * 3f - seed);
+
+        if (roughRadius < 0.62f)
+            return -2.0f * (1f - roughRadius / 0.62f);
+
+        if (roughRadius < 1.05f)
+        {
+            float rim = 1f - MathF.Abs(roughRadius - 0.82f) / 0.23f;
+            return 1.7f * MathF.Max(0f, rim);
+        }
+
+        return 0f;
+    }
+
     private static float GaussianHill(
         float dx,
         float dy,
@@ -244,6 +308,12 @@ public sealed class MassCombatTestScene
         float offsetY = dy - centerY;
         float distanceSquared = offsetX * offsetX + offsetY * offsetY;
         return height * MathF.Exp(-distanceSquared / (2f * radius * radius));
+    }
+
+    private static float SmoothStep(float min, float max, float value)
+    {
+        float t = Math.Clamp((value - min) / (max - min), 0f, 1f);
+        return t * t * (3f - 2f * t);
     }
 
     private static void ClearTestWater(
@@ -387,7 +457,6 @@ public sealed class MassCombatTestScene
 
         _units[testIndex] = id;
         _side[testIndex] = (byte)side;
-        simulation.Units.ViewRange[id.Index] = 26f;
 
         RangedWeaponConfig weapon =
             (testIndex % 3) switch
