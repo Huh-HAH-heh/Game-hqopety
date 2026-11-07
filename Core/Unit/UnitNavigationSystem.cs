@@ -676,16 +676,26 @@ public sealed class UnitNavigationSystem
 
         float stepDistance = MathF.Min(HotPathLookAheadDistance, distance);
         Vector2 candidate = start + delta * (stepDistance / distance);
-        if (IsWeightedStraightRouteAcceptable(
-                worldMap, start, candidate, footprintX, footprintY))
+        bool directSegmentClear = HasClearStraightRouteToPoint(
+            worldMap, start, candidate, footprintX, footprintY);
+        if (directSegmentClear)
         {
-            waypoint = candidate;
-            return true;
+            if (IsWeightedStraightRouteAcceptable(
+                    worldMap, start, candidate, footprintX, footprintY))
+            {
+                waypoint = candidate;
+                return true;
+            }
+
+            // A clear but expensive segment is exactly where weighted A*
+            // should compare alternate corridors. Do not inch through it.
+            obstacleAhead = true;
+            waypoint = default;
+            return false;
         }
 
-        // The look-ahead hits an obstacle or accumulates excessive terrain,
-        // edge, or traffic cost. Find a safe low-cost point before it; if
-        // progress is negligible, hand control to weighted A*.
+        // The look-ahead intersects a hard obstacle. Find the closest safe,
+        // low-cost point before it; if progress is negligible, hand control to A*.
         obstacleAhead = true;
         float safeDistance = 0f;
         float blockedDistance = stepDistance;
