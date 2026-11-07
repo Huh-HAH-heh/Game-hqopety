@@ -51,7 +51,7 @@ public sealed class UnitNavigationSystem
     private const float ShortcutCostTolerance = 0.05f;
     private const int MovingGoalTolerance = 4;
     private const float WaypointRadius = 0.12f;
-    private const int MaxWaypointShortcutCells = 24;
+    private const int MaxWaypointShortcutCells = 16;
 
     private static readonly int[] DirectionX =
         { 1, -1, 0, 0, 1, 1, -1, -1 };
