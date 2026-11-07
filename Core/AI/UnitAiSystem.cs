@@ -16,12 +16,12 @@ public sealed class UnitAiSystem
 {
     private const float ThinkInterval = 0.15f;
     private const int ThinkPhaseBuckets = 9;
-    private const float TargetMemorySeconds = 3f;
+    private const float TargetMemorySeconds = 12f;
     private const float LowHealthThreshold = 0.35f;
     private const float CoverStep = 2f;
     private const int CoverDirectionCount = 8;
     private const float RememberedEnemyRefreshInterval = 0.45f;
-    private const float RememberedEnemyMemorySeconds = 8f;
+    private const float RememberedEnemyMemorySeconds = 18f;
     private static readonly int MaxAiPlanningParallelism =
         Math.Max(1, Math.Min(2, Environment.ProcessorCount - 2));
     private static readonly ParallelOptions AiPlanningOptions = new()
@@ -1499,7 +1499,7 @@ public sealed class UnitAiSystem
                 (candidate.GetActiveSignals(now) & PerceptionSignalFlags.Investigate) == 0)
                 continue;
 
-            float confidence = candidate.GetEffectiveConfidence(now, 2.5f);
+            float confidence = candidate.GetEffectiveConfidence(now, 5f);
             if (confidence <= 0f)
                 continue;
 
@@ -1577,9 +1577,11 @@ public sealed class UnitAiSystem
         if (orderType == UnitAiOrderType.Move &&
             ReachedGoal(units.Position[unit], Store.PlayerOrderPosition[unit]))
         {
-            Store.SetPlayerOrder(unit, UnitAiOrderType.Stop, units.Position[unit]);
+            // A completed move releases the pawn into autonomous watch/search.
+            // An explicit player Stop order remains a true hold-position command.
+            Store.ClearPlayerOrder(unit);
             Store.ClearGoal(unit);
-            orderType = UnitAiOrderType.Stop;
+            orderType = UnitAiOrderType.None;
         }
 
         int visibleTargetIndex = _nearestVisibleEnemyByUnit[unit];
@@ -1666,7 +1668,7 @@ public sealed class UnitAiSystem
                 currentContact.LastVisualAtSeconds >= 0f)
             {
                 float confidence = currentContact.GetEffectiveConfidence(
-                    _perceptionMemory.CurrentTimeSeconds, 4f);
+                    _perceptionMemory.CurrentTimeSeconds, 6f);
                 float dx = currentContact.EstimatedPosition.X - units.Position[unit].X;
                 float dy = currentContact.EstimatedPosition.Y - units.Position[unit].Y;
                 lastKnownTargetUtility = UnitTacticalUtility.EvaluateInvestigation(
@@ -1689,7 +1691,7 @@ public sealed class UnitAiSystem
                     float dx = rememberedEnemyContext.EstimatedPosition.X - units.Position[unit].X;
                     float dy = rememberedEnemyContext.EstimatedPosition.Y - units.Position[unit].Y;
                     float confidence = rememberedEnemyContext.GetEffectiveConfidence(
-                        _perceptionMemory!.CurrentTimeSeconds, 4f);
+                        _perceptionMemory!.CurrentTimeSeconds, 6f);
                     lastKnownTargetUtility = UnitTacticalUtility.EvaluateInvestigation(
                         confidence, MathF.Sqrt(dx * dx + dy * dy), GetBalanceProfile(unit, units.FactionTag[unit]));
                 }
@@ -1824,7 +1826,8 @@ public sealed class UnitAiSystem
         bool hasImmediateDanger = suppression.IsInImmediateDanger(unit) ||
             HasPerceivedSignal(unit, PerceptionSignalFlags.ImmediateDanger, 0.75f, 0.14f);
         isAlerted |= hasImmediateDanger ||
-            HasPerceivedSignal(unit, PerceptionSignalFlags.PotentialThreat, 2.5f, 0.16f);
+            hasInvestigableContact ||
+            HasPerceivedSignal(unit, PerceptionSignalFlags.PotentialThreat, 5f, 0.16f);
         float coverUtility = UnitTacticalUtility.EvaluateCover(
             suppression.Value[unit],
             hasCover,
@@ -1878,6 +1881,7 @@ public sealed class UnitAiSystem
             IsProne = units.Posture[unit] == UnitPosture.Lying,
             IsMoving = units.Velocity[unit].LengthSquared() > 0.04f,
             IsAlerted = isAlerted,
+            DecisionSample = GetDecisionSample(unit, _tacticalTimeSeconds),
             HasInvestigableContact = hasInvestigableContact,
             HasSquadContact = hasSquadContact,
             IsInvestigatingContext = isInvestigatingContext,
@@ -2180,6 +2184,18 @@ public sealed class UnitAiSystem
         return true;
     }
 
+    private static float GetDecisionSample(int unit, float nowSeconds)
+    {
+        uint timeBucket = unchecked((uint)MathF.Floor(MathF.Max(0f, nowSeconds) * 10f));
+        uint hash = unchecked((uint)(unit + 1) * 0x9E3779B9u ^ timeBucket * 0x85EBCA6Bu);
+        hash ^= hash >> 16;
+        hash *= 0x7FEB352Du;
+        hash ^= hash >> 15;
+        hash *= 0x846CA68Bu;
+        hash ^= hash >> 16;
+        return (hash & 0x00FFFFFFu) / 16777216f;
+    }
+
     private void EnsurePlanningCapacity(int capacity)
     {
         if (_unitBalanceProfiles.Length < capacity)
@@ -2377,8 +2393,8 @@ public sealed class UnitAiSystem
         if (!float.IsFinite(age) || age < 0f || age > RememberedEnemyMemorySeconds)
             return false;
 
-        float confidence = contact.GetEffectiveConfidence(now, 4f);
-        if (confidence < 0.12f)
+        float confidence = contact.GetEffectiveConfidence(now, 6f);
+        if (confidence < 0.08f)
             return false;
 
         float dx = contact.EstimatedPosition.X - units.Position[observer].X;

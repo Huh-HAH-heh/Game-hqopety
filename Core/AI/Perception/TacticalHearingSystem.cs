@@ -19,10 +19,10 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     public override string Id => "auditory";
     public override PerceptionSense Channel => PerceptionSense.Auditory;
     private const float GunshotRange = 180f;
-    private const float GunshotMemorySeconds = 8f;
+    private const float GunshotMemorySeconds = 18f;
     private const float GunshotMemoryPublishIntervalSeconds = 0.15f;
-    private const float FootstepMemorySeconds = 3f;
-    private const float ConfidenceHalfLifeSeconds = 2.5f;
+    private const float FootstepMemorySeconds = 8f;
+    private const float ConfidenceHalfLifeSeconds = 5f;
     private const float MinimumContactConfidence = 0.12f;
     private const float DebugEventLifetimeSeconds = 2.25f;
     private const int MaxRecentLoudDebugEvents = 96;
@@ -247,7 +247,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 candidate.LastStimulusType is not (TacticalStimulusType.Gunshot or TacticalStimulusType.Footstep))
                 continue;
             float confidence = candidate.GetEffectiveConfidence(CurrentTimeSeconds, ConfidenceHalfLifeSeconds);
-            float minimum = candidate.LastStimulusType == TacticalStimulusType.Footstep ? 0.18f : 0.16f;
+            float minimum = candidate.LastStimulusType == TacticalStimulusType.Footstep ? 0.13f : 0.12f;
             if (confidence < minimum)
                 continue;
             float score = confidence +

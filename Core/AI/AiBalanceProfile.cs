@@ -6,7 +6,7 @@ public sealed record AiBalanceProfile
     public static AiBalanceProfile Default { get; } = new();
 
     public float MinimumCandidateScore { get; init; } = 0.001f;
-    public float MinimumInvestigationUtility { get; init; } = 0.24f;
+    public float MinimumInvestigationUtility { get; init; } = 0.22f;
     public float MinimumSquadContactUtility { get; init; } = 0.30f;
     public float RegularSwitchMargin { get; init; } = 0.10f;
     public float CommittedSwitchMargin { get; init; } = 0.23f;
@@ -55,7 +55,7 @@ public sealed record AiBalanceProfile
     public float TacticalFlankDistanceWeight { get; init; } = 0.22f;
 
     public float InvestigationDistanceForMaxPenalty { get; init; } = 64f;
-    public float InvestigationDistancePenalty { get; init; } = 0.35f;
+    public float InvestigationDistancePenalty { get; init; } = 0.30f;
     public float TacticalInvestigationBase { get; init; } = 0.25f;
     public float TacticalInvestigationConfidenceWeight { get; init; } = 0.75f;
     public float InvestigationUncertaintyMaxRadius { get; init; } = 48f;

@@ -102,6 +102,7 @@ public readonly record struct UnitIntentUtilityContext
     public float Aggression { get; init; }
     public float Discipline { get; init; }
     public float Alertness { get; init; }
+    public float DecisionSample { get; init; }
 
     public float MoveOrderUtility { get; init; }
     public float CombatUtility { get; init; }

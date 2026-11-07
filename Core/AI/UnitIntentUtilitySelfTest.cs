@@ -101,6 +101,32 @@ public static class UnitIntentUtilitySelfTest
                riskyDecision.EngageScore > 0f;
     }
 
+    public static bool InvestigableSoundCanWakeAnIdlePawn()
+    {
+        UnitIntentUtilityContext context = new()
+        {
+            IsAlive = true,
+            IsAlerted = true,
+            HasInvestigableContact = true,
+            HealthRatio = 0.9f,
+            EnergyRatio = 1f,
+            HydrationRatio = 1f,
+            Alertness = 0.7f,
+            Discipline = 0.5f,
+            InvestigationUtility = 0.8f,
+            DecisionSample = 0.5f
+        };
+
+        UnitIntentUtilityBreakdown decision = UnitIntentUtilityScorer.Select(
+            in context,
+            BehaviacUnitIntent.None,
+            0f);
+
+        return decision.SuggestedIntent == BehaviacUnitIntent.InvestigateContact &&
+            decision.SuggestedScore > 0f &&
+            decision.SuggestedScore < 0.9f;
+    }
+
     public static bool SuppressedPawnCanChooseAvailableCover()
     {
         UnitIntentUtilityContext context = new()

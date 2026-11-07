@@ -5,6 +5,9 @@ namespace Core.Unit;
 
 public static class UnitIntentUtilityScorer
 {
+    private const float UtilityScoreCompression = 0.86f;
+    private const float NearBestChoiceWindow = 0.055f;
+
     public static UnitIntentUtilityBreakdown Select(
         in UnitIntentUtilityContext context,
         BehaviacUnitIntent previousIntent,
@@ -338,6 +341,22 @@ public static class UnitIntentUtilityScorer
             moveOrder = 0.995f;
         }
 
+        // Utility is a preference, not certainty. Compress routine autonomous
+        // scores so ordinary behavior does not constantly sit at the 0.95-1.00 ceiling.
+        // Player orders and emergency responses retain full strength.
+        engage *= UtilityScoreCompression;
+        flank *= UtilityScoreCompression;
+        prone *= UtilityScoreCompression;
+        suppressiveFire *= UtilityScoreCompression;
+        lastKnown *= UtilityScoreCompression;
+        investigation *= UtilityScoreCompression;
+        squad *= UtilityScoreCompression;
+        patrol *= UtilityScoreCompression;
+        if (!context.IsInImmediateDanger && !context.IsPanicked)
+            cover *= UtilityScoreCompression;
+        if (!context.IsLowHealth)
+            retreat *= UtilityScoreCompression;
+
         var scores = new UnitIntentUtilityBreakdown
         {
             PreviousIntent = previousIntent,
@@ -373,6 +392,16 @@ public static class UnitIntentUtilityScorer
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.InvestigateContact, investigation);
         Consider(ref bestIntent, ref bestScore, BehaviacUnitIntent.InvestigateSquadContact, squad);
 
+        // Near-equal autonomous options should not always resolve to the first
+        // candidate in source order. Direct player orders and emergencies bypass this.
+        if (context.OrderType == UnitAiOrderType.None &&
+            bestScore >= 0.35f &&
+            !IsEmergencyIntent(bestIntent, context))
+        {
+            bestIntent = SelectNearBestIntent(scores, bestIntent, bestScore, context.DecisionSample);
+            bestScore = ScoreFor(bestIntent, scores);
+        }
+
         float previousScore = ScoreFor(previousIntent, scores);
         UnitIntentDecisionReason reason = previousIntent == BehaviacUnitIntent.None
             ? UnitIntentDecisionReason.InitialSelection
@@ -380,7 +409,7 @@ public static class UnitIntentUtilityScorer
 
         if (bestIntent != previousIntent &&
             previousIntent != BehaviacUnitIntent.None &&
-            previousScore >= balance.MinimumCandidateScore)
+            previousScore >= balance.MinimumCandidateScore * UtilityScoreCompression)
         {
             bool emergency = IsEmergencyIntent(bestIntent, context);
             float margin = emergency
@@ -388,6 +417,7 @@ public static class UnitIntentUtilityScorer
                 : commitRemainingSeconds > 0f
                     ? balance.CommittedSwitchMargin - discipline * balance.CommittedSwitchDisciplineRelief
                     : balance.RegularSwitchMargin + discipline * balance.RegularSwitchDisciplinePenalty;
+            margin *= UtilityScoreCompression;
 
             if (bestScore < previousScore + margin)
             {
@@ -422,6 +452,62 @@ public static class UnitIntentUtilityScorer
         AiBalanceProfile balance = balanceProfile ?? AiBalanceProfile.Default;
         return balance.CommitDurationBaseSeconds + Clamp01(discipline) * balance.CommitDurationDisciplineSeconds;
     }
+
+    private static BehaviacUnitIntent SelectNearBestIntent(
+        in UnitIntentUtilityBreakdown scores,
+        BehaviacUnitIntent bestIntent,
+        float bestScore,
+        float decisionSample)
+    {
+        Span<IntentCandidate> candidates = stackalloc IntentCandidate[]
+        {
+            new(BehaviacUnitIntent.EngageTarget, scores.EngageScore),
+            new(BehaviacUnitIntent.HoldPositionEngage, scores.HoldAndEngageScore),
+            new(BehaviacUnitIntent.SeekCover, scores.CoverScore),
+            new(BehaviacUnitIntent.RetreatToCover, scores.RetreatScore),
+            new(BehaviacUnitIntent.FollowMoveOrder, scores.MoveOrderScore),
+            new(BehaviacUnitIntent.HoldPosition, scores.HoldOrderScore),
+            new(BehaviacUnitIntent.AttackOrder, scores.AttackOrderScore),
+            new(BehaviacUnitIntent.FlankTarget, scores.FlankScore),
+            new(BehaviacUnitIntent.ProneEngage, scores.ProneScore),
+            new(BehaviacUnitIntent.SuppressiveFire, scores.SuppressiveFireScore),
+            new(BehaviacUnitIntent.InvestigateLastKnownTarget, scores.LastKnownContactScore),
+            new(BehaviacUnitIntent.InvestigateContact, scores.InvestigableContactScore),
+            new(BehaviacUnitIntent.InvestigateSquadContact, scores.SquadContactScore),
+            new(BehaviacUnitIntent.Patrol, scores.PatrolScore)
+        };
+
+        float floor = MathF.Max(0f, bestScore - NearBestChoiceWindow);
+        float totalWeight = 0f;
+        int eligibleCount = 0;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            float score = candidates[i].Score;
+            if (score <= 0f || score < floor)
+                continue;
+            totalWeight += 0.02f + score - floor;
+            eligibleCount++;
+        }
+
+        if (eligibleCount < 2 || totalWeight <= 0f)
+            return bestIntent;
+
+        float roll = MathF.Min(0.999999f, Clamp01(decisionSample)) * totalWeight;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            IntentCandidate candidate = candidates[i];
+            if (candidate.Score <= 0f || candidate.Score < floor)
+                continue;
+
+            roll -= 0.02f + candidate.Score - floor;
+            if (roll < 0f)
+                return candidate.Intent;
+        }
+
+        return bestIntent;
+    }
+
+    private readonly record struct IntentCandidate(BehaviacUnitIntent Intent, float Score);
 
     private static void Consider(
         ref BehaviacUnitIntent bestIntent,
