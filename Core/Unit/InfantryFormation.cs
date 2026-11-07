@@ -15,6 +15,42 @@ public enum InfantryFormationType : byte
 }
 
 /// <summary>
+/// Experimental movement models for column-only comparison.
+/// HistoricalSlots preserves the original independent A* destination-slot approach.
+/// LinkedTrail is the current predecessor-following implementation.
+/// </summary>
+public enum ColumnMovementVariant : byte
+{
+    HistoricalSlots = 0,
+    VirtualCenterline = 1,
+    StaggeredCenterline = 2,
+    LooseCorridor = 3,
+    LinkedTrail = 4
+}
+
+public static class ColumnMovementVariantInfo
+{
+    public static string GetName(ColumnMovementVariant variant) => variant switch
+    {
+        ColumnMovementVariant.HistoricalSlots => "Слоты (19.10)",
+        ColumnMovementVariant.VirtualCenterline => "Виртуальный центр",
+        ColumnMovementVariant.StaggeredCenterline => "Шахматная колонна",
+        ColumnMovementVariant.LooseCorridor => "Свободный коридор",
+        ColumnMovementVariant.LinkedTrail => "Цепочка (контроль)",
+        _ => "Слоты (19.10)"
+    };
+
+    public static ColumnMovementVariant Next(ColumnMovementVariant variant) => variant switch
+    {
+        ColumnMovementVariant.HistoricalSlots => ColumnMovementVariant.VirtualCenterline,
+        ColumnMovementVariant.VirtualCenterline => ColumnMovementVariant.StaggeredCenterline,
+        ColumnMovementVariant.StaggeredCenterline => ColumnMovementVariant.LooseCorridor,
+        ColumnMovementVariant.LooseCorridor => ColumnMovementVariant.LinkedTrail,
+        _ => ColumnMovementVariant.HistoricalSlots
+    };
+}
+
+/// <summary>
 /// Names squad movement profiles. Runtime orders use a shared objective and
 /// dynamic group steering; they do not assign the offsets returned by GetOffset.
 /// </summary>
