@@ -4197,12 +4197,6 @@ remove global mode action block                            case ContextMenuActio
             return;
         }
 
-        if (key == Keyboard.Key.V)
-        {
-            _debugLayersOverlay?.Toggle();
-            return;
-        }
-
         if (key != Keyboard.Key.Escape)
             return;
 
