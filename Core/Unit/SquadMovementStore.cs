@@ -365,8 +365,8 @@ public sealed class SquadMovementStore
             : SquadFormationRigidity.Organized;
         squad.HasMoveOrder = true;
         squad.IsAStarFormation = true;
-        squad.EnforceGroupSpeed =
-            formation is not (InfantryFormationType.None or InfantryFormationType.Column);
+        // The crowd keeps each pawn's own speed; no slowest-member leash.
+        squad.EnforceGroupSpeed = false;
         squad.KeepFormationInCombat = keepFormationInCombat;
         squad.SlowestMoveSpeed = slowestSpeed;
         squad.Phase = SquadMovementPhase.Advancing;
