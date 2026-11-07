@@ -42,7 +42,7 @@ public sealed class UnitMovementSystem
     private const float GroundRollingDeceleration = 0.18f;
     private const float CollisionRadiusScale = 0.72f;
     private const float CollisionRestitution = 0.08f;
-    private const float CollisionFriction = 0.45f;
+    private const float CollisionFriction = 0.30f;
     private const float ArrivalRadius = 0.14f;
     private const float ArrivalSpeed = 0.12f;
     private const float MinimumMovingSpeed = 0.035f;
@@ -277,7 +277,8 @@ public sealed class UnitMovementSystem
                     if (steeringDistanceSquared > 0.0025f)
                     {
                         float steeringDistance = MathF.Sqrt(steeringDistanceSquared);
-                        float desiredSpeed = moveSpeed;
+                        float desiredSpeed = moveSpeed * GetDownedEnemyTraversalMultiplier(
+                            units, health, unit, position);
 
                         // Final-goal braking is based on remaining route length,
                         // not distance to the temporary look-ahead point.
@@ -553,8 +554,7 @@ public sealed class UnitMovementSystem
                 while (other >= 0)
                 {
                     int next = _collisionNextUnit[other];
-                    if (other == unit ||
-                        (health != null && health.OverallHitPoints[other] <= 0f))
+                    if (other == unit || IsDownedBody(units, health, other))
                     {
                         other = next;
                         continue;
@@ -647,7 +647,7 @@ public sealed class UnitMovementSystem
                     // A consistent right-hand passing bias lets two approaching
                     // bodies choose opposite sides instead of both braking in place.
                     Vector2 passingSide = new(heading.Y, -heading.X);
-                    Vector2 steer = away * 0.25f + passingSide * 0.95f;
+                    Vector2 steer = away * 0.45f + passingSide * 0.65f;
                     float steerLength = steer.Length();
                     if (steerLength > 0.001f)
                         avoidance += steer * (urgency / steerLength);
@@ -674,13 +674,101 @@ public sealed class UnitMovementSystem
             : desiredVelocity;
     }
 
+    private static bool IsDownedBody(
+        UnitStore units,
+        UnitHealthStore? health,
+        int unit) =>
+        (health != null && health.OverallHitPoints[unit] <= 0f) ||
+        units.Posture[unit] == UnitPosture.Injured;
+
+    private float GetDownedEnemyTraversalMultiplier(
+        UnitStore units,
+        UnitHealthStore? health,
+        int unit,
+        Vector3 position)
+    {
+        if (health == null || _collisionTouchedCount == 0)
+            return 1f;
+
+        int cellX = Math.Clamp((int)MathF.Floor(position.X), 0, _collisionWidth - 1);
+        int cellY = Math.Clamp((int)MathF.Floor(position.Y), 0, _collisionHeight - 1);
+        int searchRadius = Math.Clamp(
+            (int)MathF.Ceiling(
+                GetCollisionRadius(units, unit) + _collisionMaxRadius + 1f),
+            1,
+            6);
+
+        float speedMultiplier = 1f;
+        float moverRadius = GetCollisionRadius(units, unit);
+        for (int y = Math.Max(0, cellY - searchRadius);
+             y <= Math.Min(_collisionHeight - 1, cellY + searchRadius);
+             y++)
+        {
+            for (int x = Math.Max(0, cellX - searchRadius);
+                 x <= Math.Min(_collisionWidth - 1, cellX + searchRadius);
+                 x++)
+            {
+                int other = _collisionCellHeads[x + y * _collisionWidth];
+                while (other >= 0)
+                {
+                    int next = _collisionNextUnit[other];
+                    if (other == unit ||
+                        !IsDownedBody(units, health, other) ||
+                        !FactionRules.ShouldAttack(
+                            units.FactionTag[unit],
+                            units.FactionTag[other]))
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    Vector3 bodyPosition = units.Position[other];
+                    if (bodyPosition.Z >= position.Z + units.Height[unit] ||
+                        position.Z >= bodyPosition.Z + units.Height[other])
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    float dx = bodyPosition.X - position.X;
+                    float dy = bodyPosition.Y - position.Y;
+                    float distance = MathF.Sqrt(dx * dx + dy * dy);
+                    float contactRadius = moverRadius + GetCollisionRadius(units, other);
+                    float influenceRadius = contactRadius + 0.95f;
+                    if (distance >= influenceRadius)
+                    {
+                        other = next;
+                        continue;
+                    }
+
+                    // A corpse is a soft obstacle: nearby movement slows down,
+                    // but no separation impulse or hard stop is applied.
+                    float proximity = distance <= contactRadius
+                        ? 1f
+                        : Math.Clamp(
+                            (influenceRadius - distance) /
+                                (influenceRadius - contactRadius),
+                            0f,
+                            1f);
+                    float candidateMultiplier = 1f - proximity * 0.42f;
+                    speedMultiplier = MathF.Min(
+                        speedMultiplier,
+                        candidateMultiplier);
+                    other = next;
+                }
+            }
+        }
+
+        return speedMultiplier;
+    }
+
     private void ResolveUnitOverlaps(
         UnitStore units,
         WorldMap worldMap,
         UnitHealthStore? health)
     {
         ReadOnlySpan<int> active = units.ActiveIndices;
-        for (int pass = 0; pass < 3; pass++)
+        for (int pass = 0; pass < 4; pass++)
         {
             BuildCollisionGrid(units, worldMap, health);
             if (_collisionTouchedCount == 0)
@@ -689,7 +777,7 @@ public sealed class UnitMovementSystem
             for (int i = 0; i < active.Length; i++)
             {
                 int unit = active[i];
-                if (health != null && health.OverallHitPoints[unit] <= 0f)
+                if (IsDownedBody(units, health, unit))
                     continue;
 
                 Vector3 position = units.Position[unit];
@@ -711,8 +799,7 @@ public sealed class UnitMovementSystem
                         while (other >= 0)
                         {
                             int next = _collisionNextUnit[other];
-                            if (other <= unit ||
-                                (health != null && health.OverallHitPoints[other] <= 0f))
+                            if (other <= unit || IsDownedBody(units, health, other))
                             {
                                 other = next;
                                 continue;
@@ -779,7 +866,7 @@ public sealed class UnitMovementSystem
                             // through walls; if one side is blocked, try moving the other.
                             float correctionDistance =
                                 MathF.Max(0f, minimumDistance - distance - 0.005f) *
-                                (movingAllies ? 0.55f : 0.8f);
+                                (movingAllies ? 0.86f : 0.96f);
                             Vector3 a = units.Position[unit];
                             Vector3 b = units.Position[other];
                             Vector2 oldA = new(a.X, a.Y);
@@ -843,7 +930,7 @@ public sealed class UnitMovementSystem
                                     -(1f + CollisionRestitution) * normalVelocity /
                                     inverseMassSum;
                                 if (movingAllies)
-                                    normalImpulseMagnitude *= 0.4f;
+                                    normalImpulseMagnitude *= 0.65f;
                                 Vector2 normalImpulse = normal * normalImpulseMagnitude;
                                 velocityA -= normalImpulse * inverseMassA;
                                 velocityB += normalImpulse * inverseMassB;
@@ -911,9 +998,6 @@ public sealed class UnitMovementSystem
         for (int i = 0; i < active.Length; i++)
         {
             int unit = active[i];
-            if (health != null && health.OverallHitPoints[unit] <= 0f)
-                continue;
-
             _collisionMaxRadius = MathF.Max(_collisionMaxRadius, GetCollisionRadius(units, unit));
             int x = Math.Clamp((int)MathF.Floor(units.Position[unit].X), 0, width - 1);
             int y = Math.Clamp((int)MathF.Floor(units.Position[unit].Y), 0, height - 1);
