@@ -174,16 +174,25 @@ public sealed class MassCombatTestScene
                     0.42f * MathF.Cos(dy * 0.19f - dx * 0.04f) -
                     roadCut * 1.25f;
 
-                // Surviving shells of apartment blocks. Their walls have gaps and
-                // collapsed sections; rubble aprons turn the edges into walkable ramps.
-                height += RuinedBuildingHeight(dx, dy, -32f, -15f, 9.5f, 7f, 0.12f, 0.4f);
-                height += RuinedBuildingHeight(dx, dy, -1f, -16f, 8f, 7.5f, -0.16f, 1.7f);
-                height += RuinedBuildingHeight(dx, dy, 31f, -15f, 9f, 7f, 0.10f, 2.8f);
-                height += RuinedBuildingHeight(dx, dy, -45f, 14f, 8f, 8.5f, -0.18f, 3.9f);
-                height += RuinedBuildingHeight(dx, dy, -26f, 38f, 10f, 6.5f, 0.18f, 5.1f);
-                height += RuinedBuildingHeight(dx, dy, 7f, 37f, 9f, 7f, -0.13f, 6.2f);
-                height += RuinedBuildingHeight(dx, dy, 39f, 36f, 10f, 7.5f, 0.16f, 7.3f);
-                height += RuinedBuildingHeight(dx, dy, 48f, -2f, 7f, 8f, -0.22f, 8.4f);
+                // Surviving wall cores become hard blockers; collapsed gaps and rubble
+                // aprons remain walkable and are still represented by surface height.
+                bool hasHardWall = false;
+                height += RuinedBuildingHeight(dx, dy, -32f, -15f, 9.5f, 7f, 0.12f, 0.4f, out bool wallOne);
+                hasHardWall |= wallOne;
+                height += RuinedBuildingHeight(dx, dy, -1f, -16f, 8f, 7.5f, -0.16f, 1.7f, out bool wallTwo);
+                hasHardWall |= wallTwo;
+                height += RuinedBuildingHeight(dx, dy, 31f, -15f, 9f, 7f, 0.10f, 2.8f, out bool wallThree);
+                hasHardWall |= wallThree;
+                height += RuinedBuildingHeight(dx, dy, -45f, 14f, 8f, 8.5f, -0.18f, 3.9f, out bool wallFour);
+                hasHardWall |= wallFour;
+                height += RuinedBuildingHeight(dx, dy, -26f, 38f, 10f, 6.5f, 0.18f, 5.1f, out bool wallFive);
+                hasHardWall |= wallFive;
+                height += RuinedBuildingHeight(dx, dy, 7f, 37f, 9f, 7f, -0.13f, 6.2f, out bool wallSix);
+                hasHardWall |= wallSix;
+                height += RuinedBuildingHeight(dx, dy, 39f, 36f, 10f, 7.5f, 0.16f, 7.3f, out bool wallSeven);
+                hasHardWall |= wallSeven;
+                height += RuinedBuildingHeight(dx, dy, 48f, -2f, 7f, 8f, -0.22f, 8.4f, out bool wallEight);
+                hasHardWall |= wallEight;
 
                 // Cross-street debris and collapsed facades create staggered choke points,
                 // but leave several gaps so a squad can flank instead of hitting a wall.
@@ -228,6 +237,13 @@ public sealed class MassCombatTestScene
                     y,
                     heightUnits,
                     material);
+
+                // This scene owns the generated arena: clear stale blockers there,
+                // then publish only surviving wall cores to navigation and movement.
+                worldMap.SetNavigationBlocked(
+                    x,
+                    y,
+                    blend > 0.55f && hasHardWall);
             }
         }
 
@@ -247,7 +263,8 @@ public sealed class MassCombatTestScene
         float halfWidth,
         float halfDepth,
         float rotation,
-        float seed)
+        float seed,
+        out bool isHardWallSegment)
     {
         float offsetX = dx - centerX;
         float offsetY = dy - centerY;
@@ -271,6 +288,9 @@ public sealed class MassCombatTestScene
         float wallBand =
             1f - SmoothStep(0.45f, 2.8f, MathF.Abs(signedDistance));
         float walls = 4.1f * wallBand * wallGaps;
+        isHardWallSegment =
+            MathF.Abs(signedDistance) <= 0.65f &&
+            walls >= 2.25f;
 
         // Sloped rubble aprons connect the remaining walls to street level.
         float apron =

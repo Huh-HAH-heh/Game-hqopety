@@ -191,84 +191,82 @@ public sealed class UnitMovementSystem
             float turnSeverity = 0f;
             bool hasWaypoint = false;
 
-            // The route follower is evaluated inside the integration loop so
-            // each substep steers from the body's updated position and velocity.
             if (!steeringActive)
                 _navigation.ClearRoute(unit);
 
             Vector2 velocity = new(velocities[unit].X, velocities[unit].Y);
 
-            for (int substep = 0; substep < substepCount; substep++)
+            // Route geometry does not change during this unit's fixed substeps.
+            // Compute the look-ahead and formation adjustment once, then reuse
+            // the result while the force controller integrates each substep.
+            if (steeringActive && moveSpeed > 0f)
             {
-                if (steeringActive && moveSpeed > 0f)
-                {
-                    float speedBeforeSteering = velocity.Length();
-                    hasWaypoint = _navigation.TryGetLookAheadWaypoint(
+                float speedBeforeSteering = velocity.Length();
+                hasWaypoint = _navigation.TryGetLookAheadWaypoint(
+                    units,
+                    unit,
+                    worldMap,
+                    position,
+                    target,
+                    speedBeforeSteering,
+                    out steeringPoint,
+                    out distanceToGoal,
+                    out distanceToNextTurn,
+                    out turnSeverity);
+
+                Vector2 aStarWaypoint = steeringPoint;
+                if (hasWaypoint &&
+                    squadMovement != null &&
+                    squadMovement.TryAdjustAStarFormationWaypoint(
                         units,
                         unit,
-                        worldMap,
                         position,
-                        target,
-                        speedBeforeSteering,
-                        out steeringPoint,
-                        out distanceToGoal,
-                        out distanceToNextTurn,
-                        out turnSeverity);
-
-                    Vector2 aStarWaypoint = steeringPoint;
-                    if (hasWaypoint &&
-                        squadMovement != null &&
-                        squadMovement.TryAdjustAStarFormationWaypoint(
-                            units,
-                            unit,
-                            position,
-                            steeringPoint,
-                            ai,
-                            out Vector2 formationWaypoint))
+                        steeringPoint,
+                        ai,
+                        out Vector2 formationWaypoint))
+                {
+                    Vector2 currentPosition = new(position.X, position.Y);
+                    bool foundSafeFormationPoint = false;
+                    float formationBlend = 1f;
+                    for (int attempt = 0; attempt < 6; attempt++)
                     {
-                        Vector2 currentPosition = new(position.X, position.Y);
-                        bool foundSafeFormationPoint = false;
-                        float formationBlend = 1f;
-                        for (int attempt = 0; attempt < 6; attempt++)
+                        Vector2 candidate = Vector2.Lerp(
+                            aStarWaypoint,
+                            formationWaypoint,
+                            formationBlend);
+                        if (_navigation.CanMoveDirectly(
+                                units, unit, worldMap, currentPosition, candidate))
                         {
-                            Vector2 candidate = Vector2.Lerp(
-                                aStarWaypoint,
-                                formationWaypoint,
-                                formationBlend);
-                            if (_navigation.CanMoveDirectly(
-                                    units, unit, worldMap, currentPosition, candidate))
-                            {
-                                steeringPoint = candidate;
-                                foundSafeFormationPoint = true;
-                                break;
-                            }
-
-                            formationBlend *= 0.5f;
+                            steeringPoint = candidate;
+                            foundSafeFormationPoint = true;
+                            break;
                         }
 
-                        if (!foundSafeFormationPoint)
-                        {
-                            steeringPoint = aStarWaypoint;
-                        }
-                        else if (hasCollectiveMove)
-                        {
-                            // The shared click is the cohort objective, not a
-                            // per-member stop point. Keep enough braking distance
-                            // to reach the local formation steering target.
-                            float localSteeringDistance = Vector2.Distance(
-                                currentPosition,
-                                steeringPoint);
-                            distanceToGoal = MathF.Max(
-                                distanceToGoal,
-                                localSteeringDistance + ArrivalRadius);
-                        }
+                        formationBlend *= 0.5f;
+                    }
+
+                    if (!foundSafeFormationPoint)
+                    {
+                        steeringPoint = aStarWaypoint;
+                    }
+                    else if (hasCollectiveMove)
+                    {
+                        float localSteeringDistance = Vector2.Distance(
+                            currentPosition,
+                            steeringPoint);
+                        distanceToGoal = MathF.Max(
+                            distanceToGoal,
+                            localSteeringDistance + ArrivalRadius);
                     }
                 }
-                else
-                {
-                    hasWaypoint = false;
-                }
+            }
+            else
+            {
+                hasWaypoint = false;
+            }
 
+            for (int substep = 0; substep < substepCount; substep++)
+            {
                 Vector2 desiredVelocity = Vector2.Zero;
                 if (steeringActive && hasWaypoint && moveSpeed > 0f)
                 {
@@ -774,6 +772,7 @@ public sealed class UnitMovementSystem
             if (_collisionTouchedCount == 0)
                 return;
 
+            bool movedAny = false;
             for (int i = 0; i < active.Length; i++)
             {
                 int unit = active[i];
@@ -891,6 +890,9 @@ public sealed class UnitMovementSystem
                                 units.Position[unit] = a;
                                 units.Position[other] = b;
                                 position = a;
+                                movedAny |=
+                                    Vector2.DistanceSquared(oldA, new Vector2(a.X, a.Y)) > 0.000001f ||
+                                    Vector2.DistanceSquared(oldB, new Vector2(b.X, b.Y)) > 0.000001f;
                             }
                             else if (canMoveA)
                             {
@@ -903,6 +905,8 @@ public sealed class UnitMovementSystem
                                 {
                                     units.Position[unit] = a;
                                     position = a;
+                                    movedAny |=
+                                        Vector2.DistanceSquared(oldA, new Vector2(a.X, a.Y)) > 0.000001f;
                                 }
                             }
                             else if (canMoveB)
@@ -913,7 +917,11 @@ public sealed class UnitMovementSystem
                                 ClampUnitPosition(ref b, units, other, worldMap);
                                 if (_navigation.CanMoveDirectly(
                                     units, other, worldMap, oldB, new Vector2(b.X, b.Y)))
+                                {
                                     units.Position[other] = b;
+                                    movedAny |=
+                                        Vector2.DistanceSquared(oldB, new Vector2(b.X, b.Y)) > 0.000001f;
+                                }
                             }
 
                             // Impulse-based contact: only approaching bodies receive a
@@ -966,6 +974,11 @@ public sealed class UnitMovementSystem
                     }
                 }
             }
+
+            // Another pass is useful only if the previous pass actually separated
+            // at least one pair. Stop rescanning a stable crowd or wall-blocked pile.
+            if (!movedAny)
+                break;
         }
     }
 

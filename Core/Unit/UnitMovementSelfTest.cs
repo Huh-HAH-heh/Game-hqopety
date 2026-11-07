@@ -107,12 +107,22 @@ public static class UnitMovementSelfTest
         UnitNavigationSystem navigation = simulation.Navigation;
         navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
 
+        Vector3 start = simulation.Units.Position[id.Index];
+        Vector2 wallCrossingTarget = new(wallX + 5.5f, corridorY + 0.5f);
+        if (navigation.CanMoveDirectly(
+                simulation.Units,
+                id.Index,
+                map,
+                new Vector2(start.X, start.Y),
+                wallCrossingTarget))
+            return false;
+
         if (!navigation.TryGetWaypoint(
                 simulation.Units,
                 id.Index,
                 map,
-                simulation.Units.Position[id.Index],
-                new Vector3(wallX + 5.5f, corridorY + 0.5f, 1f),
+                start,
+                new Vector3(wallCrossingTarget.X, wallCrossingTarget.Y, 1f),
                 out Vector2 firstWaypoint))
             return false;
 
