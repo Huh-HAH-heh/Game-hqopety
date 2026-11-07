@@ -294,7 +294,9 @@ public sealed class UnitNavigationSystem
                 target,
                 footprintX,
                 footprintY,
-                out Vector2 hotPathWaypoint))
+                out Vector2 hotPathWaypoint,
+                out bool obstacleAhead) &&
+            (routeInvalid || !obstacleAhead))
         {
             ClearRoute(unitIndex);
             _lastStatuses[unitIndex] = UnitNavigationStatus.FollowingHotPath;
@@ -634,8 +636,10 @@ public sealed class UnitNavigationSystem
         Vector3 target,
         int footprintX,
         int footprintY,
-        out Vector2 waypoint)
+        out Vector2 waypoint,
+        out bool obstacleAhead)
     {
+        obstacleAhead = false;
         Vector2 start = new(position.X, position.Y);
         Vector2 goal = new(target.X, target.Y);
         Vector2 delta = goal - start;
@@ -658,6 +662,7 @@ public sealed class UnitNavigationSystem
 
         // The requested look-ahead intersects an obstacle. Find the closest
         // safe point before it; if progress is negligible, hand control to A*.
+        obstacleAhead = true;
         float safeDistance = 0f;
         float blockedDistance = stepDistance;
         for (int attempt = 0; attempt < 7; attempt++)
