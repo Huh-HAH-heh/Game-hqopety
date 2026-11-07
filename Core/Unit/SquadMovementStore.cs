@@ -213,8 +213,7 @@ public sealed class SquadMovementStore
         Vector3 destination,
         InfantryFormationType formation,
         bool keepFormationInCombat,
-        WorldMap worldMap,
-        ColumnMovementVariant columnVariant = ColumnMovementVariant.HistoricalSlots)
+        WorldMap worldMap)
     {
         if (squadId <= 0 || requestedMembers == null || requestedMembers.Count == 0)
             return false;
@@ -276,9 +275,7 @@ public sealed class SquadMovementStore
         // Line, wedge and the historical column test retain individual landing
         // positions. Each pawn gets its own footprint-valid A* goal.
         bool usesIndividualFormationGoals =
-            formation is InfantryFormationType.Line or InfantryFormationType.Wedge ||
-            (formation == InfantryFormationType.Column &&
-             columnVariant == ColumnMovementVariant.HistoricalSlots);
+            formation is InfantryFormationType.Line or InfantryFormationType.Wedge or InfantryFormationType.Column;
         Vector2 side = new(-forward.Y, forward.X);
         Vector2 meanOffset = Vector2.Zero;
         if (usesIndividualFormationGoals)
@@ -351,9 +348,6 @@ public sealed class SquadMovementStore
         }
 
         squad.AnchorTarget = goal;
-        squad.ColumnVariant = formation == InfantryFormationType.Column
-            ? columnVariant
-            : ColumnMovementVariant.HistoricalSlots;
         squad.Objective = new Vector3(goal.X, goal.Y, destination.Z);
         squad.Center = center;
         squad.HasCenter = true;
@@ -1468,7 +1462,6 @@ public sealed class SquadMovementStore
         public Vector2 Forward = Vector2.UnitX;
         public float Spacing = 1.15f;
         public InfantryFormationType Formation = InfantryFormationType.Free;
-        public ColumnMovementVariant ColumnVariant = ColumnMovementVariant.HistoricalSlots;
         public SquadFormationRigidity Rigidity = SquadFormationRigidity.Free;
         public SquadMovementPhase Phase = SquadMovementPhase.Idle;
         public Vector2[] MemberOffsets = Array.Empty<Vector2>();
