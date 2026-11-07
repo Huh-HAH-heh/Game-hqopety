@@ -3475,6 +3475,7 @@ public sealed class GameRenderer
                             _window.Size.X,
                             _window.Size.Y,
                             hasUnit,
+                            selectedIds.Length > 1,
                             canCreateSquad,
                             canSendSquad,
                             canAttackTarget,
