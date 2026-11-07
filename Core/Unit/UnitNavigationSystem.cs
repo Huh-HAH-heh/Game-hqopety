@@ -1054,9 +1054,20 @@ public sealed class UnitNavigationSystem
         _fScore[start] = Heuristic(startX, startY, targetX, targetY);
         HeapPush(start);
 
-        // Choose the furthest useful frontier from the nodes A* has explored.
-        // The slight goal bias keeps progress toward the command without refusing
-        // to move around an obstacle that temporarily increases goal distance.
+        // Keep two rolling frontiers:
+        // 1) the hot-path frontier with the greatest safe progress toward the goal;
+        // 2) the old heuristic frontier as a fallback for routes that must first
+        //    move sideways or briefly away from the goal to get around a barrier.
+        Vector2 goalDirection = new(targetX - startX, targetY - startY);
+        float goalDistance = goalDirection.Length();
+        if (goalDistance > 0.0001f)
+            goalDirection /= goalDistance;
+        else
+            goalDirection = Vector2.UnitX;
+        Vector2 goalSide = new(-goalDirection.Y, goalDirection.X);
+
+        int bestHotPathCell = start;
+        float bestHotPathScore = 0f;
         int bestPartialCell = start;
         float bestPartialScore =
             _gScore[start] - 0.35f * Heuristic(startX, startY, targetX, targetY);
@@ -1078,6 +1089,23 @@ public sealed class UnitNavigationSystem
             {
                 bestPartialScore = partialScore;
                 bestPartialCell = current;
+            }
+
+            // A* still validates the route around terrain, but its next chunk
+            // ends at the most useful reachable point along the goal direction.
+            // Cross-track drift and extra detour cost are tie-break penalties,
+            // not hard limits, so an obstacle can still force a wide обход.
+            float offsetX = x - startX;
+            float offsetY = y - startY;
+            float forwardProgress = offsetX * goalDirection.X + offsetY * goalDirection.Y;
+            float lateralDrift = MathF.Abs(
+                offsetX * goalSide.X + offsetY * goalSide.Y);
+            float hotPathScore =
+                forwardProgress - lateralDrift * 0.35f - _gScore[current] * 0.06f;
+            if (hotPathScore > bestHotPathScore + 0.0001f)
+            {
+                bestHotPathScore = hotPathScore;
+                bestHotPathCell = current;
             }
 
             if (current == goal)
@@ -1156,9 +1184,12 @@ public sealed class UnitNavigationSystem
         // A distant command is approached as a rolling sequence of local A*
         // chunks. The next search starts at the new position and can choose a
         // different curve as nearby obstacles and route traffic change.
-        if (bestPartialCell != start)
+        int nextHotPoint = bestHotPathCell != start
+            ? bestHotPathCell
+            : bestPartialCell;
+        if (nextHotPoint != start)
         {
-            int[] partialPath = ReconstructPath(start, bestPartialCell);
+            int[] partialPath = ReconstructPath(start, nextHotPoint);
             if (partialPath.Length > 1)
             {
                 path = partialPath;
