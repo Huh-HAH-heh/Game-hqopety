@@ -597,6 +597,62 @@ public static class UnitMovementSelfTest
                float.IsFinite(simulation.Units.Velocity[second.Index].X);
     }
 
+    public static bool DownedEnemySlowsButDoesNotBlockTraversal()
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        Vector3 start = new(10.5f, 20.5f, 1f);
+        Vector3 bodyPosition = new(17.5f, 20.5f, 1f);
+        Vector3 destination = new(25.5f, 20.5f, 1f);
+
+        UnitId mover = simulation.Spawn(
+            UnitType.Colonist,
+            start,
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitId downedEnemy = simulation.Spawn(
+            UnitType.Colonist,
+            bodyPosition,
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 2);
+
+        simulation.Health.OverallHitPoints[downedEnemy.Index] = 0f;
+        simulation.Units.Posture[downedEnemy.Index] = UnitPosture.Lying;
+        simulation.Units.SetTarget(mover, destination);
+
+        UnitMovementSystem movement = new UnitMovementSystem();
+        float slowestSpeedNearBody = float.PositiveInfinity;
+        bool passedBody = false;
+        for (int tick = 0; tick < 1200 && simulation.Units.HasTarget[mover.Index]; tick++)
+        {
+            movement.Update(
+                simulation.Units,
+                map,
+                TestDeltaTime,
+                simulation.Health);
+
+            Vector3 position = simulation.Units.Position[mover.Index];
+            float distanceToBody = PlanarDistance(position, bodyPosition);
+            Vector3 velocity = simulation.Units.Velocity[mover.Index];
+            float speed = MathF.Sqrt(
+                velocity.X * velocity.X +
+                velocity.Y * velocity.Y);
+            if (distanceToBody <= 1.4f)
+                slowestSpeedNearBody = MathF.Min(slowestSpeedNearBody, speed);
+            if (position.X > bodyPosition.X + 1.1f)
+                passedBody = true;
+        }
+
+        Vector3 finalPosition = simulation.Units.Position[mover.Index];
+        return passedBody &&
+               slowestSpeedNearBody < simulation.Units.MoveSpeed[mover.Index] * 0.9f &&
+               PlanarDistance(finalPosition, destination) <= 0.25f &&
+               float.IsFinite(finalPosition.X) &&
+               float.IsFinite(finalPosition.Y);
+    }
+
     public static bool ColumnNarrowsWhileAdvancing()
     {
         return TryMeasureFormation(
