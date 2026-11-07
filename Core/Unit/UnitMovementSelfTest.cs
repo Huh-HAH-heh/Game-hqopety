@@ -278,7 +278,8 @@ public static class UnitMovementSelfTest
                 map,
                 start,
                 target,
-                out _))
+                out _) ||
+            navigation.SearchesThisUpdate == 0)
         {
             return false;
         }
@@ -314,6 +315,32 @@ public static class UnitMovementSelfTest
         }
 
         return rawRouteUsesOpenGround && smoothedRouteKeepsOpenGround;
+    }
+
+    public static bool OpenGroundKeepsTheHotPathFast()
+    {
+        WorldMap map = CreateFlatWorld();
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, 10.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        UnitNavigationSystem navigation = simulation.Navigation;
+        navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
+        bool found = navigation.TryGetWaypoint(
+            simulation.Units,
+            id.Index,
+            map,
+            simulation.Units.Position[id.Index],
+            new Vector3(35.5f, 10.5f, 1f),
+            out _);
+
+        return found &&
+            navigation.SearchesThisUpdate == 0 &&
+            navigation.GetLastStatus(id.Index) == UnitNavigationStatus.FollowingHotPath;
     }
 
     public static bool DenseMovingCrowdContinuesToAdvance()
