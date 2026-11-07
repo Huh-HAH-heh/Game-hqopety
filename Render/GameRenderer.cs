@@ -71,8 +71,6 @@ public sealed class GameRenderer
     private int _selectedInfoSquadId;
     private static readonly bool SquadControlsEnabled = false;
     private readonly InfantrySquadManager _squadManager = new();
-    private UnitGroupMovementMode _groupMovementMode = UnitGroupMovementMode.Column;
-    private bool _keepFormationInCombat;
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
     private bool _isPlacingMoveLine;
@@ -1448,9 +1446,6 @@ public sealed class GameRenderer
         }
     }
 
-    private static string GetMovementModeMenuLabel(UnitGroupMovementMode mode) =>
-        UnitGroupMovementModeInfo.GetName(mode);
-
     private bool AreAllAutonomousMovementDisabled(UnitId[] memberIds)
     {
         bool found = false;
@@ -2301,6 +2296,28 @@ public sealed class GameRenderer
         return false;
     }
 
+    private void IssueGroupMoveOrder(
+        UnitId[] memberIds,
+        Vector3 destination,
+        InfantryFormationType formation)
+    {
+        if (memberIds.Length <= 1 ||
+            !_unitSimulation.IssueGroupMoveOrder(
+                memberIds,
+                destination,
+                formation,
+                false,
+                _worldMap,
+                ColumnMovementVariant.HistoricalSlots))
+        {
+            IssueMoveOrderToPoint(memberIds, destination);
+            return;
+        }
+
+        Console.WriteLine(
+            $"[MOVE] {InfantryFormation.GetName(formation)}: {memberIds.Length} units.");
+    }
+
     private void IssueMoveOrderToPoint(UnitId[] memberIds, Vector3 destination) =>
         IssueMoveOrderToPoint(memberIds, destination, UnitAiOrderType.Move);
 
@@ -2312,28 +2329,7 @@ public sealed class GameRenderer
         Vector3 destination,
         UnitAiOrderType orderType)
     {
-        if (orderType == UnitAiOrderType.Move &&
-            memberIds.Length > 1 &&
-            _groupMovementMode != UnitGroupMovementMode.Individual)
-        {
-            InfantryFormationType groupFormation =
-                _groupMovementMode == UnitGroupMovementMode.Crowd
-                    ? InfantryFormationType.Free
-                    : InfantryFormationType.Column;
-            if (_unitSimulation.IssueGroupMoveOrder(
-                    memberIds,
-                    destination,
-                    groupFormation,
-                    false,
-                    _worldMap,
-                    ColumnMovementVariant.HistoricalSlots))
-            {
-                Console.WriteLine(
-                    $"[MOVE MODE] {UnitGroupMovementModeInfo.GetName(_groupMovementMode)}; " +
-                    $"{memberIds.Length} units.");
-                return;
-            }
-        }
+        _unitSimulation.ClearSquadMovementOrders(memberIds);
 
         if (orderType is not (UnitAiOrderType.Move or UnitAiOrderType.StealthMove))
             throw new ArgumentOutOfRangeException(nameof(orderType));
@@ -3402,11 +3398,6 @@ public sealed class GameRenderer
                                     ? "Разрешить самостоятельное движение"
                                     : "Запретить самостоятельное движение")
                                 : null;
-                        string? selectedFormationLabel =
-                            clickedSelectedUnit && selectedIds.Length > 1
-                                ? GetMovementModeMenuLabel(_groupMovementMode)
-                                : null;
-                        string? keepFormationLabel = null;
                         bool canHoldSelected = selectedIds.Length > 0;
                         bool canConfigureWeapons = clickedSelectedUnit && selectedIds.Length > 0;
 
@@ -3442,7 +3433,11 @@ public sealed class GameRenderer
                             return;
                         }
 
-                        if (!hasUnit && selectedIds.Length > 0)
+                        bool shiftHeld =
+                            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+
+                        if (!hasUnit && selectedIds.Length > 0 && !shiftHeld)
                         {
                             if (!_movementTestMode &&
                                 SquadControlsEnabled &&
@@ -3475,9 +3470,9 @@ public sealed class GameRenderer
                             canAttackTarget,
                             canMoveSelected,
                             autonomousMovementLabel,
-                            selectedFormationLabel != null,
-                            selectedFormationLabel,
-                            keepFormationLabel,
+                            false,
+                            null,
+                            null,
                             canHoldSelected,
                             canConfigureWeapons);
 
@@ -3600,6 +3595,8 @@ public sealed class GameRenderer
                                 break;
 
                             case ContextMenuActionType.MoveSelectedHere:
+                            case ContextMenuActionType.MoveSelectedHereAsCrowd:
+                            case ContextMenuActionType.MoveSelectedHereAsColumn:
                             {
                                 SimulationFrameSnapshot? snapshot = GetInputSnapshot();
                                 UnitId[] moveUnits = snapshot == null
@@ -3608,8 +3605,22 @@ public sealed class GameRenderer
                                 if (moveUnits.Length > 0)
                                 {
                                     Vector3 moveDestination = destination;
+                                    ContextMenuActionType selectedAction = contextAction;
                                     ExecuteSimulationCommand(() =>
-                                        IssueMoveOrderToPoint(moveUnits, moveDestination));
+                                    {
+                                        if (selectedAction == ContextMenuActionType.MoveSelectedHere)
+                                        {
+                                            IssueMoveOrderToPoint(moveUnits, moveDestination);
+                                        }
+                                        else
+                                        {
+                                            InfantryFormationType formation =
+                                                selectedAction == ContextMenuActionType.MoveSelectedHereAsCrowd
+                                                    ? InfantryFormationType.Free
+                                                    : InfantryFormationType.Column;
+                                            IssueGroupMoveOrder(moveUnits, moveDestination, formation);
+                                        }
+                                    });
                                 }
                                 break;
                             }
@@ -3630,10 +3641,7 @@ public sealed class GameRenderer
                                 if (moveUnits.Length > 0 &&
                                     GetFullySelectedSquadId() != 0)
                                 {
-                                    InfantryFormationType formation =
-                                    _groupMovementMode == UnitGroupMovementMode.Crowd
-                                        ? InfantryFormationType.Free
-                                        : InfantryFormationType.Column;
+                                    InfantryFormationType formation = InfantryFormationType.Free;
                                     int squadId = GetFullySelectedSquadId();
                                     ExecuteSimulationCommand(() =>
                                         IssueMoveOrder(moveUnits, destination, formation, squadId));
@@ -3680,22 +3688,7 @@ public sealed class GameRenderer
                                 break;
                             }
 
-                            case ContextMenuActionType.SetMovementModeIndividual:
-                            case ContextMenuActionType.SetMovementModeCrowd:
-                            case ContextMenuActionType.SetMovementModeColumn:
-                                _groupMovementMode = contextAction switch
-                                {
-                                    ContextMenuActionType.SetMovementModeIndividual =>
-                                        UnitGroupMovementMode.Individual,
-                                    ContextMenuActionType.SetMovementModeCrowd =>
-                                        UnitGroupMovementMode.Crowd,
-                                    _ => UnitGroupMovementMode.Column
-                                };
-                                Console.WriteLine(
-                                    $"[MOVE MODE] {UnitGroupMovementModeInfo.GetName(_groupMovementMode)}.");
-                                break;
-
-                            case ContextMenuActionType.ToggleAutonomousMovement:
+remove global mode action block                            case ContextMenuActionType.ToggleAutonomousMovement:
                             {
                                 SimulationFrameSnapshot? snapshot = GetInputSnapshot();
                                 UnitId[] moveUnits = snapshot == null
@@ -4204,11 +4197,9 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.J)
+        if (key == Keyboard.Key.V)
         {
-            _groupMovementMode = UnitGroupMovementModeInfo.Next(_groupMovementMode);
-            Console.WriteLine(
-                $"[MOVE MODE] {UnitGroupMovementModeInfo.GetName(_groupMovementMode)}.");
+            _debugLayersOverlay?.Toggle();
             return;
         }
 
