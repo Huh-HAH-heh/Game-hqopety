@@ -504,15 +504,12 @@ public sealed class UnitAiSystem
             }
 
             bool moving = units.Velocity[unit].LengthSquared() > 0.04f;
-            if (intent == BehaviacUnitIntent.ProneEngage)
+            if (intent == BehaviacUnitIntent.ProneEngage && !moving)
                 units.Posture[unit] = UnitPosture.Lying;
             else if (suppressionState == UnitSuppressionState.Panicked)
-                units.Posture[unit] = moving ? UnitPosture.Crouching : UnitPosture.Lying;
-            else if (moving && units.Posture[unit] == UnitPosture.Lying)
-            {
-                // Keep a prone movement order low; UnitBodySystem animates it as a crawl.
-            }
+                units.Posture[unit] = UnitPosture.Crouching;
             else if (moving)
+                // Never preserve a crawl once locomotion resumes.
                 units.Posture[unit] = UnitPosture.Standing;
             else if (suppressionState == UnitSuppressionState.Suppressed)
                 units.Posture[unit] = UnitPosture.Crouching;
@@ -745,7 +742,7 @@ public sealed class UnitAiSystem
             {
                 // Prone is a firing posture, not a command to crawl into the enemy.
                 // Approach to normal weapon range while standing, then go prone.
-                bool approachingForWeaponRange = false;
+                bool approachingForWeaponRange = moving || !targetVisible;
                 if (targetVisible && HasRangedWeapon(units, inventory, unit))
                 {
                     float range = GetMaxEffectiveRange(inventory, unit);
@@ -758,7 +755,7 @@ public sealed class UnitAiSystem
                         float distanceSquared = dx * dx + dy * dy;
                         float desiredDistance = MathF.Max(3f, range * GetBalanceProfile(unit, units.FactionTag[unit]).RangedEngagementRangeFraction);
                         float approachThreshold = desiredDistance + MathF.Max(GetBalanceProfile(unit, units.FactionTag[unit]).RangedRangeToleranceMinimum, range * GetBalanceProfile(unit, units.FactionTag[unit]).RangedRangeToleranceFraction);
-                        approachingForWeaponRange =
+                        approachingForWeaponRange |=
                             distanceSquared > approachThreshold * approachThreshold;
                     }
                 }
@@ -769,7 +766,7 @@ public sealed class UnitAiSystem
             }
             else if (suppressionState == UnitSuppressionState.Panicked)
             {
-                units.Posture[unit] = UnitPosture.Lying;
+                units.Posture[unit] = UnitPosture.Crouching;
             }
             else if (moving && units.Posture[unit] == UnitPosture.Lying)
             {
@@ -1868,6 +1865,7 @@ public sealed class UnitAiSystem
             CanFlank = canFlank,
             IsFlanking = isFlanking,
             IsProne = units.Posture[unit] == UnitPosture.Lying,
+            IsMoving = units.Velocity[unit].LengthSquared() > 0.04f,
             IsAlerted = isAlerted,
             HasInvestigableContact = hasInvestigableContact,
             HasSquadContact = hasSquadContact,
