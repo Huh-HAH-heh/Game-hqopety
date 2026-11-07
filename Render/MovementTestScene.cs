@@ -95,10 +95,15 @@ public sealed class MovementTestScene
 
         int centerX = worldMap.TileWidth / 2;
         int centerY = worldMap.TileHeight / 2;
-        int minX = Math.Max(3, centerX - 78);
-        int maxX = Math.Min(worldMap.MaxTileX - 3, centerX + 78);
-        int minY = Math.Max(3, centerY - 58);
-        int maxY = Math.Min(worldMap.MaxTileY - 3, centerY + 58);
+        const int blendWidth = 64;
+        int courseMinX = Math.Max(3, centerX - 78);
+        int courseMaxX = Math.Min(worldMap.MaxTileX - 3, centerX + 78);
+        int courseMinY = Math.Max(3, centerY - 58);
+        int courseMaxY = Math.Min(worldMap.MaxTileY - 3, centerY + 58);
+        int minX = Math.Max(3, courseMinX - blendWidth);
+        int maxX = Math.Min(worldMap.MaxTileX - 3, courseMaxX + blendWidth);
+        int minY = Math.Max(3, courseMinY - blendWidth);
+        int maxY = Math.Min(worldMap.MaxTileY - 3, courseMaxY + blendWidth);
 
         for (int y = minY; y <= maxY; y++)
         {
@@ -139,17 +144,31 @@ public sealed class MovementTestScene
                 height += GaussianHill(dx - 48f, dy + 27f, 4.2f, 13f);
 
                 height = Math.Clamp(height, 0.8f, 30f);
-                ushort heightUnits = checked((ushort)MathF.Round(height * WorldMap.HeightUnitsPerMeter));
 
-                ushort material = ridgeOne + ridgeTwo > 5f
+                float edgeDistance = MathF.Max(
+                    MathF.Max(courseMinX - x, x - courseMaxX),
+                    MathF.Max(courseMinY - y, y - courseMaxY));
+                float blend = edgeDistance <= 0f
+                    ? 1f
+                    : GateOpening(edgeDistance, 0f, blendWidth);
+                if (blend < 1f)
+                {
+                    // Keep the generated canyon outside the course, but fade
+                    // into it over 64 m so there is no artificial A* wall.
+                    float existingHeight = worldMap.GetSurfaceHeight(x, y);
+                    height = existingHeight + (height - existingHeight) * blend;
+                }
+
+                ushort heightUnits = checked((ushort)MathF.Round(height * WorldMap.HeightUnitsPerMeter));
+                ushort material = blend > 0.55f && ridgeOne + ridgeTwo > 5f
                     ? RockMaterialId
                     : GroundMaterialId;
                 worldMap.SetSolidHeight(x, y, heightUnits, material);
             }
         }
 
-        // No navigation-only walls or hidden course boundary are added.
-        // A* and physical movement read the same visible terrain profile.
+        // The core course now fades into the pre-existing world terrain.
+        // There is no invisible navigation boundary at the old rectangular edge.
     }
 
     private static float GateOpening(float y, float center, float halfWidth)
