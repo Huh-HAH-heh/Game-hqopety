@@ -783,7 +783,8 @@ public sealed class GameRenderer
 
         if (renderSnapshot != null)
         {
-            DrawPlayerOrderOverlays(renderSnapshot);
+            if (_showOrderPaths)
+                DrawPlayerOrderOverlays(renderSnapshot);
 
             stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.DrawSnapshot(
@@ -869,10 +870,10 @@ public sealed class GameRenderer
                 Volatile.Read(ref _selectedInfoSquadId),
                 _showMovementVectors,
                 _showMovementForces,
-                _showSquadFlowWeights,
-                _showSquadFormation,
-                _showSquadStates,
-                _showSquadContacts);
+                false,
+                false,
+                false,
+                false);
         }
 
         if (_isSelectingUnits && IsSelectionDrag())
@@ -1069,10 +1070,10 @@ public sealed class GameRenderer
                 _showUtilityAiDebug,
                 _showMovementVectors,
                 _showMovementForces,
-                _showSquadFlowWeights,
-                _showSquadFormation,
-                _showSquadStates,
-                _showSquadContacts);
+                false,
+                false,
+                false,
+                false);
         }
 
         _bodyRigEditorOverlay?.Draw(_window, _window.Size.X, _window.Size.Y);
@@ -4117,30 +4118,13 @@ public sealed class GameRenderer
             case DebugLayerType.MovementForces:
                 _showMovementForces = !_showMovementForces;
                 break;
-            case DebugLayerType.SquadFlowWeights:
-                if (SquadControlsEnabled || _movementTestMode)
-                    _showSquadFlowWeights = !_showSquadFlowWeights;
-                break;
-            case DebugLayerType.SquadFormation:
-                if (SquadControlsEnabled)
-                    _showSquadFormation = !_showSquadFormation;
-                break;
-            case DebugLayerType.SquadStates:
-                if (SquadControlsEnabled)
-                    _showSquadStates = !_showSquadStates;
-                break;
-            case DebugLayerType.SquadContacts:
-                if (SquadControlsEnabled)
-                    _showSquadContacts = !_showSquadContacts;
+            case DebugLayerType.OrderPaths:
+                _showOrderPaths = !_showOrderPaths;
                 break;
         }
     }
 
-    private bool ShouldCaptureSquadDebug =>
-        _movementTestMode ||
-        (SquadControlsEnabled &&
-         (_showSquadFlowWeights || _showSquadFormation ||
-          _showSquadStates || _showSquadContacts));
+    private bool ShouldCaptureSquadDebug => false;
 
     private void RecordSimulationStep(float deltaTime)
     {
