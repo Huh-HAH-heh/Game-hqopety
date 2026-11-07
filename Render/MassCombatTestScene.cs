@@ -116,10 +116,15 @@ public sealed class MassCombatTestScene
     {
         int centerX = worldMap.TileWidth / 2;
         int centerY = worldMap.TileHeight / 2;
-        int minX = Math.Max(4, centerX - 64);
-        int maxX = Math.Min(worldMap.MaxTileX - 4, centerX + 64);
-        int minY = Math.Max(4, centerY - 48);
-        int maxY = Math.Min(worldMap.MaxTileY - 4, centerY + 48);
+        const int blendWidth = 64;
+        int arenaMinX = Math.Max(4, centerX - 64);
+        int arenaMaxX = Math.Min(worldMap.MaxTileX - 4, centerX + 64);
+        int arenaMinY = Math.Max(4, centerY - 48);
+        int arenaMaxY = Math.Min(worldMap.MaxTileY - 4, centerY + 48);
+        int minX = Math.Max(4, arenaMinX - blendWidth);
+        int maxX = Math.Min(worldMap.MaxTileX - 4, arenaMaxX + blendWidth);
+        int minY = Math.Max(4, arenaMinY - blendWidth);
+        int maxY = Math.Min(worldMap.MaxTileY - 4, arenaMaxY + blendWidth);
 
         for (int y = minY; y <= maxY; y++)
         {
@@ -197,7 +202,21 @@ public sealed class MassCombatTestScene
                 // LOS are broken by 2-5 m ruin heights, not by navigation blockers.
                 height = Math.Clamp(height, 3.5f, 17f);
 
-                bool isRubble = roadCut < 0.55f &&
+                float edgeDistance = MathF.Max(
+                    MathF.Max(arenaMinX - x, x - arenaMaxX),
+                    MathF.Max(arenaMinY - y, y - arenaMaxY));
+                float blend = edgeDistance <= 0f
+                    ? 1f
+                    : SmoothStep(blendWidth, 0f, edgeDistance);
+                if (blend < 1f)
+                {
+                    // Fade the city outskirts into the original canyon terrain.
+                    // This removes the artificial height step at the arena rectangle.
+                    float existingHeight = worldMap.GetSurfaceHeight(x, y);
+                    height = existingHeight + (height - existingHeight) * blend;
+                }
+
+                bool isRubble = blend > 0.55f && roadCut < 0.55f &&
                     (debrisOne + debrisTwo + debrisThree + debrisFour > 0.45f ||
                      height > BaseTerrainHeight + 2.0f);
                 ushort material = isRubble ? (ushort)2 : (ushort)1;
