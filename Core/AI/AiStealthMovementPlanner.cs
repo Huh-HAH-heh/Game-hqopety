@@ -184,8 +184,8 @@ public static class AiStealthMovementPlanner
     {
         AiStealthProfile profile = (configuredProfile ?? AiStealthProfile.Default).Sanitized();
         float combined = risk.Combined;
-        if (combined >= profile.CrawlRiskThreshold)
-            return UnitPosture.Lying;
+        // Stealth movement is still movement: keep a low crouch at most.
+        // Lying down is reserved for the stationary defensive firing decision.
         if (combined >= profile.CrawlRiskThreshold * 0.52f)
             return UnitPosture.Crouching;
         return UnitPosture.Standing;
