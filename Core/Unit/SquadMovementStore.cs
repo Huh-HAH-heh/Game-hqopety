@@ -267,9 +267,8 @@ public sealed class SquadMovementStore
             forward = Vector2.UnitX;
         else
             forward = Vector2.Normalize(forward);
-        // Line and wedge retain the old individual landing positions. Each
-        // pawn gets its own footprint-valid A* goal; no second steering force
-        // tries to pull it away from that route.
+        // Line, wedge and the historical column test retain individual landing
+        // positions. Each pawn gets its own footprint-valid A* goal.
         bool usesIndividualFormationGoals =
             formation is InfantryFormationType.Line or InfantryFormationType.Wedge ||
             (formation == InfantryFormationType.Column &&
@@ -773,13 +772,15 @@ public sealed class SquadMovementStore
             bool reachedAnchor =
                 toAnchor.LengthSquared() <= 0.65f * 0.65f &&
                 squad.CenterVelocity.LengthSquared() <= 0.18f * 0.18f;
+            bool waitsForIndividualGoals =
+                squad.Formation is InfantryFormationType.Line or InfantryFormationType.Wedge ||
+                (squad.Formation == InfantryFormationType.Column &&
+                 squad.ColumnVariant == ColumnMovementVariant.HistoricalSlots);
             if (squad.HasMoveOrder &&
                 squad.EngagedCount == 0 &&
                 squad.RejoiningCount == 0 &&
                 squad.SeparatedCount == 0 &&
-                (squad.Formation is not (
-                    InfantryFormationType.Line or InfantryFormationType.Wedge) ||
-                 squad.MovingCount == 0) &&
+                (!waitsForIndividualGoals || squad.MovingCount == 0) &&
                 reachedAnchor)
             {
                 CompleteSquadMove(squad, units, ai, navigation);
