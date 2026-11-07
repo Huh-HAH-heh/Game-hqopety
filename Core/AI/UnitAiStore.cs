@@ -105,6 +105,7 @@ public readonly record struct UnitIntentUtilityContext
 
     public float MoveOrderUtility { get; init; }
     public float CombatUtility { get; init; }
+    public float FriendlyFireRisk { get; init; }
     public float CoverUtility { get; init; }
     public float FlankUtility { get; init; }
     public float ProneCombatUtility { get; init; }
