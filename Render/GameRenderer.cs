@@ -71,7 +71,8 @@ public sealed class GameRenderer
     private int _selectedInfoSquadId;
     private static readonly bool SquadControlsEnabled = false;
     private readonly InfantrySquadManager _squadManager = new();
-    private InfantryFormationType _infantryFormation = InfantryFormationType.Free;
+    private InfantryFormationType _infantryFormation = InfantryFormationType.Column;
+    private ColumnMovementVariant _columnMovementVariant = ColumnMovementVariant.HistoricalSlots;
     private bool _keepFormationInCombat;
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
@@ -1442,24 +1443,15 @@ public sealed class GameRenderer
                 destination,
                 formation,
                 _keepFormationInCombat,
-                _worldMap))
+                _worldMap,
+                _columnMovementVariant))
         {
             IssueMoveOrderToPoint(memberIds, destination);
         }
     }
 
-    private static string GetFormationMenuLabel(InfantryFormationType formation) =>
-        formation switch
-        {
-            InfantryFormationType.Free => "Группа",
-            InfantryFormationType.None => "Без строя",
-            InfantryFormationType.Line => "Линия",
-            InfantryFormationType.Column => "Колонна",
-            InfantryFormationType.Wedge => "Клин",
-            InfantryFormationType.DispersedLine => "Рассредоточенная линия",
-            InfantryFormationType.Perimeter => "Периметр",
-            _ => "Свободное движение"
-        };
+    private static string GetColumnVariantMenuLabel(ColumnMovementVariant variant) =>
+        ColumnMovementVariantInfo.GetName(variant);
 
     private bool AreAllAutonomousMovementDisabled(UnitId[] memberIds)
     {
@@ -2329,12 +2321,12 @@ public sealed class GameRenderer
                 destination,
                 _infantryFormation,
                 _keepFormationInCombat,
-                _worldMap))
+                _worldMap,
+                _columnMovementVariant))
         {
             Console.WriteLine(
-                $"[FORMATION] {InfantryFormation.GetName(_infantryFormation)} " +
-                $"A* order for {memberIds.Length} units; speed capped by slowest member. " +
-                (_keepFormationInCombat ? "Formation kept in combat." : "Formation steering relaxed in combat."));
+                $"[COLUMN TEST] {ColumnMovementVariantInfo.GetName(_columnMovementVariant)} " +
+                $"A* move for {memberIds.Length} units.");
             return;
         }
 
@@ -3407,13 +3399,9 @@ public sealed class GameRenderer
                                 : null;
                         string? selectedFormationLabel =
                             clickedSelectedUnit && selectedIds.Length > 1
-                                ? GetFormationMenuLabel(_infantryFormation)
+                                ? GetColumnVariantMenuLabel(_columnMovementVariant)
                                 : null;
-                        string? keepFormationLabel = selectedFormationLabel == null
-                            ? null
-                            : _keepFormationInCombat
-                                ? "Сохранять строй в бою: ВКЛ"
-                                : "Сохранять строй в бою: ВЫКЛ";
+                        string? keepFormationLabel = null;
                         bool canHoldSelected = selectedIds.Length > 0;
                         bool canConfigureWeapons = clickedSelectedUnit && selectedIds.Length > 0;
 
@@ -3684,33 +3672,28 @@ public sealed class GameRenderer
                                 break;
                             }
 
-                            case ContextMenuActionType.SetFormationFree:
-                            case ContextMenuActionType.SetFormationNone:
-                            case ContextMenuActionType.SetFormationLine:
-                            case ContextMenuActionType.SetFormationColumn:
-                            case ContextMenuActionType.SetFormationWedge:
-                            case ContextMenuActionType.SetFormationDispersedLine:
-                            case ContextMenuActionType.SetFormationPerimeter:
-                                _infantryFormation = contextAction switch
+                            case ContextMenuActionType.SetColumnVariantHistoricalSlots:
+                            case ContextMenuActionType.SetColumnVariantVirtualCenterline:
+                            case ContextMenuActionType.SetColumnVariantStaggeredCenterline:
+                            case ContextMenuActionType.SetColumnVariantLooseCorridor:
+                            case ContextMenuActionType.SetColumnVariantLinkedTrail:
+                                _infantryFormation = InfantryFormationType.Column;
+                                _columnMovementVariant = contextAction switch
                                 {
-                                    ContextMenuActionType.SetFormationFree => InfantryFormationType.Free,
-                                    ContextMenuActionType.SetFormationNone => InfantryFormationType.None,
-                                    ContextMenuActionType.SetFormationLine => InfantryFormationType.Line,
-                                    ContextMenuActionType.SetFormationColumn => InfantryFormationType.Column,
-                                    ContextMenuActionType.SetFormationWedge => InfantryFormationType.Wedge,
-                                    ContextMenuActionType.SetFormationDispersedLine => InfantryFormationType.DispersedLine,
-                                    ContextMenuActionType.SetFormationPerimeter => InfantryFormationType.Perimeter,
-                                    _ => _infantryFormation
+                                    ContextMenuActionType.SetColumnVariantHistoricalSlots =>
+                                        ColumnMovementVariant.HistoricalSlots,
+                                    ContextMenuActionType.SetColumnVariantVirtualCenterline =>
+                                        ColumnMovementVariant.VirtualCenterline,
+                                    ContextMenuActionType.SetColumnVariantStaggeredCenterline =>
+                                        ColumnMovementVariant.StaggeredCenterline,
+                                    ContextMenuActionType.SetColumnVariantLooseCorridor =>
+                                        ColumnMovementVariant.LooseCorridor,
+                                    ContextMenuActionType.SetColumnVariantLinkedTrail =>
+                                        ColumnMovementVariant.LinkedTrail,
+                                    _ => _columnMovementVariant
                                 };
                                 Console.WriteLine(
-                                    $"[FORMATION] Next group move: {GetFormationMenuLabel(_infantryFormation)}.");
-                                break;
-
-                            case ContextMenuActionType.ToggleKeepFormationInCombat:
-                                _keepFormationInCombat = !_keepFormationInCombat;
-                                Console.WriteLine(_keepFormationInCombat
-                                    ? "[FORMATION] Formation will be kept in combat."
-                                    : "[FORMATION] Formation will break on combat contact.");
+                                    $"[COLUMN TEST] Next move: {ColumnMovementVariantInfo.GetName(_columnMovementVariant)}.");
                                 break;
 
                             case ContextMenuActionType.ToggleAutonomousMovement:
@@ -4230,6 +4213,15 @@ public sealed class GameRenderer
                 Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
                 Keyboard.IsKeyPressed(Keyboard.Key.RControl);
             _bodyRigEditorOverlay.HandleKey(key, controlPressed);
+            return;
+        }
+
+        if (key == Keyboard.Key.J)
+        {
+            _infantryFormation = InfantryFormationType.Column;
+            _columnMovementVariant = ColumnMovementVariantInfo.Next(_columnMovementVariant);
+            Console.WriteLine(
+                $"[COLUMN TEST] Next move: {ColumnMovementVariantInfo.GetName(_columnMovementVariant)}.");
             return;
         }
 
