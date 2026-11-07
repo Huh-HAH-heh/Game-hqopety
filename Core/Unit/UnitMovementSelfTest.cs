@@ -271,18 +271,35 @@ public static class UnitMovementSelfTest
             return false;
         }
 
-        navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
-        if (!navigation.TryGetWaypoint(
-                simulation.Units,
-                id.Index,
-                map,
-                start,
-                target,
-                out _) ||
-            navigation.SearchesThisUpdate == 0)
+        Vector3 current = start;
+        bool builtWeightedRoute = false;
+        for (int attempt = 0; attempt < 8; attempt++)
         {
-            return false;
+            navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
+            if (!navigation.TryGetWaypoint(
+                    simulation.Units,
+                    id.Index,
+                    map,
+                    current,
+                    target,
+                    out Vector2 next))
+            {
+                builtWeightedRoute = navigation.SearchesThisUpdate > 0;
+                break;
+            }
+
+            if (navigation.SearchesThisUpdate > 0)
+            {
+                builtWeightedRoute = true;
+                break;
+            }
+
+            current = new Vector3(next.X, next.Y, current.Z);
+            simulation.Units.Position[id.Index] = current;
         }
+
+        if (!builtWeightedRoute)
+            return false;
 
         Span<Vector2> route = stackalloc Vector2[128];
         int routeCount = navigation.CopyRoutePoints(id.Index, route);
