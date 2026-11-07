@@ -101,7 +101,8 @@ public sealed class SquadTacticalCoordinator
 
             List<UnitId> staleIndividualFlanks = new();
             foreach (KeyValuePair<UnitId, FlankClaim> pair in _individualFlankClaims)
-                if (_membership.ContainsKey(pair.Value.Owner))
+                if (_membership.ContainsKey(pair.Key) ||
+                    _membership.ContainsKey(pair.Value.Owner))
                     staleIndividualFlanks.Add(pair.Key);
             for (int i = 0; i < staleIndividualFlanks.Count; i++)
                 _individualFlankClaims.Remove(staleIndividualFlanks[i]);
