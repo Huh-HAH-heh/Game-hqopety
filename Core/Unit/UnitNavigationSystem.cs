@@ -39,6 +39,8 @@ public sealed class UnitNavigationSystem
     private const float DirectFallbackDistance = 3f;
     private const float HotPathLookAheadDistance = 5f;
     private const float HotPathMinimumProgress = 0.45f;
+    private const float HotPathMaximumWeightedPenaltyPerMeter = 0.16f;
+    private const float HotPathWeightedPenaltyTolerance = 0.15f;
     private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
     private const float RouteReuseCostPerUnit = 0.10f;
@@ -674,7 +676,7 @@ public sealed class UnitNavigationSystem
 
         float stepDistance = MathF.Min(HotPathLookAheadDistance, distance);
         Vector2 candidate = start + delta * (stepDistance / distance);
-        if (HasClearStraightRouteToPoint(
+        if (IsWeightedStraightRouteAcceptable(
                 worldMap, start, candidate, footprintX, footprintY))
         {
             waypoint = candidate;
@@ -693,7 +695,7 @@ public sealed class UnitNavigationSystem
                 break;
 
             candidate = start + delta * (testDistance / distance);
-            if (HasClearStraightRouteToPoint(
+            if (IsWeightedStraightRouteAcceptable(
                     worldMap, start, candidate, footprintX, footprintY))
             {
                 safeDistance = testDistance;
@@ -737,7 +739,7 @@ public sealed class UnitNavigationSystem
         for (int attempt = 0; attempt < 4; attempt++)
         {
             Vector2 candidate = start + delta * (stepDistance / distance);
-            if (HasClearStraightRouteToPoint(
+            if (IsWeightedStraightRouteAcceptable(
                     worldMap, start, candidate, footprintX, footprintY))
             {
                 waypoint = candidate;
@@ -1411,7 +1413,11 @@ public sealed class UnitNavigationSystem
         return shortcutCost <= originalPathCost + ShortcutCostTolerance;
     }
 
-    private float GetStepCost(int fromCell, int toCell, int dx, int dy)
+    private float GetStepCost(int fromCell, int toCell, int dx, int dy) =>
+        (dx != 0 && dy != 0 ? DiagonalCost : 1f) +
+        GetStepPenalty(fromCell, toCell);
+
+    private float GetStepPenalty(int fromCell, int toCell)
     {
         float heightDifference = MathF.Abs(
             _navigationHeights[fromCell] - _navigationHeights[toCell]);
@@ -1420,10 +1426,46 @@ public sealed class UnitNavigationSystem
             priorRouteCount,
             RouteCohortSize - 1) * RouteReuseCostPerUnit;
 
-        return (dx != 0 && dy != 0 ? DiagonalCost : 1f) +
-            heightDifference * HeightCost +
+        return heightDifference * HeightCost +
             _navigationEdgeCost[toCell] +
             routeReuseCost;
+    }
+
+    private bool IsWeightedStraightRouteAcceptable(
+        WorldMap worldMap,
+        Vector2 start,
+        Vector2 end,
+        int footprintRadiusX,
+        int footprintRadiusY)
+    {
+        int startX = ClampCell((int)MathF.Floor(start.X), _width);
+        int startY = ClampCell((int)MathF.Floor(start.Y), _height);
+        int targetX = ClampCell((int)MathF.Floor(end.X), _width);
+        int targetY = ClampCell((int)MathF.Floor(end.Y), _height);
+
+        if (!CanTravelStraightToPoint(
+                worldMap,
+                start.X,
+                start.Y,
+                startX,
+                startY,
+                targetX,
+                targetY,
+                end.X,
+                end.Y,
+                footprintRadiusX,
+                footprintRadiusY,
+                out _,
+                out float weightedPenalty))
+        {
+            return false;
+        }
+
+        float distance = Vector2.Distance(start, end);
+        float maximumPenalty =
+            distance * HotPathMaximumWeightedPenaltyPerMeter +
+            HotPathWeightedPenaltyTolerance;
+        return weightedPenalty <= maximumPenalty;
     }
 
     private bool CanTravelStraight(
@@ -1471,7 +1513,7 @@ public sealed class UnitNavigationSystem
         int footprintRadiusY) =>
         CanTravelStraightToPoint(
             worldMap, startX, startY, x, y, targetX, targetY,
-            endX, endY, footprintRadiusX, footprintRadiusY, out _);
+            endX, endY, footprintRadiusX, footprintRadiusY, out _, out _);
 
     private bool CanTravelStraightToPoint(
         WorldMap worldMap,
@@ -1485,9 +1527,28 @@ public sealed class UnitNavigationSystem
         float endY,
         int footprintRadiusX,
         int footprintRadiusY,
-        out float travelCost)
+        out float travelCost) =>
+        CanTravelStraightToPoint(
+            worldMap, startX, startY, x, y, targetX, targetY,
+            endX, endY, footprintRadiusX, footprintRadiusY, out travelCost, out _);
+
+    private bool CanTravelStraightToPoint(
+        WorldMap worldMap,
+        float startX,
+        float startY,
+        int x,
+        int y,
+        int targetX,
+        int targetY,
+        float endX,
+        float endY,
+        int footprintRadiusX,
+        int footprintRadiusY,
+        out float travelCost,
+        out float weightedPenalty)
     {
         travelCost = 0f;
+        weightedPenalty = 0f;
         if (!IsInside(x, y) ||
             !IsInside(targetX, targetY) ||
             !IsFootprintPassable(worldMap, x, y, footprintRadiusX, footprintRadiusY) ||
@@ -1567,6 +1628,7 @@ public sealed class UnitNavigationSystem
             int fromCell = x + y * _width;
             int toCell = nextX + nextY * _width;
             travelCost += GetStepCost(fromCell, toCell, moveX, moveY);
+            weightedPenalty += GetStepPenalty(fromCell, toCell);
 
             x = nextX;
             y = nextY;
