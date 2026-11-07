@@ -15,7 +15,7 @@ There are no line, wedge, perimeter, rigid-slot or neighbour-following modes exp
 
 ## Navigation policy
 
-A* remains the terrain-aware pathfinder. It accounts for blocked cells, unit footprint and height transitions. Routes are cached per unit and rebuilt only when invalidated, when a local route chunk ends, or when a refresh is due.
+A* remains the terrain-aware pathfinder. It accounts for blocked cells, unit footprint and height transitions. Routes are cached per unit. When the short direct segment remains traversable, the hot path handles movement even when a cached route reaches its refresh time; A* runs when direct progress is blocked or the cached route is invalid.
 
 For long moves, each search is a bounded local chunk. Among the nodes reached by A*, the hot-path policy selects the reachable frontier with the greatest forward progress toward the objective, penalizing excessive sideways drift and detour cost. If the best forward frontier would require moving away from the objective, the previous heuristic frontier remains the fallback. The unit follows this chunk and requests the next one as it advances.
 
