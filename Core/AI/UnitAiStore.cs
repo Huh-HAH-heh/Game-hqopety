@@ -82,6 +82,7 @@ public readonly record struct UnitIntentUtilityContext
     public bool CanFlank { get; init; }
     public bool IsFlanking { get; init; }
     public bool IsProne { get; init; }
+    public bool IsMoving { get; init; }
     public bool IsAlerted { get; init; }
     public bool HasInvestigableContact { get; init; }
     public bool HasSquadContact { get; init; }
