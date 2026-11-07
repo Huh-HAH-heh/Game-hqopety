@@ -20,7 +20,6 @@ public enum ContextMenuActionType
     MoveSelectedHere,
     MoveSelectedHereAsCrowd,
     MoveSelectedHereAsColumn,
-    ToggleKeepFormationInCombat,
     ToggleAutonomousMovement,
     HoldSelected,
     CycleFireMode,
@@ -106,9 +105,6 @@ public sealed class ContextMenuOverlay : IDisposable
         bool canAttackTarget,
         bool canMoveSelected,
         string? autonomousMovementLabel = null,
-        bool canConfigureFormation = false,
-        string? selectedFormationLabel = null,
-        string? keepFormationLabel = null,
         bool canHoldSelected = false,
         bool canConfigureWeapons = false)
     {
@@ -129,9 +125,6 @@ public sealed class ContextMenuOverlay : IDisposable
             canAttackTarget,
             canMoveSelected,
             autonomousMovementLabel,
-            canConfigureFormation,
-            selectedFormationLabel,
-            keepFormationLabel,
             canHoldSelected,
             canConfigureWeapons);
     }
@@ -147,9 +140,6 @@ public sealed class ContextMenuOverlay : IDisposable
         bool canAttackTarget,
         bool canMoveSelected,
         string? autonomousMovementLabel = null,
-        bool canConfigureFormation = false,
-        string? selectedFormationLabel = null,
-        string? keepFormationLabel = null,
         bool canHoldSelected = false,
         bool canConfigureWeapons = false)
     {
@@ -222,17 +212,6 @@ public sealed class ContextMenuOverlay : IDisposable
     {
         _actions.Add(action);
         _labels.Add(label);
-    }
-
-    private void AddFormationAction(
-        ContextMenuActionType action,
-        string label,
-        string? selectedFormationLabel)
-    {
-        if (string.Equals(label, selectedFormationLabel, StringComparison.Ordinal))
-            label = $"✓ {label}";
-
-        AddAction(action, label);
     }
 
     public bool HandleMousePressed(Vector2i position, uint windowWidth, uint windowHeight)
