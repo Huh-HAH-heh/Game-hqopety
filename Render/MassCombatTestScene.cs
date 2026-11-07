@@ -464,6 +464,8 @@ public sealed class MassCombatTestScene
                 1,
                 worldMap.MaxTileY - 1);
 
+        ResolveSpawnCell(simulation, worldMap, ref tileX, ref tileY);
+
         float z =
             worldMap.GetSurfaceHeight(
                 tileX,
@@ -565,6 +567,90 @@ public sealed class MassCombatTestScene
             side);
     }
 
+    private static void ResolveSpawnCell(
+        UnitSimulation simulation,
+        WorldMap worldMap,
+        ref int tileX,
+        ref int tileY,
+        int ignoredUnit = -1)
+    {
+        if (IsSpawnCellUsable(simulation, worldMap, tileX, tileY, ignoredUnit))
+            return;
+
+        const int maximumSearchRadius = 8;
+        float bestDistanceSquared = float.PositiveInfinity;
+        int bestX = tileX;
+        int bestY = tileY;
+
+        for (int radius = 1; radius <= maximumSearchRadius; radius++)
+        {
+            for (int offsetY = -radius; offsetY <= radius; offsetY++)
+            {
+                for (int offsetX = -radius; offsetX <= radius; offsetX++)
+                {
+                    if (Math.Max(Math.Abs(offsetX), Math.Abs(offsetY)) != radius)
+                        continue;
+
+                    int candidateX = tileX + offsetX;
+                    int candidateY = tileY + offsetY;
+                    if (candidateX < 1 || candidateY < 1 ||
+                        candidateX >= worldMap.MaxTileX ||
+                        candidateY >= worldMap.MaxTileY ||
+                        !IsSpawnCellUsable(
+                            simulation, worldMap, candidateX, candidateY, ignoredUnit))
+                    {
+                        continue;
+                    }
+
+                    float distanceSquared =
+                        offsetX * offsetX + offsetY * offsetY;
+                    if (distanceSquared >= bestDistanceSquared)
+                        continue;
+
+                    bestDistanceSquared = distanceSquared;
+                    bestX = candidateX;
+                    bestY = candidateY;
+                }
+            }
+
+            if (bestDistanceSquared < float.PositiveInfinity)
+                break;
+        }
+
+        tileX = bestX;
+        tileY = bestY;
+    }
+
+    private static bool IsSpawnCellUsable(
+        UnitSimulation simulation,
+        WorldMap worldMap,
+        int tileX,
+        int tileY,
+        int ignoredUnit)
+    {
+        if (worldMap.IsNavigationBlocked(tileX, tileY) ||
+            worldMap.GetSurfaceLayer(tileX, tileY) < 0)
+            return false;
+
+        Vector2 candidate = new(tileX + 0.5f, tileY + 0.5f);
+        ReadOnlySpan<int> active = simulation.Units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int other = active[i];
+            if (other == ignoredUnit)
+                continue;
+
+            Vector3 position = simulation.Units.Position[other];
+            Vector2 offset = candidate - new Vector2(position.X, position.Y);
+            float minimumDistance =
+                simulation.Units.Radius[other] + 0.35f;
+            if (offset.LengthSquared() < minimumDistance * minimumDistance)
+                return false;
+        }
+
+        return true;
+    }
+
     private void ResetUnits(
         UnitSimulation simulation,
         WorldMap worldMap)
@@ -622,6 +708,8 @@ public sealed class MassCombatTestScene
                     (int)MathF.Floor(y),
                     1,
                     worldMap.MaxTileY - 1);
+
+            ResolveSpawnCell(simulation, worldMap, ref tileX, ref tileY, index);
 
             simulation.Units.Position[index] =
                 new Vector3(
