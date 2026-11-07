@@ -210,7 +210,7 @@ public sealed class UnitNavigationSystem
         NavigationGridBuildMilliseconds = 0d;
         EnsureNavigationGrid(worldMap);
         _routeBuildsRemaining = Math.Clamp(
-            units.ActiveCount / 128,
+            units.ActiveCount / 32,
             MinRouteBuildsPerUpdate,
             MaxRouteBuildsPerUpdate);
         RoutesBuiltThisUpdate = 0;
@@ -1001,6 +1001,25 @@ public sealed class UnitNavigationSystem
             (int)MathF.Floor(coordinate * NavigationCellsPerMeter),
             0,
             gridLength - 1);
+
+    private static float SampleSurfaceHeight(WorldMap worldMap, float x, float y)
+    {
+        int x0 = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
+        int y0 = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
+        int x1 = Math.Min(x0 + 1, worldMap.MaxTileX);
+        int y1 = Math.Min(y0 + 1, worldMap.MaxTileY);
+
+        float tx = Math.Clamp(x - x0, 0f, 1f);
+        float ty = Math.Clamp(y - y0, 0f, 1f);
+        float z00 = worldMap.GetSurfaceHeight(x0, y0);
+        float z10 = worldMap.GetSurfaceHeight(x1, y0);
+        float z01 = worldMap.GetSurfaceHeight(x0, y1);
+        float z11 = worldMap.GetSurfaceHeight(x1, y1);
+
+        float top = z00 + (z10 - z00) * tx;
+        float bottom = z01 + (z11 - z01) * tx;
+        return top + (bottom - top) * ty;
+    }
 
     private static int ToWorldTile(int navigationCell) =>
         navigationCell / NavigationCellsPerMeter;
@@ -2298,8 +2317,11 @@ public sealed class UnitNavigationSystem
                     !worldMap.IsNavigationBlocked(worldX, worldY) &&
                     worldMap.GetSurfaceLayer(worldX, worldY) >= 0;
 
+                float sampleX = (x + 0.5f) * NavigationCellSize;
+                float sampleY = (y + 0.5f) * NavigationCellSize;
                 _navigationPassable[cell] = passable;
-                _navigationHeights[cell] = worldMap.GetSurfaceHeight(worldX, worldY);
+                _navigationHeights[cell] =
+                    SampleSurfaceHeight(worldMap, sampleX, sampleY);
                 _navigationNeighbors[cell] = 0;
             }
         }

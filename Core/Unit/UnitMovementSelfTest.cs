@@ -136,6 +136,90 @@ public static class UnitMovementSelfTest
         return count > 1 && hasSubmeterPoint && hasAnyAngleJump;
     }
 
+    public static bool NavigationMatchesInterpolatedWallAndRampGeometry()
+    {
+        WorldMap map = new WorldMap(
+            regionsX: 1,
+            regionsY: 1,
+            layerCount: 500);
+
+        for (int y = 0; y < map.TileHeight; y++)
+        {
+            for (int x = 0; x < map.TileWidth; x++)
+            {
+                int heightUnits = x <= 6
+                    ? 10
+                    : x >= 26
+                        ? 330
+                        : 10 + (x - 6) * 16;
+                map.SetSolidHeight(x, y, (ushort)heightUnits, 1);
+            }
+        }
+
+        int wallX = 15;
+        int centerY = map.TileHeight / 2;
+        int openingY = centerY - 8;
+        for (int y = 2; y < map.TileHeight - 2; y++)
+        {
+            if (Math.Abs(y - openingY) > 2)
+                map.SetNavigationBlocked(wallX, y, true);
+        }
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        Vector3 start = new(
+            wallX - 2.5f,
+            centerY + 0.5f,
+            map.GetSurfaceHeight(wallX - 3, centerY));
+        Vector3 target = new(
+            wallX + 7.5f,
+            centerY + 0.5f,
+            map.GetSurfaceHeight(wallX + 7, centerY));
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            start,
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        UnitNavigationSystem navigation = simulation.Navigation;
+        navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
+        if (!navigation.TryGetWaypoint(
+                simulation.Units,
+                id.Index,
+                map,
+                start,
+                target,
+                out _))
+            return false;
+
+        if (navigation.SearchesThisUpdate == 0)
+            return false;
+
+        Span<Vector2> route = stackalloc Vector2[128];
+        int count = navigation.CopyRoutePoints(id.Index, route);
+        bool crossedOpening = false;
+        for (int i = 1; i < count; i++)
+        {
+            Vector2 a = route[i - 1];
+            Vector2 b = route[i];
+            float planeX = wallX + 0.5f;
+            if ((a.X <= planeX && b.X >= planeX) ||
+                (b.X <= planeX && a.X >= planeX))
+            {
+                float dx = b.X - a.X;
+                if (MathF.Abs(dx) < 0.0001f)
+                    continue;
+
+                float t = (planeX - a.X) / dx;
+                float crossingY = a.Y + (b.Y - a.Y) * t;
+                crossedOpening |=
+                    MathF.Abs(MathF.Floor(crossingY) - openingY) <= 2f;
+            }
+        }
+
+        return count > 1 && crossedOpening;
+    }
+
     public static bool AcceleratesAndStopsAtCommandedTarget()
     {
         WorldMap map = CreateFlatWorld();
