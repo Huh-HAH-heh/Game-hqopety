@@ -82,6 +82,7 @@ public sealed class MassCombatTestScene
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
             $"Alive {AliveUnits} | " +
+            $"LOS 26m | Broken relief | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
@@ -113,159 +114,107 @@ public sealed class MassCombatTestScene
     private void BuildTerrain(
         WorldMap worldMap)
     {
-        int centerX =
-            worldMap.TileWidth / 2;
+        int centerX = worldMap.TileWidth / 2;
+        int centerY = worldMap.TileHeight / 2;
+        int minX = Math.Max(4, centerX - 64);
+        int maxX = Math.Min(worldMap.MaxTileX - 4, centerX + 64);
+        int minY = Math.Max(4, centerY - 48);
+        int maxY = Math.Min(worldMap.MaxTileY - 4, centerY + 48);
 
-        int centerY =
-            worldMap.TileHeight / 2;
-
-        int minX =
-            Math.Max(
-                4,
-                centerX - 64);
-
-        int maxX =
-            Math.Min(
-                worldMap.MaxTileX - 4,
-                centerX + 64);
-
-        int minY =
-            Math.Max(
-                4,
-                centerY - 48);
-
-        int maxY =
-            Math.Min(
-                worldMap.MaxTileY - 4,
-                centerY + 48);
-
-        for (int y = minY;
-             y <= maxY;
-             y++)
+        for (int y = minY; y <= maxY; y++)
         {
-            for (int x = minX;
-                 x <= maxX;
-                 x++)
+            for (int x = minX; x <= maxX; x++)
             {
-                float dx =
-                    x - centerX;
+                float dx = x - centerX;
+                float dy = y - centerY;
 
-                float dy =
-                    y - centerY;
+                // Low-frequency relief gives the battle area broad, uneven shoulders.
+                float roughness =
+                    0.95f * MathF.Sin(dx * 0.105f + MathF.Sin(dy * 0.061f) * 0.8f) +
+                    0.85f * MathF.Cos(dy * 0.137f - dx * 0.043f) +
+                    0.48f * MathF.Sin((dx + dy) * 0.29f) *
+                    MathF.Cos((dx - dy) * 0.21f) +
+                    0.28f * MathF.Sin(x * 0.71f) * MathF.Cos(y * 0.63f);
 
-                float height =
-                    BaseTerrainHeight;
+                float height = BaseTerrainHeight + roughness;
 
-                // Large central valley.
-                float valley =
-                    8f *
-                    MathF.Exp(
-                        -(dx * dx) /
-                        (2f * 42f * 42f));
+                // Broken diagonal ridge: several high shoulders with low saddles between them.
+                float ridgeOneLine =
+                    dx * 0.34f +
+                    MathF.Sin(dx * 0.075f) * 5f +
+                    MathF.Sin(dy * 0.11f) * 2f - 4f;
+                float ridgeOneDistance = MathF.Abs(dy - ridgeOneLine);
+                float ridgeOneGate =
+                    0.16f + 0.84f * MathF.Abs(MathF.Sin(dx * 0.11f + dy * 0.035f));
+                float ridgeOne =
+                    MathF.Max(0f, 4.8f - ridgeOneDistance * 0.95f) * ridgeOneGate;
+                height += ridgeOne;
 
-                height -= valley;
+                // A second ridge crosses the first at an angle, creating blind corners.
+                float ridgeTwoLine =
+                    -dx * 0.41f +
+                    MathF.Sin(dx * 0.082f + 1.6f) * 4.5f +
+                    MathF.Sin(dy * 0.09f) * 1.8f + 9f;
+                float ridgeTwoDistance = MathF.Abs(dy - ridgeTwoLine);
+                float ridgeTwoGate =
+                    0.12f + 0.88f * MathF.Abs(MathF.Cos(dx * 0.095f - dy * 0.03f + 0.6f));
+                float ridgeTwo =
+                    MathF.Max(0f, 4.1f - ridgeTwoDistance * 0.88f) * ridgeTwoGate;
+                height += ridgeTwo;
 
-                // Two broad hills.
-                height +=
-                    8f *
-                    MathF.Exp(
-                        -(
-                            (dx + 26f) *
-                            (dx + 26f) +
-                            dy * dy) /
-                        (2f * 18f * 18f));
+                // Short broken spurs rise from the middle instead of forming one clean wall.
+                float ridgeThreeLine = 2f + MathF.Sin(dy * 0.12f) * 4.2f;
+                float ridgeThreeDistance = MathF.Abs(dx - ridgeThreeLine);
+                float ridgeThreeGate =
+                    0.20f + 0.80f * MathF.Abs(MathF.Sin(dy * 0.145f + 0.9f));
+                float ridgeThree =
+                    MathF.Max(0f, 3.4f - ridgeThreeDistance * 0.9f) * ridgeThreeGate;
+                height += ridgeThree;
 
-                height +=
-                    10f *
-                    MathF.Exp(
-                        -(
-                            (dx - 30f) *
-                            (dx - 30f) +
-                            (dy - 12f) *
-                            (dy - 12f)) /
-                        (2f * 20f * 20f));
+                // Winding shallow ravines cut through the ridges and provide flank routes.
+                float gullyCenterY =
+                    dx * 0.24f +
+                    MathF.Sin(dx * 0.067f + 0.5f) * 6f -
+                    8f;
+                float gullyDistance = MathF.Abs(dy - gullyCenterY);
+                height -= MathF.Max(0f, 3.0f - gullyDistance * 0.64f);
 
-                // Long diagonal ridge.
-                float ridge =
-                    MathF.Abs(
-                        dy -
-                        dx * 0.34f);
+                float crossGullyCenterX =
+                    -5f +
+                    dy * 0.28f +
+                    MathF.Sin(dy * 0.085f) * 4f;
+                float crossGullyDistance = MathF.Abs(dx - crossGullyCenterX);
+                height -= MathF.Max(0f, 2.1f - crossGullyDistance * 0.72f);
 
-                if (ridge < 3.0f)
+                // Isolated knolls break sight lines without becoming impassable cliffs.
+                float knolls =
+                    GaussianHill(dx, dy, -34f, -23f, 8.5f, 3.0f) +
+                    GaussianHill(dx, dy, 29f, -27f, 10f, 3.5f) +
+                    GaussianHill(dx, dy, -39f, 25f, 9f, 2.8f) +
+                    GaussianHill(dx, dy, 37f, 21f, 8f, 3.1f);
+                height += knolls;
+
+                // A shallow crater and its broken rim create a small close-quarters basin.
+                float craterX = (dx + 19f) / 11f;
+                float craterY = (dy - 17f) / 8f;
+                float craterDistance = MathF.Sqrt(craterX * craterX + craterY * craterY);
+                if (craterDistance < 0.62f)
                 {
-                    height +=
-                        7f *
-                        (1f -
-                         ridge / 3.0f);
+                    height -= 2.2f * (1f - craterDistance / 0.62f);
+                }
+                else if (craterDistance < 1.08f)
+                {
+                    float rim = 1f - MathF.Abs(craterDistance - 0.84f) / 0.24f;
+                    height += 2.0f * MathF.Max(0f, rim);
                 }
 
-                // Broken side ridge with passes.
-                float sideRidge =
-                    MathF.Abs(dx + 8f);
+                // Keep every slope traversable; height differences, not blockers, occlude vision.
+                height = Math.Clamp(height, 3.5f, 19f);
 
-                if (sideRidge < 2.5f)
-                {
-                    float pass =
-                        MathF.Abs(
-                            dy % 18f);
-
-                    float factor =
-                        pass < 3f
-                            ? pass / 3f
-                            : 1f;
-
-                    height +=
-                        6f *
-                        factor;
-                }
-
-                // Small terrain noise creates uneven sight lines.
-                height +=
-                    1.4f *
-                    MathF.Sin(
-                        x * 0.31f) *
-                    MathF.Cos(
-                        y * 0.27f);
-
-                // Keep the two deployment shelves traversable.
-                if (MathF.Abs(dx) > 50f)
-                {
-                    height =
-                        8.5f +
-                        0.8f *
-                        MathF.Sin(
-                            y * 0.22f);
-                }
-
-                // Artificial fortified rocks / hard cover.
-                if (IsCoverBlock(
-                        x,
-                        y,
-                        centerX,
-                        centerY))
-                {
-                    height += 7f;
-                }
-
-                ushort heightUnits =
-                    checked(
-                        (ushort)Math.Clamp(
-                            MathF.Round(
-                                MathF.Max(
-                                    3f,
-                                    height) *
-                                10f),
-                            0f,
-                            ushort.MaxValue));
-
-                ushort material =
-                    IsCoverBlock(
-                        x,
-                        y,
-                        centerX,
-                        centerY)
-                        ? (ushort)2
-                        : (ushort)1;
+                float rockScore = ridgeOne + ridgeTwo + ridgeThree + knolls * 0.35f;
+                ushort material = rockScore > 2.5f ? (ushort)2 : (ushort)1;
+                ushort heightUnits = checked(
+                    (ushort)MathF.Round(height * WorldMap.HeightUnitsPerMeter));
 
                 worldMap.SetSolidHeight(
                     x,
@@ -283,35 +232,18 @@ public sealed class MassCombatTestScene
             maxY);
     }
 
-    private static bool IsCoverBlock(
-        int x,
-        int y,
-        int centerX,
-        int centerY)
+    private static float GaussianHill(
+        float dx,
+        float dy,
+        float centerX,
+        float centerY,
+        float radius,
+        float height)
     {
-        int dx = x - centerX;
-        int dy = y - centerY;
-
-        if (Math.Abs(dx - 28) <= 2 &&
-            Math.Abs(dy) <= 10)
-        {
-            return true;
-        }
-
-        if (Math.Abs(dx + 24) <= 2 &&
-            Math.Abs(dy - 18) <= 12)
-        {
-            return true;
-        }
-
-        if (Math.Abs(dx) <= 2 &&
-            dy >= 10 &&
-            dy <= 24)
-        {
-            return true;
-        }
-
-        return false;
+        float offsetX = dx - centerX;
+        float offsetY = dy - centerY;
+        float distanceSquared = offsetX * offsetX + offsetY * offsetY;
+        return height * MathF.Exp(-distanceSquared / (2f * radius * radius));
     }
 
     private static void ClearTestWater(
@@ -455,6 +387,7 @@ public sealed class MassCombatTestScene
 
         _units[testIndex] = id;
         _side[testIndex] = (byte)side;
+        simulation.Units.ViewRange[id.Index] = 26f;
 
         RangedWeaponConfig weapon =
             (testIndex % 3) switch
