@@ -641,7 +641,7 @@ void main()
         _sceneHeading = CreateText("ТЕСТОВЫЕ СЦЕНЫ", 13, new Color(216, 224, 234), new Vector2f(0f, 0f), Text.Styles.Bold);
         _sceneName = CreateText("", 13, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _sceneActiveLabel = CreateText("", 11, new Color(154, 168, 185), new Vector2f(0f, 0f));
-        _sceneDescription = CreateText("Смена сцены пересоздаёт окружение. Курс движения по умолчанию не содержит врагов.", 10, new Color(170, 184, 201), new Vector2f(0f, 0f));
+        _sceneDescription = CreateText("Городские руины: проломы, обрушенные здания, завалы и воронки. Враги сходятся через короткие прострелы.", 10, new Color(170, 184, 201), new Vector2f(0f, 0f));
         _scenePreviousLabel = CreateText("‹", 22, Color.White, new Vector2f(0f, 0f));
         _sceneNextLabel = CreateText("›", 22, Color.White, new Vector2f(0f, 0f));
         _sceneApplyLabel = CreateText("ЗАПУСТИТЬ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
@@ -1931,7 +1931,7 @@ void main()
             1 => "Восприятие и укрытия",
             2 => "Дальний бой",
             3 => "Рельеф и генерация мира",
-            _ => "Массовый бой — 160 юнитов"
+            _ => "Ближний бой — разрушенный город"
         };
 
     public bool IsSettingsPanelHit(Vector2i point, GameMenuPage page) =>
