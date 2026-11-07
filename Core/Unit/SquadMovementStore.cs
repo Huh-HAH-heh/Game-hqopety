@@ -380,6 +380,10 @@ public sealed class SquadMovementStore
             return false;
         }
 
+        formation = formation == InfantryFormationType.Column
+            ? InfantryFormationType.Column
+            : InfantryFormationType.Free;
+
         HashSet<UnitId> selected = new(requestedMembers.Count);
         for (int i = 0; i < requestedMembers.Count; i++)
             selected.Add(requestedMembers[i]);
@@ -668,20 +672,12 @@ public sealed class SquadMovementStore
             // member slots. It stretches along travel during the march and opens
             // laterally during contact.
             float effectiveCoreCount = Math.Max(1, coreMemberCount);
-            float baseRadius = MathF.Max(
-                squad.Spacing * 1.75f,
-                MathF.Sqrt(effectiveCoreCount) * squad.Spacing * 1.1f);
-            if (squad.Rigidity == SquadFormationRigidity.Organized)
-                baseRadius *= 0.92f;
-
             bool inContact = squad.EngagedCount > 0;
             float contactScale = !inContact
                 ? 1f
                 : squad.KeepFormationInCombat ? 1.35f : 1.75f;
 
-            // The live envelope is the shape the group travels in:
-            // Column is narrow and deep, Line is wide and shallow,
-            // Free is a loose rounded crowd.
+            // Column is narrow and deep; crowd is a loose rounded group.
             switch (squad.Formation)
             {
                 case InfantryFormationType.Column:
@@ -703,10 +699,6 @@ public sealed class SquadMovementStore
                     squad.EnvelopeDepth = crowdRadius;
                     break;
 
-                default:
-                    squad.EnvelopeWidth = baseRadius * contactScale;
-                    squad.EnvelopeDepth = baseRadius * (inContact ? 1.25f : 1.55f);
-                    break;
             }
 
             Vector2 toAnchor = squad.AnchorTarget - squad.Center;
