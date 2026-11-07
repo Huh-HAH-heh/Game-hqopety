@@ -1094,7 +1094,7 @@ public sealed class UnitNavigationSystem
             // A* still validates the route around terrain, but its next chunk
             // ends at the most useful reachable point along the goal direction.
             // Cross-track drift and extra detour cost are tie-break penalties,
-            // not hard limits, so an obstacle can still force a wide обход.
+            // not hard limits, so an obstacle can still force a wide detour.
             float offsetX = x - startX;
             float offsetY = y - startY;
             float forwardProgress = offsetX * goalDirection.X + offsetY * goalDirection.Y;
