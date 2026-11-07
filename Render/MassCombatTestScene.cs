@@ -539,13 +539,6 @@ public sealed class MassCombatTestScene
             }
         }
 
-        if (testIndex % 11 == 0)
-        {
-            simulation.SetPosture(
-                id,
-                UnitPosture.Crouching);
-        }
-
         SetCombatTarget(
             simulation,
             id,
@@ -643,9 +636,7 @@ public sealed class MassCombatTestScene
 
             simulation.SetPosture(
                 _units[i],
-                i % 11 == 0
-                    ? UnitPosture.Crouching
-                    : UnitPosture.Standing);
+                UnitPosture.Standing);
 
             RestoreHealth(
                 simulation,
