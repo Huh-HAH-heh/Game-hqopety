@@ -18,7 +18,8 @@ public enum UnitNavigationStatus : byte
     PathNotFound = 7,
     NoUsableWaypoints = 8,
     FollowingPartialRoute = 9,
-    MovingTowardGoalWhileWaitingForRoute = 10
+    MovingTowardGoalWhileWaitingForRoute = 10,
+    FollowingHotPath = 11
 }
 
 /// <summary>
@@ -36,6 +37,8 @@ public sealed class UnitNavigationSystem
     private const float RouteRefreshIntervalSeconds = 5f;
     private const float RouteRefreshRetrySeconds = 0.5f;
     private const float DirectFallbackDistance = 3f;
+    private const float HotPathLookAheadDistance = 5f;
+    private const float HotPathMinimumProgress = 0.45f;
     private const int FailedRouteRetryUpdates = 120;
     private const int RouteCohortSize = 16;
     private const float RouteReuseCostPerUnit = 0.10f;
@@ -282,6 +285,23 @@ public sealed class UnitNavigationSystem
             waypointCursor < waypoints.Length &&
             _navigationTimeSeconds >= _routeRefreshAtSeconds[unitIndex];
 
+        // Prefer a short, footprint-safe move directly toward the objective.
+        // A* is requested only when the next reachable segment is blocked.
+        if (routeInvalid &&
+            TryGetHotPathWaypoint(
+                worldMap,
+                position,
+                target,
+                footprintX,
+                footprintY,
+                out Vector2 hotPathWaypoint))
+        {
+            ClearRoute(unitIndex);
+            _lastStatuses[unitIndex] = UnitNavigationStatus.FollowingHotPath;
+            waypoint = hotPathWaypoint;
+            return true;
+        }
+
         bool needsRoute = routeInvalid || refreshDue;
         if (needsRoute)
         {
@@ -507,7 +527,7 @@ public sealed class UnitNavigationSystem
             GetFootprintRadius(units.Length[unitIndex]));
     }
 
-    public bool TryResolveAStarGoal(
+    public bool TryResolveNavigableGoal(
         UnitStore units,
         int unitIndex,
         WorldMap worldMap,
@@ -600,6 +620,71 @@ public sealed class UnitNavigationSystem
             return true;
         }
 
+        return false;
+    }
+
+    /// <summary>
+    /// Picks the furthest safe point along the straight segment toward the goal,
+    /// bounded to a short look-ahead. This is the hot path: it needs no graph
+    /// search while nearby terrain is traversable.
+    /// </summary>
+    private bool TryGetHotPathWaypoint(
+        WorldMap worldMap,
+        Vector3 position,
+        Vector3 target,
+        int footprintX,
+        int footprintY,
+        out Vector2 waypoint)
+    {
+        Vector2 start = new(position.X, position.Y);
+        Vector2 goal = new(target.X, target.Y);
+        Vector2 delta = goal - start;
+        float distance = delta.Length();
+
+        if (distance <= 0.05f)
+        {
+            waypoint = goal;
+            return true;
+        }
+
+        float stepDistance = MathF.Min(HotPathLookAheadDistance, distance);
+        Vector2 candidate = start + delta * (stepDistance / distance);
+        if (HasClearStraightRouteToPoint(
+                worldMap, start, candidate, footprintX, footprintY))
+        {
+            waypoint = candidate;
+            return true;
+        }
+
+        // The requested look-ahead intersects an obstacle. Find the closest
+        // safe point before it; if progress is negligible, hand control to A*.
+        float safeDistance = 0f;
+        float blockedDistance = stepDistance;
+        for (int attempt = 0; attempt < 7; attempt++)
+        {
+            float testDistance = (safeDistance + blockedDistance) * 0.5f;
+            if (testDistance < 0.1f)
+                break;
+
+            candidate = start + delta * (testDistance / distance);
+            if (HasClearStraightRouteToPoint(
+                    worldMap, start, candidate, footprintX, footprintY))
+            {
+                safeDistance = testDistance;
+            }
+            else
+            {
+                blockedDistance = testDistance;
+            }
+        }
+
+        if (safeDistance >= HotPathMinimumProgress)
+        {
+            waypoint = start + delta * (safeDistance / distance);
+            return true;
+        }
+
+        waypoint = default;
         return false;
     }
 
