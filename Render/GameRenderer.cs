@@ -3470,9 +3470,6 @@ public sealed class GameRenderer
                             canAttackTarget,
                             canMoveSelected,
                             autonomousMovementLabel,
-                            false,
-                            null,
-                            null,
                             canHoldSelected,
                             canConfigureWeapons);
 
