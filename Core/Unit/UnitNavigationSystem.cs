@@ -287,7 +287,7 @@ public sealed class UnitNavigationSystem
 
         // Prefer a short, footprint-safe move directly toward the objective.
         // A* is requested only when the next reachable segment is blocked.
-        if (routeInvalid &&
+        if ((routeInvalid || refreshDue) &&
             TryGetHotPathWaypoint(
                 worldMap,
                 position,
