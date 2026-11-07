@@ -40,6 +40,7 @@ public sealed class SquadTacticalCoordinator
     private readonly Dictionary<UnitId, ReceivedContact> _received = new();
     private readonly Dictionary<long, InvestigationClaim> _claims = new();
     private readonly Dictionary<(int SquadId, UnitId Target), FlankClaim> _flankClaims = new();
+    private readonly Dictionary<UnitId, FlankClaim> _individualFlankClaims = new();
     private readonly Dictionary<int, InvestigationClaim> _lastKnownInvestigationClaims = new();
     private readonly List<PendingReport> _pending = new();
     private long _nextSequence = 1;
@@ -98,6 +99,13 @@ public sealed class SquadTacticalCoordinator
                     staleFlankClaims.Add(pair.Key);
             for (int i = 0; i < staleFlankClaims.Count; i++) _flankClaims.Remove(staleFlankClaims[i]);
 
+            List<UnitId> staleIndividualFlanks = new();
+            foreach (KeyValuePair<UnitId, FlankClaim> pair in _individualFlankClaims)
+                if (_membership.ContainsKey(pair.Value.Owner))
+                    staleIndividualFlanks.Add(pair.Key);
+            for (int i = 0; i < staleIndividualFlanks.Count; i++)
+                _individualFlankClaims.Remove(staleIndividualFlanks[i]);
+
             if (_lastKnownInvestigationClaims.Count > 0)
             {
                 List<int> staleInvestigations = new();
@@ -145,6 +153,13 @@ public sealed class SquadTacticalCoordinator
                     staleFlanks.Add(pair.Key);
             for (int i = 0; i < staleFlanks.Count; i++)
                 _flankClaims.Remove(staleFlanks[i]);
+
+            List<UnitId> staleIndividualFlanks = new();
+            foreach (KeyValuePair<UnitId, FlankClaim> pair in _individualFlankClaims)
+                if (pair.Key.Equals(unit) || pair.Value.Owner.Equals(unit))
+                    staleIndividualFlanks.Add(pair.Key);
+            for (int i = 0; i < staleIndividualFlanks.Count; i++)
+                _individualFlankClaims.Remove(staleIndividualFlanks[i]);
 
             if (_lastKnownInvestigationClaims.Count > 0)
             {
@@ -342,8 +357,24 @@ public sealed class SquadTacticalCoordinator
         if (!member.IsValid || !target.IsValid || !float.IsFinite(now)) return false;
         lock (_gate)
         {
-            // Units outside a squad keep the existing individual flank behavior.
-            if (!_membership.TryGetValue(member, out int squadId)) return true;
+            if (!_membership.TryGetValue(member, out int squadId))
+            {
+                // Unassigned pawns share one short-lived flank claim per target.
+                // This keeps the first eligible shooter free to manoeuvre while
+                // the rest keep firing instead of all rushing to the same side.
+                if (_individualFlankClaims.TryGetValue(target, out FlankClaim individualClaim))
+                {
+                    if (individualClaim.ExpiresAt > now &&
+                        !individualClaim.Owner.Equals(member))
+                    {
+                        return false;
+                    }
+                }
+
+                _individualFlankClaims[target] = new FlankClaim(
+                    member, now + FlankClaimLifetimeSeconds);
+                return true;
+            }
 
             var key = (SquadId: squadId, Target: target);
             if (_flankClaims.TryGetValue(key, out FlankClaim claim))
