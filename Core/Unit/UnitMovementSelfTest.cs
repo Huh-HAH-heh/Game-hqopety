@@ -452,6 +452,12 @@ public static class UnitMovementSelfTest
             map,
             new Vector2(5.5f, centerY + 0.5f),
             new Vector2(map.TileWidth - 5.5f, centerY + 0.5f));
+        bool rampAlsoAllowsDescent = navigation.CanMoveDirectly(
+            simulation.Units,
+            id.Index,
+            map,
+            new Vector2(map.TileWidth - 5.5f, centerY + 0.5f),
+            new Vector2(5.5f, centerY + 0.5f));
         bool unsupportedStepIsBlocked = !navigation.CanMoveDirectly(
             simulation.Units,
             id.Index,
@@ -459,7 +465,20 @@ public static class UnitMovementSelfTest
             new Vector2(5.5f, centerY + 8.5f),
             new Vector2(map.TileWidth - 5.5f, centerY + 8.5f));
 
-        return rampIsReachable && unsupportedStepIsBlocked;
+        bool invalidRampRejected = false;
+        try
+        {
+            map.SetRamp(wallX + 2, centerY + 4, BlockDirection.East);
+        }
+        catch (InvalidOperationException)
+        {
+            invalidRampRejected = true;
+        }
+
+        return rampIsReachable &&
+               rampAlsoAllowsDescent &&
+               unsupportedStepIsBlocked &&
+               invalidRampRejected;
     }
 
     public static bool FollowsRouteAroundWallWithoutCrossingIt()
