@@ -790,7 +790,7 @@ public sealed class GameRenderer
                 _window,
                 renderSnapshot,
                 _worldMap,
-                _visibleMaxLayer,
+                _mapRenderer.DisplayedMaxLayer,
                 _camera.View,
                 TerrainTilePixelSize,
                 _selectedUnit.IsValid ? _selectedUnit.Index : -1,
@@ -831,7 +831,7 @@ public sealed class GameRenderer
                 _showAttackLinks,
                 _showSuppressionDebug,
                 _showMemoryDebug,
-                _visibleMaxLayer);
+                _mapRenderer.DisplayedMaxLayer);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
