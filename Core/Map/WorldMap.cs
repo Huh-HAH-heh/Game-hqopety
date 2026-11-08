@@ -136,7 +136,11 @@ public sealed class WorldMap
                 _surfaceHeights[GetColumnIndex(x, y)] /
                 (float)HeightUnitsPerMeter,
                 MidpointRounding.AwayFromZero);
-            Blocks.SetSurfaceLevel(x, y, level, GetMaterialId(x, y, 0));
+            int topLayer = GetSurfaceLayer(x, y);
+            ushort topMaterial = topLayer >= 0
+                ? GetMaterialId(x, y, topLayer)
+                : (ushort)0;
+            Blocks.SetSurfaceLevel(x, y, level, topMaterial);
         }
 
         TerrainVersion++;
@@ -195,6 +199,95 @@ public sealed class WorldMap
             x, y,
             checked((ushort)(heightInMeters * HeightUnitsPerMeter)),
             materialId);
+    }
+
+    /// <summary>
+    /// Places one independent 1 x 1 x 1 m block at a discrete block Z level.
+    /// WorldMap keeps its existing 0.1 m voxel backing; ten layers represent
+    /// the vertical volume of one metre block.
+    /// </summary>
+    public void SetBlock(
+        int x,
+        int y,
+        int zLevel,
+        ushort materialId)
+    {
+        if (!UsesDiscreteBlockTerrain)
+            throw new InvalidOperationException("Discrete block terrain is not enabled.");
+        if (!IsInside(x, y))
+            throw new ArgumentOutOfRangeException(nameof(x));
+        if (zLevel < 0 || (zLevel + 1) * HeightUnitsPerMeter > LayerCount)
+            throw new ArgumentOutOfRangeException(nameof(zLevel));
+
+        GetOrCreateRegion(
+            x / TerrainRegion.TilesPerSide,
+            y / TerrainRegion.TilesPerSide);
+
+        int columnIndex = GetColumnIndex(x, y);
+        MaterializeSimpleFillColumn(x, y, columnIndex);
+        int regionX = x / TerrainRegion.TilesPerSide;
+        int regionY = y / TerrainRegion.TilesPerSide;
+        int localIndex =
+            x % TerrainRegion.TilesPerSide +
+            (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
+        int firstLayer = zLevel * HeightUnitsPerMeter;
+
+        for (int z = firstLayer; z < firstLayer + HeightUnitsPerMeter; z++)
+        {
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(localIndex, materialId);
+        }
+
+        _rangeCache[columnIndex] = null;
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
+        RecalculateSurfaceHeight(columnIndex);
+        MarkTerrainChanged(x, y);
+    }
+
+    /// <summary>Removes one 1 m block without clearing blocks above or below it.</summary>
+    public void RemoveBlock(int x, int y, int zLevel)
+    {
+        if (!UsesDiscreteBlockTerrain)
+            throw new InvalidOperationException("Discrete block terrain is not enabled.");
+        if (!IsInside(x, y))
+            throw new ArgumentOutOfRangeException(nameof(x));
+        if (zLevel < 0 || (zLevel + 1) * HeightUnitsPerMeter > LayerCount)
+            throw new ArgumentOutOfRangeException(nameof(zLevel));
+
+        int columnIndex = GetColumnIndex(x, y);
+        MaterializeSimpleFillColumn(x, y, columnIndex);
+        int regionX = x / TerrainRegion.TilesPerSide;
+        int regionY = y / TerrainRegion.TilesPerSide;
+        int localIndex =
+            x % TerrainRegion.TilesPerSide +
+            (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
+        int firstLayer = zLevel * HeightUnitsPerMeter;
+
+        for (int z = firstLayer; z < firstLayer + HeightUnitsPerMeter; z++)
+        {
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(localIndex, 0);
+        }
+
+        _rangeCache[columnIndex] = null;
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
+        RecalculateSurfaceHeight(columnIndex);
+        MarkTerrainChanged(x, y);
+    }
+
+    public bool IsBlockOccupied(int x, int y, int zLevel)
+    {
+        if (!UsesDiscreteBlockTerrain ||
+            !IsInside(x, y) ||
+            zLevel < 0 ||
+            (zLevel + 1) * HeightUnitsPerMeter > LayerCount)
+        {
+            return false;
+        }
+
+        return GetMaterialId(x, y, zLevel * HeightUnitsPerMeter) != 0;
     }
 
     public void SetBlockTransition(

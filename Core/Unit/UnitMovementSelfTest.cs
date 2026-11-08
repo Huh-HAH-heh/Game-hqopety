@@ -402,6 +402,24 @@ public static class UnitMovementSelfTest
         return turnDegrees < 20f && Vector2.Dot(before, after) > 0f;
     }
 
+    public static bool DiscreteTerrainStoresIndependentCubes()
+    {
+        WorldMap map = CreateFlatWorld();
+        map.EnableDiscreteBlockTerrain();
+
+        map.SetBlock(10, 10, 2, 7);
+        bool cubeExists = map.IsBlockOccupied(10, 10, 2);
+        bool emptyBelow = map.GetMaterialId(10, 10, 19) == 0;
+        bool correctVolume =
+            map.GetMaterialId(10, 10, 20) == 7 &&
+            map.GetMaterialId(10, 10, 29) == 7;
+
+        map.RemoveBlock(10, 10, 2);
+        bool removed = !map.IsBlockOccupied(10, 10, 2);
+
+        return cubeExists && emptyBelow && correctVolume && removed;
+    }
+
     public static bool DiscreteBlocksRequireAnExplicitRamp()
     {
         WorldMap map = CreateFlatWorld();
