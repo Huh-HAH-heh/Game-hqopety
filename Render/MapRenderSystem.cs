@@ -20,7 +20,7 @@ public sealed class MapRenderSystem : IDisposable
 
     // Retain nearby chunks for smooth camera movement without accumulating
     // every GPU mesh ever visited. The currently visible set is always retained.
-    private const int MaxCachedTerrainChunks = 768;
+    private const int MaxCachedTerrainChunks = 512;
     private const int TerrainChunkCacheReserve = 32;
 
     private sealed class TerrainChunkMesh : IDisposable
@@ -130,7 +130,7 @@ void main()
         }
     }
 
-    private const int MaxCachedSliceOverlays = 4;
+    private const int MaxCachedSliceOverlays = 2;
     private readonly Dictionary<SliceOverlayKey, SliceOverlayMesh> _sliceOverlayCache = new();
     private SliceOverlayMesh? _activeSliceOverlay;
 
