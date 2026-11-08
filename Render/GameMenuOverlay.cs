@@ -265,8 +265,11 @@ public sealed class GameMenuOverlay : IDisposable
 }";
 
     private const string ContourFragmentShaderSource =
-        @"void main()
+        @"uniform float uMaxVisibleHeight;
+void main()
 {
+    if (gl_TexCoord[0].x > uMaxVisibleHeight)
+        discard;
     gl_FragColor = gl_Color;
 }";
 
@@ -1042,10 +1045,19 @@ public sealed class GameMenuOverlay : IDisposable
             }
         }
 
+        int maxVisibleHeightUnits =
+            (Math.Clamp(visibleMaxLayer, 0, worldMap.LayerCount - 1) + 1) *
+            WorldMap.LayerHeightUnits;
+
         RenderStates contourStates = RenderStates.Default;
 
         if (_contourShader != null)
+        {
+            _contourShader.SetUniform(
+                "uMaxVisibleHeight",
+                (float)maxVisibleHeightUnits);
             contourStates = new RenderStates(_contourShader);
+        }
 
         for (int i = 0; i < _visibleContourChunks.Count; i++)
         {
@@ -1057,10 +1069,9 @@ public sealed class GameMenuOverlay : IDisposable
             for (int levelIndex = 0; levelIndex < chunk.Levels.Count; levelIndex++)
             {
                 HeightContourLevel level = chunk.Levels[levelIndex];
+                if (level.HeightUnits > maxVisibleHeightUnits)
+                    continue;
 
-                // Height isolines describe the terrain surface, not the
-                // currently selected voxel slice. Keep them visible in both
-                // normal surface view and underground cut views.
                 if (_contourShader == null &&
                     level.FallbackVertices != null &&
                     level.FallbackVertices.VertexCount > 0)
