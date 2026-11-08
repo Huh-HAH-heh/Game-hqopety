@@ -80,9 +80,11 @@ public sealed class MapRenderSystem : IDisposable
     private int _requestedMaxLayer = -1;
     private int _requestedLodStep = -1;
     private long _viewRequestChangedAt;
+    private int _minimumChunkCacheRetention;
 
     public int DisplayedMaxLayer => Math.Max(0, _displayedMaxLayer);
     public int DisplayedLodStep => _displayedLodStep;
+    public int PendingTerrainChunkCount => _pendingTerrainChunks.Count;
 
 
     private const string TerrainVertexShaderSource =
@@ -569,9 +571,12 @@ void main()
             _terrainVertexCount += mesh.VertexCount;
         }
 
+        int targetChunkCount =
+            _visibleTerrainChunks.Count + _pendingTerrainChunks.Count;
         bool targetLayerReady = _pendingTerrainChunks.Count <= buildCount;
         if (targetLayerReady)
         {
+            _minimumChunkCacheRetention = 0;
             _displayedMaxLayer = visibleMaxLayer;
             _displayedLodStep = lodStep;
         }
@@ -601,9 +606,14 @@ void main()
             {
                 _visibleTerrainChunks.Clear();
                 _visibleTerrainChunks.AddRange(_fallbackTerrainChunks);
+                _minimumChunkCacheRetention =
+                    targetChunkCount + _fallbackTerrainChunks.Count +
+                    TerrainChunkCacheReserve;
             }
             else
             {
+                _minimumChunkCacheRetention =
+                    targetChunkCount + TerrainChunkCacheReserve;
                 _displayedMaxLayer = visibleMaxLayer;
                 _displayedLodStep = lodStep;
             }
@@ -639,7 +649,9 @@ void main()
         // camera pans cache-hot while stale native VertexBuffers are disposed.
         int maxRetained = Math.Max(
             MaxCachedTerrainChunks,
-            _visibleTerrainChunks.Count + TerrainChunkCacheReserve);
+            Math.Max(
+                _minimumChunkCacheRetention,
+                _visibleTerrainChunks.Count + TerrainChunkCacheReserve));
 
         while (_terrainChunks.Count > maxRetained)
         {
@@ -923,6 +935,7 @@ void main()
         _requestedMaxLayer = -1;
         _requestedLodStep = -1;
         _viewRequestChangedAt = 0;
+        _minimumChunkCacheRetention = 0;
         _sliceOverlayCacheValid = false;
         _cachedTerrainVertexCount = 0;
         _terrainVertexCount = 0;
