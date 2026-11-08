@@ -26,6 +26,8 @@ public sealed class WorldMap
     public int LayerCount => _layers.Length;
 
     public long TerrainVersion { get; private set; }
+    public long TerrainGeometryVersion { get; private set; }
+    public long NavigationVersion { get; private set; }
 
     public WaterLayer Water { get; }
 
@@ -36,6 +38,7 @@ public sealed class WorldMap
     private readonly bool[] _simpleFillColumns;
     private readonly ushort[] _columnMaterialIds;
     private readonly TileRange[]?[] _rangeCache;
+    private readonly long[] _regionTerrainVersions;
 
     public WorldMap(
         int regionsX = 16,
@@ -85,11 +88,31 @@ public sealed class WorldMap
         Array.Fill(_simpleFillColumns, true);
         _columnMaterialIds = new ushort[columnCount];
         _rangeCache = new TileRange[]?[columnCount];
+        _regionTerrainVersions = new long[checked(regionsX * regionsY)];
 
         Water =
             new WaterLayer(
                 width,
                 height);
+    }
+
+    public long GetRegionTerrainVersion(int regionX, int regionY)
+    {
+        if (regionX < 0 || regionX >= RegionsX ||
+            regionY < 0 || regionY >= RegionsY)
+            return -1;
+
+        return _regionTerrainVersions[regionX + regionY * RegionsX];
+    }
+
+    private void MarkTerrainChanged(int x, int y)
+    {
+        TerrainVersion++;
+        TerrainGeometryVersion++;
+
+        int regionX = x / TerrainRegion.TilesPerSide;
+        int regionY = y / TerrainRegion.TilesPerSide;
+        _regionTerrainVersions[regionX + regionY * RegionsX]++;
     }
 
     // ============================================================
@@ -167,7 +190,7 @@ public sealed class WorldMap
         _simpleFillColumns[columnIndex] = false;
         _columnMaterialIds[columnIndex] = 0;
         RecalculateSurfaceHeight(columnIndex);
-        TerrainVersion++;
+        MarkTerrainChanged(x, y);
     }
 
     public bool IsNavigationBlocked(int x, int y)
@@ -189,6 +212,7 @@ public sealed class WorldMap
             return;
 
         _navigationBlocked[index] = blocked;
+        NavigationVersion++;
         TerrainVersion++;
     }
 
@@ -630,7 +654,7 @@ public sealed class WorldMap
         _rangeCache[columnIndex] = null;
         _simpleFillColumns[columnIndex] = false;
         _columnMaterialIds[columnIndex] = 0;
-        TerrainVersion++;
+        MarkTerrainChanged(globalX, globalY);
     }
 
     public void ClearTileRanges(
@@ -642,7 +666,7 @@ public sealed class WorldMap
 
         int columnIndex = GetColumnIndex(globalX, globalY);
         ClearColumn(globalX, globalY);
-        TerrainVersion++;
+        MarkTerrainChanged(globalX, globalY);
     }
 
     public bool TryAddRange(
@@ -721,7 +745,7 @@ public sealed class WorldMap
         _rangeCache[columnIndex] = null;
         _simpleFillColumns[columnIndex] = false;
         _columnMaterialIds[columnIndex] = 0;
-        TerrainVersion++;
+        MarkTerrainChanged(globalX, globalY);
         return true;
     }
 
@@ -760,7 +784,7 @@ public sealed class WorldMap
         _simpleFillColumns[columnIndex] = false;
         _columnMaterialIds[columnIndex] = 0;
         RecalculateSurfaceHeight(columnIndex);
-        TerrainVersion++;
+        MarkTerrainChanged(globalX, globalY);
     }
 
     public void SetSolidHeight(
@@ -829,7 +853,7 @@ public sealed class WorldMap
         _simpleFillColumns[columnIndex] = true;
         _columnMaterialIds[columnIndex] = filledLayers > 0 ? materialId : (ushort)0;
 
-        TerrainVersion++;
+        MarkTerrainChanged(globalX, globalY);
     }
 
     // ============================================================
