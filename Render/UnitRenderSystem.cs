@@ -262,8 +262,7 @@ public sealed class UnitRenderSystem : IDisposable
             int unitTileY = (int)MathF.Floor(unitPosition.Y);
             int unitLayer = (int)MathF.Ceiling(
                 unitPosition.Z / (WorldMap.LayerHeightUnits * 0.1f));
-            if (worldMap.IsColumnSolidBetween(
-                    unitTileX, unitTileY, unitLayer, cutLayer))
+            if (IsUnitOccludedByTerrain(worldMap, unitPosition, cutLayer))
             {
                 AppendOccludedUnitMarker(
                     _bodyOutlines,
@@ -627,11 +626,7 @@ public void DrawSnapshot(
                 screenScale);
 
             if (rootInView &&
-                worldMap.IsColumnSolidBetween(
-                    (int)MathF.Floor(position.X),
-                    (int)MathF.Floor(position.Y),
-                    (int)MathF.Ceiling(position.Z / (WorldMap.LayerHeightUnits * 0.1f)),
-                    cutLayer))
+                IsUnitOccludedByTerrain(worldMap, position, cutLayer))
             {
                 AppendOccludedUnitMarker(
                     _bodyOutlines,
@@ -1603,6 +1598,56 @@ public void DrawSnapshot(
         vertices.Append(new Vertex(p0, color));
         vertices.Append(new Vertex(p2, color));
         vertices.Append(new Vertex(p3, color));
+    }
+
+    private const float SurfaceUnitTolerance = 0.015f;
+
+    private static bool IsUnitOccludedByTerrain(
+        WorldMap worldMap,
+        Vector3 position,
+        int cutLayer)
+    {
+        float surfaceZ = SampleTerrainSurfaceZ(worldMap, position.X, position.Y);
+
+        // Movement samples the smoothed surface between four terrain vertices.
+        // A discrete voxel column can be taller than that interpolated point;
+        // do not mistake a pawn standing on the surface for one buried in terrain.
+        if (position.Z >= surfaceZ - SurfaceUnitTolerance)
+            return false;
+
+        int tileX = (int)MathF.Floor(position.X);
+        int tileY = (int)MathF.Floor(position.Y);
+        int firstLayer = (int)MathF.Ceiling(
+            position.Z / (WorldMap.LayerHeightUnits * 0.1f));
+
+        return worldMap.IsColumnSolidBetween(
+            tileX,
+            tileY,
+            firstLayer,
+            cutLayer);
+    }
+
+    private static float SampleTerrainSurfaceZ(
+        WorldMap worldMap,
+        float x,
+        float y)
+    {
+        int x0 = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
+        int y0 = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
+        int x1 = Math.Min(x0 + 1, worldMap.MaxTileX);
+        int y1 = Math.Min(y0 + 1, worldMap.MaxTileY);
+
+        float tx = Math.Clamp(x - x0, 0f, 1f);
+        float ty = Math.Clamp(y - y0, 0f, 1f);
+
+        float z00 = worldMap.GetSurfaceHeight(x0, y0);
+        float z10 = worldMap.GetSurfaceHeight(x1, y0);
+        float z01 = worldMap.GetSurfaceHeight(x0, y1);
+        float z11 = worldMap.GetSurfaceHeight(x1, y1);
+
+        float top = z00 + (z10 - z00) * tx;
+        float bottom = z01 + (z11 - z01) * tx;
+        return top + (bottom - top) * ty;
     }
 
     private static float GetMarkerRadius(
