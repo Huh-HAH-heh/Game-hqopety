@@ -327,7 +327,23 @@ public sealed class UnitMovementSystem
                         ? desiredVelocity / desiredSpeedNow
                         : Vector2.UnitX);
 
-                Vector2 requestedForce = velocityDelta * (mass / ForceResponseTime);
+                Vector2 slopeAcceleration = Vector2.Zero;
+                if (steeringActive && hasWaypoint &&
+                    desiredSpeedNow > 0.05f)
+                {
+                    slopeAcceleration = GetTerrainSlopeAcceleration(
+                        worldMap,
+                        position.X,
+                        position.Y,
+                        maxAcceleration * MaxSlopeResistanceFraction);
+                }
+
+                // Request enough motor force to both change velocity and oppose
+                // the downhill component of gravity. The normal force cap still
+                // decides whether the pawn can hold or climb this particular slope.
+                Vector2 requestedForce =
+                    velocityDelta * (mass / ForceResponseTime) -
+                    slopeAcceleration * mass;
                 float requestedLongitudinalForce = Vector2.Dot(requestedForce, forward);
                 float longitudinalForce = Math.Clamp(
                     requestedLongitudinalForce, -maxBrakeForce, maxDriveForce);
@@ -342,21 +358,9 @@ public sealed class UnitMovementSystem
                 Vector2 previousVelocity = velocity;
                 Vector2 acceleration = netForce / mass;
 
-                // Project gravity onto the local terrain surface. The model uses
-                // XY coordinates, so only the horizontal component is integrated.
-                // Cap downhill resistance below available traction: a legal slope
-                // slows the pawn but cannot pin its motor against the ground.
-                if (steeringActive && hasWaypoint &&
-                    desiredVelocity.LengthSquared() > 0.0025f)
-                {
-                    Vector2 slopeAcceleration = GetTerrainSlopeAcceleration(
-                        worldMap,
-                        position.X,
-                        position.Y,
-                        maxAcceleration * MaxSlopeResistanceFraction);
-                    acceleration += slopeAcceleration;
-                }
-
+                // Integrate the terrain's horizontal gravity component after
+                // the motor force has been capped by available traction.
+                acceleration += slopeAcceleration;
                 velocity += acceleration * substepDelta;
 
                 // Rolling resistance is an external ground force. Clamp its effect
