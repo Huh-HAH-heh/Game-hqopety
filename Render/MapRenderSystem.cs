@@ -29,6 +29,9 @@ public sealed class MapRenderSystem : IDisposable
         public VertexArray? Vertices;
         public int VertexCount;
         public long LastUsedFrame;
+        public VertexArray? CutHatch;
+        public VertexArray? VoidHatch;
+        public VertexArray? CutContour;
 
         public void Draw(RenderWindow window, RenderStates states)
         {
@@ -48,6 +51,12 @@ public sealed class MapRenderSystem : IDisposable
             Buffer = null;
             Vertices?.Dispose();
             Vertices = null;
+            CutHatch?.Dispose();
+            CutHatch = null;
+            VoidHatch?.Dispose();
+            VoidHatch = null;
+            CutContour?.Dispose();
+            CutContour = null;
         }
     }
 
@@ -107,28 +116,6 @@ void main()
 
     private readonly VertexArray _gridVertices =
         new VertexArray(PrimitiveType.Lines);
-    private readonly record struct SliceOverlayKey(
-        int MinTileX, int MaxTileX,
-        int MinTileY, int MaxTileY,
-        int CutLayer, long TerrainVersion, float TilePixelSize);
-
-    private sealed class SliceOverlayMesh : IDisposable
-    {
-        public readonly VertexArray CutSurfaceHatch = new(PrimitiveType.Lines);
-        public readonly VertexArray CutVoidGrid = new(PrimitiveType.Lines);
-        public long LastUsedFrame;
-
-        public void Dispose()
-        {
-            CutSurfaceHatch.Dispose();
-            CutVoidGrid.Dispose();
-        }
-    }
-
-    private const int MaxCachedSliceOverlays = 2;
-    private readonly Dictionary<SliceOverlayKey, SliceOverlayMesh> _sliceOverlayCache = new();
-    private SliceOverlayMesh? _activeSliceOverlay;
-
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
 
@@ -217,7 +204,6 @@ void main()
         _mapCacheValid = false;
         _gridCacheValid = false;
         _waterCacheValid = false;
-        ClearSliceOverlayCache();
 
         LastTerrainBuildMilliseconds = 0d;
     }
@@ -433,14 +419,6 @@ void main()
             _cachedTerrainVersion = worldMap.TerrainVersion;
         }
 
-        UpdateSliceOverlays(
-            worldMap, minTileX, maxTileX, minTileY, maxTileY,
-            tilePixelSize, maxLayer);
-        if (_activeSliceOverlay?.CutSurfaceHatch.VertexCount > 0)
-            window.Draw(_activeSliceOverlay.CutSurfaceHatch);
-        if (_activeSliceOverlay?.CutVoidGrid.VertexCount > 0)
-            window.Draw(_activeSliceOverlay.CutVoidGrid);
-
          DrawWater(
             window,
             worldMap,
@@ -600,6 +578,17 @@ void main()
         for (int i = 0; i < _visibleTerrainChunks.Count; i++)
             _visibleTerrainChunks[i].Draw(window, terrainStates);
 
+        for (int i = 0; i < _visibleTerrainChunks.Count; i++)
+        {
+            TerrainChunkMesh mesh = _visibleTerrainChunks[i];
+            if (mesh.CutContour?.VertexCount > 0)
+                window.Draw(mesh.CutContour);
+            if (mesh.CutHatch?.VertexCount > 0)
+                window.Draw(mesh.CutHatch);
+            if (mesh.VoidHatch?.VertexCount > 0)
+                window.Draw(mesh.VoidHatch);
+        }
+
         EvictExcessTerrainChunks();
 
         if (TerrainMeshRebuildCount != rebuildsBefore)
@@ -755,6 +744,10 @@ void main()
         }
 
         TerrainChunkMesh mesh = CreateTerrainChunkMesh(_buildingTerrainVertexCount);
+        BuildChunkSliceOverlay(
+            mesh, worldMap,
+            minTileX, maxTileX, minTileY, maxTileY,
+            lodStep, tilePixelSize, visibleMaxLayer);
         TerrainMeshRebuildCount++;
         return mesh;
     }
@@ -899,7 +892,6 @@ void main()
         _pendingTerrainChunks.Clear();
         _displayedMaxLayer = -1;
         _displayedLodStep = 1;
-        ClearSliceOverlayCache();
         _cachedTerrainVertexCount = 0;
         _terrainVertexCount = 0;
         _buildingTerrainVertexCount = 0;
@@ -914,124 +906,153 @@ void main()
         return worldMap.FindTopOccupiedLayer(x, y, visibleMaxLayer);
     }
 
-    private void UpdateSliceOverlays(
+    private void BuildChunkSliceOverlay(
+        TerrainChunkMesh mesh,
         WorldMap worldMap,
-        int minTileX, int maxTileX, int minTileY, int maxTileY,
-        float tilePixelSize, int cutLayer)
+        int minTileX,
+        int maxTileX,
+        int minTileY,
+        int maxTileY,
+        int lodStep,
+        float tilePixelSize,
+        int cutLayer)
     {
-        SliceOverlayKey key = new(
-            minTileX, maxTileX, minTileY, maxTileY,
-            cutLayer, worldMap.TerrainVersion, tilePixelSize);
+        VertexArray cutHatch = new(PrimitiveType.Lines);
+        VertexArray voidHatch = new(PrimitiveType.Lines);
+        VertexArray contour = new(PrimitiveType.Lines);
 
-        if (_sliceOverlayCache.TryGetValue(key, out SliceOverlayMesh? cached))
+        Color cutColor = new Color(34, 43, 48, 205);
+        Color voidColor = new Color(125, 162, 174, 48);
+        Color contourColor = new Color(48, 57, 61, 220);
+
+        for (int y = minTileY; y <= maxTileY; y += lodStep)
         {
-            cached.LastUsedFrame = _frameNumber;
-            _activeSliceOverlay = cached;
-            return;
-        }
-
-        SliceOverlayMesh mesh = new();
-        Color cutColor = new Color(27, 35, 42, 190);
-        Color voidColor = new Color(122, 163, 179, 58);
-
-        for (int y = minTileY; y <= maxTileY; y++)
-        {
-            for (int x = minTileX; x <= maxTileX; x++)
+            for (int x = minTileX; x <= maxTileX; x += lodStep)
             {
                 float left = x * tilePixelSize;
                 float top = y * tilePixelSize;
-                float right = left + tilePixelSize;
-                float bottom = top + tilePixelSize;
+                float right = Math.Min(worldMap.TileWidth, x + lodStep) * tilePixelSize;
+                float bottom = Math.Min(worldMap.TileHeight, y + lodStep) * tilePixelSize;
 
                 if (worldMap.GetMaterialId(x, y, cutLayer) != 0)
                 {
-                    AppendHatchedCell(
-                        mesh.CutSurfaceHatch,
-                        left, top, right, bottom, cutColor);
-                    continue;
+                    AppendClippedDiagonalHatch(
+                        cutHatch, left, top, right, bottom,
+                        cutColor, MathF.Max(7f, tilePixelSize * 0.42f), false);
                 }
-
-                int floorLayer = worldMap.FindTopOccupiedLayer(x, y, cutLayer - 1);
-                if (floorLayer >= 0 &&
-                    worldMap.GetSurfaceLayer(x, y) > cutLayer)
+                else if (worldMap.GetSurfaceLayer(x, y) > cutLayer)
                 {
-                    AppendCellGrid(
-                        mesh.CutVoidGrid,
-                        left, top, right, bottom, voidColor);
+                    float spacing = MathF.Max(14f, tilePixelSize * 0.8f);
+                    AppendClippedDiagonalHatch(
+                        voidHatch, left, top, right, bottom,
+                        voidColor, spacing, false);
+                    AppendClippedDiagonalHatch(
+                        voidHatch, left, top, right, bottom,
+                        voidColor, spacing, true);
                 }
             }
         }
 
-        mesh.LastUsedFrame = _frameNumber;
-        _sliceOverlayCache.Add(key, mesh);
-        _activeSliceOverlay = mesh;
-        EvictExcessSliceOverlays();
-    }
-
-    private void EvictExcessSliceOverlays()
-    {
-        while (_sliceOverlayCache.Count > MaxCachedSliceOverlays)
+        // Smooth cut boundaries across voxel samples instead of drawing each
+        // source tile's four-sided border.
+        for (int y = minTileY; y <= maxTileY; y += lodStep)
         {
-            SliceOverlayKey oldestKey = default;
-            SliceOverlayMesh? oldest = null;
-
-            foreach (KeyValuePair<SliceOverlayKey, SliceOverlayMesh> entry in _sliceOverlayCache)
+            for (int x = minTileX; x <= maxTileX; x += lodStep)
             {
-                if (ReferenceEquals(entry.Value, _activeSliceOverlay))
-                    continue;
-                if (oldest != null &&
-                    entry.Value.LastUsedFrame >= oldest.LastUsedFrame)
-                    continue;
+                bool tl = worldMap.GetMaterialId(x, y, cutLayer) != 0;
+                bool tr = worldMap.GetMaterialId(x + lodStep, y, cutLayer) != 0;
+                bool br = worldMap.GetMaterialId(x + lodStep, y + lodStep, cutLayer) != 0;
+                bool bl = worldMap.GetMaterialId(x, y + lodStep, cutLayer) != 0;
 
-                oldestKey = entry.Key;
-                oldest = entry.Value;
+                AppendMarchingSquaresContour(
+                    contour,
+                    x * tilePixelSize,
+                    y * tilePixelSize,
+                    lodStep * tilePixelSize,
+                    tl, tr, br, bl,
+                    contourColor);
             }
-
-            if (oldest == null)
-                return;
-
-            _sliceOverlayCache.Remove(oldestKey);
-            oldest.Dispose();
         }
+
+        if (cutHatch.VertexCount > 0)
+            mesh.CutHatch = cutHatch;
+        else
+            cutHatch.Dispose();
+
+        if (voidHatch.VertexCount > 0)
+            mesh.VoidHatch = voidHatch;
+        else
+            voidHatch.Dispose();
+
+        if (contour.VertexCount > 0)
+            mesh.CutContour = contour;
+        else
+            contour.Dispose();
     }
 
-    private void ClearSliceOverlayCache()
+    private static void AppendClippedDiagonalHatch(
+        VertexArray vertices,
+        float left,
+        float top,
+        float right,
+        float bottom,
+        Color color,
+        float spacing,
+        bool positiveSlope)
     {
-        foreach (SliceOverlayMesh mesh in _sliceOverlayCache.Values)
-            mesh.Dispose();
+        float min = positiveSlope ? left - bottom : left + top;
+        float max = positiveSlope ? right - top : right + bottom;
+        int first = (int)MathF.Floor(min / spacing);
+        int last = (int)MathF.Ceiling(max / spacing);
 
-        _sliceOverlayCache.Clear();
-        _activeSliceOverlay = null;
-    }
-
-    private static void AppendHatchedCell(
-        VertexArray vertices, float left, float top, float right, float bottom, Color color)
-    {
-        float width = right - left;
-        float height = bottom - top;
-        float spacing = MathF.Max(3f, MathF.Min(width, height) * 0.27f);
-        for (float c = spacing; c < width + height; c += spacing)
+        for (int line = first; line <= last; line++)
         {
+            float offset = line * spacing;
             int count = 0;
             float x1 = 0f, y1 = 0f, x2 = 0f, y2 = 0f;
-            if (c <= height) AddHatchPoint(left, top + c, ref count, ref x1, ref y1, ref x2, ref y2);
-            if (c <= width) AddHatchPoint(left + c, top, ref count, ref x1, ref y1, ref x2, ref y2);
-            if (c >= width && c <= width + height) AddHatchPoint(right, top + c - width, ref count, ref x1, ref y1, ref x2, ref y2);
-            if (c >= height && c <= width + height) AddHatchPoint(left + c - height, bottom, ref count, ref x1, ref y1, ref x2, ref y2);
-            if (count >= 2) AppendLine(vertices, x1, y1, x2, y2, color);
+
+            if (positiveSlope)
+            {
+                TryAppendClippedPoint(left, left - offset, left, top, right, bottom,
+                    ref count, ref x1, ref y1, ref x2, ref y2);
+                TryAppendClippedPoint(right, right - offset, left, top, right, bottom,
+                    ref count, ref x1, ref y1, ref x2, ref y2);
+                TryAppendClippedPoint(offset + top, top, left, top, right, bottom,
+                    ref count, ref x1, ref y1, ref x2, ref y2);
+                TryAppendClippedPoint(offset + bottom, bottom, left, top, right, bottom,
+                    ref count, ref x1, ref y1, ref x2, ref y2);
+            }
+            else
+            {
+                TryAppendClippedPoint(left, offset - left, left, top, right, bottom,
+                    ref count, ref x1, ref y1, ref x2, ref y2);
+                TryAppendClippedPoint(right, offset - right, left, top, right, bottom,
+                    ref count, ref x1, ref y1, ref x2, ref y2);
+                TryAppendClippedPoint(offset - top, top, left, top, right, bottom,
+                    ref count, ref x1, ref y1, ref x2, ref y2);
+                TryAppendClippedPoint(offset - bottom, bottom, left, top, right, bottom,
+                    ref count, ref x1, ref y1, ref x2, ref y2);
+            }
+
+            if (count >= 2)
+                AppendLine(vertices, x1, y1, x2, y2, color);
         }
-        AppendCellGrid(vertices, left, top, right, bottom,
-            new Color(color.R, color.G, color.B, 220));
     }
 
-    private static void AddHatchPoint(
-        float x, float y, ref int count,
+    private static void TryAppendClippedPoint(
+        float x, float y,
+        float left, float top, float right, float bottom,
+        ref int count,
         ref float x1, ref float y1, ref float x2, ref float y2)
     {
-        if (count > 0 &&
-            (MathF.Abs(x - x1) < 0.01f && MathF.Abs(y - y1) < 0.01f ||
-             count > 1 && MathF.Abs(x - x2) < 0.01f && MathF.Abs(y - y2) < 0.01f))
+        if (x < left - 0.001f || x > right + 0.001f ||
+            y < top - 0.001f || y > bottom + 0.001f)
             return;
+
+        if ((count > 0 && MathF.Abs(x - x1) < 0.01f && MathF.Abs(y - y1) < 0.01f) ||
+            (count > 1 && MathF.Abs(x - x2) < 0.01f && MathF.Abs(y - y2) < 0.01f))
+            return;
+
         if (count == 0)
         {
             x1 = x; y1 = y; count = 1;
@@ -1042,13 +1063,55 @@ void main()
         }
     }
 
-    private static void AppendCellGrid(
-        VertexArray vertices, float left, float top, float right, float bottom, Color color)
+    private static void AppendMarchingSquaresContour(
+        VertexArray vertices,
+        float left,
+        float top,
+        float step,
+        bool tl,
+        bool tr,
+        bool br,
+        bool bl,
+        Color color)
     {
-        AppendLine(vertices, left, top, right, top, color);
-        AppendLine(vertices, right, top, right, bottom, color);
-        AppendLine(vertices, right, bottom, left, bottom, color);
-        AppendLine(vertices, left, bottom, left, top, color);
+        int mask =
+            (tl ? 1 : 0) |
+            (tr ? 2 : 0) |
+            (br ? 4 : 0) |
+            (bl ? 8 : 0);
+        if (mask is 0 or 15)
+            return;
+
+        Vector2f topPoint = new(left + step, top + step * 0.5f);
+        Vector2f rightPoint = new(left + step * 1.5f, top + step);
+        Vector2f bottomPoint = new(left + step, top + step * 1.5f);
+        Vector2f leftPoint = new(left + step * 0.5f, top + step);
+
+        Span<Vector2f> crossings = stackalloc Vector2f[4];
+        int count = 0;
+        if (tl != tr) crossings[count++] = topPoint;
+        if (tr != br) crossings[count++] = rightPoint;
+        if (br != bl) crossings[count++] = bottomPoint;
+        if (bl != tl) crossings[count++] = leftPoint;
+
+        if (count == 2)
+        {
+            AppendLine(vertices, crossings[0].X, crossings[0].Y,
+                crossings[1].X, crossings[1].Y, color);
+        }
+        else if (count == 4)
+        {
+            if (mask == 5)
+            {
+                AppendLine(vertices, topPoint.X, topPoint.Y, leftPoint.X, leftPoint.Y, color);
+                AppendLine(vertices, rightPoint.X, rightPoint.Y, bottomPoint.X, bottomPoint.Y, color);
+            }
+            else
+            {
+                AppendLine(vertices, topPoint.X, topPoint.Y, rightPoint.X, rightPoint.Y, color);
+                AppendLine(vertices, bottomPoint.X, bottomPoint.Y, leftPoint.X, leftPoint.Y, color);
+            }
+        }
     }
 
     private static void AppendLine(
