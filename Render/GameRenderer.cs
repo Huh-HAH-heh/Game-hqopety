@@ -666,7 +666,7 @@ public sealed class GameRenderer
                  $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"LayerShader={_mapRenderer.UsesTerrainLayerShader} VisibleV={_mapRenderer.TerrainVertexCount:N0} " +
                 $"CacheV={_mapRenderer.TerrainCachedVertexCount:N0} ScratchV={_mapRenderer.TerrainScratchCapacity:N0} " +
-                $"SliceZ={_mapRenderer.DisplayedMaxLayer * 0.1f:0.0} LOD={_mapRenderer.DisplayedLodStep} PendingChunks={_mapRenderer.PendingTerrainChunkCount} " +
+                $"SliceZ={_mapRenderer.DisplayedMaxLayer * 0.1f:0.0} LOD={_mapRenderer.DisplayedLodStep} PendingChunks={_mapRenderer.PendingTerrainChunkCount} BuiltChunks={_mapRenderer.TerrainChunksBuiltLastFrame} " +
                 $"VBO={_mapRenderer.UsesTerrainVertexBuffer} LastChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
                 $"ChunkBuilds={_mapRenderer.TerrainMeshRebuildCount} Projectiles={activeProjectiles}/{projectileCapacity}");
         }

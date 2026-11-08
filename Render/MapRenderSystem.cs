@@ -95,6 +95,7 @@ public sealed class MapRenderSystem : IDisposable
     public int DisplayedMaxLayer => Math.Max(0, _displayedMaxLayer);
     public int DisplayedLodStep => _displayedLodStep;
     public int PendingTerrainChunkCount => _pendingTerrainChunks.Count;
+    public int TerrainChunksBuiltLastFrame { get; private set; };
 
 
     private const string TerrainVertexShaderSource =
@@ -455,6 +456,7 @@ void main()
         int geometryMaxLayer = visibleMaxLayer;
 
         _frameNumber++;
+        TerrainChunksBuiltLastFrame = 0;
         if (_transitionTargetMaxLayer != visibleMaxLayer ||
             _transitionTargetLodStep != lodStep)
         {
@@ -553,6 +555,7 @@ void main()
 
         // Built target chunks are displayed immediately; only missing regions
         // borrow a matching chunk from the previous layer/LOD.
+        TerrainChunksBuiltLastFrame = buildCount;
         if (buildCount > 0)
             _pendingTerrainChunks.RemoveRange(0, buildCount);
 
