@@ -30,7 +30,6 @@ public sealed class MapRenderSystem : IDisposable
         public int VertexCount;
         public long LastUsedFrame;
         public long RegionTerrainVersion;
-        public VertexArray? CliffFaces;
         public VertexArray? CutHatch;
         public VertexArray? VoidHatch;
         public VertexArray? CutContour;
@@ -53,8 +52,6 @@ public sealed class MapRenderSystem : IDisposable
             Buffer = null;
             Vertices?.Dispose();
             Vertices = null;
-            CliffFaces?.Dispose();
-            CliffFaces = null;
             CutHatch?.Dispose();
             CutHatch = null;
             VoidHatch?.Dispose();
@@ -71,8 +68,6 @@ public sealed class MapRenderSystem : IDisposable
     private readonly List<PendingTerrainChunk> _pendingTerrainChunks = new();
     private readonly List<TerrainChunkKey> _staleTerrainChunkKeys = new();
     private readonly VertexArray _terrainPreviewVertices =
-        new VertexArray(PrimitiveType.Triangles);
-    private readonly VertexArray _terrainPreviewFaces =
         new VertexArray(PrimitiveType.Triangles);
     private bool _terrainPreviewValid;
     private int _previewMinTileX;
@@ -672,8 +667,6 @@ void main()
         if (_pendingTerrainChunks.Count > 0 && _terrainPreviewValid)
         {
             window.Draw(_terrainPreviewVertices, terrainStates);
-            if (_terrainPreviewFaces.VertexCount > 0)
-                window.Draw(_terrainPreviewFaces);
         }
 
         for (int i = 0; i < _visibleTerrainChunks.Count; i++)
@@ -682,8 +675,6 @@ void main()
         for (int i = 0; i < _visibleTerrainChunks.Count; i++)
         {
             TerrainChunkMesh mesh = _visibleTerrainChunks[i];
-            if (mesh.CliffFaces?.VertexCount > 0)
-                window.Draw(mesh.CliffFaces);
             if (mesh.CutContour?.VertexCount > 0)
                 window.Draw(mesh.CutContour);
             if (mesh.CutHatch?.VertexCount > 0)
@@ -848,8 +839,6 @@ void main()
             }
         }
 
-        VertexArray cliffFaces = new VertexArray(PrimitiveType.Triangles);
-
         for (int row = 0; row < rowCount; row++)
         {
             int y = minTileY + row * lodStep;
@@ -885,34 +874,12 @@ void main()
                     bottomRightHeight, bottomLeftHeight,
                     surfaceLayer);
 
-                int topLayer = _chunkSurfaceLayers[topOffset + column + 1];
-                int rightLayer = _chunkSurfaceLayers[sampleOffset + column + 2];
-                int bottomLayer = _chunkSurfaceLayers[(row + 2) * vertexStride + column + 1];
-                int leftLayer = _chunkSurfaceLayers[sampleOffset + column];
-
-                if (y > 0 && surfaceLayer > topLayer)
-                    AppendCliffFace(cliffFaces, left, top, right, bottom,
-                        tilePixelSize, surfaceLayer, topLayer, 0);
-                if (x + lodStep < worldMap.TileWidth && surfaceLayer > rightLayer)
-                    AppendCliffFace(cliffFaces, left, top, right, bottom,
-                        tilePixelSize, surfaceLayer, rightLayer, 1);
-                if (y + lodStep < worldMap.TileHeight && surfaceLayer > bottomLayer)
-                    AppendCliffFace(cliffFaces, left, top, right, bottom,
-                        tilePixelSize, surfaceLayer, bottomLayer, 2);
-                if (x > 0 && surfaceLayer > leftLayer)
-                    AppendCliffFace(cliffFaces, left, top, right, bottom,
-                        tilePixelSize, surfaceLayer, leftLayer, 3);
             }
         }
 
         TerrainChunkMesh mesh = CreateTerrainChunkMesh(_buildingTerrainVertexCount);
         mesh.RegionTerrainVersion =
             worldMap.GetRegionTerrainVersion(regionX, regionY);
-        if (cliffFaces.VertexCount > 0)
-            mesh.CliffFaces = cliffFaces;
-        else
-            cliffFaces.Dispose();
-
         if (buildSliceOverlay)
         {
             BuildChunkSliceOverlay(
@@ -976,52 +943,6 @@ void main()
         return sampleCount > 0 ? heightSum / sampleCount : 0f;
     }
 
-    private void AppendCliffFace(
-        VertexArray vertices,
-        float left,
-        float top,
-        float right,
-        float bottom,
-        float tilePixelSize,
-        int highLayer,
-        int lowLayer,
-        int direction)
-    {
-        int difference = highLayer - lowLayer;
-        if (difference <= 0)
-            return;
-
-        float maximumDepth = MathF.Max(0.5f, tilePixelSize * 0.30f);
-        float minimumDepth = MathF.Min(
-            maximumDepth,
-            MathF.Max(0.5f, tilePixelSize * 0.06f));
-        float depth = Math.Clamp(
-            MathF.Sqrt(difference) * tilePixelSize * 0.04f,
-            minimumDepth,
-            maximumDepth);
-
-        Color topColor = TerrainHeightPalette.GetTerrainColor(
-            highLayer, _baseGray, _heightContrast);
-        byte shade = (byte)Math.Clamp((int)(topColor.R * 0.58f), 8, 72);
-        Color faceColor = new Color(shade, shade, shade, 255);
-
-        switch (direction)
-        {
-            case 0:
-                AppendQuad(vertices, left, top - depth, right, top, faceColor);
-                break;
-            case 1:
-                AppendQuad(vertices, right, top, right + depth, bottom, faceColor);
-                break;
-            case 2:
-                AppendQuad(vertices, left, bottom, right, bottom + depth, faceColor);
-                break;
-            default:
-                AppendQuad(vertices, left - depth, top, left, bottom, faceColor);
-                break;
-        }
-    }
-
     private void BuildTerrainPreview(
         WorldMap worldMap,
         int minTileX,
@@ -1033,7 +954,6 @@ void main()
         int visibleMaxLayer)
     {
         _terrainPreviewVertices.Clear();
-        _terrainPreviewFaces.Clear();
 
         int previewStep = Math.Clamp(lodStep * 2, 2, 6);
         long viewportCells =
@@ -1070,27 +990,6 @@ void main()
                     Math.Max(0, FindVisibleTopLayer(worldMap, x, y + previewStep, visibleMaxLayer)),
                     surfaceLayer);
 
-                int north = FindVisibleTopLayer(
-                    worldMap, sampleX, sampleY - previewStep, visibleMaxLayer);
-                int east = FindVisibleTopLayer(
-                    worldMap, sampleX + previewStep, sampleY, visibleMaxLayer);
-                int south = FindVisibleTopLayer(
-                    worldMap, sampleX, sampleY + previewStep, visibleMaxLayer);
-                int west = FindVisibleTopLayer(
-                    worldMap, sampleX - previewStep, sampleY, visibleMaxLayer);
-
-                if (sampleY - previewStep >= 0 && surfaceLayer > north)
-                    AppendCliffFace(_terrainPreviewFaces, left, top, right, bottom,
-                        tilePixelSize, surfaceLayer, north, 0);
-                if (sampleX + previewStep < worldMap.TileWidth && surfaceLayer > east)
-                    AppendCliffFace(_terrainPreviewFaces, left, top, right, bottom,
-                        tilePixelSize, surfaceLayer, east, 1);
-                if (sampleY + previewStep < worldMap.TileHeight && surfaceLayer > south)
-                    AppendCliffFace(_terrainPreviewFaces, left, top, right, bottom,
-                        tilePixelSize, surfaceLayer, south, 2);
-                if (sampleX - previewStep >= 0 && surfaceLayer > west)
-                    AppendCliffFace(_terrainPreviewFaces, left, top, right, bottom,
-                        tilePixelSize, surfaceLayer, west, 3);
             }
         }
 
@@ -1245,7 +1144,6 @@ void main()
     {
         _terrainPreviewValid = false;
         _terrainPreviewVertices.Clear();
-        _terrainPreviewFaces.Clear();
         _highestLayerCacheVersion = long.MinValue;
 
         foreach (TerrainChunkMesh mesh in _terrainChunks.Values)
@@ -1574,7 +1472,6 @@ void main()
         _smoothedChunkHeights = Array.Empty<float>();
         _chunkSurfaceLayers = Array.Empty<int>();
         _terrainPreviewVertices.Dispose();
-        _terrainPreviewFaces.Dispose();
     }
 
     private static void AppendQuad(

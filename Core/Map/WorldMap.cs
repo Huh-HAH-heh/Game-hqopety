@@ -102,7 +102,27 @@ public sealed class WorldMap
             regionY < 0 || regionY >= RegionsY)
             return -1;
 
-        return _regionTerrainVersions[regionX + regionY * RegionsX];
+        // Terrain smoothing and contour cells sample across chunk boundaries.
+        // Include adjacent region revisions so their meshes cannot go stale
+        // when an edit occurs on the other side of a shared edge.
+        long version = 17;
+        unchecked
+        {
+            for (int y = Math.Max(0, regionY - 1);
+                 y <= Math.Min(RegionsY - 1, regionY + 1);
+                 y++)
+            {
+                for (int x = Math.Max(0, regionX - 1);
+                     x <= Math.Min(RegionsX - 1, regionX + 1);
+                     x++)
+                {
+                    version = version * 31 +
+                        _regionTerrainVersions[x + y * RegionsX];
+                }
+            }
+        }
+
+        return version;
     }
 
     private void MarkTerrainChanged(int x, int y)

@@ -241,6 +241,7 @@ public sealed class GameMenuOverlay : IDisposable
         public readonly VertexArray Vertices = new VertexArray(PrimitiveType.Lines);
         public readonly List<HeightContourLevel> Levels = new();
         public long LastUsedFrame;
+        public long RegionTerrainVersion;
 
         public void Dispose()
         {
@@ -279,7 +280,6 @@ void main()
     private readonly List<HeightContourChunk> _visibleContourChunks = new();
     private readonly List<ContourLabelCandidate> _visibleContourLabels = new();
     private readonly Dictionary<(int X, int Y), List<FloatRect>> _contourLabelSpatialCells = new();
-    private long _contourTerrainVersion = long.MinValue;
     private long _contourFrame;
 
     private readonly Font? _font;
@@ -987,12 +987,6 @@ void main()
             worldMap.MaxTileY,
             (int)MathF.Ceiling(screenMaxY / tilePixelSize) + 1);
 
-        if (_contourTerrainVersion != worldMap.TerrainVersion)
-        {
-            ClearContourChunkCache();
-            _contourTerrainVersion = worldMap.TerrainVersion;
-        }
-
         int minRegionX = minTileX / TerrainRegion.TilesPerSide;
         int maxRegionX = maxTileX / TerrainRegion.TilesPerSide;
         int minRegionY = minTileY / TerrainRegion.TilesPerSide;
@@ -1011,8 +1005,18 @@ void main()
                 int regionIndex = regionX + regionY * worldMap.RegionsX;
                 HeightContourChunkKey key = new HeightContourChunkKey(regionIndex);
 
-                if (!_contourChunks.TryGetValue(key, out HeightContourChunk? chunk))
+                long regionVersion =
+                    worldMap.GetRegionTerrainVersion(regionX, regionY);
+
+                if (!_contourChunks.TryGetValue(key, out HeightContourChunk? chunk) ||
+                    chunk.RegionTerrainVersion != regionVersion)
                 {
+                    if (chunk != null)
+                    {
+                        _contourChunks.Remove(key);
+                        chunk.Dispose();
+                    }
+
                     double buildMilliseconds =
                         Stopwatch.GetElapsedTime(buildStarted).TotalMilliseconds;
 
@@ -1030,6 +1034,8 @@ void main()
                         regionX,
                         regionY,
                         lodStep);
+                    chunk.RegionTerrainVersion =
+                        worldMap.GetRegionTerrainVersion(regionX, regionY);
 
                     _contourChunks.Add(key, chunk);
                     builtThisFrame++;
