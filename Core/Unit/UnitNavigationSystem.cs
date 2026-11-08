@@ -275,7 +275,7 @@ public sealed class UnitNavigationSystem
             _routeTerrainVersion[unitIndex] == worldMap.TerrainVersion)
         {
             AdvanceWaypointCursor(
-                units, unitIndex, position, target,
+                worldMap, units, unitIndex, position, target,
                 route, waypoints, waypointPathIndices,
                 ref cursor, ref waypointCursor);
         }
@@ -501,7 +501,7 @@ public sealed class UnitNavigationSystem
         }
 
         AdvanceWaypointCursor(
-            units, unitIndex, position, target,
+            worldMap, units, unitIndex, position, target,
             route, waypoints, waypointPathIndices,
             ref cursor, ref waypointCursor);
 
@@ -938,9 +938,17 @@ public sealed class UnitNavigationSystem
             lookAheadDistance *= 0.65f;
         }
 
-        // The current waypoint is the conservative fallback. It is part of the
-        // already validated route and keeps the controller outside blocked corners.
+        // A route cell is not automatically reachable from the pawn's current
+        // position: it may have drifted past a corner or been displaced by contact.
+        // Never steer blindly into that point; let the next update rebuild the route.
         InvalidateLocalTether(unitIndex);
+        if (!HasClearStraightRouteToPoint(
+                worldMap, position2, currentWaypoint, footprintX, footprintY))
+        {
+            waypoint = default;
+            return false;
+        }
+
         waypoint = currentWaypoint;
         return true;
     }
@@ -1071,6 +1079,7 @@ public sealed class UnitNavigationSystem
     }
 
     private void AdvanceWaypointCursor(
+        WorldMap worldMap,
         UnitStore units,
         int unitIndex,
         Vector3 position,
@@ -1082,6 +1091,8 @@ public sealed class UnitNavigationSystem
         ref int waypointCursor)
     {
         Vector2 current = new(position.X, position.Y);
+        int footprintX = GetFootprintRadius(units.Width[unitIndex]);
+        int footprintY = GetFootprintRadius(units.Length[unitIndex]);
         while (waypointCursor < waypoints.Length)
         {
             Vector2 waypoint = GetWaypointPosition(waypoints[waypointCursor]);
@@ -1127,9 +1138,14 @@ public sealed class UnitNavigationSystem
                         movingAlongIncoming &&
                         !finalPointBehind)
                     {
-                        // The next look-ahead segment is still checked against terrain
-                        // and footprint constraints before it can be followed.
-                        passed = true;
+                        // Do not skip a corner unless the next leg is also visible
+                        // from the pawn's actual position. Otherwise it can cut
+                        // through the inside of a ruined wall and oscillate at it.
+                        Vector2 nextPoint = waypointCursor + 1 < waypoints.Length
+                            ? GetWaypointPosition(waypoints[waypointCursor + 1])
+                            : new Vector2(target.X, target.Y);
+                        passed = HasClearStraightRouteToPoint(
+                            worldMap, current, nextPoint, footprintX, footprintY);
                     }
                 }
             }

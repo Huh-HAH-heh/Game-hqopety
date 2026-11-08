@@ -455,6 +455,67 @@ public static class UnitMovementSelfTest
         return false;
     }
 
+    public static bool FollowsRouteThroughStaggeredRuinWithoutLooping()
+    {
+        WorldMap map = CreateFlatWorld();
+        int[] wallXs = { 14, 20, 26 };
+        int[] openingCenters = { 8, 39, 20 };
+
+        // Three broken wall lines form a zig-zag through a ruined block.
+        // The openings alternate sides, forcing the pawn to take real corners.
+        for (int wall = 0; wall < wallXs.Length; wall++)
+        {
+            for (int y = 0; y < map.TileHeight; y++)
+            {
+                if (Math.Abs(y - openingCenters[wall]) <= 1)
+                    continue;
+
+                map.SetSolidHeight(wallXs[wall], y, 40, 2);
+                map.SetNavigationBlocked(wallXs[wall], y, true);
+            }
+        }
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        Vector3 start = new(6.5f, 24.5f, 1f);
+        Vector3 target = new(42.5f, 24.5f, 1f);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            start,
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        simulation.Units.SetTarget(id, target);
+
+        UnitMovementSystem movement = new UnitMovementSystem();
+        bool madeDetour = false;
+        for (int tick = 0; tick < 3600 && simulation.Units.HasTarget[id.Index]; tick++)
+        {
+            movement.Update(simulation.Units, map, TestDeltaTime);
+
+            Vector3 position = simulation.Units.Position[id.Index];
+            if (!float.IsFinite(position.X) || !float.IsFinite(position.Y))
+                return false;
+
+            int tileX = Math.Clamp((int)MathF.Floor(position.X), 0, map.MaxTileX);
+            int tileY = Math.Clamp((int)MathF.Floor(position.Y), 0, map.MaxTileY);
+            if (map.IsNavigationBlocked(tileX, tileY))
+                return false;
+
+            madeDetour |= MathF.Abs(position.Y - start.Y) > 2f;
+        }
+
+        Vector3 finalPosition = simulation.Units.Position[id.Index];
+        Vector3 finalVelocity = simulation.Units.Velocity[id.Index];
+        float finalSpeed = MathF.Sqrt(
+            finalVelocity.X * finalVelocity.X +
+            finalVelocity.Y * finalVelocity.Y);
+
+        return madeDetour &&
+               !simulation.Units.HasTarget[id.Index] &&
+               PlanarDistance(finalPosition, target) <= 0.25f &&
+               finalSpeed <= 0.25f;
+    }
+
     public static bool WeightedAStarDetourSurvivesWaypointSmoothing()
     {
         WorldMap map = CreateFlatWorld();
