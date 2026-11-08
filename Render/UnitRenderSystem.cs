@@ -258,10 +258,6 @@ public sealed class UnitRenderSystem : IDisposable
                 tilePixelSize,
                 screenScale);
 
-            int unitTileX = (int)MathF.Floor(unitPosition.X);
-            int unitTileY = (int)MathF.Floor(unitPosition.Y);
-            int unitLayer = (int)MathF.Ceiling(
-                unitPosition.Z / (WorldMap.LayerHeightUnits * 0.1f));
             if (IsUnitOccludedByTerrain(worldMap, unitPosition, cutLayer))
             {
                 AppendOccludedUnitMarker(
