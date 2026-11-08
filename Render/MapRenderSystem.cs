@@ -58,8 +58,7 @@ public sealed class MapRenderSystem : IDisposable
             VoidHatch = null;
             CutContour?.Dispose();
             CutContour = null;
-                _blockTransitionVertices.Dispose();
-}
+        }
     }
 
     // Camera movement rebuilds only chunks entering the view.
@@ -1592,6 +1591,7 @@ void main()
         _terrainLayerShader?.Dispose();
         _terrainLayerShader = null;
         _gridVertices.Dispose();
+        _blockTransitionVertices.Dispose();
         _waterVertices.Dispose();
          _terrainVertices = Array.Empty<Vertex>();
         _smoothedChunkHeights = Array.Empty<float>();
