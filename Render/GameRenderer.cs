@@ -172,7 +172,10 @@ public sealed class GameRenderer
     private int _visibleMaxLayer;
     private bool _pageUpHeld;
     private bool _pageDownHeld;
-    private const int TerrainSliceStepLayers = 5;
+    private int GetTerrainSliceStepLayers() =>
+        _worldMap.UsesDiscreteBlockTerrain
+            ? WorldMap.HeightUnitsPerMeter
+            : 5;
     private volatile bool _showVisionDebug;
     private volatile bool _showHearingDebug;
     private volatile bool _showMemoryDebug;
@@ -3307,7 +3310,7 @@ public sealed class GameRenderer
                 {
                     int layerSteps = Math.Max(
                         1, (int)MathF.Round(MathF.Abs(e.Delta))) *
-                        TerrainSliceStepLayers;
+                        GetTerrainSliceStepLayers();
                     int direction = e.Delta > 0f ? 1 : -1;
                     AdjustTerrainSlice(direction, layerSteps);
                     return;
@@ -4274,7 +4277,7 @@ public sealed class GameRenderer
                 _unitCards.Count == 0;
 
             if (gameplayInputAllowed)
-                AdjustTerrainSlice(raiseSlice ? 1 : -1, TerrainSliceStepLayers);
+                AdjustTerrainSlice(raiseSlice ? 1 : -1, GetTerrainSliceStepLayers());
 
             return;
         }

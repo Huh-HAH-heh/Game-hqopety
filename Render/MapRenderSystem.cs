@@ -58,7 +58,8 @@ public sealed class MapRenderSystem : IDisposable
             VoidHatch = null;
             CutContour?.Dispose();
             CutContour = null;
-        }
+                _blockTransitionVertices.Dispose();
+}
     }
 
     // Camera movement rebuilds only chunks entering the view.
@@ -137,6 +138,8 @@ void main()
 }";
 
     private readonly VertexArray _gridVertices =
+        new VertexArray(PrimitiveType.Lines);
+    private readonly VertexArray _blockTransitionVertices =
         new VertexArray(PrimitiveType.Lines);
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
@@ -360,6 +363,16 @@ void main()
             lodStep,
             tilePixelSize,
             maxLayer);
+
+        DrawBlockTransitions(
+            window,
+            worldMap,
+            minTileX,
+            maxTileX,
+            minTileY,
+            maxTileY,
+            tilePixelSize,
+            DisplayedMaxLayer);
 
         // Auxiliary terrain layers must follow the mesh that is actually visible.
         maxLayer = DisplayedMaxLayer;
@@ -1388,6 +1401,118 @@ void main()
                 AppendLine(vertices, bottomPoint.X, bottomPoint.Y, leftPoint.X, leftPoint.Y, color);
             }
         }
+    }
+
+    private void DrawBlockTransitions(
+        RenderWindow window,
+        WorldMap worldMap,
+        int minTileX,
+        int maxTileX,
+        int minTileY,
+        int maxTileY,
+        float tilePixelSize,
+        int visibleMaxLayer)
+    {
+        _blockTransitionVertices.Clear();
+        if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize < 2f)
+            return;
+
+        Color rampColor = new Color(224, 185, 112, 230);
+        Color stairsColor = new Color(128, 185, 210, 230);
+        for (int y = minTileY; y <= maxTileY; y++)
+        {
+            for (int x = minTileX; x <= maxTileX; x++)
+            {
+                BlockTransitionType type = worldMap.Blocks.GetTransitionType(x, y);
+                if (type == BlockTransitionType.None ||
+                    worldMap.GetSurfaceLayer(x, y) > visibleMaxLayer)
+                {
+                    continue;
+                }
+
+                BlockDirection direction = worldMap.Blocks.GetTransitionDirection(x, y);
+                float left = x * tilePixelSize;
+                float top = y * tilePixelSize;
+                float centerX = left + tilePixelSize * 0.5f;
+                float centerY = top + tilePixelSize * 0.5f;
+                GetBlockDirectionDelta(direction, out int dx, out int dy);
+                Color color = type == BlockTransitionType.Ramp
+                    ? rampColor
+                    : stairsColor;
+
+                if (type == BlockTransitionType.Ramp)
+                {
+                    float endX = centerX + dx * tilePixelSize * 0.28f;
+                    float endY = centerY + dy * tilePixelSize * 0.28f;
+                    AppendLine(
+                        _blockTransitionVertices,
+                        centerX - dx * tilePixelSize * 0.22f,
+                        centerY - dy * tilePixelSize * 0.22f,
+                        endX,
+                        endY,
+                        color);
+                    AppendLine(
+                        _blockTransitionVertices,
+                        endX,
+                        endY,
+                        endX - dx * tilePixelSize * 0.13f - dy * tilePixelSize * 0.11f,
+                        endY - dy * tilePixelSize * 0.13f + dx * tilePixelSize * 0.11f,
+                        color);
+                    AppendLine(
+                        _blockTransitionVertices,
+                        endX,
+                        endY,
+                        endX - dx * tilePixelSize * 0.13f + dy * tilePixelSize * 0.11f,
+                        endY - dy * tilePixelSize * 0.13f - dx * tilePixelSize * 0.11f,
+                        color);
+                    continue;
+                }
+
+                // Three transverse treads form a compact top-down stair glyph.
+                for (int tread = 1; tread <= 3; tread++)
+                {
+                    float progress = tread / 4f - 0.5f;
+                    float treadX = centerX + dx * tilePixelSize * progress;
+                    float treadY = centerY + dy * tilePixelSize * progress;
+                    AppendLine(
+                        _blockTransitionVertices,
+                        treadX - dy * tilePixelSize * 0.28f,
+                        treadY + dx * tilePixelSize * 0.28f,
+                        treadX + dy * tilePixelSize * 0.28f,
+                        treadY - dx * tilePixelSize * 0.28f,
+                        color);
+                }
+                AppendLine(
+                    _blockTransitionVertices,
+                    centerX - dx * tilePixelSize * 0.34f,
+                    centerY - dy * tilePixelSize * 0.34f,
+                    centerX + dx * tilePixelSize * 0.34f,
+                    centerY + dy * tilePixelSize * 0.34f,
+                    color);
+            }
+        }
+
+        if (_blockTransitionVertices.VertexCount > 0)
+            window.Draw(_blockTransitionVertices);
+    }
+
+    private static void GetBlockDirectionDelta(
+        BlockDirection direction,
+        out int dx,
+        out int dy)
+    {
+        dx = direction switch
+        {
+            BlockDirection.East => 1,
+            BlockDirection.West => -1,
+            _ => 0
+        };
+        dy = direction switch
+        {
+            BlockDirection.South => 1,
+            BlockDirection.North => -1,
+            _ => 0
+        };
     }
 
     private static void AppendLine(
