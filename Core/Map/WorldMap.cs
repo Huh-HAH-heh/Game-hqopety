@@ -192,6 +192,98 @@ public sealed class WorldMap
         TerrainVersion++;
     }
 
+    // Uppermost occupied voxel at or below a horizontal Z slice.
+    // Continuous/simple columns resolve in O(1); edited columns scan downward.
+    public int FindTopOccupiedLayer(int x, int y, int maxLayer)
+    {
+        if (!IsInside(x, y) || maxLayer < 0)
+            return -1;
+        int columnIndex = GetColumnIndex(x, y);
+        int lastLayer = Math.Min(maxLayer, LayerCount - 1);
+        if (_simpleFillColumns[columnIndex])
+        {
+            if (_columnMaterialIds[columnIndex] == 0)
+                return -1;
+            int filledLayers = Math.Clamp(
+                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
+                LayerHeightUnits, 0, LayerCount);
+            return Math.Min(filledLayers - 1, lastLayer);
+        }
+
+        int regionX = x / TerrainRegion.TilesPerSide;
+        int regionY = y / TerrainRegion.TilesPerSide;
+        int localIndex = x % TerrainRegion.TilesPerSide +
+            (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
+        for (int z = lastLayer; z >= 0; z--)
+        {
+            if (_layers[z].GetRegion(regionX, regionY)!
+                    .GetMaterialIdAtIndex(localIndex) != 0)
+                return z;
+        }
+        return -1;
+    }
+
+    // Inclusive interval: is any voxel in this vertical column solid?
+    public bool IsColumnSolidBetween(int x, int y, int firstLayer, int lastLayer)
+    {
+        if (!IsInside(x, y))
+            return true;
+        firstLayer = Math.Max(0, firstLayer);
+        lastLayer = Math.Min(LayerCount - 1, lastLayer);
+        if (firstLayer > lastLayer)
+            return false;
+
+        int columnIndex = GetColumnIndex(x, y);
+        if (_simpleFillColumns[columnIndex])
+        {
+            if (_columnMaterialIds[columnIndex] == 0)
+                return false;
+            int filledLayers = Math.Clamp(
+                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
+                LayerHeightUnits, 0, LayerCount);
+            return firstLayer < filledLayers;
+        }
+
+        int regionX = x / TerrainRegion.TilesPerSide;
+        int regionY = y / TerrainRegion.TilesPerSide;
+        int localIndex = x % TerrainRegion.TilesPerSide +
+            (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
+        for (int z = firstLayer; z <= lastLayer; z++)
+        {
+            if (_layers[z].GetRegion(regionX, regionY)!
+                    .GetMaterialIdAtIndex(localIndex) != 0)
+                return true;
+        }
+        return false;
+    }
+
+    public bool IsColumnVolumeEmpty(int x, int y, int firstLayer, int lastLayer) =>
+        !IsColumnSolidBetween(x, y, firstLayer, lastLayer);
+
+    // Finds a solid floor voxel with enough empty vertical clearance above it.
+    public bool TryFindWalkableSurface(
+        int x, int y, int minFloorLayer, int maxFloorLayer,
+        int clearanceLayers, out int floorLayer)
+    {
+        floorLayer = -1;
+        if (!IsInside(x, y) || clearanceLayers < 1)
+            return false;
+        int minLayer = Math.Max(0, minFloorLayer);
+        int maxLayer = Math.Min(LayerCount - 1, maxFloorLayer);
+        for (int z = maxLayer; z >= minLayer; z--)
+        {
+            if (GetMaterialId(x, y, z) == 0)
+                continue;
+            int clearanceTop = Math.Min(LayerCount - 1, z + clearanceLayers);
+            if (IsColumnVolumeEmpty(x, y, z + 1, clearanceTop))
+            {
+                floorLayer = z;
+                return true;
+            }
+        }
+        return false;
+    }
+
     public int GetSurfaceLayer(
         int x,
         int y)

@@ -84,17 +84,11 @@ public sealed class MapRenderSystem : IDisposable
 }";
 
     private const string TerrainFragmentShaderSource =
-        @"uniform float uVisibleLayer;
-uniform float uBaseGray;
+        @"uniform float uBaseGray;
 uniform float uHeightContrast;
 void main()
 {
     float surfaceLayer = gl_TexCoord[0].x;
-    float voxelLayer = gl_TexCoord[0].y;
-
-    if (voxelLayer < uVisibleLayer)
-        discard;
-
     float heightFraction = clamp(surfaceLayer, 0.0, 499.0) / 499.0;
     float tonalFraction = pow(heightFraction, 1.8);
     float heightRange = clamp(uBaseGray + uHeightContrast * 1.5, 24.0, 72.0);
@@ -106,6 +100,13 @@ void main()
 
     private readonly VertexArray _gridVertices =
         new VertexArray(PrimitiveType.Lines);
+    private readonly VertexArray _cutSurfaceHatch = new VertexArray(PrimitiveType.Lines);
+    private readonly VertexArray _cutVoidGrid = new VertexArray(PrimitiveType.Lines);
+    private bool _sliceOverlayCacheValid;
+    private int _sliceMinTileX, _sliceMaxTileX, _sliceMinTileY, _sliceMaxTileY;
+    private int _sliceLayer = -1;
+    private long _sliceTerrainVersion = long.MinValue;
+    private float _sliceTilePixelSize = -1f;
 
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
@@ -196,6 +197,9 @@ void main()
         _mapCacheValid = false;
         _gridCacheValid = false;
         _waterCacheValid = false;
+        _sliceOverlayCacheValid = false;
+        _cutSurfaceHatch.Clear();
+        _cutVoidGrid.Clear();
 
         LastTerrainBuildMilliseconds = 0d;
     }
@@ -395,6 +399,14 @@ void main()
             tilePixelSize,
             maxLayer);
 
+        UpdateSliceOverlays(
+            worldMap, minTileX, maxTileX, minTileY, maxTileY,
+            tilePixelSize, maxLayer);
+        if (_cutSurfaceHatch.VertexCount > 0)
+            window.Draw(_cutSurfaceHatch);
+        if (_cutVoidGrid.VertexCount > 0)
+            window.Draw(_cutVoidGrid);
+
          DrawWater(
             window,
             worldMap,
@@ -421,11 +433,9 @@ void main()
         float tilePixelSize,
         int visibleMaxLayer)
     {
-        // Shader filtering keeps cached terrain geometry valid across Z-slices.
-        int layerCacheKey =
-            _terrainLayerShader == null
-                ? visibleMaxLayer
-                : -1;
+        // The mesh itself represents the topmost material below the cut.
+        // Different Z cuts therefore require distinct chunk geometry.
+        int layerCacheKey = visibleMaxLayer;
         int geometryMaxLayer = visibleMaxLayer;
 
         if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
@@ -525,7 +535,6 @@ void main()
 
         if (_terrainLayerShader != null)
         {
-            _terrainLayerShader.SetUniform("uVisibleLayer", (float)visibleMaxLayer);
             _terrainLayerShader.SetUniform("uBaseGray", _baseGray);
             _terrainLayerShader.SetUniform("uHeightContrast", _heightContrast);
             terrainStates = new RenderStates(_terrainLayerShader);
@@ -627,10 +636,7 @@ void main()
 
         // Cache each shared corner once per chunk. Without this scratch grid,
         // four neighbouring cells repeatedly sample the same four heights.
-        int smoothingLayer =
-            _terrainLayerShader != null
-                ? 0
-                : visibleMaxLayer;
+        int smoothingLayer = visibleMaxLayer;
 
         for (int row = 0; row <= rowCount; row++)
         {
@@ -659,18 +665,10 @@ void main()
             for (int column = 0; column < columnCount; column++)
             {
                 int x = minTileX + column * lodStep;
-                int surfaceLayer = worldMap.GetSurfaceLayer(x, y);
-
+                int surfaceLayer =
+                    FindVisibleTopLayer(worldMap, x, y, visibleMaxLayer);
                 if (surfaceLayer < 0)
                     continue;
-
-                // The generated terrain fills each column from ground to its
-                // surface. The CPU fallback still checks the exact selected layer.
-                if (_terrainLayerShader == null &&
-                    worldMap.GetMaterialId(x, y, visibleMaxLayer) == 0)
-                {
-                    continue;
-                }
 
                 float topLeftHeight =
                     _smoothedChunkHeights[topOffset + column];
@@ -717,9 +715,9 @@ void main()
         {
             for (int x = vertexX - 1; x <= vertexX; x++)
             {
-                int surfaceLayer = worldMap.GetSurfaceLayer(x, y);
-
-                if (surfaceLayer < visibleMaxLayer)
+                int surfaceLayer =
+                    FindVisibleTopLayer(worldMap, x, y, visibleMaxLayer);
+                if (surfaceLayer < 0)
                     continue;
 
                 heightSum += surfaceLayer;
@@ -852,18 +850,110 @@ void main()
         int y,
         int visibleMaxLayer)
     {
-        int topLayer =
-            Math.Min(
-                worldMap.GetSurfaceLayer(x, y),
-                visibleMaxLayer);
+        return worldMap.FindTopOccupiedLayer(x, y, visibleMaxLayer);
+    }
 
-        while (topLayer >= 0 &&
-               worldMap.GetMaterialId(x, y, topLayer) == 0)
+    private void UpdateSliceOverlays(
+        WorldMap worldMap,
+        int minTileX, int maxTileX, int minTileY, int maxTileY,
+        float tilePixelSize, int cutLayer)
+    {
+        if (_sliceOverlayCacheValid &&
+            _sliceMinTileX == minTileX && _sliceMaxTileX == maxTileX &&
+            _sliceMinTileY == minTileY && _sliceMaxTileY == maxTileY &&
+            _sliceLayer == cutLayer &&
+            _sliceTerrainVersion == worldMap.TerrainVersion &&
+            MathF.Abs(_sliceTilePixelSize - tilePixelSize) < 0.001f)
+            return;
+
+        _cutSurfaceHatch.Clear();
+        _cutVoidGrid.Clear();
+        Color cutColor = new Color(27, 35, 42, 190);
+        Color voidColor = new Color(122, 163, 179, 58);
+
+        for (int y = minTileY; y <= maxTileY; y++)
         {
-            topLayer--;
+            for (int x = minTileX; x <= maxTileX; x++)
+            {
+                float left = x * tilePixelSize;
+                float top = y * tilePixelSize;
+                float right = left + tilePixelSize;
+                float bottom = top + tilePixelSize;
+
+                if (worldMap.GetMaterialId(x, y, cutLayer) != 0)
+                {
+                    AppendHatchedCell(_cutSurfaceHatch, left, top, right, bottom, cutColor);
+                    continue;
+                }
+
+                int floorLayer = worldMap.FindTopOccupiedLayer(x, y, cutLayer - 1);
+                if (floorLayer >= 0 && worldMap.GetSurfaceLayer(x, y) > cutLayer)
+                    AppendCellGrid(_cutVoidGrid, left, top, right, bottom, voidColor);
+            }
         }
 
-        return topLayer;
+        _sliceMinTileX = minTileX;
+        _sliceMaxTileX = maxTileX;
+        _sliceMinTileY = minTileY;
+        _sliceMaxTileY = maxTileY;
+        _sliceLayer = cutLayer;
+        _sliceTerrainVersion = worldMap.TerrainVersion;
+        _sliceTilePixelSize = tilePixelSize;
+        _sliceOverlayCacheValid = true;
+    }
+
+    private static void AppendHatchedCell(
+        VertexArray vertices, float left, float top, float right, float bottom, Color color)
+    {
+        float width = right - left;
+        float height = bottom - top;
+        float spacing = MathF.Max(3f, MathF.Min(width, height) * 0.27f);
+        for (float c = spacing; c < width + height; c += spacing)
+        {
+            int count = 0;
+            float x1 = 0f, y1 = 0f, x2 = 0f, y2 = 0f;
+            if (c <= height) AddHatchPoint(left, top + c, ref count, ref x1, ref y1, ref x2, ref y2);
+            if (c <= width) AddHatchPoint(left + c, top, ref count, ref x1, ref y1, ref x2, ref y2);
+            if (c >= width && c <= width + height) AddHatchPoint(right, top + c - width, ref count, ref x1, ref y1, ref x2, ref y2);
+            if (c >= height && c <= width + height) AddHatchPoint(left + c - height, bottom, ref count, ref x1, ref y1, ref x2, ref y2);
+            if (count >= 2) AppendLine(vertices, x1, y1, x2, y2, color);
+        }
+        AppendCellGrid(vertices, left, top, right, bottom,
+            new Color(color.R, color.G, color.B, 220));
+    }
+
+    private static void AddHatchPoint(
+        float x, float y, ref int count,
+        ref float x1, ref float y1, ref float x2, ref float y2)
+    {
+        if (count > 0 &&
+            (MathF.Abs(x - x1) < 0.01f && MathF.Abs(y - y1) < 0.01f ||
+             count > 1 && MathF.Abs(x - x2) < 0.01f && MathF.Abs(y - y2) < 0.01f))
+            return;
+        if (count == 0)
+        {
+            x1 = x; y1 = y; count = 1;
+        }
+        else if (count == 1)
+        {
+            x2 = x; y2 = y; count = 2;
+        }
+    }
+
+    private static void AppendCellGrid(
+        VertexArray vertices, float left, float top, float right, float bottom, Color color)
+    {
+        AppendLine(vertices, left, top, right, top, color);
+        AppendLine(vertices, right, top, right, bottom, color);
+        AppendLine(vertices, right, bottom, left, bottom, color);
+        AppendLine(vertices, left, bottom, left, top, color);
+    }
+
+    private static void AppendLine(
+        VertexArray vertices, float x1, float y1, float x2, float y2, Color color)
+    {
+        vertices.Append(new Vertex(new Vector2f(x1, y1), color));
+        vertices.Append(new Vertex(new Vector2f(x2, y2), color));
     }
 
     private void DrawWater(
