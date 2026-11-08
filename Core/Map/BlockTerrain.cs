@@ -18,8 +18,9 @@ public enum BlockDirection : byte
 }
 
 /// <summary>
-/// Temporary Dwarf-Fortress-style surface model: each XY cell is a stack of
-/// 1 m cubic blocks. Elevation changes require an explicit ramp or stair block.
+/// Connectivity data for the discrete 1 m block world.
+/// Solid volume is stored by WorldMap; this class stores exposed surfaces
+/// and explicit ramp/stair connectors between adjacent block columns.
 /// </summary>
 public sealed class BlockTerrain
 {
@@ -93,15 +94,19 @@ public sealed class BlockTerrain
         if (!IsInside(fromX, fromY) || !IsInside(toX, toY))
             return false;
 
-        int fromLevel = GetSurfaceLevel(fromX, fromY);
-        int toLevel = GetSurfaceLevel(toX, toY);
-        if (fromLevel == toLevel)
-            return true;
-
         int dx = toX - fromX;
         int dy = toY - fromY;
         if (Math.Abs(dx) + Math.Abs(dy) != 1)
             return false;
+
+        int fromLevel = GetSurfaceLevel(fromX, fromY);
+        int toLevel = GetSurfaceLevel(toX, toY);
+        if (fromLevel <= 0 || toLevel <= 0)
+            return false;
+
+        // A horizontal move between equal-height block tops needs no connector.
+        if (fromLevel == toLevel)
+            return true;
 
         int lowerX = fromLevel < toLevel ? fromX : toX;
         int lowerY = fromLevel < toLevel ? fromY : toY;
@@ -145,8 +150,12 @@ public sealed class BlockTerrain
 
         GetDirectionDelta(GetTransitionDirection(tileX, tileY), out int dx, out int dy);
         int rise = GetSurfaceLevel(tileX + dx, tileY + dy) - (int)level;
-        if (rise <= 0)
+        if (rise <= 0 ||
+            (type == BlockTransitionType.Ramp && rise != 1) ||
+            (type == BlockTransitionType.Stairs && rise > 3))
+        {
             return level;
+        }
 
         float localX = Math.Clamp(x - tileX, 0f, 1f);
         float localY = Math.Clamp(y - tileY, 0f, 1f);
