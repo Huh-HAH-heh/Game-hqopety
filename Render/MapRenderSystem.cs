@@ -112,13 +112,27 @@ void main()
 
     private readonly VertexArray _gridVertices =
         new VertexArray(PrimitiveType.Lines);
-    private readonly VertexArray _cutSurfaceHatch = new VertexArray(PrimitiveType.Lines);
-    private readonly VertexArray _cutVoidGrid = new VertexArray(PrimitiveType.Lines);
-    private bool _sliceOverlayCacheValid;
-    private int _sliceMinTileX, _sliceMaxTileX, _sliceMinTileY, _sliceMaxTileY;
-    private int _sliceLayer = -1;
-    private long _sliceTerrainVersion = long.MinValue;
-    private float _sliceTilePixelSize = -1f;
+    private readonly record struct SliceOverlayKey(
+        int MinTileX, int MaxTileX,
+        int MinTileY, int MaxTileY,
+        int CutLayer, long TerrainVersion, float TilePixelSize);
+
+    private sealed class SliceOverlayMesh : IDisposable
+    {
+        public readonly VertexArray CutSurfaceHatch = new(PrimitiveType.Lines);
+        public readonly VertexArray CutVoidGrid = new(PrimitiveType.Lines);
+        public long LastUsedFrame;
+
+        public void Dispose()
+        {
+            CutSurfaceHatch.Dispose();
+            CutVoidGrid.Dispose();
+        }
+    }
+
+    private const int MaxCachedSliceOverlays = 4;
+    private readonly Dictionary<SliceOverlayKey, SliceOverlayMesh> _sliceOverlayCache = new();
+    private SliceOverlayMesh? _activeSliceOverlay;
 
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
@@ -208,9 +222,7 @@ void main()
         _mapCacheValid = false;
         _gridCacheValid = false;
         _waterCacheValid = false;
-        _sliceOverlayCacheValid = false;
-        _cutSurfaceHatch.Clear();
-        _cutVoidGrid.Clear();
+        ClearSliceOverlayCache();
 
         LastTerrainBuildMilliseconds = 0d;
     }
@@ -454,10 +466,10 @@ void main()
         UpdateSliceOverlays(
             worldMap, minTileX, maxTileX, minTileY, maxTileY,
             tilePixelSize, maxLayer);
-        if (_cutSurfaceHatch.VertexCount > 0)
-            window.Draw(_cutSurfaceHatch);
-        if (_cutVoidGrid.VertexCount > 0)
-            window.Draw(_cutVoidGrid);
+        if (_activeSliceOverlay?.CutSurfaceHatch.VertexCount > 0)
+            window.Draw(_activeSliceOverlay.CutSurfaceHatch);
+        if (_activeSliceOverlay?.CutVoidGrid.VertexCount > 0)
+            window.Draw(_activeSliceOverlay.CutVoidGrid);
 
          DrawWater(
             window,
@@ -936,7 +948,7 @@ void main()
         _requestedLodStep = -1;
         _viewRequestChangedAt = 0;
         _minimumChunkCacheRetention = 0;
-        _sliceOverlayCacheValid = false;
+        ClearSliceOverlayCache();
         _cachedTerrainVertexCount = 0;
         _terrainVertexCount = 0;
         _buildingTerrainVertexCount = 0;
@@ -956,16 +968,18 @@ void main()
         int minTileX, int maxTileX, int minTileY, int maxTileY,
         float tilePixelSize, int cutLayer)
     {
-        if (_sliceOverlayCacheValid &&
-            _sliceMinTileX == minTileX && _sliceMaxTileX == maxTileX &&
-            _sliceMinTileY == minTileY && _sliceMaxTileY == maxTileY &&
-            _sliceLayer == cutLayer &&
-            _sliceTerrainVersion == worldMap.TerrainVersion &&
-            MathF.Abs(_sliceTilePixelSize - tilePixelSize) < 0.001f)
-            return;
+        SliceOverlayKey key = new(
+            minTileX, maxTileX, minTileY, maxTileY,
+            cutLayer, worldMap.TerrainVersion, tilePixelSize);
 
-        _cutSurfaceHatch.Clear();
-        _cutVoidGrid.Clear();
+        if (_sliceOverlayCache.TryGetValue(key, out SliceOverlayMesh? cached))
+        {
+            cached.LastUsedFrame = _frameNumber;
+            _activeSliceOverlay = cached;
+            return;
+        }
+
+        SliceOverlayMesh mesh = new();
         Color cutColor = new Color(27, 35, 42, 190);
         Color voidColor = new Color(122, 163, 179, 58);
 
@@ -980,7 +994,9 @@ void main()
 
                 if (worldMap.GetMaterialId(x, y, cutLayer) != 0)
                 {
-                    AppendHatchedCell(_cutSurfaceHatch, left, top, right, bottom, cutColor);
+                    AppendHatchedCell(
+                        mesh.CutSurfaceHatch,
+                        left, top, right, bottom, cutColor);
                     continue;
                 }
 
@@ -988,19 +1004,53 @@ void main()
                 if (floorLayer >= 0 &&
                     worldMap.GetSurfaceLayer(x, y) > cutLayer)
                 {
-                    AppendCellGrid(_cutVoidGrid, left, top, right, bottom, voidColor);
+                    AppendCellGrid(
+                        mesh.CutVoidGrid,
+                        left, top, right, bottom, voidColor);
                 }
             }
         }
 
-        _sliceMinTileX = minTileX;
-        _sliceMaxTileX = maxTileX;
-        _sliceMinTileY = minTileY;
-        _sliceMaxTileY = maxTileY;
-        _sliceLayer = cutLayer;
-        _sliceTerrainVersion = worldMap.TerrainVersion;
-        _sliceTilePixelSize = tilePixelSize;
-        _sliceOverlayCacheValid = true;
+        mesh.LastUsedFrame = _frameNumber;
+        _sliceOverlayCache.Add(key, mesh);
+        _activeSliceOverlay = mesh;
+        EvictExcessSliceOverlays();
+    }
+
+    private void EvictExcessSliceOverlays()
+    {
+        while (_sliceOverlayCache.Count > MaxCachedSliceOverlays)
+        {
+            SliceOverlayKey oldestKey = default;
+            SliceOverlayMesh? oldest = null;
+
+            foreach (KeyValuePair<SliceOverlayKey, SliceOverlayMesh> entry in _sliceOverlayCache)
+            {
+                if (ReferenceEquals(entry.Value, _activeSliceOverlay))
+                    continue;
+                if (oldest != null &&
+                    entry.Value.LastUsedFrame >= oldest.LastUsedFrame)
+                    continue;
+
+                oldestKey = entry.Key;
+                oldest = entry.Value;
+            }
+
+            if (oldest == null)
+                return;
+
+            _sliceOverlayCache.Remove(oldestKey);
+            oldest.Dispose();
+        }
+    }
+
+    private void ClearSliceOverlayCache()
+    {
+        foreach (SliceOverlayMesh mesh in _sliceOverlayCache.Values)
+            mesh.Dispose();
+
+        _sliceOverlayCache.Clear();
+        _activeSliceOverlay = null;
     }
 
     private static void AppendHatchedCell(
