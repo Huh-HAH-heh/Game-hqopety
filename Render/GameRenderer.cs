@@ -241,7 +241,7 @@ public sealed class GameRenderer
         _worldMap =
             worldMap;
 
-        _visibleMaxLayer = 0;
+        _visibleMaxLayer = _worldMap.LayerCount - 1;
 
         _camera =
             new GameCamera(
@@ -786,6 +786,8 @@ public sealed class GameRenderer
             _unitRenderer.DrawSnapshot(
                 _window,
                 renderSnapshot,
+                _worldMap,
+                _visibleMaxLayer,
                 _camera.View,
                 TerrainTilePixelSize,
                 _selectedUnit.IsValid ? _selectedUnit.Index : -1,
@@ -796,7 +798,8 @@ public sealed class GameRenderer
                 _showHearingDebug,
                 _showAttackLinks,
                 _showSuppressionDebug,
-                _showMemoryDebug);
+                _showMemoryDebug,
+                _visibleMaxLayer);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -825,7 +828,8 @@ public sealed class GameRenderer
                 _showHearingDebug,
                 _showAttackLinks,
                 _showSuppressionDebug,
-                _showMemoryDebug);
+                _showMemoryDebug,
+                _visibleMaxLayer);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -1121,7 +1125,7 @@ public sealed class GameRenderer
             $"S={snapshot.SearchCount} D={snapshot.DeadCount} | " +
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
             $"LastHit={snapshot.LastHitPart} | " +
-            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0} м | " +
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
             "RMB=движение/атака  Shift+click=добавить выделение  СКМ=панорама  Колесо=масштаб  ESC=меню | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
@@ -1297,7 +1301,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0} м  •  ESC=меню  •••=главное меню  СКМ=панорама  Колесо=масштаб";
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
     }
 
     private void StartSimulationThread()
@@ -3290,6 +3294,21 @@ public sealed class GameRenderer
                     return;
                 }
 
+                bool shiftHeld =
+                    Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                    Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+                if (shiftHeld)
+                {
+                    int layerSteps = Math.Max(
+                        1, (int)MathF.Round(MathF.Abs(e.Delta))) * 10;
+                    int direction = e.Delta > 0f ? 1 : -1;
+                    _visibleMaxLayer = Math.Clamp(
+                        _visibleMaxLayer + direction * layerSteps,
+                        0,
+                        _worldMap.LayerCount - 1);
+                    return;
+                }
+
                 Vector2f zoomAnchorBefore = _window.MapPixelToCoords(
                     wheelPixels,
                     _camera.View);
@@ -4497,7 +4516,7 @@ public sealed class GameRenderer
                 _showTerrainExtrema = false;
                 _showHeightContours = true;
                 _showContourLabels = true;
-                _visibleMaxLayer = 0;
+                _visibleMaxLayer = _worldMap.LayerCount - 1;
                 break;
         }
     }
@@ -4594,7 +4613,7 @@ public sealed class GameRenderer
         WorldGenerator.Generate(_worldMap);
         ClearTestNavigationBlockers();
         _mapRenderer.ResetVisualSettings();
-        _visibleMaxLayer = 0;
+        _visibleMaxLayer = _worldMap.LayerCount - 1;
         _showDebugGrid = false;
         _showTerrainExtrema = false;
         _showHeightContours = true;
