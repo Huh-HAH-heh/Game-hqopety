@@ -1624,14 +1624,33 @@ public sealed class UnitNavigationSystem
     {
         float heightDifference = MathF.Abs(
             _navigationHeights[fromCell] - _navigationHeights[toCell]);
+
+        int deltaX = Math.Abs(toCell % _width - fromCell % _width);
+        int deltaY = Math.Abs(toCell / _width - fromCell / _width);
+        float horizontalDistance =
+            (deltaX != 0 && deltaY != 0 ? DiagonalCost : 1f) * NavigationCellSize;
+
+        // Price a slope by its actual 3D travel distance, not only by the
+        // vertical difference. A steep but technically traversable face must
+        // compete fairly with a longer, flatter route around the obstacle.
+        float terrainDistance = MathF.Sqrt(
+            horizontalDistance * horizontalDistance +
+            heightDifference * heightDifference);
+        float heightCost =
+            terrainDistance - horizontalDistance +
+            heightDifference * HeightCost;
+
+        // Clearance is a property of the whole edge, so use both cells.
+        // Route traffic stays destination-weighted to spread units across paths.
+        float edgeCost = (_navigationEdgeCost[fromCell] +
+            _navigationEdgeCost[toCell]) * 0.5f;
+
         int priorRouteCount = _routeTraffic[toCell];
         float routeReuseCost = Math.Min(
             priorRouteCount,
             RouteCohortSize - 1) * RouteReuseCostPerUnit * NavigationCellSize;
 
-        return heightDifference * HeightCost +
-            _navigationEdgeCost[toCell] +
-            routeReuseCost;
+        return heightCost + edgeCost + routeReuseCost;
     }
 
     private bool IsWeightedStraightRouteAcceptable(
