@@ -1955,10 +1955,10 @@ public sealed class UnitNavigationSystem
                     return false;
 
                 int index = cellX + cellY * _width;
-                int offsetX = Math.Abs(offsetX);
-                int offsetY = Math.Abs(offsetY);
+                int distanceX = Math.Abs(offsetX);
+                int distanceY = Math.Abs(offsetY);
                 float horizontalDistance =
-                    MathF.Sqrt(offsetX * offsetX + offsetY * offsetY) * NavigationCellSize;
+                    MathF.Sqrt(distanceX * distanceX + distanceY * distanceY) * NavigationCellSize;
                 float allowedHeightDifference = MathF.Min(
                     MaxStepHeight,
                     horizontalDistance * MaxTerrainSlopeGrade);
