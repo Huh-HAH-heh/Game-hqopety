@@ -402,6 +402,48 @@ public static class UnitMovementSelfTest
         return turnDegrees < 20f && Vector2.Dot(before, after) > 0f;
     }
 
+    public static bool DiscreteBlocksRequireAnExplicitRamp()
+    {
+        WorldMap map = CreateFlatWorld();
+        map.EnableDiscreteBlockTerrain();
+
+        int wallX = map.TileWidth / 2;
+        int centerY = map.TileHeight / 2;
+        for (int y = 1; y < map.TileHeight - 1; y++)
+            map.SetBlockStack(wallX, y, 2, 2);
+
+        map.SetBlockTransition(
+            wallX - 1,
+            centerY,
+            BlockTransitionType.Ramp,
+            BlockDirection.East);
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(5.5f, centerY + 0.5f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+        UnitNavigationSystem navigation = simulation.Navigation;
+        navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
+
+        bool rampIsReachable = navigation.CanMoveDirectly(
+            simulation.Units,
+            id.Index,
+            map,
+            new Vector2(5.5f, centerY + 0.5f),
+            new Vector2(map.TileWidth - 5.5f, centerY + 0.5f));
+        bool unsupportedStepIsBlocked = !navigation.CanMoveDirectly(
+            simulation.Units,
+            id.Index,
+            map,
+            new Vector2(5.5f, centerY + 8.5f),
+            new Vector2(map.TileWidth - 5.5f, centerY + 8.5f));
+
+        return rampIsReachable && unsupportedStepIsBlocked;
+    }
+
     public static bool FollowsRouteAroundWallWithoutCrossingIt()
     {
         WorldMap map = CreateFlatWorld();

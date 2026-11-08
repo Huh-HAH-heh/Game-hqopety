@@ -1011,6 +1011,9 @@ public sealed class UnitNavigationSystem
 
     private static float SampleSurfaceHeight(WorldMap worldMap, float x, float y)
     {
+        if (worldMap.UsesDiscreteBlockTerrain)
+            return worldMap.GetSurfaceHeightAt(x, y);
+
         int x0 = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
         int y0 = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
         int x1 = Math.Min(x0 + 1, worldMap.MaxTileX);
@@ -1932,10 +1935,29 @@ public sealed class UnitNavigationSystem
 
         float currentHeight = _navigationHeights[x + y * _width];
         float nextHeight = _navigationHeights[nx + ny * _width];
-        if (!IsSlopePassable(
-                MathF.Abs(nextHeight - currentHeight),
-                dx,
-                dy))
+        float heightDifference = MathF.Abs(nextHeight - currentHeight);
+        if (worldMap.UsesDiscreteBlockTerrain)
+        {
+            int fromWorldX = ToWorldTile(x);
+            int fromWorldY = ToWorldTile(y);
+            int toWorldX = ToWorldTile(nx);
+            int toWorldY = ToWorldTile(ny);
+
+            if (fromWorldX == toWorldX && fromWorldY == toWorldY)
+            {
+                if (!worldMap.Blocks.IsTransitionCell(fromWorldX, fromWorldY) &&
+                    heightDifference > 0.0001f)
+                {
+                    return false;
+                }
+            }
+            else if (!worldMap.Blocks.CanTraverse(
+                         fromWorldX, fromWorldY, toWorldX, toWorldY))
+            {
+                return false;
+            }
+        }
+        else if (!IsSlopePassable(heightDifference, dx, dy))
         {
             return false;
         }
@@ -1978,9 +2000,16 @@ public sealed class UnitNavigationSystem
                 float allowedHeightDifference = MathF.Min(
                     MaxStepHeight,
                     horizontalDistance * MaxTerrainSlopeGrade);
+                float heightDifference = MathF.Abs(
+                    _navigationHeights[index] - centerHeight);
+                bool transitionFootprint = worldMap.UsesDiscreteBlockTerrain &&
+                    (worldMap.Blocks.IsTransitionCell(
+                         x / NavigationCellsPerMeter,
+                         y / NavigationCellsPerMeter) ||
+                     worldMap.Blocks.IsTransitionCell(cellX, cellY));
                 if (!_navigationPassable[index] ||
-                    MathF.Abs(_navigationHeights[index] - centerHeight) >
-                        allowedHeightDifference + 0.0001f)
+                    (!transitionFootprint &&
+                     heightDifference > allowedHeightDifference + 0.0001f))
                 {
                     return false;
                 }
@@ -2008,10 +2037,12 @@ public sealed class UnitNavigationSystem
         if (!IsSurface(worldMap, x, y) || !IsSurface(worldMap, nx, ny))
             return false;
 
-        return IsSlopePassable(
-            MathF.Abs(
-                _navigationHeights[x + y * _width] -
-                _navigationHeights[nx + ny * _width]),
+        return CanStepCell(
+            worldMap,
+            x,
+            y,
+            nx,
+            ny,
             nx - x,
             ny - y);
     }
@@ -2391,31 +2422,26 @@ public sealed class UnitNavigationSystem
                 if (!_navigationPassable[cell])
                     continue;
 
-                float height = _navigationHeights[cell];
                 byte mask = 0;
 
                 if (x + 1 < _width &&
                     _navigationPassable[cell + 1] &&
-                    IsSlopePassable(
-                        MathF.Abs(height - _navigationHeights[cell + 1]), 1, 0))
+                    CanStepCell(worldMap, x, y, x + 1, y, 1, 0))
                     mask |= 1 << 0;
 
                 if (x > 0 &&
                     _navigationPassable[cell - 1] &&
-                    IsSlopePassable(
-                        MathF.Abs(height - _navigationHeights[cell - 1]), -1, 0))
+                    CanStepCell(worldMap, x, y, x - 1, y, -1, 0))
                     mask |= 1 << 1;
 
                 if (y + 1 < _height &&
                     _navigationPassable[cell + _width] &&
-                    IsSlopePassable(
-                        MathF.Abs(height - _navigationHeights[cell + _width]), 0, 1))
+                    CanStepCell(worldMap, x, y, x, y + 1, 0, 1))
                     mask |= 1 << 2;
 
                 if (y > 0 &&
                     _navigationPassable[cell - _width] &&
-                    IsSlopePassable(
-                        MathF.Abs(height - _navigationHeights[cell - _width]), 0, -1))
+                    CanStepCell(worldMap, x, y, x, y - 1, 0, -1))
                     mask |= 1 << 3;
 
                 _navigationNeighbors[cell] = mask;
@@ -2431,7 +2457,6 @@ public sealed class UnitNavigationSystem
             for (int x = 0; x < _width; x++)
             {
                 int cell = row + x;
-                float height = _navigationHeights[cell];
                 byte mask = _navigationNeighbors[cell];
                 if (!_navigationPassable[cell])
                     continue;
@@ -2441,8 +2466,7 @@ public sealed class UnitNavigationSystem
                     (mask & (1 << 2)) != 0 &&
                     (_navigationNeighbors[cell + 1] & (1 << 2)) != 0 &&
                     (_navigationNeighbors[cell + _width] & (1 << 0)) != 0 &&
-                    IsSlopePassable(
-                        MathF.Abs(height - _navigationHeights[cell + _width + 1]), 1, 1))
+                    CanStepCell(worldMap, x, y, x + 1, y + 1, 1, 1))
                     mask |= 1 << 4;
 
                 if (x + 1 < _width && y > 0 &&
@@ -2450,8 +2474,7 @@ public sealed class UnitNavigationSystem
                     (mask & (1 << 3)) != 0 &&
                     (_navigationNeighbors[cell + 1] & (1 << 3)) != 0 &&
                     (_navigationNeighbors[cell - _width] & (1 << 0)) != 0 &&
-                    IsSlopePassable(
-                        MathF.Abs(height - _navigationHeights[cell - _width + 1]), 1, -1))
+                    CanStepCell(worldMap, x, y, x + 1, y - 1, 1, -1))
                     mask |= 1 << 5;
 
                 if (x > 0 && y + 1 < _height &&
@@ -2459,8 +2482,7 @@ public sealed class UnitNavigationSystem
                     (mask & (1 << 2)) != 0 &&
                     (_navigationNeighbors[cell - 1] & (1 << 2)) != 0 &&
                     (_navigationNeighbors[cell + _width] & (1 << 1)) != 0 &&
-                    IsSlopePassable(
-                        MathF.Abs(height - _navigationHeights[cell + _width - 1]), -1, 1))
+                    CanStepCell(worldMap, x, y, x - 1, y + 1, -1, 1))
                     mask |= 1 << 6;
 
                 if (x > 0 && y > 0 &&
@@ -2468,8 +2490,7 @@ public sealed class UnitNavigationSystem
                     (mask & (1 << 3)) != 0 &&
                     (_navigationNeighbors[cell - 1] & (1 << 3)) != 0 &&
                     (_navigationNeighbors[cell - _width] & (1 << 1)) != 0 &&
-                    IsSlopePassable(
-                        MathF.Abs(height - _navigationHeights[cell - _width - 1]), -1, -1))
+                    CanStepCell(worldMap, x, y, x - 1, y - 1, -1, -1))
                     mask |= 1 << 7;
 
                 _navigationNeighbors[cell] = mask;

@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using Core.Map;
 using Core.Unit;
+using World;
 
 namespace RimClone.Render;
 
@@ -166,6 +167,9 @@ public sealed class MovementTestScene
                 worldMap.SetSolidHeight(x, y, heightUnits, material);
             }
         }
+
+        worldMap.EnableDiscreteBlockTerrain();
+        WorldGenerator.GenerateTraversalBlocks(worldMap);
 
         // The core course now fades into the pre-existing world terrain.
         // There is no invisible navigation boundary at the old rectangular edge.

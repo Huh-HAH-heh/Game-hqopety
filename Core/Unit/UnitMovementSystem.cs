@@ -1076,6 +1076,9 @@ public sealed class UnitMovementSystem
         float y,
         float maximumAcceleration)
     {
+        if (worldMap.UsesDiscreteBlockTerrain)
+            return Vector2.Zero;
+
         float offset = UnitNavigationSystem.NavigationCellSize;
         float leftX = Math.Clamp(x - offset, 0f, worldMap.MaxTileX);
         float rightX = Math.Clamp(x + offset, 0f, worldMap.MaxTileX);
@@ -1111,6 +1114,9 @@ public sealed class UnitMovementSystem
 
     private static float SampleSurfaceZ(WorldMap worldMap, float x, float y)
     {
+        if (worldMap.UsesDiscreteBlockTerrain)
+            return worldMap.GetSurfaceHeightAt(x, y);
+
         int x0 = Math.Clamp((int)MathF.Floor(x), 0, worldMap.MaxTileX);
         int y0 = Math.Clamp((int)MathF.Floor(y), 0, worldMap.MaxTileY);
         int x1 = Math.Min(x0 + 1, worldMap.MaxTileX);
