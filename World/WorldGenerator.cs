@@ -70,21 +70,12 @@ public static class WorldGenerator
                     }
                 }
 
-                if (bestDifference < 1 || bestDifference > 3)
+                // A one-metre step is traversable only when this lower tile
+                // explicitly contains a ramp. Larger cliffs remain solid walls.
+                if (bestDifference != 1)
                     continue;
 
-                int hash = unchecked(x * 73856093 ^ y * 19349663);
-                int roll = (hash & 0x7fffffff) % 9;
-                if ((bestDifference == 1 && roll > 2) ||
-                    (bestDifference > 1 && roll != 0))
-                {
-                    continue;
-                }
-
-                BlockTransitionType type = bestDifference == 1 && roll != 0
-                    ? BlockTransitionType.Ramp
-                    : BlockTransitionType.Stairs;
-                worldMap.SetBlockTransition(x, y, type, bestDirection);
+                worldMap.SetRamp(x, y, bestDirection);
             }
         }
     }
