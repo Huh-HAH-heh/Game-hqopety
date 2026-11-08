@@ -95,7 +95,7 @@ public sealed class MapRenderSystem : IDisposable
     public int DisplayedMaxLayer => Math.Max(0, _displayedMaxLayer);
     public int DisplayedLodStep => _displayedLodStep;
     public int PendingTerrainChunkCount => _pendingTerrainChunks.Count;
-    public int TerrainChunksBuiltLastFrame { get; private set; };
+    public int TerrainChunksBuiltLastFrame { get; private set; }
 
 
     private const string TerrainVertexShaderSource =
