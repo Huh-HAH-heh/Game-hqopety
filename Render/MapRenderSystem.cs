@@ -85,6 +85,12 @@ public sealed class MapRenderSystem : IDisposable
 
     private int _displayedMaxLayer = -1;
     private int _displayedLodStep = 1;
+    private int _stableMaxLayer = -1;
+    private int _stableLodStep = 1;
+    private int _fallbackMaxLayer = -1;
+    private int _fallbackLodStep = 1;
+    private int _transitionTargetMaxLayer = -1;
+    private int _transitionTargetLodStep = -1;
 
     public int DisplayedMaxLayer => Math.Max(0, _displayedMaxLayer);
     public int DisplayedLodStep => _displayedLodStep;
@@ -449,6 +455,15 @@ void main()
         int geometryMaxLayer = visibleMaxLayer;
 
         _frameNumber++;
+        if (_transitionTargetMaxLayer != visibleMaxLayer ||
+            _transitionTargetLodStep != lodStep)
+        {
+            _transitionTargetMaxLayer = visibleMaxLayer;
+            _transitionTargetLodStep = lodStep;
+            _fallbackMaxLayer = _stableMaxLayer;
+            _fallbackLodStep = _stableLodStep;
+        }
+
         _visibleTerrainChunks.Clear();
         _fallbackTerrainChunks.Clear();
         _terrainVertexCount = 0;
@@ -547,12 +562,13 @@ void main()
             int regionIndex = pending.RegionIndex;
             TerrainChunkMesh? fallback = null;
 
-            if (!_terrainChunks.TryGetValue(
-                    new TerrainChunkKey(regionIndex, lodStep, _displayedMaxLayer),
+            if (_fallbackMaxLayer < 0 ||
+                (!_terrainChunks.TryGetValue(
+                    new TerrainChunkKey(regionIndex, lodStep, _fallbackMaxLayer),
                     out fallback) &&
-                !_terrainChunks.TryGetValue(
-                    new TerrainChunkKey(regionIndex, _displayedLodStep, _displayedMaxLayer),
-                    out fallback))
+                 !_terrainChunks.TryGetValue(
+                    new TerrainChunkKey(regionIndex, _fallbackLodStep, _fallbackMaxLayer),
+                    out fallback)))
                 continue;
 
             fallback.LastUsedFrame = _frameNumber;
@@ -565,6 +581,14 @@ void main()
 
         _displayedMaxLayer = visibleMaxLayer;
         _displayedLodStep = lodStep;
+        if (_pendingTerrainChunks.Count == 0)
+        {
+            _stableMaxLayer = visibleMaxLayer;
+            _stableLodStep = lodStep;
+            _fallbackMaxLayer = -1;
+            _transitionTargetMaxLayer = -1;
+            _transitionTargetLodStep = -1;
+        }
 
         RenderStates terrainStates = RenderStates.Default;
 
@@ -892,6 +916,12 @@ void main()
         _pendingTerrainChunks.Clear();
         _displayedMaxLayer = -1;
         _displayedLodStep = 1;
+        _stableMaxLayer = -1;
+        _stableLodStep = 1;
+        _fallbackMaxLayer = -1;
+        _fallbackLodStep = 1;
+        _transitionTargetMaxLayer = -1;
+        _transitionTargetLodStep = -1;
         _cachedTerrainVertexCount = 0;
         _terrainVertexCount = 0;
         _buildingTerrainVertexCount = 0;
