@@ -241,7 +241,10 @@ public sealed class GameRenderer
         _worldMap =
             worldMap;
 
-        _visibleMaxLayer = _worldMap.LayerCount - 1;
+        _visibleMaxLayer = Math.Clamp(
+            _worldMap.GetHighestOccupiedLayer() + 1,
+            0,
+            _worldMap.LayerCount - 1);
 
         _camera =
             new GameCamera(
@@ -798,8 +801,7 @@ public sealed class GameRenderer
                 _showHearingDebug,
                 _showAttackLinks,
                 _showSuppressionDebug,
-                _showMemoryDebug,
-                _visibleMaxLayer);
+                _showMemoryDebug);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -3300,7 +3302,7 @@ public sealed class GameRenderer
                 if (shiftHeld)
                 {
                     int layerSteps = Math.Max(
-                        1, (int)MathF.Round(MathF.Abs(e.Delta))) * 10;
+                        1, (int)MathF.Round(MathF.Abs(e.Delta))) * 5;
                     int direction = e.Delta > 0f ? 1 : -1;
                     _visibleMaxLayer = Math.Clamp(
                         _visibleMaxLayer + direction * layerSteps,
@@ -4516,7 +4518,10 @@ public sealed class GameRenderer
                 _showTerrainExtrema = false;
                 _showHeightContours = true;
                 _showContourLabels = true;
-                _visibleMaxLayer = _worldMap.LayerCount - 1;
+                _visibleMaxLayer = Math.Clamp(
+            _worldMap.GetHighestOccupiedLayer() + 1,
+            0,
+            _worldMap.LayerCount - 1);
                 break;
         }
     }
@@ -4613,7 +4618,10 @@ public sealed class GameRenderer
         WorldGenerator.Generate(_worldMap);
         ClearTestNavigationBlockers();
         _mapRenderer.ResetVisualSettings();
-        _visibleMaxLayer = _worldMap.LayerCount - 1;
+        _visibleMaxLayer = Math.Clamp(
+            _worldMap.GetHighestOccupiedLayer() + 1,
+            0,
+            _worldMap.LayerCount - 1);
         _showDebugGrid = false;
         _showTerrainExtrema = false;
         _showHeightContours = true;
