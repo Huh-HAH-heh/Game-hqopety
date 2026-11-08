@@ -16,7 +16,7 @@ public sealed class MapRenderSystem : IDisposable
         int RegionY,
         int RegionIndex);
 
-    private const int MaxTerrainChunksBuiltPerFrame = 4;
+    private const int MaxTerrainChunksBuiltPerFrame = 8;
 
     // Retain nearby chunks for smooth camera movement without accumulating
     // every GPU mesh ever visited. The currently visible set is always retained.
@@ -74,13 +74,8 @@ public sealed class MapRenderSystem : IDisposable
     private long _chunkCacheTerrainVersion = long.MinValue;
     private float _chunkCacheTilePixelSize = -1f;
 
-    private const double ViewChangeSettleMilliseconds = 180d;
     private int _displayedMaxLayer = -1;
     private int _displayedLodStep = 1;
-    private int _requestedMaxLayer = -1;
-    private int _requestedLodStep = -1;
-    private long _viewRequestChangedAt;
-    private int _minimumChunkCacheRetention;
 
     public int DisplayedMaxLayer => Math.Max(0, _displayedMaxLayer);
     public int DisplayedLodStep => _displayedLodStep;
@@ -307,9 +302,6 @@ void main()
                 ? 2
                 : 1;
 
-        // Terrain/viewport changes are settled before selecting a new slice or LOD.
-        // During wheel input the old cached mesh remains on screen; only the final
-        // requested state starts building after a short quiet period.
         if (_chunkCacheTerrainVersion != worldMap.TerrainVersion ||
             MathF.Abs(_chunkCacheTilePixelSize - tilePixelSize) > 0.001f)
         {
@@ -318,31 +310,9 @@ void main()
             _chunkCacheTilePixelSize = tilePixelSize;
         }
 
-        long now = Stopwatch.GetTimestamp();
-        if (_requestedMaxLayer != requestedMaxLayer ||
-            _requestedLodStep != requestedLodStep)
-        {
-            _requestedMaxLayer = requestedMaxLayer;
-            _requestedLodStep = requestedLodStep;
-            _viewRequestChangedAt = now;
-        }
-
-        bool viewChangeSettled =
-            _displayedMaxLayer < 0 ||
-            Stopwatch.GetElapsedTime(_viewRequestChangedAt, now).TotalMilliseconds >=
-                ViewChangeSettleMilliseconds;
-        int maxLayer = viewChangeSettled
-            ? requestedMaxLayer
-            : _displayedMaxLayer;
-        int lodStep = viewChangeSettled
-            ? requestedLodStep
-            : _displayedLodStep;
-
-        if (_displayedMaxLayer < 0)
-        {
-            _displayedMaxLayer = maxLayer;
-            _displayedLodStep = lodStep;
-        }
+        // Select the requested Z slice and LOD immediately.
+        int maxLayer = requestedMaxLayer;
+        int lodStep = requestedLodStep;
 
         int minTileX =
             Math.Max(
@@ -502,6 +472,7 @@ void main()
 
         _frameNumber++;
         _visibleTerrainChunks.Clear();
+        _fallbackTerrainChunks.Clear();
         _terrainVertexCount = 0;
 
         if (maxTileX < minTileX || maxTileY < minTileY)
@@ -557,14 +528,15 @@ void main()
             ((minTileY + maxTileY) / 2) / TerrainRegion.TilesPerSide;
         _pendingTerrainChunks.Sort(ComparePendingTerrainChunks);
 
-        int buildCount = Math.Min(
+        int maximumBuilds = Math.Min(
             MaxTerrainChunksBuiltPerFrame,
             _pendingTerrainChunks.Count);
+        int buildCount = 0;
+        long buildStarted = Stopwatch.GetTimestamp();
 
-        for (int i = 0; i < buildCount; i++)
+        for (int i = 0; i < maximumBuilds; i++)
         {
             PendingTerrainChunk pending = _pendingTerrainChunks[i];
-
             TerrainChunkMesh mesh = BuildTerrainChunk(
                 worldMap,
                 pending.RegionX,
@@ -577,59 +549,44 @@ void main()
                 new TerrainChunkKey(pending.RegionIndex, lodStep, visibleMaxLayer),
                 mesh);
             _cachedTerrainVertexCount += mesh.VertexCount;
-
             mesh.LastUsedFrame = _frameNumber;
             _visibleTerrainChunks.Add(mesh);
             _terrainVertexCount += mesh.VertexCount;
+            buildCount++;
+
+            if (Stopwatch.GetElapsedTime(buildStarted).TotalMilliseconds >= 3.0)
+                break;
         }
 
-        int targetChunkCount =
-            _visibleTerrainChunks.Count + _pendingTerrainChunks.Count;
-        bool targetLayerReady = _pendingTerrainChunks.Count <= buildCount;
-        if (targetLayerReady)
-        {
-            _minimumChunkCacheRetention = 0;
-            _displayedMaxLayer = visibleMaxLayer;
-            _displayedLodStep = lodStep;
-        }
-        else if (_displayedMaxLayer != visibleMaxLayer ||
-                 _displayedLodStep != lodStep)
-        {
-            _fallbackTerrainChunks.Clear();
-            _terrainVertexCount = 0;
-            for (int regionY = minRegionY; regionY <= maxRegionY; regionY++)
-            {
-                for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
-                {
-                    int regionIndex = regionX + regionY * worldMap.RegionsX;
-                    TerrainChunkKey fallbackKey = new(
-                        regionIndex, _displayedLodStep, _displayedMaxLayer);
-                    if (!_terrainChunks.TryGetValue(fallbackKey, out TerrainChunkMesh? fallback))
-                        continue;
-                    fallback.LastUsedFrame = _frameNumber;
-                    _fallbackTerrainChunks.Add(fallback);
-                    _terrainVertexCount += fallback.VertexCount;
-                }
-            }
+        // Built target chunks are displayed immediately; only missing regions
+        // borrow a matching chunk from the previous layer/LOD.
+        if (buildCount > 0)
+            _pendingTerrainChunks.RemoveRange(0, buildCount);
 
-            // If a previous complete layer is still cached, display it while the
-            // requested layer warms up. Otherwise use the partial target to avoid blank terrain.
-            if (_fallbackTerrainChunks.Count > 0)
-            {
-                _visibleTerrainChunks.Clear();
-                _visibleTerrainChunks.AddRange(_fallbackTerrainChunks);
-                _minimumChunkCacheRetention =
-                    targetChunkCount + _fallbackTerrainChunks.Count +
-                    TerrainChunkCacheReserve;
-            }
-            else
-            {
-                _minimumChunkCacheRetention =
-                    targetChunkCount + TerrainChunkCacheReserve;
-                _displayedMaxLayer = visibleMaxLayer;
-                _displayedLodStep = lodStep;
-            }
+        for (int i = 0; i < _pendingTerrainChunks.Count; i++)
+        {
+            PendingTerrainChunk pending = _pendingTerrainChunks[i];
+            int regionIndex = pending.RegionIndex;
+            TerrainChunkMesh? fallback = null;
+
+            if (!_terrainChunks.TryGetValue(
+                    new TerrainChunkKey(regionIndex, lodStep, _displayedMaxLayer),
+                    out fallback) &&
+                !_terrainChunks.TryGetValue(
+                    new TerrainChunkKey(regionIndex, _displayedLodStep, _displayedMaxLayer),
+                    out fallback))
+                continue;
+
+            fallback.LastUsedFrame = _frameNumber;
+            _fallbackTerrainChunks.Add(fallback);
         }
+
+        _visibleTerrainChunks.AddRange(_fallbackTerrainChunks);
+        for (int i = 0; i < _fallbackTerrainChunks.Count; i++)
+            _terrainVertexCount += _fallbackTerrainChunks[i].VertexCount;
+
+        _displayedMaxLayer = visibleMaxLayer;
+        _displayedLodStep = lodStep;
 
         RenderStates terrainStates = RenderStates.Default;
 
@@ -661,9 +618,7 @@ void main()
         // camera pans cache-hot while stale native VertexBuffers are disposed.
         int maxRetained = Math.Max(
             MaxCachedTerrainChunks,
-            Math.Max(
-                _minimumChunkCacheRetention,
-                _visibleTerrainChunks.Count + TerrainChunkCacheReserve));
+            _visibleTerrainChunks.Count + TerrainChunkCacheReserve);
 
         while (_terrainChunks.Count > maxRetained)
         {
@@ -944,10 +899,6 @@ void main()
         _pendingTerrainChunks.Clear();
         _displayedMaxLayer = -1;
         _displayedLodStep = 1;
-        _requestedMaxLayer = -1;
-        _requestedLodStep = -1;
-        _viewRequestChangedAt = 0;
-        _minimumChunkCacheRetention = 0;
         ClearSliceOverlayCache();
         _cachedTerrainVertexCount = 0;
         _terrainVertexCount = 0;
