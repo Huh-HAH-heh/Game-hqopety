@@ -356,6 +356,21 @@ void main()
         minTileX = (minTileX / lodStep) * lodStep;
         minTileY = (minTileY / lodStep) * lodStep;
 
+        DrawTerrainChunks(
+            window,
+            worldMap,
+            minTileX,
+            maxTileX,
+            minTileY,
+            maxTileY,
+            lodStep,
+            tilePixelSize,
+            maxLayer);
+
+        // Auxiliary terrain layers must follow the mesh that is actually visible.
+        maxLayer = DisplayedMaxLayer;
+        lodStep = DisplayedLodStep;
+
         bool mapCacheMatches =
             _mapCacheValid &&
             _cachedMinTileX == minTileX &&
@@ -433,17 +448,6 @@ void main()
             _cachedVisibleMaxLayer = maxLayer;
             _cachedTerrainVersion = worldMap.TerrainVersion;
         }
-
-        DrawTerrainChunks(
-            window,
-            worldMap,
-            minTileX,
-            maxTileX,
-            minTileY,
-            maxTileY,
-            lodStep,
-            tilePixelSize,
-            maxLayer);
 
         UpdateSliceOverlays(
             worldMap, minTileX, maxTileX, minTileY, maxTileY,
