@@ -71,6 +71,9 @@ public sealed class UnitRenderSystem : IDisposable
         new VertexArray(
             PrimitiveType.Lines);
 
+    private readonly VertexArray _occludedUnitHatch =
+        new VertexArray(PrimitiveType.Lines);
+
     public void Draw(
         RenderWindow window,
         UnitSimulation simulation,
@@ -86,10 +89,14 @@ public sealed class UnitRenderSystem : IDisposable
         bool showHearingDebug = false,
         bool showAttackLinks = true,
         bool showSuppressionDebug = false,
-        bool showMemoryDebug = false)
+        bool showMemoryDebug = false,
+        int visibleMaxLayer = int.MaxValue)
     {
         if (tilePixelSize <= 0f)
             return;
+
+        int cutLayer = Math.Clamp(visibleMaxLayer, 0, worldMap.LayerCount - 1);
+        float cutHeight = (cutLayer + 1) * WorldMap.LayerHeightUnits * 0.1f;
 
         float screenScale =
             MathF.Max(
@@ -114,6 +121,7 @@ public sealed class UnitRenderSystem : IDisposable
         _soundDebug.Clear();
         _memoryDebug.Clear();
         _suppressionDebug.Clear();
+        _occludedUnitHatch.Clear();
 
         Vector2f center =
             cameraView.Center;
@@ -235,8 +243,9 @@ public sealed class UnitRenderSystem : IDisposable
                 unitPosition.Y >= minWorldY &&
                 unitPosition.Y <= maxWorldY;
 
-            // Only the gameplay collider contributes to the world-space footprint.
-            if (!rootVisible)
+            // The slice hides units above its plane. Solid material between a
+            // lower unit and the cut is shown as an X-ray faction hatch.
+            if (!rootVisible || unitPosition.Z > cutHeight + 0.001f)
                 continue;
 
             float screenX = unitPosition.X * tilePixelSize;
@@ -248,6 +257,23 @@ public sealed class UnitRenderSystem : IDisposable
                 lengths[unitIndex],
                 tilePixelSize,
                 screenScale);
+
+            int unitTileX = (int)MathF.Floor(unitPosition.X);
+            int unitTileY = (int)MathF.Floor(unitPosition.Y);
+            int unitLayer = (int)MathF.Ceiling(
+                unitPosition.Z / (WorldMap.LayerHeightUnits * 0.1f));
+            if (worldMap.IsColumnSolidBetween(
+                    unitTileX, unitTileY, unitLayer, cutLayer))
+            {
+                AppendOccludedUnitMarker(
+                    _bodyOutlines,
+                    _occludedUnitHatch,
+                    screenX,
+                    screenY,
+                    markerRadius,
+                    units.FactionTag[unitIndex]);
+                continue;
+            }
 
             int renderedParts = 0;
             if (showRigDetails)
@@ -385,6 +411,9 @@ public sealed class UnitRenderSystem : IDisposable
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
 
+        if (_occludedUnitHatch.VertexCount > 0)
+            window.Draw(_occludedUnitHatch);
+
         if (_statusIcons.VertexCount > 0)
             window.Draw(_statusIcons);
 
@@ -422,6 +451,8 @@ public sealed class UnitRenderSystem : IDisposable
 public void DrawSnapshot(
         RenderWindow window,
         SimulationFrameSnapshot snapshot,
+        WorldMap worldMap,
+        int visibleMaxLayer,
         View cameraView,
         float tilePixelSize,
         int selectedUnitIndex,
@@ -436,6 +467,9 @@ public void DrawSnapshot(
     {
         if (tilePixelSize <= 0f)
             return;
+
+        int cutLayer = Math.Clamp(visibleMaxLayer, 0, worldMap.LayerCount - 1);
+        float cutHeight = (cutLayer + 1) * WorldMap.LayerHeightUnits * 0.1f;
 
         float screenScale = MathF.Max(
             0.001f,
@@ -464,6 +498,7 @@ public void DrawSnapshot(
         _soundDebug.Clear();
         _memoryDebug.Clear();
         _suppressionDebug.Clear();
+        _occludedUnitHatch.Clear();
 
         RenderUnitState[] units = snapshot.Units;
         RenderBodyPart[] bodyParts = snapshot.BodyParts;
@@ -471,6 +506,9 @@ public void DrawSnapshot(
         {
             RenderUnitState unit = units[i];
             Vector3 position = unit.Position;
+            if (position.Z > cutHeight + 0.001f)
+                continue;
+
             float x = position.X * tilePixelSize;
             float y = position.Y * tilePixelSize;
             bool isSelected = selectedUnits != null
@@ -585,6 +623,23 @@ public void DrawSnapshot(
                 unit.Length,
                 tilePixelSize,
                 screenScale);
+
+            if (rootInView &&
+                worldMap.IsColumnSolidBetween(
+                    (int)MathF.Floor(position.X),
+                    (int)MathF.Floor(position.Y),
+                    (int)MathF.Ceiling(position.Z / (WorldMap.LayerHeightUnits * 0.1f)),
+                    cutLayer))
+            {
+                AppendOccludedUnitMarker(
+                    _bodyOutlines,
+                    _occludedUnitHatch,
+                    x,
+                    y,
+                    markerRadius,
+                    unit.FactionTag);
+                continue;
+            }
 
             int renderedParts = 0;
             if (showRigDetails)
@@ -781,6 +836,8 @@ public void DrawSnapshot(
             window.Draw(_vertices);
         if (_bodyOutlines.VertexCount > 0)
             window.Draw(_bodyOutlines);
+        if (_occludedUnitHatch.VertexCount > 0)
+            window.Draw(_occludedUnitHatch);
         if (_statusIcons.VertexCount > 0)
             window.Draw(_statusIcons);
         if (_selection.VertexCount > 0)
@@ -2933,6 +2990,41 @@ private static void AppendSuppressionDebug(
                     x1,
                     y1),
                 color));
+    }
+
+    private static void AppendOccludedUnitMarker(
+        VertexArray outline,
+        VertexArray hatch,
+        float centerX,
+        float centerY,
+        float radius,
+        ushort factionTag)
+    {
+        Color accent = GetFactionAccent(factionTag);
+        Color outlineColor = new Color(accent.R, accent.G, accent.B, 245);
+        Color hatchColor = new Color(accent.R, accent.G, accent.B, 205);
+        radius = MathF.Max(2f, radius * 0.72f);
+        AppendCircleOutline(outline, centerX, centerY, radius, outlineColor, 16);
+
+        const float inverseSqrtTwo = 0.70710678f;
+        float spacing = MathF.Max(2.5f, radius * 0.34f);
+        for (float offset = -radius * 0.82f;
+             offset <= radius * 0.82f;
+             offset += spacing)
+        {
+            float halfLength = MathF.Sqrt(MathF.Max(0f, radius * radius - offset * offset));
+            float normalX = offset * inverseSqrtTwo;
+            float normalY = offset * inverseSqrtTwo;
+            float alongX = halfLength * inverseSqrtTwo;
+            float alongY = halfLength * inverseSqrtTwo;
+            AppendDebugLine(
+                hatch,
+                centerX + normalX - alongX,
+                centerY + normalY + alongY,
+                centerX + normalX + alongX,
+                centerY + normalY - alongY,
+                hatchColor);
+        }
     }
 
     private static void AppendCircleOutline(
