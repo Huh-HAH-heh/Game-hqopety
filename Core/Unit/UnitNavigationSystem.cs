@@ -2415,6 +2415,7 @@ public sealed class UnitNavigationSystem
             for (int x = 0; x < _width; x++)
             {
                 int cell = row + x;
+                float height = _navigationHeights[cell];
                 byte mask = _navigationNeighbors[cell];
                 if (!_navigationPassable[cell])
                     continue;
