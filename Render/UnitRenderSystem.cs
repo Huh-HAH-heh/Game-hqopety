@@ -270,8 +270,8 @@ public sealed class UnitRenderSystem : IDisposable
                 continue;
             }
 
-            int fillVerticesBeforeRig = _vertices.VertexCount;
-            int outlineVerticesBeforeRig = _bodyOutlines.VertexCount;
+            uint fillVerticesBeforeRig = _vertices.VertexCount;
+            uint outlineVerticesBeforeRig = _bodyOutlines.VertexCount;
             if (showRigDetails)
             {
                 UnitHitRegionProfile? hitProfile =
@@ -634,8 +634,8 @@ public void DrawSnapshot(
                 continue;
             }
 
-            int fillVerticesBeforeRig = _vertices.VertexCount;
-            int outlineVerticesBeforeRig = _bodyOutlines.VertexCount;
+            uint fillVerticesBeforeRig = _vertices.VertexCount;
+            uint outlineVerticesBeforeRig = _bodyOutlines.VertexCount;
             if (showRigDetails)
             {
                 if (unit.Type == UnitType.Colonist &&
