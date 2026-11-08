@@ -363,15 +363,20 @@ void main()
             tilePixelSize,
             maxLayer);
 
-        DrawBlockTransitions(
-            window,
-            worldMap,
-            minTileX,
-            maxTileX,
-            minTileY,
-            maxTileY,
-            tilePixelSize,
-            DisplayedMaxLayer);
+        // Discrete ramps are rendered as sloped block surfaces in the terrain
+        // mesh. The old arrow/line overlay was only a debug marker.
+        if (!worldMap.UsesDiscreteBlockTerrain)
+        {
+            DrawBlockTransitions(
+                window,
+                worldMap,
+                minTileX,
+                maxTileX,
+                minTileY,
+                maxTileY,
+                tilePixelSize,
+                DisplayedMaxLayer);
+        }
 
         // Auxiliary terrain layers must follow the mesh that is actually visible.
         maxLayer = DisplayedMaxLayer;
@@ -801,6 +806,18 @@ void main()
         int visibleMaxLayer,
         bool buildSliceOverlay)
     {
+        if (worldMap.UsesDiscreteBlockTerrain)
+        {
+            return BuildDiscreteBlockTerrainChunk(
+                worldMap,
+                regionX,
+                regionY,
+                lodStep,
+                tilePixelSize,
+                visibleMaxLayer,
+                buildSliceOverlay);
+        }
+
         _buildingTerrainVertexCount = 0;
 
         int minTileX = regionX * TerrainRegion.TilesPerSide;
@@ -898,6 +915,197 @@ void main()
                 mesh, worldMap,
                 minTileX, maxTileX, minTileY, maxTileY,
                 lodStep, tilePixelSize, visibleMaxLayer);
+        }
+
+        TerrainMeshRebuildCount++;
+        return mesh;
+    }
+
+    private TerrainChunkMesh BuildDiscreteBlockTerrainChunk(
+        WorldMap worldMap,
+        int regionX,
+        int regionY,
+        int lodStep,
+        float tilePixelSize,
+        int visibleMaxLayer,
+        bool buildSliceOverlay)
+    {
+        _buildingTerrainVertexCount = 0;
+
+        int minTileX = regionX * TerrainRegion.TilesPerSide;
+        int maxTileX = Math.Min(
+            worldMap.MaxTileX,
+            minTileX + TerrainRegion.TilesPerSide - 1);
+        int minTileY = regionY * TerrainRegion.TilesPerSide;
+        int maxTileY = Math.Min(
+            worldMap.MaxTileY,
+            minTileY + TerrainRegion.TilesPerSide - 1);
+
+        int columnCount = (maxTileX - minTileX) / lodStep + 1;
+        int rowCount = (maxTileY - minTileY) / lodStep + 1;
+
+        // Pass 1: draw one hard, flat top per occupied block column.
+        // Ramps use different corner heights so their surface is visibly sloped.
+        for (int row = 0; row < rowCount; row++)
+        {
+            int y = minTileY + row * lodStep;
+            for (int column = 0; column < columnCount; column++)
+            {
+                int x = minTileX + column * lodStep;
+                int surfaceLayer = FindVisibleTopLayer(
+                    worldMap, x, y, visibleMaxLayer);
+                if (surfaceLayer < 0)
+                    continue;
+
+                float left = x * tilePixelSize;
+                float top = y * tilePixelSize;
+                float right = Math.Min(
+                    worldMap.TileWidth, x + lodStep) * tilePixelSize;
+                float bottom = Math.Min(
+                    worldMap.TileHeight, y + lodStep) * tilePixelSize;
+
+                float high = surfaceLayer + 1f;
+                float low = Math.Max(
+                    0f,
+                    high - WorldMap.HeightUnitsPerMeter);
+                float topLeft = high;
+                float topRight = high;
+                float bottomRight = high;
+                float bottomLeft = high;
+
+                if (worldMap.Blocks.GetTransitionType(x, y) ==
+                    BlockTransitionType.Ramp)
+                {
+                    switch (worldMap.Blocks.GetTransitionDirection(x, y))
+                    {
+                        case BlockDirection.North:
+                            bottomLeft = low;
+                            bottomRight = low;
+                            break;
+                        case BlockDirection.East:
+                            topLeft = low;
+                            bottomLeft = low;
+                            break;
+                        case BlockDirection.South:
+                            topLeft = low;
+                            topRight = low;
+                            break;
+                        case BlockDirection.West:
+                            topRight = low;
+                            bottomRight = low;
+                            break;
+                    }
+                }
+
+                AppendTerrainQuad(
+                    left, top, right, bottom,
+                    topLeft, topRight, bottomRight, bottomLeft,
+                    surfaceLayer);
+            }
+        }
+
+        // Pass 2: add filled side faces where one block column rises above
+        // its neighbour. These are faces, not contour/edge outlines.
+        for (int row = 0; row < rowCount; row++)
+        {
+            int y = minTileY + row * lodStep;
+            for (int column = 0; column < columnCount; column++)
+            {
+                int x = minTileX + column * lodStep;
+                int surfaceLayer = FindVisibleTopLayer(
+                    worldMap, x, y, visibleMaxLayer);
+                if (surfaceLayer < 0)
+                    continue;
+
+                float left = x * tilePixelSize;
+                float top = y * tilePixelSize;
+                float right = Math.Min(
+                    worldMap.TileWidth, x + lodStep) * tilePixelSize;
+                float bottom = Math.Min(
+                    worldMap.TileHeight, y + lodStep) * tilePixelSize;
+
+                for (int directionIndex = 0; directionIndex < 4; directionIndex++)
+                {
+                    BlockDirection direction = (BlockDirection)directionIndex;
+                    GetBlockDirectionDelta(direction, out int dx, out int dy);
+                    int neighbourX = x + dx * lodStep;
+                    int neighbourY = y + dy * lodStep;
+                    int neighbourLayer = FindVisibleTopLayer(
+                        worldMap, neighbourX, neighbourY, visibleMaxLayer);
+
+                    if (neighbourLayer >= surfaceLayer)
+                        continue;
+
+                    // A ramp joins these two surfaces; do not draw a vertical
+                    // wall over its upper edge.
+                    BlockTransitionType neighbourTransition =
+                        worldMap.Blocks.GetTransitionType(neighbourX, neighbourY);
+                    BlockDirection reverseDirection =
+                        (BlockDirection)(((int)direction + 2) & 3);
+                    if (neighbourTransition == BlockTransitionType.Ramp &&
+                        worldMap.Blocks.GetTransitionDirection(
+                            neighbourX, neighbourY) == reverseDirection)
+                    {
+                        continue;
+                    }
+
+                    float differenceMeters =
+                        (surfaceLayer - neighbourLayer) /
+                        (float)WorldMap.HeightUnitsPerMeter;
+                    float faceDepth = tilePixelSize * Math.Clamp(
+                        0.10f + differenceMeters * 0.08f,
+                        0.10f,
+                        0.42f);
+
+                    float faceLeft = left;
+                    float faceTop = top;
+                    float faceRight = right;
+                    float faceBottom = bottom;
+                    switch (direction)
+                    {
+                        case BlockDirection.North:
+                            faceBottom = Math.Min(bottom, top + faceDepth);
+                            break;
+                        case BlockDirection.East:
+                            faceLeft = Math.Max(left, right - faceDepth);
+                            break;
+                        case BlockDirection.South:
+                            faceTop = Math.Max(top, bottom - faceDepth);
+                            break;
+                        case BlockDirection.West:
+                            faceRight = Math.Min(right, left + faceDepth);
+                            break;
+                    }
+
+                    int faceLayer = Math.Max(
+                        0,
+                        surfaceLayer - Math.Min(
+                            surfaceLayer,
+                            WorldMap.HeightUnitsPerMeter));
+                    AppendTerrainQuad(
+                        faceLeft, faceTop, faceRight, faceBottom,
+                        faceLayer, faceLayer, faceLayer, faceLayer,
+                        faceLayer);
+                }
+            }
+        }
+
+        TerrainChunkMesh mesh = CreateTerrainChunkMesh(_buildingTerrainVertexCount);
+        mesh.RegionTerrainVersion =
+            worldMap.GetRegionTerrainVersion(regionX, regionY);
+
+        if (buildSliceOverlay)
+        {
+            BuildChunkSliceOverlay(
+                mesh,
+                worldMap,
+                minTileX,
+                maxTileX,
+                minTileY,
+                maxTileY,
+                lodStep,
+                tilePixelSize,
+                visibleMaxLayer);
         }
 
         TerrainMeshRebuildCount++;
