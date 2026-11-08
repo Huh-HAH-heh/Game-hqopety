@@ -275,7 +275,8 @@ public sealed class UnitRenderSystem : IDisposable
                 continue;
             }
 
-            int renderedParts = 0;
+            int fillVerticesBeforeRig = _vertices.VertexCount;
+            int outlineVerticesBeforeRig = _bodyOutlines.VertexCount;
             if (showRigDetails)
             {
                 UnitHitRegionProfile? hitProfile =
@@ -284,7 +285,7 @@ public sealed class UnitRenderSystem : IDisposable
                 if (units.Type[unitIndex] == UnitType.Colonist &&
                     hitProfile is UnitAnatomyProfile)
                 {
-                    renderedParts = AppendGameplayZones(
+                    AppendGameplayZones(
                         _vertices,
                         _bodyOutlines,
                         units,
@@ -296,7 +297,7 @@ public sealed class UnitRenderSystem : IDisposable
                 }
                 else
                 {
-                    renderedParts = AppendBodyParts(
+                    AppendBodyParts(
                         _vertices,
                         _bodyOutlines,
                         bodies,
@@ -312,10 +313,12 @@ public sealed class UnitRenderSystem : IDisposable
                 }
             }
 
-            // A marker is a substitute for the rig, never an overlay on it.
-            // Rig mode renders anatomy; marker-only mode renders this silhouette.
-            float markerOpacity = showUnitRig ? 0f : 1f;
-            if (markerOpacity > 0f)
+            // Keep the rig when it produced geometry; otherwise fall back to a
+            // stable silhouette so a unit with an empty or invalid rig never vanishes.
+            bool hasRenderedRig =
+                _vertices.VertexCount > fillVerticesBeforeRig ||
+                _bodyOutlines.VertexCount > outlineVerticesBeforeRig;
+            if (!hasRenderedRig)
             {
                 AppendLowDetailUnitMarker(
                     _vertices,
@@ -324,8 +327,7 @@ public sealed class UnitRenderSystem : IDisposable
                     markerRadius,
                     units.FactionTag[unitIndex],
                     isAlive,
-                    markerOpacity);
-
+                    1f);
             }
 
 
@@ -641,7 +643,8 @@ public void DrawSnapshot(
                 continue;
             }
 
-            int renderedParts = 0;
+            int fillVerticesBeforeRig = _vertices.VertexCount;
+            int outlineVerticesBeforeRig = _bodyOutlines.VertexCount;
             if (showRigDetails)
             {
                 if (unit.Type == UnitType.Colonist &&
@@ -668,12 +671,11 @@ public void DrawSnapshot(
                             isAlive,
                             tilePixelSize,
                             screenScale);
-                        renderedParts++;
                     }
                 }
                 else
                 {
-                    renderedParts = AppendBodyParts(
+                    AppendBodyParts(
                         _vertices,
                         _bodyOutlines,
                         bodyParts,
@@ -689,10 +691,11 @@ public void DrawSnapshot(
                 }
             }
 
-            // Marker-only mode draws the full silhouette. When rig mode is on,
-            // the anatomical parts replace the marker completely.
-            float markerOpacity = showUnitRig ? 0f : 1f;
-            if (markerOpacity > 0f)
+            // Use a marker only when the rig produced no drawable geometry.
+            bool hasRenderedRig =
+                _vertices.VertexCount > fillVerticesBeforeRig ||
+                _bodyOutlines.VertexCount > outlineVerticesBeforeRig;
+            if (!hasRenderedRig)
             {
                 AppendLowDetailUnitMarker(
                     _vertices,
@@ -701,8 +704,7 @@ public void DrawSnapshot(
                     markerRadius,
                     unit.FactionTag,
                     isAlive,
-                    markerOpacity);
-
+                    1f);
             }
 
 
