@@ -210,11 +210,21 @@ public sealed class WorldMap
             return Math.Min(filledLayers - 1, lastLayer);
         }
 
+        int surfaceLayer = Math.Min(
+            lastLayer,
+            Math.Clamp(
+                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
+                LayerHeightUnits - 1,
+                -1,
+                LayerCount - 1));
+        if (surfaceLayer < 0)
+            return -1;
+
         int regionX = x / TerrainRegion.TilesPerSide;
         int regionY = y / TerrainRegion.TilesPerSide;
         int localIndex = x % TerrainRegion.TilesPerSide +
             (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
-        for (int z = lastLayer; z >= 0; z--)
+        for (int z = surfaceLayer; z >= 0; z--)
         {
             if (_layers[z].GetRegion(regionX, regionY)!
                     .GetMaterialIdAtIndex(localIndex) != 0)

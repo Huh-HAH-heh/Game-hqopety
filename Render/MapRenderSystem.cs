@@ -886,8 +886,7 @@ void main()
                     continue;
                 }
 
-                int floorLayer = worldMap.FindTopOccupiedLayer(x, y, cutLayer - 1);
-                if (floorLayer >= 0 && worldMap.GetSurfaceLayer(x, y) > cutLayer)
+                if (worldMap.GetSurfaceLayer(x, y) > cutLayer)
                     AppendCellGrid(_cutVoidGrid, left, top, right, bottom, voidColor);
             }
         }
