@@ -170,6 +170,9 @@ public sealed class GameRenderer
 
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
+    private bool _pageUpHeld;
+    private bool _pageDownHeld;
+    private const int TerrainSliceStepLayers = 5;
     private volatile bool _showVisionDebug;
     private volatile bool _showHearingDebug;
     private volatile bool _showMemoryDebug;
@@ -1304,7 +1307,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
     }
 
     private void StartSimulationThread()
@@ -3303,12 +3306,10 @@ public sealed class GameRenderer
                 if (shiftHeld)
                 {
                     int layerSteps = Math.Max(
-                        1, (int)MathF.Round(MathF.Abs(e.Delta))) * 5;
+                        1, (int)MathF.Round(MathF.Abs(e.Delta))) *
+                        TerrainSliceStepLayers;
                     int direction = e.Delta > 0f ? 1 : -1;
-                    _visibleMaxLayer = Math.Clamp(
-                        _visibleMaxLayer + direction * layerSteps,
-                        0,
-                        _worldMap.LayerCount - 1);
+                    AdjustTerrainSlice(direction, layerSteps);
                     return;
                 }
 
@@ -4124,6 +4125,11 @@ public sealed class GameRenderer
         _window.KeyReleased +=
             (_, e) =>
             {
+                if (e.Code == Keyboard.Key.PageUp)
+                    _pageUpHeld = false;
+                else if (e.Code == Keyboard.Key.PageDown)
+                    _pageDownHeld = false;
+
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                     _bodyRigEditorOverlay.HandleKeyReleased(e.Code);
             };
@@ -4233,8 +4239,46 @@ public sealed class GameRenderer
         }
     }
 
+    private void AdjustTerrainSlice(int direction, int layerSteps)
+    {
+        _visibleMaxLayer = Math.Clamp(
+            _visibleMaxLayer + Math.Sign(direction) * Math.Max(1, layerSteps),
+            0,
+            _worldMap.LayerCount - 1);
+    }
+
     private void HandleKey(Keyboard.Key key)
     {
+        if (key is Keyboard.Key.PageUp or Keyboard.Key.PageDown)
+        {
+            bool raiseSlice = key == Keyboard.Key.PageUp;
+            if (raiseSlice)
+            {
+                if (_pageUpHeld)
+                    return;
+                _pageUpHeld = true;
+            }
+            else
+            {
+                if (_pageDownHeld)
+                    return;
+                _pageDownHeld = true;
+            }
+
+            bool gameplayInputAllowed =
+                _menuPage == GameMenuPage.Closed &&
+                _bodyRigEditorOverlay?.IsOpen != true &&
+                _debugLayersOverlay?.IsOpen != true &&
+                _contextMenuOverlay?.IsOpen != true &&
+                _unitGroupCardOverlay?.IsOpen != true &&
+                _unitCards.Count == 0;
+
+            if (gameplayInputAllowed)
+                AdjustTerrainSlice(raiseSlice ? 1 : -1, TerrainSliceStepLayers);
+
+            return;
+        }
+
         if (_bodyRigEditorOverlay?.IsOpen == true)
         {
             if (key == Keyboard.Key.Escape)
