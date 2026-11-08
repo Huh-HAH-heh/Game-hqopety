@@ -957,6 +957,7 @@ void main()
         Color cutColor = new Color(34, 43, 48, 205);
         Color voidColor = new Color(125, 162, 174, 48);
         Color contourColor = new Color(48, 57, 61, 220);
+        bool hasSolidCut = false;
 
         for (int y = minTileY; y <= maxTileY; y += lodStep)
         {
@@ -969,6 +970,7 @@ void main()
 
                 if (worldMap.GetMaterialId(x, y, cutLayer) != 0)
                 {
+                    hasSolidCut = true;
                     AppendClippedDiagonalHatch(
                         cutHatch, left, top, right, bottom,
                         cutColor, MathF.Max(7f, tilePixelSize * 0.42f), false);
@@ -986,25 +988,30 @@ void main()
             }
         }
 
-        // Smooth cut boundaries across voxel samples instead of drawing each
-        // source tile's four-sided border.
-        for (int y = minTileY; y <= maxTileY; y += lodStep)
+        if (hasSolidCut)
         {
-            for (int x = minTileX; x <= maxTileX; x += lodStep)
+            // Smooth cut boundaries across voxel samples instead of drawing each
+            // source tile's four-sided border.
+            for (int y = minTileY; y <= maxTileY; y += lodStep)
             {
-                bool tl = worldMap.GetMaterialId(x, y, cutLayer) != 0;
-                bool tr = worldMap.GetMaterialId(x + lodStep, y, cutLayer) != 0;
-                bool br = worldMap.GetMaterialId(x + lodStep, y + lodStep, cutLayer) != 0;
-                bool bl = worldMap.GetMaterialId(x, y + lodStep, cutLayer) != 0;
-
-                AppendMarchingSquaresContour(
-                    contour,
-                    x * tilePixelSize,
-                    y * tilePixelSize,
-                    lodStep * tilePixelSize,
-                    tl, tr, br, bl,
-                    contourColor);
+                for (int x = minTileX; x <= maxTileX; x += lodStep)
+                {
+                    bool tl = worldMap.GetMaterialId(x, y, cutLayer) != 0;
+                    bool tr = worldMap.GetMaterialId(x + lodStep, y, cutLayer) != 0;
+                    bool br = worldMap.GetMaterialId(x + lodStep, y + lodStep, cutLayer) != 0;
+                    bool bl = worldMap.GetMaterialId(x, y + lodStep, cutLayer) != 0;
+    
+                    AppendMarchingSquaresContour(
+                        contour,
+                        x * tilePixelSize,
+                        y * tilePixelSize,
+                        lodStep * tilePixelSize,
+                        tl, tr, br, bl,
+                        contourColor);
+                }
             }
+    
+    
         }
 
         if (cutHatch.VertexCount > 0)
