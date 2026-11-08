@@ -32,6 +32,7 @@ public sealed class UnitNavigationSystem
     public const float NavigationCellSize = 1f / NavigationCellsPerMeter;
 
     private const float MaxStepHeight = 1.5f;
+    private const float MaxTerrainSlopeGrade = 0.95f;
     private const float HeightCost = 0.35f;
     private const int MinRouteBuildsPerUpdate = 2;
     private const int MaxRouteBuildsPerUpdate = 8;
@@ -1325,30 +1326,17 @@ public sealed class UnitNavigationSystem
 
                 Touch(neighbor, stamp);
 
-                float heightDifference = MathF.Abs(
-                    _navigationHeights[current] -
-                    _navigationHeights[neighbor]);
-
-                float stepCost =
-                    (dx != 0 && dy != 0 ? DiagonalCost : 1f) * NavigationCellSize;
-
                 int priorRouteCount = _routeTraffic[neighbor];
-                float routeReuseCost = Math.Min(
-                    priorRouteCount,
-                    RouteCohortSize - 1) * RouteReuseCostPerUnit * NavigationCellSize;
-
                 if (priorRouteCount > 0)
                 {
                     _lastSearchTrafficCellsConsidered++;
                     RouteTrafficCellsConsideredThisUpdate++;
                 }
 
+                // The search, Theta* shortcuts and straight-route validation
+                // must all use the same terrain-aware edge cost.
                 float tentativeG =
-                    _gScore[current] +
-                    stepCost +
-                    heightDifference * HeightCost +
-                    _navigationEdgeCost[neighbor] +
-                    routeReuseCost;
+                    _gScore[current] + GetStepCost(current, neighbor, dx, dy);
                 int parentCell = current;
 
                 // Theta*: bypass cell-to-cell turns when the parent's continuous
@@ -1928,8 +1916,13 @@ public sealed class UnitNavigationSystem
 
         float currentHeight = _navigationHeights[x + y * _width];
         float nextHeight = _navigationHeights[nx + ny * _width];
-        if (MathF.Abs(nextHeight - currentHeight) > MaxStepHeight)
+        if (!IsSlopePassable(
+                MathF.Abs(nextHeight - currentHeight),
+                dx,
+                dy))
+        {
             return false;
+        }
 
         if (dx != 0 && dy != 0 &&
             (!CanCardinalStep(worldMap, x, y, x + dx, y) ||
@@ -1962,9 +1955,19 @@ public sealed class UnitNavigationSystem
                     return false;
 
                 int index = cellX + cellY * _width;
+                int offsetX = Math.Abs(offsetX);
+                int offsetY = Math.Abs(offsetY);
+                float horizontalDistance =
+                    MathF.Sqrt(offsetX * offsetX + offsetY * offsetY) * NavigationCellSize;
+                float allowedHeightDifference = MathF.Min(
+                    MaxStepHeight,
+                    horizontalDistance * MaxTerrainSlopeGrade);
                 if (!_navigationPassable[index] ||
-                    MathF.Abs(_navigationHeights[index] - centerHeight) > MaxStepHeight)
+                    MathF.Abs(_navigationHeights[index] - centerHeight) >
+                        allowedHeightDifference + 0.0001f)
+                {
                     return false;
+                }
             }
         }
 
@@ -1989,9 +1992,26 @@ public sealed class UnitNavigationSystem
         if (!IsSurface(worldMap, x, y) || !IsSurface(worldMap, nx, ny))
             return false;
 
-        return MathF.Abs(
-            _navigationHeights[x + y * _width] -
-            _navigationHeights[nx + ny * _width]) <= MaxStepHeight;
+        return IsSlopePassable(
+            MathF.Abs(
+                _navigationHeights[x + y * _width] -
+                _navigationHeights[nx + ny * _width]),
+            nx - x,
+            ny - y);
+    }
+
+    private static bool IsSlopePassable(
+        float heightDifference,
+        int dx,
+        int dy)
+    {
+        if (heightDifference > MaxStepHeight)
+            return false;
+
+        float horizontalDistance =
+            (dx != 0 && dy != 0 ? DiagonalCost : 1f) * NavigationCellSize;
+        return heightDifference <=
+            horizontalDistance * MaxTerrainSlopeGrade + 0.0001f;
     }
 
     private bool IsSurface(WorldMap worldMap, int x, int y)
@@ -2360,22 +2380,26 @@ public sealed class UnitNavigationSystem
 
                 if (x + 1 < _width &&
                     _navigationPassable[cell + 1] &&
-                    MathF.Abs(height - _navigationHeights[cell + 1]) <= MaxStepHeight)
+                    IsSlopePassable(
+                        MathF.Abs(height - _navigationHeights[cell + 1]), 1, 0))
                     mask |= 1 << 0;
 
                 if (x > 0 &&
                     _navigationPassable[cell - 1] &&
-                    MathF.Abs(height - _navigationHeights[cell - 1]) <= MaxStepHeight)
+                    IsSlopePassable(
+                        MathF.Abs(height - _navigationHeights[cell - 1]), -1, 0))
                     mask |= 1 << 1;
 
                 if (y + 1 < _height &&
                     _navigationPassable[cell + _width] &&
-                    MathF.Abs(height - _navigationHeights[cell + _width]) <= MaxStepHeight)
+                    IsSlopePassable(
+                        MathF.Abs(height - _navigationHeights[cell + _width]), 0, 1))
                     mask |= 1 << 2;
 
                 if (y > 0 &&
                     _navigationPassable[cell - _width] &&
-                    MathF.Abs(height - _navigationHeights[cell - _width]) <= MaxStepHeight)
+                    IsSlopePassable(
+                        MathF.Abs(height - _navigationHeights[cell - _width]), 0, -1))
                     mask |= 1 << 3;
 
                 _navigationNeighbors[cell] = mask;
@@ -2399,28 +2423,36 @@ public sealed class UnitNavigationSystem
                     (mask & (1 << 0)) != 0 &&
                     (mask & (1 << 2)) != 0 &&
                     (_navigationNeighbors[cell + 1] & (1 << 2)) != 0 &&
-                    (_navigationNeighbors[cell + _width] & (1 << 0)) != 0)
+                    (_navigationNeighbors[cell + _width] & (1 << 0)) != 0 &&
+                    IsSlopePassable(
+                        MathF.Abs(height - _navigationHeights[cell + _width + 1]), 1, 1))
                     mask |= 1 << 4;
 
                 if (x + 1 < _width && y > 0 &&
                     (mask & (1 << 0)) != 0 &&
                     (mask & (1 << 3)) != 0 &&
                     (_navigationNeighbors[cell + 1] & (1 << 3)) != 0 &&
-                    (_navigationNeighbors[cell - _width] & (1 << 0)) != 0)
+                    (_navigationNeighbors[cell - _width] & (1 << 0)) != 0 &&
+                    IsSlopePassable(
+                        MathF.Abs(height - _navigationHeights[cell - _width + 1]), 1, -1))
                     mask |= 1 << 5;
 
                 if (x > 0 && y + 1 < _height &&
                     (mask & (1 << 1)) != 0 &&
                     (mask & (1 << 2)) != 0 &&
                     (_navigationNeighbors[cell - 1] & (1 << 2)) != 0 &&
-                    (_navigationNeighbors[cell + _width] & (1 << 1)) != 0)
+                    (_navigationNeighbors[cell + _width] & (1 << 1)) != 0 &&
+                    IsSlopePassable(
+                        MathF.Abs(height - _navigationHeights[cell + _width - 1]), -1, 1))
                     mask |= 1 << 6;
 
                 if (x > 0 && y > 0 &&
                     (mask & (1 << 1)) != 0 &&
                     (mask & (1 << 3)) != 0 &&
                     (_navigationNeighbors[cell - 1] & (1 << 3)) != 0 &&
-                    (_navigationNeighbors[cell - _width] & (1 << 1)) != 0)
+                    (_navigationNeighbors[cell - _width] & (1 << 1)) != 0 &&
+                    IsSlopePassable(
+                        MathF.Abs(height - _navigationHeights[cell - _width - 1]), -1, -1))
                     mask |= 1 << 7;
 
                 _navigationNeighbors[cell] = mask;

@@ -40,6 +40,8 @@ public sealed class UnitMovementSystem
     private const float BaseTurningAcceleration = 6f;
     private const float ForceResponseTime = 0.32f;
     private const float GroundRollingDeceleration = 0.18f;
+    private const float GroundGravityAcceleration = 9.81f;
+    private const float MaxSlopeResistanceFraction = 0.80f;
     private const float CollisionRadiusScale = 0.72f;
     private const float CollisionRestitution = 0.08f;
     private const float CollisionFriction = 0.30f;
@@ -339,6 +341,22 @@ public sealed class UnitMovementSystem
                 _lastMotorForce[unit] = netForce;
                 Vector2 previousVelocity = velocity;
                 Vector2 acceleration = netForce / mass;
+
+                // Project gravity onto the local terrain surface. The model uses
+                // XY coordinates, so only the horizontal component is integrated.
+                // Cap downhill resistance below available traction: a legal slope
+                // slows the pawn but cannot pin its motor against the ground.
+                if (steeringActive && hasWaypoint &&
+                    desiredVelocity.LengthSquared() > 0.0025f)
+                {
+                    Vector2 slopeAcceleration = GetTerrainSlopeAcceleration(
+                        worldMap,
+                        position.X,
+                        position.Y,
+                        maxAcceleration * MaxSlopeResistanceFraction);
+                    acceleration += slopeAcceleration;
+                }
+
                 velocity += acceleration * substepDelta;
 
                 // Rolling resistance is an external ground force. Clamp its effect
@@ -1046,6 +1064,45 @@ public sealed class UnitMovementSystem
         position.X = Math.Clamp(position.X, minX, maxX);
         position.Y = Math.Clamp(position.Y, minY, maxY);
         position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+    }
+
+    private static Vector2 GetTerrainSlopeAcceleration(
+        WorldMap worldMap,
+        float x,
+        float y,
+        float maximumAcceleration)
+    {
+        float offset = UnitNavigationSystem.NavigationCellSize;
+        float leftX = Math.Clamp(x - offset, 0f, worldMap.MaxTileX);
+        float rightX = Math.Clamp(x + offset, 0f, worldMap.MaxTileX);
+        float topY = Math.Clamp(y - offset, 0f, worldMap.MaxTileY);
+        float bottomY = Math.Clamp(y + offset, 0f, worldMap.MaxTileY);
+
+        float spanX = rightX - leftX;
+        float spanY = bottomY - topY;
+        float slopeX = spanX > 0.0001f
+            ? (SampleSurfaceZ(worldMap, rightX, y) -
+               SampleSurfaceZ(worldMap, leftX, y)) / spanX
+            : 0f;
+        float slopeY = spanY > 0.0001f
+            ? (SampleSurfaceZ(worldMap, x, bottomY) -
+               SampleSurfaceZ(worldMap, x, topY)) / spanY
+            : 0f;
+
+        float gradeSquared = slopeX * slopeX + slopeY * slopeY;
+        if (gradeSquared <= 0.000001f)
+            return Vector2.Zero;
+
+        // On a surface z=f(x,y), gravity's horizontal tangent component is
+        // -g * grad(z) / (1 + |grad(z)|^2).
+        Vector2 acceleration = new Vector2(-slopeX, -slopeY) *
+            (GroundGravityAcceleration / (1f + gradeSquared));
+        float length = acceleration.Length();
+        float limit = MathF.Max(0f, maximumAcceleration);
+        if (length > limit && length > 0.0001f)
+            acceleration *= limit / length;
+
+        return acceleration;
     }
 
     private static float SampleSurfaceZ(WorldMap worldMap, float x, float y)
