@@ -725,6 +725,44 @@ public sealed class WorldMap
         return true;
     }
 
+    // Removes a vertical voxel interval from one XY column.
+    // startLayer is inclusive; endLayerExclusive is exclusive.
+    public void ClearVoxelRange(
+        int globalX,
+        int globalY,
+        int startLayer,
+        int endLayerExclusive)
+    {
+        if (!IsInside(globalX, globalY))
+            throw new IndexOutOfRangeException();
+
+        int firstLayer = Math.Max(0, startLayer);
+        int lastLayerExclusive = Math.Min(LayerCount, endLayerExclusive);
+        if (firstLayer >= lastLayerExclusive)
+            return;
+
+        int columnIndex = GetColumnIndex(globalX, globalY);
+        MaterializeSimpleFillColumn(globalX, globalY, columnIndex);
+
+        int regionX = globalX / TerrainRegion.TilesPerSide;
+        int regionY = globalY / TerrainRegion.TilesPerSide;
+        int localIndex =
+            globalX % TerrainRegion.TilesPerSide +
+            (globalY % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
+
+        for (int z = firstLayer; z < lastLayerExclusive; z++)
+        {
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(localIndex, 0);
+        }
+
+        _rangeCache[columnIndex] = null;
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
+        RecalculateSurfaceHeight(columnIndex);
+        TerrainVersion++;
+    }
+
     public void SetSolidHeight(
         int globalX,
         int globalY,
