@@ -11,17 +11,101 @@ public static class WorldGenerator
         WorldMap worldMap,
         bool writeLog = true)
     {
+        worldMap.DisableDiscreteBlockTerrain();
         worldMap.Water.Clear();
+        GenerateBaseTerrain(worldMap);
+        worldMap.EnableDiscreteBlockTerrain();
+        GenerateTraversalBlocks(worldMap);
 
+        if (writeLog)
+        {
+            Console.WriteLine(
+                "[WorldGenerator] " +
+                $"Дискретный блочный рельеф создан: " +
+                $"{worldMap.Blocks.Width}x{worldMap.Blocks.Height}, шаг Z = 1 м.");
+        }
+    }
+
+    public static void GenerateSmooth(WorldMap worldMap, bool writeLog = true)
+    {
+        worldMap.DisableDiscreteBlockTerrain();
+        worldMap.Water.Clear();
         GenerateBaseTerrain(worldMap);
 
         if (writeLog)
         {
             Console.WriteLine(
                 "[WorldGenerator] " +
-                $"Полнообъёмный тест каньона создан: " +
+                $"Плавный тест каньона создан: " +
                 $"{worldMap.LayerCount} уровней, шаг высоты 0,1 м.");
         }
+    }
+
+    public static void GenerateTraversalBlocks(WorldMap worldMap)
+    {
+        if (!worldMap.UsesDiscreteBlockTerrain)
+            worldMap.EnableDiscreteBlockTerrain();
+
+        worldMap.ClearBlockTransitions();
+        for (int y = 1; y < worldMap.TileHeight - 1; y++)
+        {
+            for (int x = 1; x < worldMap.TileWidth - 1; x++)
+            {
+                int level = worldMap.Blocks.GetSurfaceLevel(x, y);
+                if (level <= 0)
+                    continue;
+
+                int bestDifference = 0;
+                BlockDirection bestDirection = BlockDirection.North;
+                for (int direction = 0; direction < 4; direction++)
+                {
+                    BlockDirection candidateDirection = (BlockDirection)direction;
+                    GetDirectionDelta(candidateDirection, out int dx, out int dy);
+                    int neighborLevel = worldMap.Blocks.GetSurfaceLevel(x + dx, y + dy);
+                    int difference = neighborLevel - level;
+                    if (difference > bestDifference)
+                    {
+                        bestDifference = difference;
+                        bestDirection = candidateDirection;
+                    }
+                }
+
+                if (bestDifference < 1 || bestDifference > 3)
+                    continue;
+
+                int hash = unchecked(x * 73856093 ^ y * 19349663);
+                int roll = (hash & 0x7fffffff) % 9;
+                if ((bestDifference == 1 && roll > 2) ||
+                    (bestDifference > 1 && roll != 0))
+                {
+                    continue;
+                }
+
+                BlockTransitionType type = bestDifference == 1 && roll != 0
+                    ? BlockTransitionType.Ramp
+                    : BlockTransitionType.Stairs;
+                worldMap.SetBlockTransition(x, y, type, bestDirection);
+            }
+        }
+    }
+
+    private static void GetDirectionDelta(
+        BlockDirection direction,
+        out int dx,
+        out int dy)
+    {
+        dx = direction switch
+        {
+            BlockDirection.East => 1,
+            BlockDirection.West => -1,
+            _ => 0
+        };
+        dy = direction switch
+        {
+            BlockDirection.South => 1,
+            BlockDirection.North => -1,
+            _ => 0
+        };
     }
 
     private static void GenerateBaseTerrain(

@@ -30,6 +30,8 @@ public sealed class WorldMap
     public long NavigationVersion { get; private set; }
 
     public WaterLayer Water { get; }
+    public BlockTerrain Blocks { get; }
+    public bool UsesDiscreteBlockTerrain { get; private set; }
 
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly TerrainLayer[] _layers;
@@ -83,6 +85,7 @@ public sealed class WorldMap
         }
 
         _surfaceHeights = new ushort[columnCount];
+        Blocks = new BlockTerrain(width, height);
         _navigationBlocked = new bool[columnCount];
         _simpleFillColumns = new bool[columnCount];
         Array.Fill(_simpleFillColumns, true);
@@ -127,12 +130,113 @@ public sealed class WorldMap
 
     private void MarkTerrainChanged(int x, int y)
     {
+        if (UsesDiscreteBlockTerrain)
+        {
+            int level = (int)MathF.Round(
+                _surfaceHeights[GetColumnIndex(x, y)] /
+                (float)HeightUnitsPerMeter,
+                MidpointRounding.AwayFromZero);
+            Blocks.SetSurfaceLevel(x, y, level, GetMaterialId(x, y, 0));
+        }
+
         TerrainVersion++;
         TerrainGeometryVersion++;
 
         int regionX = x / TerrainRegion.TilesPerSide;
         int regionY = y / TerrainRegion.TilesPerSide;
         _regionTerrainVersions[regionX + regionY * RegionsX]++;
+    }
+
+    public void EnableDiscreteBlockTerrain()
+    {
+        if (UsesDiscreteBlockTerrain)
+            return;
+
+        UsesDiscreteBlockTerrain = true;
+        for (int y = 0; y < TileHeight; y++)
+        {
+            for (int x = 0; x < TileWidth; x++)
+            {
+                ushort oldHeight = _surfaceHeights[GetColumnIndex(x, y)];
+                ushort material = GetMaterialId(x, y, 0);
+                int levels = (int)MathF.Round(
+                    oldHeight / (float)HeightUnitsPerMeter,
+                    MidpointRounding.AwayFromZero);
+                SetSolidHeight(
+                    x, y,
+                    checked((ushort)(levels * HeightUnitsPerMeter)),
+                    material);
+            }
+        }
+
+        NavigationVersion++;
+        TerrainVersion++;
+    }
+
+    public void DisableDiscreteBlockTerrain()
+    {
+        if (!UsesDiscreteBlockTerrain)
+            return;
+
+        UsesDiscreteBlockTerrain = false;
+        NavigationVersion++;
+        TerrainVersion++;
+    }
+
+    public void SetBlockStack(int x, int y, int heightInMeters, ushort materialId)
+    {
+        if (!UsesDiscreteBlockTerrain)
+            throw new InvalidOperationException("Discrete block terrain is not enabled.");
+        if (heightInMeters < 0 ||
+            heightInMeters > LayerCount / HeightUnitsPerMeter)
+            throw new ArgumentOutOfRangeException(nameof(heightInMeters));
+
+        SetSolidHeight(
+            x, y,
+            checked((ushort)(heightInMeters * HeightUnitsPerMeter)),
+            materialId);
+    }
+
+    public void SetBlockTransition(
+        int x, int y, BlockTransitionType type, BlockDirection direction)
+    {
+        if (!UsesDiscreteBlockTerrain)
+            throw new InvalidOperationException("Discrete block terrain is not enabled.");
+
+        Blocks.SetTransition(x, y, type, direction);
+        NavigationVersion++;
+        MarkTerrainChanged(x, y);
+    }
+
+    public void ClearBlockTransitions()
+    {
+        if (!UsesDiscreteBlockTerrain)
+            return;
+
+        Blocks.ClearTransitions();
+        NavigationVersion++;
+        TerrainVersion++;
+        TerrainGeometryVersion++;
+        for (int i = 0; i < _regionTerrainVersions.Length; i++)
+            _regionTerrainVersions[i]++;
+    }
+
+    public float GetSurfaceHeightAt(float x, float y)
+    {
+        if (UsesDiscreteBlockTerrain)
+            return Blocks.SampleSurfaceHeight(x, y);
+
+        int x0 = Math.Clamp((int)MathF.Floor(x), 0, MaxTileX);
+        int y0 = Math.Clamp((int)MathF.Floor(y), 0, MaxTileY);
+        int x1 = Math.Min(x0 + 1, MaxTileX);
+        int y1 = Math.Min(y0 + 1, MaxTileY);
+        float tx = Math.Clamp(x - x0, 0f, 1f);
+        float ty = Math.Clamp(y - y0, 0f, 1f);
+        float top = GetSurfaceHeight(x0, y0) +
+            (GetSurfaceHeight(x1, y0) - GetSurfaceHeight(x0, y0)) * tx;
+        float bottom = GetSurfaceHeight(x0, y1) +
+            (GetSurfaceHeight(x1, y1) - GetSurfaceHeight(x0, y1)) * tx;
+        return top + (bottom - top) * ty;
     }
 
     // ============================================================
@@ -832,6 +936,16 @@ public sealed class WorldMap
             Math.Min(
                 height,
                 LayerCount * LayerHeightUnits);
+
+        if (UsesDiscreteBlockTerrain)
+        {
+            clampedHeight = Math.Clamp(
+                (int)MathF.Round(
+                    clampedHeight / (float)HeightUnitsPerMeter,
+                    MidpointRounding.AwayFromZero) * HeightUnitsPerMeter,
+                0,
+                LayerCount * LayerHeightUnits);
+        }
 
         bool wasSimpleFill = _simpleFillColumns[columnIndex];
         int previousLayers =
