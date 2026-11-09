@@ -105,18 +105,15 @@ public sealed class UnitRenderSystem : IDisposable
                 axisZ.X + _liftX * axisZ.Z,
                 axisZ.Y + _liftY * axisZ.Z);
 
-            projectedRotation = projectedAxisX.LengthSquared() > 0.000001f
-                ? MathF.Atan2(projectedAxisX.Y, projectedAxisX.X)
-                : projectedAxisY.LengthSquared() > 0.000001f
-                    ? MathF.Atan2(projectedAxisY.Y, projectedAxisY.X) - MathF.PI * 0.5f
-                    : fallbackRotation;
-
             float sx = MathF.Abs(scale.X);
             float sy = MathF.Abs(scale.Y);
             float sz = MathF.Abs(scale.Z);
 
             if (primitive == BodyPrimitive.Line)
             {
+                projectedRotation = projectedAxisX.LengthSquared() > 0.000001f
+                    ? MathF.Atan2(projectedAxisX.Y, projectedAxisX.X)
+                    : fallbackRotation;
                 projectedScale = new Vector3(
                     sx * MathF.Sqrt(projectedAxisX.LengthSquared()),
                     0f,
@@ -124,6 +121,9 @@ public sealed class UnitRenderSystem : IDisposable
                 return;
             }
 
+            // The 3D ellipsoid becomes a 2D ellipse after projection. Use the
+            // covariance eigenvectors so the projected principal axes remain
+            // correct even when vertical thickness shears the silhouette.
             float xx =
                 sx * sx * projectedAxisX.X * projectedAxisX.X +
                 sy * sy * projectedAxisY.X * projectedAxisY.X +
@@ -137,14 +137,19 @@ public sealed class UnitRenderSystem : IDisposable
                 sy * sy * projectedAxisY.X * projectedAxisY.Y +
                 sz * sz * projectedAxisZ.X * projectedAxisZ.Y;
 
-            float cos = MathF.Cos(projectedRotation);
-            float sin = MathF.Sin(projectedRotation);
-            float alongX = xx * cos * cos + 2f * xy * cos * sin + yy * sin * sin;
-            float alongY = xx * sin * sin - 2f * xy * cos * sin + yy * cos * cos;
+            float discriminant = MathF.Sqrt(MathF.Max(
+                0f,
+                (xx - yy) * (xx - yy) + 4f * xy * xy));
+            float majorVariance = MathF.Max(0.000001f, (xx + yy + discriminant) * 0.5f);
+            float minorVariance = MathF.Max(0.000001f, (xx + yy - discriminant) * 0.5f);
+
+            projectedRotation = discriminant > 0.0001f
+                ? 0.5f * MathF.Atan2(2f * xy, xx - yy)
+                : fallbackRotation;
 
             projectedScale = new Vector3(
-                MathF.Sqrt(MathF.Max(0.000001f, alongX)),
-                MathF.Sqrt(MathF.Max(0.000001f, alongY)),
+                MathF.Sqrt(majorVariance),
+                MathF.Sqrt(minorVariance),
                 0f);
         }
     }
