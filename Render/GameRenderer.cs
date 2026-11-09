@@ -170,7 +170,7 @@ public sealed class GameRenderer
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
-    private bool _showDebugGrid;
+    private bool _showDebugGrid = true;
     private int _visibleMaxLayer;
     private bool _pageUpHeld;
     private bool _pageDownHeld;
@@ -4695,7 +4695,7 @@ public sealed class GameRenderer
 
             case GameMenuActionType.ResetTerrainSettings:
                 _mapRenderer.ResetVisualSettings();
-                _showDebugGrid = false;
+                _showDebugGrid = true;
                 _showTerrainExtrema = false;
                 _showHeightContours = true;
                 _showContourLabels = true;
@@ -4803,7 +4803,7 @@ public sealed class GameRenderer
             _worldMap.GetHighestOccupiedLayer() + 1,
             0,
             _worldMap.LayerCount - 1);
-        _showDebugGrid = false;
+        _showDebugGrid = true;
         _showTerrainExtrema = false;
         _showHeightContours = true;
         _showContourLabels = true;
