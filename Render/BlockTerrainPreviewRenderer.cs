@@ -121,51 +121,27 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     float eastZ = baseHeight;
                     float southZ = baseHeight;
                     float westZ = baseHeight;
-    
-                    BlockTransitionType transition =
-                        worldMap.Blocks.GetTransitionType(x, y);
-                    if (transition == BlockTransitionType.None && step > 1)
+                    bool isRamp = step == 1 &&
+                        TryGetValidRamp(
+                            worldMap,
+                            x,
+                            y,
+                            out BlockDirection rampDirection,
+                            out _);
+                    BlockTransitionType transition = isRamp
+                        ? BlockTransitionType.Ramp
+                        : BlockTransitionType.None;
+
+                    if (isRamp)
                     {
-                        int scanMaxX = Math.Min(worldMap.MaxTileX, x + step - 1);
-                        int scanMaxY = Math.Min(worldMap.MaxTileY, y + step - 1);
-                        for (int scanY = y; scanY <= scanMaxY &&
-                             transition == BlockTransitionType.None; scanY++)
-                        {
-                            for (int scanX = x; scanX <= scanMaxX; scanX++)
-                            {
-                                if (worldMap.Blocks.GetTransitionType(scanX, scanY) ==
-                                    BlockTransitionType.Ramp)
-                                {
-                                    transition = BlockTransitionType.Ramp;
-                                    break;
-                                }
-                            }
-                        }
+                        ApplyRampSlope(
+                            rampDirection,
+                            ref northZ,
+                            ref eastZ,
+                            ref southZ,
+                            ref westZ);
                     }
-    
-                    if (transition == BlockTransitionType.Ramp && step == 1)
-                    {
-                        switch (worldMap.Blocks.GetTransitionDirection(x, y))
-                        {
-                            case BlockDirection.North:
-                                northZ += 1f;
-                                eastZ += 1f;
-                                break;
-                            case BlockDirection.East:
-                                eastZ += 1f;
-                                southZ += 1f;
-                                break;
-                            case BlockDirection.South:
-                                southZ += 1f;
-                                westZ += 1f;
-                                break;
-                            case BlockDirection.West:
-                                westZ += 1f;
-                                northZ += 1f;
-                                break;
-                        }
-                    }
-    
+
                     Vector2f north = Project(x, y, northZ, tileSize);
                     Vector2f east = Project(x + step, y, eastZ, tileSize);
                     Vector2f south = Project(x + step, y + step, southZ, tileSize);
@@ -204,6 +180,35 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     AppendLine(_blockSeams, east, south, seamColor);
                     AppendLine(_blockSeams, south, west, seamColor);
                     AppendLine(_blockSeams, west, north, seamColor);
+
+                    // Coarse terrain LOD represents a step x step patch. Draw
+                    // every real ramp in that patch at its own 1 m position,
+                    // preserving its actual cardinal orientation.
+                    if (step > 1)
+                    {
+                        int scanMaxX = Math.Min(worldMap.MaxTileX, x + step - 1);
+                        int scanMaxY = Math.Min(worldMap.MaxTileY, y + step - 1);
+                        for (int scanY = y; scanY <= scanMaxY; scanY++)
+                        {
+                            for (int scanX = x; scanX <= scanMaxX; scanX++)
+                            {
+                                if (TryGetValidRamp(
+                                        worldMap,
+                                        scanX,
+                                        scanY,
+                                        out BlockDirection rampDirection,
+                                        out float rampHeight))
+                                {
+                                    AppendRampTopFace(
+                                        scanX,
+                                        scanY,
+                                        rampHeight,
+                                        rampDirection,
+                                        tileSize);
+                                }
+                            }
+                        }
+                    }
                 }
         }
 
@@ -218,6 +223,106 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         window.Draw(_blockFaces);
         if (pixelsPerTile >= 2.4f)
             window.Draw(_blockSeams);
+    }
+
+    private static bool TryGetValidRamp(
+        WorldMap worldMap,
+        int x,
+        int y,
+        out BlockDirection direction,
+        out float baseHeight)
+    {
+        direction = worldMap.Blocks.GetTransitionDirection(x, y);
+        baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
+
+        if (worldMap.Blocks.GetTransitionType(x, y) != BlockTransitionType.Ramp ||
+            baseHeight <= 0f)
+        {
+            return false;
+        }
+
+        GetDirectionDelta(direction, out int dx, out int dy);
+        return worldMap.Blocks.GetSurfaceLevel(x + dx, y + dy) ==
+               baseHeight + 1f;
+    }
+
+    private static void GetDirectionDelta(
+        BlockDirection direction,
+        out int dx,
+        out int dy)
+    {
+        dx = direction switch
+        {
+            BlockDirection.East => 1,
+            BlockDirection.West => -1,
+            _ => 0
+        };
+        dy = direction switch
+        {
+            BlockDirection.South => 1,
+            BlockDirection.North => -1,
+            _ => 0
+        };
+    }
+
+    private static void ApplyRampSlope(
+        BlockDirection direction,
+        ref float northZ,
+        ref float eastZ,
+        ref float southZ,
+        ref float westZ)
+    {
+        switch (direction)
+        {
+            case BlockDirection.North:
+                northZ += 1f;
+                eastZ += 1f;
+                break;
+            case BlockDirection.East:
+                eastZ += 1f;
+                southZ += 1f;
+                break;
+            case BlockDirection.South:
+                southZ += 1f;
+                westZ += 1f;
+                break;
+            case BlockDirection.West:
+                westZ += 1f;
+                northZ += 1f;
+                break;
+        }
+    }
+
+    private void AppendRampTopFace(
+        int x,
+        int y,
+        float baseHeight,
+        BlockDirection direction,
+        float tileSize)
+    {
+        float northZ = baseHeight;
+        float eastZ = baseHeight;
+        float southZ = baseHeight;
+        float westZ = baseHeight;
+        ApplyRampSlope(
+            direction,
+            ref northZ,
+            ref eastZ,
+            ref southZ,
+            ref westZ);
+
+        Vector2f north = Project(x, y, northZ, tileSize);
+        Vector2f east = Project(x + 1, y, eastZ, tileSize);
+        Vector2f south = Project(x + 1, y + 1, southZ, tileSize);
+        Vector2f west = Project(x, y + 1, westZ, tileSize);
+        Color rampColor = new Color(157, 132, 91, 255);
+        AppendTopFace(_blockFaces, north, east, south, west, rampColor);
+
+        Color seamColor = new Color(27, 31, 34, 175);
+        AppendLine(_blockSeams, north, east, seamColor);
+        AppendLine(_blockSeams, east, south, seamColor);
+        AppendLine(_blockSeams, south, west, seamColor);
+        AppendLine(_blockSeams, west, north, seamColor);
     }
 
     private void AppendSideFace(
