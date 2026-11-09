@@ -11,8 +11,7 @@ namespace RimClone.Render;
 /// </summary>
 public sealed class BlockTerrainPreviewRenderer : IDisposable
 {
-    private readonly VertexArray _sideFaces = new(PrimitiveType.Triangles);
-    private readonly VertexArray _topFaces = new(PrimitiveType.Triangles);
+    private readonly VertexArray _blockFaces = new(PrimitiveType.Triangles);
     private readonly VertexArray _blockSeams = new(PrimitiveType.Lines);
 
     public static Vector2f GetCameraCenter(
@@ -34,8 +33,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         View cameraView,
         float tilePixelSize)
     {
-        _sideFaces.Clear();
-        _topFaces.Clear();
+        _blockFaces.Clear();
         _blockSeams.Clear();
 
         if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize <= 0f)
@@ -154,7 +152,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
                 ushort materialId = worldMap.GetMaterialId(x, y, surfaceLayer);
                 Color topColor = GetTopColor(materialId, baseHeight, transition);
-                AppendTopFace(north, east, south, west, topColor);
+                AppendTopFace(_blockFaces, north, east, south, west, topColor);
 
                 // Thin seams expose the individual metre blocks without
                 // covering the terrain with a bright wireframe.
@@ -166,8 +164,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             }
         }
 
-        window.Draw(_sideFaces);
-        window.Draw(_topFaces);
+        window.Draw(_blockFaces);
         if (pixelsPerTile >= 2.4f)
             window.Draw(_blockSeams);
     }
@@ -195,7 +192,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         UnprojectXY(topB, topHeightB, tileSize, out float bx, out float by);
         Vector2f bottomA = Project(ax, ay, bottomHeightA, tileSize);
         Vector2f bottomB = Project(bx, by, bottomHeightB, tileSize);
-        AppendQuad(_sideFaces, topA, topB, bottomB, bottomA, color);
+        AppendQuad(_blockFaces, topA, topB, bottomB, bottomA, color);
 
         float seamStart = MathF.Max(bottomHeightA, bottomHeightB);
         float seamEnd = MathF.Min(topHeightA, topHeightB);
@@ -228,14 +225,15 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     }
 
     private static void AppendTopFace(
+        VertexArray vertices,
         Vector2f north,
         Vector2f east,
         Vector2f south,
         Vector2f west,
         Color color)
     {
-        AppendTriangle(_topFaces, north, east, south, color);
-        AppendTriangle(_topFaces, north, south, west, color);
+        AppendTriangle(vertices, north, east, south, color);
+        AppendTriangle(vertices, north, south, west, color);
     }
 
     private static void AppendQuad(
@@ -355,8 +353,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
     public void Dispose()
     {
-        _sideFaces.Dispose();
-        _topFaces.Dispose();
+        _blockFaces.Dispose();
         _blockSeams.Dispose();
     }
 }
