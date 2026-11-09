@@ -420,6 +420,70 @@ public static class UnitMovementSelfTest
         return cubeExists && emptyBelow && correctVolume && removed;
     }
 
+    public static bool AllFourRampOrientationsConnectAndSlopeCorrectly()
+    {
+        int[] directionX = { 0, 1, 0, -1 };
+        int[] directionY = { -1, 0, 1, 0 };
+
+        for (int directionIndex = 0; directionIndex < 4; directionIndex++)
+        {
+            WorldMap map = CreateFlatWorld();
+            map.EnableDiscreteBlockTerrain();
+
+            int rampX = map.TileWidth / 2;
+            int rampY = map.TileHeight / 2;
+            int upperX = rampX + directionX[directionIndex];
+            int upperY = rampY + directionY[directionIndex];
+            int alternateDirection = (directionIndex + 1) & 3;
+            int alternateX = rampX + directionX[alternateDirection];
+            int alternateY = rampY + directionY[alternateDirection];
+
+            map.SetBlockStack(upperX, upperY, 2, 2);
+            map.SetBlockStack(alternateX, alternateY, 2, 3);
+            map.SetRamp(rampX, rampY, (BlockDirection)directionIndex);
+
+            if (!map.Blocks.CanTraverse(rampX, rampY, upperX, upperY) ||
+                !map.Blocks.CanTraverse(upperX, upperY, rampX, rampY) ||
+                map.Blocks.CanTraverse(rampX, rampY, alternateX, alternateY) ||
+                map.Blocks.CanTraverse(alternateX, alternateY, rampX, rampY))
+            {
+                return false;
+            }
+
+            float lowEdge;
+            float highEdge;
+            switch ((BlockDirection)directionIndex)
+            {
+                case BlockDirection.North:
+                    lowEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.5f, rampY + 0.9f);
+                    highEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.5f, rampY + 0.1f);
+                    break;
+                case BlockDirection.East:
+                    lowEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.1f, rampY + 0.5f);
+                    highEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.9f, rampY + 0.5f);
+                    break;
+                case BlockDirection.South:
+                    lowEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.5f, rampY + 0.1f);
+                    highEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.5f, rampY + 0.9f);
+                    break;
+                case BlockDirection.West:
+                    lowEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.9f, rampY + 0.5f);
+                    highEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.1f, rampY + 0.5f);
+                    break;
+                default:
+                    return false;
+            }
+
+            if (MathF.Abs(lowEdge - 1.1f) > 0.02f ||
+                MathF.Abs(highEdge - 1.9f) > 0.02f)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public static bool DiscreteBlocksRequireAnExplicitRamp()
     {
         WorldMap map = CreateFlatWorld();
