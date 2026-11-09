@@ -138,6 +138,8 @@ void main()
 
     private readonly VertexArray _gridVertices =
         new VertexArray(PrimitiveType.Lines);
+    private readonly VertexArray _heightStepVertices =
+        new VertexArray(PrimitiveType.Lines);
     private readonly VertexArray _blockTransitionVertices =
         new VertexArray(PrimitiveType.Lines);
     private readonly VertexArray _waterVertices =
@@ -240,7 +242,8 @@ void main()
 
     public double LastTerrainBuildMilliseconds { get; private set; }
 
-    private const byte GridAlpha = 90;
+    private const byte GridAlpha = 112;
+    private const int HeightStepLineThresholdUnits = 5;
 
     public MapRenderSystem(
         float tilePixelSize)
@@ -422,9 +425,10 @@ void main()
             _gridCacheValid = false;
         }
 
-        if (showGrid && !gridCacheMatches)
+        if (!gridCacheMatches)
         {
             _gridVertices.Clear();
+            _heightStepVertices.Clear();
 
             for (int y = minTileY; y <= maxTileY; y += lodStep)
             {
@@ -437,18 +441,30 @@ void main()
                             y,
                             maxLayer);
 
-                    if (topLayer < 0)
-                        continue;
-
                     float left = x * tilePixelSize;
                     float top = y * tilePixelSize;
-                    float right = (x + lodStep) * tilePixelSize;
-                    float bottom = (y + lodStep) * tilePixelSize;
+                    float right = Math.Min(worldMap.TileWidth, x + lodStep) * tilePixelSize;
+                    float bottom = Math.Min(worldMap.TileHeight, y + lodStep) * tilePixelSize;
 
-                    AppendGrid(
-                        _gridVertices,
-                        left,
-                        top,
+                    if (topLayer >= 0)
+                    {
+                        AppendGrid(
+                            _gridVertices,
+                            left,
+                            top,
+                            right,
+                            bottom);
+                    }
+
+                    AppendHeightStepEdges(
+                        _heightStepVertices,
+                        worldMap,
+                        x,
+                        y,
+                        lodStep,
+                        tilePixelSize,
+                        maxLayer,
+                        topLayer,
                         right,
                         bottom);
                 }
@@ -477,6 +493,9 @@ void main()
 
         if (showGrid && _gridVertices.VertexCount > 0)
             window.Draw(_gridVertices);
+
+        if (_heightStepVertices.VertexCount > 0)
+            window.Draw(_heightStepVertices);
     }
 
     private void DrawTerrainChunks(
@@ -1707,6 +1726,72 @@ void main()
             window.Draw(_blockTransitionVertices);
     }
 
+    private static void AppendHeightStepEdges(
+        VertexArray vertices,
+        WorldMap worldMap,
+        int x,
+        int y,
+        int lodStep,
+        float tilePixelSize,
+        int visibleMaxLayer,
+        int currentLayer,
+        float right,
+        float bottom)
+    {
+        int eastX = x + lodStep;
+        if (eastX <= worldMap.MaxTileX)
+        {
+            int eastLayer = FindVisibleTopLayer(
+                worldMap, eastX, y, visibleMaxLayer);
+            AppendHeightStepLine(
+                vertices,
+                right,
+                y * tilePixelSize,
+                right,
+                bottom,
+                currentLayer,
+                eastLayer);
+        }
+
+        int southY = y + lodStep;
+        if (southY <= worldMap.MaxTileY)
+        {
+            int southLayer = FindVisibleTopLayer(
+                worldMap, x, southY, visibleMaxLayer);
+            AppendHeightStepLine(
+                vertices,
+                x * tilePixelSize,
+                bottom,
+                right,
+                bottom,
+                currentLayer,
+                southLayer);
+        }
+    }
+
+    private static void AppendHeightStepLine(
+        VertexArray vertices,
+        float x1,
+        float y1,
+        float x2,
+        float y2,
+        int firstLayer,
+        int secondLayer)
+    {
+        int heightDifference = Math.Abs(firstLayer - secondLayer);
+        if (heightDifference < HeightStepLineThresholdUnits)
+            return;
+
+        Color color = heightDifference switch
+        {
+            >= 30 => new Color(245, 105, 78, 235),
+            >= 10 => new Color(238, 177, 86, 220),
+            _ => new Color(112, 190, 220, 205)
+        };
+
+        AppendLine(vertices, x1, y1, x2, y2, color);
+    }
+
     private static void GetBlockDirectionDelta(
         BlockDirection direction,
         out int dx,
@@ -1803,6 +1888,7 @@ void main()
         _terrainLayerShader?.Dispose();
         _terrainLayerShader = null;
         _gridVertices.Dispose();
+        _heightStepVertices.Dispose();
         _blockTransitionVertices.Dispose();
         _waterVertices.Dispose();
          _terrainVertices = Array.Empty<Vertex>();
