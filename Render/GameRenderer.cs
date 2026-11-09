@@ -2618,7 +2618,9 @@ public sealed class GameRenderer
                     unit.Position.X * TerrainTilePixelSize,
                     unit.Position.Y * TerrainTilePixelSize),
                 _camera.View);
-            float radius = GetMarkerWorldRadius(unit, 0f) * pixelsPerTile;
+            float radius = MathF.Max(
+                2f,
+                GetMarkerWorldRadius(unit, 0f) * pixelsPerTile);
             if (screenPosition.X + radius < minPixelX ||
                 screenPosition.X - radius > maxPixelX ||
                 screenPosition.Y + radius < minPixelY ||
