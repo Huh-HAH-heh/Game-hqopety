@@ -18,7 +18,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         WorldMap worldMap,
         float tilePixelSize)
     {
-        float tileSize = MathF.Max(1f, tilePixelSize * 1.5f);
+        float tileSize = MathF.Max(1f, tilePixelSize * 2f);
         float highestMeters = GetHighestHeightMeters(worldMap);
         return Project(
             worldMap.TileWidth * 0.5f,
@@ -47,9 +47,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
-        int step = pixelsPerTile < 1.25f ? 8
-            : pixelsPerTile < 2f ? 4
-            : pixelsPerTile < 3.5f ? 2
+        int step = pixelsPerTile < 2f ? 8
+            : pixelsPerTile < 4f ? 4
+            : pixelsPerTile < 12f ? 2
             : 1;
 
         GetVisibleTileBounds(
