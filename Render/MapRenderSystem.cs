@@ -297,11 +297,15 @@ void main()
 
         Vector2f center = cameraView.Center;
         Vector2f viewSize = cameraView.Size;
+        GameCamera.GetVisibleWorldHalfExtents(
+            cameraView,
+            out float halfViewX,
+            out float halfViewY);
 
-        float screenMinX = center.X - viewSize.X * 0.5f;
-        float screenMaxX = center.X + viewSize.X * 0.5f;
-        float screenMinY = center.Y - viewSize.Y * 0.5f;
-        float screenMaxY = center.Y + viewSize.Y * 0.5f;
+        float screenMinX = center.X - halfViewX;
+        float screenMaxX = center.X + halfViewX;
+        float screenMinY = center.Y - halfViewY;
+        float screenMaxY = center.Y + halfViewY;
 
         // Estimate visible cells before building geometry. Preserve full detail when zoomed
         // in, but reduce vertex work when zoomed out.

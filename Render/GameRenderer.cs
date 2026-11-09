@@ -1157,7 +1157,8 @@ public sealed class GameRenderer
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
             $"LastHit={snapshot.LastHitPart} | " +
             $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
-            "RMB=движение/атака  Shift+click=добавить выделение  СКМ=панорама  Колесо=масштаб  ESC=меню | " +
+            $"Верх карты={_camera.DirectionLabel} (Q/E: 45°) | " +
+            "RMB=движение/атака  Shift+click=добавить выделение  СКМ=панорама  Колесо=масштаб  ESC=меню | +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
@@ -4290,6 +4291,7 @@ public sealed class GameRenderer
         if (_showBlockTerrainPreview)
         {
             _normalCameraCenter = _camera.View.Center;
+            _camera.SetIsometricProjection(false);
             _camera.CenterOnPosition(
                 BlockTerrainPreviewRenderer.GetCameraCenter(
                     _worldMap,
@@ -4300,8 +4302,9 @@ public sealed class GameRenderer
         }
         else
         {
+            _camera.SetIsometricProjection(true);
             _camera.CenterOnPosition(_normalCameraCenter);
-            Console.WriteLine("[Terrain preview] Normal game view.");
+            Console.WriteLine("[Terrain preview] Isometric game view restored.");
         }
     }
 
@@ -4369,6 +4372,24 @@ public sealed class GameRenderer
                 Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
                 Keyboard.IsKeyPressed(Keyboard.Key.RControl);
             _bodyRigEditorOverlay.HandleKey(key, controlPressed);
+            return;
+        }
+
+        if ((key is Keyboard.Key.Q or Keyboard.Key.E) &&
+            _menuPage == GameMenuPage.Closed &&
+            _debugLayersOverlay?.IsOpen != true &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _unitGroupCardOverlay?.IsOpen != true &&
+            _unitCards.Count == 0 &&
+            !_showUtilityAiDebug)
+        {
+            if (key == Keyboard.Key.Q)
+                _camera.RotateCounterClockwise();
+            else
+                _camera.RotateClockwise();
+
+            Console.WriteLine(
+                $"[CAMERA] Верх карты: {_camera.DirectionLabel}. Q/E — поворот на 45 градусов.");
             return;
         }
 

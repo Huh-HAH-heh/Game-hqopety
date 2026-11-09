@@ -315,20 +315,24 @@ public sealed class InformationLayersRenderer : IDisposable
         }
 
         Vector2f mouseWorld = window.MapPixelToCoords(Mouse.GetPosition(window), view);
+        GameCamera.GetVisibleWorldHalfExtents(
+            view,
+            out float halfViewX,
+            out float halfViewY);
         int minX = Math.Clamp(
-            (int)MathF.Floor((view.Center.X - view.Size.X * 0.5f) / tilePixels),
+            (int)MathF.Floor((view.Center.X - halfViewX) / tilePixels),
             0,
             field.Width - 1);
         int maxX = Math.Clamp(
-            (int)MathF.Ceiling((view.Center.X + view.Size.X * 0.5f) / tilePixels),
+            (int)MathF.Ceiling((view.Center.X + halfViewX) / tilePixels),
             0,
             field.Width - 1);
         int minY = Math.Clamp(
-            (int)MathF.Floor((view.Center.Y - view.Size.Y * 0.5f) / tilePixels),
+            (int)MathF.Floor((view.Center.Y - halfViewY) / tilePixels),
             0,
             field.Height - 1);
         int maxY = Math.Clamp(
-            (int)MathF.Ceiling((view.Center.Y + view.Size.Y * 0.5f) / tilePixels),
+            (int)MathF.Ceiling((view.Center.Y + halfViewY) / tilePixels),
             0,
             field.Height - 1);
 
@@ -435,8 +439,8 @@ public sealed class InformationLayersRenderer : IDisposable
             : $"Cost ({mouseX},{mouseY}): unreachable";
 
         Vector2f tooltipPosition = new(mouseWorld.X + 12f, mouseWorld.Y + 12f);
-        float viewRight = view.Center.X + view.Size.X * 0.5f;
-        float viewBottom = view.Center.Y + view.Size.Y * 0.5f;
+        float viewRight = view.Center.X + halfViewX;
+        float viewBottom = view.Center.Y + halfViewY;
         if (tooltipPosition.X + 220f > viewRight)
             tooltipPosition.X = mouseWorld.X - 232f;
         if (tooltipPosition.Y + 28f > viewBottom)

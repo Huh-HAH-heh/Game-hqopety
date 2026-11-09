@@ -123,35 +123,16 @@ public sealed class UnitRenderSystem : IDisposable
         _suppressionDebug.Clear();
         _occludedUnitHatch.Clear();
 
-        Vector2f center =
-            cameraView.Center;
+        Vector2f center = cameraView.Center;
+        GameCamera.GetVisibleWorldHalfExtents(
+            cameraView,
+            out float halfWorldX,
+            out float halfWorldY);
 
-        Vector2f viewSize =
-            cameraView.Size;
-
-        float minWorldX =
-            (center.X -
-             viewSize.X * 0.5f) /
-            tilePixelSize -
-            2f;
-
-        float maxWorldX =
-            (center.X +
-             viewSize.X * 0.5f) /
-            tilePixelSize +
-            2f;
-
-        float minWorldY =
-            (center.Y -
-             viewSize.Y * 0.5f) /
-            tilePixelSize -
-            2f;
-
-        float maxWorldY =
-            (center.Y +
-             viewSize.Y * 0.5f) /
-            tilePixelSize +
-            2f;
+        float minWorldX = (center.X - halfWorldX) / tilePixelSize - 2f;
+        float maxWorldX = (center.X + halfWorldX) / tilePixelSize + 2f;
+        float minWorldY = (center.Y - halfWorldY) / tilePixelSize - 2f;
+        float maxWorldY = (center.Y + halfWorldY) / tilePixelSize + 2f;
 
         UnitStore units =
             simulation.Units;
@@ -477,8 +458,10 @@ public void DrawSnapshot(
 
         float centerX = cameraView.Center.X;
         float centerY = cameraView.Center.Y;
-        float halfWidth = cameraView.Size.X * 0.5f;
-        float halfHeight = cameraView.Size.Y * 0.5f;
+        GameCamera.GetVisibleWorldHalfExtents(
+            cameraView,
+            out float halfWidth,
+            out float halfHeight);
         float minX = (centerX - halfWidth) / tilePixelSize - 2f;
         float maxX = (centerX + halfWidth) / tilePixelSize + 2f;
         float minY = (centerY - halfHeight) / tilePixelSize - 2f;
@@ -2630,10 +2613,14 @@ private static void AppendSuppressionDebug(
         if (tilePixelSize <= 0f)
             return;
 
-        float minX = (cameraView.Center.X - cameraView.Size.X * 0.5f) / tilePixelSize - 2f;
-        float maxX = (cameraView.Center.X + cameraView.Size.X * 0.5f) / tilePixelSize + 2f;
-        float minY = (cameraView.Center.Y - cameraView.Size.Y * 0.5f) / tilePixelSize - 2f;
-        float maxY = (cameraView.Center.Y + cameraView.Size.Y * 0.5f) / tilePixelSize + 2f;
+        GameCamera.GetVisibleWorldHalfExtents(
+            cameraView,
+            out float halfViewX,
+            out float halfViewY);
+        float minX = (cameraView.Center.X - halfViewX) / tilePixelSize - 2f;
+        float maxX = (cameraView.Center.X + halfViewX) / tilePixelSize + 2f;
+        float minY = (cameraView.Center.Y - halfViewY) / tilePixelSize - 2f;
+        float maxY = (cameraView.Center.Y + halfViewY) / tilePixelSize + 2f;
 
         for (int i = 0; i < pulses.Length; i++)
         {
@@ -2714,10 +2701,14 @@ private static void AppendSuppressionDebug(
         if (tilePixelSize <= 0f || selectedUnitIndex < 0 || contacts.Length == 0)
             return;
 
-        float minX = (cameraView.Center.X - cameraView.Size.X * 0.5f) / tilePixelSize - 2f;
-        float maxX = (cameraView.Center.X + cameraView.Size.X * 0.5f) / tilePixelSize + 2f;
-        float minY = (cameraView.Center.Y - cameraView.Size.Y * 0.5f) / tilePixelSize - 2f;
-        float maxY = (cameraView.Center.Y + cameraView.Size.Y * 0.5f) / tilePixelSize + 2f;
+        GameCamera.GetVisibleWorldHalfExtents(
+            cameraView,
+            out float halfViewX,
+            out float halfViewY);
+        float minX = (cameraView.Center.X - halfViewX) / tilePixelSize - 2f;
+        float maxX = (cameraView.Center.X + halfViewX) / tilePixelSize + 2f;
+        float minY = (cameraView.Center.Y - halfViewY) / tilePixelSize - 2f;
+        float maxY = (cameraView.Center.Y + halfViewY) / tilePixelSize + 2f;
 
         for (int i = 0; i < contacts.Length; i++)
         {

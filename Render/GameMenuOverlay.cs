@@ -964,10 +964,14 @@ void main()
         bool drawContourLabels =
             showContourLabels && zoomLevel < MaxContourLabelZoom;
 
-        float screenMinX = cameraView.Center.X - cameraView.Size.X * 0.5f;
-        float screenMaxX = cameraView.Center.X + cameraView.Size.X * 0.5f;
-        float screenMinY = cameraView.Center.Y - cameraView.Size.Y * 0.5f;
-        float screenMaxY = cameraView.Center.Y + cameraView.Size.Y * 0.5f;
+        GameCamera.GetVisibleWorldHalfExtents(
+            cameraView,
+            out float halfViewX,
+            out float halfViewY);
+        float screenMinX = cameraView.Center.X - halfViewX;
+        float screenMaxX = cameraView.Center.X + halfViewX;
+        float screenMinY = cameraView.Center.Y - halfViewY;
+        float screenMaxY = cameraView.Center.Y + halfViewY;
 
         // Build contour geometry once per region. Zoom only changes the view,
         // never the contour mesh detail or its cache key.
