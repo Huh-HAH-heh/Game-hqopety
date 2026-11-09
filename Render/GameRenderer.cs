@@ -54,6 +54,7 @@ public sealed class GameRenderer
     private readonly GameCamera _camera;
     private readonly GameInput _input;
     private readonly MapRenderSystem _mapRenderer;
+    private readonly BlockTerrainPreviewRenderer _blockTerrainPreviewRenderer = new();
     private readonly UnitSimulation _unitSimulation;
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
@@ -165,6 +166,8 @@ public sealed class GameRenderer
     private bool _showHeightContours = true;
     private bool _showContourLabels = true;
     private bool _showUnitRig = true;
+    private bool _showBlockTerrainPreview;
+    private Vector2f _normalCameraCenter;
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
@@ -442,6 +445,7 @@ public sealed class GameRenderer
             // Release every native render resource while the SFML context
             // still exists, even if initialization, update, or drawing throws.
             _mapRenderer.Dispose();
+            _blockTerrainPreviewRenderer.Dispose();
             _projectileRenderer.Dispose();
             _unitRenderer.Dispose();
             _visionTestScene.Dispose();
@@ -765,6 +769,24 @@ public sealed class GameRenderer
             _camera.View);
 
         long stageStarted = Stopwatch.GetTimestamp();
+        if (_showBlockTerrainPreview)
+        {
+            _blockTerrainPreviewRenderer.Draw(
+                _window,
+                _worldMap,
+                _camera.View,
+                TerrainTilePixelSize);
+            _lastTerrainDrawMilliseconds =
+                Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
+            _lastUnitDrawMilliseconds = 0d;
+            _lastProjectileDrawMilliseconds = 0d;
+            _lastUiDrawMilliseconds = 0d;
+            _window.Display();
+            _lastRenderMilliseconds =
+                Stopwatch.GetElapsedTime(renderStarted).TotalMilliseconds;
+            return;
+        }
+
         _mapRenderer.Draw(
             _window,
             _worldMap,
@@ -3306,7 +3328,7 @@ public sealed class GameRenderer
                 bool shiftHeld =
                     Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
                     Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-                if (shiftHeld)
+                if (shiftHeld && !_showBlockTerrainPreview)
                 {
                     int layerSteps = Math.Max(
                         1, (int)MathF.Round(MathF.Abs(e.Delta))) *
@@ -3330,6 +3352,9 @@ public sealed class GameRenderer
         _window.MouseButtonPressed +=
             (_, e) =>
             {
+                if (_showBlockTerrainPreview && e.Button != Mouse.Button.Middle)
+                    return;
+
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
                     if (e.Button is Mouse.Button.Left or Mouse.Button.Middle)
@@ -4023,6 +4048,9 @@ public sealed class GameRenderer
                     return;
                 }
 
+                if (_showBlockTerrainPreview)
+                    return;
+
                 if (e.Button == Mouse.Button.Right && _isPlacingMoveLine)
                 {
                     Vector2f worldPixels = _window.MapPixelToCoords(e.Position, _camera.View);
@@ -4250,8 +4278,48 @@ public sealed class GameRenderer
             _worldMap.LayerCount - 1);
     }
 
+    private void ToggleBlockTerrainPreview()
+    {
+        _showBlockTerrainPreview = !_showBlockTerrainPreview;
+        _isPanningCamera = false;
+        _isSelectingUnits = false;
+        _isPlacingMoveLine = false;
+        _contextMenuOverlay?.Close();
+        _contextMenuUnit = default;
+
+        if (_showBlockTerrainPreview)
+        {
+            _normalCameraCenter = _camera.View.Center;
+            _camera.CenterOnPosition(
+                BlockTerrainPreviewRenderer.GetCameraCenter(
+                    _worldMap,
+                    TerrainTilePixelSize));
+            Console.WriteLine(
+                "[Terrain preview] Isometric block view. " +
+                "Middle mouse: pan; wheel: zoom; B: return to game.");
+        }
+        else
+        {
+            _camera.CenterOnPosition(_normalCameraCenter);
+            Console.WriteLine("[Terrain preview] Normal game view.");
+        }
+    }
+
     private void HandleKey(Keyboard.Key key)
     {
+        if (key == Keyboard.Key.B &&
+            _worldMap.UsesDiscreteBlockTerrain &&
+            _menuPage == GameMenuPage.Closed &&
+            _bodyRigEditorOverlay?.IsOpen != true &&
+            _debugLayersOverlay?.IsOpen != true &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _unitGroupCardOverlay?.IsOpen != true &&
+            _unitCards.Count == 0)
+        {
+            ToggleBlockTerrainPreview();
+            return;
+        }
+
         if (key is Keyboard.Key.PageUp or Keyboard.Key.PageDown)
         {
             bool raiseSlice = key == Keyboard.Key.PageUp;
