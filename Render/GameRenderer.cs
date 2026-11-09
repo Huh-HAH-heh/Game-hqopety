@@ -104,8 +104,6 @@ public sealed class GameRenderer
     private Vector2i _lastCameraPanPixel;
     private Vector2i _selectionDragStartPixel;
     private Vector2i _selectionDragCurrentPixel;
-    private Vector2f _selectionDragStartWorld;
-    private Vector2f _selectionDragCurrentWorld;
     private const int SelectionDragThreshold = 5;
 
     private readonly RectangleShape _selectionBox = new(new Vector2f(0f, 0f))
@@ -910,8 +908,12 @@ public sealed class GameRenderer
                 false);
         }
 
-        if (_isSelectingUnits && IsSelectionDrag())
+        if (_isSelectingUnits && IsSelectionDrag() && _uiView != null)
+        {
+            _window.SetView(_uiView);
             _window.Draw(_selectionBox);
+            _window.SetView(_camera.View);
+        }
 
         if (_isPlacingMoveLine)
             DrawMoveLinePreview();
@@ -1335,7 +1337,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  Верх карты={_camera.DirectionLabel}  Q/E=поворот 45°  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
     }
 
     private void StartSimulationThread()
@@ -2066,9 +2068,6 @@ public sealed class GameRenderer
             Keyboard.IsKeyPressed(Keyboard.Key.RShift);
         _selectionDragStartPixel = mousePixel;
         _selectionDragCurrentPixel = mousePixel;
-        _selectionDragStartWorld =
-            _window.MapPixelToCoords(mousePixel, _camera.View);
-        _selectionDragCurrentWorld = _selectionDragStartWorld;
         UpdateSelectionBox();
     }
 
@@ -2579,17 +2578,17 @@ public sealed class GameRenderer
 
     private void UpdateSelectionBox()
     {
-        float left = MathF.Min(_selectionDragStartWorld.X, _selectionDragCurrentWorld.X);
-        float top = MathF.Min(_selectionDragStartWorld.Y, _selectionDragCurrentWorld.Y);
+        float left = MathF.Min(_selectionDragStartPixel.X, _selectionDragCurrentPixel.X);
+        float top = MathF.Min(_selectionDragStartPixel.Y, _selectionDragCurrentPixel.Y);
         _selectionBox.Position = new Vector2f(left, top);
         _selectionBox.Size = new Vector2f(
-            MathF.Abs(_selectionDragCurrentWorld.X - _selectionDragStartWorld.X),
-            MathF.Abs(_selectionDragCurrentWorld.Y - _selectionDragStartWorld.Y));
+            MathF.Abs(_selectionDragCurrentPixel.X - _selectionDragStartPixel.X),
+            MathF.Abs(_selectionDragCurrentPixel.Y - _selectionDragStartPixel.Y));
     }
 
     private void SelectWorldUnitsInRectangle(
-        Vector2f startPixels,
-        Vector2f endPixels,
+        Vector2i startPixel,
+        Vector2i endPixel,
         bool shiftHeld = false)
     {
         SimulationFrameSnapshot? snapshot = _simulationThread != null
@@ -2598,13 +2597,14 @@ public sealed class GameRenderer
         if (snapshot == null)
             return;
 
-        float minX = MathF.Min(startPixels.X, endPixels.X) / TerrainTilePixelSize;
-        float maxX = MathF.Max(startPixels.X, endPixels.X) / TerrainTilePixelSize;
-        float minY = MathF.Min(startPixels.Y, endPixels.Y) / TerrainTilePixelSize;
-        float maxY = MathF.Max(startPixels.Y, endPixels.Y) / TerrainTilePixelSize;
-        float pixelsPerUnit = TerrainTilePixelSize *
-            _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
-        float minimumMarkerRadius = 2f / MathF.Max(1f, pixelsPerUnit);
+        int minPixelX = Math.Min(startPixel.X, endPixel.X);
+        int maxPixelX = Math.Max(startPixel.X, endPixel.X);
+        int minPixelY = Math.Min(startPixel.Y, endPixel.Y);
+        int maxPixelY = Math.Max(startPixel.Y, endPixel.Y);
+        float pixelsPerWorldX = _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
+        float pixelsPerWorldY = _window.Size.Y / MathF.Max(1f, _camera.View.Size.Y);
+        float pixelsPerTile = TerrainTilePixelSize *
+            MathF.Max(pixelsPerWorldX, pixelsPerWorldY);
         List<UnitId> picked = new();
 
         for (int i = 0; i < snapshot.Units.Length; i++)
@@ -2613,13 +2613,19 @@ public sealed class GameRenderer
             if (unit.HitPoints <= 0f)
                 continue;
 
-            float radius = GetMarkerWorldRadius(unit, minimumMarkerRadius);
-            float closestX = Math.Clamp(unit.Position.X, minX, maxX);
-            float closestY = Math.Clamp(unit.Position.Y, minY, maxY);
-            float dx = unit.Position.X - closestX;
-            float dy = unit.Position.Y - closestY;
-            if (dx * dx + dy * dy > radius * radius)
+            Vector2i screenPosition = _window.MapCoordsToPixel(
+                new Vector2f(
+                    unit.Position.X * TerrainTilePixelSize,
+                    unit.Position.Y * TerrainTilePixelSize),
+                _camera.View);
+            float radius = GetMarkerWorldRadius(unit, 0f) * pixelsPerTile;
+            if (screenPosition.X + radius < minPixelX ||
+                screenPosition.X - radius > maxPixelX ||
+                screenPosition.Y + radius < minPixelY ||
+                screenPosition.Y - radius > maxPixelY)
+            {
                 continue;
+            }
 
             picked.Add(new UnitId(unit.Index, unit.Generation));
         }
@@ -4011,8 +4017,6 @@ public sealed class GameRenderer
                 if (_isSelectingUnits)
                 {
                     _selectionDragCurrentPixel = e.Position;
-                    _selectionDragCurrentWorld =
-                        _window.MapPixelToCoords(e.Position, _camera.View);
                     UpdateSelectionBox();
                     return;
                 }
@@ -4133,8 +4137,6 @@ public sealed class GameRenderer
                     return;
 
                 _selectionDragCurrentPixel = e.Position;
-                _selectionDragCurrentWorld =
-                    _window.MapPixelToCoords(e.Position, _camera.View);
                 bool boxSelection = IsSelectionDrag();
                 _isSelectingUnits = false;
                 _selectionBox.Size = new Vector2f(0f, 0f);
@@ -4142,8 +4144,8 @@ public sealed class GameRenderer
                 if (boxSelection)
                 {
                     SelectWorldUnitsInRectangle(
-                        _selectionDragStartWorld,
-                        _selectionDragCurrentWorld,
+                        _selectionDragStartPixel,
+                        _selectionDragCurrentPixel,
                         _selectionShiftHeld);
                 }
                 else
