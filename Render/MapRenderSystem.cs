@@ -436,12 +436,9 @@ void main()
             {
                 for (int x = minTileX; x <= maxTileX; x += lodStep)
                 {
-                    int topLayer =
-                        FindVisibleTopLayer(
-                            worldMap,
-                            x,
-                            y,
-                            maxLayer);
+                    int topLayer = showGrid
+                        ? FindVisibleTopLayer(worldMap, x, y, maxLayer)
+                        : -1;
 
                     float left = x * tilePixelSize;
                     float top = y * tilePixelSize;
