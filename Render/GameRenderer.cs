@@ -793,7 +793,8 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _camera.ZoomLevel,
             _showDebugGrid,
-            _visibleMaxLayer);
+            _visibleMaxLayer,
+            _camera.IsometricProjectionEnabled);
         _lastTerrainDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
         if (_showVisionDebug &&
