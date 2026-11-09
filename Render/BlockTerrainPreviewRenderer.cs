@@ -200,7 +200,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                         new Color(39, 45, 49, 255),
                         tileSize);
     
-                    ushort materialId = worldMap.GetMaterialId(x, y, surfaceLayer);
+                    ushort materialId = surfaceLayer >= 0
+                        ? worldMap.GetMaterialId(x, y, surfaceLayer)
+                        : (ushort)0;
                     Color topColor = GetTopColor(materialId, baseHeight, transition);
                     AppendTopFace(_blockFaces, north, east, south, west, topColor);
     
