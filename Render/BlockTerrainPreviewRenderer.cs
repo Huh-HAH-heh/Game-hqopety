@@ -205,7 +205,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                             y,
                             step,
                             tileSize);
-                    }                }
+                    }
+                }
         }
 
             _cachedTerrainVersion = worldMap.TerrainVersion;
