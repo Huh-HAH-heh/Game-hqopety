@@ -166,6 +166,7 @@ public sealed class GameRenderer
     private bool _showUnitRig = true;
     private bool _showBlockTerrainPreview;
     private Vector2f _normalCameraCenter;
+    private bool _blockPreviewRestoreIsometricProjection;
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
@@ -828,7 +829,8 @@ public sealed class GameRenderer
                 _showHearingDebug,
                 _showAttackLinks,
                 _showSuppressionDebug,
-                _showMemoryDebug);
+                _showMemoryDebug,
+                _camera.IsometricProjectionEnabled);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -858,7 +860,8 @@ public sealed class GameRenderer
                 _showAttackLinks,
                 _showSuppressionDebug,
                 _showMemoryDebug,
-                _mapRenderer.DisplayedMaxLayer);
+                _mapRenderer.DisplayedMaxLayer,
+                _camera.IsometricProjectionEnabled);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -1160,8 +1163,8 @@ public sealed class GameRenderer
             $"LastHit={snapshot.LastHitPart} | " +
             $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
             (_camera.IsometricProjectionEnabled
-                ? $"Верх карты={_camera.DirectionLabel} (Q/E: 45°) | "
-                : "Блочный предпросмотр | ") +
+                ? $"ИЗОМЕТРИЯ • Верх карты={_camera.DirectionLabel} (Q/E: 45°) • Tab: вид сверху | "
+                : "ВИД СВЕРХУ • Tab: изометрия | ") +
             "RMB=движение/атака  Shift+click=добавить выделение  СКМ=панорама  Колесо=масштаб  ESC=меню | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
@@ -1337,7 +1340,11 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  Верх карты={_camera.DirectionLabel}  Q/E=поворот 45°  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  " +
+            (_camera.IsometricProjectionEnabled
+                ? $"Изометрия • верх карты={_camera.DirectionLabel} • Q/E=поворот 45° • "
+                : "Вид сверху • ") +
+            "Tab=режим камеры  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
     }
 
     private void StartSimulationThread()
@@ -4297,6 +4304,7 @@ public sealed class GameRenderer
         if (_showBlockTerrainPreview)
         {
             _normalCameraCenter = _camera.View.Center;
+            _blockPreviewRestoreIsometricProjection = _camera.IsometricProjectionEnabled;
             _camera.SetIsometricProjection(false);
             _camera.CenterOnPosition(
                 BlockTerrainPreviewRenderer.GetCameraCenter(
@@ -4308,9 +4316,12 @@ public sealed class GameRenderer
         }
         else
         {
-            _camera.SetIsometricProjection(true);
+            _camera.SetIsometricProjection(_blockPreviewRestoreIsometricProjection);
             _camera.CenterOnPosition(_normalCameraCenter);
-            Console.WriteLine("[Terrain preview] Isometric game view restored.");
+            Console.WriteLine(
+                _camera.IsometricProjectionEnabled
+                    ? "[Terrain preview] Isometric game view restored."
+                    : "[Terrain preview] Top-down game view restored.");
         }
     }
 
@@ -4333,6 +4344,23 @@ public sealed class GameRenderer
             _unitCards.Count == 0)
         {
             ToggleBlockTerrainPreview();
+            return;
+        }
+
+        if (key == Keyboard.Key.Tab &&
+            _menuPage == GameMenuPage.Closed &&
+            _bodyRigEditorOverlay?.IsOpen != true &&
+            _debugLayersOverlay?.IsOpen != true &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _unitGroupCardOverlay?.IsOpen != true &&
+            _unitCards.Count == 0 &&
+            !_showUtilityAiDebug)
+        {
+            _camera.SetIsometricProjection(!_camera.IsometricProjectionEnabled);
+            Console.WriteLine(
+                _camera.IsometricProjectionEnabled
+                    ? "[CAMERA] Изометрия. Q/E — поворот на 45°. Tab — обычный вид сверху."
+                    : "[CAMERA] Обычный вид сверху. Tab — изометрия.");
             return;
         }
 
@@ -4382,6 +4410,7 @@ public sealed class GameRenderer
         }
 
         if ((key is Keyboard.Key.Q or Keyboard.Key.E) &&
+            _camera.IsometricProjectionEnabled &&
             _menuPage == GameMenuPage.Closed &&
             _debugLayersOverlay?.IsOpen != true &&
             _contextMenuOverlay?.IsOpen != true &&

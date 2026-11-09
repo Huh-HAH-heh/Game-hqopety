@@ -42,17 +42,9 @@ public sealed class UnitRenderSystem : IDisposable
             _liftY = liftY;
         }
 
-        public static UnitVisualProjection Create(RenderWindow window, View view)
+        public static UnitVisualProjection Create(View view, bool isometricEnabled)
         {
-            float viewportWidth = MathF.Max(1f, window.Size.X);
-            float viewportHeight = MathF.Max(1f, window.Size.Y);
-            float horizontalScale = MathF.Abs(view.Size.X) / viewportWidth;
-            float verticalScale = MathF.Abs(view.Size.Y) / viewportHeight;
-
-            // GameCamera's isometric view is exactly half the normal
-            // viewport-relative width/height ratio. Flat block preview is 1:1.
-            float projectionRatio = horizontalScale / MathF.Max(0.0001f, verticalScale);
-            if (MathF.Abs(projectionRatio - 0.5f) > 0.08f)
+            if (!isometricEnabled)
                 return default;
 
             float angle = view.Rotation.Radians;
@@ -267,12 +259,15 @@ public sealed class UnitRenderSystem : IDisposable
         bool showAttackLinks = true,
         bool showSuppressionDebug = false,
         bool showMemoryDebug = false,
-        int visibleMaxLayer = int.MaxValue)
+        int visibleMaxLayer = int.MaxValue,
+        bool isometricProjectionEnabled = false)
     {
         if (tilePixelSize <= 0f)
             return;
 
-        UnitVisualProjection projection = UnitVisualProjection.Create(window, cameraView);
+        UnitVisualProjection projection = UnitVisualProjection.Create(
+            cameraView,
+            isometricProjectionEnabled);
         int cutLayer = Math.Clamp(visibleMaxLayer, 0, worldMap.LayerCount - 1);
         float cutHeight = (cutLayer + 1) * WorldMap.LayerHeightUnits * 0.1f;
 
@@ -625,12 +620,15 @@ public void DrawSnapshot(
         bool showHearingDebug = false,
         bool showAttackLinks = true,
         bool showSuppressionDebug = false,
-        bool showMemoryDebug = false)
+        bool showMemoryDebug = false,
+        bool isometricProjectionEnabled = false)
     {
         if (tilePixelSize <= 0f)
             return;
 
-        UnitVisualProjection projection = UnitVisualProjection.Create(window, cameraView);
+        UnitVisualProjection projection = UnitVisualProjection.Create(
+            cameraView,
+            isometricProjectionEnabled);
         int cutLayer = Math.Clamp(visibleMaxLayer, 0, worldMap.LayerCount - 1);
         float cutHeight = (cutLayer + 1) * WorldMap.LayerHeightUnits * 0.1f;
 

@@ -21,7 +21,7 @@ public sealed class GameCamera : IDisposable
     private float _zoomLevel = 1.0f;
     private Vector2f _targetPosition;
     private Vector2f _viewportSize;
-    private bool _isometricProjectionEnabled = true;
+    private bool _isometricProjectionEnabled = false;
     private int _rotationStep;
 
     public float ZoomLevel => _zoomLevel;
