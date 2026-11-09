@@ -4307,9 +4307,10 @@ public sealed class GameRenderer
 
     private void HandleKey(Keyboard.Key key)
     {
-        if (_showBlockTerrainPreview && key == Keyboard.Key.Escape)
+        if (_showBlockTerrainPreview)
         {
-            ToggleBlockTerrainPreview();
+            if (key is Keyboard.Key.B or Keyboard.Key.Escape)
+                ToggleBlockTerrainPreview();
             return;
         }
 
