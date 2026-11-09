@@ -269,12 +269,13 @@ public sealed class UnitNavigationSystem
         bool goalChanged = sameOwner &&
             (targetX != _routeGoalX[unitIndex] ||
              targetY != _routeGoalY[unitIndex]);
+        bool passedBlockedCorner = false;
         if (sameOwner &&
             !targetFarMoved &&
             !footprintChanged &&
             _routeTerrainVersion[unitIndex] == worldMap.TerrainVersion)
         {
-            AdvanceWaypointCursor(
+            passedBlockedCorner = AdvanceWaypointCursor(
                 worldMap, units, unitIndex, position, target,
                 route, waypoints, waypointPathIndices,
                 ref cursor, ref waypointCursor);
@@ -305,6 +306,7 @@ public sealed class UnitNavigationSystem
             length == 0 ||
             targetFarMoved ||
             deviatedFromRoute ||
+            passedBlockedCorner ||
             (routeFinished && goalChanged) ||
             repositionedAwayFromFinishedRoute ||
             footprintChanged ||
@@ -1081,7 +1083,7 @@ public sealed class UnitNavigationSystem
         return target;
     }
 
-    private void AdvanceWaypointCursor(
+    private bool AdvanceWaypointCursor(
         WorldMap worldMap,
         UnitStore units,
         int unitIndex,
@@ -1096,6 +1098,7 @@ public sealed class UnitNavigationSystem
         Vector2 current = new(position.X, position.Y);
         int footprintX = GetFootprintRadius(units.Width[unitIndex]);
         int footprintY = GetFootprintRadius(units.Length[unitIndex]);
+        bool passedBlockedCorner = false;
         while (waypointCursor < waypoints.Length)
         {
             Vector2 waypoint = GetWaypointPosition(waypoints[waypointCursor]);
@@ -1149,11 +1152,20 @@ public sealed class UnitNavigationSystem
                             : new Vector2(target.X, target.Y);
                         passed = HasClearStraightRouteToPoint(
                             worldMap, current, nextPoint, footprintX, footprintY);
+                        if (!passed)
+                        {
+                            // The pawn has already crossed this corner, but the
+                            // next leg is not visible from its actual position.
+                            // Rebuild from here instead of steering backwards to
+                            // a waypoint that inertia has carried behind the pawn.
+                            passedBlockedCorner = true;
+                            break;
+                        }
                     }
                 }
             }
 
-            if (!reached && !passed)
+            if (passedBlockedCorner || (!reached && !passed))
                 break;
 
             int reachedRouteIndex = waypointPathIndices[waypointCursor];
@@ -1171,6 +1183,8 @@ public sealed class UnitNavigationSystem
         _waypointCursor[unitIndex] = waypointCursor;
         if (waypointCursor >= waypoints.Length)
             _routeTrafficRegistered[unitIndex] = false;
+
+        return passedBlockedCorner;
     }
 
     public void ClearRoute(int unitIndex) =>
@@ -2004,9 +2018,11 @@ public sealed class UnitNavigationSystem
                     _navigationHeights[index] - centerHeight);
                 bool transitionFootprint = worldMap.UsesDiscreteBlockTerrain &&
                     (worldMap.Blocks.IsTransitionCell(
-                         x / NavigationCellsPerMeter,
-                         y / NavigationCellsPerMeter) ||
-                     worldMap.Blocks.IsTransitionCell(cellX, cellY));
+                         ToWorldTile(x),
+                         ToWorldTile(y)) ||
+                     worldMap.Blocks.IsTransitionCell(
+                         ToWorldTile(cellX),
+                         ToWorldTile(cellY)));
                 if (!_navigationPassable[index] ||
                     (!transitionFootprint &&
                      heightDifference > allowedHeightDifference + 0.0001f))
