@@ -50,9 +50,13 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
-        int step = pixelsPerTile < 2f ? 8
-            : pixelsPerTile < 4f ? 4
-            : pixelsPerTile < 12f ? 2
+        // Keep the detailed 1 m mesh for close inspection only.
+        // At normal overview zoom, larger patches avoid submitting tens of
+        // thousands of individual block faces to the GPU.
+        int step = pixelsPerTile < 3.5f ? 16
+            : pixelsPerTile < 7f ? 8
+            : pixelsPerTile < 14f ? 4
+            : pixelsPerTile < 28f ? 2
             : 1;
 
         bool cameraMovedOutsideCache =
@@ -60,11 +64,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 cameraView.Size.X * 0.2f ||
             MathF.Abs(cameraView.Center.Y - _cachedCameraCenter.Y) >
                 cameraView.Size.Y * 0.2f;
+        // The cached mesh already includes a 70% viewport margin.
+        // Rebuild only when zooming out far enough to exceed that margin;
+        // zooming in and small wheel steps can safely reuse the existing mesh.
         bool viewSizeChanged =
-            MathF.Abs(cameraView.Size.X - _cachedViewSize.X) >
-                MathF.Max(1f, _cachedViewSize.X * 0.02f) ||
-            MathF.Abs(cameraView.Size.Y - _cachedViewSize.Y) >
-                MathF.Max(1f, _cachedViewSize.Y * 0.02f);
+            cameraView.Size.X > _cachedViewSize.X * 1.25f ||
+            cameraView.Size.Y > _cachedViewSize.Y * 1.25f;
         bool rebuildGeometry =
             !_cacheValid ||
             _cachedTerrainVersion != worldMap.TerrainVersion ||
