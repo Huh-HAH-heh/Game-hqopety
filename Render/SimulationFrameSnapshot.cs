@@ -136,15 +136,18 @@ public readonly record struct RenderProjectileImpact(
     ProjectileImpactKind Kind);
 
 /// <summary>
-/// Immutable horizontal body geometry captured for one render frame.
-/// Scale and rotation come from the same articulated body transforms used by hit testing.
+/// Immutable 3D body geometry captured for one render frame.
+/// The renderer projects it into the active camera plane.
 /// </summary>
 public readonly record struct RenderBodyPart(
     Vector3 Position,
     Vector3 Scale,
     float Rotation,
     BodyPrimitive Primitive,
-    BodyPartRole Role);
+    BodyPartRole Role)
+{
+    public Quaternion Orientation { get; init; }
+}
 
 /// <summary>
 /// Immutable data published by the simulation thread and consumed by the renderer.
@@ -571,6 +574,7 @@ public sealed class SimulationFrameSnapshot
         Vector3[] sourceBodyPositions = bodyStore.WorldPosition;
         Vector3[] sourceBodyScales = bodyStore.Scale;
         float[] sourceBodyRotations = bodyStore.WorldRotation;
+        Quaternion[] sourceBodyOrientations = bodyStore.WorldOrientation;
         BodyPrimitive[] sourceBodyPrimitives = bodyStore.Primitive;
         BodyPartRole[] sourceBodyRoles = bodyStore.Role;
         int renderBodyPartWrite = 0;
@@ -754,7 +758,10 @@ public sealed class SimulationFrameSnapshot
                         sourceBodyScales[sourceIndex],
                         sourceBodyRotations[sourceIndex],
                         sourceBodyPrimitives[sourceIndex],
-                        sourceBodyRoles[sourceIndex]);
+                        sourceBodyRoles[sourceIndex])
+                    {
+                        Orientation = sourceBodyOrientations[sourceIndex]
+                    };
                 }
             }
 

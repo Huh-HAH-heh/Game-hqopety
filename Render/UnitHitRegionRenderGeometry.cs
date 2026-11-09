@@ -19,7 +19,10 @@ internal static class UnitHitRegionRenderGeometry
             new Vector3(geometry.Radius, geometry.Radius, geometry.HalfHeight),
             0f,
             BodyPrimitive.Circle,
-            GetRole(region));
+            GetRole(region))
+        {
+            Orientation = BodyPartTransformMath.TopDownRotation(0f)
+        };
     }
 
     private static BodyPartRole GetRole(in UnitCircleHitRegion region)
