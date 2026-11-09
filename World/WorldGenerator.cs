@@ -76,7 +76,6 @@ public static class WorldGenerator
                     }
                 }
 
-
                 // A one-metre step is traversable only when this lower tile
                 // explicitly contains a ramp. Larger cliffs remain solid walls.
                 if (bestDifference != 1)
