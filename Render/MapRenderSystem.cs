@@ -151,6 +151,7 @@ void main()
     private bool _mapCacheValid;
     private bool _gridCacheValid;
     private bool _cachedShowGrid;
+    private bool _cachedIsometricProjection;
     private bool _waterCacheValid;
 
     private int _cachedMinTileX;
@@ -258,7 +259,8 @@ void main()
         float tilePixelSize,
         float zoomLevel,
         bool showGrid,
-        int visibleMaxLayer = -1)
+        int visibleMaxLayer = -1,
+        bool isometricProjectionEnabled = false)
     {
         if (tilePixelSize <= 0f)
             return;
@@ -373,7 +375,7 @@ void main()
 
         // Discrete ramps are rendered as sloped block surfaces in the terrain
         // mesh. The old arrow/line overlay was only a debug marker.
-        if (!worldMap.UsesDiscreteBlockTerrain)
+        if (isometricProjectionEnabled && !worldMap.UsesDiscreteBlockTerrain)
         {
             DrawBlockTransitions(
                 window,
@@ -409,7 +411,8 @@ void main()
             _cachedLodStep == lodStep &&
             _cachedVisibleMaxLayer == maxLayer &&
             _cachedTerrainVersion == worldMap.TerrainVersion &&
-            _cachedShowGrid == showGrid;
+            _cachedShowGrid == showGrid &&
+            _cachedIsometricProjection == isometricProjectionEnabled;
 
         if (!mapCacheMatches)
         {
@@ -455,14 +458,17 @@ void main()
                             bottom);
                     }
 
-                    AppendHeightStepEdges(
-                        _heightStepVertices,
-                        worldMap,
-                        x,
-                        y,
-                        lodStep,
-                        tilePixelSize,
-                        maxLayer);
+                    if (isometricProjectionEnabled)
+                    {
+                        AppendHeightStepEdges(
+                            _heightStepVertices,
+                            worldMap,
+                            x,
+                            y,
+                            lodStep,
+                            tilePixelSize,
+                            maxLayer);
+                    }
                 }
             }
 
@@ -475,6 +481,7 @@ void main()
             _cachedVisibleMaxLayer = maxLayer;
             _cachedTerrainVersion = worldMap.TerrainVersion;
             _cachedShowGrid = showGrid;
+            _cachedIsometricProjection = isometricProjectionEnabled;
         }
 
          DrawWater(
@@ -491,7 +498,7 @@ void main()
         if (showGrid && _gridVertices.VertexCount > 0)
             window.Draw(_gridVertices);
 
-        if (_heightStepVertices.VertexCount > 0)
+        if (isometricProjectionEnabled && _heightStepVertices.VertexCount > 0)
             window.Draw(_heightStepVertices);
     }
 
