@@ -110,40 +110,58 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     
                     int surfaceLayer = worldMap.FindTopOccupiedLayer(
                         x, y, worldMap.LayerCount - 1);
-                    if (surfaceLayer < 0)
-                    {
-                        if (step > 1)
-                        {
-                            AppendRampOverlaysInPatch(
-                                worldMap,
-                                x,
-                                y,
-                                step,
-                                tileSize);
-                        }
-
-                        continue;
-                    }
-    
-                    float baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
-                    if (baseHeight <= 0f)
-                        baseHeight = (surfaceLayer + 1f) * 0.1f;
-    
-                    float northZ = baseHeight;
-                    float eastZ = baseHeight;
-                    float southZ = baseHeight;
-                    float westZ = baseHeight;
+                    float baseHeight;
                     BlockDirection rampDirection = BlockDirection.North;
-                    bool isRamp = step == 1 &&
-                        TryGetValidRamp(
+                    bool isRamp;
+
+                    if (step == 1)
+                    {
+                        if (surfaceLayer < 0)
+                            continue;
+
+                        baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
+                        if (baseHeight <= 0f)
+                            baseHeight = (surfaceLayer + 1f) * 0.1f;
+
+                        isRamp = TryGetValidRamp(
                             worldMap,
                             x,
                             y,
                             out rampDirection,
                             out _);
+                    }
+                    else if (TrySummarizeRampPatch(
+                                 worldMap,
+                                 x,
+                                 y,
+                                 step,
+                                 out rampDirection,
+                                 out baseHeight))
+                    {
+                        // Several one-metre ramps collapse to one coarse ramp
+                        // for this patch. At distant LOD we keep only the
+                        // dominant direction, rather than appending every ramp.
+                        isRamp = true;
+                    }
+                    else
+                    {
+                        if (surfaceLayer < 0)
+                            continue;
+
+                        baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
+                        if (baseHeight <= 0f)
+                            baseHeight = (surfaceLayer + 1f) * 0.1f;
+
+                        isRamp = false;
+                    }
+
                     BlockTransitionType transition = isRamp
                         ? BlockTransitionType.Ramp
                         : BlockTransitionType.None;
+                    float northZ = baseHeight;
+                    float eastZ = baseHeight;
+                    float southZ = baseHeight;
+                    float westZ = baseHeight;
 
                     if (isRamp)
                     {
@@ -194,18 +212,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     AppendLine(_blockSeams, south, west, seamColor);
                     AppendLine(_blockSeams, west, north, seamColor);
 
-                    // Coarse terrain LOD represents a step x step patch. Draw
-                    // every real ramp in that patch at its own 1 m position,
-                    // preserving its actual cardinal orientation.
-                    if (step > 1)
-                    {
-                        AppendRampOverlaysInPatch(
-                            worldMap,
-                            x,
-                            y,
-                            step,
-                            tileSize);
-                    }
                 }
         }
 
@@ -290,67 +296,63 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         }
     }
 
-    private void AppendRampOverlaysInPatch(
+    private static bool TrySummarizeRampPatch(
         WorldMap worldMap,
         int startX,
         int startY,
         int step,
-        float tileSize)
+        out BlockDirection dominantDirection,
+        out float averageBaseHeight)
     {
+        Span<int> directionCounts = stackalloc int[4];
+        int totalRamps = 0;
+        float heightSum = 0f;
+
         int maxX = Math.Min(worldMap.MaxTileX, startX + step - 1);
         int maxY = Math.Min(worldMap.MaxTileY, startY + step - 1);
         for (int y = startY; y <= maxY; y++)
         {
             for (int x = startX; x <= maxX; x++)
             {
-                if (TryGetValidRamp(
+                if (!TryGetValidRamp(
                         worldMap,
                         x,
                         y,
                         out BlockDirection direction,
-                        out float rampHeight))
+                        out float baseHeight))
                 {
-                    AppendRampTopFace(
-                        x,
-                        y,
-                        rampHeight,
-                        direction,
-                        tileSize);
+                    continue;
                 }
+
+                directionCounts[(int)direction]++;
+                totalRamps++;
+                heightSum += baseHeight;
             }
         }
-    }
 
-    private void AppendRampTopFace(
-        int x,
-        int y,
-        float baseHeight,
-        BlockDirection direction,
-        float tileSize)
-    {
-        float northZ = baseHeight;
-        float eastZ = baseHeight;
-        float southZ = baseHeight;
-        float westZ = baseHeight;
-        ApplyRampSlope(
-            direction,
-            ref northZ,
-            ref eastZ,
-            ref southZ,
-            ref westZ);
+        int bestDirection = -1;
+        int bestCount = 0;
+        for (int direction = 0; direction < directionCounts.Length; direction++)
+        {
+            if (directionCounts[direction] > bestCount)
+            {
+                bestCount = directionCounts[direction];
+                bestDirection = direction;
+            }
+        }
 
-        Vector2f north = Project(x, y, northZ, tileSize);
-        Vector2f east = Project(x + 1, y, eastZ, tileSize);
-        Vector2f south = Project(x + 1, y + 1, southZ, tileSize);
-        Vector2f west = Project(x, y + 1, westZ, tileSize);
-        Color rampColor = new Color(157, 132, 91, 255);
-        AppendTopFace(_blockFaces, north, east, south, west, rampColor);
+        // Mixed patches with no clear majority should not invent a ramp
+        // direction. They stay a flat distant-LOD surface instead.
+        if (totalRamps == 0 || bestCount * 2 <= totalRamps)
+        {
+            dominantDirection = BlockDirection.North;
+            averageBaseHeight = 0f;
+            return false;
+        }
 
-        Color seamColor = new Color(27, 31, 34, 175);
-        AppendLine(_blockSeams, north, east, seamColor);
-        AppendLine(_blockSeams, east, south, seamColor);
-        AppendLine(_blockSeams, south, west, seamColor);
-        AppendLine(_blockSeams, west, north, seamColor);
+        dominantDirection = (BlockDirection)bestDirection;
+        averageBaseHeight = heightSum / totalRamps;
+        return true;
     }
 
     private void AppendSideFace(
