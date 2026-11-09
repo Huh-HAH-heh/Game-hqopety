@@ -111,7 +111,19 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     int surfaceLayer = worldMap.FindTopOccupiedLayer(
                         x, y, worldMap.LayerCount - 1);
                     if (surfaceLayer < 0)
+                    {
+                        if (step > 1)
+                        {
+                            AppendRampOverlaysInPatch(
+                                worldMap,
+                                x,
+                                y,
+                                step,
+                                tileSize);
+                        }
+
                         continue;
+                    }
     
                     float baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
                     if (baseHeight <= 0f)
@@ -187,30 +199,13 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     // preserving its actual cardinal orientation.
                     if (step > 1)
                     {
-                        int scanMaxX = Math.Min(worldMap.MaxTileX, x + step - 1);
-                        int scanMaxY = Math.Min(worldMap.MaxTileY, y + step - 1);
-                        for (int scanY = y; scanY <= scanMaxY; scanY++)
-                        {
-                            for (int scanX = x; scanX <= scanMaxX; scanX++)
-                            {
-                                if (TryGetValidRamp(
-                                        worldMap,
-                                        scanX,
-                                        scanY,
-                                        out BlockDirection rampDirection,
-                                        out float rampHeight))
-                                {
-                                    AppendRampTopFace(
-                                        scanX,
-                                        scanY,
-                                        rampHeight,
-                                        rampDirection,
-                                        tileSize);
-                                }
-                            }
-                        }
-                    }
-                }
+                        AppendRampOverlaysInPatch(
+                            worldMap,
+                            x,
+                            y,
+                            step,
+                            tileSize);
+                    }                }
         }
 
             _cachedTerrainVersion = worldMap.TerrainVersion;
@@ -291,6 +286,37 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 westZ += 1f;
                 northZ += 1f;
                 break;
+        }
+    }
+
+    private void AppendRampOverlaysInPatch(
+        WorldMap worldMap,
+        int startX,
+        int startY,
+        int step,
+        float tileSize)
+    {
+        int maxX = Math.Min(worldMap.MaxTileX, startX + step - 1);
+        int maxY = Math.Min(worldMap.MaxTileY, startY + step - 1);
+        for (int y = startY; y <= maxY; y++)
+        {
+            for (int x = startX; x <= maxX; x++)
+            {
+                if (TryGetValidRamp(
+                        worldMap,
+                        x,
+                        y,
+                        out BlockDirection direction,
+                        out float rampHeight))
+                {
+                    AppendRampTopFace(
+                        x,
+                        y,
+                        rampHeight,
+                        direction,
+                        tileSize);
+                }
+            }
         }
     }
 
