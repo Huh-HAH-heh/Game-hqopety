@@ -68,6 +68,7 @@ public static class CombatSelfTest
         RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
+        RunTest("Terrain: ramps support all four isometric orientations", UnitMovementSelfTest.AllFourRampOrientationsConnectAndSlopeCorrectly, ref passed, ref failed);
         RunTest("Movement: accelerates and stops at commanded target", UnitMovementSelfTest.AcceleratesAndStopsAtCommandedTarget, ref passed, ref failed);
         RunTest("Movement: units advance while waiting for route budget", UnitMovementSelfTest.UnitsMoveWhileWaitingForRouteBudget, ref passed, ref failed);
         RunTest("Movement: cancelling a command applies gradual braking", UnitMovementSelfTest.CancellingCommandAppliesGradualBraking, ref passed, ref failed);
