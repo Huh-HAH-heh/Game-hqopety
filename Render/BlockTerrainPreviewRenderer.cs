@@ -122,11 +122,28 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 float southZ = baseHeight;
                 float westZ = baseHeight;
 
-                BlockTransitionType transition = step == 1
-                    ? worldMap.Blocks.GetTransitionType(x, y)
-                    : BlockTransitionType.None;
+                BlockTransitionType transition =
+                    worldMap.Blocks.GetTransitionType(x, y);
+                if (transition == BlockTransitionType.None && step > 1)
+                {
+                    int scanMaxX = Math.Min(worldMap.MaxTileX, x + step - 1);
+                    int scanMaxY = Math.Min(worldMap.MaxTileY, y + step - 1);
+                    for (int scanY = y; scanY <= scanMaxY &&
+                         transition == BlockTransitionType.None; scanY++)
+                    {
+                        for (int scanX = x; scanX <= scanMaxX; scanX++)
+                        {
+                            if (worldMap.Blocks.GetTransitionType(scanX, scanY) ==
+                                BlockTransitionType.Ramp)
+                            {
+                                transition = BlockTransitionType.Ramp;
+                                break;
+                            }
+                        }
+                    }
+                }
 
-                if (transition == BlockTransitionType.Ramp)
+                if (transition == BlockTransitionType.Ramp && step == 1)
                 {
                     switch (worldMap.Blocks.GetTransitionDirection(x, y))
                     {
