@@ -68,6 +68,12 @@ public static class CombatSelfTest
         RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
+        RunTest("Navigation: half-metre cells and any-angle parents", UnitMovementSelfTest.NavigationUsesHalfMeterCellsAndAnyAngleParents, ref passed, ref failed);
+        RunTest("Navigation: interpolated walls and ramps", UnitMovementSelfTest.NavigationMatchesInterpolatedWallAndRampGeometry, ref passed, ref failed);
+        RunTest("Navigation: discrete block transitions are required", UnitMovementSelfTest.DiscreteBlocksRequireAnExplicitRamp, ref passed, ref failed);
+        RunTest("Navigation: wide footprints do not alias ramp coordinates", UnitMovementSelfTest.WideFootprintDoesNotAliasBlockTransitionCoordinates, ref passed, ref failed);
+        RunTest("Navigation: staggered ruins do not cause route loops", UnitMovementSelfTest.FollowsRouteThroughStaggeredRuinWithoutLooping, ref passed, ref failed);
+        RunTest("Navigation: weighted detours survive waypoint smoothing", UnitMovementSelfTest.WeightedAStarDetourSurvivesWaypointSmoothing, ref passed, ref failed);
         RunTest("Terrain: ramps support all four isometric orientations", UnitMovementSelfTest.AllFourRampOrientationsConnectAndSlopeCorrectly, ref passed, ref failed);
         RunTest("Movement: accelerates and stops at commanded target", UnitMovementSelfTest.AcceleratesAndStopsAtCommandedTarget, ref passed, ref failed);
         RunTest("Movement: units advance while waiting for route budget", UnitMovementSelfTest.UnitsMoveWhileWaitingForRouteBudget, ref passed, ref failed);
