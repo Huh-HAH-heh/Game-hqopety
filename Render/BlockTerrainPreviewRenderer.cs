@@ -79,132 +79,132 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _blockSeams.Clear();
 
             GetVisibleTileBounds(
-            cameraView,
-            halfWidth,
-            quarterHeight,
-            verticalScale,
-            highestMeters,
-            worldMap,
-            out int minX,
-            out int maxX,
-            out int minY,
-            out int maxY);
-
-        minX = minX / step * step;
-        minY = minY / step * step;
-        maxX = Math.Min(worldMap.MaxTileX, maxX);
-        maxY = Math.Min(worldMap.MaxTileY, maxY);
-
-        // Draw in isometric depth order so rear blocks are covered by nearer blocks.
-        for (int depth = minX + minY; depth <= maxX + maxY; depth += step)
-        {
-            int firstX = Math.Max(minX, depth - maxY);
-            int lastX = Math.Min(maxX, depth - minY);
-            firstX = (firstX + step - 1) / step * step;
-
-            for (int x = firstX; x <= lastX; x += step)
+                cameraView,
+                halfWidth,
+                quarterHeight,
+                verticalScale,
+                highestMeters,
+                worldMap,
+                out int minX,
+                out int maxX,
+                out int minY,
+                out int maxY);
+    
+            minX = minX / step * step;
+            minY = minY / step * step;
+            maxX = Math.Min(worldMap.MaxTileX, maxX);
+            maxY = Math.Min(worldMap.MaxTileY, maxY);
+    
+            // Draw in isometric depth order so rear blocks are covered by nearer blocks.
+            for (int depth = minX + minY; depth <= maxX + maxY; depth += step)
             {
-                int y = depth - x;
-                if (y < minY || y > maxY || y % step != 0)
-                    continue;
-
-                int surfaceLayer = worldMap.FindTopOccupiedLayer(
-                    x, y, worldMap.LayerCount - 1);
-                if (surfaceLayer < 0)
-                    continue;
-
-                float baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
-                if (baseHeight <= 0f)
-                    baseHeight = (surfaceLayer + 1f) * 0.1f;
-
-                float northZ = baseHeight;
-                float eastZ = baseHeight;
-                float southZ = baseHeight;
-                float westZ = baseHeight;
-
-                BlockTransitionType transition =
-                    worldMap.Blocks.GetTransitionType(x, y);
-                if (transition == BlockTransitionType.None && step > 1)
+                int firstX = Math.Max(minX, depth - maxY);
+                int lastX = Math.Min(maxX, depth - minY);
+                firstX = (firstX + step - 1) / step * step;
+    
+                for (int x = firstX; x <= lastX; x += step)
                 {
-                    int scanMaxX = Math.Min(worldMap.MaxTileX, x + step - 1);
-                    int scanMaxY = Math.Min(worldMap.MaxTileY, y + step - 1);
-                    for (int scanY = y; scanY <= scanMaxY &&
-                         transition == BlockTransitionType.None; scanY++)
+                    int y = depth - x;
+                    if (y < minY || y > maxY || y % step != 0)
+                        continue;
+    
+                    int surfaceLayer = worldMap.FindTopOccupiedLayer(
+                        x, y, worldMap.LayerCount - 1);
+                    if (surfaceLayer < 0)
+                        continue;
+    
+                    float baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
+                    if (baseHeight <= 0f)
+                        baseHeight = (surfaceLayer + 1f) * 0.1f;
+    
+                    float northZ = baseHeight;
+                    float eastZ = baseHeight;
+                    float southZ = baseHeight;
+                    float westZ = baseHeight;
+    
+                    BlockTransitionType transition =
+                        worldMap.Blocks.GetTransitionType(x, y);
+                    if (transition == BlockTransitionType.None && step > 1)
                     {
-                        for (int scanX = x; scanX <= scanMaxX; scanX++)
+                        int scanMaxX = Math.Min(worldMap.MaxTileX, x + step - 1);
+                        int scanMaxY = Math.Min(worldMap.MaxTileY, y + step - 1);
+                        for (int scanY = y; scanY <= scanMaxY &&
+                             transition == BlockTransitionType.None; scanY++)
                         {
-                            if (worldMap.Blocks.GetTransitionType(scanX, scanY) ==
-                                BlockTransitionType.Ramp)
+                            for (int scanX = x; scanX <= scanMaxX; scanX++)
                             {
-                                transition = BlockTransitionType.Ramp;
-                                break;
+                                if (worldMap.Blocks.GetTransitionType(scanX, scanY) ==
+                                    BlockTransitionType.Ramp)
+                                {
+                                    transition = BlockTransitionType.Ramp;
+                                    break;
+                                }
                             }
                         }
                     }
-                }
-
-                if (transition == BlockTransitionType.Ramp && step == 1)
-                {
-                    switch (worldMap.Blocks.GetTransitionDirection(x, y))
+    
+                    if (transition == BlockTransitionType.Ramp && step == 1)
                     {
-                        case BlockDirection.North:
-                            northZ += 1f;
-                            eastZ += 1f;
-                            break;
-                        case BlockDirection.East:
-                            eastZ += 1f;
-                            southZ += 1f;
-                            break;
-                        case BlockDirection.South:
-                            southZ += 1f;
-                            westZ += 1f;
-                            break;
-                        case BlockDirection.West:
-                            westZ += 1f;
-                            northZ += 1f;
-                            break;
+                        switch (worldMap.Blocks.GetTransitionDirection(x, y))
+                        {
+                            case BlockDirection.North:
+                                northZ += 1f;
+                                eastZ += 1f;
+                                break;
+                            case BlockDirection.East:
+                                eastZ += 1f;
+                                southZ += 1f;
+                                break;
+                            case BlockDirection.South:
+                                southZ += 1f;
+                                westZ += 1f;
+                                break;
+                            case BlockDirection.West:
+                                westZ += 1f;
+                                northZ += 1f;
+                                break;
+                        }
                     }
+    
+                    Vector2f north = Project(x, y, northZ, tileSize);
+                    Vector2f east = Project(x + step, y, eastZ, tileSize);
+                    Vector2f south = Project(x + step, y + step, southZ, tileSize);
+                    Vector2f west = Project(x, y + step, westZ, tileSize);
+    
+                    // Exposed vertical block faces. Only the two faces visible
+                    // from the isometric camera are emitted.
+                    int eastNeighbourLayer = worldMap.FindTopOccupiedLayer(
+                        x + step, y, worldMap.LayerCount - 1);
+                    float eastNeighbourZ = eastNeighbourLayer < 0
+                        ? 0f
+                        : worldMap.Blocks.GetSurfaceLevel(x + step, y);
+                    AppendSideFace(
+                        east, south, eastZ, southZ, eastNeighbourZ,
+                        new Color(55, 61, 65, 255),
+                        tileSize);
+    
+                    int southNeighbourLayer = worldMap.FindTopOccupiedLayer(
+                        x, y + step, worldMap.LayerCount - 1);
+                    float southNeighbourZ = southNeighbourLayer < 0
+                        ? 0f
+                        : worldMap.Blocks.GetSurfaceLevel(x, y + step);
+                    AppendSideFace(
+                        south, west, southZ, westZ, southNeighbourZ,
+                        new Color(39, 45, 49, 255),
+                        tileSize);
+    
+                    ushort materialId = worldMap.GetMaterialId(x, y, surfaceLayer);
+                    Color topColor = GetTopColor(materialId, baseHeight, transition);
+                    AppendTopFace(_blockFaces, north, east, south, west, topColor);
+    
+                    // Thin seams expose the individual metre blocks without
+                    // covering the terrain with a bright wireframe.
+                    Color seamColor = new Color(27, 31, 34, 150);
+                    AppendLine(_blockSeams, north, east, seamColor);
+                    AppendLine(_blockSeams, east, south, seamColor);
+                    AppendLine(_blockSeams, south, west, seamColor);
+                    AppendLine(_blockSeams, west, north, seamColor);
                 }
-
-                Vector2f north = Project(x, y, northZ, tileSize);
-                Vector2f east = Project(x + step, y, eastZ, tileSize);
-                Vector2f south = Project(x + step, y + step, southZ, tileSize);
-                Vector2f west = Project(x, y + step, westZ, tileSize);
-
-                // Exposed vertical block faces. Only the two faces visible
-                // from the isometric camera are emitted.
-                int eastNeighbourLayer = worldMap.FindTopOccupiedLayer(
-                    x + step, y, worldMap.LayerCount - 1);
-                float eastNeighbourZ = eastNeighbourLayer < 0
-                    ? 0f
-                    : worldMap.Blocks.GetSurfaceLevel(x + step, y);
-                AppendSideFace(
-                    east, south, eastZ, southZ, eastNeighbourZ,
-                    new Color(55, 61, 65, 255),
-                    tileSize);
-
-                int southNeighbourLayer = worldMap.FindTopOccupiedLayer(
-                    x, y + step, worldMap.LayerCount - 1);
-                float southNeighbourZ = southNeighbourLayer < 0
-                    ? 0f
-                    : worldMap.Blocks.GetSurfaceLevel(x, y + step);
-                AppendSideFace(
-                    south, west, southZ, westZ, southNeighbourZ,
-                    new Color(39, 45, 49, 255),
-                    tileSize);
-
-                ushort materialId = worldMap.GetMaterialId(x, y, surfaceLayer);
-                Color topColor = GetTopColor(materialId, baseHeight, transition);
-                AppendTopFace(_blockFaces, north, east, south, west, topColor);
-
-                // Thin seams expose the individual metre blocks without
-                // covering the terrain with a bright wireframe.
-                Color seamColor = new Color(27, 31, 34, 150);
-                AppendLine(_blockSeams, north, east, seamColor);
-                AppendLine(_blockSeams, east, south, seamColor);
-                AppendLine(_blockSeams, south, west, seamColor);
-                AppendLine(_blockSeams, west, north, seamColor);
-            }
         }
 
             _cachedTerrainVersion = worldMap.TerrainVersion;
