@@ -830,6 +830,7 @@ public void DrawSnapshot(
                             isAlive,
                             tilePixelSize,
                             screenScale,
+                            1f,
                             position.Z,
                             projection);
                     }
@@ -1170,6 +1171,7 @@ public void DrawSnapshot(
                 isAlive,
                 tilePixelSize,
                 screenScale,
+                1f,
                 rootZ,
                 projection);
         }
@@ -1222,6 +1224,7 @@ public void DrawSnapshot(
                 isAlive,
                 tilePixelSize,
                 screenScale,
+                1f,
                 rootZ,
                 projection);
         }
