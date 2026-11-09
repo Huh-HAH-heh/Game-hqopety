@@ -57,9 +57,15 @@ public static class WorldGenerator
 
                 int bestDifference = 0;
                 BlockDirection bestDirection = BlockDirection.North;
-                for (int direction = 0; direction < 4; direction++)
+
+                // Rotate the tie-break order per cell. When two or more
+                // neighbours are equally high, generation must not always
+                // prefer North; all four ramp orientations should occur.
+                int directionOffset = (x + y * 3) & 3;
+                for (int offset = 0; offset < 4; offset++)
                 {
-                    BlockDirection candidateDirection = (BlockDirection)direction;
+                    BlockDirection candidateDirection =
+                        (BlockDirection)((directionOffset + offset) & 3);
                     GetDirectionDelta(candidateDirection, out int dx, out int dy);
                     int neighborLevel = worldMap.Blocks.GetSurfaceLevel(x + dx, y + dy);
                     int difference = neighborLevel - level;
@@ -69,6 +75,7 @@ public static class WorldGenerator
                         bestDirection = candidateDirection;
                     }
                 }
+
 
                 // A one-metre step is traversable only when this lower tile
                 // explicitly contains a ramp. Larger cliffs remain solid walls.
