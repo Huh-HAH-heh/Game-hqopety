@@ -545,6 +545,42 @@ public static class UnitMovementSelfTest
                invalidRampRejected;
     }
 
+    public static bool WideFootprintDoesNotAliasBlockTransitionCoordinates()
+    {
+        WorldMap map = CreateFlatWorld();
+        map.EnableDiscreteBlockTerrain();
+
+        int rampX = 10;
+        int rampY = 10;
+        map.SetBlockStack(5, 5, 2, 2);
+        map.SetBlockStack(rampX + 1, rampY, 2, 2);
+        map.SetRamp(rampX, rampY, BlockDirection.East);
+
+        UnitSimulation simulation = new UnitSimulation(4, 64);
+        UnitId id = simulation.Spawn(
+            UnitType.Colonist,
+            new Vector3(6.25f, 5.25f, 1f),
+            Vector3.UnitX,
+            Vector3.UnitX,
+            factionTag: 1);
+
+        // A two-metre footprint covers the raised block at (5,5). Its
+        // half-metre navigation cell (10,10) must not alias the unrelated
+        // one-metre ramp stored at block coordinates (10,10).
+        simulation.Units.Width[id.Index] = 2f;
+        simulation.Units.Length[id.Index] = 2f;
+
+        UnitNavigationSystem navigation = simulation.Navigation;
+        navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
+
+        return !navigation.CanMoveDirectly(
+            simulation.Units,
+            id.Index,
+            map,
+            new Vector2(6.25f, 5.25f),
+            new Vector2(6.30f, 5.25f));
+    }
+
     public static bool FollowsRouteAroundWallWithoutCrossingIt()
     {
         WorldMap map = CreateFlatWorld();
