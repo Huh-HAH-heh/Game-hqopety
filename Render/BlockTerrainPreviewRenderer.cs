@@ -121,12 +121,13 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     float eastZ = baseHeight;
                     float southZ = baseHeight;
                     float westZ = baseHeight;
+                    BlockDirection rampDirection = BlockDirection.North;
                     bool isRamp = step == 1 &&
                         TryGetValidRamp(
                             worldMap,
                             x,
                             y,
-                            out BlockDirection rampDirection,
+                            out rampDirection,
                             out _);
                     BlockTransitionType transition = isRamp
                         ? BlockTransitionType.Ramp
