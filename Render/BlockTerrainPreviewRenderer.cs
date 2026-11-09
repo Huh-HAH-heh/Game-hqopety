@@ -13,6 +13,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 {
     private readonly VertexArray _blockFaces = new(PrimitiveType.Triangles);
     private readonly VertexArray _blockSeams = new(PrimitiveType.Lines);
+    private bool _cacheValid;
+    private long _cachedTerrainVersion = long.MinValue;
+    private int _cachedLodStep;
+    private float _cachedTileSize = -1f;
+    private Vector2f _cachedCameraCenter;
+    private Vector2f _cachedViewSize;
 
     public static Vector2f GetCameraCenter(
         WorldMap worldMap,
@@ -33,13 +39,10 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         View cameraView,
         float tilePixelSize)
     {
-        _blockFaces.Clear();
-        _blockSeams.Clear();
-
         if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize <= 0f)
             return;
 
-        float tileSize = MathF.Max(1f, tilePixelSize * 1.5f);
+        float tileSize = MathF.Max(1f, tilePixelSize * 2f);
         float halfWidth = tileSize * 0.5f;
         float quarterHeight = tileSize * 0.25f;
         float verticalScale = tileSize * 0.5f;
@@ -52,7 +55,30 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             : pixelsPerTile < 12f ? 2
             : 1;
 
-        GetVisibleTileBounds(
+        bool cameraMovedOutsideCache =
+            MathF.Abs(cameraView.Center.X - _cachedCameraCenter.X) >
+                cameraView.Size.X * 0.2f ||
+            MathF.Abs(cameraView.Center.Y - _cachedCameraCenter.Y) >
+                cameraView.Size.Y * 0.2f;
+        bool viewSizeChanged =
+            MathF.Abs(cameraView.Size.X - _cachedViewSize.X) >
+                MathF.Max(1f, _cachedViewSize.X * 0.02f) ||
+            MathF.Abs(cameraView.Size.Y - _cachedViewSize.Y) >
+                MathF.Max(1f, _cachedViewSize.Y * 0.02f);
+        bool rebuildGeometry =
+            !_cacheValid ||
+            _cachedTerrainVersion != worldMap.TerrainVersion ||
+            _cachedLodStep != step ||
+            MathF.Abs(_cachedTileSize - tileSize) > 0.001f ||
+            cameraMovedOutsideCache ||
+            viewSizeChanged;
+
+        if (rebuildGeometry)
+        {
+            _blockFaces.Clear();
+            _blockSeams.Clear();
+
+            GetVisibleTileBounds(
             cameraView,
             halfWidth,
             quarterHeight,
@@ -162,6 +188,14 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 AppendLine(_blockSeams, south, west, seamColor);
                 AppendLine(_blockSeams, west, north, seamColor);
             }
+        }
+
+            _cachedTerrainVersion = worldMap.TerrainVersion;
+            _cachedLodStep = step;
+            _cachedTileSize = tileSize;
+            _cachedCameraCenter = cameraView.Center;
+            _cachedViewSize = cameraView.Size;
+            _cacheValid = true;
         }
 
         window.Draw(_blockFaces);
@@ -319,10 +353,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         maxX = 0;
         maxY = 0;
 
-        float left = view.Center.X - view.Size.X * 0.5f;
-        float right = view.Center.X + view.Size.X * 0.5f;
-        float top = view.Center.Y - view.Size.Y * 0.5f;
-        float bottom = view.Center.Y + view.Size.Y * 0.5f;
+        // Build slightly beyond the viewport. Small camera pans can then reuse
+        // this mesh instead of rebuilding thousands of block faces every frame.
+        float left = view.Center.X - view.Size.X * 0.7f;
+        float right = view.Center.X + view.Size.X * 0.7f;
+        float top = view.Center.Y - view.Size.Y * 0.7f;
+        float bottom = view.Center.Y + view.Size.Y * 0.7f;
 
         for (int corner = 0; corner < 4; corner++)
         {
