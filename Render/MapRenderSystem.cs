@@ -150,6 +150,7 @@ void main()
 
     private bool _mapCacheValid;
     private bool _gridCacheValid;
+    private bool _cachedShowGrid;
     private bool _waterCacheValid;
 
     private int _cachedMinTileX;
@@ -242,7 +243,7 @@ void main()
 
     public double LastTerrainBuildMilliseconds { get; private set; }
 
-    private const byte GridAlpha = 112;
+    private const byte GridAlpha = 52;
     private const int HeightStepLineThresholdUnits = 5;
 
     public MapRenderSystem(
@@ -407,7 +408,8 @@ void main()
             _cachedMaxTileY == maxTileY &&
             _cachedLodStep == lodStep &&
             _cachedVisibleMaxLayer == maxLayer &&
-            _cachedTerrainVersion == worldMap.TerrainVersion;
+            _cachedTerrainVersion == worldMap.TerrainVersion &&
+            _cachedShowGrid == showGrid;
 
         if (!mapCacheMatches)
         {
@@ -446,7 +448,7 @@ void main()
                     float right = Math.Min(worldMap.TileWidth, x + lodStep) * tilePixelSize;
                     float bottom = Math.Min(worldMap.TileHeight, y + lodStep) * tilePixelSize;
 
-                    if (topLayer >= 0)
+                    if (showGrid && topLayer >= 0)
                     {
                         AppendGrid(
                             _gridVertices,
@@ -463,10 +465,7 @@ void main()
                         y,
                         lodStep,
                         tilePixelSize,
-                        maxLayer,
-                        topLayer,
-                        right,
-                        bottom);
+                        maxLayer);
                 }
             }
 
@@ -478,6 +477,7 @@ void main()
             _cachedLodStep = lodStep;
             _cachedVisibleMaxLayer = maxLayer;
             _cachedTerrainVersion = worldMap.TerrainVersion;
+            _cachedShowGrid = showGrid;
         }
 
          DrawWater(
@@ -1733,39 +1733,68 @@ void main()
         int y,
         int lodStep,
         float tilePixelSize,
-        int visibleMaxLayer,
-        int currentLayer,
-        float right,
-        float bottom)
+        int visibleMaxLayer)
     {
         int eastX = x + lodStep;
         if (eastX <= worldMap.MaxTileX)
         {
-            int eastLayer = FindVisibleTopLayer(
-                worldMap, eastX, y, visibleMaxLayer);
-            AppendHeightStepLine(
-                vertices,
-                right,
-                y * tilePixelSize,
-                right,
-                bottom,
-                currentLayer,
-                eastLayer);
+            int edgeX = eastX;
+            int firstY = y;
+            int lastY = Math.Min(worldMap.MaxTileY, y + lodStep - 1);
+
+            // Keep each physical tile edge independent at coarse LODs so a
+            // ramp is dashed only on the segment where it actually exists.
+            for (int edgeY = firstY; edgeY <= lastY; edgeY++)
+            {
+                int westLayer = FindVisibleTopLayer(
+                    worldMap, edgeX - 1, edgeY, visibleMaxLayer);
+                int eastLayer = FindVisibleTopLayer(
+                    worldMap, edgeX, edgeY, visibleMaxLayer);
+                bool traversable = worldMap.UsesDiscreteBlockTerrain &&
+                    worldMap.Blocks.CanTraverse(
+                        edgeX - 1, edgeY, edgeX, edgeY);
+
+                AppendHeightStepLine(
+                    vertices,
+                    edgeX * tilePixelSize,
+                    edgeY * tilePixelSize,
+                    edgeX * tilePixelSize,
+                    (edgeY + 1) * tilePixelSize,
+                    westLayer,
+                    eastLayer,
+                    tilePixelSize,
+                    traversable);
+            }
         }
 
         int southY = y + lodStep;
         if (southY <= worldMap.MaxTileY)
         {
-            int southLayer = FindVisibleTopLayer(
-                worldMap, x, southY, visibleMaxLayer);
-            AppendHeightStepLine(
-                vertices,
-                x * tilePixelSize,
-                bottom,
-                right,
-                bottom,
-                currentLayer,
-                southLayer);
+            int edgeY = southY;
+            int firstX = x;
+            int lastX = Math.Min(worldMap.MaxTileX, x + lodStep - 1);
+
+            for (int edgeX = firstX; edgeX <= lastX; edgeX++)
+            {
+                int northLayer = FindVisibleTopLayer(
+                    worldMap, edgeX, edgeY - 1, visibleMaxLayer);
+                int southLayer = FindVisibleTopLayer(
+                    worldMap, edgeX, edgeY, visibleMaxLayer);
+                bool traversable = worldMap.UsesDiscreteBlockTerrain &&
+                    worldMap.Blocks.CanTraverse(
+                        edgeX, edgeY - 1, edgeX, edgeY);
+
+                AppendHeightStepLine(
+                    vertices,
+                    edgeX * tilePixelSize,
+                    edgeY * tilePixelSize,
+                    (edgeX + 1) * tilePixelSize,
+                    edgeY * tilePixelSize,
+                    northLayer,
+                    southLayer,
+                    tilePixelSize,
+                    traversable);
+            }
         }
     }
 
@@ -1776,20 +1805,65 @@ void main()
         float x2,
         float y2,
         int firstLayer,
-        int secondLayer)
+        int secondLayer,
+        float tilePixelSize,
+        bool traversable)
     {
+        if (firstLayer < 0 && secondLayer < 0)
+            return;
+
         int heightDifference = Math.Abs(firstLayer - secondLayer);
         if (heightDifference < HeightStepLineThresholdUnits)
             return;
 
-        Color color = heightDifference switch
+        byte alpha = heightDifference >= 30 ? (byte)220 : (byte)165;
+        Color color = new Color(245, 247, 250, alpha);
+
+        if (traversable)
         {
-            >= 30 => new Color(245, 105, 78, 235),
-            >= 10 => new Color(238, 177, 86, 220),
-            _ => new Color(112, 190, 220, 205)
-        };
+            AppendDashedLine(
+                vertices,
+                x1, y1, x2, y2,
+                color,
+                MathF.Max(0.45f, tilePixelSize * 0.14f));
+            return;
+        }
 
         AppendLine(vertices, x1, y1, x2, y2, color);
+    }
+
+    private static void AppendDashedLine(
+        VertexArray vertices,
+        float x1,
+        float y1,
+        float x2,
+        float y2,
+        Color color,
+        float dashLength)
+    {
+        float dx = x2 - x1;
+        float dy = y2 - y1;
+        float length = MathF.Sqrt(dx * dx + dy * dy);
+        if (length <= 0.001f)
+            return;
+
+        float dash = MathF.Min(dashLength, length);
+        float gap = dashLength * 0.8f;
+
+        for (float start = 0f; start < length; start += dash + gap)
+        {
+            float end = MathF.Min(length, start + dash);
+            float startT = start / length;
+            float endT = end / length;
+
+            AppendLine(
+                vertices,
+                x1 + dx * startT,
+                y1 + dy * startT,
+                x1 + dx * endT,
+                y1 + dy * endT,
+                color);
+        }
     }
 
     private static void GetBlockDirectionDelta(
