@@ -167,6 +167,7 @@ public sealed class GameRenderer
     private bool _showBlockTerrainPreview;
     private Vector2f _normalCameraCenter;
     private bool _blockPreviewRestoreIsometricProjection;
+    private int _blockPreviewRotationStep;
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
@@ -4309,13 +4310,15 @@ public sealed class GameRenderer
             _normalCameraCenter = _camera.View.Center;
             _blockPreviewRestoreIsometricProjection = _camera.IsometricProjectionEnabled;
             _camera.SetIsometricProjection(false);
+            _blockPreviewRotationStep = 0;
+            _camera.SetPreviewRotation(_blockPreviewRotationStep);
             _camera.CenterOnPosition(
                 BlockTerrainPreviewRenderer.GetCameraCenter(
                     _worldMap,
                     TerrainTilePixelSize));
             Console.WriteLine(
                 "[Terrain preview] Isometric block view. " +
-                "Middle mouse: pan; wheel: zoom; B: return to game.");
+                "Q/E: rotate 90 degrees; middle mouse: pan; wheel: zoom; B: return to game.");
         }
         else
         {
@@ -4333,7 +4336,18 @@ public sealed class GameRenderer
         if (_showBlockTerrainPreview)
         {
             if (key is Keyboard.Key.B or Keyboard.Key.Escape)
+            {
                 ToggleBlockTerrainPreview();
+            }
+            else if (key is Keyboard.Key.Q or Keyboard.Key.E)
+            {
+                _blockPreviewRotationStep =
+                    (_blockPreviewRotationStep + (key == Keyboard.Key.Q ? 3 : 1)) & 3;
+                _camera.SetPreviewRotation(_blockPreviewRotationStep);
+                Console.WriteLine(
+                    $"[Terrain preview] Camera angle: {_blockPreviewRotationStep * 90}°. Q/E: rotate 90 degrees.");
+            }
+
             return;
         }
 
