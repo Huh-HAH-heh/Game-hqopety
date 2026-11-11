@@ -4351,8 +4351,8 @@ public sealed class GameRenderer
             Console.WriteLine(
                 "[Terrain preview] Camera centered on terrain. " +
                 "Right mouse drag: free rotation; Q/E: rotate 90 degrees; " +
-                "NumPad +/-: elevation; middle mouse: pan; WASD: move; " +
-                "wheel: zoom; B: return to game.");
+                $"NumPad +/-: elevation ({_camera.ElevationDegrees:0}°); " +
+                "middle mouse: pan; WASD: move; wheel: zoom; B: return to game.");
         }
         else
         {

@@ -8,6 +8,7 @@ namespace RimClone.Render;
 
 /// <summary>
 /// Isometric inspection view for the discrete 4 x 4 x 1 m block terrain.
+/// Camera elevation changes only projection; terrain data remains fixed.
 /// It is intentionally read-only: gameplay keeps its normal XY controls.
 /// </summary>
 public sealed class BlockTerrainPreviewRenderer : IDisposable
@@ -409,15 +410,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             (byte)Math.Clamp(shade + 6 - materialTint, 0, 255),
             255);
     }
-
-    private static Vector2f Project(
-        float x,
-        float y,
-        float heightMeters,
-        float tileSize) =>
-        new(
-            (x - y) * tileSize * 0.5f,
-            (x + y) * tileSize * 0.25f - heightMeters * tileSize * 0.5f);
 
     private Vector2f ProjectLevelPoint(
         WorldMap worldMap,
