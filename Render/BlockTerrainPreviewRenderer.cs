@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using Core.Map;
 using SFML.Graphics;
 using SFML.System;
@@ -34,6 +35,33 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private float _cachedElevationDegrees = float.NaN;
     private float _rotationCosine = 1f;
     private float _rotationSine;
+
+    public static Vector2 ProjectMovementToScreen(
+        Vector2 movement,
+        float azimuthDegrees,
+        float elevationDegrees)
+    {
+        if (movement.LengthSquared() <= 0.000001f)
+            return Vector2.Zero;
+
+        float azimuthRadians = azimuthDegrees * (MathF.PI / 180f);
+        float cosine = MathF.Cos(azimuthRadians);
+        float sine = MathF.Sin(azimuthRadians);
+        float rotatedX = cosine * movement.X - sine * movement.Y;
+        float rotatedY = sine * movement.X + cosine * movement.Y;
+        float elevationRadians = Math.Clamp(elevationDegrees, 15f, 90f) *
+            (MathF.PI / 180f);
+        float depthScale = MathF.Sin(elevationRadians);
+
+        // Match the ground-plane projection: X-Y forms the screen horizontal
+        // axis, while X+Y is compressed by the camera elevation.
+        Vector2 projected = new(
+            rotatedX - rotatedY,
+            (rotatedX + rotatedY) * depthScale);
+        return projected.LengthSquared() > 0.000001f
+            ? Vector2.Normalize(projected)
+            : Vector2.Zero;
+    }
 
     public static Vector2f GetCameraCenter(
         WorldMap worldMap,

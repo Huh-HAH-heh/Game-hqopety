@@ -4367,11 +4367,25 @@ public sealed class GameRenderer
         }
     }
 
+    private void UpdateCameraMovement(float deltaTime)
+    {
+        Vector2 direction = _input.MoveDirection;
+        if (_showBlockTerrainPreview)
+        {
+            direction = BlockTerrainPreviewRenderer.ProjectMovementToScreen(
+                direction,
+                _camera.AzimuthDegrees,
+                _camera.ElevationDegrees);
+        }
+
+        _camera.Update(direction, deltaTime);
+    }
+
     private void UpdateBlockPreviewCamera(float deltaTime)
     {
         if (!_showBlockTerrainPreview)
         {
-            _camera.Update(_input.MoveDirection, deltaTime);
+            UpdateCameraMovement(deltaTime);
             return;
         }
 
@@ -4380,7 +4394,7 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _camera.ElevationDegrees);
         Vector2f oldCenter = _camera.View.Center;
-        _camera.Update(_input.MoveDirection, deltaTime);
+        UpdateCameraMovement(deltaTime);
         Vector2f movedCenter = _camera.View.Center;
         Vector2f newFocus = BlockTerrainPreviewRenderer.GetCameraCenter(
             _worldMap,
@@ -4615,7 +4629,9 @@ public sealed class GameRenderer
                 ? _massCombatTestScene.UnitsPerFaction
                 : _classicMassCombatMode
                     ? _classicMassCombatTestScene.UnitCount / 2
-                    : 0);
+                    : 0,
+            _camera.PanSensitivity,
+            _camera.MoveSensitivity);
     }
 
     private void ApplyGameMenuAction(GameMenuAction action)
@@ -4768,6 +4784,14 @@ public sealed class GameRenderer
                     action.Layer,
                     0,
                     _worldMap.LayerCount - 1);
+                break;
+
+            case GameMenuActionType.SetCameraPanSensitivity:
+                _camera.SetPanSensitivity(action.Value);
+                break;
+
+            case GameMenuActionType.SetKeyboardMoveSensitivity:
+                _camera.SetMoveSensitivity(action.Value);
                 break;
 
             case GameMenuActionType.ToggleGrid:

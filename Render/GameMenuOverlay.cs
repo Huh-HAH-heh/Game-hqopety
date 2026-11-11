@@ -30,6 +30,8 @@ public enum GameMenuActionType
     SetBaseGray,
     SetHeightContrast,
     SetLayer,
+    SetCameraPanSensitivity,
+    SetKeyboardMoveSensitivity,
     ToggleGrid,
     ToggleExtrema,
     ToggleHeightContours,
@@ -78,7 +80,9 @@ public readonly record struct GameSettingsSnapshot(
     bool VisionEnabled,
     bool ShowCombatTracers,
     bool ShowCombatHud,
-    int UnitsPerCombatFaction);
+    int UnitsPerCombatFaction,
+    float CameraPanSensitivity,
+    float KeyboardMoveSensitivity);
 
 public readonly record struct GameResolution(
     uint Width,
@@ -202,7 +206,7 @@ public sealed class GameMenuOverlay : IDisposable
 
     private const float MenuButtonSize = 38f;
     private const float SettingsWidth = 620f;
-    private const float SettingsHeight = 650f;
+    private const float SettingsHeight = 690f;
     private const float MainWidth = 390f;
     private const float MainHeight = 360f;
     private const float MaxContourLabelZoom = 2.5f;
@@ -559,6 +563,12 @@ void main()
         _sliders.Add(new SliderControl(
             _font, GameMenuActionType.SetLayer,
             "Высота среза Z", 0f, WorldMap.DefaultTerrainLayerCount - 1));
+        _sliders.Add(new SliderControl(
+            _font, GameMenuActionType.SetCameraPanSensitivity,
+            "Чувствительность панорамы мышью", 0.25f, 3f));
+        _sliders.Add(new SliderControl(
+            _font, GameMenuActionType.SetKeyboardMoveSensitivity,
+            "Скорость перемещения WASD", 0.25f, 3f));
 
         if (_font == null)
         {
@@ -596,7 +606,7 @@ void main()
             "НАСТРОЙКИ", 19, new Color(241, 245, 250),
             new Vector2f(0f, 0f), Text.Styles.Bold);
         _settingsSubtitle = CreateText(
-            "Графика и окно игры", 11, new Color(154, 168, 185), new Vector2f(0f, 0f));
+            "Графика, камера и окно игры", 11, new Color(154, 168, 185), new Vector2f(0f, 0f));
         _closeLabel = CreateText(
             "×", 19, Color.White, new Vector2f(0f, 0f));
         _resolutionHeading = CreateText(
@@ -634,7 +644,7 @@ void main()
         _backLabel = CreateText(
             "НАЗАД", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _keyboardHelp = CreateText(
-            "Колесо — масштаб   •   Средняя кнопка мыши — панорама",
+            "Колесо — масштаб   •   Средняя кнопка — панорама   •   WASD — движение камеры",
             10, new Color(145, 157, 173), new Vector2f(0f, 0f));
 
         _sceneHeading = CreateText("ТЕСТОВЫЕ СЦЕНЫ", 13, new Color(216, 224, 234), new Vector2f(0f, 0f), Text.Styles.Bold);
@@ -1694,28 +1704,28 @@ void main()
             _sliders[i].Layout(sliderStartX, trackY, sliderWidth);
         }
 
-        _gridButton.Position = new Vector2f(settingsX + 22f, settingsY + 442f);
-        _extremaButton.Position = new Vector2f(settingsX + 166f, settingsY + 442f);
-        _contoursButton.Position = new Vector2f(settingsX + 310f, settingsY + 442f);
-        _contourLabelsButton.Position = new Vector2f(settingsX + 454f, settingsY + 442f);
-        _unitRigButton.Position = new Vector2f(settingsX + 22f, settingsY + 480f);
+        _gridButton.Position = new Vector2f(settingsX + 22f, settingsY + 460f);
+        _extremaButton.Position = new Vector2f(settingsX + 166f, settingsY + 460f);
+        _contoursButton.Position = new Vector2f(settingsX + 310f, settingsY + 460f);
+        _contourLabelsButton.Position = new Vector2f(settingsX + 454f, settingsY + 460f);
+        _unitRigButton.Position = new Vector2f(settingsX + 22f, settingsY + 498f);
 
-        _toneHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 522f);
-        _toneLowLabel!.Position = new Vector2f(settingsX + 22f, settingsY + 554f);
-        _toneHighLabel!.Position = new Vector2f(settingsX + SettingsWidth - 80f, settingsY + 554f);
+        _toneHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 540f);
+        _toneLowLabel!.Position = new Vector2f(settingsX + 22f, settingsY + 572f);
+        _toneHighLabel!.Position = new Vector2f(settingsX + SettingsWidth - 80f, settingsY + 572f);
 
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
             _toneSwatches[i].Position = new Vector2f(
                 settingsX + 22f + i * 112f,
-                settingsY + 541f);
+                settingsY + 559f);
         }
 
-        _resetButton.Position = new Vector2f(settingsX + 22f, settingsY + 594f);
-        _backButton.Position = new Vector2f(settingsX + SettingsWidth - 150f, settingsY + 594f);
-        _resetLabel!.Position = new Vector2f(settingsX + 38f, settingsY + 603f);
-        _backLabel!.Position = new Vector2f(settingsX + SettingsWidth - 113f, settingsY + 603f);
-        _keyboardHelp!.Position = new Vector2f(settingsX + 22f, settingsY + 574f);
+        _resetButton.Position = new Vector2f(settingsX + 22f, settingsY + 640f);
+        _backButton.Position = new Vector2f(settingsX + SettingsWidth - 150f, settingsY + 640f);
+        _resetLabel!.Position = new Vector2f(settingsX + 38f, settingsY + 649f);
+        _backLabel!.Position = new Vector2f(settingsX + SettingsWidth - 113f, settingsY + 649f);
+        _keyboardHelp!.Position = new Vector2f(settingsX + 22f, settingsY + 596f);
 
         if (_lastSelectedResolutionIndex != settings.SelectedResolutionIndex)
         {
@@ -1850,6 +1860,8 @@ void main()
                 GameMenuActionType.SetBaseGray => settings.BaseGray,
                 GameMenuActionType.SetHeightContrast => settings.HeightContrast,
                 GameMenuActionType.SetLayer => settings.VisibleMaxLayer,
+                GameMenuActionType.SetCameraPanSensitivity => settings.CameraPanSensitivity,
+                GameMenuActionType.SetKeyboardMoveSensitivity => settings.KeyboardMoveSensitivity,
                 _ => 0f
             };
 
@@ -2267,6 +2279,8 @@ void main()
                 GameMenuActionType.SetBaseGray => $"{current:0} / 96",
                 GameMenuActionType.SetHeightContrast => $"{current:0} / 32",
                 GameMenuActionType.SetLayer => $"{current * 0.1f:0.0} / {(layerCount - 1) * 0.1f:0.0} м",
+                GameMenuActionType.SetCameraPanSensitivity or
+                GameMenuActionType.SetKeyboardMoveSensitivity => $"{current:0.00}×",
                 _ => current.ToString("0.0")
             };
         }

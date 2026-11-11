@@ -22,6 +22,8 @@ public sealed class GameCamera : IDisposable
     private readonly float _moveSpeed;
 
     private float _zoomLevel = 1.0f;
+    private float _panSensitivity = 1f;
+    private float _moveSensitivity = 1f;
     private float _azimuthDegrees;
     private float _elevationDegrees = 30f;
     private float _targetElevationDegrees = 30f;
@@ -37,6 +39,8 @@ public sealed class GameCamera : IDisposable
     public float AzimuthDegrees => _azimuthDegrees;
     public float ElevationDegrees => _elevationDegrees;
     public float TargetElevationDegrees => _targetElevationDegrees;
+    public float PanSensitivity => _panSensitivity;
+    public float MoveSensitivity => _moveSensitivity;
 
     // The label describes the compass direction currently pointing to the top
     // of the screen. Q/E moves it through the eight 45-degree orientations.
@@ -92,6 +96,15 @@ public sealed class GameCamera : IDisposable
         _azimuthDegrees = 0f;
         ApplyProjection();
     }
+
+    public void SetPanSensitivity(float sensitivity) =>
+        _panSensitivity = ClampSensitivity(sensitivity);
+
+    public void SetMoveSensitivity(float sensitivity) =>
+        _moveSensitivity = ClampSensitivity(sensitivity);
+
+    private static float ClampSensitivity(float value) =>
+        float.IsFinite(value) ? Math.Clamp(value, 0.1f, 4f) : 1f;
 
     public void RotateAzimuth(float deltaDegrees)
     {
@@ -174,8 +187,8 @@ public sealed class GameCamera : IDisposable
         if (viewportWidth <= 0f || viewportHeight <= 0f)
             return;
 
-        float localX = pixelDelta.X * _view.Size.X / viewportWidth;
-        float localY = pixelDelta.Y * _view.Size.Y / viewportHeight;
+        float localX = pixelDelta.X * _view.Size.X / viewportWidth * _panSensitivity;
+        float localY = pixelDelta.Y * _view.Size.Y / viewportHeight * _panSensitivity;
         Vector2f worldDelta = ScreenUnitsToWorld(localX, localY);
 
         _targetPosition.X -= worldDelta.X;
@@ -202,7 +215,8 @@ public sealed class GameCamera : IDisposable
 
         if (moveDirection.LengthSquared() > 0f)
         {
-            float zoomSpeed = _moveSpeed * Math.Clamp(_zoomLevel, 0.05f, 24f);
+            float zoomSpeed = _moveSpeed * _moveSensitivity *
+                Math.Clamp(_zoomLevel, 0.05f, 24f);
             float localScaleX = _isometricProjectionEnabled ? InverseSqrtTwo : 1f;
             float localScaleY = _isometricProjectionEnabled ? SqrtTwo : 1f;
 
