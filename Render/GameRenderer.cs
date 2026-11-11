@@ -780,7 +780,8 @@ public sealed class GameRenderer
                 _window,
                 _worldMap,
                 _camera.View,
-                TerrainTilePixelSize);
+                TerrainTilePixelSize,
+                _camera.FreeRotationDegrees);
             _lastTerrainDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
             _lastUnitDrawMilliseconds = 0d;

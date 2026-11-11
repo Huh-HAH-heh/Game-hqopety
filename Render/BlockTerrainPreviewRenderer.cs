@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Core.Map;
 using SFML.Graphics;
 using SFML.System;
@@ -11,25 +12,30 @@ namespace RimClone.Render;
 /// </summary>
 public sealed class BlockTerrainPreviewRenderer : IDisposable
 {
+    private struct BlockDrawItem
+    {
+        public int X;
+        public int Y;
+        public int SurfaceLayer;
+        public float Height;
+        public ushort MaterialId;
+        public float Depth;
+    }
+
     private readonly VertexArray _blockFaces = new(PrimitiveType.Triangles);
     private readonly VertexArray _blockSeams = new(PrimitiveType.Lines);
+    private readonly List<BlockDrawItem> _visibleBlocks = new(4096);
     private bool _cacheValid;
     private long _cachedTerrainVersion = long.MinValue;
     private int _cachedLodStep;
     private float _cachedTileSize = -1f;
     private Vector2f _cachedCameraCenter;
     private Vector2f _cachedViewSize;
-    private int _rotationStep;
+    private float _cachedCameraAzimuthDegrees = float.NaN;
+    private float _rotationCosine = 1f;
+    private float _rotationSine;
 
-    public void SetRotation(int quarterTurns)
-    {
-        int next = quarterTurns & 3;
-        if (_rotationStep == next)
-            return;
 
-        _rotationStep = next;
-        _cacheValid = false;
-    }
 
     public static Vector2f GetCameraCenter(
         WorldMap worldMap,
@@ -48,7 +54,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         RenderWindow window,
         WorldMap worldMap,
         View cameraView,
-        float tilePixelSize)
+        float tilePixelSize,
+        float cameraAzimuthDegrees)
     {
         if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize <= 0f)
             return;
@@ -58,6 +65,14 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float quarterHeight = tileSize * 0.25f;
         float verticalScale = tileSize * 0.5f;
         float highestMeters = GetHighestHeightMeters(worldMap);
+        if (!float.IsFinite(cameraAzimuthDegrees))
+            cameraAzimuthDegrees = 0f;
+        cameraAzimuthDegrees %= 360f;
+        if (cameraAzimuthDegrees < 0f)
+            cameraAzimuthDegrees += 360f;
+        float rotationRadians = cameraAzimuthDegrees * (MathF.PI / 180f);
+        _rotationCosine = MathF.Cos(rotationRadians);
+        _rotationSine = MathF.Sin(rotationRadians);
 
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
@@ -80,6 +95,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         bool rebuildGeometry =
             !_cacheValid ||
             _cachedTerrainVersion != worldMap.TerrainVersion ||
+            MathF.Abs(_cachedCameraAzimuthDegrees - cameraAzimuthDegrees) > 0.01f ||
             _cachedLodStep != step ||
             MathF.Abs(_cachedTileSize - tileSize) > 0.001f ||
             cameraMovedOutsideCache ||
@@ -97,102 +113,97 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 verticalScale,
                 highestMeters,
                 worldMap,
-                _rotationStep,
+                _rotationCosine,
+                _rotationSine,
                 out int minX,
                 out int maxX,
                 out int minY,
                 out int maxY);
-    
+
             minX = minX / step * step;
             minY = minY / step * step;
             maxX = Math.Min(worldMap.MaxTileX, maxX);
             maxY = Math.Min(worldMap.MaxTileY, maxY);
-    
-            // Traverse diagonals in rotated level-space so the depth order
-            // follows the terrain, not the camera.
-            int worldWidth = worldMap.TileWidth;
-            int worldHeight = worldMap.TileHeight;
-            for (int depth = 0; depth <= worldWidth + worldHeight - 2; depth++)
+
+            _visibleBlocks.Clear();
+            float centerX = worldMap.TileWidth * 0.5f;
+            float centerY = worldMap.TileHeight * 0.5f;
+            for (int y = minY; y <= maxY; y += step)
             {
-                int firstX;
-                int lastX;
-                switch (_rotationStep)
+                for (int x = minX; x <= maxX; x += step)
                 {
-                    case 1:
-                        firstX = Math.Max(minX, minY - (worldHeight - 1) + depth);
-                        lastX = Math.Min(maxX, maxY - (worldHeight - 1) + depth);
-                        break;
-                    case 2:
-                        int oppositeDepth = worldWidth + worldHeight - 2 - depth;
-                        firstX = Math.Max(minX, oppositeDepth - maxY);
-                        lastX = Math.Min(maxX, oppositeDepth - minY);
-                        break;
-                    case 3:
-                        firstX = Math.Max(minX, minY - depth + worldWidth - 1);
-                        lastX = Math.Min(maxX, maxY - depth + worldWidth - 1);
-                        break;
-                    default:
-                        firstX = Math.Max(minX, depth - maxY);
-                        lastX = Math.Min(maxX, depth - minY);
-                        break;
-                }
-
-                firstX = Math.Max(0, (firstX + step - 1) / step * step);
-                for (int x = firstX; x <= lastX; x += step)
-                {
-                    int y = _rotationStep switch
-                    {
-                        1 => worldHeight - 1 + x - depth,
-                        2 => worldWidth + worldHeight - 2 - depth - x,
-                        3 => depth - worldWidth + 1 + x,
-                        _ => depth - x
-                    };
-                    if (y < minY || y > maxY || y % step != 0)
-                        continue;
-
                     int surfaceLayer = worldMap.FindTopOccupiedLayer(
                         x, y, worldMap.LayerCount - 1);
                     if (surfaceLayer < 0)
                         continue;
 
-                    float baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
-                    if (baseHeight <= 0f)
-                        baseHeight = (surfaceLayer + 1f) * 0.1f;
+                    float height = worldMap.Blocks.GetSurfaceLevel(x, y);
+                    if (height <= 0f)
+                        height = (surfaceLayer + 1f) * 0.1f;
 
-                    float northZ = baseHeight;
-                    float eastZ = baseHeight;
-                    float southZ = baseHeight;
-                    float westZ = baseHeight;
+                    float localX = x + step * 0.5f - centerX;
+                    float localY = y + step * 0.5f - centerY;
+                    float rotatedX =
+                        _rotationCosine * localX - _rotationSine * localY;
+                    float rotatedY =
+                        _rotationSine * localX + _rotationCosine * localY;
 
-                    Vector2f north = ProjectLevelPoint(worldMap, x, y, northZ, tileSize);
-                    Vector2f east = ProjectLevelPoint(worldMap, x + step, y, eastZ, tileSize);
-                    Vector2f south = ProjectLevelPoint(worldMap, x + step, y + step, southZ, tileSize);
-                    Vector2f west = ProjectLevelPoint(worldMap, x, y + step, westZ, tileSize);
-
-                    // Keep camera-facing sides fixed while selecting the
-                    // corresponding source edges after the level turns.
-                    AppendVisibleSideFaces(
-                        worldMap, x, y, step, tileSize,
-                        northZ, eastZ, southZ, westZ);
-    
-                    ushort materialId = surfaceLayer >= 0
-                        ? worldMap.GetMaterialId(x, y, surfaceLayer)
-                        : (ushort)0;
-                    Color topColor = GetTopColor(materialId, baseHeight);
-                    AppendTopFace(_blockFaces, north, east, south, west, topColor);
-    
-                    // Thin seams expose the individual metre blocks without
-                    // covering the terrain with a bright wireframe.
-                    Color seamColor = new Color(27, 31, 34, 150);
-                    AppendLine(_blockSeams, north, east, seamColor);
-                    AppendLine(_blockSeams, east, south, seamColor);
-                    AppendLine(_blockSeams, south, west, seamColor);
-                    AppendLine(_blockSeams, west, north, seamColor);
-
+                    _visibleBlocks.Add(new BlockDrawItem
+                    {
+                        X = x,
+                        Y = y,
+                        SurfaceLayer = surfaceLayer,
+                        Height = height,
+                        MaterialId = worldMap.GetMaterialId(x, y, surfaceLayer),
+                        Depth = rotatedX + rotatedY
+                    });
                 }
-        }
+            }
+
+            _visibleBlocks.Sort(static (left, right) =>
+            {
+                int depthOrder = left.Depth.CompareTo(right.Depth);
+                if (depthOrder != 0)
+                    return depthOrder;
+                int xOrder = left.X.CompareTo(right.X);
+                return xOrder != 0 ? xOrder : left.Y.CompareTo(right.Y);
+            });
+
+            Color seamColor = new Color(27, 31, 34, 150);
+            for (int i = 0; i < _visibleBlocks.Count; i++)
+            {
+                BlockDrawItem block = _visibleBlocks[i];
+                int x = block.X;
+                int y = block.Y;
+                float height = block.Height;
+                float northZ = height;
+                float eastZ = height;
+                float southZ = height;
+                float westZ = height;
+
+                Vector2f north = ProjectLevelPoint(worldMap, x, y, northZ, tileSize);
+                Vector2f east = ProjectLevelPoint(
+                    worldMap, x + step, y, eastZ, tileSize);
+                Vector2f south = ProjectLevelPoint(
+                    worldMap, x + step, y + step, southZ, tileSize);
+                Vector2f west = ProjectLevelPoint(
+                    worldMap, x, y + step, westZ, tileSize);
+
+                AppendVisibleSideFaces(
+                    worldMap, x, y, step, tileSize,
+                    northZ, eastZ, southZ, westZ);
+
+                Color topColor = GetTopColor(block.MaterialId, height);
+                AppendTopFace(_blockFaces, north, east, south, west, topColor);
+
+                AppendLine(_blockSeams, north, east, seamColor);
+                AppendLine(_blockSeams, east, south, seamColor);
+                AppendLine(_blockSeams, south, west, seamColor);
+                AppendLine(_blockSeams, west, north, seamColor);
+            }
 
             _cachedTerrainVersion = worldMap.TerrainVersion;
+            _cachedCameraAzimuthDegrees = cameraAzimuthDegrees;
             _cachedLodStep = step;
             _cachedTileSize = tileSize;
             _cachedCameraCenter = cameraView.Center;
@@ -219,37 +230,32 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         Color xFacingColor = new Color(55, 61, 65, 255);
         Color yFacingColor = new Color(39, 45, 49, 255);
 
-        // Each turn changes which original map edge faces the fixed camera.
-        switch (_rotationStep)
+        // Camera azimuth selects the two outward-facing sides. The map data
+        // stays fixed; only its view-space basis and visible faces change.
+        if (_rotationCosine + _rotationSine >= 0f)
         {
-            case 1:
-                AppendSourceEdge(worldMap, x, y, 0, -1, step,
-                    x, y, x + step, y, northZ, eastZ, tileSize, xFacingColor);
-                AppendSourceEdge(worldMap, x, y, 1, 0, step,
-                    x + step, y, x + step, y + step,
-                    eastZ, southZ, tileSize, yFacingColor);
-                break;
-            case 2:
-                AppendSourceEdge(worldMap, x, y, -1, 0, step,
-                    x, y + step, x, y, westZ, northZ, tileSize, xFacingColor);
-                AppendSourceEdge(worldMap, x, y, 0, -1, step,
-                    x, y, x + step, y, northZ, eastZ, tileSize, yFacingColor);
-                break;
-            case 3:
-                AppendSourceEdge(worldMap, x, y, 0, 1, step,
-                    x + step, y + step, x, y + step,
-                    southZ, westZ, tileSize, xFacingColor);
-                AppendSourceEdge(worldMap, x, y, -1, 0, step,
-                    x, y + step, x, y, westZ, northZ, tileSize, yFacingColor);
-                break;
-            default:
-                AppendSourceEdge(worldMap, x, y, 1, 0, step,
-                    x + step, y, x + step, y + step,
-                    eastZ, southZ, tileSize, xFacingColor);
-                AppendSourceEdge(worldMap, x, y, 0, 1, step,
-                    x + step, y + step, x, y + step,
-                    southZ, westZ, tileSize, yFacingColor);
-                break;
+            AppendSourceEdge(worldMap, x, y, 1, 0, step,
+                x + step, y, x + step, y + step,
+                eastZ, southZ, tileSize, xFacingColor);
+        }
+        else
+        {
+            AppendSourceEdge(worldMap, x, y, -1, 0, step,
+                x, y + step, x, y,
+                westZ, northZ, tileSize, xFacingColor);
+        }
+
+        if (_rotationCosine - _rotationSine >= 0f)
+        {
+            AppendSourceEdge(worldMap, x, y, 0, 1, step,
+                x + step, y + step, x, y + step,
+                southZ, westZ, tileSize, yFacingColor);
+        }
+        else
+        {
+            AppendSourceEdge(worldMap, x, y, 0, -1, step,
+                x, y, x + step, y,
+                northZ, eastZ, tileSize, yFacingColor);
         }
     }
 
@@ -378,50 +384,19 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float heightMeters,
         float tileSize)
     {
-        RotateLevelPoint(
-            x, y,
-            worldMap.TileWidth * 0.5f,
-            worldMap.TileHeight * 0.5f,
-            _rotationStep,
-            out float rotatedX,
-            out float rotatedY);
+        float centerX = worldMap.TileWidth * 0.5f;
+        float centerY = worldMap.TileHeight * 0.5f;
+        float dx = x - centerX;
+        float dy = y - centerY;
+        float rotatedX =
+            centerX + _rotationCosine * dx - _rotationSine * dy;
+        float rotatedY =
+            centerY + _rotationSine * dx + _rotationCosine * dy;
 
         return new Vector2f(
             (rotatedX - rotatedY) * tileSize * 0.5f,
             (rotatedX + rotatedY) * tileSize * 0.25f -
                 heightMeters * tileSize * 0.5f);
-    }
-
-    private static void RotateLevelPoint(
-        float x,
-        float y,
-        float centerX,
-        float centerY,
-        int rotationStep,
-        out float rotatedX,
-        out float rotatedY)
-    {
-        float dx = x - centerX;
-        float dy = y - centerY;
-        switch (rotationStep & 3)
-        {
-            case 1:
-                rotatedX = centerX - dy;
-                rotatedY = centerY + dx;
-                break;
-            case 2:
-                rotatedX = centerX - dx;
-                rotatedY = centerY - dy;
-                break;
-            case 3:
-                rotatedX = centerX + dy;
-                rotatedY = centerY - dx;
-                break;
-            default:
-                rotatedX = x;
-                rotatedY = y;
-                break;
-        }
     }
 
     private static float GetHighestHeightMeters(WorldMap worldMap)
@@ -437,7 +412,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float verticalScale,
         float highestMeters,
         WorldMap worldMap,
-        int rotationStep,
+        float rotationCosine,
+        float rotationSine,
         out int minX,
         out int maxX,
         out int minY,
@@ -474,27 +450,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 float dx = rotatedX - centerX;
                 float dy = rotatedY - centerY;
 
-                float x;
-                float y;
-                switch (rotationStep & 3)
-                {
-                    case 1:
-                        x = centerX + dy;
-                        y = centerY - dx;
-                        break;
-                    case 2:
-                        x = centerX - dx;
-                        y = centerY - dy;
-                        break;
-                    case 3:
-                        x = centerX - dy;
-                        y = centerY + dx;
-                        break;
-                    default:
-                        x = rotatedX;
-                        y = rotatedY;
-                        break;
-                }
+                // Inverse camera azimuth maps the four screen corners back
+                // into the unchanged world-map tile coordinates.
+                float x =
+                    centerX + rotationCosine * dx + rotationSine * dy;
+                float y =
+                    centerY - rotationSine * dx + rotationCosine * dy;
 
                 minX = Math.Min(minX, (int)MathF.Floor(x));
                 maxX = Math.Max(maxX, (int)MathF.Ceiling(x));
