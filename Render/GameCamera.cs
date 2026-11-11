@@ -101,13 +101,6 @@ public sealed class GameCamera : IDisposable
         ApplyRotation();
     }
 
-    // The block preview already builds an isometric mesh. Rotate its view
-    // independently from the gameplay projection and its 45-degree rotation.
-    public void SetPreviewRotation(int quarterTurns)
-    {
-        _view.Rotation = Angle.FromDegrees((quarterTurns & 3) * 90f);
-    }
-
     public void HandleZoom(float delta)
     {
         if (delta == 0f)
