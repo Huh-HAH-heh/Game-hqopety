@@ -7,7 +7,7 @@ using SFML.System;
 namespace RimClone.Render;
 
 /// <summary>
-/// Isometric inspection view for the discrete 1 m block terrain.
+/// Isometric inspection view for the discrete 4 x 4 x 1 m block terrain.
 /// It is intentionally read-only: gameplay keeps its normal XY controls.
 /// </summary>
 public sealed class BlockTerrainPreviewRenderer : IDisposable
@@ -16,7 +16,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     {
         public int X;
         public int Y;
-        public int SurfaceLayer;
         public float Height;
         public ushort MaterialId;
         public float Depth;
@@ -34,8 +33,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private float _cachedCameraAzimuthDegrees = float.NaN;
     private float _rotationCosine = 1f;
     private float _rotationSine;
-
-
 
     public static Vector2f GetCameraCenter(
         WorldMap worldMap,
@@ -152,7 +149,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     {
                         X = x,
                         Y = y,
-                        SurfaceLayer = surfaceLayer,
                         Height = height,
                         MaterialId = worldMap.GetMaterialId(x, y, surfaceLayer),
                         Depth = rotatedX + rotatedY

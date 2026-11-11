@@ -19,7 +19,7 @@ public sealed class GameCamera : IDisposable
     private readonly float _moveSpeed;
 
     private float _zoomLevel = 1.0f;
-    private float _freeRotationDegrees;
+    private float _azimuthDegrees;
     private Vector2f _targetPosition;
     private Vector2f _viewportSize;
     private bool _isometricProjectionEnabled = false;
@@ -29,7 +29,7 @@ public sealed class GameCamera : IDisposable
     public View View => _view;
     public bool IsometricProjectionEnabled => _isometricProjectionEnabled;
     public int RotationStep => _rotationStep;
-    public float FreeRotationDegrees => _freeRotationDegrees;
+    public float AzimuthDegrees => _azimuthDegrees;
 
     // The label describes the compass direction currently pointing to the top
     // of the screen. Q/E moves it through the eight 45-degree orientations.
@@ -82,11 +82,11 @@ public sealed class GameCamera : IDisposable
             return;
 
         _isometricProjectionEnabled = enabled;
-        _freeRotationDegrees = 0f;
+        _azimuthDegrees = 0f;
         ApplyProjection();
     }
 
-    public void RotateView(float deltaDegrees)
+    public void RotateAzimuth(float deltaDegrees)
     {
         if (_isometricProjectionEnabled ||
             !float.IsFinite(deltaDegrees) ||
@@ -95,14 +95,14 @@ public sealed class GameCamera : IDisposable
             return;
         }
 
-        _freeRotationDegrees = (_freeRotationDegrees + deltaDegrees) % 360f;
-        if (_freeRotationDegrees < 0f)
-            _freeRotationDegrees += 360f;
+        _azimuthDegrees = (_azimuthDegrees + deltaDegrees) % 360f;
+        if (_azimuthDegrees < 0f)
+            _azimuthDegrees += 360f;
     }
 
-    public void ResetViewRotation()
+    public void ResetAzimuth()
     {
-        _freeRotationDegrees = 0f;
+        _azimuthDegrees = 0f;
     }
 
     public void RotateClockwise()

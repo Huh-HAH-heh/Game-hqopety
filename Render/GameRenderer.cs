@@ -781,7 +781,7 @@ public sealed class GameRenderer
                 _worldMap,
                 _camera.View,
                 TerrainTilePixelSize,
-                _camera.FreeRotationDegrees);
+                _camera.AzimuthDegrees);
             _lastTerrainDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
             _lastUnitDrawMilliseconds = 0d;
@@ -3978,7 +3978,7 @@ public sealed class GameRenderer
                 {
                     float horizontalDelta =
                         e.Position.X - _lastCameraRotatePixel.X;
-                    _camera.RotateView(
+                    _camera.RotateAzimuth(
                         horizontalDelta * CameraRotationDegreesPerPixel);
                     _lastCameraRotatePixel = e.Position;
                     return;
@@ -4341,7 +4341,7 @@ public sealed class GameRenderer
             _normalCameraCenter = _camera.View.Center;
             _blockPreviewRestoreIsometricProjection = _camera.IsometricProjectionEnabled;
             _camera.SetIsometricProjection(false);
-            _camera.ResetViewRotation();
+            _camera.ResetAzimuth();
             _camera.CenterOnPosition(
                 BlockTerrainPreviewRenderer.GetCameraCenter(
                     _worldMap,
@@ -4355,7 +4355,7 @@ public sealed class GameRenderer
         {
             _camera.SetIsometricProjection(_blockPreviewRestoreIsometricProjection);
             if (!_blockPreviewRestoreIsometricProjection)
-                _camera.ResetViewRotation();
+                _camera.ResetAzimuth();
             _camera.CenterOnPosition(_normalCameraCenter);
             Console.WriteLine(
                 _camera.IsometricProjectionEnabled
@@ -4374,7 +4374,7 @@ public sealed class GameRenderer
             }
             else if (key is Keyboard.Key.Q or Keyboard.Key.E)
             {
-                _camera.RotateView(key == Keyboard.Key.Q ? -90f : 90f);
+                _camera.RotateAzimuth(key == Keyboard.Key.Q ? -90f : 90f);
             }
 
             return;
