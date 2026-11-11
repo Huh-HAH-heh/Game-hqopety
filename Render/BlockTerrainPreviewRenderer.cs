@@ -228,7 +228,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     // corresponding source edges after the level turns.
                     AppendVisibleSideFaces(
                         worldMap, x, y, step, tileSize,
-                        north, east, south, west,
                         northZ, eastZ, southZ, westZ);
     
                     ushort materialId = surfaceLayer >= 0
@@ -394,10 +393,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         int y,
         int step,
         float tileSize,
-        Vector2f north,
-        Vector2f east,
-        Vector2f south,
-        Vector2f west,
         float northZ,
         float eastZ,
         float southZ,
@@ -552,6 +547,15 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             (byte)Math.Clamp(shade + 6 - materialTint, 0, 255),
             255);
     }
+
+    private static Vector2f Project(
+        float x,
+        float y,
+        float heightMeters,
+        float tileSize) =>
+        new(
+            (x - y) * tileSize * 0.5f,
+            (x + y) * tileSize * 0.25f - heightMeters * tileSize * 0.5f);
 
     private Vector2f ProjectLevelPoint(
         WorldMap worldMap,
