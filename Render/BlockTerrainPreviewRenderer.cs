@@ -61,11 +61,10 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
-        // Terrain is authored as 4 x 4 m blocks. At distant zoom levels,
-        // combine several blocks into larger patches to keep the mesh light.
-        int step = pixelsPerTile < 3.5f ? 16
-            : pixelsPerTile < 7f ? 8
-            : BlockTerrain.HorizontalBlockSize;
+        // Keep the mesh aligned to physical 4 x 4 m terrain blocks.
+        // Blindly merging 8/16 m patches hides intermediate height boundaries
+        // and makes the rendered collision silhouette disagree with navigation.
+        int step = BlockTerrain.HorizontalBlockSize;
 
         bool cameraMovedOutsideCache =
             MathF.Abs(cameraView.Center.X - _cachedCameraCenter.X) >

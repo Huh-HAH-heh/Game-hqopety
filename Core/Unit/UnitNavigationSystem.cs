@@ -2037,10 +2037,13 @@ public sealed class UnitNavigationSystem
 
     private static int GetFootprintRadius(float size)
     {
-        int worldTileRadius = Math.Max(
-            0,
-            (int)MathF.Ceiling((MathF.Max(0.1f, size) - 1f) * 0.5f));
-        return worldTileRadius * NavigationCellsPerMeter;
+        // Expand the unit to the navigation-cell grid. Include every cell
+        // touched by its half-extent plus half a navigation cell; otherwise
+        // sub-metre pawns are treated as points and can overhang block edges.
+        float halfExtent = MathF.Max(0.1f, size) * 0.5f;
+        float cellsBeyondCenter =
+            halfExtent / NavigationCellSize - 0.5f;
+        return Math.Max(0, (int)MathF.Ceiling(cellsBeyondCenter));
     }
 
     private bool CanCardinalStep(
