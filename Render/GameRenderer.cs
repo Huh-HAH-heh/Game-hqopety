@@ -781,7 +781,8 @@ public sealed class GameRenderer
                 _worldMap,
                 _camera.View,
                 TerrainTilePixelSize,
-                _camera.AzimuthDegrees);
+                _camera.AzimuthDegrees,
+                _camera.ElevationDegrees);
             _lastTerrainDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
             _lastUnitDrawMilliseconds = 0d;
@@ -4345,11 +4346,13 @@ public sealed class GameRenderer
             _camera.CenterOnPosition(
                 BlockTerrainPreviewRenderer.GetCameraCenter(
                     _worldMap,
-                    TerrainTilePixelSize));
+                    TerrainTilePixelSize,
+                    _camera.ElevationDegrees));
             Console.WriteLine(
                 "[Terrain preview] Camera centered on terrain. " +
                 "Right mouse drag: free rotation; Q/E: rotate 90 degrees; " +
-                "middle mouse: pan; WASD: move; wheel: zoom; B: return to game.");
+                "NumPad +/-: elevation; middle mouse: pan; WASD: move; " +
+                "wheel: zoom; B: return to game.");
         }
         else
         {
@@ -4364,6 +4367,32 @@ public sealed class GameRenderer
         }
     }
 
+    private void AdjustBlockPreviewElevation(float deltaDegrees)
+    {
+        Vector2f oldFocus = BlockTerrainPreviewRenderer.GetCameraCenter(
+            _worldMap,
+            TerrainTilePixelSize,
+            _camera.ElevationDegrees);
+        Vector2f panOffset = new(
+            _camera.View.Center.X - oldFocus.X,
+            _camera.View.Center.Y - oldFocus.Y);
+
+        if (!_camera.AdjustElevation(deltaDegrees))
+            return;
+
+        Vector2f newFocus = BlockTerrainPreviewRenderer.GetCameraCenter(
+            _worldMap,
+            TerrainTilePixelSize,
+            _camera.ElevationDegrees);
+        _camera.CenterOnPosition(new Vector2f(
+            newFocus.X + panOffset.X,
+            newFocus.Y + panOffset.Y));
+
+        Console.WriteLine(
+            $"[Terrain preview] Camera elevation: {_camera.ElevationDegrees:0}°. " +
+            "NumPad +/-: change angle.");
+    }
+
     private void HandleKey(Keyboard.Key key)
     {
         if (_showBlockTerrainPreview)
@@ -4375,6 +4404,14 @@ public sealed class GameRenderer
             else if (key is Keyboard.Key.Q or Keyboard.Key.E)
             {
                 _camera.RotateAzimuth(key == Keyboard.Key.Q ? -90f : 90f);
+            }
+            else if (key == Keyboard.Key.NumpadPlus)
+            {
+                AdjustBlockPreviewElevation(5f);
+            }
+            else if (key == Keyboard.Key.NumpadMinus)
+            {
+                AdjustBlockPreviewElevation(-5f);
             }
 
             return;
