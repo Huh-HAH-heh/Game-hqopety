@@ -19,6 +19,7 @@ public sealed class GameCamera : IDisposable
     private readonly float _moveSpeed;
 
     private float _zoomLevel = 1.0f;
+    private float _freeRotationDegrees;
     private Vector2f _targetPosition;
     private Vector2f _viewportSize;
     private bool _isometricProjectionEnabled = false;
@@ -80,7 +81,29 @@ public sealed class GameCamera : IDisposable
             return;
 
         _isometricProjectionEnabled = enabled;
+        _freeRotationDegrees = 0f;
         ApplyProjection();
+    }
+
+    public void RotateView(float deltaDegrees)
+    {
+        if (_isometricProjectionEnabled ||
+            !float.IsFinite(deltaDegrees) ||
+            MathF.Abs(deltaDegrees) < 0.0001f)
+        {
+            return;
+        }
+
+        _freeRotationDegrees += deltaDegrees;
+        _freeRotationDegrees %= 360f;
+        _view.Rotation = Angle.FromDegrees(_freeRotationDegrees);
+    }
+
+    public void ResetViewRotation()
+    {
+        _freeRotationDegrees = 0f;
+        if (!_isometricProjectionEnabled)
+            _view.Rotation = Angle.FromDegrees(0f);
     }
 
     public void RotateClockwise()
@@ -202,7 +225,7 @@ public sealed class GameCamera : IDisposable
         _view.Size = new Vector2f(
             _viewportSize.X * _zoomLevel,
             _viewportSize.Y * _zoomLevel);
-        _view.Rotation = Angle.FromDegrees(0f);
+        _view.Rotation = Angle.FromDegrees(_freeRotationDegrees);
     }
 
     private void ApplyRotation()

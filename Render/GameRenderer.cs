@@ -43,6 +43,8 @@ public sealed class GameRenderer
     }
 
     private const float TileSize = 16f;
+    private const bool UnitsTemporarilyDisabled = true;
+    private const float CameraRotationDegreesPerPixel = 0.45f;
     private const float MaximumScaledSimulationDelta = 0.2f;
     private static readonly float[] SimulationSpeedLevels = { 0.25f, 0.5f, 1f, 2f };
 
@@ -102,6 +104,8 @@ public sealed class GameRenderer
     };
     private bool _isPanningCamera;
     private Vector2i _lastCameraPanPixel;
+    private bool _isRotatingCamera;
+    private Vector2i _lastCameraRotatePixel;
     private Vector2i _selectionDragStartPixel;
     private Vector2i _selectionDragCurrentPixel;
     private const int SelectionDragThreshold = 5;
@@ -167,7 +171,6 @@ public sealed class GameRenderer
     private bool _showBlockTerrainPreview;
     private Vector2f _normalCameraCenter;
     private bool _blockPreviewRestoreIsometricProjection;
-    private int _blockPreviewRotationStep;
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
@@ -689,7 +692,9 @@ public sealed class GameRenderer
 
             bool singleStepRequested = _simulationThread == null &&
                 Interlocked.Exchange(ref _singleStepRequested, 0) != 0;
-            if (_simulationThread == null && (!_simulationPaused || singleStepRequested))
+            if (!UnitsTemporarilyDisabled &&
+                _simulationThread == null &&
+                (!_simulationPaused || singleStepRequested))
             {
                 float updateDeltaTime = singleStepRequested ? 1f / 60f : simulationDeltaTime;
                 if (_visionTestMode)
@@ -813,7 +818,7 @@ public sealed class GameRenderer
             ? Volatile.Read(ref _latestSnapshot)
             : null;
 
-        if (renderSnapshot != null)
+        if (!UnitsTemporarilyDisabled && renderSnapshot != null)
         {
             stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.DrawSnapshot(
@@ -843,7 +848,7 @@ public sealed class GameRenderer
                 _showCombatTracers);
             _lastProjectileDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
         }
-        else
+        else if (!UnitsTemporarilyDisabled)
         {
             stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.Draw(
@@ -1353,7 +1358,7 @@ public sealed class GameRenderer
 
     private void StartSimulationThread()
     {
-        if (_simulationThread != null)
+        if (UnitsTemporarilyDisabled || _simulationThread != null)
             return;
 
         _stopSimulationThread = false;
@@ -3374,6 +3379,14 @@ public sealed class GameRenderer
         _window.MouseButtonPressed +=
             (_, e) =>
             {
+                if (_showBlockTerrainPreview && e.Button == Mouse.Button.Right)
+                {
+                    _isRotatingCamera = true;
+                    _lastCameraRotatePixel = e.Position;
+                    _isPanningCamera = false;
+                    return;
+                }
+
                 if (_showBlockTerrainPreview && e.Button != Mouse.Button.Middle)
                     return;
 
@@ -3960,6 +3973,16 @@ public sealed class GameRenderer
                     return;
                 }
 
+                if (_isRotatingCamera)
+                {
+                    float horizontalDelta =
+                        e.Position.X - _lastCameraRotatePixel.X;
+                    _camera.RotateView(
+                        horizontalDelta * CameraRotationDegreesPerPixel);
+                    _lastCameraRotatePixel = e.Position;
+                    return;
+                }
+
                 if (_isPanningCamera)
                 {
                     Vector2f pixelDelta = new(
@@ -4059,6 +4082,12 @@ public sealed class GameRenderer
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
                     _bodyRigEditorOverlay.HandleMouseReleased(e.Button);
+                    return;
+                }
+
+                if (e.Button == Mouse.Button.Right && _isRotatingCamera)
+                {
+                    _isRotatingCamera = false;
                     return;
                 }
 
@@ -4300,6 +4329,7 @@ public sealed class GameRenderer
     {
         _showBlockTerrainPreview = !_showBlockTerrainPreview;
         _isPanningCamera = false;
+        _isRotatingCamera = false;
         _isSelectingUnits = false;
         _isPlacingMoveLine = false;
         _contextMenuOverlay?.Close();
@@ -4310,19 +4340,21 @@ public sealed class GameRenderer
             _normalCameraCenter = _camera.View.Center;
             _blockPreviewRestoreIsometricProjection = _camera.IsometricProjectionEnabled;
             _camera.SetIsometricProjection(false);
-            _blockPreviewRotationStep = 0;
-            _blockTerrainPreviewRenderer.SetRotation(_blockPreviewRotationStep);
+            _camera.ResetViewRotation();
             _camera.CenterOnPosition(
                 BlockTerrainPreviewRenderer.GetCameraCenter(
                     _worldMap,
                     TerrainTilePixelSize));
             Console.WriteLine(
-                "[Terrain preview] Isometric block view. " +
-                "Q/E: rotate 90 degrees; middle mouse: pan; wheel: zoom; B: return to game.");
+                "[Terrain preview] Camera centered on terrain. " +
+                "Right mouse drag: free rotation; Q/E: rotate 90 degrees; " +
+                "middle mouse: pan; WASD: move; wheel: zoom; B: return to game.");
         }
         else
         {
             _camera.SetIsometricProjection(_blockPreviewRestoreIsometricProjection);
+            if (!_blockPreviewRestoreIsometricProjection)
+                _camera.ResetViewRotation();
             _camera.CenterOnPosition(_normalCameraCenter);
             Console.WriteLine(
                 _camera.IsometricProjectionEnabled
@@ -4341,11 +4373,7 @@ public sealed class GameRenderer
             }
             else if (key is Keyboard.Key.Q or Keyboard.Key.E)
             {
-                _blockPreviewRotationStep =
-                    (_blockPreviewRotationStep + (key == Keyboard.Key.Q ? 3 : 1)) & 3;
-                _blockTerrainPreviewRenderer.SetRotation(_blockPreviewRotationStep);
-                Console.WriteLine(
-                    $"[Terrain preview] Level rotation: {_blockPreviewRotationStep * 90}°. Q/E: rotate 90 degrees.");
+                _camera.RotateView(key == Keyboard.Key.Q ? -90f : 90f);
             }
 
             return;
@@ -4757,6 +4785,11 @@ public sealed class GameRenderer
     private void ActivateTestScene(int sceneIndex)
     {
         sceneIndex = Math.Clamp(sceneIndex, 0, GameMenuOverlay.TestSceneCount - 1);
+        if (UnitsTemporarilyDisabled && sceneIndex != 3)
+        {
+            Console.WriteLine("[SCENE] Юниты временно отключены. Доступен только рельефный режим.");
+            return;
+        }
         if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
         {
             Console.WriteLine("[SCENE] Останови эволюцию ИИ перед сменой или перезапуском тестовой карты.");
