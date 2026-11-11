@@ -5,7 +5,6 @@ namespace Core.Map;
 public enum BlockTransitionType : byte
 {
     None = 0,
-    Ramp = 1,
     Stairs = 2
 }
 
@@ -20,7 +19,7 @@ public enum BlockDirection : byte
 /// <summary>
 /// Connectivity data for the discrete 1 m block world.
 /// Solid volume is stored by WorldMap; this class stores exposed surfaces
-/// and explicit ramp/stair connectors between adjacent block columns.
+/// and explicit stair connectors between adjacent block columns.
 /// </summary>
 public sealed class BlockTerrain
 {
@@ -113,9 +112,7 @@ public sealed class BlockTerrain
         int upperX = fromLevel < toLevel ? toX : fromX;
         int upperY = fromLevel < toLevel ? toY : fromY;
         int rise = Math.Abs(toLevel - fromLevel);
-        BlockTransitionType type = GetTransitionType(lowerX, lowerY);
-
-        if (type == BlockTransitionType.None ||
+        if (GetTransitionType(lowerX, lowerY) != BlockTransitionType.Stairs ||
             !DirectionMatches(
                 GetTransitionDirection(lowerX, lowerY),
                 upperX - lowerX,
@@ -124,16 +121,11 @@ public sealed class BlockTerrain
             return false;
         }
 
-        return type switch
-        {
-            BlockTransitionType.Ramp => rise == 1,
-            BlockTransitionType.Stairs => rise is >= 1 and <= 3,
-            _ => false
-        };
+        return rise is >= 1 and <= 3;
     }
 
     /// <summary>
-    /// Only ramp and stair tiles change Z within a tile. Other block surfaces
+    /// Only stair connectors change Z within a tile. Other block surfaces
     /// are perfectly level; the legacy bilinear terrain is not sampled here.
     /// </summary>
     public float SampleSurfaceHeight(float x, float y)
@@ -144,18 +136,13 @@ public sealed class BlockTerrain
         if (level < 0f)
             return 0f;
 
-        BlockTransitionType type = GetTransitionType(tileX, tileY);
-        if (type == BlockTransitionType.None)
+        if (GetTransitionType(tileX, tileY) != BlockTransitionType.Stairs)
             return level;
 
         GetDirectionDelta(GetTransitionDirection(tileX, tileY), out int dx, out int dy);
         int rise = GetSurfaceLevel(tileX + dx, tileY + dy) - (int)level;
-        if (rise <= 0 ||
-            (type == BlockTransitionType.Ramp && rise != 1) ||
-            (type == BlockTransitionType.Stairs && rise > 3))
-        {
+        if (rise is < 1 or > 3)
             return level;
-        }
 
         float localX = Math.Clamp(x - tileX, 0f, 1f);
         float localY = Math.Clamp(y - tileY, 0f, 1f);
@@ -164,9 +151,6 @@ public sealed class BlockTerrain
             : dy > 0 ? localY
             : 1f - localY;
         progress = Math.Clamp(progress, 0f, 1f);
-
-        if (type == BlockTransitionType.Ramp)
-            return level + progress * rise;
 
         int steps = Math.Max(3, rise * 3);
         int completed = Math.Clamp((int)MathF.Floor(progress * steps + 0.0001f), 0, steps);

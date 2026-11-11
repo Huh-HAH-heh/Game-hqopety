@@ -373,8 +373,7 @@ void main()
             tilePixelSize,
             maxLayer);
 
-        // Discrete ramps are rendered as sloped block surfaces in the terrain
-        // mesh. The old arrow/line overlay was only a debug marker.
+        // Stair connectors keep a small direction marker in the terrain view.
         if (isometricProjectionEnabled && !worldMap.UsesDiscreteBlockTerrain)
         {
             DrawBlockTransitions(
@@ -972,7 +971,6 @@ void main()
         int rowCount = (maxTileY - minTileY) / lodStep + 1;
 
         // Pass 1: draw one hard, flat top per occupied block column.
-        // Ramps use different corner heights so their surface is visibly sloped.
         for (int row = 0; row < rowCount; row++)
         {
             int y = minTileY + row * lodStep;
@@ -992,41 +990,10 @@ void main()
                     worldMap.TileHeight, y + lodStep) * tilePixelSize;
 
                 float high = surfaceLayer + 1f;
-                float low = Math.Max(
-                    0f,
-                    high - WorldMap.HeightUnitsPerMeter);
-                float topLeft = high;
-                float topRight = high;
-                float bottomRight = high;
-                float bottomLeft = high;
-
-                if (worldMap.Blocks.GetTransitionType(x, y) ==
-                    BlockTransitionType.Ramp)
-                {
-                    switch (worldMap.Blocks.GetTransitionDirection(x, y))
-                    {
-                        case BlockDirection.North:
-                            bottomLeft = low;
-                            bottomRight = low;
-                            break;
-                        case BlockDirection.East:
-                            topLeft = low;
-                            bottomLeft = low;
-                            break;
-                        case BlockDirection.South:
-                            topLeft = low;
-                            topRight = low;
-                            break;
-                        case BlockDirection.West:
-                            topRight = low;
-                            bottomRight = low;
-                            break;
-                    }
-                }
 
                 AppendTerrainQuad(
                     left, top, right, bottom,
-                    topLeft, topRight, bottomRight, bottomLeft,
+                    high, high, high, high,
                     surfaceLayer);
             }
         }
@@ -1062,19 +1029,6 @@ void main()
 
                     if (neighbourLayer >= surfaceLayer)
                         continue;
-
-                    // A ramp joins these two surfaces; do not draw a vertical
-                    // wall over its upper edge.
-                    BlockTransitionType neighbourTransition =
-                        worldMap.Blocks.GetTransitionType(neighbourX, neighbourY);
-                    BlockDirection reverseDirection =
-                        (BlockDirection)(((int)direction + 2) & 3);
-                    if (neighbourTransition == BlockTransitionType.Ramp &&
-                        worldMap.Blocks.GetTransitionDirection(
-                            neighbourX, neighbourY) == reverseDirection)
-                    {
-                        continue;
-                    }
 
                     float differenceMeters =
                         (surfaceLayer - neighbourLayer) /
@@ -1651,14 +1605,12 @@ void main()
         if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize < 2f)
             return;
 
-        Color rampColor = new Color(224, 185, 112, 230);
         Color stairsColor = new Color(128, 185, 210, 230);
         for (int y = minTileY; y <= maxTileY; y++)
         {
             for (int x = minTileX; x <= maxTileX; x++)
             {
-                BlockTransitionType type = worldMap.Blocks.GetTransitionType(x, y);
-                if (type == BlockTransitionType.None ||
+                if (worldMap.Blocks.GetTransitionType(x, y) != BlockTransitionType.Stairs ||
                     worldMap.GetSurfaceLayer(x, y) > visibleMaxLayer)
                 {
                     continue;
@@ -1670,39 +1622,7 @@ void main()
                 float centerX = left + tilePixelSize * 0.5f;
                 float centerY = top + tilePixelSize * 0.5f;
                 GetBlockDirectionDelta(direction, out int dx, out int dy);
-                Color color = type == BlockTransitionType.Ramp
-                    ? rampColor
-                    : stairsColor;
 
-                if (type == BlockTransitionType.Ramp)
-                {
-                    float endX = centerX + dx * tilePixelSize * 0.28f;
-                    float endY = centerY + dy * tilePixelSize * 0.28f;
-                    AppendLine(
-                        _blockTransitionVertices,
-                        centerX - dx * tilePixelSize * 0.22f,
-                        centerY - dy * tilePixelSize * 0.22f,
-                        endX,
-                        endY,
-                        color);
-                    AppendLine(
-                        _blockTransitionVertices,
-                        endX,
-                        endY,
-                        endX - dx * tilePixelSize * 0.13f - dy * tilePixelSize * 0.11f,
-                        endY - dy * tilePixelSize * 0.13f + dx * tilePixelSize * 0.11f,
-                        color);
-                    AppendLine(
-                        _blockTransitionVertices,
-                        endX,
-                        endY,
-                        endX - dx * tilePixelSize * 0.13f + dy * tilePixelSize * 0.11f,
-                        endY - dy * tilePixelSize * 0.13f - dx * tilePixelSize * 0.11f,
-                        color);
-                    continue;
-                }
-
-                // Three transverse treads form a compact top-down stair glyph.
                 for (int tread = 1; tread <= 3; tread++)
                 {
                     float progress = tread / 4f - 0.5f;
@@ -1714,15 +1634,16 @@ void main()
                         treadY + dx * tilePixelSize * 0.28f,
                         treadX + dy * tilePixelSize * 0.28f,
                         treadY - dx * tilePixelSize * 0.28f,
-                        color);
+                        stairsColor);
                 }
+
                 AppendLine(
                     _blockTransitionVertices,
                     centerX - dx * tilePixelSize * 0.34f,
                     centerY - dy * tilePixelSize * 0.34f,
                     centerX + dx * tilePixelSize * 0.34f,
                     centerY + dy * tilePixelSize * 0.34f,
-                    color);
+                    stairsColor);
             }
         }
 
@@ -1747,7 +1668,7 @@ void main()
             int lastY = Math.Min(worldMap.MaxTileY, y + lodStep - 1);
 
             // Keep each physical tile edge independent at coarse LODs so a
-            // ramp is dashed only on the segment where it actually exists.
+            // stair connector is marked only on the segment where it exists.
             for (int edgeY = firstY; edgeY <= lastY; edgeY++)
             {
                 int westLayer = FindVisibleTopLayer(

@@ -297,8 +297,10 @@ public sealed class WorldMap
             throw new InvalidOperationException("Discrete block terrain is not enabled.");
         if (!IsInside(x, y))
             throw new ArgumentOutOfRangeException(nameof(x));
+        if (type is not (BlockTransitionType.None or BlockTransitionType.Stairs))
+            throw new ArgumentOutOfRangeException(nameof(type));
 
-        if (type != BlockTransitionType.None)
+        if (type == BlockTransitionType.Stairs)
         {
             int level = Blocks.GetSurfaceLevel(x, y);
             int dx = direction == BlockDirection.East ? 1 :
@@ -308,13 +310,10 @@ public sealed class WorldMap
             int nextLevel = Blocks.GetSurfaceLevel(x + dx, y + dy);
             int rise = nextLevel - level;
 
-            if (level <= 0 ||
-                (type == BlockTransitionType.Ramp && rise != 1) ||
-                (type == BlockTransitionType.Stairs && rise is < 1 or > 3))
+            if (level <= 0 || rise is < 1 or > 3)
             {
                 throw new InvalidOperationException(
-                    "A ramp must connect adjacent solid surfaces exactly one metre apart. " +
-                    "Stairs may connect surfaces one to three metres apart.");
+                    "Stairs may connect adjacent solid surfaces one to three metres apart.");
             }
         }
 
@@ -322,12 +321,6 @@ public sealed class WorldMap
         NavigationVersion++;
         MarkTerrainChanged(x, y);
     }
-
-    public void SetRamp(int x, int y, BlockDirection direction) =>
-        SetBlockTransition(x, y, BlockTransitionType.Ramp, direction);
-
-    public void RemoveRamp(int x, int y) =>
-        SetBlockTransition(x, y, BlockTransitionType.None, BlockDirection.North);
 
     public void ClearBlockTransitions()
     {

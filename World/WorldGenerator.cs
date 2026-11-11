@@ -15,7 +15,7 @@ public static class WorldGenerator
         worldMap.Water.Clear();
         GenerateBaseTerrain(worldMap);
         worldMap.EnableDiscreteBlockTerrain();
-        GenerateTraversalBlocks(worldMap);
+        worldMap.ClearBlockTransitions();
 
         if (writeLog)
         {
@@ -39,70 +39,6 @@ public static class WorldGenerator
                 $"Плавный тест каньона создан: " +
                 $"{worldMap.LayerCount} уровней, шаг высоты 0,1 м.");
         }
-    }
-
-    public static void GenerateTraversalBlocks(WorldMap worldMap)
-    {
-        if (!worldMap.UsesDiscreteBlockTerrain)
-            worldMap.EnableDiscreteBlockTerrain();
-
-        worldMap.ClearBlockTransitions();
-        for (int y = 1; y < worldMap.TileHeight - 1; y++)
-        {
-            for (int x = 1; x < worldMap.TileWidth - 1; x++)
-            {
-                int level = worldMap.Blocks.GetSurfaceLevel(x, y);
-                if (level <= 0)
-                    continue;
-
-                int bestDifference = 0;
-                BlockDirection bestDirection = BlockDirection.North;
-
-                // Rotate the tie-break order per cell. When two or more
-                // neighbours are equally high, generation must not always
-                // prefer North; all four ramp orientations should occur.
-                int directionOffset = (x + y * 3) & 3;
-                for (int offset = 0; offset < 4; offset++)
-                {
-                    BlockDirection candidateDirection =
-                        (BlockDirection)((directionOffset + offset) & 3);
-                    GetDirectionDelta(candidateDirection, out int dx, out int dy);
-                    int neighborLevel = worldMap.Blocks.GetSurfaceLevel(x + dx, y + dy);
-                    int difference = neighborLevel - level;
-                    if (difference > bestDifference)
-                    {
-                        bestDifference = difference;
-                        bestDirection = candidateDirection;
-                    }
-                }
-
-                // A one-metre step is traversable only when this lower tile
-                // explicitly contains a ramp. Larger cliffs remain solid walls.
-                if (bestDifference != 1)
-                    continue;
-
-                worldMap.SetRamp(x, y, bestDirection);
-            }
-        }
-    }
-
-    private static void GetDirectionDelta(
-        BlockDirection direction,
-        out int dx,
-        out int dy)
-    {
-        dx = direction switch
-        {
-            BlockDirection.East => 1,
-            BlockDirection.West => -1,
-            _ => 0
-        };
-        dy = direction switch
-        {
-            BlockDirection.South => 1,
-            BlockDirection.North => -1,
-            _ => 0
-        };
     }
 
     private static void GenerateBaseTerrain(
