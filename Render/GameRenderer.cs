@@ -4405,11 +4405,11 @@ public sealed class GameRenderer
             {
                 _camera.RotateAzimuth(key == Keyboard.Key.Q ? -90f : 90f);
             }
-            else if (key == Keyboard.Key.NumpadPlus)
+            else if (key == Keyboard.Key.Add)
             {
                 AdjustBlockPreviewElevation(5f);
             }
-            else if (key == Keyboard.Key.NumpadMinus)
+            else if (key == Keyboard.Key.Subtract)
             {
                 AdjustBlockPreviewElevation(-5f);
             }
