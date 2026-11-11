@@ -19,6 +19,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private float _cachedTileSize = -1f;
     private Vector2f _cachedCameraCenter;
     private Vector2f _cachedViewSize;
+    private float _cachedViewRotationRadians;
 
     public static Vector2f GetCameraCenter(
         WorldMap worldMap,
@@ -76,7 +77,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _cachedLodStep != step ||
             MathF.Abs(_cachedTileSize - tileSize) > 0.001f ||
             cameraMovedOutsideCache ||
-            viewSizeChanged;
+            viewSizeChanged ||
+            MathF.Abs(cameraView.Rotation.Radians - _cachedViewRotationRadians) > 0.001f;
 
         if (rebuildGeometry)
         {
@@ -227,6 +229,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _cachedTileSize = tileSize;
             _cachedCameraCenter = cameraView.Center;
             _cachedViewSize = cameraView.Size;
+            _cachedViewRotationRadians = cameraView.Rotation.Radians;
             _cacheValid = true;
         }
 
@@ -519,10 +522,16 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float top = view.Center.Y - view.Size.Y * 0.7f;
         float bottom = view.Center.Y + view.Size.Y * 0.7f;
 
+        float radians = view.Rotation.Radians;
+        float cosine = MathF.Cos(radians);
+        float sine = MathF.Sin(radians);
+
         for (int corner = 0; corner < 4; corner++)
         {
-            float screenX = (corner & 1) == 0 ? left : right;
-            float screenY = (corner & 2) == 0 ? top : bottom;
+            float localX = (corner & 1) == 0 ? -view.Size.X * 0.7f : view.Size.X * 0.7f;
+            float localY = (corner & 2) == 0 ? -view.Size.Y * 0.7f : view.Size.Y * 0.7f;
+            float screenX = view.Center.X + cosine * localX - sine * localY;
+            float screenY = view.Center.Y + sine * localX + cosine * localY;
 
             for (int heightIndex = 0; heightIndex < 2; heightIndex++)
             {
