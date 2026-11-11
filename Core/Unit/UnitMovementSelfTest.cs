@@ -420,7 +420,7 @@ public static class UnitMovementSelfTest
         return cubeExists && emptyBelow && correctVolume && removed;
     }
 
-    public static bool AllFourRampOrientationsConnectAndSlopeCorrectly()
+    public static bool AllFourStairOrientationsConnectAndStepCorrectly()
     {
         int[] directionX = { 0, 1, 0, -1 };
         int[] directionY = { -1, 0, 1, 0 };
@@ -430,22 +430,24 @@ public static class UnitMovementSelfTest
             WorldMap map = CreateFlatWorld();
             map.EnableDiscreteBlockTerrain();
 
-            int rampX = map.TileWidth / 2;
-            int rampY = map.TileHeight / 2;
-            int upperX = rampX + directionX[directionIndex];
-            int upperY = rampY + directionY[directionIndex];
+            int stairsX = map.TileWidth / 2;
+            int stairsY = map.TileHeight / 2;
+            int upperX = stairsX + directionX[directionIndex];
+            int upperY = stairsY + directionY[directionIndex];
             int alternateDirection = (directionIndex + 1) & 3;
-            int alternateX = rampX + directionX[alternateDirection];
-            int alternateY = rampY + directionY[alternateDirection];
+            int alternateX = stairsX + directionX[alternateDirection];
+            int alternateY = stairsY + directionY[alternateDirection];
 
             map.SetBlockStack(upperX, upperY, 2, 2);
             map.SetBlockStack(alternateX, alternateY, 2, 3);
-            map.SetRamp(rampX, rampY, (BlockDirection)directionIndex);
+            map.SetBlockTransition(
+                stairsX, stairsY, BlockTransitionType.Stairs,
+                (BlockDirection)directionIndex);
 
-            if (!map.Blocks.CanTraverse(rampX, rampY, upperX, upperY) ||
-                !map.Blocks.CanTraverse(upperX, upperY, rampX, rampY) ||
-                map.Blocks.CanTraverse(rampX, rampY, alternateX, alternateY) ||
-                map.Blocks.CanTraverse(alternateX, alternateY, rampX, rampY))
+            if (!map.Blocks.CanTraverse(stairsX, stairsY, upperX, upperY) ||
+                !map.Blocks.CanTraverse(upperX, upperY, stairsX, stairsY) ||
+                map.Blocks.CanTraverse(stairsX, stairsY, alternateX, alternateY) ||
+                map.Blocks.CanTraverse(alternateX, alternateY, stairsX, stairsY))
             {
                 return false;
             }
@@ -455,27 +457,27 @@ public static class UnitMovementSelfTest
             switch ((BlockDirection)directionIndex)
             {
                 case BlockDirection.North:
-                    lowEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.5f, rampY + 0.9f);
-                    highEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.5f, rampY + 0.1f);
+                    lowEdge = map.Blocks.SampleSurfaceHeight(stairsX + 0.5f, stairsY + 0.9f);
+                    highEdge = map.Blocks.SampleSurfaceHeight(stairsX + 0.5f, stairsY + 0.1f);
                     break;
                 case BlockDirection.East:
-                    lowEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.1f, rampY + 0.5f);
-                    highEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.9f, rampY + 0.5f);
+                    lowEdge = map.Blocks.SampleSurfaceHeight(stairsX + 0.1f, stairsY + 0.5f);
+                    highEdge = map.Blocks.SampleSurfaceHeight(stairsX + 0.9f, stairsY + 0.5f);
                     break;
                 case BlockDirection.South:
-                    lowEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.5f, rampY + 0.1f);
-                    highEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.5f, rampY + 0.9f);
+                    lowEdge = map.Blocks.SampleSurfaceHeight(stairsX + 0.5f, stairsY + 0.1f);
+                    highEdge = map.Blocks.SampleSurfaceHeight(stairsX + 0.5f, stairsY + 0.9f);
                     break;
                 case BlockDirection.West:
-                    lowEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.9f, rampY + 0.5f);
-                    highEdge = map.Blocks.SampleSurfaceHeight(rampX + 0.1f, rampY + 0.5f);
+                    lowEdge = map.Blocks.SampleSurfaceHeight(stairsX + 0.9f, stairsY + 0.5f);
+                    highEdge = map.Blocks.SampleSurfaceHeight(stairsX + 0.1f, stairsY + 0.5f);
                     break;
                 default:
                     return false;
             }
 
-            if (MathF.Abs(lowEdge - 1.1f) > 0.02f ||
-                MathF.Abs(highEdge - 1.9f) > 0.02f)
+            if (MathF.Abs(lowEdge - 1f) > 0.02f ||
+                MathF.Abs(highEdge - (1f + 2f / 3f)) > 0.02f)
             {
                 return false;
             }
@@ -484,7 +486,7 @@ public static class UnitMovementSelfTest
         return true;
     }
 
-    public static bool DiscreteBlocksRequireAnExplicitRamp()
+    public static bool DiscreteBlocksRequireExplicitStairs()
     {
         WorldMap map = CreateFlatWorld();
         map.EnableDiscreteBlockTerrain();
@@ -497,7 +499,7 @@ public static class UnitMovementSelfTest
         map.SetBlockTransition(
             wallX - 1,
             centerY,
-            BlockTransitionType.Ramp,
+            BlockTransitionType.Stairs,
             BlockDirection.East);
 
         UnitSimulation simulation = new UnitSimulation(4, 64);
@@ -510,13 +512,13 @@ public static class UnitMovementSelfTest
         UnitNavigationSystem navigation = simulation.Navigation;
         navigation.BeginUpdate(simulation.Units, map, TestDeltaTime);
 
-        bool rampIsReachable = navigation.CanMoveDirectly(
+        bool stairsAreReachable = navigation.CanMoveDirectly(
             simulation.Units,
             id.Index,
             map,
             new Vector2(5.5f, centerY + 0.5f),
             new Vector2(map.TileWidth - 5.5f, centerY + 0.5f));
-        bool rampAlsoAllowsDescent = navigation.CanMoveDirectly(
+        bool stairsAlsoAllowDescent = navigation.CanMoveDirectly(
             simulation.Units,
             id.Index,
             map,
@@ -529,20 +531,24 @@ public static class UnitMovementSelfTest
             new Vector2(5.5f, centerY + 8.5f),
             new Vector2(map.TileWidth - 5.5f, centerY + 8.5f));
 
-        bool invalidRampRejected = false;
+        bool invalidStairsRejected = false;
         try
         {
-            map.SetRamp(wallX + 2, centerY + 4, BlockDirection.East);
+            map.SetBlockTransition(
+                wallX + 2,
+                centerY + 4,
+                BlockTransitionType.Stairs,
+                BlockDirection.East);
         }
         catch (InvalidOperationException)
         {
-            invalidRampRejected = true;
+            invalidStairsRejected = true;
         }
 
-        return rampIsReachable &&
-               rampAlsoAllowsDescent &&
+        return stairsAreReachable &&
+               stairsAlsoAllowDescent &&
                unsupportedStepIsBlocked &&
-               invalidRampRejected;
+               invalidStairsRejected;
     }
 
     public static bool WideFootprintDoesNotAliasBlockTransitionCoordinates()
@@ -550,11 +556,12 @@ public static class UnitMovementSelfTest
         WorldMap map = CreateFlatWorld();
         map.EnableDiscreteBlockTerrain();
 
-        int rampX = 10;
-        int rampY = 10;
+        int transitionX = 10;
+        int transitionY = 10;
         map.SetBlockStack(5, 5, 2, 2);
-        map.SetBlockStack(rampX + 1, rampY, 2, 2);
-        map.SetRamp(rampX, rampY, BlockDirection.East);
+        map.SetBlockStack(transitionX + 1, transitionY, 2, 2);
+        map.SetBlockTransition(
+            transitionX, transitionY, BlockTransitionType.Stairs, BlockDirection.East);
 
         UnitSimulation simulation = new UnitSimulation(4, 64);
         UnitId id = simulation.Spawn(
@@ -566,7 +573,7 @@ public static class UnitMovementSelfTest
 
         // A two-metre footprint covers the raised block at (5,5). Its
         // half-metre navigation cell (10,10) must not alias the unrelated
-        // one-metre ramp stored at block coordinates (10,10).
+        // stair connector stored at block coordinates (10,10).
         simulation.Units.Width[id.Index] = 2f;
         simulation.Units.Length[id.Index] = 2f;
 
