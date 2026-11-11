@@ -517,11 +517,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         // Build slightly beyond the viewport. Small camera pans can then reuse
         // this mesh instead of rebuilding thousands of block faces every frame.
-        float left = view.Center.X - view.Size.X * 0.7f;
-        float right = view.Center.X + view.Size.X * 0.7f;
-        float top = view.Center.Y - view.Size.Y * 0.7f;
-        float bottom = view.Center.Y + view.Size.Y * 0.7f;
-
         float radians = view.Rotation.Radians;
         float cosine = MathF.Cos(radians);
         float sine = MathF.Sin(radians);
