@@ -4311,7 +4311,7 @@ public sealed class GameRenderer
             _blockPreviewRestoreIsometricProjection = _camera.IsometricProjectionEnabled;
             _camera.SetIsometricProjection(false);
             _blockPreviewRotationStep = 0;
-            _camera.SetPreviewRotation(_blockPreviewRotationStep);
+            _blockTerrainPreviewRenderer.SetRotation(_blockPreviewRotationStep);
             _camera.CenterOnPosition(
                 BlockTerrainPreviewRenderer.GetCameraCenter(
                     _worldMap,
@@ -4343,9 +4343,9 @@ public sealed class GameRenderer
             {
                 _blockPreviewRotationStep =
                     (_blockPreviewRotationStep + (key == Keyboard.Key.Q ? 3 : 1)) & 3;
-                _camera.SetPreviewRotation(_blockPreviewRotationStep);
+                _blockTerrainPreviewRenderer.SetRotation(_blockPreviewRotationStep);
                 Console.WriteLine(
-                    $"[Terrain preview] Camera angle: {_blockPreviewRotationStep * 90}°. Q/E: rotate 90 degrees.");
+                    $"[Terrain preview] Level rotation: {_blockPreviewRotationStep * 90}°. Q/E: rotate 90 degrees.");
             }
 
             return;
