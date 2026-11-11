@@ -42,7 +42,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float elevationDegrees)
     {
         float tileSize = MathF.Max(1f, tilePixelSize * 2f);
-        float elevationRadians = Math.Clamp(elevationDegrees, 15f, 80f) *
+        float elevationRadians = Math.Clamp(elevationDegrees, 15f, 90f) *
             (MathF.PI / 180f);
         float groundDepthScale =
             tileSize * 0.5f * MathF.Sin(elevationRadians);
@@ -75,7 +75,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         elevationDegrees = Math.Clamp(
             float.IsFinite(elevationDegrees) ? elevationDegrees : 30f,
             15f,
-            80f);
+            90f);
         float elevationRadians = elevationDegrees * (MathF.PI / 180f);
         float groundDepthScale =
             tileSize * 0.5f * MathF.Sin(elevationRadians);

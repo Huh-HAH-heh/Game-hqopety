@@ -10,7 +10,8 @@ public sealed class GameCamera : IDisposable
     private const float InverseSqrtTwo = 0.70710678118f;
     private const float SqrtTwo = 1.41421356237f;
     private const float MinimumElevationDegrees = 15f;
-    private const float MaximumElevationDegrees = 80f;
+    private const float MaximumElevationDegrees = 90f;
+    private const float ElevationSmoothing = 7.5f;
 
     private static readonly string[] ScreenNorthLabels =
     {
@@ -23,6 +24,7 @@ public sealed class GameCamera : IDisposable
     private float _zoomLevel = 1.0f;
     private float _azimuthDegrees;
     private float _elevationDegrees = 30f;
+    private float _targetElevationDegrees = 30f;
     private Vector2f _targetPosition;
     private Vector2f _viewportSize;
     private bool _isometricProjectionEnabled = false;
@@ -34,6 +36,7 @@ public sealed class GameCamera : IDisposable
     public int RotationStep => _rotationStep;
     public float AzimuthDegrees => _azimuthDegrees;
     public float ElevationDegrees => _elevationDegrees;
+    public float TargetElevationDegrees => _targetElevationDegrees;
 
     // The label describes the compass direction currently pointing to the top
     // of the screen. Q/E moves it through the eight 45-degree orientations.
@@ -119,13 +122,13 @@ public sealed class GameCamera : IDisposable
         }
 
         float next = Math.Clamp(
-            _elevationDegrees + deltaDegrees,
+            _targetElevationDegrees + deltaDegrees,
             MinimumElevationDegrees,
             MaximumElevationDegrees);
-        if (MathF.Abs(next - _elevationDegrees) < 0.0001f)
+        if (MathF.Abs(next - _targetElevationDegrees) < 0.0001f)
             return false;
 
-        _elevationDegrees = next;
+        _targetElevationDegrees = next;
         return true;
     }
 
@@ -186,6 +189,16 @@ public sealed class GameCamera : IDisposable
     {
         if (deltaTime <= 0f)
             return;
+
+        float elevationDelta = _targetElevationDegrees - _elevationDegrees;
+        if (MathF.Abs(elevationDelta) > 0.001f)
+        {
+            float elevationLerp =
+                1f - MathF.Exp(-ElevationSmoothing * deltaTime);
+            _elevationDegrees += elevationDelta * elevationLerp;
+            if (MathF.Abs(_targetElevationDegrees - _elevationDegrees) < 0.02f)
+                _elevationDegrees = _targetElevationDegrees;
+        }
 
         if (moveDirection.LengthSquared() > 0f)
         {

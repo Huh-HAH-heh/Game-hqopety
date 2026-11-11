@@ -688,7 +688,7 @@ public sealed class GameRenderer
 
         if (_menuPage == GameMenuPage.Closed)
         {
-            _camera.Update(_input.MoveDirection, deltaTime);
+            UpdateBlockPreviewCamera(deltaTime);
 
             bool singleStepRequested = _simulationThread == null &&
                 Interlocked.Exchange(ref _singleStepRequested, 0) != 0;
@@ -4367,30 +4367,46 @@ public sealed class GameRenderer
         }
     }
 
-    private void AdjustBlockPreviewElevation(float deltaDegrees)
+    private void UpdateBlockPreviewCamera(float deltaTime)
     {
+        if (!_showBlockTerrainPreview)
+        {
+            _camera.Update(_input.MoveDirection, deltaTime);
+            return;
+        }
+
         Vector2f oldFocus = BlockTerrainPreviewRenderer.GetCameraCenter(
             _worldMap,
             TerrainTilePixelSize,
             _camera.ElevationDegrees);
-        Vector2f panOffset = new(
-            _camera.View.Center.X - oldFocus.X,
-            _camera.View.Center.Y - oldFocus.Y);
-
-        if (!_camera.AdjustElevation(deltaDegrees))
-            return;
-
+        Vector2f oldCenter = _camera.View.Center;
+        _camera.Update(_input.MoveDirection, deltaTime);
+        Vector2f movedCenter = _camera.View.Center;
         Vector2f newFocus = BlockTerrainPreviewRenderer.GetCameraCenter(
             _worldMap,
             TerrainTilePixelSize,
             _camera.ElevationDegrees);
+
+        Vector2f panOffset = new(
+            oldCenter.X - oldFocus.X,
+            oldCenter.Y - oldFocus.Y);
+        Vector2f movement = new(
+            movedCenter.X - oldCenter.X,
+            movedCenter.Y - oldCenter.Y);
+
         _camera.CenterOnPosition(new Vector2f(
-            newFocus.X + panOffset.X,
-            newFocus.Y + panOffset.Y));
+            newFocus.X + panOffset.X + movement.X,
+            newFocus.Y + panOffset.Y + movement.Y));
+    }
+
+    private void AdjustBlockPreviewElevation(float deltaDegrees)
+    {
+        if (!_camera.AdjustElevation(deltaDegrees))
+            return;
 
         Console.WriteLine(
-            $"[Terrain preview] Camera elevation: {_camera.ElevationDegrees:0}°. " +
-            "NumPad +/-: change angle.");
+            $"[Terrain preview] Target elevation: {_camera.TargetElevationDegrees:0}°. " +
+            "Transition is smooth; NumPad +/-: change angle.");
     }
 
     private void HandleKey(Keyboard.Key key)
