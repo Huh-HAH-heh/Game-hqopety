@@ -61,14 +61,11 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
-        // Keep the detailed 1 m mesh for close inspection only.
-        // At normal overview zoom, larger patches avoid submitting tens of
-        // thousands of individual block faces to the GPU.
+        // Terrain is authored as 4 x 4 m blocks. At distant zoom levels,
+        // combine several blocks into larger patches to keep the mesh light.
         int step = pixelsPerTile < 3.5f ? 16
             : pixelsPerTile < 7f ? 8
-            : pixelsPerTile < 14f ? 4
-            : pixelsPerTile < 28f ? 2
-            : 1;
+            : BlockTerrain.HorizontalBlockSize;
 
         bool cameraMovedOutsideCache =
             MathF.Abs(cameraView.Center.X - _cachedCameraCenter.X) >

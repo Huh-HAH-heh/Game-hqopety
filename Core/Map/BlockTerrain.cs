@@ -17,12 +17,14 @@ public enum BlockDirection : byte
 }
 
 /// <summary>
-/// Connectivity data for the discrete 1 m block world.
-/// Solid volume is stored by WorldMap; this class stores exposed surfaces
-/// and explicit stair connectors between adjacent block columns.
+/// Surface connectivity for discrete terrain. Generated terrain patches use
+/// a 4 x 4 m horizontal footprint and 1 m vertical layers. Surface samples
+/// stay on the 1 m navigation grid so units can still move inside each patch.
 /// </summary>
 public sealed class BlockTerrain
 {
+    public const int HorizontalBlockSize = 4;
+    public const int VerticalBlockHeightMeters = 1;
     private readonly int[] _surfaceLevels;
     private readonly ushort[] _materialIds;
     private readonly BlockTransitionType[] _transitionTypes;

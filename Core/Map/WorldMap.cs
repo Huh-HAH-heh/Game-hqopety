@@ -157,19 +157,36 @@ public sealed class WorldMap
             return;
 
         UsesDiscreteBlockTerrain = true;
-        for (int y = 0; y < TileHeight; y++)
+        int blockSize = BlockTerrain.HorizontalBlockSize;
+
+        // Collapse the incoming 1 m height samples into flat 4 x 4 m patches.
+        // The center sample determines each patch's one-metre layer height.
+        for (int blockY = 0; blockY < TileHeight; blockY += blockSize)
         {
-            for (int x = 0; x < TileWidth; x++)
+            for (int blockX = 0; blockX < TileWidth; blockX += blockSize)
             {
-                ushort oldHeight = _surfaceHeights[GetColumnIndex(x, y)];
-                ushort material = GetMaterialId(x, y, 0);
+                int sampleX = Math.Min(
+                    blockX + blockSize / 2,
+                    TileWidth - 1);
+                int sampleY = Math.Min(
+                    blockY + blockSize / 2,
+                    TileHeight - 1);
+                ushort oldHeight =
+                    _surfaceHeights[GetColumnIndex(sampleX, sampleY)];
+                ushort material = GetMaterialId(sampleX, sampleY, 0);
                 int levels = (int)MathF.Round(
                     oldHeight / (float)HeightUnitsPerMeter,
                     MidpointRounding.AwayFromZero);
-                SetSolidHeight(
-                    x, y,
-                    checked((ushort)(levels * HeightUnitsPerMeter)),
-                    material);
+                ushort blockHeight = checked(
+                    (ushort)(levels * HeightUnitsPerMeter));
+
+                int maxY = Math.Min(blockY + blockSize, TileHeight);
+                int maxX = Math.Min(blockX + blockSize, TileWidth);
+                for (int y = blockY; y < maxY; y++)
+                {
+                    for (int x = blockX; x < maxX; x++)
+                        SetSolidHeight(x, y, blockHeight, material);
+                }
             }
         }
 

@@ -22,7 +22,8 @@ public static class WorldGenerator
             Console.WriteLine(
                 "[WorldGenerator] " +
                 $"Дискретный блочный рельеф создан: " +
-                $"{worldMap.Blocks.Width}x{worldMap.Blocks.Height}, шаг Z = 1 м.");
+                $"блоки {BlockTerrain.HorizontalBlockSize}x{BlockTerrain.HorizontalBlockSize} м, " +
+                $"высота слоя = {BlockTerrain.VerticalBlockHeightMeters} м.");
         }
     }
 
