@@ -72,7 +72,14 @@ public readonly record struct RenderUnitState(
     Vector3 PlayerOrderPosition,
     UnitId PlayerOrderTarget,
     int OrderPathStart,
-    int OrderPathCount);
+    int OrderPathCount,
+    Vector2 MotorForce,
+    int SquadId,
+    SquadMemberMovementState SquadMovementState,
+    bool HasSquadMovementState,
+    Vector2 SquadFormationOffset,
+    Vector2 SquadMemberGoal,
+    bool HasSquadFormationData);
 
 public readonly record struct RenderAimRing(Vector3 AimPoint, float Progress);
 
@@ -88,6 +95,16 @@ public readonly record struct RenderSoundPulse(
 public readonly record struct RenderAuditoryContact(
     UnitId Observer, Vector3 ObserverPosition, Vector3 EstimatedPosition,
     float ErrorRadius, float Confidence, float AgeSeconds, TacticalStimulusType Type);
+
+public readonly record struct RenderSquadContact(
+    int SquadId,
+    UnitId Observer,
+    Vector3 ObserverPosition,
+    Vector3 EstimatedPosition,
+    float ErrorRadius,
+    float Confidence,
+    UnitId Reporter,
+    float AgeSeconds);
 
 public readonly record struct RenderMemoryContact(
     UnitId Observer,
@@ -119,15 +136,18 @@ public readonly record struct RenderProjectileImpact(
     ProjectileImpactKind Kind);
 
 /// <summary>
-/// Immutable horizontal body geometry captured for one render frame.
-/// Scale and rotation come from the same articulated body transforms used by hit testing.
+/// Immutable 3D body geometry captured for one render frame.
+/// The renderer projects it into the active camera plane.
 /// </summary>
 public readonly record struct RenderBodyPart(
     Vector3 Position,
     Vector3 Scale,
     float Rotation,
     BodyPrimitive Primitive,
-    BodyPartRole Role);
+    BodyPartRole Role)
+{
+    public Quaternion Orientation { get; init; }
+}
 
 /// <summary>
 /// Immutable data published by the simulation thread and consumed by the renderer.
@@ -146,6 +166,8 @@ public sealed class SimulationFrameSnapshot
     public RenderSoundPulse[] SoundPulses { get; init; } = Array.Empty<RenderSoundPulse>();
     public RenderAuditoryContact[] SoundContacts { get; init; } = Array.Empty<RenderAuditoryContact>();
     public RenderMemoryContact[] MemoryContacts { get; init; } = Array.Empty<RenderMemoryContact>();
+    public SquadMovementDebugSnapshot[] SquadMovement { get; init; } = Array.Empty<SquadMovementDebugSnapshot>();
+    public RenderSquadContact[] SquadContacts { get; init; } = Array.Empty<RenderSquadContact>();
     public RenderProjectileImpact[] Impacts { get; init; } = Array.Empty<RenderProjectileImpact>();
     public MeleeHitVisual[] MeleeHitVisuals { get; init; } = Array.Empty<MeleeHitVisual>();
 
@@ -302,19 +324,17 @@ public sealed class SimulationFrameSnapshot
 
             RenderAuditoryContact best0 = default, best1 = default, best2 = default;
             float bestTime0 = -1f, bestTime1 = -1f, bestTime2 = -1f;
-            IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-            for (int contactIndex = 0; contactIndex < contacts.Count; contactIndex++)
+            TacticalContactCollection contacts = memory.Contacts;
+            foreach (TacticalContact contact in contacts)
             {
-                TacticalContact contact = contacts[contactIndex];
                 if (contact.ExpiresAtSeconds <= nowSeconds)
                     continue;
 
                 PerceptionObservation latest = default;
                 bool foundAuditory = false;
-                IReadOnlyList<PerceptionObservation> observations = contact.Observations;
-                for (int observationIndex = 0; observationIndex < observations.Count; observationIndex++)
+                PerceptionEvidenceCollection observations = contact.Observations;
+                foreach (PerceptionObservation observation in observations)
                 {
-                    PerceptionObservation observation = observations[observationIndex];
                     if (observation.Sense != PerceptionSense.Auditory ||
                         observation.ExpiresAtSeconds <= nowSeconds)
                         continue;
@@ -391,12 +411,11 @@ public sealed class SimulationFrameSnapshot
         float nowSeconds = simulation.PerceptionMemory.CurrentTimeSeconds;
         ushort observerFaction = units.FactionTag[observerIndex];
         Vector3 observerPosition = units.Position[observerIndex];
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
+        TacticalContactCollection contacts = memory.Contacts;
         List<RenderMemoryContact> captured = new(Math.Min(contacts.Count, 32));
 
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact contact in contacts)
         {
-            TacticalContact contact = contacts[i];
             if (contact.ExpiresAtSeconds <= nowSeconds)
                 continue;
 
@@ -404,10 +423,9 @@ public sealed class SimulationFrameSnapshot
             bool hasAuditoryEvidence = false;
             bool hasCommunicationEvidence =
                 contact.LastStimulusType == TacticalStimulusType.AllyContactReport;
-            IReadOnlyList<PerceptionObservation> observations = contact.Observations;
-            for (int observationIndex = 0; observationIndex < observations.Count; observationIndex++)
+            PerceptionEvidenceCollection observations = contact.Observations;
+            foreach (PerceptionObservation observation in observations)
             {
-                PerceptionObservation observation = observations[observationIndex];
                 if (observation.ExpiresAtSeconds <= nowSeconds)
                     continue;
 
@@ -492,7 +510,8 @@ public sealed class SimulationFrameSnapshot
         bool includeMemoryDebug = false,
         UnitId memoryDebugObserver = default,
         bool includeUtilityAiDebug = false,
-        UnitId utilityAiDebugObserver = default)
+        UnitId utilityAiDebugObserver = default,
+        bool includeSquadDebug = false)
     {
         long captureStarted = Stopwatch.GetTimestamp();
         long captureAllocatedBytesStarted = GC.GetAllocatedBytesForCurrentThread();
@@ -555,6 +574,7 @@ public sealed class SimulationFrameSnapshot
         Vector3[] sourceBodyPositions = bodyStore.WorldPosition;
         Vector3[] sourceBodyScales = bodyStore.Scale;
         float[] sourceBodyRotations = bodyStore.WorldRotation;
+        Quaternion[] sourceBodyOrientations = bodyStore.WorldOrientation;
         BodyPrimitive[] sourceBodyPrimitives = bodyStore.Primitive;
         BodyPartRole[] sourceBodyRoles = bodyStore.Role;
         int renderBodyPartWrite = 0;
@@ -738,8 +758,27 @@ public sealed class SimulationFrameSnapshot
                         sourceBodyScales[sourceIndex],
                         sourceBodyRotations[sourceIndex],
                         sourceBodyPrimitives[sourceIndex],
-                        sourceBodyRoles[sourceIndex]);
+                        sourceBodyRoles[sourceIndex])
+                    {
+                        Orientation = sourceBodyOrientations[sourceIndex]
+                    };
                 }
+            }
+
+            UnitId unitId = units.GetId(index);
+            int squadId = 0;
+            SquadMemberMovementState memberMovementState = SquadMemberMovementState.Following;
+            bool hasMemberMovementState = false;
+            Vector2 formationOffset = Vector2.Zero;
+            Vector2 memberGoal = Vector2.Zero;
+            bool hasFormationData = false;
+            if (includeSquadDebug)
+            {
+                simulation.SquadMovement.TryGetMemberSquadId(unitId, out squadId);
+                hasMemberMovementState = simulation.SquadMovement.TryGetMemberState(
+                    unitId, out memberMovementState);
+                hasFormationData = simulation.SquadMovement.TryGetMemberFormationData(
+                    unitId, out formationOffset, out memberGoal);
             }
 
             unitStates[i] = new RenderUnitState(
@@ -785,7 +824,14 @@ public sealed class SimulationFrameSnapshot
                 playerOrderPositions[index],
                 playerOrderTargets[index],
                 orderPathStarts[i],
-                orderPathCounts[i]);
+                orderPathCounts[i],
+                simulation.GetMovementMotorForce(index),
+                squadId,
+                memberMovementState,
+                hasMemberMovementState,
+                formationOffset,
+                memberGoal,
+                hasFormationData);
 
             bool alive = hp > 0f;
             if (faction == 1)
@@ -1003,6 +1049,40 @@ public sealed class SimulationFrameSnapshot
         if (includeMemoryDebug)
             CaptureMemoryDebug(simulation, memoryDebugObserver, out memoryContacts);
 
+        SquadMovementDebugSnapshot[] squadMovement = Array.Empty<SquadMovementDebugSnapshot>();
+        RenderSquadContact[] squadContacts = Array.Empty<RenderSquadContact>();
+        if (includeSquadDebug)
+        {
+            squadMovement = simulation.SquadMovement.CaptureDebugSnapshots();
+            List<RenderSquadContact> capturedContacts = new();
+            float now = simulation.PerceptionMemory.CurrentTimeSeconds;
+
+            for (int i = 0; i < active.Length; i++)
+            {
+                int observerIndex = active[i];
+                if (hitPoints[observerIndex] <= 0f)
+                    continue;
+
+                UnitId observer = units.GetId(observerIndex);
+                if (!simulation.SquadMovement.TryGetMemberSquadId(observer, out int squadId) ||
+                    !simulation.AI.SquadCoordinator.TryGetContact(
+                        observer, now, out SquadTacticalContact contact))
+                    continue;
+
+                capturedContacts.Add(new RenderSquadContact(
+                    squadId,
+                    observer,
+                    positions[observerIndex],
+                    contact.EstimatedPosition,
+                    contact.PositionErrorRadius,
+                    contact.Confidence,
+                    contact.Reporter,
+                    contact.AgeSeconds));
+            }
+
+            squadContacts = capturedContacts.ToArray();
+        }
+
         return new SimulationFrameSnapshot
         {
             Units = unitStates,
@@ -1016,6 +1096,8 @@ public sealed class SimulationFrameSnapshot
             SoundPulses = soundPulses,
             SoundContacts = soundContacts,
             MemoryContacts = memoryContacts,
+            SquadMovement = squadMovement,
+            SquadContacts = squadContacts,
             Impacts = impacts,
             MeleeHitVisuals = meleeHitVisuals,
             ActiveProjectiles = projectiles.ActiveCount,

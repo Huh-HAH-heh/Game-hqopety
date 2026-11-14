@@ -8,6 +8,7 @@ on:
       - experimental/unit-development-terrain-data-refactor
       - feature/unit-navigation-800-battle
       - feature/prone-crawl-silhouette
+      - feature/rimworld-like-ai
   pull_request:
     branches:
       - main

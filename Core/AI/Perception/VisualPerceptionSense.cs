@@ -92,7 +92,7 @@ public sealed class VisualPerceptionSense : PerceptionSenseBase
                             identificationLevel: PerceptionIdentificationLevel.Identified,
                             occurredAtSeconds: nowSeconds,
                             receivedAtSeconds: nowSeconds,
-                            expiresAtSeconds: nowSeconds + 8f,
+                            expiresAtSeconds: nowSeconds + 18f,
                             identifiedSubject: units.GetId(target)));
                     LastObservationsPublished++;
                 }

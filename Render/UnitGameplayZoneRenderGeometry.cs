@@ -20,6 +20,9 @@ internal static class UnitGameplayZoneRenderGeometry
             new Vector3(zone.HalfForward, zone.HalfSide, zone.HalfHeight),
             zone.Rotation,
             BodyPrimitive.Circle,
-            role);
+            role)
+        {
+            Orientation = BodyPartTransformMath.TopDownRotation(zone.Rotation)
+        };
     }
 }

@@ -19,33 +19,43 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     public override string Id => "auditory";
     public override PerceptionSense Channel => PerceptionSense.Auditory;
     private const float GunshotRange = 180f;
-    private const float GunshotMemorySeconds = 8f;
+    private const float GunshotMemorySeconds = 18f;
     private const float GunshotMemoryPublishIntervalSeconds = 0.15f;
-    private const float GunshotMergeCellSize = 8f;
-    private const float FootstepMergeCellSize = 4f;
-    private const float FootstepMemorySeconds = 3f;
-    private const float ConfidenceHalfLifeSeconds = 2.5f;
+    private const float FootstepMemorySeconds = 8f;
+    private const float ConfidenceHalfLifeSeconds = 5f;
     private const float MinimumContactConfidence = 0.12f;
     private const float DebugEventLifetimeSeconds = 2.25f;
     private const int MaxRecentLoudDebugEvents = 96;
     private const int MaxRecentFootstepDebugEvents = 48;
-    private const int ListenerGridCellSize = 32;
-    private const int PulseBufferTrimThreshold = 4096;
-    private const int PulseBufferRetainedCapacity = 128;
-    private const float PulseBufferTrimQuietSeconds = 2f;
-
-    private readonly List<SoundPulse> _pendingPulses = new();
-    private readonly Dictionary<AcousticCellKey, AcousticBatch> _pendingAcousticBatches = new(128);
-    private SoundPulse[] _bestGunshotPulseByObserver = Array.Empty<SoundPulse>();
+    private const int ListenerGridCellSize = 16;
+    private const int MaxFootstepClustersPerObserver = 8;
+    private const int MaxDangerClustersPerObserver = 8;
+    private const float FootstepListenerClusterRadius = 10.5f;
+    private readonly AcousticEventStore _acousticEvents = new();
+    // Structure-of-arrays scratch storage: no per-listener/per-event heap objects.
+    private AcousticEvent[] _footstepPulseByObserver = Array.Empty<AcousticEvent>();
+    private Vector3[] _footstepEstimateByObserver = Array.Empty<Vector3>();
+    private float[] _footstepConfidenceByObserver = Array.Empty<float>();
+    private float[] _footstepErrorByObserver = Array.Empty<float>();
+    private int[] _footstepClusterCountByObserver = Array.Empty<int>();
+    private float[] _footstepAlertAccumulationByObserver = Array.Empty<float>();
+    private float[] _footstepAlertBestConfidenceByObserver = Array.Empty<float>();
+    private Vector3[] _footstepAlertEstimateByObserver = Array.Empty<Vector3>();
+    private AcousticEvent[] _bestGunshotPulseByObserver = Array.Empty<AcousticEvent>();
     private Vector3[] _bestGunshotEstimateByObserver = Array.Empty<Vector3>();
     private float[] _bestGunshotConfidenceByObserver = Array.Empty<float>();
     private float[] _bestGunshotErrorByObserver = Array.Empty<float>();
+    private float[] _gunshotAlertAccumulationByObserver = Array.Empty<float>();
     private bool[] _hasBestGunshotByObserver = Array.Empty<bool>();
     private float[] _lastGunshotMemoryPublishedAt = Array.Empty<float>();
     private bool[] _hasPublishedGunshotMemory = Array.Empty<bool>();
-    private int _pendingGunshotEvents;
-    private int _pendingGunshotBatches;
-    private int _pendingGunshotsMerged;
+    private AcousticEvent[] _dangerPulseByObserver = Array.Empty<AcousticEvent>();
+    private Vector3[] _dangerEstimateByObserver = Array.Empty<Vector3>();
+    private float[] _dangerConfidenceByObserver = Array.Empty<float>();
+    private float[] _dangerErrorByObserver = Array.Empty<float>();
+    private int[] _dangerClusterCountByObserver = Array.Empty<int>();
+    private float[] _dangerAlertAccumulationByObserver = Array.Empty<float>();
+    private Vector3[] _dangerAlertEstimateByObserver = Array.Empty<Vector3>();
     private readonly Queue<TacticalSoundDebugEvent> _recentLoudDebugEvents = new();
     private readonly Queue<TacticalSoundDebugEvent> _recentFootstepDebugEvents = new();
     private readonly PerceptionMemoryStore _memoryStore;
@@ -56,9 +66,6 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     private int[] _listenerCellStarts = Array.Empty<int>();
     private int[] _listenerCellWriteCursors = Array.Empty<int>();
     private int[] _listenerUnits = Array.Empty<int>();
-    private long _nextPulseId = 1;
-    private float _lastPulseAtSeconds = float.NegativeInfinity;
-
     public float CurrentTimeSeconds => _memoryStore.CurrentTimeSeconds;
     public int LastQueuedPulseCount { get; private set; }
     public int LastListenerChecks { get; private set; }
@@ -67,6 +74,11 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     public int LastGunshotEventsQueued { get; private set; }
     public int LastGunshotBatchesQueued { get; private set; }
     public int LastGunshotsMerged { get; private set; }
+    public int LastFootstepEventsCoalesced { get; private set; }
+    public int LastFootstepClustersPublished { get; private set; }
+    public int FootstepClustersPerObserver => MaxFootstepClustersPerObserver;
+    public int PendingAcousticBatchCount => _acousticEvents.PendingBatchCount;
+    public int PendingSoundEventCount => _acousticEvents.PendingEventCount;
 
     public TacticalHearingSystem(
         int initialUnitCapacity = 1024,
@@ -100,8 +112,8 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 TacticalStimulusType.CoverImpact or TacticalStimulusType.Explosion))
             return;
 
-        QueuePulse(new SoundPulse(
-            _nextPulseId++, sourceUnit, sourceFaction, position, type,
+        QueuePulse(new AcousticEvent(
+            _acousticEvents.NextEventId(), sourceUnit, sourceFaction, position, type,
             CurrentTimeSeconds, Math.Clamp(intensity, 0f, 1f), audibleRange));
     }
 
@@ -167,19 +179,16 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         if (!float.IsFinite(deltaTime) || deltaTime <= 0f)
             return;
         CollectFootsteps(units, health, deltaTime, nowSeconds);
-        LastQueuedPulseCount = _pendingPulses.Count;
+        FlushMaturedAcousticBatches(nowSeconds);
+        LastQueuedPulseCount = _acousticEvents.PendingEventCount + _acousticEvents.PendingBatchCount;
         LastListenerChecks = 0;
         LastContactsRecorded = 0;
-        LastGunshotEventsQueued = _pendingGunshotEvents;
-        LastGunshotBatchesQueued = _pendingGunshotBatches;
-        LastGunshotsMerged = _pendingGunshotsMerged;
+        LastGunshotEventsQueued = 0;
+        LastGunshotBatchesQueued = 0;
+        LastGunshotsMerged = 0;
 
         DeliverPulses(units, health, response, nowSeconds, worldMap, vision);
-        _pendingPulses.Clear();
-        _pendingAcousticBatches.Clear();
-        _pendingGunshotEvents = 0;
-        _pendingGunshotBatches = 0;
-        _pendingGunshotsMerged = 0;
+        _acousticEvents.ClearDispatchedEvents();
         TrimTransientBuffersIfQuiet(nowSeconds);
     }
 
@@ -189,21 +198,36 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             throw new ArgumentOutOfRangeException(nameof(unitIndex));
         EnsureCapacity(unitIndex + 1);
         _footstepCooldown[unitIndex] = 0f;
+        _footstepClusterCountByObserver[unitIndex] = 0;
+        _footstepAlertAccumulationByObserver[unitIndex] = 0f;
+        _footstepAlertBestConfidenceByObserver[unitIndex] = 0f;
         _hasBestGunshotByObserver[unitIndex] = false;
         _lastGunshotMemoryPublishedAt[unitIndex] = 0f;
         _hasPublishedGunshotMemory[unitIndex] = false;
+        _dangerClusterCountByObserver[unitIndex] = 0;
+        _dangerAlertAccumulationByObserver[unitIndex] = 0f;
+        _dangerAlertEstimateByObserver[unitIndex] = Vector3.Zero;
     }
 
     public void ClearUnit(int unitIndex)
     {
         if ((uint)unitIndex < (uint)_footstepCooldown.Length)
             _footstepCooldown[unitIndex] = 0f;
+        if ((uint)unitIndex < (uint)_footstepClusterCountByObserver.Length)
+        {
+            _footstepClusterCountByObserver[unitIndex] = 0;
+            _footstepAlertAccumulationByObserver[unitIndex] = 0f;
+            _footstepAlertBestConfidenceByObserver[unitIndex] = 0f;
+        }
 
         if ((uint)unitIndex < (uint)_hasBestGunshotByObserver.Length)
         {
             _hasBestGunshotByObserver[unitIndex] = false;
             _lastGunshotMemoryPublishedAt[unitIndex] = 0f;
             _hasPublishedGunshotMemory[unitIndex] = false;
+            _dangerClusterCountByObserver[unitIndex] = 0;
+            _dangerAlertAccumulationByObserver[unitIndex] = 0f;
+            _dangerAlertEstimateByObserver[unitIndex] = Vector3.Zero;
         }
     }
 
@@ -212,20 +236,18 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
 
     public bool TryGetBestInvestigableContact(int observerIndex, out TacticalContact contact)
     {
-        contact = null!;
+        contact = default;
         if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
             return false;
         float bestScore = 0f;
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact candidate in memory.Contacts)
         {
-            TacticalContact candidate = contacts[i];
             if (candidate.IsInvestigated ||
                 candidate.ExpiresAtSeconds <= CurrentTimeSeconds ||
                 candidate.LastStimulusType is not (TacticalStimulusType.Gunshot or TacticalStimulusType.Footstep))
                 continue;
             float confidence = candidate.GetEffectiveConfidence(CurrentTimeSeconds, ConfidenceHalfLifeSeconds);
-            float minimum = candidate.LastStimulusType == TacticalStimulusType.Footstep ? 0.18f : 0.16f;
+            float minimum = candidate.LastStimulusType == TacticalStimulusType.Footstep ? 0.13f : 0.12f;
             if (confidence < minimum)
                 continue;
             float score = confidence +
@@ -243,15 +265,13 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
 
     public bool TryGetBestImmediateDangerContact(int observerIndex, out TacticalContact contact)
     {
-        contact = null!;
+        contact = default;
         if (!_memoryStore.TryGetMemory(observerIndex, out TacticalContactMemory memory))
             return false;
 
         float bestScore = 0f;
-        IReadOnlyList<TacticalContact> contacts = memory.Contacts;
-        for (int i = 0; i < contacts.Count; i++)
+        foreach (TacticalContact candidate in memory.Contacts)
         {
-            TacticalContact candidate = contacts[i];
             if (candidate.IsInvestigated ||
                 candidate.ExpiresAtSeconds <= CurrentTimeSeconds ||
                 candidate.LastStimulusType is not (TacticalStimulusType.NearMiss or
@@ -299,8 +319,8 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 case UnitPosture.Sitting: intensity = 0.28f; range = 11f; interval = 0.80f; break;
                 default: intensity = 0.55f; range = 20f; interval = 0.50f; break;
             }
-            QueuePulse(new SoundPulse(
-                _nextPulseId++, units.GetId(unit), units.FactionTag[unit],
+            QueuePulse(new AcousticEvent(
+                _acousticEvents.NextEventId(), units.GetId(unit), units.FactionTag[unit],
                 units.Position[unit], TacticalStimulusType.Footstep, nowSeconds, intensity, range));
             _footstepCooldown[unit] = interval;
         }
@@ -316,15 +336,30 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
     {
         ReadOnlySpan<int> active = units.ActiveIndices;
         Array.Clear(_hasBestGunshotByObserver);
+        Array.Clear(_gunshotAlertAccumulationByObserver);
+        Array.Clear(_footstepClusterCountByObserver);
+        Array.Clear(_footstepAlertAccumulationByObserver);
+        Array.Clear(_footstepAlertBestConfidenceByObserver);
+        Array.Clear(_dangerClusterCountByObserver);
+        Array.Clear(_dangerAlertAccumulationByObserver);
+        LastFootstepEventsCoalesced = 0;
+        LastFootstepClustersPublished = 0;
         LastListenerCellsVisited = 0;
 
-        bool useListenerGrid = worldMap != null && _pendingPulses.Count > 0;
+        bool useListenerGrid = worldMap != null && _acousticEvents.PendingEventCount > 0;
         if (useListenerGrid)
             BuildListenerGrid(units, health, worldMap! , active);
 
-        for (int pulseIndex = 0; pulseIndex < _pendingPulses.Count; pulseIndex++)
+        for (int pulseIndex = 0; pulseIndex < _acousticEvents.PendingEventCount; pulseIndex++)
         {
-            SoundPulse pulse = _pendingPulses[pulseIndex];
+            AcousticEvent pulse = _acousticEvents.PendingEvents[pulseIndex];
+            if (pulse.Type == TacticalStimulusType.Gunshot)
+            {
+                LastGunshotEventsQueued += pulse.EventCount;
+                LastGunshotBatchesQueued++;
+                LastGunshotsMerged += Math.Max(0, pulse.EventCount - 1);
+            }
+
             float lifetime = pulse.Type switch
             {
                 TacticalStimulusType.Footstep => FootstepMemorySeconds,
@@ -342,6 +377,13 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                 for (int i = 0; i < active.Length; i++)
                 {
                     int observer = active[i];
+                    if (health.OverallHitPoints[observer] <= 0f ||
+                        units.GetId(observer).Equals(pulse.SourceUnitId) ||
+                        (pulse.SourceFaction != 0 && units.FactionTag[observer] == pulse.SourceFaction))
+                    {
+                        continue;
+                    }
+
                     LastListenerChecks++;
                     DeliverPulseToObserver(
                         pulse, lifetime, observer, units, health, response,
@@ -370,6 +412,12 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
                     for (int listener = start; listener < end; listener++)
                     {
                         int observer = _listenerUnits[listener];
+                        if (units.GetId(observer).Equals(pulse.SourceUnitId) ||
+                            (pulse.SourceFaction != 0 && units.FactionTag[observer] == pulse.SourceFaction))
+                        {
+                            continue;
+                        }
+
                         LastListenerChecks++;
                         DeliverPulseToObserver(
                             pulse, lifetime, observer, units, health, response,
@@ -379,40 +427,110 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             }
         }
 
-        // Persist gunfire as a sensory update, not once per bullet received by
-        // every listener. Fast bursts still raise alertness for all heard clusters.
+        // Commit compact per-listener scratch results once. Gunfire remains
+        // one strongest contact per listener; footsteps retain up to four distinct
+        // spatial hypotheses instead of recording every pulse separately.
         for (int i = 0; i < active.Length; i++)
         {
             int observer = active[i];
-            if (!_hasBestGunshotByObserver[observer])
-                continue;
 
-            float lastPublished = _lastGunshotMemoryPublishedAt[observer];
-            if (_hasPublishedGunshotMemory[observer] &&
-                nowSeconds - lastPublished < GunshotMemoryPublishIntervalSeconds)
-                continue;
-
-            SoundPulse pulse = _bestGunshotPulseByObserver[observer];
-            Vector3 estimate = _bestGunshotEstimateByObserver[observer];
-            if (_memoryStore.Record(
-                    observer,
-                    new TacticalStimulus(
-                        pulse.Type, estimate, pulse.OccurredAtSeconds,
-                        pulse.Intensity, _bestGunshotErrorByObserver[observer],
-                        _bestGunshotConfidenceByObserver[observer]),
-                    nowSeconds,
-                    GunshotMemorySeconds) != null)
+            float dangerAlert = _dangerAlertAccumulationByObserver[observer];
+            if (dangerAlert > 0f)
             {
-                LastContactsRecorded++;
+                response.AddAlertness(
+                    observer, dangerAlert, _dangerAlertEstimateByObserver[observer]);
             }
 
-            _lastGunshotMemoryPublishedAt[observer] = nowSeconds;
-            _hasPublishedGunshotMemory[observer] = true;
+            int dangerCount = _dangerClusterCountByObserver[observer];
+            int dangerStart = observer * MaxDangerClustersPerObserver;
+            for (int cluster = 0; cluster < dangerCount; cluster++)
+            {
+                int slot = dangerStart + cluster;
+                AcousticEvent danger = _dangerPulseByObserver[slot];
+                float lifetime = danger.Type switch
+                {
+                    TacticalStimulusType.NearMiss => 5f,
+                    TacticalStimulusType.CoverImpact => 6f,
+                    TacticalStimulusType.Explosion => 10f,
+                    _ => 4f
+                };
+
+                if (_memoryStore.RecordObservation(
+                        observer,
+                        CreateAuditoryObservation(
+                            danger,
+                            _dangerEstimateByObserver[slot],
+                            _dangerConfidenceByObserver[slot],
+                            _dangerErrorByObserver[slot],
+                            nowSeconds,
+                            lifetime)) != null)
+                {
+                    LastContactsRecorded++;
+                }
+            }
+
+            if (_hasBestGunshotByObserver[observer])
+            {
+                float alertContribution = _gunshotAlertAccumulationByObserver[observer];
+                if (alertContribution > 0f)
+                    response.AddAlertness(
+                        observer, alertContribution, _bestGunshotEstimateByObserver[observer]);
+
+                float lastPublished = _lastGunshotMemoryPublishedAt[observer];
+                if (!_hasPublishedGunshotMemory[observer] ||
+                    nowSeconds - lastPublished >= GunshotMemoryPublishIntervalSeconds)
+                {
+                    AcousticEvent gunshot = _bestGunshotPulseByObserver[observer];
+                    if (_memoryStore.RecordObservation(
+                            observer,
+                            CreateAuditoryObservation(
+                                gunshot,
+                                _bestGunshotEstimateByObserver[observer],
+                                _bestGunshotConfidenceByObserver[observer],
+                                _bestGunshotErrorByObserver[observer],
+                                nowSeconds,
+                                GunshotMemorySeconds)) != null)
+                    {
+                        LastContactsRecorded++;
+                    }
+
+                    _lastGunshotMemoryPublishedAt[observer] = nowSeconds;
+                    _hasPublishedGunshotMemory[observer] = true;
+                }
+            }
+
+            int clusterCount = _footstepClusterCountByObserver[observer];
+            if (clusterCount == 0)
+                continue;
+
+            float footstepAlert = _footstepAlertAccumulationByObserver[observer];
+            if (footstepAlert > 0f)
+                response.AddAlertness(
+                    observer, footstepAlert, _footstepAlertEstimateByObserver[observer]);
+
+            int clusterStart = observer * MaxFootstepClustersPerObserver;
+            for (int cluster = 0; cluster < clusterCount; cluster++)
+            {
+                int slot = clusterStart + cluster;
+                if (_memoryStore.RecordObservation(
+                        observer,
+                        CreateAuditoryObservation(
+                            _footstepPulseByObserver[slot],
+                            _footstepEstimateByObserver[slot],
+                            _footstepConfidenceByObserver[slot],
+                            _footstepErrorByObserver[slot],
+                            nowSeconds,
+                            FootstepMemorySeconds)) != null)
+                {
+                    LastContactsRecorded++;
+                    LastFootstepClustersPublished++;
+                }
+            }
         }
     }
 
     private void DeliverPulseToObserver(
-        SoundPulse pulse,
+        AcousticEvent pulse,
         float lifetime,
         int observer,
         UnitStore units,
@@ -422,16 +540,6 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         WorldMap? worldMap,
         VisionSystem? vision)
     {
-        if (health.OverallHitPoints[observer] <= 0f ||
-            units.GetId(observer).Equals(pulse.SourceUnit))
-        {
-            return;
-        }
-
-        ushort observerFaction = units.FactionTag[observer];
-        if (pulse.SourceFaction != 0 && pulse.SourceFaction == observerFaction)
-            return;
-
         Vector3 observerPosition = units.Position[observer];
         float dx = pulse.Position.X - observerPosition.X;
         float dy = pulse.Position.Y - observerPosition.Y;
@@ -448,9 +556,9 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         float error = pulse.Type switch
         {
             TacticalStimulusType.Footstep =>
-                MathF.Max(1.5f + distance * 0.20f, FootstepMergeCellSize * 0.75f),
+                MathF.Max(1.5f + distance * 0.20f, AcousticEventStore.FootstepMergeCellSize * 0.75f),
             TacticalStimulusType.Gunshot =>
-                MathF.Max(4f + distance * 0.22f, GunshotMergeCellSize * 0.75f),
+                MathF.Max(4f + distance * 0.22f, AcousticEventStore.GunshotMergeCellSize * 0.75f),
             _ => 4f + distance * 0.22f
         };
         Vector3 estimate = EstimatePosition(pulse, observer, error, attenuation);
@@ -464,12 +572,15 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             TacticalStimulusType.Explosion => 0.70f,
             _ => 0.18f
         };
-        response.AddAlertness(observer, alertFactor * confidence, estimate);
-
         if (pulse.Type == TacticalStimulusType.Gunshot)
         {
-            // Hearing still affects alertness for every cluster, but we keep
-            // only the strongest uncertain gunshot contact per observer/tick.
+            // Coalesce multiple heard cells into one listener-side response.
+            float contribution = Math.Clamp(alertFactor * confidence, 0f, 1f);
+            float accumulated = _gunshotAlertAccumulationByObserver[observer];
+            _gunshotAlertAccumulationByObserver[observer] =
+                1f - (1f - accumulated) * (1f - contribution);
+
+            // Keep the strongest uncertain source estimate for memory and search.
             if (!_hasBestGunshotByObserver[observer] ||
                 confidence >= _bestGunshotConfidenceByObserver[observer])
             {
@@ -483,20 +594,184 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             return;
         }
 
-        if (_memoryStore.Record(
-                observer,
-                new TacticalStimulus(
-                    pulse.Type, estimate, pulse.OccurredAtSeconds,
-                    pulse.Intensity, error, confidence),
-                nowSeconds,
-                lifetime) != null)
+        if (pulse.Type == TacticalStimulusType.Footstep)
         {
-            LastContactsRecorded++;
+            AccumulateFootstepForObserver(
+                observer, pulse, estimate, confidence, error, alertFactor);
+            return;
         }
 
+        AccumulateDangerForObserver(
+            observer, pulse, estimate, confidence, error, alertFactor);
+
+        // Every close event still drives its immediate physical reaction. Only
+        // the slower tactical-memory write is coalesced per listener and location.
         ApplyImmediateDangerResponse(
             response, units, vision, worldMap, observer, pulse.Type,
             pulse.Position, pulse.Range, confidence, estimate);
+    }
+
+    private void AccumulateDangerForObserver(
+        int observer,
+        AcousticEvent pulse,
+        Vector3 estimate,
+        float confidence,
+        float positionError,
+        float alertFactor)
+    {
+        // AddAlertness is a positive, clamped sum. Accumulating here preserves its
+        // final value and the last heard source while avoiding one write per pulse.
+        _dangerAlertAccumulationByObserver[observer] = Math.Clamp(
+            _dangerAlertAccumulationByObserver[observer] + alertFactor * confidence,
+            0f,
+            1f);
+        _dangerAlertEstimateByObserver[observer] = estimate;
+
+        int count = _dangerClusterCountByObserver[observer];
+        int baseSlot = observer * MaxDangerClustersPerObserver;
+
+        for (int i = 0; i < count; i++)
+        {
+            int slot = baseSlot + i;
+            if (_dangerPulseByObserver[slot].Type != pulse.Type)
+                continue;
+
+            Vector3 existingEstimate = _dangerEstimateByObserver[slot];
+            float dx = estimate.X - existingEstimate.X;
+            float dy = estimate.Y - existingEstimate.Y;
+            float dz = estimate.Z - existingEstimate.Z;
+            float mergeRadius = MathF.Max(
+                1.5f,
+                _dangerErrorByObserver[slot] + positionError);
+
+            if (dx * dx + dy * dy + dz * dz > mergeRadius * mergeRadius)
+                continue;
+
+            if (pulse.OccurredAtSeconds >= _dangerPulseByObserver[slot].OccurredAtSeconds)
+                _dangerPulseByObserver[slot] = pulse;
+
+            float existingConfidence = _dangerConfidenceByObserver[slot];
+            if (positionError <= _dangerErrorByObserver[slot] ||
+                confidence > existingConfidence)
+            {
+                _dangerEstimateByObserver[slot] = estimate;
+                _dangerErrorByObserver[slot] = positionError;
+            }
+
+            if (confidence > existingConfidence)
+                _dangerConfidenceByObserver[slot] = confidence;
+            return;
+        }
+
+        if (count < MaxDangerClustersPerObserver)
+        {
+            int slot = baseSlot + count;
+            _dangerPulseByObserver[slot] = pulse;
+            _dangerEstimateByObserver[slot] = estimate;
+            _dangerConfidenceByObserver[slot] = confidence;
+            _dangerErrorByObserver[slot] = positionError;
+            _dangerClusterCountByObserver[observer] = count + 1;
+            return;
+        }
+
+        // Keep the eight strongest spatially distinct danger hypotheses for one
+        // listener and simulation step. Close reactions above are never discarded.
+        int weakestSlot = baseSlot;
+        float weakestConfidence = _dangerConfidenceByObserver[baseSlot];
+        for (int i = 1; i < MaxDangerClustersPerObserver; i++)
+        {
+            int slot = baseSlot + i;
+            if (_dangerConfidenceByObserver[slot] >= weakestConfidence)
+                continue;
+            weakestConfidence = _dangerConfidenceByObserver[slot];
+            weakestSlot = slot;
+        }
+
+        if (confidence <= weakestConfidence)
+            return;
+
+        _dangerPulseByObserver[weakestSlot] = pulse;
+        _dangerEstimateByObserver[weakestSlot] = estimate;
+        _dangerConfidenceByObserver[weakestSlot] = confidence;
+        _dangerErrorByObserver[weakestSlot] = positionError;
+    }
+
+    private void AccumulateFootstepForObserver(
+        int observer,
+        AcousticEvent pulse,
+        Vector3 estimate,
+        float confidence,
+        float positionError,
+        float alertFactor)
+    {
+        _footstepAlertAccumulationByObserver[observer] = Math.Clamp(
+            _footstepAlertAccumulationByObserver[observer] + alertFactor * confidence,
+            0f,
+            1f);
+
+        if (confidence >= _footstepAlertBestConfidenceByObserver[observer])
+        {
+            _footstepAlertBestConfidenceByObserver[observer] = confidence;
+            _footstepAlertEstimateByObserver[observer] = estimate;
+        }
+
+        int count = _footstepClusterCountByObserver[observer];
+        int baseSlot = observer * MaxFootstepClustersPerObserver;
+        float mergeDistanceSquared =
+            FootstepListenerClusterRadius * FootstepListenerClusterRadius;
+
+        for (int i = 0; i < count; i++)
+        {
+            int slot = baseSlot + i;
+            Vector3 existingPosition = _footstepPulseByObserver[slot].Position;
+            float dx = pulse.Position.X - existingPosition.X;
+            float dy = pulse.Position.Y - existingPosition.Y;
+            if (dx * dx + dy * dy > mergeDistanceSquared)
+                continue;
+
+            LastFootstepEventsCoalesced++;
+            if (confidence > _footstepConfidenceByObserver[slot])
+            {
+                _footstepPulseByObserver[slot] = pulse;
+                _footstepEstimateByObserver[slot] = estimate;
+                _footstepConfidenceByObserver[slot] = confidence;
+                _footstepErrorByObserver[slot] = positionError;
+            }
+            return;
+        }
+
+        if (count < MaxFootstepClustersPerObserver)
+        {
+            int slot = baseSlot + count;
+            _footstepPulseByObserver[slot] = pulse;
+            _footstepEstimateByObserver[slot] = estimate;
+            _footstepConfidenceByObserver[slot] = confidence;
+            _footstepErrorByObserver[slot] = positionError;
+            _footstepClusterCountByObserver[observer] = count + 1;
+            return;
+        }
+
+        // A listener cannot maintain an unbounded number of simultaneous footstep
+        // hypotheses. Preserve the eight strongest spatially distinct estimates.
+        int weakestSlot = baseSlot;
+        float weakestConfidence = _footstepConfidenceByObserver[baseSlot];
+        for (int i = 1; i < MaxFootstepClustersPerObserver; i++)
+        {
+            int slot = baseSlot + i;
+            if (_footstepConfidenceByObserver[slot] >= weakestConfidence)
+                continue;
+            weakestConfidence = _footstepConfidenceByObserver[slot];
+            weakestSlot = slot;
+        }
+
+        LastFootstepEventsCoalesced++;
+        if (confidence <= weakestConfidence)
+            return;
+
+        _footstepPulseByObserver[weakestSlot] = pulse;
+        _footstepEstimateByObserver[weakestSlot] = estimate;
+        _footstepConfidenceByObserver[weakestSlot] = confidence;
+        _footstepErrorByObserver[weakestSlot] = positionError;
     }
 
     private void BuildListenerGrid(
@@ -602,10 +877,13 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         }
 
         // Sound can travel vertically, but danger radius is physical 3D proximity.
-        float dangerDistance = Vector3.Distance(units.Position[observer], sourcePosition);
-        if (!float.IsFinite(dangerDistance) ||
-            dangerDistance > dangerRadius ||
-            confidence < minimumConfidence)
+        if (confidence < minimumConfidence)
+            return;
+
+        Vector3 dangerOffset = units.Position[observer] - sourcePosition;
+        float dangerDistanceSquared = dangerOffset.LengthSquared();
+        if (!float.IsFinite(dangerDistanceSquared) ||
+            dangerDistanceSquared > dangerRadius * dangerRadius)
             return;
 
         bool hasDirectExposure = true;
@@ -657,12 +935,12 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         response.MarkImmediateDanger(observer, duration, estimatedSource);
     }
 
-    private static Vector3 EstimatePosition(SoundPulse pulse, int observer, float error, float attenuation)
+    private static Vector3 EstimatePosition(AcousticEvent pulse, int observer, float error, float attenuation)
     {
         ulong seed = unchecked(
-            (ulong)pulse.Sequence * 6364136223846793005UL +
+            (ulong)pulse.EventId * 6364136223846793005UL +
             (ulong)(observer + 1) * 1442695040888963407UL +
-            (ulong)(pulse.SourceUnit.Index + 1) * 22695477UL);
+            (ulong)(pulse.SourceUnitId.Index + 1) * 22695477UL);
         float angle = (seed % 628319UL) / 100000f;
         float offset = error * (0.15f + (1f - attenuation) * 0.45f);
         return new Vector3(
@@ -671,60 +949,47 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             pulse.Position.Z);
     }
 
-    private void QueuePulse(SoundPulse pulse)
+    private static PerceptionObservation CreateAuditoryObservation(
+        AcousticEvent sound,
+        Vector3 estimatedPosition,
+        float confidence,
+        float positionError,
+        float receivedAtSeconds,
+        float memoryLifetimeSeconds) =>
+        new(
+            PerceptionSense.Auditory,
+            sound.Type,
+            estimatedPosition,
+            positionError,
+            sound.Intensity,
+            confidence,
+            0f,
+            confidence >= 0.45f
+                ? PerceptionDetectionLevel.Detected
+                : PerceptionDetectionLevel.Suspected,
+            PerceptionIdentificationLevel.Unknown,
+            sound.OccurredAtSeconds,
+            receivedAtSeconds,
+            sound.OccurredAtSeconds + memoryLifetimeSeconds);
+
+    private void QueuePulse(AcousticEvent pulse)
     {
-        _lastPulseAtSeconds = pulse.OccurredAtSeconds;
-        bool appendPulse = true;
-        bool gunshot = pulse.Type == TacticalStimulusType.Gunshot;
-        bool batchable = gunshot || pulse.Type == TacticalStimulusType.Footstep;
-        if (gunshot)
-            _pendingGunshotEvents++;
+        bool batchable = _acousticEvents.WillBatch(pulse);
+        _acousticEvents.Queue(pulse);
+        if (!batchable)
+            AddDebugEvent(pulse);
+    }
 
-        if (batchable && pulse.SourceFaction != 0)
-        {
-            float cellSize = gunshot ? GunshotMergeCellSize : FootstepMergeCellSize;
-            var key = new AcousticCellKey(
-                (int)MathF.Floor(pulse.Position.X / cellSize),
-                (int)MathF.Floor(pulse.Position.Y / cellSize),
-                pulse.SourceFaction,
-                pulse.Type);
+    private void FlushMaturedAcousticBatches(float nowSeconds)
+    {
+        int previousCount = _acousticEvents.PendingEventCount;
+        _acousticEvents.FlushMaturedBatches(nowSeconds);
+        for (int i = previousCount; i < _acousticEvents.PendingEventCount; i++)
+            AddDebugEvent(_acousticEvents.PendingEvents[i]);
+    }
 
-            if (_pendingAcousticBatches.TryGetValue(key, out AcousticBatch batch))
-            {
-                SoundPulse existing = _pendingPulses[batch.PulseIndex];
-                Vector3 positionSum = batch.PositionSum + pulse.Position;
-                int count = batch.Count + 1;
-                _pendingPulses[batch.PulseIndex] = new SoundPulse(
-                    existing.Sequence,
-                    existing.SourceUnit,
-                    existing.SourceFaction,
-                    positionSum / count,
-                    existing.Type,
-                    MathF.Max(existing.OccurredAtSeconds, pulse.OccurredAtSeconds),
-                    MathF.Max(existing.Intensity, pulse.Intensity),
-                    MathF.Max(existing.Range, pulse.Range));
-                _pendingAcousticBatches[key] = new AcousticBatch(batch.PulseIndex, positionSum, count);
-                if (gunshot)
-                    _pendingGunshotsMerged++;
-                appendPulse = false;
-            }
-            else
-            {
-                _pendingAcousticBatches.Add(
-                    key,
-                    new AcousticBatch(_pendingPulses.Count, pulse.Position, 1));
-                if (gunshot)
-                    _pendingGunshotBatches++;
-            }
-        }
-
-        if (!appendPulse)
-            return;
-
-        if (gunshot && pulse.SourceFaction == 0)
-            _pendingGunshotBatches++;
-
-        _pendingPulses.Add(pulse);
+    private void AddDebugEvent(AcousticEvent pulse)
+    {
         Queue<TacticalSoundDebugEvent> history = pulse.Type == TacticalStimulusType.Footstep
             ? _recentFootstepDebugEvents
             : _recentLoudDebugEvents;
@@ -734,7 +999,7 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
         while (history.Count >= limit)
             history.Dequeue();
         history.Enqueue(new TacticalSoundDebugEvent(
-            pulse.Sequence, pulse.SourceUnit, pulse.Position, pulse.Type,
+            pulse.EventId, pulse.SourceUnitId, pulse.Position, pulse.Type,
             pulse.OccurredAtSeconds, pulse.Intensity, pulse.Range));
     }
 
@@ -747,27 +1012,8 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             events.Dequeue();
     }
 
-    private void TrimTransientBuffersIfQuiet(float nowSeconds)
-    {
-        if (_pendingPulses.Count != 0 ||
-            _pendingAcousticBatches.Count != 0 ||
-            nowSeconds - _lastPulseAtSeconds < PulseBufferTrimQuietSeconds)
-        {
-            return;
-        }
-
-        // Keep normal small buffers warm, but release the high-water allocation after
-        // an unusually large battle burst has been quiet for a while. Events are never
-        // dropped to satisfy a cap; this only affects empty collection capacity.
-        if (_pendingPulses.Capacity > PulseBufferTrimThreshold)
-            _pendingPulses.Capacity = PulseBufferRetainedCapacity;
-
-        if (_pendingAcousticBatches.EnsureCapacity(0) > PulseBufferTrimThreshold)
-        {
-            _pendingAcousticBatches.TrimExcess();
-            _pendingAcousticBatches.EnsureCapacity(PulseBufferRetainedCapacity);
-        }
-    }
+    private void TrimTransientBuffersIfQuiet(float nowSeconds) =>
+        _acousticEvents.TrimBuffersIfQuiet(nowSeconds);
 
     private void EnsureCapacity(int required)
     {
@@ -781,20 +1027,38 @@ public sealed class TacticalHearingSystem : PerceptionSenseBase
             Array.Resize(ref _bestGunshotEstimateByObserver, capacity);
             Array.Resize(ref _bestGunshotConfidenceByObserver, capacity);
             Array.Resize(ref _bestGunshotErrorByObserver, capacity);
+            Array.Resize(ref _gunshotAlertAccumulationByObserver, capacity);
             Array.Resize(ref _hasBestGunshotByObserver, capacity);
             Array.Resize(ref _lastGunshotMemoryPublishedAt, capacity);
             Array.Resize(ref _hasPublishedGunshotMemory, capacity);
+        }
+
+        if (_footstepClusterCountByObserver.Length < required)
+        {
+            int capacity = Math.Max(required, Math.Max(64, _footstepClusterCountByObserver.Length * 2));
+            int clusterCapacity = checked(capacity * MaxFootstepClustersPerObserver);
+            Array.Resize(ref _footstepPulseByObserver, clusterCapacity);
+            Array.Resize(ref _footstepEstimateByObserver, clusterCapacity);
+            Array.Resize(ref _footstepConfidenceByObserver, clusterCapacity);
+            Array.Resize(ref _footstepErrorByObserver, clusterCapacity);
+            Array.Resize(ref _footstepClusterCountByObserver, capacity);
+            Array.Resize(ref _footstepAlertAccumulationByObserver, capacity);
+            Array.Resize(ref _footstepAlertBestConfidenceByObserver, capacity);
+            Array.Resize(ref _footstepAlertEstimateByObserver, capacity);
+
+            int dangerClusterCapacity = checked(capacity * MaxDangerClustersPerObserver);
+            Array.Resize(ref _dangerPulseByObserver, dangerClusterCapacity);
+            Array.Resize(ref _dangerEstimateByObserver, dangerClusterCapacity);
+            Array.Resize(ref _dangerConfidenceByObserver, dangerClusterCapacity);
+            Array.Resize(ref _dangerErrorByObserver, dangerClusterCapacity);
+            Array.Resize(ref _dangerClusterCountByObserver, capacity);
+            Array.Resize(ref _dangerAlertAccumulationByObserver, capacity);
+            Array.Resize(ref _dangerAlertEstimateByObserver, capacity);
         }
     }
 
     private static bool IsFinite(Vector3 value) =>
         float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
 
-    private readonly record struct AcousticCellKey(
-        int X, int Y, ushort Faction, TacticalStimulusType Type);
-    private readonly record struct AcousticBatch(int PulseIndex, Vector3 PositionSum, int Count);
 
-    private readonly record struct SoundPulse(
-        long Sequence, UnitId SourceUnit, ushort SourceFaction, Vector3 Position,
-        TacticalStimulusType Type, float OccurredAtSeconds, float Intensity, float Range);
 }

@@ -43,6 +43,8 @@ public sealed class GameRenderer
     }
 
     private const float TileSize = 16f;
+    private const bool UnitsTemporarilyDisabled = true;
+    private const float CameraRotationDegreesPerPixel = 0.45f;
     private const float MaximumScaledSimulationDelta = 0.2f;
     private static readonly float[] SimulationSpeedLevels = { 0.25f, 0.5f, 1f, 2f };
 
@@ -54,22 +56,25 @@ public sealed class GameRenderer
     private readonly GameCamera _camera;
     private readonly GameInput _input;
     private readonly MapRenderSystem _mapRenderer;
+    private readonly BlockTerrainPreviewRenderer _blockTerrainPreviewRenderer = new();
     private readonly UnitSimulation _unitSimulation;
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
     private readonly VisionTestScene _visionTestScene;
     private CombatStatusOverlay? _combatStatusOverlay;
     private SimulationControlOverlay? _simulationControlOverlay;
+    private UnitMovementModeOverlay? _unitMovementModeOverlay;
     private readonly LongRangeCombatTestScene _massCombatTestScene;
+    private readonly MassCombatTestScene _classicMassCombatTestScene = new();
+    private readonly MovementTestScene _movementTestScene = new();
     private readonly LiveAiEvolutionTrainer _liveAiEvolutionTrainer = new();
     private AiEvolutionOverlay? _aiEvolutionOverlay;
 
     private UnitId _selectedUnit;
     private readonly HashSet<UnitId> _selectedUnits = new();
-    // Squad creation/assignment is temporarily disabled while individual pawn AI is stabilized.
+    private int _selectedInfoSquadId;
     private static readonly bool SquadControlsEnabled = false;
     private readonly InfantrySquadManager _squadManager = new();
-    private InfantryFormationType _infantryFormation = InfantryFormationType.Line;
     private bool _isSelectingUnits;
     private bool _selectionShiftHeld;
     private bool _isPlacingMoveLine;
@@ -99,10 +104,10 @@ public sealed class GameRenderer
     };
     private bool _isPanningCamera;
     private Vector2i _lastCameraPanPixel;
+    private bool _isRotatingCamera;
+    private Vector2i _lastCameraRotatePixel;
     private Vector2i _selectionDragStartPixel;
     private Vector2i _selectionDragCurrentPixel;
-    private Vector2f _selectionDragStartWorld;
-    private Vector2f _selectionDragCurrentWorld;
     private const int SelectionDragThreshold = 5;
 
     private readonly RectangleShape _selectionBox = new(new Vector2f(0f, 0f))
@@ -148,6 +153,7 @@ public sealed class GameRenderer
     private GameMenuOverlay? _gameMenuOverlay;
     private ContextMenuOverlay? _contextMenuOverlay;
     private DebugLayersOverlay? _debugLayersOverlay;
+    private InformationLayersRenderer? _informationLayersRenderer;
     private UtilityAiDebugOverlay? _utilityAiDebugOverlay;
     private UnitGroupCardOverlay? _unitGroupCardOverlay;
     private UnitBodyRigEditorOverlay? _bodyRigEditorOverlay;
@@ -162,18 +168,38 @@ public sealed class GameRenderer
     private bool _showHeightContours = true;
     private bool _showContourLabels = true;
     private bool _showUnitRig = true;
+    private bool _showBlockTerrainPreview;
+    private Vector2f _normalCameraCenter;
+    private bool _blockPreviewRestoreIsometricProjection;
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
-    private bool _showDebugGrid;
+    private bool _showDebugGrid = false;
     private int _visibleMaxLayer;
+    private bool _pageUpHeld;
+    private bool _pageDownHeld;
+    private int GetTerrainSliceStepLayers() =>
+        _worldMap.UsesDiscreteBlockTerrain
+            ? WorldMap.HeightUnitsPerMeter
+            : 5;
     private volatile bool _showVisionDebug;
     private volatile bool _showHearingDebug;
     private volatile bool _showMemoryDebug;
     private volatile bool _showUtilityAiDebug;
-    private bool _showAttackLinks = true;
+    private volatile bool _showMovementVectors;
+    private volatile bool _showMovementForces;
+    private volatile bool _showOrderPaths;
+    private volatile bool _showSquadFormation;
+    private volatile bool _showSquadStates;
+    private volatile bool _showSquadContacts;
+    private bool _showAttackLinks;
     private bool _showSuppressionDebug;
     private volatile bool _massCombatMode;
+    private bool _classicMassCombatMode;
+    private bool _movementTestMode;
+    private bool _visionTestMode;
+    private int _selectedTestSceneIndex;
+    private int _activeTestSceneIndex = -1;
     private volatile bool _simulationPaused;
     private volatile float _simulationSpeed = 1f;
     private int _singleStepRequested;
@@ -181,7 +207,6 @@ public sealed class GameRenderer
     private bool _showCombatTracers = true;
     private bool _showCombatHud = true;
     private bool _showAiStateDebug = false;
-    private int _visionTestIndex;
 
     private float _perfTimer;
     private long _simulationUpdatesSample;
@@ -228,7 +253,10 @@ public sealed class GameRenderer
         _worldMap =
             worldMap;
 
-        _visibleMaxLayer = 0;
+        _visibleMaxLayer = Math.Clamp(
+            _worldMap.GetHighestOccupiedLayer() + 1,
+            0,
+            _worldMap.LayerCount - 1);
 
         _camera =
             new GameCamera(
@@ -274,10 +302,13 @@ public sealed class GameRenderer
         _showVisionDebug = false;
         _showHearingDebug = false;
 
-        // Show the window before constructing the 1,600-unit combat scene.
-        // The simulation thread builds the scene after the first frame.
+        // Start directly in the ruined-city close-combat arena.
+        // Other test scenes remain available from ESC -> Settings -> Test scenes.
         _terrainStressMode = false;
-        _massCombatMode = true;
+        _massCombatMode = false;
+        _movementTestMode = false;
+        _visionTestMode = false;
+        _selectedTestSceneIndex = 4;
 
         // The default camera starts focused on the isolated melee arena, so
         // begin closer than the old 1,600-unit overview setting.
@@ -385,8 +416,7 @@ public sealed class GameRenderer
                 TerrainTilePixelSize,
                 _worldMap);
 
-            if (_massCombatMode)
-                StartSimulationThread();
+            ActivateTestScene(_selectedTestSceneIndex);
 
             Clock clock = new Clock();
 
@@ -418,18 +448,21 @@ public sealed class GameRenderer
             // Release every native render resource while the SFML context
             // still exists, even if initialization, update, or drawing throws.
             _mapRenderer.Dispose();
+            _blockTerrainPreviewRenderer.Dispose();
             _projectileRenderer.Dispose();
             _unitRenderer.Dispose();
             _visionTestScene.Dispose();
             _gameMenuOverlay?.Dispose();
             _contextMenuOverlay?.Dispose();
             _debugLayersOverlay?.Dispose();
+            _informationLayersRenderer?.Dispose();
             _utilityAiDebugOverlay?.Dispose();
             CloseUnitCards();
             _unitGroupCardOverlay?.Dispose();
             _bodyRigEditorOverlay?.Dispose();
             _combatStatusOverlay?.Dispose();
             _simulationControlOverlay?.Dispose();
+            _unitMovementModeOverlay?.Dispose();
             _aiEvolutionOverlay?.Dispose();
             _camera.Dispose();
             _uiView?.Dispose();
@@ -646,6 +679,7 @@ public sealed class GameRenderer
                  $"VisibleQ={_mapRenderer.TerrainQuadCount:N0} Chunks={_mapRenderer.TerrainChunkCacheCount} " +
                 $"LayerShader={_mapRenderer.UsesTerrainLayerShader} VisibleV={_mapRenderer.TerrainVertexCount:N0} " +
                 $"CacheV={_mapRenderer.TerrainCachedVertexCount:N0} ScratchV={_mapRenderer.TerrainScratchCapacity:N0} " +
+                $"SliceZ={_mapRenderer.DisplayedMaxLayer * 0.1f:0.0} LOD={_mapRenderer.DisplayedLodStep} PendingChunks={_mapRenderer.PendingTerrainChunkCount} BuiltChunks={_mapRenderer.TerrainChunksBuiltLastFrame} " +
                 $"VBO={_mapRenderer.UsesTerrainVertexBuffer} LastChunkBuild={_mapRenderer.LastTerrainBuildMilliseconds:0.0}ms " +
                 $"ChunkBuilds={_mapRenderer.TerrainMeshRebuildCount} Projectiles={activeProjectiles}/{projectileCapacity}");
         }
@@ -654,14 +688,16 @@ public sealed class GameRenderer
 
         if (_menuPage == GameMenuPage.Closed)
         {
-            _camera.Update(_input.MoveDirection, deltaTime);
+            UpdateBlockPreviewCamera(deltaTime);
 
             bool singleStepRequested = _simulationThread == null &&
                 Interlocked.Exchange(ref _singleStepRequested, 0) != 0;
-            if (_simulationThread == null && (!_simulationPaused || singleStepRequested))
+            if (!UnitsTemporarilyDisabled &&
+                _simulationThread == null &&
+                (!_simulationPaused || singleStepRequested))
             {
                 float updateDeltaTime = singleStepRequested ? 1f / 60f : simulationDeltaTime;
-                if (!_terrainStressMode && !_massCombatMode)
+                if (_visionTestMode)
                 {
                     _visionTestScene.UpdateAiDemo(
                         _unitSimulation,
@@ -738,6 +774,60 @@ public sealed class GameRenderer
             _camera.View);
 
         long stageStarted = Stopwatch.GetTimestamp();
+        if (_showBlockTerrainPreview)
+        {
+            _blockTerrainPreviewRenderer.Draw(
+                _window,
+                _worldMap,
+                _camera.View,
+                TerrainTilePixelSize,
+                _camera.AzimuthDegrees,
+                _camera.ElevationDegrees,
+                _isRotatingCamera);
+            _lastTerrainDrawMilliseconds =
+                Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
+
+            stageStarted = Stopwatch.GetTimestamp();
+            SimulationFrameSnapshot? previewSnapshot = _simulationThread != null
+                ? Volatile.Read(ref _latestSnapshot)
+                : null;
+            if (previewSnapshot != null)
+            {
+                _unitRenderer.DrawIsometricPreview(
+                    _window,
+                    previewSnapshot.Units,
+                    previewSnapshot.BodyParts,
+                    _worldMap,
+                    _camera.View,
+                    TerrainTilePixelSize,
+                    _camera.AzimuthDegrees,
+                    _camera.ElevationDegrees,
+                    _selectedUnit,
+                    _selectedUnits);
+            }
+            else if (_simulationThread == null)
+            {
+                _unitRenderer.DrawIsometricPreview(
+                    _window,
+                    _unitSimulation,
+                    _worldMap,
+                    _camera.View,
+                    TerrainTilePixelSize,
+                    _camera.AzimuthDegrees,
+                    _camera.ElevationDegrees,
+                    _selectedUnit,
+                    _selectedUnits);
+            }
+            _lastUnitDrawMilliseconds =
+                Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
+            _lastProjectileDrawMilliseconds = 0d;
+            _lastUiDrawMilliseconds = 0d;
+            _window.Display();
+            _lastRenderMilliseconds =
+                Stopwatch.GetElapsedTime(renderStarted).TotalMilliseconds;
+            return;
+        }
+
         _mapRenderer.Draw(
             _window,
             _worldMap,
@@ -745,7 +835,8 @@ public sealed class GameRenderer
             TerrainTilePixelSize,
             _camera.ZoomLevel,
             _showDebugGrid,
-            _visibleMaxLayer);
+            _visibleMaxLayer,
+            _camera.IsometricProjectionEnabled);
         _lastTerrainDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
         if (_showVisionDebug &&
@@ -756,18 +847,21 @@ public sealed class GameRenderer
                 _window);
         }
 
+        Volatile.Write(
+            ref _selectedInfoSquadId,
+            _movementTestMode ? 0 : GetSelectedSquadId());
         SimulationFrameSnapshot? renderSnapshot = _simulationThread != null
             ? Volatile.Read(ref _latestSnapshot)
             : null;
 
-        if (renderSnapshot != null)
+        if (!UnitsTemporarilyDisabled && renderSnapshot != null)
         {
-            DrawPlayerOrderOverlays(renderSnapshot);
-
             stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.DrawSnapshot(
                 _window,
                 renderSnapshot,
+                _worldMap,
+                _mapRenderer.DisplayedMaxLayer,
                 _camera.View,
                 TerrainTilePixelSize,
                 _selectedUnit.IsValid ? _selectedUnit.Index : -1,
@@ -778,7 +872,8 @@ public sealed class GameRenderer
                 _showHearingDebug,
                 _showAttackLinks,
                 _showSuppressionDebug,
-                _showMemoryDebug);
+                _showMemoryDebug,
+                _camera.IsometricProjectionEnabled);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -789,7 +884,7 @@ public sealed class GameRenderer
                 _showCombatTracers);
             _lastProjectileDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
         }
-        else
+        else if (!UnitsTemporarilyDisabled)
         {
             stageStarted = Stopwatch.GetTimestamp();
             _unitRenderer.Draw(
@@ -807,7 +902,9 @@ public sealed class GameRenderer
                 _showHearingDebug,
                 _showAttackLinks,
                 _showSuppressionDebug,
-                _showMemoryDebug);
+                _showMemoryDebug,
+                _mapRenderer.DisplayedMaxLayer,
+                _camera.IsometricProjectionEnabled);
             _lastUnitDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
@@ -827,8 +924,42 @@ public sealed class GameRenderer
                 DrawSquadMarkers(SimulationFrameSnapshot.Capture(_unitSimulation));
         }
 
-        if (_isSelectingUnits && IsSelectionDrag())
+        bool includeSquadDebug = ShouldCaptureSquadDebug;
+        SimulationFrameSnapshot? informationSnapshot = renderSnapshot;
+        if (informationSnapshot == null &&
+            (includeSquadDebug || _showMovementVectors || _showMovementForces || _showOrderPaths))
+        {
+            informationSnapshot = SimulationFrameSnapshot.Capture(
+                _unitSimulation,
+                includeSquadDebug: includeSquadDebug);
+        }
+
+        if (_showOrderPaths && informationSnapshot != null)
+            DrawPlayerOrderOverlays(informationSnapshot);
+
+        if (informationSnapshot != null)
+        {
+            _informationLayersRenderer?.DrawWorld(
+                _window,
+                _camera.View,
+                informationSnapshot,
+                TerrainTilePixelSize,
+                _camera.ZoomLevel,
+                Volatile.Read(ref _selectedInfoSquadId),
+                _showMovementVectors,
+                _showMovementForces,
+                false,
+                false,
+                false,
+                false);
+        }
+
+        if (_isSelectingUnits && IsSelectionDrag() && _uiView != null)
+        {
+            _window.SetView(_uiView);
             _window.Draw(_selectionBox);
+            _window.SetView(_camera.View);
+        }
 
         if (_isPlacingMoveLine)
             DrawMoveLinePreview();
@@ -848,6 +979,22 @@ public sealed class GameRenderer
         if (_uiView != null)
         {
             _window.SetView(_uiView);
+
+            if (informationSnapshot != null)
+            {
+                _informationLayersRenderer?.DrawHud(
+                    _window,
+                    _window.Size.X,
+                    _window.Size.Y,
+                    informationSnapshot,
+                    Volatile.Read(ref _selectedInfoSquadId),
+                    _showMovementVectors,
+                    _showMovementForces,
+                    false,
+                    false,
+                    false,
+                    false);
+            }
 
             AiEvolutionStatus? evolutionStatus = _liveAiEvolutionTrainer.Status;
             if (evolutionStatus?.HasStarted == true)
@@ -892,6 +1039,14 @@ public sealed class GameRenderer
                 _simulationSpeed,
                 _simulationGameSecondsPerWallSecond,
                 _simulationUpdatesPerSecond,
+                uiMousePosition);
+
+            _unitMovementModeOverlay?.Draw(
+                _window,
+                _window.Size.X,
+                _window.Size.Y,
+                _menuPage == GameMenuPage.Closed ? _selectedUnits.Count : 0,
+                AreAllAutonomousMovementDisabled(_selectedUnits),
                 uiMousePosition);
 
             _gameMenuOverlay?.Draw(
@@ -1002,7 +1157,10 @@ public sealed class GameRenderer
                 _showAiStateDebug,
                 _showSuppressionDebug,
                 _showMemoryDebug,
-                _showUtilityAiDebug);
+                _showUtilityAiDebug,
+                _showMovementVectors,
+                _showMovementForces,
+                _showOrderPaths);
         }
 
         _bodyRigEditorOverlay?.Draw(_window, _window.Size.X, _window.Size.Y);
@@ -1045,12 +1203,14 @@ public sealed class GameRenderer
             $"States I={snapshot.IdleCount} A={snapshot.AttackCount} C={snapshot.CoverCount} " +
             $"S={snapshot.SearchCount} D={snapshot.DeadCount} | " +
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
-            $"Demo=FIREFIGHT | LastHit={snapshot.LastHitPart} | " +
-            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m " +
-            "PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            "LMB drag=select units; RMB=menu; Shift+click=add selection; Attack=selected units; S=hold | " +
-            "A=AI disabled B=ballistic F=direct M=fire N=aim L=ammo C=MASS TAB=unit V=debug-layers " +
-            "F6=vision F8=scale I=AI-states T=tracers F9=HUD | time controls: visual card | " +
+            $"LastHit={snapshot.LastHitPart} | " +
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
+            (_showBlockTerrainPreview
+                ? "БЛОЧНЫЙ ПРЕДПРОСМОТР | "
+                : _camera.IsometricProjectionEnabled
+                    ? $"ИЗОМЕТРИЯ • Верх карты={_camera.DirectionLabel} (Q/E: 45°) • Tab: вид сверху | "
+                    : "ВИД СВЕРХУ • Tab: изометрия | ") +
+            "RMB=движение/атака  Shift+click=добавить выделение  СКМ=панорама  Колесо=масштаб  ESC=меню | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
@@ -1225,14 +1385,16 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Z={_visibleMaxLayer * 0.1f:0.0}/{(_worldMap.LayerCount - 1) * 0.1f:0.0}m PgUp/PgDn=Z-slice Shift+PgUp/PgDn=1m Shift+Wheel=Z СКМ=камера F2=settings •••=menu | " +
-            $"A=enable AI B=ballistic F=direct M=fire N=aim K=target L=ammo C=MASS Y=reset TAB=unit V=debug-layers " +
-            $"F6=vision F8=scale I=AI-states T=tracers F9=HUD | time controls: visual card";
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  " +
+            (_camera.IsometricProjectionEnabled
+                ? $"Изометрия • верх карты={_camera.DirectionLabel} • Q/E=поворот 45° • "
+                : "Вид сверху • ") +
+            "Tab=режим камеры  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
     }
 
     private void StartSimulationThread()
     {
-        if (_simulationThread != null || !_massCombatMode)
+        if (UnitsTemporarilyDisabled || _simulationThread != null)
             return;
 
         _stopSimulationThread = false;
@@ -1264,61 +1426,6 @@ public sealed class GameRenderer
         _selectedUnit = unit;
         _selectedUnits.Clear();
         _selectedUnits.Add(unit);
-    }
-
-    private static int GetNumberKey(Keyboard.Key key) => key switch
-    {
-        Keyboard.Key.Num1 or Keyboard.Key.Numpad1 => 1,
-        Keyboard.Key.Num2 or Keyboard.Key.Numpad2 => 2,
-        Keyboard.Key.Num3 or Keyboard.Key.Numpad3 => 3,
-        Keyboard.Key.Num4 or Keyboard.Key.Numpad4 => 4,
-        Keyboard.Key.Num5 or Keyboard.Key.Numpad5 => 5,
-        Keyboard.Key.Num6 or Keyboard.Key.Numpad6 => 6,
-        Keyboard.Key.Num7 or Keyboard.Key.Numpad7 => 7,
-        Keyboard.Key.Num8 or Keyboard.Key.Numpad8 => 8,
-        Keyboard.Key.Num9 or Keyboard.Key.Numpad9 => 9,
-        _ => 0
-    };
-
-    private bool TryHandleSquadHotkey(Keyboard.Key key)
-    {
-        if (!SquadControlsEnabled)
-            return false;
-
-        int number = GetNumberKey(key);
-        if (number == 0)
-            return false;
-
-        bool controlPressed =
-            Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
-            Keyboard.IsKeyPressed(Keyboard.Key.RControl);
-        bool shiftPressed =
-            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-
-        if (controlPressed)
-            return false;
-
-        if (shiftPressed)
-        {
-            int squadId = GetFullySelectedSquadId();
-            if (squadId == 0)
-            {
-                Console.WriteLine("[SQUAD] Create a squad from the RMB context menu, then select it before binding a number.");
-                return true;
-            }
-
-            if (_squadManager.AssignHotkey(number, squadId))
-                Console.WriteLine($"[SQUAD] Squad {squadId} bound to {number}.");
-            return true;
-        }
-
-        int assignedSquadId = _squadManager.GetHotkeySquadId(number);
-        if (assignedSquadId == 0)
-            return false;
-
-        SelectSquad(assignedSquadId, false);
-        return true;
     }
 
     private int GetSelectedSquadId()
@@ -1404,20 +1511,6 @@ public sealed class GameRenderer
             $"[SQUAD] Created/merged squad {squadId} with {members.Length} soldiers.");
     }
 
-    private bool TryDisbandSelectedSquads()
-    {
-        if (!SquadControlsEnabled || _selectedUnits.Count == 0)
-            return false;
-
-        int disbanded = _squadManager.DisbandContaining(_selectedUnits);
-        if (disbanded == 0)
-            return false;
-
-        SyncSquadTactics();
-        Console.WriteLine($"[SQUAD] Disbanded {disbanded} squad(s). Soldiers remain on the field.");
-        return true;
-    }
-
     private UnitId[] CaptureSelectedUnitIds(SimulationFrameSnapshot snapshot)
     {
         List<UnitId> selected = new();
@@ -1437,15 +1530,80 @@ public sealed class GameRenderer
     private void IssueMoveOrder(
         UnitId[] memberIds,
         Vector3 destination,
-        InfantryFormationType formation)
+        InfantryFormationType formation,
+        int squadId)
+    {
+        // The squad API is kept for compatibility with persistent squad data,
+        // but movement is always executed through per-unit A* navigation.
+        if (!_unitSimulation.IssueGroupMoveOrder(
+                memberIds,
+                destination,
+                formation,
+                false,
+                _worldMap))
+        {
+            IssueMoveOrderToPoint(memberIds, destination);
+        }
+    }
+
+    private ContextMenuMovementMode GetSelectionMovementMode(IEnumerable<UnitId> memberIds)
     {
         UnitStore units = _unitSimulation.Units;
         UnitAiStore ai = _unitSimulation.AI.Store;
-        List<(UnitId Id, int Index)> members = new(memberIds.Length);
-        float centerX = 0f;
-        float centerY = 0f;
-        float spacing = 1.15f;
+        bool[] holdPosition = ai.AutonomousMovementDisabled;
+        bool hasLivingMember = false;
+        bool selectedHoldPosition = false;
 
+        foreach (UnitId id in memberIds)
+        {
+            if (!units.TryGetIndex(id, out int index) ||
+                _unitSimulation.Health.OverallHitPoints[index] <= 0f)
+            {
+                continue;
+            }
+
+            bool memberHoldsPosition = holdPosition[index];
+            if (!hasLivingMember)
+            {
+                selectedHoldPosition = memberHoldsPosition;
+                hasLivingMember = true;
+            }
+            else if (selectedHoldPosition != memberHoldsPosition)
+            {
+                return ContextMenuMovementMode.Mixed;
+            }
+        }
+
+        if (!hasLivingMember)
+            return ContextMenuMovementMode.None;
+
+        return selectedHoldPosition
+            ? ContextMenuMovementMode.HoldPosition
+            : ContextMenuMovementMode.MoveAtWill;
+    }
+
+    private bool AreAllAutonomousMovementDisabled(IEnumerable<UnitId> memberIds)
+    {
+        bool found = false;
+        bool[] disabled = _unitSimulation.AI.Store.AutonomousMovementDisabled;
+        foreach (UnitId id in memberIds)
+        {
+            int index = id.Index;
+            if (!id.IsValid || (uint)index >= (uint)disabled.Length)
+                continue;
+            found = true;
+            if (!disabled[index])
+                return false;
+        }
+
+        return found;
+    }
+
+    private void SetAutonomousMovementDisabled(UnitId[] memberIds, bool disabled)
+    {
+        UnitStore units = _unitSimulation.Units;
+        UnitAiStore ai = _unitSimulation.AI.Store;
+        int changed = 0;
         for (int i = 0; i < memberIds.Length; i++)
         {
             UnitId id = memberIds[i];
@@ -1455,58 +1613,31 @@ public sealed class GameRenderer
                 continue;
             }
 
-            members.Add((id, index));
-            Vector3 position = units.Position[index];
-            centerX += position.X;
-            centerY += position.Y;
-            spacing = MathF.Max(spacing, units.Radius[index] * 2.25f);
+            ai.AutonomousMovementDisabled[index] = disabled;
+            // This mode only governs autonomous reactions. An explicit player
+            // move/attack order must keep running even while Hold Position is on.
+            if (!disabled && ai.PlayerOrderType[index] == UnitAiOrderType.Stop)
+                ai.ClearPlayerOrder(index);
+
+            changed++;
         }
 
-        if (members.Count == 0)
+        Console.WriteLine(disabled
+            ? $"[MOVE MODE] Hold Position enabled for {changed} units."
+            : $"[MOVE MODE] Move at will enabled for {changed} units.");
+    }
+
+    private void ToggleAutonomousMovementForSelection()
+    {
+        if (_selectedUnits.Count == 0)
             return;
 
-        centerX /= members.Count;
-        centerY /= members.Count;
+        UnitId[] selected = new UnitId[_selectedUnits.Count];
+        _selectedUnits.CopyTo(selected);
 
-        float forwardX = destination.X - centerX;
-        float forwardY = destination.Y - centerY;
-        float directionLength = MathF.Sqrt(forwardX * forwardX + forwardY * forwardY);
-        if (directionLength < 0.001f)
-        {
-            forwardX = 1f;
-            forwardY = 0f;
-        }
-        else
-        {
-            forwardX /= directionLength;
-            forwardY /= directionLength;
-        }
-
-        // Formation slots are destinations for AI tasks, not direct movement calls.
-        Vector2 offsetSum = Vector2.Zero;
-        for (int i = 0; i < members.Count; i++)
-            offsetSum += InfantryFormation.GetOffset(i, members.Count, formation, spacing);
-        Vector2 meanOffset = offsetSum / members.Count;
-
-        float sideX = -forwardY;
-        float sideY = forwardX;
-        for (int i = 0; i < members.Count; i++)
-        {
-            var member = members[i];
-            Vector2 offset = InfantryFormation.GetOffset(i, members.Count, formation, spacing) - meanOffset;
-            float x = destination.X + sideX * offset.X - forwardX * offset.Y;
-            float y = destination.Y + sideY * offset.X - forwardY * offset.Y;
-            x = Math.Clamp(x, 0.5f, _worldMap.MaxTileX - 0.5f);
-            y = Math.Clamp(y, 0.5f, _worldMap.MaxTileY - 0.5f);
-
-            int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
-            int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
-            Vector3 target = new(x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
-            ai.SetPlayerOrder(member.Index, UnitAiOrderType.Move, target);
-        }
-
-        Console.WriteLine(
-            $"[SQUAD] Issued {InfantryFormation.GetName(formation)} move task to {members.Count} soldiers.");
+        bool enableHoldPosition = !AreAllAutonomousMovementDisabled(selected);
+        ExecuteSimulationCommand(() =>
+            SetAutonomousMovementDisabled(selected, enableHoldPosition));
     }
 
     private void IssueAttackOrder(UnitId[] memberIds, UnitId targetId)
@@ -1547,8 +1678,43 @@ public sealed class GameRenderer
             $"[SQUAD] Attack task replaced previous orders for {assigned} soldiers; nearest-threat switching enabled.");
     }
 
+    private void IssueMovementTestMoveOrder(
+        UnitId[] memberIds,
+        Vector3 destination)
+    {
+        // The movement course uses the same per-unit A* route follower as the
+        // playable scene; it no longer exercises the disabled shared Flow Field.
+        IssueMoveOrderToPoint(memberIds, destination);
+    }
+
+    private bool IsCompleteMovementTestSelection(UnitId[] memberIds)
+    {
+        if (!_movementTestMode || memberIds.Length != _movementTestScene.Units.Length)
+            return false;
+
+        ReadOnlySpan<UnitId> expected = _movementTestScene.Units;
+        for (int i = 0; i < expected.Length; i++)
+        {
+            bool found = false;
+            for (int j = 0; j < memberIds.Length; j++)
+            {
+                if (memberIds[j] == expected[i])
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+                return false;
+        }
+
+        return true;
+    }
+
     private void IssueHoldOrder(UnitId[] memberIds)
     {
+        SetAutonomousMovementDisabled(memberIds, true);
         UnitStore units = _unitSimulation.Units;
         UnitAiStore ai = _unitSimulation.AI.Store;
         int assigned = 0;
@@ -1565,11 +1731,62 @@ public sealed class GameRenderer
                 unitIndex,
                 UnitAiOrderType.Stop,
                 units.Position[unitIndex]);
+            units.ClearTarget(memberIds[i]);
+            _unitSimulation.Navigation.ClearRoute(unitIndex);
             assigned++;
         }
 
         Console.WriteLine(
-            $"[SQUAD] Hold-position task replaced previous orders for {assigned} soldiers.");
+            $"[MOVE MODE] Hold-position order applied to {assigned} soldiers.");
+    }
+
+    private void ApplyWeaponContextAction(
+        UnitId[] memberIds,
+        ContextMenuActionType action)
+    {
+        UnitStore units = _unitSimulation.Units;
+        for (int i = 0; i < memberIds.Length; i++)
+        {
+            UnitId id = memberIds[i];
+            if (!units.TryGetIndex(id, out int unitIndex) ||
+                _unitSimulation.Health.OverallHitPoints[unitIndex] <= 0f)
+            {
+                continue;
+            }
+
+            switch (action)
+            {
+                case ContextMenuActionType.CycleFireMode:
+                    _unitSimulation.Weapons.CycleFireMode(unitIndex, UnitWeaponSlot.Primary);
+                    break;
+
+                case ContextMenuActionType.CycleAimMode:
+                    _unitSimulation.Weapons.CycleAimMode(unitIndex, UnitWeaponSlot.Primary);
+                    break;
+
+                case ContextMenuActionType.CycleTargetMode:
+                    _unitSimulation.Weapons.CycleTargetMode(unitIndex, UnitWeaponSlot.Primary);
+                    break;
+
+                case ContextMenuActionType.CycleAmmunition:
+                {
+                    int weaponState = UnitWeaponStore.GetIndex(unitIndex, UnitWeaponSlot.Primary);
+                    int nextAmmo = _unitSimulation.Weapons.CurrentAmmoType[weaponState] + 1;
+                    short inventorySlot = _unitSimulation.Inventory.GetWeaponEquipment(
+                        unitIndex, UnitWeaponSlot.Primary);
+                    if (inventorySlot >= 0)
+                    {
+                        RangedWeaponConfig? weapon =
+                            _unitSimulation.Inventory.GetItem(unitIndex, inventorySlot) as RangedWeaponConfig;
+                        int ammoCount = weapon?.AmmoSet?.Count ?? 1;
+                        nextAmmo = ammoCount <= 0 ? 0 : nextAmmo % ammoCount;
+                    }
+
+                    _unitSimulation.SelectAmmunition(id, UnitWeaponSlot.Primary, nextAmmo);
+                    break;
+                }
+            }
+        }
     }
 
     private bool IsHostileToSelection(
@@ -1903,9 +2120,6 @@ public sealed class GameRenderer
             Keyboard.IsKeyPressed(Keyboard.Key.RShift);
         _selectionDragStartPixel = mousePixel;
         _selectionDragCurrentPixel = mousePixel;
-        _selectionDragStartWorld =
-            _window.MapPixelToCoords(mousePixel, _camera.View);
-        _selectionDragCurrentWorld = _selectionDragStartWorld;
         UpdateSelectionBox();
     }
 
@@ -2221,6 +2435,27 @@ public sealed class GameRenderer
         return false;
     }
 
+    private void IssueGroupMoveOrder(
+        UnitId[] memberIds,
+        Vector3 destination,
+        InfantryFormationType formation)
+    {
+        if (memberIds.Length <= 1 ||
+            !_unitSimulation.IssueGroupMoveOrder(
+                memberIds,
+                destination,
+                formation,
+                false,
+                _worldMap))
+        {
+            IssueMoveOrderToPoint(memberIds, destination);
+            return;
+        }
+
+        Console.WriteLine(
+            $"[MOVE] {InfantryFormation.GetName(formation)}: {memberIds.Length} units.");
+    }
+
     private void IssueMoveOrderToPoint(UnitId[] memberIds, Vector3 destination) =>
         IssueMoveOrderToPoint(memberIds, destination, UnitAiOrderType.Move);
 
@@ -2232,6 +2467,8 @@ public sealed class GameRenderer
         Vector3 destination,
         UnitAiOrderType orderType)
     {
+        _unitSimulation.ClearSquadMovementOrders(memberIds);
+
         if (orderType is not (UnitAiOrderType.Move or UnitAiOrderType.StealthMove))
             throw new ArgumentOutOfRangeException(nameof(orderType));
         UnitStore units = _unitSimulation.Units;
@@ -2250,15 +2487,20 @@ public sealed class GameRenderer
 
             if (TryFindAvailableMoveCell(desiredX, desiredY, reserved, out int tileX, out int tileY))
             {
-                ai.SetPlayerOrder(unit, orderType, new Vector3(
+                Vector3 target = new(
                     tileX + 0.5f,
                     tileY + 0.5f,
-                    _worldMap.GetSurfaceHeight(tileX, tileY)));
+                    _worldMap.GetSurfaceHeight(tileX, tileY));
+                ai.SetPlayerOrder(unit, orderType, target);
+                if (_movementTestMode && orderType == UnitAiOrderType.Move)
+                    units.SetTarget(units.GetId(unit), target);
                 assigned++;
             }
             else
             {
                 ai.SetPlayerOrder(unit, orderType, destination);
+                if (_movementTestMode && orderType == UnitAiOrderType.Move)
+                    units.SetTarget(units.GetId(unit), destination);
                 assigned++;
             }
         }
@@ -2388,17 +2630,17 @@ public sealed class GameRenderer
 
     private void UpdateSelectionBox()
     {
-        float left = MathF.Min(_selectionDragStartWorld.X, _selectionDragCurrentWorld.X);
-        float top = MathF.Min(_selectionDragStartWorld.Y, _selectionDragCurrentWorld.Y);
+        float left = MathF.Min(_selectionDragStartPixel.X, _selectionDragCurrentPixel.X);
+        float top = MathF.Min(_selectionDragStartPixel.Y, _selectionDragCurrentPixel.Y);
         _selectionBox.Position = new Vector2f(left, top);
         _selectionBox.Size = new Vector2f(
-            MathF.Abs(_selectionDragCurrentWorld.X - _selectionDragStartWorld.X),
-            MathF.Abs(_selectionDragCurrentWorld.Y - _selectionDragStartWorld.Y));
+            MathF.Abs(_selectionDragCurrentPixel.X - _selectionDragStartPixel.X),
+            MathF.Abs(_selectionDragCurrentPixel.Y - _selectionDragStartPixel.Y));
     }
 
     private void SelectWorldUnitsInRectangle(
-        Vector2f startPixels,
-        Vector2f endPixels,
+        Vector2i startPixel,
+        Vector2i endPixel,
         bool shiftHeld = false)
     {
         SimulationFrameSnapshot? snapshot = _simulationThread != null
@@ -2407,13 +2649,14 @@ public sealed class GameRenderer
         if (snapshot == null)
             return;
 
-        float minX = MathF.Min(startPixels.X, endPixels.X) / TerrainTilePixelSize;
-        float maxX = MathF.Max(startPixels.X, endPixels.X) / TerrainTilePixelSize;
-        float minY = MathF.Min(startPixels.Y, endPixels.Y) / TerrainTilePixelSize;
-        float maxY = MathF.Max(startPixels.Y, endPixels.Y) / TerrainTilePixelSize;
-        float pixelsPerUnit = TerrainTilePixelSize *
-            _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
-        float minimumMarkerRadius = 2f / MathF.Max(1f, pixelsPerUnit);
+        int minPixelX = Math.Min(startPixel.X, endPixel.X);
+        int maxPixelX = Math.Max(startPixel.X, endPixel.X);
+        int minPixelY = Math.Min(startPixel.Y, endPixel.Y);
+        int maxPixelY = Math.Max(startPixel.Y, endPixel.Y);
+        float pixelsPerWorldX = _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
+        float pixelsPerWorldY = _window.Size.Y / MathF.Max(1f, _camera.View.Size.Y);
+        float pixelsPerTile = TerrainTilePixelSize *
+            MathF.Max(pixelsPerWorldX, pixelsPerWorldY);
         List<UnitId> picked = new();
 
         for (int i = 0; i < snapshot.Units.Length; i++)
@@ -2422,13 +2665,21 @@ public sealed class GameRenderer
             if (unit.HitPoints <= 0f)
                 continue;
 
-            float radius = GetMarkerWorldRadius(unit, minimumMarkerRadius);
-            float closestX = Math.Clamp(unit.Position.X, minX, maxX);
-            float closestY = Math.Clamp(unit.Position.Y, minY, maxY);
-            float dx = unit.Position.X - closestX;
-            float dy = unit.Position.Y - closestY;
-            if (dx * dx + dy * dy > radius * radius)
+            Vector2i screenPosition = _window.MapCoordsToPixel(
+                new Vector2f(
+                    unit.Position.X * TerrainTilePixelSize,
+                    unit.Position.Y * TerrainTilePixelSize),
+                _camera.View);
+            float radius = MathF.Max(
+                2f,
+                GetMarkerWorldRadius(unit, 0f) * pixelsPerTile);
+            if (screenPosition.X + radius < minPixelX ||
+                screenPosition.X - radius > maxPixelX ||
+                screenPosition.Y + radius < minPixelY ||
+                screenPosition.Y - radius > maxPixelY)
+            {
                 continue;
+            }
 
             picked.Add(new UnitId(unit.Index, unit.Generation));
         }
@@ -2595,28 +2846,116 @@ public sealed class GameRenderer
     {
         selected = default;
         bool found = false;
+        float bestDistanceSquared = float.PositiveInfinity;
 
-        // World selection follows the visible gameplay marker at the live unit
-        // position. Static anatomy is for inspection/damage, never a pick target.
+        // Resolve overlaps by proximity to the pawn root, not snapshot/render
+        // order. Pick against the visible body as well as its root marker so
+        // RMB on a head, torso or limb cannot be mistaken for a ground command.
         for (int i = 0; i < snapshot.Units.Length; i++)
         {
             RenderUnitState unit = snapshot.Units[i];
-            if (unit.HitPoints <= 0f)
+            if (unit.HitPoints <= 0f ||
+                !IsUnitVisualHit(snapshot, unit, worldX, worldY, padding, minimumMarkerRadius,
+                    out float centerDistanceSquared))
+            {
+                continue;
+            }
+
+            if (centerDistanceSquared >= bestDistanceSquared)
                 continue;
 
-            float radius = GetMarkerWorldRadius(unit, minimumMarkerRadius) + padding;
-            float dx = worldX - unit.Position.X;
-            float dy = worldY - unit.Position.Y;
-
-            if (dx * dx + dy * dy > radius * radius)
-                continue;
-
-            // Draw order is snapshot order, so the last overlapping marker wins.
             selected = unit;
+            bestDistanceSquared = centerDistanceSquared;
             found = true;
         }
 
         return found;
+    }
+
+    private static bool IsUnitVisualHit(
+        SimulationFrameSnapshot snapshot,
+        in RenderUnitState unit,
+        float worldX,
+        float worldY,
+        float padding,
+        float minimumMarkerRadius,
+        out float centerDistanceSquared)
+    {
+        float rootDx = worldX - unit.Position.X;
+        float rootDy = worldY - unit.Position.Y;
+        centerDistanceSquared = rootDx * rootDx + rootDy * rootDy;
+
+        float rootRadius = GetMarkerWorldRadius(unit, minimumMarkerRadius) + padding;
+        bool hit = centerDistanceSquared <= rootRadius * rootRadius;
+
+        RenderBodyPart[] bodyParts = snapshot.BodyParts;
+        int start = Math.Clamp(unit.BodyPartStart, 0, bodyParts.Length);
+        int count = Math.Clamp(unit.BodyPartCount, 0, bodyParts.Length - start);
+        if (count == 0)
+            return hit;
+
+        // Match the scale used by UnitRenderSystem: gameplay zones are reduced
+        // around the root, while the informational body rig uses its own scale.
+        float visualScale = unit.Type == UnitType.Colonist &&
+            unit.BodyPartCount == UnitGameplayZoneSystem.ZoneCount
+                ? 0.64f
+                : 0.8f;
+
+        for (int i = start; i < start + count; i++)
+        {
+            RenderBodyPart part = bodyParts[i];
+            if (part.Role == BodyPartRole.Internal)
+                continue;
+
+            float partX = unit.Position.X +
+                (part.Position.X - unit.Position.X) * visualScale;
+            float partY = unit.Position.Y +
+                (part.Position.Y - unit.Position.Y) * visualScale;
+            float dx = worldX - partX;
+            float dy = worldY - partY;
+            float cosine = MathF.Cos(part.Rotation);
+            float sine = MathF.Sin(part.Rotation);
+            float localX = dx * cosine + dy * sine;
+            float localY = -dx * sine + dy * cosine;
+            float radiusX = MathF.Abs(part.Scale.X) * visualScale;
+            float radiusY = MathF.Abs(part.Scale.Y) * visualScale;
+
+            if (radiusX <= 0.001f)
+                continue;
+
+            if (part.Primitive == BodyPrimitive.Line)
+            {
+                float closestX = Math.Clamp(localX, -radiusX, radiusX);
+                float lineDx = localX - closestX;
+                float lineTolerance = padding + 0.045f;
+                hit |= lineDx * lineDx + localY * localY <=
+                    lineTolerance * lineTolerance;
+                continue;
+            }
+
+            if (radiusY <= 0.001f)
+                continue;
+
+            if (part.Primitive == BodyPrimitive.Box)
+            {
+                float outsideX = MathF.Max(0f, MathF.Abs(localX) - radiusX);
+                float outsideY = MathF.Max(0f, MathF.Abs(localY) - radiusY);
+                hit |= outsideX * outsideX + outsideY * outsideY <= padding * padding;
+            }
+            else
+            {
+                float expandedX = radiusX + padding;
+                float expandedY = radiusY + padding;
+                float normalizedX = localX / expandedX;
+                float normalizedY = localY / expandedY;
+                hit |= normalizedX * normalizedX + normalizedY * normalizedY <= 1f;
+            }
+
+            if (hit)
+                break;
+        }
+
+        return hit;
     }
 
     private static float GetMarkerWorldRadius(
@@ -2631,10 +2970,19 @@ public sealed class GameRenderer
 
     private void SyncSquadTactics()
     {
+        if (!SquadControlsEnabled)
+            return;
+
         List<SquadMembershipSnapshot> squads = new(_squadManager.Squads.Count);
         foreach (InfantrySquad squad in _squadManager.Squads)
             squads.Add(new SquadMembershipSnapshot(squad.Id, squad.Members.ToArray()));
-        _unitSimulation.AI.SynchronizeSquadMemberships(squads);
+
+        SquadMembershipSnapshot[] snapshot = squads.ToArray();
+        ExecuteSimulationCommand(() =>
+        {
+            _unitSimulation.AI.SynchronizeSquadMemberships(snapshot);
+            _unitSimulation.SynchronizeSquadMovementMemberships(snapshot);
+        });
     }
 
     private void PruneSquadState(SimulationFrameSnapshot snapshot)
@@ -2783,32 +3131,6 @@ public sealed class GameRenderer
         }
     }
 
-    private void CycleMassCombatSelection()
-    {
-        SimulationFrameSnapshot? snapshot = Volatile.Read(ref _latestSnapshot);
-        if (snapshot == null || snapshot.Units.Length == 0)
-            return;
-
-        RenderUnitState[] units = snapshot.Units;
-        int current = -1;
-        for (int i = 0; i < units.Length; i++)
-        {
-            if (units[i].Index == _selectedUnit.Index &&
-                units[i].Generation == _selectedUnit.Generation)
-            {
-                current = i;
-                break;
-            }
-        }
-
-        int next = current < 0 ? 0 : (current + 1) % units.Length;
-        RenderUnitState selected = units[next];
-        SetSelectedUnit(new UnitId(selected.Index, selected.Generation));
-        _camera.CenterOnPosition(new Vector2f(
-            selected.Position.X * TerrainTilePixelSize,
-            selected.Position.Y * TerrainTilePixelSize));
-    }
-
     private void StopSimulationThread()
     {
         Thread? thread = _simulationThread;
@@ -2842,13 +3164,14 @@ public sealed class GameRenderer
 
         while (true)
         {
-            // Terrain generation and spawning are deferred until the window exists;
-            // Draw() displays a responsive loading frame during this one-off work.
+            // Long-range combat creates a large roster; do it on the worker
+            // while Draw() keeps the render window responsive.
             if (_massCombatMode && !Volatile.Read(ref _massCombatWorldReady))
             {
                 try
                 {
                     _massCombatTestScene.Start(_unitSimulation, _worldMap);
+                    _startupMassCombatSelectionApplied = false;
                     Volatile.Write(ref _massCombatWorldReady, true);
                 }
                 catch (Exception exception)
@@ -2891,10 +3214,21 @@ public sealed class GameRenderer
                 try
                 {
                     _unitSimulation.BeginMetricsFrame();
-                    _massCombatTestScene.Update(
-                        _unitSimulation,
-                        _worldMap,
-                        updateDeltaTime);
+                    if (_visionTestMode)
+                        _visionTestScene.UpdateAiDemo(
+                            _unitSimulation,
+                            _worldMap,
+                            updateDeltaTime);
+                    if (_massCombatMode)
+                        _massCombatTestScene.Update(
+                            _unitSimulation,
+                            _worldMap,
+                            updateDeltaTime);
+                    if (_classicMassCombatMode)
+                        _classicMassCombatTestScene.Update(
+                            _unitSimulation,
+                            _worldMap,
+                            updateDeltaTime);
                     _unitSimulation.Update(_worldMap, updateDeltaTime);
                     _liveAiEvolutionTrainer.Update(
                         _unitSimulation,
@@ -2921,7 +3255,8 @@ public sealed class GameRenderer
                         _showMemoryDebug,
                         _showMemoryDebug ? _selectedUnit : default,
                         _showUtilityAiDebug,
-                        _showUtilityAiDebug ? _selectedUnit : default));
+                        _showUtilityAiDebug ? _selectedUnit : default,
+                        ShouldCaptureSquadDebug));
             }
             catch (Exception exception)
             {
@@ -2975,6 +3310,7 @@ public sealed class GameRenderer
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
         _debugLayersOverlay = new DebugLayersOverlay();
+        _informationLayersRenderer = new InformationLayersRenderer();
         _utilityAiDebugOverlay = new UtilityAiDebugOverlay();
         _unitGroupCardOverlay = new UnitGroupCardOverlay();
         _bodyRigEditorOverlay = new UnitBodyRigEditorOverlay(
@@ -2982,6 +3318,7 @@ public sealed class GameRenderer
             SaveProjectUnitAsset);
         _combatStatusOverlay = new CombatStatusOverlay();
         _simulationControlOverlay = new SimulationControlOverlay();
+        _unitMovementModeOverlay = new UnitMovementModeOverlay();
         _aiEvolutionOverlay = new AiEvolutionOverlay();
         _selectedResolutionIndex = GameMenuOverlay.FindResolutionIndex(_window.Size.X, _window.Size.Y);
 
@@ -3042,6 +3379,7 @@ public sealed class GameRenderer
                 }
 
                 if (_simulationControlOverlay?.Contains(wheelPosition) == true ||
+                    _unitMovementModeOverlay?.Contains(wheelPosition) == true ||
                     _combatStatusOverlay?.Contains(wheelPosition) == true ||
                     _debugLayersOverlay?.Contains(wheelPosition) == true ||
                     (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(wheelPosition) == true) ||
@@ -3050,23 +3388,49 @@ public sealed class GameRenderer
                     return;
                 }
 
-                bool shiftPressed =
+                bool shiftHeld =
                     Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
                     Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-
-                if (shiftPressed)
+                if (shiftHeld && !_showBlockTerrainPreview)
                 {
-                    ScrollTerrainLayers(
-                        e.Delta > 0f ? 1 : -1);
+                    int layerSteps = Math.Max(
+                        1, (int)MathF.Round(MathF.Abs(e.Delta))) *
+                        GetTerrainSliceStepLayers();
+                    int direction = e.Delta > 0f ? 1 : -1;
+                    AdjustTerrainSlice(direction, layerSteps);
                     return;
                 }
 
+                Vector2f zoomAnchorBefore = _window.MapPixelToCoords(
+                    wheelPixels,
+                    _camera.View);
                 _camera.HandleZoom(e.Delta);
+                Vector2f zoomAnchorAfter = _window.MapPixelToCoords(
+                    wheelPixels,
+                    _camera.View);
+                _camera.CenterOnPosition(
+                    _camera.View.Center + zoomAnchorBefore - zoomAnchorAfter);
             };
 
         _window.MouseButtonPressed +=
             (_, e) =>
             {
+                bool altPressed =
+                    Keyboard.IsKeyPressed(Keyboard.Key.LAlt) ||
+                    Keyboard.IsKeyPressed(Keyboard.Key.RAlt);
+                if (_showBlockTerrainPreview &&
+                    e.Button == Mouse.Button.Right &&
+                    altPressed)
+                {
+                    _isRotatingCamera = true;
+                    _lastCameraRotatePixel = e.Position;
+                    _isPanningCamera = false;
+                    return;
+                }
+
+                if (_showBlockTerrainPreview && e.Button != Mouse.Button.Middle)
+                    return;
+
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
                     if (e.Button is Mouse.Button.Left or Mouse.Button.Middle)
@@ -3111,6 +3475,7 @@ public sealed class GameRenderer
 
                         bool overUi =
                             _unitGroupCardOverlay?.Contains(middlePosition) == true ||
+                            _unitMovementModeOverlay?.Contains(middlePosition) == true ||
                             _simulationControlOverlay?.Contains(middlePosition) == true ||
                             _combatStatusOverlay?.Contains(middlePosition) == true ||
                             _debugLayersOverlay?.Contains(middlePosition) == true ||
@@ -3144,10 +3509,14 @@ public sealed class GameRenderer
                         (int)contextCoordinates.Y);
 
                     if (_unitGroupCardOverlay?.Contains(contextPosition) == true ||
+                        _unitMovementModeOverlay?.Contains(contextPosition) == true ||
                         _simulationControlOverlay?.Contains(contextPosition) == true ||
                         _combatStatusOverlay?.Contains(contextPosition) == true ||
                         _debugLayersOverlay?.Contains(contextPosition) == true ||
-                        (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(contextPosition) == true))
+                        (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(contextPosition) == true) ||
+                        (_liveAiEvolutionTrainer.Status?.HasStarted == true &&
+                         _aiEvolutionOverlay?.Contains(contextPosition) == true) ||
+                        _informationLayersRenderer?.ContainsHud(contextPosition) == true)
                     {
                         return;
                     }
@@ -3189,6 +3558,24 @@ public sealed class GameRenderer
                             selectedIds.Length > 0 &&
                             inputSnapshot != null &&
                             IsHostileToSelection(inputSnapshot, contextUnit);
+                        bool canMoveSelected = !hasUnit && selectedIds.Length > 0;
+                        bool clickedSelectedUnit = false;
+                        if (hasUnit)
+                        {
+                            UnitId clickedId = new(contextUnit.Index, contextUnit.Generation);
+                            for (int i = 0; i < selectedIds.Length; i++)
+                            {
+                                if (selectedIds[i] == clickedId)
+                                {
+                                    clickedSelectedUnit = true;
+                                    break;
+                                }
+                            }
+                        }
+                        bool canHoldSelected = selectedIds.Length > 0;
+                        bool canConfigureWeapons = clickedSelectedUnit && selectedIds.Length > 0;
+                        ContextMenuMovementMode movementMode =
+                            GetSelectionMovementMode(selectedIds);
 
                         float destinationX = Math.Clamp(
                             worldPosition.X / TerrainTilePixelSize,
@@ -3222,9 +3609,16 @@ public sealed class GameRenderer
                             return;
                         }
 
-                        if (!hasUnit && selectedIds.Length > 0)
+                        bool shiftHeld =
+                            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+                            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+
+                        if (!hasUnit && selectedIds.Length > 0 && !shiftHeld)
                         {
-                            if (selectedIds.Length > 1 && TryBeginMoveLine(e.Position))
+                            if (!_movementTestMode &&
+                                SquadControlsEnabled &&
+                                selectedIds.Length > 1 &&
+                                TryBeginMoveLine(e.Position))
                                 return;
 
                             UnitId[] moveUnits = selectedIds;
@@ -3232,7 +3626,12 @@ public sealed class GameRenderer
                             _contextMenuUnit = default;
                             _contextMenuOverlay.Close();
                             ExecuteSimulationCommand(() =>
-                                IssueMoveOrderToPoint(moveUnits, destination));
+                            {
+                                if (_movementTestMode)
+                                    IssueMovementTestMoveOrder(moveUnits, destination);
+                                else
+                                    IssueMoveOrderToPoint(moveUnits, destination);
+                            });
                             return;
                         }
 
@@ -3244,7 +3643,11 @@ public sealed class GameRenderer
                             selectedIds.Length > 1,
                             canCreateSquad,
                             canSendSquad,
-                            canAttackTarget);
+                            canAttackTarget,
+                            canMoveSelected,
+                            canHoldSelected,
+                            canConfigureWeapons,
+                            movementMode);
 
                         if (!_contextMenuOverlay.IsOpen)
                             _contextMenuUnit = default;
@@ -3269,6 +3672,15 @@ public sealed class GameRenderer
                 Vector2i uiPosition = new Vector2i(
                     (int)uiCoordinates.X,
                     (int)uiCoordinates.Y);
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _unitMovementModeOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _selectedUnits.Count > 0,
+                        ToggleAutonomousMovementForSelection) == true)
+                {
+                    return;
+                }
 
                 if (_showUtilityAiDebug &&
                     _utilityAiDebugOverlay?.HandleMousePressed(
@@ -3364,6 +3776,33 @@ public sealed class GameRenderer
                                 }
                                 break;
 
+                            case ContextMenuActionType.MoveSelectedHere:
+                            case ContextMenuActionType.MoveSelectedHereAsColumn:
+                            {
+                                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+                                UnitId[] moveUnits = snapshot == null
+                                    ? Array.Empty<UnitId>()
+                                    : CaptureSelectedUnitIds(snapshot);
+                                if (moveUnits.Length > 0)
+                                {
+                                    Vector3 moveDestination = destination;
+                                    ContextMenuActionType selectedAction = contextAction;
+                                    ExecuteSimulationCommand(() =>
+                                    {
+                                        if (selectedAction == ContextMenuActionType.MoveSelectedHere)
+                                        {
+                                            IssueMoveOrderToPoint(moveUnits, moveDestination);
+                                        }
+                                        else
+                                        {
+                                            IssueGroupMoveOrder(
+                                                moveUnits, moveDestination, InfantryFormationType.Column);
+                                        }
+                                    });
+                                }
+                                break;
+                            }
+
                             case ContextMenuActionType.CreateSquad:
                                 if (SquadControlsEnabled)
                                     CreateSquadFromSelection();
@@ -3380,9 +3819,10 @@ public sealed class GameRenderer
                                 if (moveUnits.Length > 0 &&
                                     GetFullySelectedSquadId() != 0)
                                 {
-                                    InfantryFormationType formation = _infantryFormation;
+                                    InfantryFormationType formation = InfantryFormationType.Free;
+                                    int squadId = GetFullySelectedSquadId();
                                     ExecuteSimulationCommand(() =>
-                                        IssueMoveOrder(moveUnits, destination, formation));
+                                        IssueMoveOrder(moveUnits, destination, formation, squadId));
                                 }
                                 break;
                             }
@@ -3401,12 +3841,46 @@ public sealed class GameRenderer
                                 }
                                 break;
                             }
+
+                            case ContextMenuActionType.HoldSelected:
+                            case ContextMenuActionType.CycleFireMode:
+                            case ContextMenuActionType.CycleAimMode:
+                            case ContextMenuActionType.CycleTargetMode:
+                            case ContextMenuActionType.CycleAmmunition:
+                            {
+                                SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+                                UnitId[] commandUnits = snapshot == null
+                                    ? Array.Empty<UnitId>()
+                                    : CaptureSelectedUnitIds(snapshot);
+                                if (commandUnits.Length == 0)
+                                    break;
+
+                                ContextMenuActionType selectedAction = contextAction;
+                                ExecuteSimulationCommand(() =>
+                                {
+                                    if (selectedAction == ContextMenuActionType.HoldSelected)
+                                        IssueHoldOrder(commandUnits);
+                                    else
+                                        ApplyWeaponContextAction(commandUnits, selectedAction);
+                                });
+                                break;
+                            }
+
                         }
 
                         return;
                     }
 
                     _contextMenuUnit = default;
+                }
+
+                if (_gameMenuOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y,
+                        _menuPage) == true)
+                {
+                    return;
                 }
 
                 if (_gameMenuOverlay != null &&
@@ -3435,6 +3909,24 @@ public sealed class GameRenderer
                 if (action.HasValue)
                 {
                     ApplyGameMenuAction(action.Value);
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _aiEvolutionOverlay?.HandleMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _informationLayersRenderer?.HandleHudMousePressed(
+                        uiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
                     return;
                 }
 
@@ -3478,6 +3970,33 @@ public sealed class GameRenderer
                     return;
                 }
 
+                if (_menuPage != GameMenuPage.Closed &&
+                    _gameMenuOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _aiEvolutionOverlay?.HandleMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
+                if (_menuPage == GameMenuPage.Closed &&
+                    _informationLayersRenderer?.HandleHudMouseMoved(
+                        dragUiPosition,
+                        _window.Size.X,
+                        _window.Size.Y) == true)
+                {
+                    return;
+                }
+
                 if (_debugLayersOverlay?.HandleMouseMoved(
                         dragUiPosition,
                         _window.Size.X,
@@ -3492,6 +4011,25 @@ public sealed class GameRenderer
                         _window.Size.X,
                         _window.Size.Y) == true)
                 {
+                    return;
+                }
+
+                if (_isRotatingCamera)
+                {
+                    float horizontalDelta =
+                        e.Position.X - _lastCameraRotatePixel.X;
+                    float azimuthDelta =
+                        horizontalDelta * CameraRotationDegreesPerPixel;
+                    Vector2f rotatedCameraCenter =
+                        _blockTerrainPreviewRenderer.RotateCameraCenterForAzimuth(
+                            _worldMap,
+                            _camera.View.Center,
+                            TerrainTilePixelSize,
+                            _camera.ElevationDegrees,
+                            azimuthDelta);
+                    _camera.RotateAzimuth(azimuthDelta);
+                    _camera.CenterOnPosition(rotatedCameraCenter);
+                    _lastCameraRotatePixel = e.Position;
                     return;
                 }
 
@@ -3565,8 +4103,6 @@ public sealed class GameRenderer
                 if (_isSelectingUnits)
                 {
                     _selectionDragCurrentPixel = e.Position;
-                    _selectionDragCurrentWorld =
-                        _window.MapPixelToCoords(e.Position, _camera.View);
                     UpdateSelectionBox();
                     return;
                 }
@@ -3599,11 +4135,20 @@ public sealed class GameRenderer
                     return;
                 }
 
+                if (e.Button == Mouse.Button.Right && _isRotatingCamera)
+                {
+                    _isRotatingCamera = false;
+                    return;
+                }
+
                 if (e.Button == Mouse.Button.Middle)
                 {
                     _isPanningCamera = false;
                     return;
                 }
+
+                if (_showBlockTerrainPreview)
+                    return;
 
                 if (e.Button == Mouse.Button.Right && _isPlacingMoveLine)
                 {
@@ -3641,6 +4186,15 @@ public sealed class GameRenderer
                 if (e.Button != Mouse.Button.Left)
                     return;
 
+                if (_gameMenuOverlay?.HandleMouseReleased() == true)
+                    return;
+
+                if (_aiEvolutionOverlay?.HandleMouseReleased() == true)
+                    return;
+
+                if (_informationLayersRenderer?.HandleHudMouseReleased() == true)
+                    return;
+
                 if (_debugLayersOverlay?.HandleMouseReleased() == true)
                     return;
 
@@ -3675,8 +4229,6 @@ public sealed class GameRenderer
                     return;
 
                 _selectionDragCurrentPixel = e.Position;
-                _selectionDragCurrentWorld =
-                    _window.MapPixelToCoords(e.Position, _camera.View);
                 bool boxSelection = IsSelectionDrag();
                 _isSelectingUnits = false;
                 _selectionBox.Size = new Vector2f(0f, 0f);
@@ -3684,8 +4236,8 @@ public sealed class GameRenderer
                 if (boxSelection)
                 {
                     SelectWorldUnitsInRectangle(
-                        _selectionDragStartWorld,
-                        _selectionDragCurrentWorld,
+                        _selectionDragStartPixel,
+                        _selectionDragCurrentPixel,
                         _selectionShiftHeld);
                 }
                 else
@@ -3701,6 +4253,11 @@ public sealed class GameRenderer
         _window.KeyReleased +=
             (_, e) =>
             {
+                if (e.Code == Keyboard.Key.PageUp)
+                    _pageUpHeld = false;
+                else if (e.Code == Keyboard.Key.PageDown)
+                    _pageDownHeld = false;
+
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                     _bodyRigEditorOverlay.HandleKeyReleased(e.Code);
             };
@@ -3738,8 +4295,19 @@ public sealed class GameRenderer
             case DebugLayerType.UtilityAi:
                 _showUtilityAiDebug = !_showUtilityAiDebug;
                 break;
+            case DebugLayerType.MovementVectors:
+                _showMovementVectors = !_showMovementVectors;
+                break;
+            case DebugLayerType.MovementForces:
+                _showMovementForces = !_showMovementForces;
+                break;
+            case DebugLayerType.OrderPaths:
+                _showOrderPaths = !_showOrderPaths;
+                break;
         }
     }
+
+    private bool ShouldCaptureSquadDebug => false;
 
     private void RecordSimulationStep(float deltaTime)
     {
@@ -3799,30 +4367,210 @@ public sealed class GameRenderer
         }
     }
 
-    private void HandleKey(
-        Keyboard.Key key)
+    private void AdjustTerrainSlice(int direction, int layerSteps)
     {
-        if (key == Keyboard.Key.F10)
+        _visibleMaxLayer = Math.Clamp(
+            _visibleMaxLayer + Math.Sign(direction) * Math.Max(1, layerSteps),
+            0,
+            _worldMap.LayerCount - 1);
+    }
+
+    private void ToggleBlockTerrainPreview()
+    {
+        _showBlockTerrainPreview = !_showBlockTerrainPreview;
+        _isPanningCamera = false;
+        _isRotatingCamera = false;
+        _isSelectingUnits = false;
+        _isPlacingMoveLine = false;
+        _contextMenuOverlay?.Close();
+        _contextMenuUnit = default;
+
+        if (_showBlockTerrainPreview)
         {
-            if (_bodyRigEditorOverlay?.IsOpen == true)
+            _normalCameraCenter = _camera.View.Center;
+            _blockPreviewRestoreIsometricProjection = _camera.IsometricProjectionEnabled;
+            _camera.SetIsometricProjection(false);
+            _camera.ResetAzimuth();
+            _camera.CenterOnPosition(
+                _blockTerrainPreviewRenderer.GetCameraCenter(
+                    _worldMap,
+                    TerrainTilePixelSize,
+                    _camera.ElevationDegrees));
+            Console.WriteLine(
+                "[Terrain preview] Camera centered on terrain. " +
+                "Alt+right mouse drag: free rotation; Q/E: rotate 45 degrees; " +
+                $"NumPad +/-: elevation ({_camera.ElevationDegrees:0}°); " +
+                "middle mouse: pan; WASD/arrows: move; wheel: zoom to cursor; B: return to game.");
+        }
+        else
+        {
+            _camera.SetIsometricProjection(_blockPreviewRestoreIsometricProjection);
+            if (!_blockPreviewRestoreIsometricProjection)
+                _camera.ResetAzimuth();
+            _camera.CenterOnPosition(_normalCameraCenter);
+            Console.WriteLine(
+                _camera.IsometricProjectionEnabled
+                    ? "[Terrain preview] Isometric game view restored."
+                    : "[Terrain preview] Top-down game view restored.");
+        }
+    }
+
+    private void UpdateCameraMovement(float deltaTime)
+    {
+        // The block-preview terrain and camera center are already in projected
+        // screen space. Applying another terrain projection here double-transforms
+        // WASD and makes movement drift away from the camera's visible axes.
+        _camera.Update(_input.MoveDirection, deltaTime);
+    }
+
+    private void UpdateBlockPreviewCamera(float deltaTime)
+    {
+        if (!_showBlockTerrainPreview)
+        {
+            UpdateCameraMovement(deltaTime);
+            return;
+        }
+
+        Vector2f oldFocus = _blockTerrainPreviewRenderer.GetCameraCenter(
+            _worldMap,
+            TerrainTilePixelSize,
+            _camera.ElevationDegrees);
+        Vector2f oldCenter = _camera.View.Center;
+        UpdateCameraMovement(deltaTime);
+        Vector2f movedCenter = _camera.View.Center;
+        Vector2f newFocus = _blockTerrainPreviewRenderer.GetCameraCenter(
+            _worldMap,
+            TerrainTilePixelSize,
+            _camera.ElevationDegrees);
+
+        Vector2f panOffset = new(
+            oldCenter.X - oldFocus.X,
+            oldCenter.Y - oldFocus.Y);
+        Vector2f movement = new(
+            movedCenter.X - oldCenter.X,
+            movedCenter.Y - oldCenter.Y);
+
+        _camera.CenterOnPosition(new Vector2f(
+            newFocus.X + panOffset.X + movement.X,
+            newFocus.Y + panOffset.Y + movement.Y));
+    }
+
+    private void RotateBlockPreviewAzimuth(float deltaDegrees)
+    {
+        Vector2f rotatedCameraCenter =
+            _blockTerrainPreviewRenderer.RotateCameraCenterForAzimuth(
+                _worldMap,
+                _camera.View.Center,
+                TerrainTilePixelSize,
+                _camera.ElevationDegrees,
+                deltaDegrees);
+
+        _camera.RotateAzimuth(deltaDegrees);
+        _camera.CenterOnPosition(rotatedCameraCenter);
+    }
+
+    private void AdjustBlockPreviewElevation(float deltaDegrees)
+    {
+        if (!_camera.AdjustElevation(deltaDegrees))
+            return;
+
+        Console.WriteLine(
+            $"[Terrain preview] Target elevation: {_camera.TargetElevationDegrees:0}°. " +
+            "Transition is smooth; NumPad +/-: change angle.");
+    }
+
+    private void HandleKey(Keyboard.Key key)
+    {
+        if (_showBlockTerrainPreview)
+        {
+            if (key is Keyboard.Key.B or Keyboard.Key.Escape)
             {
-                _bodyRigEditorOverlay.Close();
+                ToggleBlockTerrainPreview();
+            }
+            else if (key is Keyboard.Key.Q or Keyboard.Key.E)
+            {
+                RotateBlockPreviewAzimuth(key == Keyboard.Key.Q ? -45f : 45f);
+            }
+            else if (key == Keyboard.Key.Add)
+            {
+                AdjustBlockPreviewElevation(5f);
+            }
+            else if (key == Keyboard.Key.Subtract)
+            {
+                AdjustBlockPreviewElevation(-5f);
+            }
+
+            return;
+        }
+
+        if (key == Keyboard.Key.B &&
+            _worldMap.UsesDiscreteBlockTerrain &&
+            _menuPage == GameMenuPage.Closed &&
+            _bodyRigEditorOverlay?.IsOpen != true &&
+            _debugLayersOverlay?.IsOpen != true &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _unitGroupCardOverlay?.IsOpen != true &&
+            _unitCards.Count == 0)
+        {
+            ToggleBlockTerrainPreview();
+            return;
+        }
+
+        if (key == Keyboard.Key.Tab &&
+            _menuPage == GameMenuPage.Closed &&
+            _bodyRigEditorOverlay?.IsOpen != true &&
+            _debugLayersOverlay?.IsOpen != true &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _unitGroupCardOverlay?.IsOpen != true &&
+            _unitCards.Count == 0 &&
+            !_showUtilityAiDebug)
+        {
+            _camera.SetIsometricProjection(!_camera.IsometricProjectionEnabled);
+            Console.WriteLine(
+                _camera.IsometricProjectionEnabled
+                    ? "[CAMERA] Изометрия. Q/E — поворот на 45°. Tab — обычный вид сверху."
+                    : "[CAMERA] Обычный вид сверху. Tab — изометрия.");
+            return;
+        }
+
+        if (key is Keyboard.Key.PageUp or Keyboard.Key.PageDown)
+        {
+            bool raiseSlice = key == Keyboard.Key.PageUp;
+            if (raiseSlice)
+            {
+                if (_pageUpHeld)
+                    return;
+                _pageUpHeld = true;
             }
             else
             {
-                CloseUnitCards();
-                _unitGroupCardOverlay?.Close();
-                _contextMenuOverlay?.Close();
-                _contextMenuUnit = default;
-                _menuPage = GameMenuPage.Closed;
-                _bodyRigEditorOverlay?.Open();
+                if (_pageDownHeld)
+                    return;
+                _pageDownHeld = true;
             }
+
+            bool gameplayInputAllowed =
+                _menuPage == GameMenuPage.Closed &&
+                _bodyRigEditorOverlay?.IsOpen != true &&
+                _debugLayersOverlay?.IsOpen != true &&
+                _contextMenuOverlay?.IsOpen != true &&
+                _unitGroupCardOverlay?.IsOpen != true &&
+                _unitCards.Count == 0;
+
+            if (gameplayInputAllowed)
+                AdjustTerrainSlice(raiseSlice ? 1 : -1, GetTerrainSliceStepLayers());
 
             return;
         }
 
         if (_bodyRigEditorOverlay?.IsOpen == true)
         {
+            if (key == Keyboard.Key.Escape)
+            {
+                _bodyRigEditorOverlay.Close();
+                return;
+            }
+
             bool controlPressed =
                 Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
                 Keyboard.IsKeyPressed(Keyboard.Key.RControl);
@@ -3830,237 +4578,22 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.K && TryDisbandSelectedSquads())
-            return;
-
-        if (TryHandleSquadHotkey(key))
-            return;
-
-        if (key == Keyboard.Key.J)
+        if ((key is Keyboard.Key.Q or Keyboard.Key.E) &&
+            _camera.IsometricProjectionEnabled &&
+            _menuPage == GameMenuPage.Closed &&
+            _debugLayersOverlay?.IsOpen != true &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _unitGroupCardOverlay?.IsOpen != true &&
+            _unitCards.Count == 0 &&
+            !_showUtilityAiDebug)
         {
-            _infantryFormation = (InfantryFormationType)(((int)_infantryFormation + 1) % 3);
-            Console.WriteLine($"[INFANTRY] Formation: {InfantryFormation.GetName(_infantryFormation)}");
-            return;
-        }
+            if (key == Keyboard.Key.Q)
+                _camera.RotateCounterClockwise();
+            else
+                _camera.RotateClockwise();
 
-        if (key == Keyboard.Key.S &&
-            (Keyboard.IsKeyPressed(Keyboard.Key.LControl) ||
-             Keyboard.IsKeyPressed(Keyboard.Key.RControl)))
-        {
-            SimulationFrameSnapshot? stealthSnapshot = GetInputSnapshot();
-            if (stealthSnapshot != null)
-            {
-                UnitId[] stealthUnits = CaptureSelectedUnitIds(stealthSnapshot);
-                if (stealthUnits.Length > 0)
-                {
-                    SFML.System.Vector2f mouseWorld =
-                        _window.MapPixelToCoords(Mouse.GetPosition(_window), _camera.View);
-                    float x = Math.Clamp(mouseWorld.X, 0.5f, _worldMap.TileWidth - 0.5f);
-                    float y = Math.Clamp(mouseWorld.Y, 0.5f, _worldMap.TileHeight - 0.5f);
-                    int tileX = Math.Clamp((int)MathF.Floor(x), 0, _worldMap.MaxTileX);
-                    int tileY = Math.Clamp((int)MathF.Floor(y), 0, _worldMap.MaxTileY);
-                    Vector3 destination = new(
-                        x, y, _worldMap.GetSurfaceHeight(tileX, tileY));
-                    ExecuteSimulationCommand(() =>
-                        IssueStealthMoveOrderToPoint(stealthUnits, destination));
-                }
-                else
-                {
-                    Console.WriteLine("[AI-STEALTH] Select one or more living units first.");
-                }
-            }
-
-            return;
-        }
-
-        if (key == Keyboard.Key.S)
-        {
-            SimulationFrameSnapshot? snapshot = GetInputSnapshot();
-            if (snapshot != null)
-            {
-                UnitId[] holdUnits = CaptureSelectedUnitIds(snapshot);
-                if (holdUnits.Length > 0)
-                {
-                    ExecuteSimulationCommand(() =>
-                        IssueHoldOrder(holdUnits));
-                }
-            }
-
-            return;
-        }
-
-        if (key == Keyboard.Key.PageUp)
-        {
-            int step =
-                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                Keyboard.IsKeyPressed(Keyboard.Key.RShift)
-                    ? 10
-                    : 1;
-
-            ScrollTerrainLayers(step);
-            return;
-        }
-
-        if (key == Keyboard.Key.PageDown)
-        {
-            int step =
-                Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                Keyboard.IsKeyPressed(Keyboard.Key.RShift)
-                    ? 10
-                    : 1;
-
-            ScrollTerrainLayers(-step);
-            return;
-        }
-
-        if (key == Keyboard.Key.G)
-        {
-            _showDebugGrid =
-                !_showDebugGrid;
-            return;
-        }
-
-        if (key == Keyboard.Key.F2)
-        {
-            CloseUnitCards();
-            _unitGroupCardOverlay?.Close();
-            _contextMenuOverlay?.Close();
-            _contextMenuUnit = default;
-            _menuPage = _menuPage == GameMenuPage.Settings
-                ? GameMenuPage.Closed
-                : GameMenuPage.Settings;
-            _draggingMenuSlider = null;
-            return;
-        }
-
-        if (key == Keyboard.Key.Escape)
-        {
-            if (_debugLayersOverlay?.IsOpen == true)
-            {
-                _debugLayersOverlay.Close();
-                return;
-            }
-
-            if (_unitGroupCardOverlay?.IsOpen == true)
-            {
-                _unitGroupCardOverlay.Close();
-                return;
-            }
-
-            if (_unitCards.Count > 0)
-            {
-                CloseTopUnitCard();
-                return;
-            }
-
-            if (_contextMenuOverlay?.IsOpen == true)
-            {
-                _contextMenuOverlay.Close();
-                _contextMenuUnit = default;
-                return;
-            }
-
-            _menuPage = _menuPage switch
-            {
-                GameMenuPage.Settings => GameMenuPage.Main,
-                GameMenuPage.Main => GameMenuPage.Closed,
-                _ => GameMenuPage.Closed
-            };
-            _draggingMenuSlider = null;
-            return;
-        }
-
-        if (key == Keyboard.Key.T)
-        {
-            _showCombatTracers = !_showCombatTracers;
-            Console.WriteLine($"[TEST] Tracers={_showCombatTracers}");
-            return;
-        }
-
-        if (key == Keyboard.Key.F5)
-        {
-            if (!_massCombatMode)
-            {
-                Console.WriteLine("[EVOLVE LIVE] Switch to the mass-combat scene (C) before starting live evolution.");
-                return;
-            }
-
-            ExecuteSimulationCommand(() =>
-                _liveAiEvolutionTrainer.Toggle(_unitSimulation, _massCombatTestScene, _worldMap));
-            return;
-        }
-
-        if (key == Keyboard.Key.F9)
-        {
-            _showCombatHud = !_showCombatHud;
-            if (_combatStatusOverlay != null)
-                _combatStatusOverlay.Visible = _showCombatHud;
-            return;
-        }
-
-        if (key == Keyboard.Key.I)
-        {
-            _showAiStateDebug = !_showAiStateDebug;
-            Console.WriteLine($"[TEST] AI state markers={_showAiStateDebug}");
-            return;
-        }
-
-        if (key == Keyboard.Key.F6)
-        {
-            ExecuteSimulationCommand(() =>
-            {
-                _unitSimulation.VisionEnabled = !_unitSimulation.VisionEnabled;
-                Console.WriteLine(
-                    $"[TEST] Vision simulation={_unitSimulation.VisionEnabled}");
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.F8)
-        {
-            if (!_massCombatMode)
-                return;
-            if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
-            {
-                Console.WriteLine("[EVOLVE LIVE] Stop training with F5 before changing battle scale.");
-                return;
-            }
-
-            // Scale changes rebuild both terrain and units, so perform them
-            // with the simulation worker stopped rather than racing the map renderer.
-            StopSimulationThread();
-            _massCombatTestScene.CycleScale(_unitSimulation, _worldMap);
-            SetSelectedUnit(_massCombatTestScene.FirstMeleeUnit);
-            CenterOnMeleeBattle();
-            Console.WriteLine($"[TEST] {_massCombatTestScene.GetStatus(_unitSimulation)}");
-            StartSimulationThread();
-            return;
-        }
-
-        if (key == Keyboard.Key.C)
-        {
-            if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
-            {
-                Console.WriteLine("[EVOLVE LIVE] Stop training with F5 before switching scenes.");
-                return;
-            }
-
-            StopSimulationThread();
-            ToggleTerrainCombatTest();
-            if (_massCombatMode)
-                StartSimulationThread();
-            return;
-        }
-
-
-        if (key == Keyboard.Key.Y)
-        {
-            if (_terrainStressMode || _massCombatMode)
-                return;
-
-            _visionTestScene.ResetAiDemo(
-                _unitSimulation,
-                _worldMap);
+            Console.WriteLine(
+                $"[CAMERA] Верх карты: {_camera.DirectionLabel}. Q/E — поворот на 45 градусов.");
             return;
         }
 
@@ -4070,190 +4603,58 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.Tab)
+        if (key == Keyboard.Key.F &&
+            _menuPage == GameMenuPage.Closed &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _selectedUnits.Count > 0)
         {
-            if (_massCombatMode)
-            {
-                CycleMassCombatSelection();
-                return;
-            }
-
-            _visionTestIndex =
-                (_visionTestIndex + 1) %
-                _visionTestScene.UnitCount;
-
-            SetSelectedUnit(_visionTestScene.GetUnit(_visionTestIndex));
-
+            ToggleAutonomousMovementForSelection();
             return;
         }
 
-        if (key == Keyboard.Key.R)
+        if (key != Keyboard.Key.Escape)
+            return;
+
+        if (_debugLayersOverlay?.IsOpen == true)
         {
-            _visionTestIndex = 0;
-            SetSelectedUnit(_visionTestScene.Observer);
+            _debugLayersOverlay.Close();
             return;
         }
 
-        if (key == Keyboard.Key.F)
+        if (_showUtilityAiDebug)
         {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int shooterIndex))
-                    return;
-
-                _unitSimulation.FireWeapon(
-                    selected,
-                    UnitWeaponSlot.Primary,
-                    _unitSimulation.Units.HeadNormal[shooterIndex]);
-            });
+            _showUtilityAiDebug = false;
             return;
         }
 
-        if (key == Keyboard.Key.B)
+        if (_unitGroupCardOverlay?.IsOpen == true)
         {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int shooterIndex) ||
-                    !_unitSimulation.AI.Store.HasTarget[shooterIndex])
-                {
-                    return;
-                }
-
-                UnitId target = _unitSimulation.AI.Store.Target[shooterIndex];
-                if (_unitSimulation.Units.IsAlive(target))
-                {
-                    _unitSimulation.FireWeaponAt(
-                        selected,
-                        UnitWeaponSlot.Primary,
-                        target);
-                }
-            });
+            _unitGroupCardOverlay.Close();
             return;
         }
 
-        if (key == Keyboard.Key.H)
+        if (_unitCards.Count > 0)
         {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-                _unitSimulation.ApplyDamage(
-                    selected,
-                    UnitHealthPartId.Torso,
-                    70f));
+            CloseTopUnitCard();
             return;
         }
 
-        if (key == Keyboard.Key.M)
+        if (_contextMenuOverlay?.IsOpen == true)
         {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int unitIndex))
-                    return;
-
-                _unitSimulation.Weapons.CycleFireMode(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                int stateIndex = UnitWeaponStore.GetIndex(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                Console.WriteLine(
-                    $"[FIRE CONTROL] Unit[{unitIndex}] " +
-                    $"Fire={_unitSimulation.Weapons.CurrentFireMode[stateIndex]} " +
-                    $"Aim={_unitSimulation.Weapons.CurrentAimMode[stateIndex]}");
-            });
+            _contextMenuOverlay.Close();
+            _contextMenuUnit = default;
             return;
         }
 
-        if (key == Keyboard.Key.N)
+        _menuPage = _menuPage switch
         {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int unitIndex))
-                    return;
-
-                _unitSimulation.Weapons.CycleAimMode(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                int stateIndex = UnitWeaponStore.GetIndex(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                Console.WriteLine(
-                    $"[FIRE CONTROL] Unit[{unitIndex}] " +
-                    $"Fire={_unitSimulation.Weapons.CurrentFireMode[stateIndex]} " +
-                    $"Aim={_unitSimulation.Weapons.CurrentAimMode[stateIndex]}");
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.K)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (_unitSimulation.Units.TryGetIndex(selected, out int unitIndex))
-                {
-                    _unitSimulation.Weapons.CycleTargetMode(
-                        unitIndex,
-                        UnitWeaponSlot.Primary);
-                }
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.L)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.TryGetIndex(selected, out int unitIndex))
-                    return;
-
-                int stateIndex = UnitWeaponStore.GetIndex(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-                int nextAmmo = _unitSimulation.Weapons.CurrentAmmoType[stateIndex] + 1;
-                short inventorySlot = _unitSimulation.Inventory.GetWeaponEquipment(
-                    unitIndex,
-                    UnitWeaponSlot.Primary);
-
-                if (inventorySlot >= 0)
-                {
-                    RangedWeaponConfig? weapon =
-                        _unitSimulation.Inventory.GetItem(unitIndex, inventorySlot) as RangedWeaponConfig;
-                    int ammoCount = weapon?.AmmoSet?.Count ?? 1;
-                    nextAmmo = ammoCount <= 0 ? 0 : nextAmmo % ammoCount;
-                }
-
-                _unitSimulation.SelectAmmunition(
-                    selected,
-                    UnitWeaponSlot.Primary,
-                    nextAmmo);
-            });
-            return;
-        }
-
-        if (key == Keyboard.Key.T)
-        {
-            UnitId selected = _selectedUnit;
-            ExecuteSimulationCommand(() =>
-            {
-                if (!_unitSimulation.Units.IsAlive(selected))
-                    return;
-
-                float centerX = _worldMap.TileWidth * 0.5f;
-                float centerY = _worldMap.TileHeight * 0.5f;
-                _unitSimulation.SetTarget(
-                    selected,
-                    new System.Numerics.Vector3(centerX, centerY - 20f, 0f));
-            });
-        }
+            GameMenuPage.Closed => GameMenuPage.Main,
+            GameMenuPage.TestScenes => GameMenuPage.Settings,
+            GameMenuPage.Settings => GameMenuPage.Main,
+            GameMenuPage.Main => GameMenuPage.Closed,
+            _ => GameMenuPage.Main
+        };
+        _draggingMenuSlider = null;
     }
 
     private GameSettingsSnapshot GetGameSettingsSnapshot()
@@ -4272,13 +4673,116 @@ public sealed class GameRenderer
             _selectedResolutionIndex,
             currentSize.X,
             currentSize.Y,
-            _showUnitRig);
+            _showUnitRig,
+            _selectedTestSceneIndex,
+            _activeTestSceneIndex,
+            _liveAiEvolutionTrainer.Status?.IsRunning == true,
+            _unitSimulation.AI.Enabled,
+            _unitSimulation.VisionEnabled,
+            _showCombatTracers,
+            _showCombatHud,
+            _massCombatMode
+                ? _massCombatTestScene.UnitsPerFaction
+                : _classicMassCombatMode
+                    ? _classicMassCombatTestScene.UnitCount / 2
+                    : 0,
+            _camera.PanSensitivity,
+            _camera.MoveSensitivity);
     }
 
     private void ApplyGameMenuAction(GameMenuAction action)
     {
         switch (action.Type)
         {
+            case GameMenuActionType.OpenInformation:
+                _menuPage = GameMenuPage.Closed;
+                if (_debugLayersOverlay?.IsOpen != true)
+                    _debugLayersOverlay?.Toggle();
+                _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.OpenTestScenes:
+                _menuPage = GameMenuPage.TestScenes;
+                _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.BackToSettings:
+                _menuPage = GameMenuPage.Settings;
+                _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.PreviousTestScene:
+                _selectedTestSceneIndex =
+                    (_selectedTestSceneIndex - 1 + GameMenuOverlay.TestSceneCount) %
+                    GameMenuOverlay.TestSceneCount;
+                break;
+
+            case GameMenuActionType.NextTestScene:
+                _selectedTestSceneIndex =
+                    (_selectedTestSceneIndex + 1) % GameMenuOverlay.TestSceneCount;
+                break;
+
+            case GameMenuActionType.ApplyTestScene:
+            case GameMenuActionType.RestartTestScene:
+                ActivateTestScene(_selectedTestSceneIndex);
+                _menuPage = GameMenuPage.Closed;
+                break;
+
+            case GameMenuActionType.ToggleAiEvolution:
+                if (_massCombatMode)
+                {
+                    ExecuteSimulationCommand(() =>
+                        _liveAiEvolutionTrainer.Toggle(
+                            _unitSimulation, _massCombatTestScene, _worldMap));
+                }
+                else
+                {
+                    Console.WriteLine("[EVOLVE LIVE] Доступно только на карте дальнего боя.");
+                }
+                break;
+
+            case GameMenuActionType.CycleCombatScale:
+                if (_massCombatMode &&
+                    _liveAiEvolutionTrainer.Status?.IsRunning != true)
+                {
+                    StopSimulationThread();
+                    _massCombatTestScene.CycleScale(_unitSimulation, _worldMap);
+                    SetSelectedUnit(_massCombatTestScene.FirstMeleeUnit);
+                    CenterOnMeleeBattle();
+                    StartSimulationThread();
+                }
+                break;
+
+            case GameMenuActionType.ToggleAi:
+                ExecuteSimulationCommand(() =>
+                    _unitSimulation.AI.Enabled = !_unitSimulation.AI.Enabled);
+                break;
+
+            case GameMenuActionType.ToggleVision:
+                ExecuteSimulationCommand(() =>
+                    _unitSimulation.VisionEnabled = !_unitSimulation.VisionEnabled);
+                break;
+
+            case GameMenuActionType.ToggleCombatTracers:
+                _showCombatTracers = !_showCombatTracers;
+                break;
+
+            case GameMenuActionType.ToggleCombatHud:
+                _showCombatHud = !_showCombatHud;
+                if (_combatStatusOverlay != null)
+                    _combatStatusOverlay.Visible = _showCombatHud;
+                break;
+
+            case GameMenuActionType.OpenBodyRigEditor:
+                CloseUnitCards();
+                _unitGroupCardOverlay?.Close();
+                _contextMenuOverlay?.Close();
+                _contextMenuUnit = default;
+                _menuPage = GameMenuPage.Closed;
+                _draggingMenuSlider = null;
+                _bodyRigEditorOverlay?.Open();
+                break;
+
             case GameMenuActionType.OpenMainMenu:
                 _menuPage = GameMenuPage.Main;
                 _draggingMenuSlider = null;
@@ -4338,6 +4842,14 @@ public sealed class GameRenderer
                     _worldMap.LayerCount - 1);
                 break;
 
+            case GameMenuActionType.SetCameraPanSensitivity:
+                _camera.SetPanSensitivity(action.Value);
+                break;
+
+            case GameMenuActionType.SetKeyboardMoveSensitivity:
+                _camera.SetMoveSensitivity(action.Value);
+                break;
+
             case GameMenuActionType.ToggleGrid:
                 _showDebugGrid = !_showDebugGrid;
                 break;
@@ -4364,7 +4876,10 @@ public sealed class GameRenderer
                 _showTerrainExtrema = false;
                 _showHeightContours = true;
                 _showContourLabels = true;
-                _visibleMaxLayer = 0;
+                _visibleMaxLayer = Math.Clamp(
+            _worldMap.GetHighestOccupiedLayer() + 1,
+            0,
+            _worldMap.LayerCount - 1);
                 break;
         }
     }
@@ -4401,89 +4916,177 @@ public sealed class GameRenderer
         _uiView = CreateUiView(size);
     }
 
-    private void ScrollTerrainLayers(
-        int direction)
+    private void ActivateTestScene(int sceneIndex)
     {
-        _visibleMaxLayer =
-            Math.Clamp(
-                _visibleMaxLayer + direction,
-                0,
-                _worldMap.LayerCount - 1);
-    }
-
-    private void ToggleTerrainCombatTest()
-    {
-        if (_terrainStressMode)
+        sceneIndex = Math.Clamp(sceneIndex, 0, GameMenuOverlay.TestSceneCount - 1);
+        if (UnitsTemporarilyDisabled && sceneIndex != 3)
         {
-            _terrainStressMode = false;
-            EnterMassCombatMode();
+            Console.WriteLine("[SCENE] Юниты временно отключены. Доступен только рельефный режим.");
+            return;
+        }
+        if (_liveAiEvolutionTrainer.Status?.IsRunning == true)
+        {
+            Console.WriteLine("[SCENE] Останови эволюцию ИИ перед сменой или перезапуском тестовой карты.");
             return;
         }
 
-        if (!_massCombatMode)
-            return;
+        StopSimulationThread();
 
-        _massCombatTestScene.Stop(_unitSimulation);
-        _massCombatMode = false;
-        _terrainStressMode = true;
-        _showVisionDebug = false;
+        if (_massCombatTestScene.Initialized)
+            _massCombatTestScene.Stop(_unitSimulation);
+        if (_classicMassCombatTestScene.Initialized)
+            _classicMassCombatTestScene.Stop(_unitSimulation);
+        if (_movementTestScene.Initialized)
+            _movementTestScene.Stop(_unitSimulation);
 
+        // Test scenes own different unit sets. Clear anything left by a prior
+        // scene before rebuilding terrain or spawning the next roster.
+        ReadOnlySpan<int> activeIndices = _unitSimulation.Units.ActiveIndices;
+        UnitId[] previousUnits = new UnitId[activeIndices.Length];
+        for (int i = 0; i < activeIndices.Length; i++)
+            previousUnits[i] = _unitSimulation.Units.GetId(activeIndices[i]);
+        for (int i = 0; i < previousUnits.Length; i++)
+            _unitSimulation.Destroy(previousUnits[i]);
+
+        _unitSimulation.Projectiles.Clear();
         _unitSimulation.AI.Enabled = false;
         _unitSimulation.VisionEnabled = false;
-        _unitSimulation.Projectiles.Clear();
+        _massCombatMode = false;
+        _classicMassCombatMode = false;
+        _movementTestMode = false;
+        _visionTestMode = false;
+        _terrainStressMode = false;
+        _massCombatWorldReady = false;
+        _startupMassCombatSelectionApplied = false;
+        _simulationPaused = false;
+        _simulationSpeed = 1f;
+        _selectedUnits.Clear();
+        _selectedUnit = default;
+        _showVisionDebug = false;
+        _showHearingDebug = false;
+        _showMemoryDebug = false;
+        _showMovementVectors = false;
+        _showMovementForces = false;
+        _showSquadFormation = false;
+        _showSquadStates = false;
+        _showSquadContacts = false;
+        _showAttackLinks = false;
+        _showSuppressionDebug = false;
+        _showAiStateDebug = false;
+        _showCombatTracers = true;
+        _showCombatHud = true;
+        if (_combatStatusOverlay != null)
+            _combatStatusOverlay.Visible = true;
 
         WorldGenerator.Generate(_worldMap);
-
-        _visibleMaxLayer = 0;
-
+        ClearTestNavigationBlockers();
         _mapRenderer.ResetVisualSettings();
+        _visibleMaxLayer = Math.Clamp(
+            _worldMap.GetHighestOccupiedLayer() + 1,
+            0,
+            _worldMap.LayerCount - 1);
         _showDebugGrid = false;
         _showTerrainExtrema = false;
         _showHeightContours = true;
-        _menuPage = GameMenuPage.Closed;
-        _draggingMenuSlider = null;
+        _showContourLabels = true;
+        _debugLayersOverlay?.Close();
+        _showUtilityAiDebug = false;
+        _unitGroupCardOverlay?.Close();
+        _contextMenuOverlay?.Close();
+        CloseUnitCards();
+        PruneSquadState(SimulationFrameSnapshot.Capture(_unitSimulation));
 
-        SetSelectedUnit(default);
-
-        _camera.CenterOnWorld(
-            TerrainTilePixelSize,
-            _worldMap);
-    }
-
-    private void EnterMassCombatMode()
-    {
-        if (!_massCombatMode)
+        switch (sceneIndex)
         {
-            ReadOnlySpan<UnitId> testUnits =
-                _visionTestScene.Units;
-
-            for (int i = 0;
-                 i < testUnits.Length;
-                 i++)
+            case 0:
             {
-                if (_unitSimulation.Units.IsAlive(
-                        testUnits[i]))
-                {
-                    _unitSimulation.Destroy(
-                        testUnits[i]);
-                }
+                _movementTestMode = true;
+                _unitSimulation.AI.Enabled = false;
+                _unitSimulation.VisionEnabled = false;
+                _movementTestScene.Start(_unitSimulation, _worldMap);
+
+                UnitId[] members = _movementTestScene.Units.ToArray();
+                _selectedUnits.Clear();
+                for (int i = 0; i < members.Length; i++)
+                    _selectedUnits.Add(members[i]);
+                _selectedUnit = members.Length > 0 ? members[0] : default;
+
+                int centerX = _worldMap.TileWidth / 2;
+                int centerY = _worldMap.TileHeight / 2;
+                _camera.CenterOnPosition(new Vector2f(
+                    centerX * TerrainTilePixelSize,
+                    centerY * TerrainTilePixelSize));
+                if (members.Length > 0)
+                    IssueMovementTestMoveOrder(members, _movementTestScene.InitialDestination);
+                StartSimulationThread();
+                break;
             }
 
-            _unitSimulation.Projectiles.Clear();
-            _massCombatMode = true;
-            _showVisionDebug = false;
+            case 1:
+                _visionTestMode = true;
+                _unitSimulation.AI.Enabled = true;
+                _unitSimulation.VisionEnabled = true;
+                CreateVisionTestScene();
+                if (_unitSimulation.Units.TryGetIndex(_selectedUnit, out int observerIndex))
+                {
+                    Vector3 position = _unitSimulation.Units.Position[observerIndex];
+                    _camera.CenterOnPosition(new Vector2f(
+                        position.X * TerrainTilePixelSize,
+                        position.Y * TerrainTilePixelSize));
+                }
+                StartSimulationThread();
+                break;
+
+            case 2:
+                _massCombatMode = true;
+                _unitSimulation.AI.Enabled = true;
+                _unitSimulation.VisionEnabled = true;
+                _selectedTestSceneIndex = sceneIndex;
+                StartSimulationThread();
+                break;
+
+            case 3:
+                _terrainStressMode = true;
+                _unitSimulation.AI.Enabled = false;
+                _unitSimulation.VisionEnabled = false;
+                _camera.CenterOnWorld(TerrainTilePixelSize, _worldMap);
+                Volatile.Write(
+                    ref _latestSnapshot,
+                    SimulationFrameSnapshot.Capture(_unitSimulation));
+                break;
+
+            case 4:
+            {
+                _classicMassCombatMode = true;
+                _unitSimulation.AI.Enabled = true;
+                _unitSimulation.VisionEnabled = true;
+                _classicMassCombatTestScene.Start(_unitSimulation, _worldMap);
+                SetSelectedUnit(_classicMassCombatTestScene.FirstUnit);
+                _camera.CenterOnPosition(new Vector2f(
+                    (_worldMap.TileWidth / 2f) * TerrainTilePixelSize,
+                    (_worldMap.TileHeight / 2f) * TerrainTilePixelSize));
+                StartSimulationThread();
+                break;
+            }
         }
 
-        _unitSimulation.VisionEnabled = true;
-        _unitSimulation.AI.Enabled = true;
-        _massCombatTestScene.Start(
-            _unitSimulation,
-            _worldMap);
-        Volatile.Write(ref _massCombatWorldReady, true);
-        _startupMassCombatSelectionApplied = true;
+        _activeTestSceneIndex = sceneIndex;
+        _selectedTestSceneIndex = sceneIndex;
+        Console.WriteLine($"[SCENE] Активна тестовая карта: {GameMenuOverlay.GetTestSceneName(sceneIndex)}.");
+    }
 
-        SetSelectedUnit(_massCombatTestScene.FirstMeleeUnit);
-        CenterOnMeleeBattle();
+    private void ClearTestNavigationBlockers()
+    {
+        // Test scenes use visible terrain for obstacles. Stale navigation-only
+        // blockers have no rendered geometry and look like invisible perimeter walls.
+        for (int y = 0; y < _worldMap.TileHeight; y++)
+        {
+            for (int x = 0; x < _worldMap.TileWidth; x++)
+            {
+                if (_worldMap.IsNavigationBlocked(x, y))
+                    _worldMap.SetNavigationBlocked(x, y, false);
+            }
+        }
     }
 
     private void CenterOnMeleeBattle()

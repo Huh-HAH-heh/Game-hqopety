@@ -11,15 +11,33 @@ public static class WorldGenerator
         WorldMap worldMap,
         bool writeLog = true)
     {
+        worldMap.DisableDiscreteBlockTerrain();
         worldMap.Water.Clear();
+        GenerateBaseTerrain(worldMap);
+        worldMap.EnableDiscreteBlockTerrain();
+        worldMap.ClearBlockTransitions();
 
+        if (writeLog)
+        {
+            Console.WriteLine(
+                "[WorldGenerator] " +
+                $"Дискретный блочный рельеф создан: " +
+                $"блоки {BlockTerrain.HorizontalBlockSize}x{BlockTerrain.HorizontalBlockSize} м, " +
+                $"высота слоя = {BlockTerrain.VerticalBlockHeightMeters} м.");
+        }
+    }
+
+    public static void GenerateSmooth(WorldMap worldMap, bool writeLog = true)
+    {
+        worldMap.DisableDiscreteBlockTerrain();
+        worldMap.Water.Clear();
         GenerateBaseTerrain(worldMap);
 
         if (writeLog)
         {
             Console.WriteLine(
                 "[WorldGenerator] " +
-                $"Полнообъёмный тест каньона создан: " +
+                $"Плавный тест каньона создан: " +
                 $"{worldMap.LayerCount} уровней, шаг высоты 0,1 м.");
         }
     }

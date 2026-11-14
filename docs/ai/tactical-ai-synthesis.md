@@ -125,3 +125,8 @@ Behaviac по-прежнему определяет допустимую пол�
 ### Этап 7 — предпочтение позиции с линией видимости
 
 Для полного приказа атаки отделение делится на передовую группу и огневую поддержку. Поиск точек поддержки выполняет два прохода: сначала ищет свободные проходимые клетки с прямой линией видимости от уровня глаз бойца к уровню глаз исходной цели через VisionSystem; если таких точек в локальной области нет, использует ближайшую доступную клетку без требования видимости. Это предпочтение, а не жёсткая блокировка приказа, поэтому поддержка не остаётся без задачи за стеной. Индивидуальные и частичные приказы атаки не меняются.
+
+
+## Collective movement and squad information
+
+The first implementation of flexible squad movement is documented in [Squad movement and information layers](squad-movement-and-information-layers.md). It adds shared Flow Field navigation, soft spatial formation profiles, individual detach/rejoin states and a separate movement-information snapshot. Tactical contact sharing remains a delayed, uncertain information channel rather than a shared truth state.

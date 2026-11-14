@@ -33,6 +33,10 @@ public static class CombatSelfTest
         RunTest("Perception: detection and identity stay separate", PerceptionMemorySelfTest.DetectionAndIdentityAreSeparate, ref passed, ref failed);
         RunTest("Perception: independent senses fuse anonymous contacts", PerceptionMemorySelfTest.IndependentSensesFuseAnonymousContact, ref passed, ref failed);
         RunTest("Perception: repeated same-sense evidence is bounded", PerceptionMemorySelfTest.RepeatedSameSenseEvidenceIsBounded, ref passed, ref failed);
+        RunTest("Perception: contact handles cannot alias reused slots", PerceptionMemorySelfTest.ContactHandlesCannotAliasReusedSlots, ref passed, ref failed);
+        RunTest("Perception: evidence pool reuses released nodes", PerceptionMemorySelfTest.EvidencePoolReusesReleasedNodes, ref passed, ref failed);
+        RunTest("Perception: clearing memory keeps its view usable", PerceptionMemorySelfTest.ClearingMemoryKeepsItsViewUsable, ref passed, ref failed);
+        RunTest("Perception: unit initialization invalidates old memory views", PerceptionMemorySelfTest.UnitInitializationInvalidatesOldMemoryViews, ref passed, ref failed);
         RunTest("Perception: explicit correlation can identify an anonymous contact", PerceptionMemorySelfTest.ExplicitCorrelationCanIdentifyAnonymousContact, ref passed, ref failed);
         RunTest("Perception: conflicting identity cannot hijack a correlated contact", PerceptionMemorySelfTest.ConflictingIdentityCannotHijackCorrelatedContact, ref passed, ref failed);
         RunTest("Perception: expired observations are rejected", PerceptionMemorySelfTest.ExpiredObservationIsRejected, ref passed, ref failed);
@@ -44,6 +48,12 @@ public static class CombatSelfTest
         RunTest("Behaviac: lost visual target causes search at last known position", PerceptionMemorySelfTest.BehaviacInvestigatesLastKnownPositionWithoutCurrentTargetKnowledge, ref passed, ref failed);
         RunTest("Behaviac: no contact selects patrol instead of hold-position fallback", PerceptionMemorySelfTest.BehaviacFallsBackToPatrolWithoutAContact, ref passed, ref failed);
         RunTest("Perception: real gunshot creates anonymous contact and triggers audible investigation", TacticalHearingSelfTest.Run, ref passed, ref failed);
+        RunTest("Hearing: merges nearby gunshots in 50 ms acoustic cells", TacticalHearingSelfTest.CoalescesGunshotsInSpaceAndTime, ref passed, ref failed);
+        RunTest("Hearing: coalesces footsteps over a wider space/time window", TacticalHearingSelfTest.CoalescesFootstepsInLargerSpatialAndTimeCells, ref passed, ref failed);
+        RunTest("Hearing: shared acoustic events keep listener contacts anonymous and independent", TacticalHearingSelfTest.SharedAcousticEventsKeepListenerContactsIndependent, ref passed, ref failed);
+        RunTest("Hearing: footsteps use bounded per-listener data buffers", TacticalHearingSelfTest.FootstepListenerWorkIsBoundedAndKeepsDistinctDirections, ref passed, ref failed);
+        RunTest("Hearing: urgent danger bypasses acoustic batching", TacticalHearingSelfTest.UrgentDangerBypassesAcousticBatchWindow, ref passed, ref failed);
+        RunTest("Hearing: danger memory writes are coalesced per listener", TacticalHearingSelfTest.CoalescesDangerMemoryWritesPerListener, ref passed, ref failed);
         RunTest("AI: aim survives vision sample gaps but clears on obstruction", TestAimSurvivesVisionSampleGaps, ref passed, ref failed);
         RunTest("AI: last Behaviac intent resets on unit lifecycle", TestAiIntentLifecycle, ref passed, ref failed);
         RunTest("Weapon: aim modes have distinct CE warmup times", TestAimModeDurations, ref passed, ref failed);
@@ -58,6 +68,27 @@ public static class CombatSelfTest
         RunTest("AI: exposed unit crawls prone toward firing range", TestProneCrawlApproach, ref passed, ref failed);
         RunTest("Accuracy: recoil and movement increase spread", TestAccuracy, ref passed, ref failed);
         RunTest("Navigation: A* routes around an impassable ridge", TestNavigationRoutesAroundWall, ref passed, ref failed);
+        RunTest("Navigation: half-metre cells and any-angle parents", UnitMovementSelfTest.NavigationUsesHalfMeterCellsAndAnyAngleParents, ref passed, ref failed);
+        RunTest("Navigation: interpolated walls and ramps", UnitMovementSelfTest.NavigationMatchesInterpolatedWallAndRampGeometry, ref passed, ref failed);
+        RunTest("Navigation: discrete block traversal requires stairs", UnitMovementSelfTest.DiscreteBlocksRequireExplicitStairs, ref passed, ref failed);
+        RunTest("Navigation: wide footprints do not alias ramp coordinates", UnitMovementSelfTest.WideFootprintDoesNotAliasBlockTransitionCoordinates, ref passed, ref failed);
+        RunTest("Navigation: staggered ruins do not cause route loops", UnitMovementSelfTest.FollowsRouteThroughStaggeredRuinWithoutLooping, ref passed, ref failed);
+        RunTest("Navigation: weighted detours survive waypoint smoothing", UnitMovementSelfTest.WeightedAStarDetourSurvivesWaypointSmoothing, ref passed, ref failed);
+        RunTest("Terrain: stairs support all four orientations", UnitMovementSelfTest.AllFourStairOrientationsConnectAndStepCorrectly, ref passed, ref failed);
+        RunTest("Movement: accelerates and stops at commanded target", UnitMovementSelfTest.AcceleratesAndStopsAtCommandedTarget, ref passed, ref failed);
+        RunTest("Movement: units advance while waiting for route budget", UnitMovementSelfTest.UnitsMoveWhileWaitingForRouteBudget, ref passed, ref failed);
+        RunTest("Movement: cancelling a command applies gradual braking", UnitMovementSelfTest.CancellingCommandAppliesGradualBraking, ref passed, ref failed);
+        RunTest("Movement: direction changes respect inertia", UnitMovementSelfTest.DirectionChangesRespectInertia, ref passed, ref failed);
+        RunTest("Movement: follows route around wall without crossing it", UnitMovementSelfTest.FollowsRouteAroundWallWithoutCrossingIt, ref passed, ref failed);
+        RunTest("Movement: contacts use reduced radius without explosive separation", UnitMovementSelfTest.ContactsUseReducedRadiusWithoutExplosiveSeparation, ref passed, ref failed);
+        RunTest("Movement: dense moving crowd continues to advance", UnitMovementSelfTest.DenseMovingCrowdContinuesToAdvance, ref passed, ref failed);
+        RunTest("Movement: opposing units steer around one another", UnitMovementSelfTest.OpposingUnitsSteerAroundOneAnother, ref passed, ref failed);
+        RunTest("Squad movement: column narrows while advancing", UnitMovementSelfTest.ColumnNarrowsWhileAdvancing, ref passed, ref failed);
+        RunTest("Squad movement: line widens while advancing", UnitMovementSelfTest.LineWidensWhileAdvancing, ref passed, ref failed);
+        RunTest("Squad movement: line keeps its landing slots", UnitMovementSelfTest.LineKeepsItsFormationSlotsAtArrival, ref passed, ref failed);
+        RunTest("Squad movement: wedge keeps its landing slots", UnitMovementSelfTest.WedgeKeepsItsFormationSlotsAtArrival, ref passed, ref failed);
+        RunTest("Squad movement: free group gathers into a moving crowd", UnitMovementSelfTest.FreeGroupGathersIntoCrowdWhileMoving, ref passed, ref failed);
+        RunTest("Squad movement: free group completes without artificial spacing hold", UnitMovementSelfTest.CollectiveMoveCompletesWithoutArtificialSpacingHold, ref passed, ref failed);
         RunTest("Navigation: cached routes avoid previous corridors", TestNavigationRouteReuse, ref passed, ref failed);
         RunTest("AI: scouts toward the center when no target is visible", TestAiSearchAdvance, ref passed, ref failed);
         RunTest("Vision: candidate sampling bounds pair work", TestVisionBoundedCandidateSampling, ref passed, ref failed);
@@ -1243,10 +1274,13 @@ public static class CombatSelfTest
         float startY = start.Y;
         bool detoured = false;
 
-        navigation.BeginUpdate(simulation.Units, worldMap);
-
         for (int step = 0; step < width * height; step++)
         {
+            // Each waypoint hop represents another movement update, so the
+            // shared A* search budget is replenished before requesting the next
+            // local route chunk.
+            navigation.BeginUpdate(simulation.Units, worldMap);
+
             if (!navigation.TryGetWaypoint(
                     simulation.Units,
                     unit.Index,
@@ -1263,7 +1297,7 @@ public static class CombatSelfTest
 
             if (waypoint == new Vector2(target.X, target.Y))
             {
-                if (!detoured || navigation.RoutesBuilt != 1)
+                if (!detoured || navigation.RoutesBuilt < 2)
                     return false;
 
                 break;

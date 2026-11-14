@@ -3,47 +3,39 @@ using System;
 namespace Core.AI.Perception;
 
 /// <summary>
-/// Shared per-observer memory for every perception channel.
-/// Sensors publish observations here; no sensor or AI system owns a parallel contact list.
+/// Owns the shared perception clock and one data-oriented contact/evidence pool.
+/// Per-observer memories are value views, not separately allocated objects.
 /// </summary>
 public sealed class PerceptionMemoryStore : IPerceptionObservationSink
 {
-    private TacticalContactMemory?[] _memories;
+    private bool[] _hasMemory;
+    private readonly PerceptionContactStorage _contacts;
 
-    public float CurrentTimeSeconds { get; private set; }
-    public int Capacity => _memories.Length;
+    public float CurrentTimeSeconds => _contacts.CurrentTimeSeconds;
+    public int Capacity => _hasMemory.Length;
 
     public PerceptionMemoryStore(int initialUnitCapacity = 1024)
     {
         if (initialUnitCapacity <= 0)
             throw new ArgumentOutOfRangeException(nameof(initialUnitCapacity));
-        _memories = new TacticalContactMemory?[initialUnitCapacity];
+
+        _hasMemory = new bool[initialUnitCapacity];
+        _contacts = new PerceptionContactStorage(initialUnitCapacity);
     }
 
-    public void AdvanceTime(float nowSeconds)
-    {
-        ValidateTime(nowSeconds);
-        if (nowSeconds < CurrentTimeSeconds)
-            throw new ArgumentOutOfRangeException(nameof(nowSeconds),
-                "Perception memory time cannot move backwards.");
-        if (nowSeconds == CurrentTimeSeconds)
-            return;
-
-        CurrentTimeSeconds = nowSeconds;
-        for (int i = 0; i < _memories.Length; i++)
-            _memories[i]?.AdvanceTime(nowSeconds);
-    }
+    public void AdvanceTime(float nowSeconds) =>
+        _contacts.AdvanceTime(nowSeconds);
 
     public bool TryGetMemory(int observerIndex, out TacticalContactMemory memory)
     {
-        if ((uint)observerIndex < (uint)_memories.Length &&
-            _memories[observerIndex] is TacticalContactMemory found)
+        if ((uint)observerIndex < (uint)_hasMemory.Length &&
+            _hasMemory[observerIndex])
         {
-            memory = found;
+            memory = CreateView(observerIndex);
             return true;
         }
 
-        memory = null!;
+        memory = default;
         return false;
     }
 
@@ -51,13 +43,15 @@ public sealed class PerceptionMemoryStore : IPerceptionObservationSink
     {
         if (observerIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(observerIndex));
+
         EnsureCapacity(observerIndex + 1);
-        return _memories[observerIndex] ??= new TacticalContactMemory();
+        _hasMemory[observerIndex] = true;
+        return CreateView(observerIndex);
     }
 
     /// <summary>
-    /// Compatibility bridge for existing event producers. The common store keeps
-    /// only PerceptionObservation objects, irrespective of the producer type.
+    /// Compatibility bridge for event producers. All observations enter the same
+    /// observer-scoped contact pool regardless of their source sensor.
     /// </summary>
     public TacticalContact? Record(
         int observerIndex,
@@ -66,14 +60,15 @@ public sealed class PerceptionMemoryStore : IPerceptionObservationSink
         float memoryLifetimeSeconds)
     {
         ArgumentNullException.ThrowIfNull(stimulus);
-        ValidateTime(nowSeconds);
-        if (nowSeconds < CurrentTimeSeconds)
-            throw new ArgumentOutOfRangeException(nameof(nowSeconds),
-                "Perception memory time cannot move backwards.");
+        if (observerIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(observerIndex));
 
-        return RecordObservation(
-            observerIndex,
-            PerceptionObservation.FromStimulus(stimulus, nowSeconds, memoryLifetimeSeconds));
+        EnsureCapacity(observerIndex + 1);
+        PerceptionObservation observation = PerceptionObservation.FromStimulus(
+            stimulus, nowSeconds, memoryLifetimeSeconds);
+        TacticalContact? contact = _contacts.Record(observerIndex, observation);
+        _hasMemory[observerIndex] = true;
+        return contact;
     }
 
     public TacticalContact? RecordObservation(
@@ -84,49 +79,46 @@ public sealed class PerceptionMemoryStore : IPerceptionObservationSink
         if (observerIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(observerIndex));
 
-        float receivedAtSeconds = observation.ReceivedAtSeconds;
-        ValidateTime(receivedAtSeconds);
-        if (receivedAtSeconds < CurrentTimeSeconds)
-            throw new ArgumentOutOfRangeException(nameof(observation),
-                "Observation receipt time cannot be older than the shared perception clock.");
-        if (receivedAtSeconds > CurrentTimeSeconds)
-            AdvanceTime(receivedAtSeconds);
-
-        return GetOrCreateMemory(observerIndex).Record(observation, correlatedContactId);
+        EnsureCapacity(observerIndex + 1);
+        TacticalContact? contact = _contacts.Record(observerIndex, observation, correlatedContactId);
+        _hasMemory[observerIndex] = true;
+        return contact;
     }
 
     public void InitializeUnit(int unitIndex)
     {
         if (unitIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(unitIndex));
+
         EnsureCapacity(unitIndex + 1);
-        _memories[unitIndex]?.Clear();
-        _memories[unitIndex] = null;
+        _contacts.ClearObserver(unitIndex);
+        _hasMemory[unitIndex] = false;
     }
 
     public void ClearUnit(int unitIndex)
     {
-        if ((uint)unitIndex >= (uint)_memories.Length)
+        if ((uint)unitIndex >= (uint)_hasMemory.Length)
             return;
 
-        _memories[unitIndex]?.Clear();
-        _memories[unitIndex] = null;
+        _contacts.ClearObserver(unitIndex);
+        _hasMemory[unitIndex] = false;
     }
 
     public void EnsureCapacity(int required)
     {
         if (required <= 0)
             throw new ArgumentOutOfRangeException(nameof(required));
-        if (required <= _memories.Length)
+        if (required <= _hasMemory.Length)
             return;
 
-        int capacity = Math.Max(required, _memories.Length * 2);
-        Array.Resize(ref _memories, capacity);
+        int capacity = Math.Max(required, _hasMemory.Length * 2);
+        Array.Resize(ref _hasMemory, capacity);
+        _contacts.EnsureObserverCapacity(capacity);
     }
 
-    private static void ValidateTime(float nowSeconds)
-    {
-        if (!float.IsFinite(nowSeconds) || nowSeconds < 0f)
-            throw new ArgumentOutOfRangeException(nameof(nowSeconds));
-    }
+    private TacticalContactMemory CreateView(int observerIndex) =>
+        new(
+            _contacts,
+            observerIndex,
+            _contacts.GetObserverGeneration(observerIndex));
 }
