@@ -32,6 +32,11 @@ public sealed class UnitRenderSystem : IDisposable
     {
         private readonly float _liftX;
         private readonly float _liftY;
+        private readonly Vector2 _axisX;
+        private readonly Vector2 _axisY;
+        private readonly Vector2 _axisZ;
+        private readonly Vector2 _origin;
+        private readonly bool _terrainPreview;
 
         public bool Isometric { get; }
 
@@ -40,6 +45,27 @@ public sealed class UnitRenderSystem : IDisposable
             Isometric = isometric;
             _liftX = liftX;
             _liftY = liftY;
+            _axisX = default;
+            _axisY = default;
+            _axisZ = default;
+            _origin = default;
+            _terrainPreview = false;
+        }
+
+        private UnitVisualProjection(
+            Vector2 axisX,
+            Vector2 axisY,
+            Vector2 axisZ,
+            Vector2 origin)
+        {
+            Isometric = true;
+            _liftX = 0f;
+            _liftY = 0f;
+            _axisX = axisX;
+            _axisY = axisY;
+            _axisZ = axisZ;
+            _origin = origin;
+            _terrainPreview = true;
         }
 
         public static UnitVisualProjection Create(View view, bool isometricEnabled)
@@ -55,12 +81,69 @@ public sealed class UnitRenderSystem : IDisposable
                 -sqrtTwo * MathF.Cos(angle));
         }
 
+        public static UnitVisualProjection CreateTerrainPreview(
+            WorldMap worldMap,
+            float tilePixelSize,
+            float azimuthDegrees,
+            float elevationDegrees)
+        {
+            float elevation = Math.Clamp(
+                float.IsFinite(elevationDegrees) ? elevationDegrees : 30f,
+                15f,
+                90f) * (MathF.PI / 180f);
+            float azimuth = (float.IsFinite(azimuthDegrees) ? azimuthDegrees : 0f) *
+                (MathF.PI / 180f);
+            float cosine = MathF.Cos(azimuth);
+            float sine = MathF.Sin(azimuth);
+            float halfTile = tilePixelSize;
+            float depthScale = halfTile * MathF.Sin(elevation);
+            float verticalScale =
+                halfTile * MathF.Cos(elevation) / MathF.Cos(MathF.PI / 6f);
+
+            Vector2 axisX = new(
+                (cosine - sine) * halfTile,
+                (cosine + sine) * depthScale);
+            Vector2 axisY = new(
+                (-sine - cosine) * halfTile,
+                (-sine + cosine) * depthScale);
+            Vector2 axisZ = new(0f, -verticalScale);
+
+            float centerX = worldMap.TileWidth * 0.5f;
+            float centerY = worldMap.TileHeight * 0.5f;
+            Vector2 origin = new(
+                (centerX - centerY) * halfTile,
+                (centerX + centerY) * depthScale);
+
+            return new UnitVisualProjection(axisX, axisY, axisZ, origin);
+        }
+
         public Vector2f ProjectPosition(Vector3 position, float groundZ, float tilePixelSize)
         {
+            if (_terrainPreview)
+            {
+                return new Vector2f(
+                    _origin.X + _axisX.X * position.X + _axisY.X * position.Y + _axisZ.X * position.Z,
+                    _origin.Y + _axisX.Y * position.X + _axisY.Y * position.Y + _axisZ.Y * position.Z);
+            }
+
             float height = Isometric ? position.Z - groundZ : 0f;
             return new Vector2f(
                 (position.X + _liftX * height) * tilePixelSize,
                 (position.Y + _liftY * height) * tilePixelSize);
+        }
+
+        public Vector2f ProjectVector(Vector3 direction, float tilePixelSize)
+        {
+            if (_terrainPreview)
+            {
+                return new Vector2f(
+                    _axisX.X * direction.X + _axisY.X * direction.Y + _axisZ.X * direction.Z,
+                    _axisX.Y * direction.X + _axisY.Y * direction.Y + _axisZ.Y * direction.Z);
+            }
+
+            return new Vector2f(
+                (direction.X + _liftX * direction.Z) * tilePixelSize,
+                (direction.Y + _liftY * direction.Z) * tilePixelSize);
         }
 
         public void ProjectShape(
@@ -87,15 +170,15 @@ public sealed class UnitRenderSystem : IDisposable
             Vector3 axisY = Vector3.Transform(Vector3.UnitY, orientation);
             Vector3 axisZ = Vector3.Transform(Vector3.UnitZ, orientation);
 
-            Vector2 projectedAxisX = new(
-                axisX.X + _liftX * axisX.Z,
-                axisX.Y + _liftY * axisX.Z);
-            Vector2 projectedAxisY = new(
-                axisY.X + _liftX * axisY.Z,
-                axisY.Y + _liftY * axisY.Z);
-            Vector2 projectedAxisZ = new(
-                axisZ.X + _liftX * axisZ.Z,
-                axisZ.Y + _liftY * axisZ.Z);
+            Vector2 projectedAxisX = _terrainPreview
+                ? ProjectVector(axisX, 1f)
+                : new Vector2(axisX.X + _liftX * axisX.Z, axisX.Y + _liftY * axisX.Z);
+            Vector2 projectedAxisY = _terrainPreview
+                ? ProjectVector(axisY, 1f)
+                : new Vector2(axisY.X + _liftX * axisY.Z, axisY.Y + _liftY * axisY.Z);
+            Vector2 projectedAxisZ = _terrainPreview
+                ? ProjectVector(axisZ, 1f)
+                : new Vector2(axisZ.X + _liftX * axisZ.Z, axisZ.Y + _liftY * axisZ.Z);
 
             float sx = MathF.Abs(scale.X);
             float sy = MathF.Abs(scale.Y);
@@ -113,9 +196,6 @@ public sealed class UnitRenderSystem : IDisposable
                 return;
             }
 
-            // The 3D ellipsoid becomes a 2D ellipse after projection. Use the
-            // covariance eigenvectors so the projected principal axes remain
-            // correct even when vertical thickness shears the silhouette.
             float xx =
                 sx * sx * projectedAxisX.X * projectedAxisX.X +
                 sy * sy * projectedAxisY.X * projectedAxisY.X +
@@ -218,6 +298,344 @@ public sealed class UnitRenderSystem : IDisposable
         int capacity = Math.Max(count, Math.Max(64, _renderOrder.Length * 2));
         Array.Resize(ref _renderOrder, capacity);
         Array.Resize(ref _renderDepthKeys, capacity);
+    }
+
+
+    public void DrawIsometricPreview(
+        RenderWindow window,
+        UnitSimulation simulation,
+        WorldMap worldMap,
+        View cameraView,
+        float tilePixelSize,
+        float azimuthDegrees,
+        float elevationDegrees,
+        UnitId selectedUnit,
+        HashSet<UnitId>? selectedUnits = null)
+    {
+        if (tilePixelSize <= 0f)
+            return;
+
+        UnitVisualProjection projection = UnitVisualProjection.CreateTerrainPreview(
+            worldMap, tilePixelSize, azimuthDegrees, elevationDegrees);
+        float screenScale = MathF.Max(
+            0.001f,
+            window.Size.X / MathF.Max(1f, cameraView.Size.X));
+
+        _vertices.Clear();
+        _bodyOutlines.Clear();
+        _selection.Clear();
+
+        UnitStore units = simulation.Units;
+        UnitBodyStore bodies = simulation.Bodies;
+        ReadOnlySpan<int> active = units.ActiveIndices;
+        int[] bodyStarts = units.BodyStart;
+        short[] bodyCounts = units.BodyCount;
+        Vector3[] positions = units.Position;
+        float[] hitPoints = simulation.Health.OverallHitPoints;
+
+        PreparePreviewRenderOrder(active, positions, azimuthDegrees);
+
+        for (int order = 0; order < active.Length; order++)
+        {
+            int index = _renderOrder[order];
+            Vector3 position = positions[index];
+            if (hitPoints[index] <= 0f)
+                continue;
+
+            Vector2f center = projection.ProjectPosition(position, position.Z, tilePixelSize);
+            if (!IsPreviewPointVisible(center, cameraView))
+                continue;
+
+            uint fillsBefore = _vertices.VertexCount;
+            uint outlinesBefore = _bodyOutlines.VertexCount;
+
+            UnitHitRegionProfile? hitProfile = simulation.HitRegions.GetProfile(index);
+            if (units.Type[index] == UnitType.Colonist &&
+                hitProfile is UnitAnatomyProfile)
+            {
+                AppendGameplayZones(
+                    _vertices,
+                    _bodyOutlines,
+                    units,
+                    index,
+                    units.FactionTag[index],
+                    true,
+                    tilePixelSize,
+                    screenScale,
+                    position.Z,
+                    projection);
+            }
+            else
+            {
+                AppendBodyParts(
+                    _vertices,
+                    _bodyOutlines,
+                    bodies,
+                    bodyStarts[index],
+                    bodyCounts[index],
+                    units.FactionTag[index],
+                    true,
+                    tilePixelSize,
+                    screenScale,
+                    1f,
+                    position,
+                    UnitRigVisualScale,
+                    projection);
+            }
+
+            bool hasBody = _vertices.VertexCount > fillsBefore ||
+                _bodyOutlines.VertexCount > outlinesBefore;
+            if (!hasBody)
+            {
+                Vector2f axisX = projection.ProjectVector(new Vector3(0.22f, 0f, 0f), tilePixelSize);
+                Vector2f axisY = projection.ProjectVector(new Vector3(0f, 0.15f, 0f), tilePixelSize);
+                AppendPreviewEllipse(
+                    _vertices, center, axisX, axisY,
+                    GetBodyPartColor(BodyPartRole.Torso, units.FactionTag[index], true),
+                    14);
+            }
+
+            UnitId id = units.GetId(index);
+            if (selectedUnits?.Contains(id) == true || id.Equals(selectedUnit))
+            {
+                float radius = MathF.Max(units.Width[index], units.Length[index]) *
+                    0.6f * UnitVisualScale;
+                AppendPreviewGroundEllipse(
+                    _selection, projection, position, radius, radius,
+                    tilePixelSize, new Color(255, 238, 115, 235));
+            }
+        }
+
+        DrawPreviewGeometry(window);
+    }
+
+    public void DrawIsometricPreview(
+        RenderWindow window,
+        RenderUnitState[] units,
+        RenderBodyPart[] bodyParts,
+        WorldMap worldMap,
+        View cameraView,
+        float tilePixelSize,
+        float azimuthDegrees,
+        float elevationDegrees,
+        UnitId selectedUnit,
+        HashSet<UnitId>? selectedUnits = null)
+    {
+        if (tilePixelSize <= 0f || units.Length == 0)
+            return;
+
+        UnitVisualProjection projection = UnitVisualProjection.CreateTerrainPreview(
+            worldMap, tilePixelSize, azimuthDegrees, elevationDegrees);
+        float screenScale = MathF.Max(
+            0.001f,
+            window.Size.X / MathF.Max(1f, cameraView.Size.X));
+
+        _vertices.Clear();
+        _bodyOutlines.Clear();
+        _selection.Clear();
+        PreparePreviewRenderOrder(units, azimuthDegrees);
+
+        for (int order = 0; order < units.Length; order++)
+        {
+            RenderUnitState unit = units[_renderOrder[order]];
+            if (unit.HitPoints <= 0f)
+                continue;
+
+            Vector3 position = unit.Position;
+            Vector2f center = projection.ProjectPosition(position, position.Z, tilePixelSize);
+            if (!IsPreviewPointVisible(center, cameraView))
+                continue;
+
+            uint fillsBefore = _vertices.VertexCount;
+            uint outlinesBefore = _bodyOutlines.VertexCount;
+
+            if (unit.Type == UnitType.Colonist &&
+                unit.BodyPartCount == UnitGameplayZoneSystem.ZoneCount)
+            {
+                int count = Math.Clamp(
+                    unit.BodyPartCount,
+                    0,
+                    bodyParts.Length - Math.Clamp(unit.BodyPartStart, 0, bodyParts.Length));
+                int start = Math.Clamp(unit.BodyPartStart, 0, bodyParts.Length);
+                for (int partIndex = start; partIndex < start + count; partIndex++)
+                {
+                    RenderBodyPart part = bodyParts[partIndex];
+                    AppendBodyPart(
+                        _vertices,
+                        _bodyOutlines,
+                        position + (part.Position - position) * UnitVisualScale,
+                        part.Scale * UnitVisualScale,
+                        part.Orientation,
+                        part.Rotation,
+                        part.Primitive,
+                        part.Role,
+                        unit.FactionTag,
+                        true,
+                        tilePixelSize,
+                        screenScale,
+                        1f,
+                        position.Z,
+                        projection);
+                }
+            }
+            else
+            {
+                AppendBodyParts(
+                    _vertices,
+                    _bodyOutlines,
+                    bodyParts,
+                    unit.BodyPartStart,
+                    unit.BodyPartCount,
+                    unit.FactionTag,
+                    true,
+                    tilePixelSize,
+                    screenScale,
+                    1f,
+                    position,
+                    UnitRigVisualScale,
+                    projection);
+            }
+
+            bool hasBody = _vertices.VertexCount > fillsBefore ||
+                _bodyOutlines.VertexCount > outlinesBefore;
+            if (!hasBody)
+            {
+                Vector2f axisX = projection.ProjectVector(new Vector3(0.22f, 0f, 0f), tilePixelSize);
+                Vector2f axisY = projection.ProjectVector(new Vector3(0f, 0.15f, 0f), tilePixelSize);
+                AppendPreviewEllipse(
+                    _vertices, center, axisX, axisY,
+                    GetBodyPartColor(BodyPartRole.Torso, unit.FactionTag, true),
+                    14);
+            }
+
+            UnitId id = new(unit.Index, unit.Generation);
+            if (selectedUnits?.Contains(id) == true || id.Equals(selectedUnit))
+            {
+                float radius = MathF.Max(unit.Width, unit.Length) *
+                    0.6f * UnitVisualScale;
+                AppendPreviewGroundEllipse(
+                    _selection, projection, position, radius, radius,
+                    tilePixelSize, new Color(255, 238, 115, 235));
+            }
+        }
+
+        DrawPreviewGeometry(window);
+    }
+
+    private void PreparePreviewRenderOrder(
+        ReadOnlySpan<int> active,
+        Vector3[] positions,
+        float azimuthDegrees)
+    {
+        EnsureRenderOrderCapacity(active.Length);
+        float radians = (float.IsFinite(azimuthDegrees) ? azimuthDegrees : 0f) *
+            (MathF.PI / 180f);
+        float cosine = MathF.Cos(radians);
+        float sine = MathF.Sin(radians);
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int index = active[i];
+            Vector3 position = positions[index];
+            float rotatedX = cosine * position.X - sine * position.Y;
+            float rotatedY = sine * position.X + cosine * position.Y;
+            _renderDepthKeys[i] = rotatedX + rotatedY;
+            _renderOrder[i] = index;
+        }
+
+        Array.Sort(_renderDepthKeys, _renderOrder, 0, active.Length);
+    }
+
+    private void PreparePreviewRenderOrder(
+        RenderUnitState[] units,
+        float azimuthDegrees)
+    {
+        EnsureRenderOrderCapacity(units.Length);
+        float radians = (float.IsFinite(azimuthDegrees) ? azimuthDegrees : 0f) *
+            (MathF.PI / 180f);
+        float cosine = MathF.Cos(radians);
+        float sine = MathF.Sin(radians);
+
+        for (int i = 0; i < units.Length; i++)
+        {
+            Vector3 position = units[i].Position;
+            float rotatedX = cosine * position.X - sine * position.Y;
+            float rotatedY = sine * position.X + cosine * position.Y;
+            _renderDepthKeys[i] = rotatedX + rotatedY;
+            _renderOrder[i] = i;
+        }
+
+        Array.Sort(_renderDepthKeys, _renderOrder, 0, units.Length);
+    }
+
+    private static bool IsPreviewPointVisible(Vector2f point, View view)
+    {
+        float marginX = view.Size.X * 0.62f;
+        float marginY = view.Size.Y * 0.62f;
+        return point.X >= view.Center.X - marginX &&
+            point.X <= view.Center.X + marginX &&
+            point.Y >= view.Center.Y - marginY &&
+            point.Y <= view.Center.Y + marginY;
+    }
+
+    private static void AppendPreviewEllipse(
+        VertexArray vertices,
+        Vector2f center,
+        Vector2f axisA,
+        Vector2f axisB,
+        Color color,
+        int segments)
+    {
+        for (int i = 0; i < segments; i++)
+        {
+            float angle0 = i * MathF.Tau / segments;
+            float angle1 = (i + 1) * MathF.Tau / segments;
+            Vector2f p0 = new(
+                center.X + axisA.X * MathF.Cos(angle0) + axisB.X * MathF.Sin(angle0),
+                center.Y + axisA.Y * MathF.Cos(angle0) + axisB.Y * MathF.Sin(angle0));
+            Vector2f p1 = new(
+                center.X + axisA.X * MathF.Cos(angle1) + axisB.X * MathF.Sin(angle1),
+                center.Y + axisA.Y * MathF.Cos(angle1) + axisB.Y * MathF.Sin(angle1));
+            vertices.Append(new Vertex(center, color));
+            vertices.Append(new Vertex(p0, color));
+            vertices.Append(new Vertex(p1, color));
+        }
+    }
+
+    private static void AppendPreviewGroundEllipse(
+        VertexArray lines,
+        UnitVisualProjection projection,
+        Vector3 position,
+        float radiusX,
+        float radiusY,
+        float tilePixelSize,
+        Color color)
+    {
+        const int segments = 28;
+        Vector2f center = projection.ProjectPosition(position, position.Z, tilePixelSize);
+        Vector2f axisX = projection.ProjectVector(new Vector3(radiusX, 0f, 0f), tilePixelSize);
+        Vector2f axisY = projection.ProjectVector(new Vector3(0f, radiusY, 0f), tilePixelSize);
+        Vector2f previous = new(center.X + axisX.X, center.Y + axisX.Y);
+
+        for (int i = 1; i <= segments; i++)
+        {
+            float angle = i * MathF.Tau / segments;
+            Vector2f next = new(
+                center.X + axisX.X * MathF.Cos(angle) + axisY.X * MathF.Sin(angle),
+                center.Y + axisX.Y * MathF.Cos(angle) + axisY.Y * MathF.Sin(angle));
+            AppendDebugLine(lines, previous.X, previous.Y, next.X, next.Y, color);
+            previous = next;
+        }
+    }
+
+    private void DrawPreviewGeometry(RenderWindow window)
+    {
+        if (_vertices.VertexCount > 0)
+            window.Draw(_vertices);
+        if (_bodyOutlines.VertexCount > 0)
+            window.Draw(_bodyOutlines);
+        if (_selection.VertexCount > 0)
+            window.Draw(_selection);
     }
 
     private readonly VertexArray _visionDebug =

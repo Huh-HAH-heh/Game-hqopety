@@ -57,7 +57,6 @@ public sealed class GameRenderer
     private readonly GameInput _input;
     private readonly MapRenderSystem _mapRenderer;
     private readonly BlockTerrainPreviewRenderer _blockTerrainPreviewRenderer = new();
-    private readonly IsometricUnitPreviewRenderer _isometricUnitPreviewRenderer = new();
     private readonly UnitSimulation _unitSimulation;
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
@@ -450,7 +449,6 @@ public sealed class GameRenderer
             // still exists, even if initialization, update, or drawing throws.
             _mapRenderer.Dispose();
             _blockTerrainPreviewRenderer.Dispose();
-            _isometricUnitPreviewRenderer.Dispose();
             _projectileRenderer.Dispose();
             _unitRenderer.Dispose();
             _visionTestScene.Dispose();
@@ -795,9 +793,10 @@ public sealed class GameRenderer
                 : null;
             if (previewSnapshot != null)
             {
-                _isometricUnitPreviewRenderer.DrawSnapshot(
+                _unitRenderer.DrawIsometricPreview(
                     _window,
                     previewSnapshot.Units,
+                    previewSnapshot.BodyParts,
                     _worldMap,
                     _camera.View,
                     TerrainTilePixelSize,
@@ -808,7 +807,7 @@ public sealed class GameRenderer
             }
             else if (_simulationThread == null)
             {
-                _isometricUnitPreviewRenderer.Draw(
+                _unitRenderer.DrawIsometricPreview(
                     _window,
                     _unitSimulation,
                     _worldMap,
