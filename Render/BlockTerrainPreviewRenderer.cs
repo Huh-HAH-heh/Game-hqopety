@@ -64,6 +64,53 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 highestMeters * heightScale * 0.42f);
     }
 
+    public Vector2f RotateCameraCenterForAzimuth(
+        WorldMap worldMap,
+        Vector2f cameraCenter,
+        float tilePixelSize,
+        float elevationDegrees,
+        float deltaAzimuthDegrees)
+    {
+        if (!float.IsFinite(deltaAzimuthDegrees) ||
+            MathF.Abs(deltaAzimuthDegrees) < 0.0001f)
+        {
+            return cameraCenter;
+        }
+
+        float tileSize = MathF.Max(1f, tilePixelSize * 2f);
+        float halfTileSize = tileSize * 0.5f;
+        float elevationRadians = Math.Clamp(
+            float.IsFinite(elevationDegrees) ? elevationDegrees : 30f,
+            15f,
+            90f) * (MathF.PI / 180f);
+        float groundDepthScale = halfTileSize * MathF.Sin(elevationRadians);
+        if (groundDepthScale <= 0.001f)
+            return cameraCenter;
+
+        Vector2f focus = GetCameraCenter(
+            worldMap,
+            tilePixelSize,
+            elevationDegrees);
+
+        // Convert the camera offset from projected coordinates back into
+        // map-plane coordinates, rotate it with the terrain, then project it
+        // again. This keeps the world point under the viewport center stable.
+        float projectedX = (cameraCenter.X - focus.X) / halfTileSize;
+        float projectedY = (cameraCenter.Y - focus.Y) / groundDepthScale;
+        float mapX = (projectedX + projectedY) * 0.5f;
+        float mapY = (projectedY - projectedX) * 0.5f;
+
+        float radians = (deltaAzimuthDegrees % 360f) * (MathF.PI / 180f);
+        float cosine = MathF.Cos(radians);
+        float sine = MathF.Sin(radians);
+        float rotatedX = cosine * mapX - sine * mapY;
+        float rotatedY = sine * mapX + cosine * mapY;
+
+        return new Vector2f(
+            focus.X + (rotatedX - rotatedY) * halfTileSize,
+            focus.Y + (rotatedX + rotatedY) * groundDepthScale);
+    }
+
     public void Draw(
         RenderWindow window,
         WorldMap worldMap,

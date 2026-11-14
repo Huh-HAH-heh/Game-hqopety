@@ -3980,8 +3980,17 @@ public sealed class GameRenderer
                 {
                     float horizontalDelta =
                         e.Position.X - _lastCameraRotatePixel.X;
-                    _camera.RotateAzimuth(
-                        horizontalDelta * CameraRotationDegreesPerPixel);
+                    float azimuthDelta =
+                        horizontalDelta * CameraRotationDegreesPerPixel;
+                    Vector2f rotatedCameraCenter =
+                        _blockTerrainPreviewRenderer.RotateCameraCenterForAzimuth(
+                            _worldMap,
+                            _camera.View.Center,
+                            TerrainTilePixelSize,
+                            _camera.ElevationDegrees,
+                            azimuthDelta);
+                    _camera.RotateAzimuth(azimuthDelta);
+                    _camera.CenterOnPosition(rotatedCameraCenter);
                     _lastCameraRotatePixel = e.Position;
                     return;
                 }
