@@ -146,6 +146,9 @@ public sealed class UnitRenderSystem : IDisposable
                 (direction.Y + _liftY * direction.Z) * tilePixelSize);
         }
 
+        private static Vector2 ToNumerics(Vector2f value) =>
+            new(value.X, value.Y);
+
         public void ProjectShape(
             Vector3 scale,
             Quaternion orientation,
@@ -171,13 +174,13 @@ public sealed class UnitRenderSystem : IDisposable
             Vector3 axisZ = Vector3.Transform(Vector3.UnitZ, orientation);
 
             Vector2 projectedAxisX = _terrainPreview
-                ? ProjectVector(axisX, 1f)
+                ? ToNumerics(ProjectVector(axisX, 1f))
                 : new Vector2(axisX.X + _liftX * axisX.Z, axisX.Y + _liftY * axisX.Z);
             Vector2 projectedAxisY = _terrainPreview
-                ? ProjectVector(axisY, 1f)
+                ? ToNumerics(ProjectVector(axisY, 1f))
                 : new Vector2(axisY.X + _liftX * axisY.Z, axisY.Y + _liftY * axisY.Z);
             Vector2 projectedAxisZ = _terrainPreview
-                ? ProjectVector(axisZ, 1f)
+                ? ToNumerics(ProjectVector(axisZ, 1f))
                 : new Vector2(axisZ.X + _liftX * axisZ.Z, axisZ.Y + _liftY * axisZ.Z);
 
             float sx = MathF.Abs(scale.X);
@@ -228,6 +231,7 @@ public sealed class UnitRenderSystem : IDisposable
 
     private float[] _renderDepthKeys = Array.Empty<float>();
     private int[] _renderOrder = Array.Empty<int>();
+    private readonly List<BlockTerrainPreviewRenderer.OcclusionUnit> _previewOcclusionUnits = new(512);
 
     private readonly VertexArray _vertices =
         new VertexArray(
@@ -311,8 +315,10 @@ public sealed class UnitRenderSystem : IDisposable
         float azimuthDegrees,
         float elevationDegrees,
         UnitId selectedUnit,
-        HashSet<UnitId>? selectedUnits = null)
+        HashSet<UnitId>? selectedUnits = null,
+        bool showXray = false)
     {
+        _previewOcclusionUnits.Clear();
         if (tilePixelSize <= 0f)
             return;
 
@@ -353,6 +359,19 @@ public sealed class UnitRenderSystem : IDisposable
             Vector2f center = projection.ProjectPosition(position, position.Z, tilePixelSize);
             if (!IsPreviewPointVisible(center, cameraView))
                 continue;
+
+            if (showXray)
+            {
+                _previewOcclusionUnits.Add(new BlockTerrainPreviewRenderer.OcclusionUnit(
+                    position.X, position.Y, position.Z,
+                    units.BodyNormal[index].X, units.BodyNormal[index].Y,
+                    units.Width[index], units.Length[index], units.Height[index],
+                    units.FactionTag[index]));
+                float xrayRadius = MathF.Max(units.Width[index], units.Length[index]) * 0.58f;
+                AppendPreviewGroundEllipse(
+                    _selection, projection, position, xrayRadius, xrayRadius,
+                    tilePixelSize, GetXrayFactionColor(units.FactionTag[index]));
+            }
 
             uint fillsBefore = _vertices.VertexCount;
             uint outlinesBefore = _bodyOutlines.VertexCount;
@@ -428,8 +447,10 @@ public sealed class UnitRenderSystem : IDisposable
         float azimuthDegrees,
         float elevationDegrees,
         UnitId selectedUnit,
-        HashSet<UnitId>? selectedUnits = null)
+        HashSet<UnitId>? selectedUnits = null,
+        bool showXray = false)
     {
+        _previewOcclusionUnits.Clear();
         if (tilePixelSize <= 0f || units.Length == 0)
             return;
 
@@ -461,6 +482,19 @@ public sealed class UnitRenderSystem : IDisposable
             Vector2f center = projection.ProjectPosition(position, position.Z, tilePixelSize);
             if (!IsPreviewPointVisible(center, cameraView))
                 continue;
+
+            if (showXray)
+            {
+                _previewOcclusionUnits.Add(new BlockTerrainPreviewRenderer.OcclusionUnit(
+                    position.X, position.Y, position.Z,
+                    unit.BodyNormal.X, unit.BodyNormal.Y,
+                    unit.Width, unit.Length, unit.Height,
+                    unit.FactionTag));
+                float xrayRadius = MathF.Max(unit.Width, unit.Length) * 0.58f;
+                AppendPreviewGroundEllipse(
+                    _selection, projection, position, xrayRadius, xrayRadius,
+                    tilePixelSize, GetXrayFactionColor(unit.FactionTag));
+            }
 
             uint fillsBefore = _vertices.VertexCount;
             uint outlinesBefore = _bodyOutlines.VertexCount;
@@ -643,6 +677,29 @@ public sealed class UnitRenderSystem : IDisposable
             previous = next;
         }
     }
+
+    public void DrawBlockPreviewXrayOverlay(
+        RenderWindow window,
+        BlockTerrainPreviewRenderer terrainRenderer,
+        WorldMap worldMap,
+        View cameraView,
+        bool enabled)
+    {
+        if (enabled && _previewOcclusionUnits.Count > 0)
+        {
+            terrainRenderer.DrawHiddenUnitHatching(
+                window, worldMap, _previewOcclusionUnits, cameraView);
+        }
+    }
+
+    private static Color GetXrayFactionColor(ushort factionTag) =>
+        factionTag switch
+        {
+            1 => new Color(74, 166, 238, 175),
+            2 => new Color(232, 98, 92, 175),
+            3 => new Color(235, 190, 84, 175),
+            _ => new Color(180, 192, 205, 175)
+        };
 
     private void DrawPreviewGeometry(RenderWindow window)
     {

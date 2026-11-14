@@ -169,6 +169,7 @@ public sealed class GameRenderer
     private bool _showContourLabels = true;
     private bool _showUnitRig = true;
     private bool _showBlockTerrainPreview;
+    private bool _showBlockPreviewXray;
     private Vector2f _normalCameraCenter;
     private bool _blockPreviewRestoreIsometricProjection;
     private bool _closeRequested;
@@ -804,7 +805,8 @@ public sealed class GameRenderer
                     _camera.AzimuthDegrees,
                     _camera.ElevationDegrees,
                     _selectedUnit,
-                    _selectedUnits);
+                    _selectedUnits,
+                    _showBlockPreviewXray);
             }
             else if (_simulationThread == null)
             {
@@ -818,9 +820,16 @@ public sealed class GameRenderer
                     _camera.AzimuthDegrees,
                     _camera.ElevationDegrees,
                     _selectedUnit,
-                    _selectedUnits);
+                    _selectedUnits,
+                    _showBlockPreviewXray);
             }
             _blockTerrainPreviewRenderer.DrawRemainingOccluders(_window);
+            _unitRenderer.DrawBlockPreviewXrayOverlay(
+                _window,
+                _blockTerrainPreviewRenderer,
+                _worldMap,
+                _camera.View,
+                _showBlockPreviewXray);
             _lastUnitDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
             _lastProjectileDrawMilliseconds = 0d;
@@ -4403,7 +4412,8 @@ public sealed class GameRenderer
                 "[Terrain preview] Camera centered on terrain. " +
                 "Alt+right mouse drag: free rotation; Q/E: rotate 45 degrees; " +
                 $"NumPad +/-: elevation ({_camera.ElevationDegrees:0}°); " +
-                "middle mouse: pan; WASD/arrows: move; wheel: zoom to cursor; B: return to game.");
+                "middle mouse: pan; WASD/arrows: move; wheel: zoom to cursor; " +
+                "X: faction highlight + wall hatching; B: return to game.");
         }
         else
         {
@@ -4493,6 +4503,12 @@ public sealed class GameRenderer
             else if (key is Keyboard.Key.Q or Keyboard.Key.E)
             {
                 RotateBlockPreviewAzimuth(key == Keyboard.Key.Q ? -45f : 45f);
+            }
+            else if (key == Keyboard.Key.X)
+            {
+                _showBlockPreviewXray = !_showBlockPreviewXray;
+                Console.WriteLine(
+                    $"[Terrain preview] Unit X-ray: {(_showBlockPreviewXray ? "ON" : "OFF")}.");
             }
             else if (key == Keyboard.Key.Add)
             {
