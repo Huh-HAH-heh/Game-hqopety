@@ -64,7 +64,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         }
     }
 
-    private readonly VertexArray _blockFaces = new(PrimitiveType.Triangles);
     private readonly List<BlockDrawItem> _visibleBlocks = new(4096);
     private readonly List<OcclusionBatch> _occlusionBatchPool = new(128);
     private readonly List<OcclusionBatch> _activeOcclusionBatches = new(128);
@@ -229,7 +228,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         if (rebuildGeometry)
         {
-            _blockFaces.Clear();
             BeginOcclusionBatchBuild(minimumDetailSize);
 
             GetVisibleTileBounds(
@@ -306,6 +304,25 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 bool drawBlockOutline =
                     drawBlockGrid && size >= BlockTerrain.HorizontalBlockSize;
 
+                // Top faces and vertical faces must share the same depth queue.
+                // Drawing every top face first lets distant walls overwrite nearer terrain.
+                VertexArray topFaces = GetOcclusionFaces(block.Depth);
+                Color topColor = GetTopColor(block.MaterialId, height);
+                AppendTopFace(topFaces, north, east, south, west, topColor);
+
+                if (drawBlockOutline)
+                {
+                    // Every internal edge is emitted once: north and west.
+                    // East and south are only needed at the outer map boundary.
+                    AppendLineAsQuad(topFaces, north, east, seamColor);
+                    AppendLineAsQuad(topFaces, west, north, seamColor);
+
+                    if (x + size >= worldMap.TileWidth)
+                        AppendLineAsQuad(topFaces, east, south, seamColor);
+                    if (y + size >= worldMap.TileHeight)
+                        AppendLineAsQuad(topFaces, south, west, seamColor);
+                }
+
                 AppendVisibleSideFaces(
                     worldMap, x, y, size,
                     Math.Min(minimumDetailSize, BlockTerrain.HorizontalBlockSize),
@@ -313,22 +330,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     groundDepthScale, verticalScale,
                     drawBlockOutline,
                     northZ, eastZ, southZ, westZ);
-
-                Color topColor = GetTopColor(block.MaterialId, height);
-                AppendTopFace(_blockFaces, north, east, south, west, topColor);
-
-                if (drawBlockOutline)
-                {
-                    // Every internal edge is emitted once: north and west.
-                    // East and south are only needed at the outer map boundary.
-                    AppendLineAsQuad(_blockFaces, north, east, seamColor);
-                    AppendLineAsQuad(_blockFaces, west, north, seamColor);
-
-                    if (x + size >= worldMap.TileWidth)
-                        AppendLineAsQuad(_blockFaces, east, south, seamColor);
-                    if (y + size >= worldMap.TileHeight)
-                        AppendLineAsQuad(_blockFaces, south, west, seamColor);
-                }
             }
 
             _activeOcclusionBatches.Sort(static (left, right) =>
@@ -346,9 +347,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _cacheValid = true;
         }
 
-        // Top surfaces are the terrain base pass. Camera-facing vertical
-        // faces are drawn later, interleaved with units by camera depth.
-        window.Draw(_blockFaces);
+        // All terrain faces are queued by camera depth and consumed together
+        // with units through DrawOccludersBeforeDepth / DrawRemainingOccluders.
     }
 
     public bool HasOccludersBeforeDepth(float depth) =>
@@ -1190,7 +1190,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
     public void Dispose()
     {
-        _blockFaces.Dispose();
         _xrayFill.Dispose();
         _xrayHatch.Dispose();
         for (int i = 0; i < _occlusionBatchPool.Count; i++)

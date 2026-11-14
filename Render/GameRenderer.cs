@@ -3430,12 +3430,8 @@ public sealed class GameRenderer
         _window.MouseButtonPressed +=
             (_, e) =>
             {
-                bool altPressed =
-                    Keyboard.IsKeyPressed(Keyboard.Key.LAlt) ||
-                    Keyboard.IsKeyPressed(Keyboard.Key.RAlt);
                 if (_showBlockTerrainPreview &&
-                    e.Button == Mouse.Button.Right &&
-                    altPressed)
+                    e.Button == Mouse.Button.Right)
                 {
                     _isRotatingCamera = true;
                     _lastCameraRotatePixel = e.Position;
@@ -3979,6 +3975,25 @@ public sealed class GameRenderer
                     (int)dragUiCoordinates.X,
                     (int)dragUiCoordinates.Y);
 
+                if (_showBlockTerrainPreview && _isRotatingCamera)
+                {
+                    float horizontalDelta =
+                        e.Position.X - _lastCameraRotatePixel.X;
+                    float azimuthDelta =
+                        horizontalDelta * CameraRotationDegreesPerPixel;
+                    Vector2f rotatedCameraCenter =
+                        _blockTerrainPreviewRenderer.RotateCameraCenterForAzimuth(
+                            _worldMap,
+                            _camera.View.Center,
+                            TerrainTilePixelSize,
+                            _camera.ElevationDegrees,
+                            azimuthDelta);
+                    _camera.RotateAzimuth(azimuthDelta);
+                    _camera.CenterOnPosition(rotatedCameraCenter);
+                    _lastCameraRotatePixel = e.Position;
+                    return;
+                }
+
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                 {
                     _bodyRigEditorOverlay.HandleMouseMoved(dragUiPosition);
@@ -4026,25 +4041,6 @@ public sealed class GameRenderer
                         _window.Size.X,
                         _window.Size.Y) == true)
                 {
-                    return;
-                }
-
-                if (_isRotatingCamera)
-                {
-                    float horizontalDelta =
-                        e.Position.X - _lastCameraRotatePixel.X;
-                    float azimuthDelta =
-                        horizontalDelta * CameraRotationDegreesPerPixel;
-                    Vector2f rotatedCameraCenter =
-                        _blockTerrainPreviewRenderer.RotateCameraCenterForAzimuth(
-                            _worldMap,
-                            _camera.View.Center,
-                            TerrainTilePixelSize,
-                            _camera.ElevationDegrees,
-                            azimuthDelta);
-                    _camera.RotateAzimuth(azimuthDelta);
-                    _camera.CenterOnPosition(rotatedCameraCenter);
-                    _lastCameraRotatePixel = e.Position;
                     return;
                 }
 
@@ -4144,15 +4140,15 @@ public sealed class GameRenderer
         _window.MouseButtonReleased +=
             (_, e) =>
             {
-                if (_bodyRigEditorOverlay?.IsOpen == true)
-                {
-                    _bodyRigEditorOverlay.HandleMouseReleased(e.Button);
-                    return;
-                }
-
                 if (e.Button == Mouse.Button.Right && _isRotatingCamera)
                 {
                     _isRotatingCamera = false;
+                    return;
+                }
+
+                if (_bodyRigEditorOverlay?.IsOpen == true)
+                {
+                    _bodyRigEditorOverlay.HandleMouseReleased(e.Button);
                     return;
                 }
 
@@ -4413,7 +4409,7 @@ public sealed class GameRenderer
                     _camera.ElevationDegrees));
             Console.WriteLine(
                 "[Terrain preview] Camera centered on terrain. " +
-                "Alt+right mouse drag: free rotation; Q/E: rotate 45 degrees; " +
+                "right mouse drag: free rotation; Q/E: rotate 45 degrees; " +
                 $"NumPad +/-: elevation ({_camera.ElevationDegrees:0}°); " +
                 "middle mouse: pan; WASD/arrows: move; wheel: zoom to cursor; " +
                 "X: faction highlight + wall hatching; B: return to game.");
