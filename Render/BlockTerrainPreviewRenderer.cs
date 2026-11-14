@@ -13,10 +13,14 @@ namespace RimClone.Render;
 /// </summary>
 public sealed class BlockTerrainPreviewRenderer : IDisposable
 {
+    private const int MinimumBlockSize = 1;
+    private const int MaximumAdaptiveBlockSize = BlockTerrain.HorizontalBlockSize * 8;
+
     private struct BlockDrawItem
     {
         public int X;
         public int Y;
+        public int Size;
         public float Height;
         public ushort MaterialId;
         public float Depth;
@@ -96,10 +100,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
-        // Keep full 4 x 4 m detail at rest. While the camera is dragged,
-        // temporarily double the block step to reduce rebuild and sort work.
-        // Full detail is restored automatically on the first frame after release.
-        int step = BlockTerrain.HorizontalBlockSize * (isCameraRotating ? 2 : 1);
+        // Calm terrain is merged into large 32 m blocks. Height/material changes
+        // recursively split patches down to 1 m details; while dragging the camera,
+        // keep the previous 4 m minimum detail to reduce rotation-time rebuild work.
+        int minimumDetailSize = isCameraRotating
+            ? BlockTerrain.HorizontalBlockSize
+            : MinimumBlockSize;
 
         bool cameraMovedOutsideCache =
             MathF.Abs(cameraView.Center.X - _cachedCameraCenter.X) >
@@ -117,7 +123,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _cachedTerrainVersion != worldMap.TerrainVersion ||
             MathF.Abs(_cachedCameraAzimuthDegrees - cameraAzimuthDegrees) > 0.01f ||
             MathF.Abs(_cachedElevationDegrees - elevationDegrees) > 0.01f ||
-            _cachedLodStep != step ||
+            _cachedLodStep != minimumDetailSize ||
             MathF.Abs(_cachedTileSize - tileSize) > 0.001f ||
             cameraMovedOutsideCache ||
             viewSizeChanged;
@@ -140,42 +146,21 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 out int minY,
                 out int maxY);
 
-            minX = minX / step * step;
-            minY = minY / step * step;
             maxX = Math.Min(worldMap.MaxTileX, maxX);
             maxY = Math.Min(worldMap.MaxTileY, maxY);
 
             _visibleBlocks.Clear();
             float centerX = worldMap.TileWidth * 0.5f;
             float centerY = worldMap.TileHeight * 0.5f;
-            for (int y = minY; y <= maxY; y += step)
+            int firstBlockX = minX / MaximumAdaptiveBlockSize * MaximumAdaptiveBlockSize;
+            int firstBlockY = minY / MaximumAdaptiveBlockSize * MaximumAdaptiveBlockSize;
+            for (int y = firstBlockY; y <= maxY; y += MaximumAdaptiveBlockSize)
             {
-                for (int x = minX; x <= maxX; x += step)
+                for (int x = firstBlockX; x <= maxX; x += MaximumAdaptiveBlockSize)
                 {
-                    int surfaceLayer = worldMap.FindTopOccupiedLayer(
-                        x, y, worldMap.LayerCount - 1);
-                    if (surfaceLayer < 0)
-                        continue;
-
-                    float height = worldMap.Blocks.GetSurfaceLevel(x, y);
-                    if (height <= 0f)
-                        height = (surfaceLayer + 1f) * 0.1f;
-
-                    float localX = x + step * 0.5f - centerX;
-                    float localY = y + step * 0.5f - centerY;
-                    float rotatedX =
-                        _rotationCosine * localX - _rotationSine * localY;
-                    float rotatedY =
-                        _rotationSine * localX + _rotationCosine * localY;
-
-                    _visibleBlocks.Add(new BlockDrawItem
-                    {
-                        X = x,
-                        Y = y,
-                        Height = height,
-                        MaterialId = worldMap.GetMaterialId(x, y, surfaceLayer),
-                        Depth = rotatedX + rotatedY
-                    });
+                    CollectAdaptiveBlocks(
+                        worldMap, x, y, MaximumAdaptiveBlockSize,
+                        minimumDetailSize, centerX, centerY);
                 }
             }
 
@@ -195,6 +180,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 BlockDrawItem block = _visibleBlocks[i];
                 int x = block.X;
                 int y = block.Y;
+                int size = block.Size;
                 float height = block.Height;
                 float northZ = height;
                 float eastZ = height;
@@ -205,17 +191,17 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     worldMap, x, y, northZ, tileSize,
                     groundDepthScale, verticalScale);
                 Vector2f east = ProjectLevelPoint(
-                    worldMap, x + step, y, eastZ, tileSize,
+                    worldMap, x + size, y, eastZ, tileSize,
                     groundDepthScale, verticalScale);
                 Vector2f south = ProjectLevelPoint(
-                    worldMap, x + step, y + step, southZ, tileSize,
+                    worldMap, x + size, y + size, southZ, tileSize,
                     groundDepthScale, verticalScale);
                 Vector2f west = ProjectLevelPoint(
-                    worldMap, x, y + step, westZ, tileSize,
+                    worldMap, x, y + size, westZ, tileSize,
                     groundDepthScale, verticalScale);
 
                 AppendVisibleSideFaces(
-                    worldMap, x, y, step, tileSize,
+                    worldMap, x, y, size, minimumDetailSize, tileSize,
                     groundDepthScale, verticalScale,
                     drawBlockGrid,
                     northZ, eastZ, southZ, westZ);
@@ -235,7 +221,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _cachedTerrainVersion = worldMap.TerrainVersion;
             _cachedCameraAzimuthDegrees = cameraAzimuthDegrees;
             _cachedElevationDegrees = elevationDegrees;
-            _cachedLodStep = step;
+            _cachedLodStep = minimumDetailSize;
             _cachedTileSize = tileSize;
             _cachedCameraCenter = cameraView.Center;
             _cachedViewSize = cameraView.Size;
@@ -245,11 +231,110 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         window.Draw(_blockFaces);
     }
 
+    private void CollectAdaptiveBlocks(
+        WorldMap worldMap,
+        int x,
+        int y,
+        int size,
+        int minimumDetailSize,
+        float centerX,
+        float centerY)
+    {
+        if (x >= worldMap.TileWidth || y >= worldMap.TileHeight)
+            return;
+
+        if (TryGetUniformPatch(
+                worldMap, x, y, size, minimumDetailSize,
+                out int surfaceLevel, out ushort materialId))
+        {
+            if (surfaceLevel > 0 && materialId != 0)
+                AddVisibleBlock(x, y, size, surfaceLevel, materialId, centerX, centerY);
+            return;
+        }
+
+        if (size <= minimumDetailSize)
+        {
+            // At the active detail limit use the local surface sample. This is
+            // 1 m when idle and 4 m during camera rotation for a cheaper preview.
+            surfaceLevel = worldMap.Blocks.GetSurfaceLevel(x, y);
+            materialId = worldMap.Blocks.GetMaterialId(x, y);
+            if (surfaceLevel > 0 && materialId != 0)
+                AddVisibleBlock(x, y, size, surfaceLevel, materialId, centerX, centerY);
+            return;
+        }
+
+        int half = size >> 1;
+        CollectAdaptiveBlocks(worldMap, x, y, half, minimumDetailSize, centerX, centerY);
+        CollectAdaptiveBlocks(worldMap, x + half, y, half, minimumDetailSize, centerX, centerY);
+        CollectAdaptiveBlocks(worldMap, x, y + half, half, minimumDetailSize, centerX, centerY);
+        CollectAdaptiveBlocks(worldMap, x + half, y + half, half, minimumDetailSize, centerX, centerY);
+    }
+
+    private static bool TryGetUniformPatch(
+        WorldMap worldMap,
+        int x,
+        int y,
+        int size,
+        int minimumDetailSize,
+        out int surfaceLevel,
+        out ushort materialId)
+    {
+        surfaceLevel = 0;
+        materialId = 0;
+        if (x + size > worldMap.TileWidth || y + size > worldMap.TileHeight)
+            return false;
+
+        BlockTerrain blocks = worldMap.Blocks;
+        surfaceLevel = blocks.GetSurfaceLevel(x, y);
+        materialId = blocks.GetMaterialId(x, y);
+
+        for (int tileY = y; tileY < y + size; tileY++)
+        {
+            for (int tileX = x; tileX < x + size; tileX++)
+            {
+                if (blocks.GetSurfaceLevel(tileX, tileY) != surfaceLevel ||
+                    blocks.GetMaterialId(tileX, tileY) != materialId ||
+                    (size > minimumDetailSize && blocks.IsTransitionCell(tileX, tileY)))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private void AddVisibleBlock(
+        int x,
+        int y,
+        int size,
+        int surfaceLevel,
+        ushort materialId,
+        float centerX,
+        float centerY)
+    {
+        float localX = x + size * 0.5f - centerX;
+        float localY = y + size * 0.5f - centerY;
+        float rotatedX = _rotationCosine * localX - _rotationSine * localY;
+        float rotatedY = _rotationSine * localX + _rotationCosine * localY;
+
+        _visibleBlocks.Add(new BlockDrawItem
+        {
+            X = x,
+            Y = y,
+            Size = size,
+            Height = surfaceLevel,
+            MaterialId = materialId,
+            Depth = rotatedX + rotatedY
+        });
+    }
+
     private void AppendVisibleSideFaces(
         WorldMap worldMap,
         int x,
         int y,
-        int step,
+        int blockSize,
+        int edgeSegmentSize,
         float tileSize,
         float groundDepthScale,
         float verticalScale,
@@ -262,34 +347,47 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         Color xFacingColor = new Color(55, 61, 65, 255);
         Color yFacingColor = new Color(39, 45, 49, 255);
 
-        if (_rotationCosine + _rotationSine >= 0f)
+        for (int offset = 0; offset < blockSize; offset += edgeSegmentSize)
         {
-            AppendSourceEdge(worldMap, x, y, 1, 0, step,
-                x + step, y, x + step, y + step,
-                eastZ, southZ, tileSize,
-                groundDepthScale, verticalScale, drawBlockGrid, xFacingColor);
-        }
-        else
-        {
-            AppendSourceEdge(worldMap, x, y, -1, 0, step,
-                x, y + step, x, y,
-                westZ, northZ, tileSize,
-                groundDepthScale, verticalScale, drawBlockGrid, xFacingColor);
-        }
+            int segmentSize = Math.Min(edgeSegmentSize, blockSize - offset);
 
-        if (_rotationCosine - _rotationSine >= 0f)
-        {
-            AppendSourceEdge(worldMap, x, y, 0, 1, step,
-                x + step, y + step, x, y + step,
-                southZ, westZ, tileSize,
-                groundDepthScale, verticalScale, drawBlockGrid, yFacingColor);
-        }
-        else
-        {
-            AppendSourceEdge(worldMap, x, y, 0, -1, step,
-                x, y, x + step, y,
-                northZ, eastZ, tileSize,
-                groundDepthScale, verticalScale, drawBlockGrid, yFacingColor);
+            if (_rotationCosine + _rotationSine >= 0f)
+            {
+                int segmentX = x + blockSize - segmentSize;
+                int segmentY = y + offset;
+                AppendSourceEdge(worldMap, segmentX, segmentY, 1, 0, segmentSize,
+                    x + blockSize, segmentY, x + blockSize, segmentY + segmentSize,
+                    eastZ, southZ, tileSize,
+                    groundDepthScale, verticalScale, drawBlockGrid, xFacingColor);
+            }
+            else
+            {
+                int segmentX = x;
+                int segmentY = y + offset;
+                AppendSourceEdge(worldMap, segmentX, segmentY, -1, 0, segmentSize,
+                    x, segmentY + segmentSize, x, segmentY,
+                    westZ, northZ, tileSize,
+                    groundDepthScale, verticalScale, drawBlockGrid, xFacingColor);
+            }
+
+            if (_rotationCosine - _rotationSine >= 0f)
+            {
+                int segmentX = x + offset;
+                int segmentY = y + blockSize - segmentSize;
+                AppendSourceEdge(worldMap, segmentX, segmentY, 0, 1, segmentSize,
+                    segmentX + segmentSize, y + blockSize, segmentX, y + blockSize,
+                    southZ, westZ, tileSize,
+                    groundDepthScale, verticalScale, drawBlockGrid, yFacingColor);
+            }
+            else
+            {
+                int segmentX = x + offset;
+                int segmentY = y;
+                AppendSourceEdge(worldMap, segmentX, segmentY, 0, -1, segmentSize,
+                    segmentX, y, segmentX + segmentSize, y,
+                    northZ, eastZ, tileSize,
+                    groundDepthScale, verticalScale, drawBlockGrid, yFacingColor);
+            }
         }
     }
 
@@ -314,11 +412,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     {
         int neighbourX = x + neighbourDx * step;
         int neighbourY = y + neighbourDy * step;
-        int neighbourLayer = worldMap.FindTopOccupiedLayer(
-            neighbourX, neighbourY, worldMap.LayerCount - 1);
-        float neighbourHeight = neighbourLayer < 0
-            ? 0f
-            : worldMap.Blocks.GetSurfaceLevel(neighbourX, neighbourY);
+        int neighbourLevel = worldMap.Blocks.GetSurfaceLevel(neighbourX, neighbourY);
+        float neighbourHeight = neighbourLevel > 0 ? neighbourLevel : 0f;
 
         float bottomHeightA = MathF.Min(topHeightA, neighbourHeight);
         float bottomHeightB = MathF.Min(topHeightB, neighbourHeight);
