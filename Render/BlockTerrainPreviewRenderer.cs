@@ -247,22 +247,33 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     worldMap, x, y + size, westZ, tileSize,
                     groundDepthScale, verticalScale);
 
+                // Fine 1 m detail is kept in the terrain silhouette and shading.
+                // Drawing a full outline around every tiny patch creates many
+                // duplicate edge quads, so the visible grid starts at the 4 m block.
+                bool drawBlockOutline =
+                    drawBlockGrid && size >= BlockTerrain.HorizontalBlockSize;
+
                 AppendVisibleSideFaces(
                     worldMap, x, y, size, minimumDetailSize,
                     Math.Max(1, size / BlockTerrain.HorizontalBlockSize), tileSize,
                     groundDepthScale, verticalScale,
-                    drawBlockGrid,
+                    drawBlockOutline,
                     northZ, eastZ, southZ, westZ);
 
                 Color topColor = GetTopColor(block.MaterialId, height);
                 AppendTopFace(_blockFaces, north, east, south, west, topColor);
 
-                if (drawBlockGrid)
+                if (drawBlockOutline)
                 {
+                    // Every internal edge is emitted once: north and west.
+                    // East and south are only needed at the outer map boundary.
                     AppendLineAsQuad(_blockFaces, north, east, seamColor);
-                    AppendLineAsQuad(_blockFaces, east, south, seamColor);
-                    AppendLineAsQuad(_blockFaces, south, west, seamColor);
                     AppendLineAsQuad(_blockFaces, west, north, seamColor);
+
+                    if (x + size >= worldMap.TileWidth)
+                        AppendLineAsQuad(_blockFaces, east, south, seamColor);
+                    if (y + size >= worldMap.TileHeight)
+                        AppendLineAsQuad(_blockFaces, south, west, seamColor);
                 }
             }
 
