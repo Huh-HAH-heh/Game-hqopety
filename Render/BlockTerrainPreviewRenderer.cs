@@ -201,7 +201,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     groundDepthScale, verticalScale);
 
                 AppendVisibleSideFaces(
-                    worldMap, x, y, size, minimumDetailSize, tileSize,
+                    worldMap, x, y, size, minimumDetailSize,
+                    Math.Max(1, size / BlockTerrain.HorizontalBlockSize), tileSize,
                     groundDepthScale, verticalScale,
                     drawBlockGrid,
                     northZ, eastZ, southZ, westZ);
@@ -335,6 +336,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         int y,
         int blockSize,
         int edgeSegmentSize,
+        int verticalGroupHeight,
         float tileSize,
         float groundDepthScale,
         float verticalScale,
@@ -358,7 +360,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 AppendSourceEdge(worldMap, segmentX, segmentY, 1, 0, segmentSize,
                     x + blockSize, segmentY, x + blockSize, segmentY + segmentSize,
                     eastZ, southZ, tileSize,
-                    groundDepthScale, verticalScale, drawBlockGrid, xFacingColor);
+                    groundDepthScale, verticalScale, drawBlockGrid,
+                    verticalGroupHeight, xFacingColor);
             }
             else
             {
@@ -367,7 +370,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 AppendSourceEdge(worldMap, segmentX, segmentY, -1, 0, segmentSize,
                     x, segmentY + segmentSize, x, segmentY,
                     westZ, northZ, tileSize,
-                    groundDepthScale, verticalScale, drawBlockGrid, xFacingColor);
+                    groundDepthScale, verticalScale, drawBlockGrid,
+                    verticalGroupHeight, xFacingColor);
             }
 
             if (_rotationCosine - _rotationSine >= 0f)
@@ -377,7 +381,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 AppendSourceEdge(worldMap, segmentX, segmentY, 0, 1, segmentSize,
                     segmentX + segmentSize, y + blockSize, segmentX, y + blockSize,
                     southZ, westZ, tileSize,
-                    groundDepthScale, verticalScale, drawBlockGrid, yFacingColor);
+                    groundDepthScale, verticalScale, drawBlockGrid,
+                    verticalGroupHeight, yFacingColor);
             }
             else
             {
@@ -386,7 +391,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 AppendSourceEdge(worldMap, segmentX, segmentY, 0, -1, segmentSize,
                     segmentX, y, segmentX + segmentSize, y,
                     northZ, eastZ, tileSize,
-                    groundDepthScale, verticalScale, drawBlockGrid, yFacingColor);
+                    groundDepthScale, verticalScale, drawBlockGrid,
+                    verticalGroupHeight, yFacingColor);
             }
         }
     }
@@ -408,6 +414,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float groundDepthScale,
         float verticalScale,
         bool drawBlockGrid,
+        int verticalGroupHeight,
         Color color)
     {
         int neighbourX = x + neighbourDx * step;
@@ -439,9 +446,11 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         {
             float seamStart = MathF.Max(bottomHeightA, bottomHeightB);
             float seamEnd = MathF.Min(topHeightA, topHeightB);
-            for (float height = MathF.Floor(seamStart) + 1f;
+            float groupHeight = Math.Max(1, verticalGroupHeight);
+            float firstSeam = (MathF.Floor(seamStart / groupHeight) + 1f) * groupHeight;
+            for (float height = firstSeam;
                  height < seamEnd - 0.01f;
-                 height += 1f)
+                 height += groupHeight)
             {
                 AppendLineAsQuad(
                     _blockFaces,
