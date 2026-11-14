@@ -147,12 +147,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
-        // Calm terrain is merged into large 32 m blocks. Height/material changes
-        // recursively split patches down to 1 m details; while dragging the camera,
-        // keep the previous 4 m minimum detail to reduce rotation-time rebuild work.
-        int minimumDetailSize = isCameraRotating
-            ? BlockTerrain.HorizontalBlockSize
-            : MinimumBlockSize;
+        // Keep roughly 2-3 screen pixels per smallest terrain patch.
+        // As the camera pulls back, stop subdividing terrain that cannot be
+        // resolved on screen. Rotation keeps the existing 4 m performance floor.
+        int minimumDetailSize = GetMinimumDetailSize(
+            pixelsPerTile,
+            isCameraRotating);
 
         bool cameraMovedOutsideCache =
             MathF.Abs(cameraView.Center.X - _cachedCameraCenter.X) >
@@ -290,6 +290,25 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         window.Draw(_blockFaces);
     }
 
+    private static int GetMinimumDetailSize(
+        float pixelsPerTile,
+        bool isCameraRotating)
+    {
+        int detailSize = pixelsPerTile switch
+        {
+            >= 3f => MinimumBlockSize,
+            >= 1.5f => 2,
+            >= 0.75f => 4,
+            >= 0.375f => 8,
+            >= 0.1875f => 16,
+            _ => MaximumAdaptiveBlockSize
+        };
+
+        return isCameraRotating
+            ? Math.Max(detailSize, BlockTerrain.HorizontalBlockSize)
+            : detailSize;
+    }
+
     private void CollectAdaptiveBlocks(
         WorldMap worldMap,
         int x,
@@ -313,10 +332,11 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         if (size <= minimumDetailSize)
         {
-            // At the active detail limit use the local surface sample. This is
-            // 1 m when idle and 4 m during camera rotation for a cheaper preview.
-            surfaceLevel = worldMap.Blocks.GetSurfaceLevel(x, y);
-            materialId = worldMap.Blocks.GetMaterialId(x, y);
+            // At coarse LOD, represent the patch by its highest occupied sample.
+            // This avoids dropping a hill just because the patch's first tile is empty.
+            GetPatchRepresentative(
+                worldMap, x, y, size,
+                out surfaceLevel, out materialId);
             if (surfaceLevel > 0 && materialId != 0)
                 AddVisibleBlock(x, y, size, surfaceLevel, materialId, centerX, centerY);
             return;
@@ -327,6 +347,35 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         CollectAdaptiveBlocks(worldMap, x + half, y, half, minimumDetailSize, centerX, centerY);
         CollectAdaptiveBlocks(worldMap, x, y + half, half, minimumDetailSize, centerX, centerY);
         CollectAdaptiveBlocks(worldMap, x + half, y + half, half, minimumDetailSize, centerX, centerY);
+    }
+
+    private static void GetPatchRepresentative(
+        WorldMap worldMap,
+        int x,
+        int y,
+        int size,
+        out int surfaceLevel,
+        out ushort materialId)
+    {
+        surfaceLevel = 0;
+        materialId = 0;
+        BlockTerrain blocks = worldMap.Blocks;
+        int maxX = Math.Min(worldMap.TileWidth, x + size);
+        int maxY = Math.Min(worldMap.TileHeight, y + size);
+
+        for (int tileY = y; tileY < maxY; tileY++)
+        {
+            for (int tileX = x; tileX < maxX; tileX++)
+            {
+                int candidateLevel = blocks.GetSurfaceLevel(tileX, tileY);
+                ushort candidateMaterial = blocks.GetMaterialId(tileX, tileY);
+                if (candidateLevel <= surfaceLevel || candidateMaterial == 0)
+                    continue;
+
+                surfaceLevel = candidateLevel;
+                materialId = candidateMaterial;
+            }
+        }
     }
 
     private static bool TryGetUniformPatch(
