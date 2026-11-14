@@ -1219,7 +1219,9 @@ public sealed class GameRenderer
             $"LastHit={snapshot.LastHitPart} | " +
             $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
             (_showBlockTerrainPreview
-                ? "БЛОЧНЫЙ ПРЕДПРОСМОТР | "
+                ? (_showBlockPreviewXray
+                    ? "БЛОЧНЫЙ ПРЕДПРОСМОТР • X-RAY ON | "
+                    : "БЛОЧНЫЙ ПРЕДПРОСМОТР | ")
                 : _camera.IsometricProjectionEnabled
                     ? $"ИЗОМЕТРИЯ • Верх карты={_camera.DirectionLabel} (Q/E: 45°) • Tab: вид сверху | "
                     : "ВИД СВЕРХУ • Tab: изометрия | ") +
