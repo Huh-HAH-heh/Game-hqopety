@@ -4360,7 +4360,7 @@ public sealed class GameRenderer
                     _camera.ElevationDegrees));
             Console.WriteLine(
                 "[Terrain preview] Camera centered on terrain. " +
-                "Right mouse drag: free rotation; Q/E: rotate 90 degrees; G: display mode; " +
+                "Right mouse drag: free rotation; Q/E: rotate 90 degrees; " +
                 $"NumPad +/-: elevation ({_camera.ElevationDegrees:0}°); " +
                 "middle mouse: pan; WASD: move; wheel: zoom; B: return to game.");
         }
@@ -4434,19 +4434,6 @@ public sealed class GameRenderer
             if (key is Keyboard.Key.B or Keyboard.Key.Escape)
             {
                 ToggleBlockTerrainPreview();
-            }
-            else if (key == Keyboard.Key.G)
-            {
-                BlockTerrainDisplayMode mode =
-                    _blockTerrainPreviewRenderer.CycleDisplayMode();
-                string modeLabel = mode switch
-                {
-                    BlockTerrainDisplayMode.WhiteHeightFaces => "белые грани перепадов высот",
-                    BlockTerrainDisplayMode.BlackHeightFaces => "чёрные грани перепадов высот",
-                    _ => "сетка блоков"
-                };
-                Console.WriteLine(
-                    $"[Terrain preview] Режим отображения: {modeLabel}. G — следующий режим.");
             }
             else if (key is Keyboard.Key.Q or Keyboard.Key.E)
             {

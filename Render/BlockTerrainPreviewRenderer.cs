@@ -6,13 +6,6 @@ using SFML.System;
 
 namespace RimClone.Render;
 
-public enum BlockTerrainDisplayMode
-{
-    Grid = 0,
-    WhiteHeightFaces = 1,
-    BlackHeightFaces = 2
-}
-
 /// <summary>
 /// Isometric inspection view for the discrete 4 x 4 x 1 m block terrain.
 /// Camera elevation changes only projection; terrain data remains fixed.
@@ -47,24 +40,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private float _cachedHighestHeightMeters;
     private float _rotationCosine = 1f;
     private float _rotationSine;
-    private BlockTerrainDisplayMode _displayMode = BlockTerrainDisplayMode.Grid;
-    private int _cachedDisplayMode = -1;
-
-    public BlockTerrainDisplayMode DisplayMode => _displayMode;
-
-    public string DisplayModeName => _displayMode switch
-    {
-        BlockTerrainDisplayMode.WhiteHeightFaces => "white height faces",
-        BlockTerrainDisplayMode.BlackHeightFaces => "black height faces",
-        _ => "block grid"
-    };
-
-    public BlockTerrainDisplayMode CycleDisplayMode()
-    {
-        _displayMode = (BlockTerrainDisplayMode)(
-            ((int)_displayMode + 1) % 3);
-        return _displayMode;
-    }
 
     public Vector2f GetCameraCenter(
         WorldMap worldMap,
@@ -196,7 +171,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             MathF.Abs(_cachedCameraAzimuthDegrees - cameraAzimuthDegrees) > 0.01f ||
             MathF.Abs(_cachedElevationDegrees - elevationDegrees) > 0.01f ||
             _cachedLodStep != minimumDetailSize ||
-            _cachedDisplayMode != (int)_displayMode ||
             MathF.Abs(_cachedTileSize - tileSize) > 0.001f ||
             cameraMovedOutsideCache ||
             viewSizeChanged;
@@ -246,21 +220,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 return xOrder != 0 ? xOrder : left.Y.CompareTo(right.Y);
             });
 
-            bool drawBlockGrid =
-                _displayMode == BlockTerrainDisplayMode.Grid &&
-                pixelsPerTile >= 2.4f;
+            bool drawBlockGrid = pixelsPerTile >= 2.4f;
             Color seamColor = new Color(27, 31, 34, 150);
-            Color xFacingColor = _displayMode switch
-            {
-                BlockTerrainDisplayMode.WhiteHeightFaces => new Color(245, 247, 250, 255),
-                BlockTerrainDisplayMode.BlackHeightFaces => new Color(0, 0, 0, 255),
-                _ => new Color(55, 61, 65, 255)
-            };
-            Color yFacingColor = _displayMode switch
-            {
-                BlockTerrainDisplayMode.Grid => new Color(39, 45, 49, 255),
-                _ => xFacingColor
-            };
             for (int i = 0; i < _visibleBlocks.Count; i++)
             {
                 BlockDrawItem block = _visibleBlocks[i];
@@ -297,7 +258,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     Math.Max(1, size / BlockTerrain.HorizontalBlockSize), tileSize,
                     groundDepthScale, verticalScale,
                     drawBlockOutline,
-                    xFacingColor, yFacingColor,
                     northZ, eastZ, southZ, westZ);
 
                 Color topColor = GetTopColor(block.MaterialId, height);
@@ -321,7 +281,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _cachedCameraAzimuthDegrees = cameraAzimuthDegrees;
             _cachedElevationDegrees = elevationDegrees;
             _cachedLodStep = minimumDetailSize;
-            _cachedDisplayMode = (int)_displayMode;
             _cachedTileSize = tileSize;
             _cachedCameraCenter = cameraView.Center;
             _cachedViewSize = cameraView.Size;
@@ -440,13 +399,14 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float groundDepthScale,
         float verticalScale,
         bool drawBlockGrid,
-        Color xFacingColor,
-        Color yFacingColor,
         float northZ,
         float eastZ,
         float southZ,
         float westZ)
     {
+        Color xFacingColor = new Color(55, 61, 65, 255);
+        Color yFacingColor = new Color(39, 45, 49, 255);
+
         for (int offset = 0; offset < blockSize; offset += edgeSegmentSize)
         {
             int segmentSize = Math.Min(edgeSegmentSize, blockSize - offset);
