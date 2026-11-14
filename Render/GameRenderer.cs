@@ -799,6 +799,7 @@ public sealed class GameRenderer
                     previewSnapshot.BodyParts,
                     _worldMap,
                     _camera.View,
+                    _blockTerrainPreviewRenderer,
                     TerrainTilePixelSize,
                     _camera.AzimuthDegrees,
                     _camera.ElevationDegrees,
@@ -812,12 +813,14 @@ public sealed class GameRenderer
                     _unitSimulation,
                     _worldMap,
                     _camera.View,
+                    _blockTerrainPreviewRenderer,
                     TerrainTilePixelSize,
                     _camera.AzimuthDegrees,
                     _camera.ElevationDegrees,
                     _selectedUnit,
                     _selectedUnits);
             }
+            _blockTerrainPreviewRenderer.DrawRemainingOccluders(_window);
             _lastUnitDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
             _lastProjectileDrawMilliseconds = 0d;

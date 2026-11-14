@@ -306,6 +306,7 @@ public sealed class UnitRenderSystem : IDisposable
         UnitSimulation simulation,
         WorldMap worldMap,
         View cameraView,
+        BlockTerrainPreviewRenderer terrainRenderer,
         float tilePixelSize,
         float azimuthDegrees,
         float elevationDegrees,
@@ -337,6 +338,13 @@ public sealed class UnitRenderSystem : IDisposable
 
         for (int order = 0; order < active.Length; order++)
         {
+            float unitDepth = _renderDepthKeys[order];
+            if (terrainRenderer.HasOccludersBeforeDepth(unitDepth))
+            {
+                DrawPreviewGeometry(window);
+                terrainRenderer.DrawOccludersBeforeDepth(window, unitDepth);
+            }
+
             int index = _renderOrder[order];
             Vector3 position = positions[index];
             if (hitPoints[index] <= 0f)
@@ -415,6 +423,7 @@ public sealed class UnitRenderSystem : IDisposable
         RenderBodyPart[] bodyParts,
         WorldMap worldMap,
         View cameraView,
+        BlockTerrainPreviewRenderer terrainRenderer,
         float tilePixelSize,
         float azimuthDegrees,
         float elevationDegrees,
@@ -437,6 +446,13 @@ public sealed class UnitRenderSystem : IDisposable
 
         for (int order = 0; order < units.Length; order++)
         {
+            float unitDepth = _renderDepthKeys[order];
+            if (terrainRenderer.HasOccludersBeforeDepth(unitDepth))
+            {
+                DrawPreviewGeometry(window);
+                terrainRenderer.DrawOccludersBeforeDepth(window, unitDepth);
+            }
+
             RenderUnitState unit = units[_renderOrder[order]];
             if (unit.HitPoints <= 0f)
                 continue;
@@ -636,6 +652,10 @@ public sealed class UnitRenderSystem : IDisposable
             window.Draw(_bodyOutlines);
         if (_selection.VertexCount > 0)
             window.Draw(_selection);
+
+        _vertices.Clear();
+        _bodyOutlines.Clear();
+        _selection.Clear();
     }
 
     private readonly VertexArray _visionDebug =

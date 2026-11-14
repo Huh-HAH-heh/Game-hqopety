@@ -26,8 +26,22 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         public float Depth;
     }
 
+    private sealed class OcclusionBatch : IDisposable
+    {
+        public int DepthBucket;
+        public float Depth;
+        public readonly VertexArray Faces = new(PrimitiveType.Triangles);
+
+        public void Dispose() => Faces.Dispose();
+    }
+
     private readonly VertexArray _blockFaces = new(PrimitiveType.Triangles);
     private readonly List<BlockDrawItem> _visibleBlocks = new(4096);
+    private readonly List<OcclusionBatch> _occlusionBatchPool = new(128);
+    private readonly List<OcclusionBatch> _activeOcclusionBatches = new(128);
+    private readonly Dictionary<int, OcclusionBatch> _occlusionBatchLookup = new();
+    private int _occlusionBucketSize = 1;
+    private int _nextOcclusionBatch;
     private bool _cacheValid;
     private long _cachedTerrainVersion = long.MinValue;
     private int _cachedLodStep;
@@ -123,6 +137,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize <= 0f)
             return;
 
+        _nextOcclusionBatch = 0;
+
         float tileSize = MathF.Max(1f, tilePixelSize * 2f);
         float halfWidth = tileSize * 0.5f;
         elevationDegrees = Math.Clamp(
@@ -178,6 +194,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         if (rebuildGeometry)
         {
             _blockFaces.Clear();
+            BeginOcclusionBatchBuild(minimumDetailSize);
 
             GetVisibleTileBounds(
                 cameraView,
@@ -277,6 +294,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 }
             }
 
+            _activeOcclusionBatches.Sort(static (left, right) =>
+                left.Depth.CompareTo(right.Depth));
+
             _cachedTerrainVersion = worldMap.TerrainVersion;
             _cachedCameraAzimuthDegrees = cameraAzimuthDegrees;
             _cachedElevationDegrees = elevationDegrees;
@@ -287,7 +307,79 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _cacheValid = true;
         }
 
+        // Top surfaces are the terrain base pass. Camera-facing vertical
+        // faces are drawn later, interleaved with units by camera depth.
         window.Draw(_blockFaces);
+    }
+
+    public bool HasOccludersBeforeDepth(float depth) =>
+        _nextOcclusionBatch < _activeOcclusionBatches.Count &&
+        _activeOcclusionBatches[_nextOcclusionBatch].Depth <= depth;
+
+    public void DrawOccludersBeforeDepth(RenderWindow window, float depth)
+    {
+        while (_nextOcclusionBatch < _activeOcclusionBatches.Count)
+        {
+            OcclusionBatch batch = _activeOcclusionBatches[_nextOcclusionBatch];
+            if (batch.Depth > depth)
+                break;
+
+            if (batch.Faces.VertexCount > 0)
+                window.Draw(batch.Faces);
+
+            _nextOcclusionBatch++;
+        }
+    }
+
+    public void DrawRemainingOccluders(RenderWindow window)
+    {
+        while (_nextOcclusionBatch < _activeOcclusionBatches.Count)
+        {
+            OcclusionBatch batch = _activeOcclusionBatches[_nextOcclusionBatch++];
+            if (batch.Faces.VertexCount > 0)
+                window.Draw(batch.Faces);
+        }
+    }
+
+    private void BeginOcclusionBatchBuild(int bucketSize)
+    {
+        _occlusionBucketSize = Math.Max(1, bucketSize);
+        _activeOcclusionBatches.Clear();
+        _occlusionBatchLookup.Clear();
+        _nextOcclusionBatch = 0;
+    }
+
+    private VertexArray GetOcclusionFaces(float depth)
+    {
+        int bucket = (int)MathF.Floor(depth / _occlusionBucketSize);
+        if (_occlusionBatchLookup.TryGetValue(bucket, out OcclusionBatch? existing))
+            return existing.Faces;
+
+        int poolIndex = _activeOcclusionBatches.Count;
+        OcclusionBatch batch;
+        if (poolIndex < _occlusionBatchPool.Count)
+        {
+            batch = _occlusionBatchPool[poolIndex];
+            batch.Faces.Clear();
+        }
+        else
+        {
+            batch = new OcclusionBatch();
+            _occlusionBatchPool.Add(batch);
+        }
+
+        batch.DepthBucket = bucket;
+        batch.Depth = (bucket + 0.5f) * _occlusionBucketSize;
+        _activeOcclusionBatches.Add(batch);
+        _occlusionBatchLookup.Add(bucket, batch);
+        return batch.Faces;
+    }
+
+    private float GetCameraDepth(float x, float y)
+    {
+        float rotatedX = _rotationCosine * x - _rotationSine * y;
+        float rotatedY = _rotationSine * x + _rotationCosine * y;
+        return rotatedX + rotatedY;
     }
 
     private static int GetMinimumDetailSize(
@@ -547,7 +639,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         Vector2f bottomB = ProjectLevelPoint(
             worldMap, bx, by, bottomHeightB, tileSize,
             groundDepthScale, verticalScale);
-        AppendQuad(_blockFaces, topA, topB, bottomB, bottomA, color);
+        float edgeDepth = GetCameraDepth((ax + bx) * 0.5f, (ay + by) * 0.5f);
+        VertexArray occlusionFaces = GetOcclusionFaces(edgeDepth);
+        AppendQuad(occlusionFaces, topA, topB, bottomB, bottomA, color);
 
         if (drawBlockGrid)
         {
@@ -560,7 +654,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                  height += groupHeight)
             {
                 AppendLineAsQuad(
-                    _blockFaces,
+                    occlusionFaces,
                     ProjectLevelPoint(
                         worldMap, ax, ay, height, tileSize,
                         groundDepthScale, verticalScale),
@@ -752,5 +846,11 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     public void Dispose()
     {
         _blockFaces.Dispose();
+        for (int i = 0; i < _occlusionBatchPool.Count; i++)
+            _occlusionBatchPool[i].Dispose();
+
+        _occlusionBatchPool.Clear();
+        _activeOcclusionBatches.Clear();
+        _occlusionBatchLookup.Clear();
     }
 }
