@@ -3416,7 +3416,12 @@ public sealed class GameRenderer
         _window.MouseButtonPressed +=
             (_, e) =>
             {
-                if (_showBlockTerrainPreview && e.Button == Mouse.Button.Right)
+                bool altPressed =
+                    Keyboard.IsKeyPressed(Keyboard.Key.LAlt) ||
+                    Keyboard.IsKeyPressed(Keyboard.Key.RAlt);
+                if (_showBlockTerrainPreview &&
+                    e.Button == Mouse.Button.Right &&
+                    altPressed)
                 {
                     _isRotatingCamera = true;
                     _lastCameraRotatePixel = e.Position;
@@ -4394,9 +4399,9 @@ public sealed class GameRenderer
                     _camera.ElevationDegrees));
             Console.WriteLine(
                 "[Terrain preview] Camera centered on terrain. " +
-                "Right mouse drag: free rotation; Q/E: rotate 90 degrees; " +
+                "Alt+right mouse drag: free rotation; Q/E: rotate 45 degrees; " +
                 $"NumPad +/-: elevation ({_camera.ElevationDegrees:0}°); " +
-                "middle mouse: pan; WASD: move; wheel: zoom; B: return to game.");
+                "middle mouse: pan; WASD/arrows: move; wheel: zoom to cursor; B: return to game.");
         }
         else
         {
@@ -4451,6 +4456,20 @@ public sealed class GameRenderer
             newFocus.Y + panOffset.Y + movement.Y));
     }
 
+    private void RotateBlockPreviewAzimuth(float deltaDegrees)
+    {
+        Vector2f rotatedCameraCenter =
+            _blockTerrainPreviewRenderer.RotateCameraCenterForAzimuth(
+                _worldMap,
+                _camera.View.Center,
+                TerrainTilePixelSize,
+                _camera.ElevationDegrees,
+                deltaDegrees);
+
+        _camera.RotateAzimuth(deltaDegrees);
+        _camera.CenterOnPosition(rotatedCameraCenter);
+    }
+
     private void AdjustBlockPreviewElevation(float deltaDegrees)
     {
         if (!_camera.AdjustElevation(deltaDegrees))
@@ -4471,7 +4490,7 @@ public sealed class GameRenderer
             }
             else if (key is Keyboard.Key.Q or Keyboard.Key.E)
             {
-                _camera.RotateAzimuth(key == Keyboard.Key.Q ? -90f : 90f);
+                RotateBlockPreviewAzimuth(key == Keyboard.Key.Q ? -45f : 45f);
             }
             else if (key == Keyboard.Key.Add)
             {
