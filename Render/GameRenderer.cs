@@ -782,7 +782,8 @@ public sealed class GameRenderer
                 _camera.View,
                 TerrainTilePixelSize,
                 _camera.AzimuthDegrees,
-                _camera.ElevationDegrees);
+                _camera.ElevationDegrees,
+                _isRotatingCamera);
             _lastTerrainDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
             _lastUnitDrawMilliseconds = 0d;
@@ -4344,7 +4345,7 @@ public sealed class GameRenderer
             _camera.SetIsometricProjection(false);
             _camera.ResetAzimuth();
             _camera.CenterOnPosition(
-                BlockTerrainPreviewRenderer.GetCameraCenter(
+                _blockTerrainPreviewRenderer.GetCameraCenter(
                     _worldMap,
                     TerrainTilePixelSize,
                     _camera.ElevationDegrees));
@@ -4369,16 +4370,10 @@ public sealed class GameRenderer
 
     private void UpdateCameraMovement(float deltaTime)
     {
-        Vector2 direction = _input.MoveDirection;
-        if (_showBlockTerrainPreview)
-        {
-            direction = BlockTerrainPreviewRenderer.ProjectMovementToScreen(
-                direction,
-                _camera.AzimuthDegrees,
-                _camera.ElevationDegrees);
-        }
-
-        _camera.Update(direction, deltaTime);
+        // The block-preview terrain and camera center are already in projected
+        // screen space. Applying another terrain projection here double-transforms
+        // WASD and makes movement drift away from the camera's visible axes.
+        _camera.Update(_input.MoveDirection, deltaTime);
     }
 
     private void UpdateBlockPreviewCamera(float deltaTime)
@@ -4389,14 +4384,14 @@ public sealed class GameRenderer
             return;
         }
 
-        Vector2f oldFocus = BlockTerrainPreviewRenderer.GetCameraCenter(
+        Vector2f oldFocus = _blockTerrainPreviewRenderer.GetCameraCenter(
             _worldMap,
             TerrainTilePixelSize,
             _camera.ElevationDegrees);
         Vector2f oldCenter = _camera.View.Center;
         UpdateCameraMovement(deltaTime);
         Vector2f movedCenter = _camera.View.Center;
-        Vector2f newFocus = BlockTerrainPreviewRenderer.GetCameraCenter(
+        Vector2f newFocus = _blockTerrainPreviewRenderer.GetCameraCenter(
             _worldMap,
             TerrainTilePixelSize,
             _camera.ElevationDegrees);

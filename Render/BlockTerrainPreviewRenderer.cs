@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Numerics;
 using Core.Map;
 using SFML.Graphics;
 using SFML.System;
@@ -33,37 +32,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private Vector2f _cachedViewSize;
     private float _cachedCameraAzimuthDegrees = float.NaN;
     private float _cachedElevationDegrees = float.NaN;
+    private long _cachedHighestHeightTerrainVersion = long.MinValue;
+    private float _cachedHighestHeightMeters;
     private float _rotationCosine = 1f;
     private float _rotationSine;
 
-    public static Vector2 ProjectMovementToScreen(
-        Vector2 movement,
-        float azimuthDegrees,
-        float elevationDegrees)
-    {
-        if (movement.LengthSquared() <= 0.000001f)
-            return Vector2.Zero;
-
-        float azimuthRadians = azimuthDegrees * (MathF.PI / 180f);
-        float cosine = MathF.Cos(azimuthRadians);
-        float sine = MathF.Sin(azimuthRadians);
-        float rotatedX = cosine * movement.X - sine * movement.Y;
-        float rotatedY = sine * movement.X + cosine * movement.Y;
-        float elevationRadians = Math.Clamp(elevationDegrees, 15f, 90f) *
-            (MathF.PI / 180f);
-        float depthScale = MathF.Sin(elevationRadians);
-
-        // Match the ground-plane projection: X-Y forms the screen horizontal
-        // axis, while X+Y is compressed by the camera elevation.
-        Vector2 projected = new(
-            rotatedX - rotatedY,
-            (rotatedX + rotatedY) * depthScale);
-        return projected.LengthSquared() > 0.000001f
-            ? Vector2.Normalize(projected)
-            : Vector2.Zero;
-    }
-
-    public static Vector2f GetCameraCenter(
+    public Vector2f GetCameraCenter(
         WorldMap worldMap,
         float tilePixelSize,
         float elevationDegrees)
@@ -92,7 +66,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         View cameraView,
         float tilePixelSize,
         float cameraAzimuthDegrees,
-        float elevationDegrees)
+        float elevationDegrees,
+        bool isCameraRotating)
     {
         if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize <= 0f)
             return;
@@ -121,10 +96,10 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
-        // Keep the mesh aligned to physical 4 x 4 m terrain blocks.
-        // Blindly merging 8/16 m patches hides intermediate height boundaries
-        // and makes the rendered collision silhouette disagree with navigation.
-        int step = BlockTerrain.HorizontalBlockSize;
+        // Keep full 4 x 4 m detail at rest. While the camera is dragged,
+        // temporarily double the block step to reduce rebuild and sort work.
+        // Full detail is restored automatically on the first frame after release.
+        int step = BlockTerrain.HorizontalBlockSize * (isCameraRotating ? 2 : 1);
 
         bool cameraMovedOutsideCache =
             MathF.Abs(cameraView.Center.X - _cachedCameraCenter.X) >
@@ -484,10 +459,18 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 heightMeters * verticalScale);
     }
 
-    private static float GetHighestHeightMeters(WorldMap worldMap)
+    private float GetHighestHeightMeters(WorldMap worldMap)
     {
-        int highestLayer = worldMap.GetHighestOccupiedLayer();
-        return highestLayer < 0 ? 0f : (highestLayer + 1f) * 0.1f;
+        long terrainVersion = worldMap.TerrainVersion;
+        if (_cachedHighestHeightTerrainVersion != terrainVersion)
+        {
+            int highestLayer = worldMap.GetHighestOccupiedLayer();
+            _cachedHighestHeightMeters =
+                highestLayer < 0 ? 0f : (highestLayer + 1f) * 0.1f;
+            _cachedHighestHeightTerrainVersion = terrainVersion;
+        }
+
+        return _cachedHighestHeightMeters;
     }
 
     private static void GetVisibleTileBounds(
