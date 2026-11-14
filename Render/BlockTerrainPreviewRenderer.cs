@@ -26,12 +26,42 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         public float Depth;
     }
 
+    public readonly struct OcclusionUnit
+    {
+        public readonly float X, Y, Z, FacingX, FacingY, Width, Length, Height;
+        public readonly ushort FactionTag;
+
+        public OcclusionUnit(
+            float x, float y, float z, float facingX, float facingY,
+            float width, float length, float height, ushort factionTag)
+        {
+            X = x; Y = y; Z = z;
+            FacingX = facingX; FacingY = facingY;
+            Width = width; Length = length; Height = height;
+            FactionTag = factionTag;
+        }
+    }
+
     private sealed class OcclusionBatch : IDisposable
     {
         public float Depth;
         public readonly VertexArray Faces = new(PrimitiveType.Triangles);
-
         public void Dispose() => Faces.Dispose();
+    }
+
+    private readonly struct OcclusionFace
+    {
+        public readonly Vector2f A, B, C, D;
+        public readonly float Depth, MinX, MinY, MaxX, MaxY;
+
+        public OcclusionFace(Vector2f a, Vector2f b, Vector2f c, Vector2f d, float depth)
+        {
+            A = a; B = b; C = c; D = d; Depth = depth;
+            MinX = MathF.Min(MathF.Min(a.X, b.X), MathF.Min(c.X, d.X));
+            MinY = MathF.Min(MathF.Min(a.Y, b.Y), MathF.Min(c.Y, d.Y));
+            MaxX = MathF.Max(MathF.Max(a.X, b.X), MathF.Max(c.X, d.X));
+            MaxY = MathF.Max(MathF.Max(a.Y, b.Y), MathF.Max(c.Y, d.Y));
+        }
     }
 
     private readonly VertexArray _blockFaces = new(PrimitiveType.Triangles);
@@ -39,6 +69,10 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private readonly List<OcclusionBatch> _occlusionBatchPool = new(128);
     private readonly List<OcclusionBatch> _activeOcclusionBatches = new(128);
     private readonly Dictionary<int, OcclusionBatch> _occlusionBatchLookup = new();
+    private readonly List<OcclusionFace> _occlusionFaces = new(2048);
+    private readonly VertexArray _xrayFill = new(PrimitiveType.Triangles);
+    private readonly VertexArray _xrayHatch = new(PrimitiveType.Triangles);
+    private float _projectionTileSize, _projectionGroundDepthScale, _projectionVerticalScale;
     private int _occlusionBucketSize = 1;
     private int _nextOcclusionBatch;
     private bool _cacheValid;
@@ -150,6 +184,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float verticalScale =
             tileSize * 0.5f * MathF.Cos(elevationRadians) /
             MathF.Cos(MathF.PI / 6f);
+        _projectionTileSize = tileSize;
+        _projectionGroundDepthScale = groundDepthScale;
+        _projectionVerticalScale = verticalScale;
         float highestMeters = GetHighestHeightMeters(worldMap);
         if (!float.IsFinite(cameraAzimuthDegrees))
             cameraAzimuthDegrees = 0f;
@@ -350,6 +387,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             Math.Min(bucketSize, BlockTerrain.HorizontalBlockSize));
         _activeOcclusionBatches.Clear();
         _occlusionBatchLookup.Clear();
+        _occlusionFaces.Clear();
         _nextOcclusionBatch = 0;
     }
 
@@ -384,6 +422,291 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float rotatedY = _rotationSine * x + _rotationCosine * y;
         return rotatedX + rotatedY;
     }
+
+
+    public void DrawHiddenUnitHatching(
+        RenderWindow window,
+        WorldMap worldMap,
+        IReadOnlyList<OcclusionUnit> units,
+        View cameraView)
+    {
+        _xrayFill.Clear();
+        _xrayHatch.Clear();
+        if (units.Count == 0 || _occlusionFaces.Count == 0)
+            return;
+
+        float pixelsPerViewUnit = window.Size.X / MathF.Max(1f, cameraView.Size.X);
+        float spacing = 8f / MathF.Max(0.01f, pixelsPerViewUnit);
+        float thickness = 0.65f / MathF.Max(0.01f, pixelsPerViewUnit);
+
+        Span<Vector2f> corners = stackalloc Vector2f[8];
+        Span<Vector2f> hull = stackalloc Vector2f[16];
+        Span<Vector2f> overlap = stackalloc Vector2f[24];
+        Span<Vector2f> wall = stackalloc Vector2f[4];
+
+        for (int u = 0; u < units.Count; u++)
+        {
+            OcclusionUnit unit = units[u];
+            float facingLength = MathF.Sqrt(unit.FacingX * unit.FacingX + unit.FacingY * unit.FacingY);
+            float fx = facingLength > 0.0001f ? unit.FacingX / facingLength : 1f;
+            float fy = facingLength > 0.0001f ? unit.FacingY / facingLength : 0f;
+            float sx = -fy, sy = fx;
+            float halfLength = MathF.Max(0.16f, MathF.Max(unit.Length, unit.Width) * 0.34f);
+            float halfWidth = MathF.Max(0.14f, MathF.Min(unit.Length, unit.Width) * 0.42f);
+            float bodyHeight = Math.Clamp(
+                float.IsFinite(unit.Height) && unit.Height > 0.3f ? unit.Height : 1.6f,
+                0.45f, 3.2f);
+            float unitDepth = GetCameraDepth(unit.X, unit.Y);
+
+            int corner = 0;
+            for (int zIndex = 0; zIndex < 2; zIndex++)
+            {
+                float z = unit.Z + (zIndex == 0 ? 0f : bodyHeight);
+                for (int along = -1; along <= 1; along += 2)
+                for (int across = -1; across <= 1; across += 2)
+                {
+                    float x = unit.X + fx * halfLength * along + sx * halfWidth * across;
+                    float y = unit.Y + fy * halfLength * along + sy * halfWidth * across;
+                    corners[corner++] = ProjectLevelPoint(
+                        worldMap, x, y, z, _projectionTileSize,
+                        _projectionGroundDepthScale, _projectionVerticalScale);
+                }
+            }
+
+            int hullCount = BuildConvexHull(corners, hull);
+            if (hullCount < 3)
+                continue;
+
+            GetBounds(hull[..hullCount],
+                out float minX, out float minY, out float maxX, out float maxY);
+            Color faction = GetOcclusionFactionColor(unit.FactionTag);
+
+            for (int faceIndex = 0; faceIndex < _occlusionFaces.Count; faceIndex++)
+            {
+                OcclusionFace face = _occlusionFaces[faceIndex];
+                if (face.Depth <= unitDepth + 0.025f ||
+                    face.MaxX < minX || face.MinX > maxX ||
+                    face.MaxY < minY || face.MinY > maxY)
+                    continue;
+
+                wall[0] = face.A; wall[1] = face.B; wall[2] = face.C; wall[3] = face.D;
+                int overlapCount = ClipConvexPolygon(hull[..hullCount], wall, overlap);
+                if (overlapCount < 3)
+                    continue;
+
+                AppendPolygonFill(_xrayFill, overlap[..overlapCount],
+                    new Color(faction.R, faction.G, faction.B, 48));
+                AppendHatch(_xrayHatch, overlap[..overlapCount], spacing, thickness,
+                    new Color(faction.R, faction.G, faction.B, 178));
+            }
+        }
+
+        if (_xrayFill.VertexCount > 0)
+            window.Draw(_xrayFill);
+        if (_xrayHatch.VertexCount > 0)
+            window.Draw(_xrayHatch);
+    }
+
+    private static int BuildConvexHull(Span<Vector2f> points, Span<Vector2f> hull)
+    {
+        for (int i = 1; i < points.Length; i++)
+        {
+            Vector2f value = points[i];
+            int j = i - 1;
+            while (j >= 0 && (points[j].X > value.X ||
+                (MathF.Abs(points[j].X - value.X) < 0.0001f && points[j].Y > value.Y)))
+            { points[j + 1] = points[j]; j--; }
+            points[j + 1] = value;
+        }
+
+        int count = 0;
+        for (int i = 0; i < points.Length; i++)
+        {
+            while (count >= 2 && Cross(hull[count - 2], hull[count - 1], points[i]) <= 0f)
+                count--;
+            hull[count++] = points[i];
+        }
+
+        int lowerLimit = count + 1;
+        for (int i = points.Length - 2; i >= 0; i--)
+        {
+            while (count >= lowerLimit && Cross(hull[count - 2], hull[count - 1], points[i]) <= 0f)
+                count--;
+            hull[count++] = points[i];
+        }
+        return Math.Max(0, count - 1);
+    }
+
+    private static int ClipConvexPolygon(
+        ReadOnlySpan<Vector2f> subject,
+        ReadOnlySpan<Vector2f> clip,
+        Span<Vector2f> result)
+    {
+        Span<Vector2f> input = stackalloc Vector2f[24];
+        Span<Vector2f> output = stackalloc Vector2f[24];
+        subject.CopyTo(input);
+        int inputCount = subject.Length;
+        float winding = SignedArea(clip) >= 0f ? 1f : -1f;
+
+        for (int edge = 0; edge < clip.Length && inputCount > 0; edge++)
+        {
+            Vector2f a = clip[edge], b = clip[(edge + 1) % clip.Length];
+            int outputCount = 0;
+            Vector2f previous = input[inputCount - 1];
+            float previousDistance = Cross(a, b, previous) * winding;
+            bool previousInside = previousDistance >= -0.001f;
+
+            for (int i = 0; i < inputCount; i++)
+            {
+                Vector2f current = input[i];
+                float currentDistance = Cross(a, b, current) * winding;
+                bool currentInside = currentDistance >= -0.001f;
+                if (currentInside != previousInside)
+                {
+                    float denominator = previousDistance - currentDistance;
+                    if (MathF.Abs(denominator) > 0.000001f && outputCount < output.Length)
+                    {
+                        float t = Math.Clamp(previousDistance / denominator, 0f, 1f);
+                        output[outputCount++] = new Vector2f(
+                            previous.X + (current.X - previous.X) * t,
+                            previous.Y + (current.Y - previous.Y) * t);
+                    }
+                }
+                if (currentInside && outputCount < output.Length)
+                    output[outputCount++] = current;
+                previous = current;
+                previousDistance = currentDistance;
+                previousInside = currentInside;
+            }
+
+            Span<Vector2f> swap = input;
+            input = output;
+            output = swap;
+            inputCount = outputCount;
+        }
+
+        int count = Math.Min(inputCount, result.Length);
+        input[..count].CopyTo(result);
+        return count;
+    }
+
+    private static void AppendPolygonFill(
+        VertexArray vertices, ReadOnlySpan<Vector2f> polygon, Color color)
+    {
+        for (int i = 1; i < polygon.Length - 1; i++)
+        {
+            vertices.Append(new Vertex(polygon[0], color));
+            vertices.Append(new Vertex(polygon[i], color));
+            vertices.Append(new Vertex(polygon[i + 1], color));
+        }
+    }
+
+    private static void AppendHatch(
+        VertexArray vertices, ReadOnlySpan<Vector2f> polygon,
+        float spacing, float halfWidth, Color color)
+    {
+        float min = float.MaxValue, max = float.MinValue;
+        for (int i = 0; i < polygon.Length; i++)
+        {
+            float value = polygon[i].X + polygon[i].Y;
+            min = MathF.Min(min, value); max = MathF.Max(max, value);
+        }
+
+        Span<Vector2f> intersections = stackalloc Vector2f[8];
+        for (float line = MathF.Ceiling(min / spacing) * spacing; line <= max; line += spacing)
+        {
+            int count = 0;
+            for (int i = 0; i < polygon.Length; i++)
+            {
+                Vector2f a = polygon[i], b = polygon[(i + 1) % polygon.Length];
+                float da = a.X + a.Y - line, db = b.X + b.Y - line;
+                if (MathF.Abs(da) < 0.0001f)
+                    AddUniquePoint(intersections, ref count, a);
+                if (da * db < -0.000001f)
+                {
+                    float t = da / (da - db);
+                    AddUniquePoint(intersections, ref count, new Vector2f(
+                        a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t));
+                }
+            }
+            if (count < 2) continue;
+
+            int first = 0, second = 1;
+            float longest = DistanceSquared(intersections[0], intersections[1]);
+            for (int i = 0; i < count; i++)
+            for (int j = i + 1; j < count; j++)
+            {
+                float length = DistanceSquared(intersections[i], intersections[j]);
+                if (length > longest) { longest = length; first = i; second = j; }
+            }
+            AppendHatchSegment(vertices, intersections[first], intersections[second], halfWidth, color);
+        }
+    }
+
+    private static void AddUniquePoint(Span<Vector2f> points, ref int count, Vector2f point)
+    {
+        for (int i = 0; i < count; i++)
+            if (DistanceSquared(points[i], point) < 0.0001f) return;
+        if (count < points.Length) points[count++] = point;
+    }
+
+    private static void AppendHatchSegment(
+        VertexArray vertices, Vector2f a, Vector2f b, float halfWidth, Color color)
+    {
+        float dx = b.X - a.X, dy = b.Y - a.Y;
+        float length = MathF.Sqrt(dx * dx + dy * dy);
+        if (length < 0.0001f) return;
+        float ox = -dy / length * halfWidth, oy = dx / length * halfWidth;
+        AppendQuad(vertices,
+            new Vector2f(a.X + ox, a.Y + oy),
+            new Vector2f(b.X + ox, b.Y + oy),
+            new Vector2f(b.X - ox, b.Y - oy),
+            new Vector2f(a.X - ox, a.Y - oy), color);
+    }
+
+    private static void GetBounds(
+        ReadOnlySpan<Vector2f> points,
+        out float minX, out float minY, out float maxX, out float maxY)
+    {
+        minX = minY = float.MaxValue;
+        maxX = maxY = float.MinValue;
+        for (int i = 0; i < points.Length; i++)
+        {
+            minX = MathF.Min(minX, points[i].X);
+            minY = MathF.Min(minY, points[i].Y);
+            maxX = MathF.Max(maxX, points[i].X);
+            maxY = MathF.Max(maxY, points[i].Y);
+        }
+    }
+
+    private static float SignedArea(ReadOnlySpan<Vector2f> polygon)
+    {
+        float area = 0f;
+        for (int i = 0; i < polygon.Length; i++)
+        {
+            Vector2f a = polygon[i], b = polygon[(i + 1) % polygon.Length];
+            area += a.X * b.Y - b.X * a.Y;
+        }
+        return area * 0.5f;
+    }
+
+    private static float Cross(Vector2f a, Vector2f b, Vector2f c) =>
+        (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+
+    private static float DistanceSquared(Vector2f a, Vector2f b)
+    {
+        float dx = a.X - b.X, dy = a.Y - b.Y;
+        return dx * dx + dy * dy;
+    }
+
+    private static Color GetOcclusionFactionColor(ushort factionTag) =>
+        factionTag switch
+        {
+            1 => new Color(74, 166, 238, 255),
+            2 => new Color(232, 98, 92, 255),
+            3 => new Color(235, 190, 84, 255),
+            _ => new Color(180, 192, 205, 255)
+        };
 
     private static int GetMinimumDetailSize(
         float pixelsPerTile,
@@ -645,6 +968,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float edgeDepth = GetCameraDepth((ax + bx) * 0.5f, (ay + by) * 0.5f);
         VertexArray occlusionFaces = GetOcclusionFaces(edgeDepth);
         AppendQuad(occlusionFaces, topA, topB, bottomB, bottomA, color);
+        _occlusionFaces.Add(new OcclusionFace(topA, topB, bottomB, bottomA, edgeDepth));
 
         if (drawBlockGrid)
         {
@@ -849,6 +1173,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     public void Dispose()
     {
         _blockFaces.Dispose();
+        _xrayFill.Dispose();
+        _xrayHatch.Dispose();
         for (int i = 0; i < _occlusionBatchPool.Count; i++)
             _occlusionBatchPool[i].Dispose();
 
