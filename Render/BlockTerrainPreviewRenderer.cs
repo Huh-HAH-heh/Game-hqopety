@@ -270,7 +270,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     drawBlockGrid && size >= BlockTerrain.HorizontalBlockSize;
 
                 AppendVisibleSideFaces(
-                    worldMap, x, y, size, minimumDetailSize,
+                    worldMap, x, y, size,
+                    Math.Min(minimumDetailSize, BlockTerrain.HorizontalBlockSize),
                     Math.Max(1, size / BlockTerrain.HorizontalBlockSize), tileSize,
                     groundDepthScale, verticalScale,
                     drawBlockOutline,
