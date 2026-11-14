@@ -789,6 +789,7 @@ public sealed class GameRenderer
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
             stageStarted = Stopwatch.GetTimestamp();
+            _unitRenderer.ClearBlockPreviewXrayUnits();
             SimulationFrameSnapshot? previewSnapshot = _simulationThread != null
                 ? Volatile.Read(ref _latestSnapshot)
                 : null;

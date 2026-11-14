@@ -678,6 +678,9 @@ public sealed class UnitRenderSystem : IDisposable
         }
     }
 
+    public void ClearBlockPreviewXrayUnits() =>
+        _previewOcclusionUnits.Clear();
+
     public void DrawBlockPreviewXrayOverlay(
         RenderWindow window,
         BlockTerrainPreviewRenderer terrainRenderer,
