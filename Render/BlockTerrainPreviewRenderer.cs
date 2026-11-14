@@ -333,6 +333,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
             _activeOcclusionBatches.Sort(static (left, right) =>
                 left.Depth.CompareTo(right.Depth));
+            _occlusionFaces.Sort(static (left, right) =>
+                left.Depth.CompareTo(right.Depth));
 
             _cachedTerrainVersion = worldMap.TerrainVersion;
             _cachedCameraAzimuthDegrees = cameraAzimuthDegrees;
@@ -424,6 +426,21 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     }
 
 
+    private int FindFirstOcclusionFaceAfterDepth(float depth)
+    {
+        int low = 0;
+        int high = _occlusionFaces.Count;
+        while (low < high)
+        {
+            int middle = low + ((high - low) >> 1);
+            if (_occlusionFaces[middle].Depth <= depth)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        return low;
+    }
+
     public void DrawHiddenUnitHatching(
         RenderWindow window,
         WorldMap worldMap,
@@ -481,7 +498,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 out float minX, out float minY, out float maxX, out float maxY);
             Color faction = GetOcclusionFactionColor(unit.FactionTag);
 
-            for (int faceIndex = 0; faceIndex < _occlusionFaces.Count; faceIndex++)
+            int firstFace = FindFirstOcclusionFaceAfterDepth(unitDepth + 0.025f);
+            for (int faceIndex = firstFace; faceIndex < _occlusionFaces.Count; faceIndex++)
             {
                 OcclusionFace face = _occlusionFaces[faceIndex];
                 if (face.Depth <= unitDepth + 0.025f ||
