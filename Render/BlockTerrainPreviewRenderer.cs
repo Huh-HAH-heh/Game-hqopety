@@ -28,7 +28,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
     private sealed class OcclusionBatch : IDisposable
     {
-        public int DepthBucket;
         public float Depth;
         public readonly VertexArray Faces = new(PrimitiveType.Triangles);
 
@@ -343,7 +342,11 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
     private void BeginOcclusionBatchBuild(int bucketSize)
     {
-        _occlusionBucketSize = Math.Max(1, bucketSize);
+        // Keep wall ordering finer than large adaptive LOD patches. The
+        // horizontal block size is the coarsest useful depth precision.
+        _occlusionBucketSize = Math.Max(
+            1,
+            Math.Min(bucketSize, BlockTerrain.HorizontalBlockSize));
         _activeOcclusionBatches.Clear();
         _occlusionBatchLookup.Clear();
         _nextOcclusionBatch = 0;
@@ -368,7 +371,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _occlusionBatchPool.Add(batch);
         }
 
-        batch.DepthBucket = bucket;
         batch.Depth = (bucket + 0.5f) * _occlusionBucketSize;
         _activeOcclusionBatches.Add(batch);
         _occlusionBatchLookup.Add(bucket, batch);
