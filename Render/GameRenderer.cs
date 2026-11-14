@@ -57,6 +57,7 @@ public sealed class GameRenderer
     private readonly GameInput _input;
     private readonly MapRenderSystem _mapRenderer;
     private readonly BlockTerrainPreviewRenderer _blockTerrainPreviewRenderer = new();
+    private readonly IsometricUnitPreviewRenderer _isometricUnitPreviewRenderer = new();
     private readonly UnitSimulation _unitSimulation;
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
@@ -449,6 +450,7 @@ public sealed class GameRenderer
             // still exists, even if initialization, update, or drawing throws.
             _mapRenderer.Dispose();
             _blockTerrainPreviewRenderer.Dispose();
+            _isometricUnitPreviewRenderer.Dispose();
             _projectileRenderer.Dispose();
             _unitRenderer.Dispose();
             _visionTestScene.Dispose();
@@ -786,7 +788,39 @@ public sealed class GameRenderer
                 _isRotatingCamera);
             _lastTerrainDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
-            _lastUnitDrawMilliseconds = 0d;
+
+            stageStarted = Stopwatch.GetTimestamp();
+            SimulationFrameSnapshot? previewSnapshot = _simulationThread != null
+                ? Volatile.Read(ref _latestSnapshot)
+                : null;
+            if (previewSnapshot != null)
+            {
+                _isometricUnitPreviewRenderer.DrawSnapshot(
+                    _window,
+                    previewSnapshot.Units,
+                    _worldMap,
+                    _camera.View,
+                    TerrainTilePixelSize,
+                    _camera.AzimuthDegrees,
+                    _camera.ElevationDegrees,
+                    _selectedUnit,
+                    _selectedUnits);
+            }
+            else if (_simulationThread == null)
+            {
+                _isometricUnitPreviewRenderer.Draw(
+                    _window,
+                    _unitSimulation,
+                    _worldMap,
+                    _camera.View,
+                    TerrainTilePixelSize,
+                    _camera.AzimuthDegrees,
+                    _camera.ElevationDegrees,
+                    _selectedUnit,
+                    _selectedUnits);
+            }
+            _lastUnitDrawMilliseconds =
+                Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
             _lastProjectileDrawMilliseconds = 0d;
             _lastUiDrawMilliseconds = 0d;
             _window.Display();
