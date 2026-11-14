@@ -95,24 +95,24 @@ public sealed class UnitRenderSystem : IDisposable
                 (MathF.PI / 180f);
             float cosine = MathF.Cos(azimuth);
             float sine = MathF.Sin(azimuth);
-            float halfTile = tilePixelSize;
-            float depthScale = halfTile * MathF.Sin(elevation);
-            float verticalScale =
-                halfTile * MathF.Cos(elevation) / MathF.Cos(MathF.PI / 6f);
+            float depthFactor = MathF.Sin(elevation);
+            float verticalFactor = MathF.Cos(elevation) / MathF.Cos(MathF.PI / 6f);
 
+            // Keep the basis dimensionless: AppendBodyPart applies tilePixelSize
+            // once after projecting the anatomical shape axes.
             Vector2 axisX = new(
-                (cosine - sine) * halfTile,
-                (cosine + sine) * depthScale);
+                cosine - sine,
+                (cosine + sine) * depthFactor);
             Vector2 axisY = new(
-                (-sine - cosine) * halfTile,
-                (-sine + cosine) * depthScale);
-            Vector2 axisZ = new(0f, -verticalScale);
+                -sine - cosine,
+                (-sine + cosine) * depthFactor);
+            Vector2 axisZ = new(0f, -verticalFactor);
 
             float centerX = worldMap.TileWidth * 0.5f;
             float centerY = worldMap.TileHeight * 0.5f;
             Vector2 origin = new(
-                (centerX - centerY) * halfTile,
-                (centerX + centerY) * depthScale);
+                (centerX - centerY) * tilePixelSize,
+                (centerX + centerY) * tilePixelSize * depthFactor);
 
             return new UnitVisualProjection(axisX, axisY, axisZ, origin);
         }
@@ -122,8 +122,8 @@ public sealed class UnitRenderSystem : IDisposable
             if (_terrainPreview)
             {
                 return new Vector2f(
-                    _origin.X + _axisX.X * position.X + _axisY.X * position.Y + _axisZ.X * position.Z,
-                    _origin.Y + _axisX.Y * position.X + _axisY.Y * position.Y + _axisZ.Y * position.Z);
+                    _origin.X + (_axisX.X * position.X + _axisY.X * position.Y + _axisZ.X * position.Z) * tilePixelSize,
+                    _origin.Y + (_axisX.Y * position.X + _axisY.Y * position.Y + _axisZ.Y * position.Z) * tilePixelSize);
             }
 
             float height = Isometric ? position.Z - groundZ : 0f;
@@ -137,8 +137,8 @@ public sealed class UnitRenderSystem : IDisposable
             if (_terrainPreview)
             {
                 return new Vector2f(
-                    _axisX.X * direction.X + _axisY.X * direction.Y + _axisZ.X * direction.Z,
-                    _axisX.Y * direction.X + _axisY.Y * direction.Y + _axisZ.Y * direction.Z);
+                    (_axisX.X * direction.X + _axisY.X * direction.Y + _axisZ.X * direction.Z) * tilePixelSize,
+                    (_axisX.Y * direction.X + _axisY.Y * direction.Y + _axisZ.Y * direction.Z) * tilePixelSize);
             }
 
             return new Vector2f(
