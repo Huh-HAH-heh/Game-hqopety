@@ -229,8 +229,43 @@ public sealed class UnitRenderSystem : IDisposable
         }
     }
 
+    private sealed class PreviewDepthBatch : IDisposable
+    {
+        public float Depth;
+        public readonly VertexArray Fills = new(PrimitiveType.Triangles);
+        public readonly VertexArray Outlines = new(PrimitiveType.Lines);
+        public readonly VertexArray Selection = new(PrimitiveType.Lines);
+
+        public void Clear()
+        {
+            Fills.Clear();
+            Outlines.Clear();
+            Selection.Clear();
+        }
+
+        public void Draw(RenderWindow window)
+        {
+            if (Fills.VertexCount > 0)
+                window.Draw(Fills);
+            if (Outlines.VertexCount > 0)
+                window.Draw(Outlines);
+            if (Selection.VertexCount > 0)
+                window.Draw(Selection);
+        }
+
+        public void Dispose()
+        {
+            Fills.Dispose();
+            Outlines.Dispose();
+            Selection.Dispose();
+        }
+    }
+
     private float[] _renderDepthKeys = Array.Empty<float>();
     private int[] _renderOrder = Array.Empty<int>();
+    private readonly List<PreviewDepthBatch> _previewDepthBatchPool = new(64);
+    private readonly List<PreviewDepthBatch> _activePreviewDepthBatches = new(64);
+    private readonly Dictionary<int, PreviewDepthBatch> _previewDepthBatchLookup = new();
     private readonly List<BlockTerrainPreviewRenderer.OcclusionUnit> _previewOcclusionUnits = new(512);
 
     private readonly VertexArray _vertices =
@@ -258,6 +293,251 @@ public sealed class UnitRenderSystem : IDisposable
             PrimitiveType.Lines);
 
     private bool[] _aimTargetDrawn = Array.Empty<bool>();
+
+    private void BeginPreviewDepthBatchBuild()
+    {
+        _activePreviewDepthBatches.Clear();
+        _previewDepthBatchLookup.Clear();
+    }
+
+    private PreviewDepthBatch GetPreviewDepthBatch(
+        BlockTerrainPreviewRenderer terrainRenderer,
+        float x,
+        float y,
+        float z)
+    {
+        int bucket = terrainRenderer.GetDepthBucketIndex(
+            terrainRenderer.GetCameraDepth(x, y, z));
+        if (_previewDepthBatchLookup.TryGetValue(bucket, out PreviewDepthBatch? existing))
+            return existing;
+
+        int poolIndex = _activePreviewDepthBatches.Count;
+        PreviewDepthBatch batch;
+        if (poolIndex < _previewDepthBatchPool.Count)
+        {
+            batch = _previewDepthBatchPool[poolIndex];
+            batch.Clear();
+        }
+        else
+        {
+            batch = new PreviewDepthBatch();
+            _previewDepthBatchPool.Add(batch);
+        }
+
+        batch.Depth = terrainRenderer.GetDepthBucketCenter(bucket);
+        _activePreviewDepthBatches.Add(batch);
+        _previewDepthBatchLookup.Add(bucket, batch);
+        return batch;
+    }
+
+    private void DrawPreviewDepthBatches(
+        RenderWindow window,
+        BlockTerrainPreviewRenderer terrainRenderer)
+    {
+        _activePreviewDepthBatches.Sort(static (left, right) =>
+            left.Depth.CompareTo(right.Depth));
+
+        for (int i = 0; i < _activePreviewDepthBatches.Count; i++)
+        {
+            PreviewDepthBatch batch = _activePreviewDepthBatches[i];
+            terrainRenderer.DrawOccludersBeforeDepth(window, batch.Depth);
+            batch.Draw(window);
+        }
+    }
+
+    private static void AppendPreviewBodyPart(
+        PreviewDepthBatch batch,
+        Vector3 position,
+        Vector3 scale,
+        Quaternion orientation,
+        float rotation,
+        BodyPrimitive primitive,
+        BodyPartRole role,
+        ushort factionTag,
+        bool isAlive,
+        float tilePixelSize,
+        float screenScale,
+        float opacity,
+        float rootZ,
+        UnitVisualProjection projection)
+    {
+        AppendBodyPart(
+            batch.Fills,
+            batch.Outlines,
+            position,
+            scale,
+            orientation,
+            rotation,
+            primitive,
+            role,
+            factionTag,
+            isAlive,
+            tilePixelSize,
+            screenScale,
+            opacity,
+            rootZ,
+            projection);
+    }
+
+    private int AppendPreviewBodyParts(
+        BlockTerrainPreviewRenderer terrainRenderer,
+        UnitBodyStore bodies,
+        int start,
+        int count,
+        ushort factionTag,
+        bool isAlive,
+        float tilePixelSize,
+        float screenScale,
+        float opacity,
+        Vector3 visualOrigin,
+        float visualScale,
+        UnitVisualProjection projection)
+    {
+        if (start < 0 || count <= 0 || start >= bodies.Count)
+            return 0;
+
+        count = Math.Min(count, bodies.Count - start);
+        Vector3[] positions = bodies.WorldPosition;
+        Vector3[] scales = bodies.Scale;
+        Quaternion[] orientations = bodies.WorldOrientation;
+        float[] rotations = bodies.WorldRotation;
+        BodyPrimitive[] primitives = bodies.Primitive;
+        BodyPartRole[] roles = bodies.Role;
+        int rendered = 0;
+
+        for (int i = start; i < start + count; i++)
+        {
+            if (roles[i] == BodyPartRole.Internal)
+                continue;
+
+            Vector3 partPosition = positions[i];
+            Vector3 partScale = scales[i];
+            if (visualScale != 1f)
+            {
+                partPosition = visualOrigin + (partPosition - visualOrigin) * visualScale;
+                partScale *= visualScale;
+            }
+
+            PreviewDepthBatch batch = GetPreviewDepthBatch(
+                terrainRenderer, partPosition.X, partPosition.Y, partPosition.Z);
+            AppendPreviewBodyPart(
+                batch,
+                partPosition,
+                partScale,
+                orientations[i],
+                rotations[i],
+                primitives[i],
+                roles[i],
+                factionTag,
+                isAlive,
+                tilePixelSize,
+                screenScale,
+                opacity,
+                visualOrigin.Z,
+                projection);
+            rendered++;
+        }
+
+        return rendered;
+    }
+
+    private int AppendPreviewBodyParts(
+        BlockTerrainPreviewRenderer terrainRenderer,
+        RenderBodyPart[] bodyParts,
+        int start,
+        int count,
+        ushort factionTag,
+        bool isAlive,
+        float tilePixelSize,
+        float screenScale,
+        float opacity,
+        Vector3 visualOrigin,
+        float visualScale,
+        UnitVisualProjection projection)
+    {
+        if (start < 0 || count <= 0 || start >= bodyParts.Length)
+            return 0;
+
+        count = Math.Min(count, bodyParts.Length - start);
+        int rendered = 0;
+        for (int i = start; i < start + count; i++)
+        {
+            RenderBodyPart part = bodyParts[i];
+            if (part.Role == BodyPartRole.Internal)
+                continue;
+
+            Vector3 partPosition = part.Position;
+            Vector3 partScale = part.Scale;
+            if (visualScale != 1f)
+            {
+                partPosition = visualOrigin + (partPosition - visualOrigin) * visualScale;
+                partScale *= visualScale;
+            }
+
+            PreviewDepthBatch batch = GetPreviewDepthBatch(
+                terrainRenderer, partPosition.X, partPosition.Y, partPosition.Z);
+            AppendPreviewBodyPart(
+                batch,
+                partPosition,
+                partScale,
+                part.Orientation,
+                part.Rotation,
+                part.Primitive,
+                part.Role,
+                factionTag,
+                isAlive,
+                tilePixelSize,
+                screenScale,
+                opacity,
+                visualOrigin.Z,
+                projection);
+            rendered++;
+        }
+
+        return rendered;
+    }
+
+    private int AppendPreviewGameplayZones(
+        BlockTerrainPreviewRenderer terrainRenderer,
+        UnitStore units,
+        int unitIndex,
+        ushort factionTag,
+        float tilePixelSize,
+        float screenScale,
+        UnitVisualProjection projection)
+    {
+        Vector3 origin = units.Position[unitIndex];
+        int rendered = 0;
+        for (int zoneIndex = 0; zoneIndex < UnitGameplayZoneSystem.ZoneCount; zoneIndex++)
+        {
+            UnitGameplayZoneGeometry zone = UnitGameplayZoneSystem.GetGeometry(
+                units, unitIndex, zoneIndex);
+            RenderBodyPart part = UnitGameplayZoneRenderGeometry.CreatePart(zone);
+            Vector3 partPosition =
+                origin + (part.Position - origin) * UnitVisualScale;
+            PreviewDepthBatch batch = GetPreviewDepthBatch(
+                terrainRenderer, partPosition.X, partPosition.Y, partPosition.Z);
+
+            AppendPreviewBodyPart(
+                batch,
+                partPosition,
+                part.Scale * UnitVisualScale,
+                part.Orientation,
+                part.Rotation,
+                part.Primitive,
+                part.Role,
+                factionTag,
+                true,
+                tilePixelSize,
+                screenScale,
+                1f,
+                origin.Z,
+                projection);
+            rendered++;
+        }
+
+        return rendered;
+    }
 
     private void PrepareRenderOrder(ReadOnlySpan<int> active, Vector3[] positions, View view)
     {
@@ -328,9 +608,7 @@ public sealed class UnitRenderSystem : IDisposable
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
 
-        _vertices.Clear();
-        _bodyOutlines.Clear();
-        _selection.Clear();
+        BeginPreviewDepthBatchBuild();
 
         UnitStore units = simulation.Units;
         UnitBodyStore bodies = simulation.Bodies;
@@ -349,13 +627,6 @@ public sealed class UnitRenderSystem : IDisposable
 
         for (int order = 0; order < active.Length; order++)
         {
-            float unitDepth = _renderDepthKeys[order];
-            if (terrainRenderer.HasOccludersBeforeDepth(unitDepth))
-            {
-                DrawPreviewGeometry(window);
-                terrainRenderer.DrawOccludersBeforeDepth(window, unitDepth);
-            }
-
             int index = _renderOrder[order];
             Vector3 position = positions[index];
             if (hitPoints[index] <= 0f)
@@ -373,35 +644,31 @@ public sealed class UnitRenderSystem : IDisposable
                     units.Width[index], units.Length[index], units.Height[index],
                     units.FactionTag[index]));
                 float xrayRadius = MathF.Max(units.Width[index], units.Length[index]) * 0.58f;
+                PreviewDepthBatch xrayBatch = GetPreviewDepthBatch(
+                    terrainRenderer, position.X, position.Y, position.Z);
                 AppendPreviewGroundEllipse(
-                    _selection, projection, position, xrayRadius, xrayRadius,
+                    xrayBatch.Selection, projection, position, xrayRadius, xrayRadius,
                     tilePixelSize, GetXrayFactionColor(units.FactionTag[index]));
             }
 
-            uint fillsBefore = _vertices.VertexCount;
-            uint outlinesBefore = _bodyOutlines.VertexCount;
-
             UnitHitRegionProfile? hitProfile = simulation.HitRegions.GetProfile(index);
+            int renderedParts;
             if (units.Type[index] == UnitType.Colonist &&
                 hitProfile is UnitAnatomyProfile)
             {
-                AppendGameplayZones(
-                    _vertices,
-                    _bodyOutlines,
+                renderedParts = AppendPreviewGameplayZones(
+                    terrainRenderer,
                     units,
                     index,
                     units.FactionTag[index],
-                    true,
                     tilePixelSize,
                     screenScale,
-                    position.Z,
                     projection);
             }
             else
             {
-                AppendBodyParts(
-                    _vertices,
-                    _bodyOutlines,
+                renderedParts = AppendPreviewBodyParts(
+                    terrainRenderer,
                     bodies,
                     bodyStarts[index],
                     bodyCounts[index],
@@ -415,14 +682,17 @@ public sealed class UnitRenderSystem : IDisposable
                     projection);
             }
 
-            bool hasBody = _vertices.VertexCount > fillsBefore ||
-                _bodyOutlines.VertexCount > outlinesBefore;
-            if (!hasBody)
+            if (renderedParts == 0)
             {
+                PreviewDepthBatch fallbackBatch = GetPreviewDepthBatch(
+                    terrainRenderer,
+                    position.X,
+                    position.Y,
+                    position.Z + MathF.Max(0f, units.Height[index]) * 0.5f);
                 Vector2f axisX = projection.ProjectVector(new Vector3(0.22f, 0f, 0f), tilePixelSize);
                 Vector2f axisY = projection.ProjectVector(new Vector3(0f, 0.15f, 0f), tilePixelSize);
                 AppendPreviewEllipse(
-                    _vertices, center, axisX, axisY,
+                    fallbackBatch.Fills, center, axisX, axisY,
                     GetBodyPartColor(BodyPartRole.Torso, units.FactionTag[index], true),
                     14);
             }
@@ -432,13 +702,15 @@ public sealed class UnitRenderSystem : IDisposable
             {
                 float radius = MathF.Max(units.Width[index], units.Length[index]) *
                     0.6f * UnitVisualScale;
+                PreviewDepthBatch selectionBatch = GetPreviewDepthBatch(
+                    terrainRenderer, position.X, position.Y, position.Z);
                 AppendPreviewGroundEllipse(
-                    _selection, projection, position, radius, radius,
+                    selectionBatch.Selection, projection, position, radius, radius,
                     tilePixelSize, new Color(255, 238, 115, 235));
             }
         }
 
-        DrawPreviewGeometry(window);
+        DrawPreviewDepthBatches(window, terrainRenderer);
     }
 
     public void DrawIsometricPreview(
@@ -465,20 +737,11 @@ public sealed class UnitRenderSystem : IDisposable
             0.001f,
             window.Size.X / MathF.Max(1f, cameraView.Size.X));
 
-        _vertices.Clear();
-        _bodyOutlines.Clear();
-        _selection.Clear();
+        BeginPreviewDepthBatchBuild();
         PreparePreviewRenderOrder(units, azimuthDegrees, elevationDegrees);
 
         for (int order = 0; order < units.Length; order++)
         {
-            float unitDepth = _renderDepthKeys[order];
-            if (terrainRenderer.HasOccludersBeforeDepth(unitDepth))
-            {
-                DrawPreviewGeometry(window);
-                terrainRenderer.DrawOccludersBeforeDepth(window, unitDepth);
-            }
-
             RenderUnitState unit = units[_renderOrder[order]];
             if (unit.HitPoints <= 0f)
                 continue;
@@ -496,14 +759,14 @@ public sealed class UnitRenderSystem : IDisposable
                     unit.Width, unit.Length, unit.Height,
                     unit.FactionTag));
                 float xrayRadius = MathF.Max(unit.Width, unit.Length) * 0.58f;
+                PreviewDepthBatch xrayBatch = GetPreviewDepthBatch(
+                    terrainRenderer, position.X, position.Y, position.Z);
                 AppendPreviewGroundEllipse(
-                    _selection, projection, position, xrayRadius, xrayRadius,
+                    xrayBatch.Selection, projection, position, xrayRadius, xrayRadius,
                     tilePixelSize, GetXrayFactionColor(unit.FactionTag));
             }
 
-            uint fillsBefore = _vertices.VertexCount;
-            uint outlinesBefore = _bodyOutlines.VertexCount;
-
+            int renderedParts;
             if (unit.Type == UnitType.Colonist &&
                 unit.BodyPartCount == UnitGameplayZoneSystem.ZoneCount)
             {
@@ -512,32 +775,24 @@ public sealed class UnitRenderSystem : IDisposable
                     0,
                     bodyParts.Length - Math.Clamp(unit.BodyPartStart, 0, bodyParts.Length));
                 int start = Math.Clamp(unit.BodyPartStart, 0, bodyParts.Length);
-                for (int partIndex = start; partIndex < start + count; partIndex++)
-                {
-                    RenderBodyPart part = bodyParts[partIndex];
-                    AppendBodyPart(
-                        _vertices,
-                        _bodyOutlines,
-                        position + (part.Position - position) * UnitVisualScale,
-                        part.Scale * UnitVisualScale,
-                        part.Orientation,
-                        part.Rotation,
-                        part.Primitive,
-                        part.Role,
-                        unit.FactionTag,
-                        true,
-                        tilePixelSize,
-                        screenScale,
-                        1f,
-                        position.Z,
-                        projection);
-                }
+                renderedParts = AppendPreviewBodyParts(
+                    terrainRenderer,
+                    bodyParts,
+                    start,
+                    count,
+                    unit.FactionTag,
+                    true,
+                    tilePixelSize,
+                    screenScale,
+                    1f,
+                    position,
+                    UnitVisualScale,
+                    projection);
             }
             else
             {
-                AppendBodyParts(
-                    _vertices,
-                    _bodyOutlines,
+                renderedParts = AppendPreviewBodyParts(
+                    terrainRenderer,
                     bodyParts,
                     unit.BodyPartStart,
                     unit.BodyPartCount,
@@ -551,14 +806,17 @@ public sealed class UnitRenderSystem : IDisposable
                     projection);
             }
 
-            bool hasBody = _vertices.VertexCount > fillsBefore ||
-                _bodyOutlines.VertexCount > outlinesBefore;
-            if (!hasBody)
+            if (renderedParts == 0)
             {
+                PreviewDepthBatch fallbackBatch = GetPreviewDepthBatch(
+                    terrainRenderer,
+                    position.X,
+                    position.Y,
+                    position.Z + MathF.Max(0f, unit.Height) * 0.5f);
                 Vector2f axisX = projection.ProjectVector(new Vector3(0.22f, 0f, 0f), tilePixelSize);
                 Vector2f axisY = projection.ProjectVector(new Vector3(0f, 0.15f, 0f), tilePixelSize);
                 AppendPreviewEllipse(
-                    _vertices, center, axisX, axisY,
+                    fallbackBatch.Fills, center, axisX, axisY,
                     GetBodyPartColor(BodyPartRole.Torso, unit.FactionTag, true),
                     14);
             }
@@ -568,13 +826,15 @@ public sealed class UnitRenderSystem : IDisposable
             {
                 float radius = MathF.Max(unit.Width, unit.Length) *
                     0.6f * UnitVisualScale;
+                PreviewDepthBatch selectionBatch = GetPreviewDepthBatch(
+                    terrainRenderer, position.X, position.Y, position.Z);
                 AppendPreviewGroundEllipse(
-                    _selection, projection, position, radius, radius,
+                    selectionBatch.Selection, projection, position, radius, radius,
                     tilePixelSize, new Color(255, 238, 115, 235));
             }
         }
 
-        DrawPreviewGeometry(window);
+        DrawPreviewDepthBatches(window, terrainRenderer);
     }
 
     private void PreparePreviewRenderOrder(
@@ -4016,5 +4276,11 @@ private static Vector3 NormalizeHorizontal(
         _aiming.Dispose();
         _visionDebug.Dispose();
         _aiDebug.Dispose();
+        for (int i = 0; i < _previewDepthBatchPool.Count; i++)
+            _previewDepthBatchPool[i].Dispose();
+
+        _previewDepthBatchPool.Clear();
+        _activePreviewDepthBatches.Clear();
+        _previewDepthBatchLookup.Clear();
     }
 }

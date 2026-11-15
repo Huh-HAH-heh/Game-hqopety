@@ -15,6 +15,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 {
     private const int MinimumBlockSize = 1;
     private const int MaximumAdaptiveBlockSize = BlockTerrain.HorizontalBlockSize * 8;
+    public const float DepthBucketSize = 0.25f;
 
     private struct BlockDrawItem
     {
@@ -135,10 +136,11 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private int _nextPrimitiveSequence;
     private readonly VertexArray _xrayFill = new(PrimitiveType.Triangles);
     private readonly VertexArray _xrayHatch = new(PrimitiveType.Triangles);
+    private readonly VertexArray _topFaces = new(PrimitiveType.Triangles);
+    private VertexBuffer? _topFacesGpu;
     private float _projectionTileSize, _projectionGroundDepthScale, _projectionVerticalScale;
     private float _depthPlanarScale = 1f;
     private float _depthVerticalScale;
-    private int _occlusionBucketSize = 1;
     private int _nextOcclusionBatch;
     private bool _cacheValid;
     private long _cachedTerrainVersion = long.MinValue;
@@ -224,7 +226,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         if (rebuildGeometry)
         {
-            BeginOcclusionBatchBuild(minimumDetailSize);
+            BeginOcclusionBatchBuild();
 
             GetVisibleTileBounds(
                 cameraView,
@@ -297,28 +299,28 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 // duplicate edge quads, so the visible grid starts at the 4 m block.
                 bool drawBlockOutline = drawBlockGrid;
 
-                // Top faces and vertical faces must share the same depth queue.
-                // Drawing every top face first lets distant walls overwrite nearer terrain.
+                // Top surfaces are the support layer. Draw them before actors so
+                // a unit standing on a large adaptive patch cannot be hidden by it.
                 Color topColor = GetTopColor(block.MaterialId, height);
-                QueueDepthQuad(block.Depth, north, east, south, west, topColor);
+                AppendQuad(_topFaces, north, east, south, west, topColor);
 
                 if (drawBlockOutline)
                 {
                     // Draw the 4 m construction grid even when LOD has split
                     // the top into 1 m cells. Each grid edge is emitted once.
                     if (y % BlockTerrain.HorizontalBlockSize == 0)
-                        QueueDepthLine(GetCameraDepth(x + size * 0.5f, y, height), north, east, seamColor);
+                        AppendTopDepthLine(_topFaces, north, east, seamColor);
                     if (x % BlockTerrain.HorizontalBlockSize == 0)
-                        QueueDepthLine(GetCameraDepth(x, y + size * 0.5f, height), west, north, seamColor);
+                        AppendTopDepthLine(_topFaces, west, north, seamColor);
 
                     if (x + size >= worldMap.TileWidth)
-                        QueueDepthLine(GetCameraDepth(x + size, y + size * 0.5f, height), east, south, seamColor);
+                        AppendTopDepthLine(_topFaces, east, south, seamColor);
                     if (y + size >= worldMap.TileHeight)
-                        QueueDepthLine(GetCameraDepth(x + size * 0.5f, y + size, height), south, west, seamColor);
+                        AppendTopDepthLine(_topFaces, south, west, seamColor);
                 }
 
-                // Emit the top patch first, then its camera-facing wall
-                // segments. Both enter the same depth queue in back-to-front order.
+                // Camera-facing wall segments remain in the depth queue and can
+                // cover individual anatomical parts farther from the camera.
                 AppendVisibleSideFaces(
                     worldMap,
                     x, y, size,
@@ -329,6 +331,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             }
 
             FlushDepthPrimitives();
+            UploadTopFacesToGpu();
 
             // Upload rebuilt static terrain geometry once. Subsequent frames draw
             // directly from GPU memory instead of resending CPU VertexArrays.
@@ -350,8 +353,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _cacheValid = true;
         }
 
-        // All terrain faces are queued by camera depth and consumed together
-        // with units through DrawOccludersBeforeDepth / DrawRemainingOccluders.
+        DrawTopFaces(window);
+
+        // Vertical faces are consumed with anatomical parts through the shared depth order.
     }
 
     public bool HasOccludersBeforeDepth(float depth) =>
@@ -381,11 +385,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         }
     }
 
-    private void BeginOcclusionBatchBuild(int bucketSize)
+    private void BeginOcclusionBatchBuild()
     {
-        // Surface samples and wall segments are addressed on the 1 m grid.
-        // Keep painter-order bands at that same resolution regardless of LOD.
-        _occlusionBucketSize = 1;
+        _topFaces.Clear();
         _activeOcclusionBatches.Clear();
         _occlusionBatchLookup.Clear();
         _occlusionFaces.Clear();
@@ -421,6 +423,70 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             color);
     }
 
+    private static void AppendTopDepthLine(
+        VertexArray vertices,
+        Vector2f a,
+        Vector2f b,
+        Color color)
+    {
+        float dx = b.X - a.X;
+        float dy = b.Y - a.Y;
+        float length = MathF.Sqrt(dx * dx + dy * dy);
+        if (length <= 0.001f)
+            return;
+
+        const float halfThickness = 0.55f;
+        float offsetX = -dy / length * halfThickness;
+        float offsetY = dx / length * halfThickness;
+        AppendQuad(
+            vertices,
+            new Vector2f(a.X + offsetX, a.Y + offsetY),
+            new Vector2f(b.X + offsetX, b.Y + offsetY),
+            new Vector2f(b.X - offsetX, b.Y - offsetY),
+            new Vector2f(a.X - offsetX, a.Y - offsetY),
+            color);
+    }
+
+    private void UploadTopFacesToGpu()
+    {
+        if (_topFaces.VertexCount == 0 || !VertexBuffer.Available)
+        {
+            _topFacesGpu?.Dispose();
+            _topFacesGpu = null;
+            return;
+        }
+
+        int vertexCount = checked((int)_topFaces.VertexCount);
+        Vertex[] vertices = new Vertex[vertexCount];
+        for (int i = 0; i < vertexCount; i++)
+            vertices[i] = _topFaces[(uint)i];
+
+        if (_topFacesGpu == null || _topFacesGpu.VertexCount != (uint)vertexCount)
+        {
+            _topFacesGpu?.Dispose();
+            _topFacesGpu = new VertexBuffer(
+                (uint)vertexCount,
+                PrimitiveType.Triangles,
+                VertexBuffer.UsageSpecifier.Static);
+        }
+
+        if (_topFacesGpu.Update(vertices))
+            _topFaces.Clear();
+        else
+        {
+            _topFacesGpu.Dispose();
+            _topFacesGpu = null;
+        }
+    }
+
+    private void DrawTopFaces(RenderWindow window)
+    {
+        if (_topFacesGpu != null && _topFacesGpu.VertexCount > 0)
+            window.Draw(_topFacesGpu);
+        else if (_topFaces.VertexCount > 0)
+            window.Draw(_topFaces);
+    }
+
     private void FlushDepthPrimitives()
     {
         _depthPrimitives.Sort(static (left, right) =>
@@ -443,7 +509,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
     private VertexArray GetOcclusionFaces(float depth)
     {
-        int bucket = (int)MathF.Floor(depth / _occlusionBucketSize);
+        int bucket = GetDepthBucketIndex(depth);
         if (_occlusionBatchLookup.TryGetValue(bucket, out OcclusionBatch? existing))
             return existing.Faces;
 
@@ -460,13 +526,13 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _occlusionBatchPool.Add(batch);
         }
 
-        batch.Depth = (bucket + 0.5f) * _occlusionBucketSize;
+        batch.Depth = GetDepthBucketCenter(bucket);
         _activeOcclusionBatches.Add(batch);
         _occlusionBatchLookup.Add(bucket, batch);
         return batch.Faces;
     }
 
-    private float GetCameraDepth(float x, float y, float heightMeters)
+    public float GetCameraDepth(float x, float y, float heightMeters)
     {
         float rotatedX = _rotationCosine * x - _rotationSine * y;
         float rotatedY = _rotationSine * x + _rotationCosine * y;
@@ -474,6 +540,14 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         return planarDepth * _depthPlanarScale +
             heightMeters * _depthVerticalScale;
     }
+
+    public int GetDepthBucketIndex(float depth) =>
+        float.IsFinite(depth)
+            ? (int)MathF.Floor(depth / DepthBucketSize)
+            : 0;
+
+    public float GetDepthBucketCenter(int bucket) =>
+        (bucket + 0.5f) * DepthBucketSize;
 
 
     private int FindFirstOcclusionFaceAfterDepth(float depth)
@@ -1249,6 +1323,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     {
         _xrayFill.Dispose();
         _xrayHatch.Dispose();
+        _topFaces.Dispose();
+        _topFacesGpu?.Dispose();
+        _topFacesGpu = null;
         for (int i = 0; i < _occlusionBatchPool.Count; i++)
             _occlusionBatchPool[i].Dispose();
 
