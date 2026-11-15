@@ -46,7 +46,45 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     {
         public float Depth;
         public readonly VertexArray Faces = new(PrimitiveType.Triangles);
-        public void Dispose() => Faces.Dispose();
+        public VertexBuffer? GpuFaces;
+
+        public void UploadToGpu()
+        {
+            if (!VertexBuffer.Available || Faces.VertexCount == 0)
+                return;
+
+            int vertexCount = checked((int)Faces.VertexCount);
+            Vertex[] vertices = new Vertex[vertexCount];
+            for (int i = 0; i < vertexCount; i++)
+                vertices[i] = Faces[(uint)i];
+
+            if (GpuFaces == null || GpuFaces.VertexCount != (uint)vertexCount)
+            {
+                GpuFaces?.Dispose();
+                GpuFaces = new VertexBuffer(
+                    (uint)vertexCount,
+                    PrimitiveType.Triangles,
+                    VertexBuffer.UsageSpecifier.Static);
+            }
+
+            if (GpuFaces.Update(vertices))
+                Faces.Clear();
+        }
+
+        public void Draw(RenderWindow window)
+        {
+            if (GpuFaces != null && GpuFaces.VertexCount > 0)
+                window.Draw(GpuFaces);
+            else if (Faces.VertexCount > 0)
+                window.Draw(Faces);
+        }
+
+        public void Dispose()
+        {
+            Faces.Dispose();
+            GpuFaces?.Dispose();
+            GpuFaces = null;
+        }
     }
 
     private readonly struct DepthPrimitive
@@ -284,6 +322,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             }
 
             FlushDepthPrimitives();
+
+            // Upload rebuilt static terrain geometry once. Subsequent frames draw
+            // directly from GPU memory instead of resending CPU VertexArrays.
+            for (int i = 0; i < _activeOcclusionBatches.Count; i++)
+                _activeOcclusionBatches[i].UploadToGpu();
+
             _activeOcclusionBatches.Sort(static (left, right) =>
                 left.Depth.CompareTo(right.Depth));
             _occlusionFaces.Sort(static (left, right) =>
@@ -315,8 +359,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             if (batch.Depth > depth)
                 break;
 
-            if (batch.Faces.VertexCount > 0)
-                window.Draw(batch.Faces);
+            batch.Draw(window);
 
             _nextOcclusionBatch++;
         }
@@ -327,8 +370,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         while (_nextOcclusionBatch < _activeOcclusionBatches.Count)
         {
             OcclusionBatch batch = _activeOcclusionBatches[_nextOcclusionBatch++];
-            if (batch.Faces.VertexCount > 0)
-                window.Draw(batch.Faces);
+            batch.Draw(window);
         }
     }
 
