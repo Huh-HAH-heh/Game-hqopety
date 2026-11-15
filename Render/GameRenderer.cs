@@ -3450,6 +3450,7 @@ public sealed class GameRenderer
                 if (_showBlockTerrainPreview &&
                     e.Button == Mouse.Button.Right)
                 {
+                    _blockPreviewCamera.BeginInteractiveRotation();
                     _isRotatingCamera = true;
                     _lastCameraRotatePixel = e.Position;
                     _isPanningCamera = false;
@@ -4164,6 +4165,9 @@ public sealed class GameRenderer
             {
                 if (e.Button == Mouse.Button.Right && _isRotatingCamera)
                 {
+                    _blockPreviewCamera.EndInteractiveRotation(
+                        _worldMap,
+                        TerrainTilePixelSize);
                     _isRotatingCamera = false;
                     return;
                 }
@@ -4410,6 +4414,13 @@ public sealed class GameRenderer
 
     private void ToggleBlockTerrainPreview()
     {
+        if (_isRotatingCamera)
+        {
+            _blockPreviewCamera.EndInteractiveRotation(
+                _worldMap,
+                TerrainTilePixelSize);
+        }
+
         _showBlockTerrainPreview = !_showBlockTerrainPreview;
         _isPanningCamera = false;
         _isRotatingCamera = false;

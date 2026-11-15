@@ -49,6 +49,23 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         public void Dispose() => Faces.Dispose();
     }
 
+    private readonly struct DepthPrimitive
+    {
+        public readonly float Depth;
+        public readonly Vector2f A, B, C, D;
+        public readonly Color Color;
+        public readonly int Sequence;
+
+        public DepthPrimitive(float depth, Vector2f a, Vector2f b,
+            Vector2f c, Vector2f d, Color color, int sequence)
+        {
+            Depth = depth;
+            A = a; B = b; C = c; D = d;
+            Color = color;
+            Sequence = sequence;
+        }
+    }
+
     private readonly struct OcclusionFace
     {
         public readonly Vector2f A, B, C, D;
@@ -69,6 +86,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private readonly List<OcclusionBatch> _activeOcclusionBatches = new(128);
     private readonly Dictionary<int, OcclusionBatch> _occlusionBatchLookup = new();
     private readonly List<OcclusionFace> _occlusionFaces = new(2048);
+    private readonly List<DepthPrimitive> _depthPrimitives = new(32768);
+    private int _nextPrimitiveSequence;
     private readonly VertexArray _xrayFill = new(PrimitiveType.Triangles);
     private readonly VertexArray _xrayHatch = new(PrimitiveType.Triangles);
     private float _projectionTileSize, _projectionGroundDepthScale, _projectionVerticalScale;
@@ -235,23 +254,22 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
                 // Top faces and vertical faces must share the same depth queue.
                 // Drawing every top face first lets distant walls overwrite nearer terrain.
-                VertexArray topFaces = GetOcclusionFaces(block.Depth);
                 Color topColor = GetTopColor(block.MaterialId, height);
-                AppendTopFace(topFaces, north, east, south, west, topColor);
+                QueueDepthQuad(block.Depth, north, east, south, west, topColor);
 
                 if (drawBlockOutline)
                 {
                     // Draw the 4 m construction grid even when LOD has split
                     // the top into 1 m cells. Each grid edge is emitted once.
                     if (y % BlockTerrain.HorizontalBlockSize == 0)
-                        AppendLineAsQuad(topFaces, north, east, seamColor);
+                        QueueDepthLine(GetCameraDepth(x + size * 0.5f, y, height), north, east, seamColor);
                     if (x % BlockTerrain.HorizontalBlockSize == 0)
-                        AppendLineAsQuad(topFaces, west, north, seamColor);
+                        QueueDepthLine(GetCameraDepth(x, y + size * 0.5f, height), west, north, seamColor);
 
                     if (x + size >= worldMap.TileWidth)
-                        AppendLineAsQuad(topFaces, east, south, seamColor);
+                        QueueDepthLine(GetCameraDepth(x + size, y + size * 0.5f, height), east, south, seamColor);
                     if (y + size >= worldMap.TileHeight)
-                        AppendLineAsQuad(topFaces, south, west, seamColor);
+                        QueueDepthLine(GetCameraDepth(x + size * 0.5f, y + size, height), south, west, seamColor);
                 }
 
                 // Emit the top patch first, then its camera-facing wall
@@ -265,6 +283,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     drawBlockOutline);
             }
 
+            FlushDepthPrimitives();
             _activeOcclusionBatches.Sort(static (left, right) =>
                 left.Depth.CompareTo(right.Depth));
             _occlusionFaces.Sort(static (left, right) =>
@@ -321,7 +340,56 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         _activeOcclusionBatches.Clear();
         _occlusionBatchLookup.Clear();
         _occlusionFaces.Clear();
+        _depthPrimitives.Clear();
+        _nextPrimitiveSequence = 0;
         _nextOcclusionBatch = 0;
+    }
+
+    private void QueueDepthQuad(
+        float depth, Vector2f a, Vector2f b, Vector2f c, Vector2f d, Color color)
+    {
+        _depthPrimitives.Add(new DepthPrimitive(
+            depth, a, b, c, d, color, _nextPrimitiveSequence++));
+    }
+
+    private void QueueDepthLine(float depth, Vector2f a, Vector2f b, Color color)
+    {
+        float dx = b.X - a.X;
+        float dy = b.Y - a.Y;
+        float length = MathF.Sqrt(dx * dx + dy * dy);
+        if (length <= 0.001f)
+            return;
+
+        const float halfThickness = 0.55f;
+        float offsetX = -dy / length * halfThickness;
+        float offsetY = dx / length * halfThickness;
+        QueueDepthQuad(
+            depth,
+            new Vector2f(a.X + offsetX, a.Y + offsetY),
+            new Vector2f(b.X + offsetX, b.Y + offsetY),
+            new Vector2f(b.X - offsetX, b.Y - offsetY),
+            new Vector2f(a.X - offsetX, a.Y - offsetY),
+            color);
+    }
+
+    private void FlushDepthPrimitives()
+    {
+        _depthPrimitives.Sort(static (left, right) =>
+        {
+            int depthOrder = left.Depth.CompareTo(right.Depth);
+            return depthOrder != 0
+                ? depthOrder
+                : left.Sequence.CompareTo(right.Sequence);
+        });
+
+        for (int i = 0; i < _depthPrimitives.Count; i++)
+        {
+            DepthPrimitive primitive = _depthPrimitives[i];
+            AppendQuad(
+                GetOcclusionFaces(primitive.Depth),
+                primitive.A, primitive.B, primitive.C, primitive.D,
+                primitive.Color);
+        }
     }
 
     private VertexArray GetOcclusionFaces(float depth)
@@ -911,8 +979,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             (ax + bx) * 0.5f,
             (ay + by) * 0.5f,
             faceCenterHeight);
-        VertexArray occlusionFaces = GetOcclusionFaces(edgeDepth);
-        AppendQuad(occlusionFaces, topA, topB, bottomB, bottomA, color);
+        QueueDepthQuad(edgeDepth, topA, topB, bottomB, bottomA, color);
         _occlusionFaces.Add(new OcclusionFace(topA, topB, bottomB, bottomA, edgeDepth));
 
         if (drawBlockGrid)
@@ -925,8 +992,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                  height < seamEnd - 0.01f;
                  height += groupHeight)
             {
-                AppendLineAsQuad(
-                    occlusionFaces,
+                QueueDepthLine(
+                    GetCameraDepth((ax + bx) * 0.5f, (ay + by) * 0.5f, height),
                     ProjectLevelPoint(
                         worldMap, ax, ay, height, tileSize,
                         groundDepthScale, verticalScale),
@@ -936,18 +1003,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     new Color(18, 22, 25, 190));
             }
         }
-    }
-
-    private static void AppendTopFace(
-        VertexArray vertices,
-        Vector2f north,
-        Vector2f east,
-        Vector2f south,
-        Vector2f west,
-        Color color)
-    {
-        AppendTriangle(vertices, north, east, south, color);
-        AppendTriangle(vertices, north, south, west, color);
     }
 
     private static void AppendQuad(
@@ -972,31 +1027,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         vertices.Append(new Vertex(a, color));
         vertices.Append(new Vertex(b, color));
         vertices.Append(new Vertex(c, color));
-    }
-
-    private static void AppendLineAsQuad(
-        VertexArray vertices,
-        Vector2f a,
-        Vector2f b,
-        Color color)
-    {
-        float dx = b.X - a.X;
-        float dy = b.Y - a.Y;
-        float length = MathF.Sqrt(dx * dx + dy * dy);
-        if (length <= 0.001f)
-            return;
-
-        const float halfThickness = 0.55f;
-        float offsetX = -dy / length * halfThickness;
-        float offsetY = dx / length * halfThickness;
-
-        AppendQuad(
-            vertices,
-            new Vector2f(a.X + offsetX, a.Y + offsetY),
-            new Vector2f(b.X + offsetX, b.Y + offsetY),
-            new Vector2f(b.X - offsetX, b.Y - offsetY),
-            new Vector2f(a.X - offsetX, a.Y - offsetY),
-            color);
     }
 
     private static Color GetTopColor(
@@ -1077,8 +1107,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
         for (int corner = 0; corner < 4; corner++)
         {
-            float localX = (corner & 1) == 0 ? -view.Size.X * 0.7f : view.Size.X * 0.7f;
-            float localY = (corner & 2) == 0 ? -view.Size.Y * 0.7f : view.Size.Y * 0.7f;
+            float localX = (corner & 1) == 0 ? -view.Size.X : view.Size.X;
+            float localY = (corner & 2) == 0 ? -view.Size.Y : view.Size.Y;
             float screenX = view.Center.X + cosine * localX - sine * localY;
             float screenY = view.Center.Y + sine * localX + cosine * localY;
 

@@ -24,6 +24,9 @@ public sealed class BlockTerrainPreviewCamera : IDisposable
     private float _panSensitivity = 1f;
     private float _moveSensitivity = 1f;
     private float _azimuthDegrees;
+    private float _renderAzimuthDegrees;
+    private float _interactiveRotationDegrees;
+    private bool _isInteractiveRotation;
     private float _elevationDegrees = 30f;
     private float _targetElevationDegrees = 30f;
     private long _cachedTerrainVersion = long.MinValue;
@@ -31,7 +34,9 @@ public sealed class BlockTerrainPreviewCamera : IDisposable
 
     public View View => _view;
     public float ZoomLevel => _zoomLevel;
-    public float AzimuthDegrees => _azimuthDegrees;
+    public float AzimuthDegrees => _renderAzimuthDegrees;
+    public float TargetAzimuthDegrees => _azimuthDegrees;
+    public bool IsInteractiveRotation => _isInteractiveRotation;
     public float ElevationDegrees => _elevationDegrees;
     public float TargetElevationDegrees => _targetElevationDegrees;
 
@@ -138,16 +143,88 @@ public sealed class BlockTerrainPreviewCamera : IDisposable
         _view.Center = center;
     }
 
+    public void BeginInteractiveRotation()
+    {
+        if (_isInteractiveRotation)
+            return;
+
+        _isInteractiveRotation = true;
+        _interactiveRotationDegrees = 0f;
+        _view.Rotation = Angle.FromDegrees(0f);
+    }
+
     public void RotateAzimuth(float deltaDegrees, WorldMap worldMap, float tilePixelSize)
     {
         if (!float.IsFinite(deltaDegrees) || MathF.Abs(deltaDegrees) < 0.0001f)
             return;
 
+        _azimuthDegrees = WrapDegrees(_azimuthDegrees + deltaDegrees);
+        if (_isInteractiveRotation)
+        {
+            _interactiveRotationDegrees += deltaDegrees;
+            _view.Rotation = Angle.FromDegrees(
+                GetInteractiveScreenRotation(_interactiveRotationDegrees));
+            return;
+        }
+
         _view.Center = RotateProjectedPosition(_view.Center, deltaDegrees, worldMap, tilePixelSize);
         _targetPosition = RotateProjectedPosition(_targetPosition, deltaDegrees, worldMap, tilePixelSize);
-        _azimuthDegrees = (_azimuthDegrees + deltaDegrees) % 360f;
-        if (_azimuthDegrees < 0f)
-            _azimuthDegrees += 360f;
+        _renderAzimuthDegrees = _azimuthDegrees;
+        _view.Rotation = Angle.FromDegrees(0f);
+    }
+
+    public void EndInteractiveRotation(WorldMap worldMap, float tilePixelSize)
+    {
+        if (!_isInteractiveRotation)
+            return;
+
+        float totalDelta = _interactiveRotationDegrees;
+        _isInteractiveRotation = false;
+        if (MathF.Abs(totalDelta) > 0.0001f)
+        {
+            _view.Center = RotateProjectedPosition(_view.Center, totalDelta, worldMap, tilePixelSize);
+            _targetPosition = RotateProjectedPosition(_targetPosition, totalDelta, worldMap, tilePixelSize);
+        }
+
+        _renderAzimuthDegrees = _azimuthDegrees;
+        _interactiveRotationDegrees = 0f;
+        _view.Rotation = Angle.FromDegrees(0f);
+    }
+
+    private float GetInteractiveScreenRotation(float deltaDegrees)
+    {
+        float elevationRadians = Math.Clamp(_elevationDegrees, 15f, 90f) *
+            (MathF.PI / 180f);
+        float verticalToHorizontal = MathF.Sin(elevationRadians);
+        float radians = (deltaDegrees % 360f) * (MathF.PI / 180f);
+        float cosine = MathF.Cos(radians);
+        float sine = MathF.Sin(radians);
+
+        float oldXAxis = MathF.Atan2(verticalToHorizontal, 1f);
+        float newXAxis = MathF.Atan2(
+            verticalToHorizontal * (cosine + sine), cosine - sine);
+        float oldYAxis = MathF.Atan2(verticalToHorizontal, -1f);
+        float newYAxis = MathF.Atan2(
+            verticalToHorizontal * (cosine - sine), -sine - cosine);
+
+        float xDelta = NormalizeRadians(newXAxis - oldXAxis);
+        float yDelta = NormalizeRadians(newYAxis - oldYAxis);
+        return (xDelta + yDelta) * 0.5f * (180f / MathF.PI);
+    }
+
+    private static float NormalizeRadians(float radians)
+    {
+        while (radians > MathF.PI)
+            radians -= MathF.PI * 2f;
+        while (radians < -MathF.PI)
+            radians += MathF.PI * 2f;
+        return radians;
+    }
+
+    private static float WrapDegrees(float degrees)
+    {
+        degrees %= 360f;
+        return degrees < 0f ? degrees + 360f : degrees;
     }
 
     public bool AdjustElevation(float deltaDegrees)
