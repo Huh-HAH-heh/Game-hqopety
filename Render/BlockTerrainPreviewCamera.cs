@@ -195,30 +195,24 @@ public sealed class BlockTerrainPreviewCamera : IDisposable
     {
         float elevationRadians = Math.Clamp(_elevationDegrees, 15f, 90f) *
             (MathF.PI / 180f);
-        float verticalToHorizontal = MathF.Sin(elevationRadians);
+        float verticalToHorizontal = MathF.Max(
+            0.001f,
+            MathF.Sin(elevationRadians));
         float radians = (deltaDegrees % 360f) * (MathF.PI / 180f);
-        float cosine = MathF.Cos(radians);
         float sine = MathF.Sin(radians);
+        float cosine = MathF.Cos(radians);
 
-        float oldXAxis = MathF.Atan2(verticalToHorizontal, 1f);
-        float newXAxis = MathF.Atan2(
-            verticalToHorizontal * (cosine + sine), cosine - sine);
-        float oldYAxis = MathF.Atan2(verticalToHorizontal, -1f);
-        float newYAxis = MathF.Atan2(
-            verticalToHorizontal * (cosine - sine), -sine - cosine);
+        // The projected ground transform for an azimuth change is:
+        // [ cos(delta)  -sin(delta) / sin(elevation) ]
+        // [ sin(delta) * sin(elevation)   cos(delta) ]
+        // Extract its closest pure screen rotation (polar decomposition).
+        // SFML View stores camera orientation, so the view angle has the
+        // opposite sign to the rotation applied to the rendered world.
+        float projectedWorldRotation = MathF.Atan2(
+            sine * (verticalToHorizontal + 1f / verticalToHorizontal),
+            2f * cosine);
 
-        float xDelta = NormalizeRadians(newXAxis - oldXAxis);
-        float yDelta = NormalizeRadians(newYAxis - oldYAxis);
-        return (xDelta + yDelta) * 0.5f * (180f / MathF.PI);
-    }
-
-    private static float NormalizeRadians(float radians)
-    {
-        while (radians > MathF.PI)
-            radians -= MathF.PI * 2f;
-        while (radians < -MathF.PI)
-            radians += MathF.PI * 2f;
-        return radians;
+        return -projectedWorldRotation * (180f / MathF.PI);
     }
 
     private static float WrapDegrees(float degrees)
