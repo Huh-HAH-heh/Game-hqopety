@@ -54,6 +54,7 @@ public sealed class GameRenderer
     private readonly WorldMap _worldMap;
 
     private readonly GameCamera _camera;
+    private readonly BlockTerrainPreviewCamera _blockPreviewCamera;
     private readonly GameInput _input;
     private readonly MapRenderSystem _mapRenderer;
     private readonly BlockTerrainPreviewRenderer _blockTerrainPreviewRenderer = new();
@@ -170,8 +171,6 @@ public sealed class GameRenderer
     private bool _showUnitRig = true;
     private bool _showBlockTerrainPreview;
     private bool _showBlockPreviewXray;
-    private Vector2f _normalCameraCenter;
-    private bool _blockPreviewRestoreIsometricProjection;
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
@@ -267,6 +266,12 @@ public sealed class GameRenderer
                 new Vector2f(
                     1280f,
                     720f),
+                450f);
+
+        _blockPreviewCamera =
+            new BlockTerrainPreviewCamera(
+                new Vector2f(400f, 400f),
+                new Vector2f(1280f, 720f),
                 450f);
 
         _input =
@@ -466,6 +471,7 @@ public sealed class GameRenderer
             _unitMovementModeOverlay?.Dispose();
             _aiEvolutionOverlay?.Dispose();
             _camera.Dispose();
+            _blockPreviewCamera.Dispose();
             _uiView?.Dispose();
             _selectionBox.Dispose();
             _orderPathLine.Dispose();
@@ -689,7 +695,7 @@ public sealed class GameRenderer
 
         if (_menuPage == GameMenuPage.Closed)
         {
-            UpdateBlockPreviewCamera(deltaTime);
+            UpdateCameraMovement(deltaTime);
 
             bool singleStepRequested = _simulationThread == null &&
                 Interlocked.Exchange(ref _singleStepRequested, 0) != 0;
@@ -772,7 +778,9 @@ public sealed class GameRenderer
                 9));
 
         _window.SetView(
-            _camera.View);
+            _showBlockTerrainPreview
+                ? _blockPreviewCamera.View
+                : _camera.View);
 
         long stageStarted = Stopwatch.GetTimestamp();
         if (_showBlockTerrainPreview)
@@ -780,10 +788,10 @@ public sealed class GameRenderer
             _blockTerrainPreviewRenderer.Draw(
                 _window,
                 _worldMap,
-                _camera.View,
+                _blockPreviewCamera.View,
                 TerrainTilePixelSize,
-                _camera.AzimuthDegrees,
-                _camera.ElevationDegrees,
+                _blockPreviewCamera.AzimuthDegrees,
+                _blockPreviewCamera.ElevationDegrees,
                 _isRotatingCamera);
             _lastTerrainDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
@@ -800,11 +808,11 @@ public sealed class GameRenderer
                     previewSnapshot.Units,
                     previewSnapshot.BodyParts,
                     _worldMap,
-                    _camera.View,
+                    _blockPreviewCamera.View,
                     _blockTerrainPreviewRenderer,
                     TerrainTilePixelSize,
-                    _camera.AzimuthDegrees,
-                    _camera.ElevationDegrees,
+                    _blockPreviewCamera.AzimuthDegrees,
+                    _blockPreviewCamera.ElevationDegrees,
                     _selectedUnit,
                     _selectedUnits,
                     _showBlockPreviewXray);
@@ -815,11 +823,11 @@ public sealed class GameRenderer
                     _window,
                     _unitSimulation,
                     _worldMap,
-                    _camera.View,
+                    _blockPreviewCamera.View,
                     _blockTerrainPreviewRenderer,
                     TerrainTilePixelSize,
-                    _camera.AzimuthDegrees,
-                    _camera.ElevationDegrees,
+                    _blockPreviewCamera.AzimuthDegrees,
+                    _blockPreviewCamera.ElevationDegrees,
                     _selectedUnit,
                     _selectedUnits,
                     _showBlockPreviewXray);
@@ -829,7 +837,7 @@ public sealed class GameRenderer
                 _window,
                 _blockTerrainPreviewRenderer,
                 _worldMap,
-                _camera.View,
+                _blockPreviewCamera.View,
                 _showBlockPreviewXray);
             _lastUnitDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
@@ -3321,6 +3329,10 @@ public sealed class GameRenderer
             new Vector2f(
                 _window.Size.X,
                 _window.Size.Y));
+        _blockPreviewCamera.Resize(
+            new Vector2f(
+                _window.Size.X,
+                _window.Size.Y));
         _uiView = CreateUiView(_window.Size);
         _gameMenuOverlay = new GameMenuOverlay();
         _contextMenuOverlay = new ContextMenuOverlay();
@@ -3416,15 +3428,21 @@ public sealed class GameRenderer
                     return;
                 }
 
-                Vector2f zoomAnchorBefore = _window.MapPixelToCoords(
-                    wheelPixels,
-                    _camera.View);
-                _camera.HandleZoom(e.Delta);
-                Vector2f zoomAnchorAfter = _window.MapPixelToCoords(
-                    wheelPixels,
-                    _camera.View);
-                _camera.CenterOnPosition(
-                    _camera.View.Center + zoomAnchorBefore - zoomAnchorAfter);
+                View zoomView = _showBlockTerrainPreview
+                    ? _blockPreviewCamera.View
+                    : _camera.View;
+                Vector2f zoomAnchorBefore = _window.MapPixelToCoords(wheelPixels, zoomView);
+                if (_showBlockTerrainPreview)
+                    _blockPreviewCamera.HandleZoom(e.Delta);
+                else
+                    _camera.HandleZoom(e.Delta);
+                Vector2f zoomAnchorAfter = _window.MapPixelToCoords(wheelPixels, zoomView);
+                Vector2f anchoredCenter = zoomView.Center +
+                    zoomAnchorBefore - zoomAnchorAfter;
+                if (_showBlockTerrainPreview)
+                    _blockPreviewCamera.CenterOnPosition(anchoredCenter);
+                else
+                    _camera.CenterOnPosition(anchoredCenter);
             };
 
         _window.MouseButtonPressed +=
@@ -3981,15 +3999,10 @@ public sealed class GameRenderer
                         e.Position.X - _lastCameraRotatePixel.X;
                     float azimuthDelta =
                         horizontalDelta * CameraRotationDegreesPerPixel;
-                    Vector2f rotatedCameraCenter =
-                        _blockTerrainPreviewRenderer.RotateCameraCenterForAzimuth(
-                            _worldMap,
-                            _camera.View.Center,
-                            TerrainTilePixelSize,
-                            _camera.ElevationDegrees,
-                            azimuthDelta);
-                    _camera.RotateAzimuth(azimuthDelta);
-                    _camera.CenterOnPosition(rotatedCameraCenter);
+                    _blockPreviewCamera.RotateAzimuth(
+                        azimuthDelta,
+                        _worldMap,
+                        TerrainTilePixelSize);
                     _lastCameraRotatePixel = e.Position;
                     return;
                 }
@@ -4050,10 +4063,20 @@ public sealed class GameRenderer
                         e.Position.X - _lastCameraPanPixel.X,
                         e.Position.Y - _lastCameraPanPixel.Y);
 
-                    _camera.PanByPixels(
-                        pixelDelta,
-                        _window.Size.X,
-                        _window.Size.Y);
+                    if (_showBlockTerrainPreview)
+                    {
+                        _blockPreviewCamera.PanByPixels(
+                            pixelDelta,
+                            _window.Size.X,
+                            _window.Size.Y);
+                    }
+                    else
+                    {
+                        _camera.PanByPixels(
+                            pixelDelta,
+                            _window.Size.X,
+                            _window.Size.Y);
+                    }
 
                     _lastCameraPanPixel = e.Position;
                     return;
@@ -4399,28 +4422,16 @@ public sealed class GameRenderer
         if (_showBlockTerrainPreview)
         {
             _showBlockPreviewXray = false;
-            _normalCameraCenter = _camera.View.Center;
-            _blockPreviewRestoreIsometricProjection = _camera.IsometricProjectionEnabled;
-            _camera.SetIsometricProjection(false);
-            _camera.ResetAzimuth();
-            _camera.CenterOnPosition(
-                _blockTerrainPreviewRenderer.GetCameraCenter(
-                    _worldMap,
-                    TerrainTilePixelSize,
-                    _camera.ElevationDegrees));
+            _blockPreviewCamera.CenterOnWorld(_worldMap, TerrainTilePixelSize);
             Console.WriteLine(
                 "[Terrain preview] Camera centered on terrain. " +
                 "right mouse drag: free rotation; Q/E: rotate 45 degrees; " +
-                $"NumPad +/-: elevation ({_camera.ElevationDegrees:0}°); " +
+                $"NumPad +/-: elevation ({_blockPreviewCamera.ElevationDegrees:0}°); " +
                 "middle mouse: pan; WASD/arrows: move; wheel: zoom to cursor; " +
                 "X: faction highlight + wall hatching; B: return to game.");
         }
         else
         {
-            _camera.SetIsometricProjection(_blockPreviewRestoreIsometricProjection);
-            if (!_blockPreviewRestoreIsometricProjection)
-                _camera.ResetAzimuth();
-            _camera.CenterOnPosition(_normalCameraCenter);
             Console.WriteLine(
                 _camera.IsometricProjectionEnabled
                     ? "[Terrain preview] Isometric game view restored."
@@ -4430,65 +4441,29 @@ public sealed class GameRenderer
 
     private void UpdateCameraMovement(float deltaTime)
     {
-        // The block-preview terrain and camera center are already in projected
-        // screen space. Applying another terrain projection here double-transforms
-        // WASD and makes movement drift away from the camera's visible axes.
-        _camera.Update(_input.MoveDirection, deltaTime);
-    }
-
-    private void UpdateBlockPreviewCamera(float deltaTime)
-    {
-        if (!_showBlockTerrainPreview)
+        if (_showBlockTerrainPreview)
         {
-            UpdateCameraMovement(deltaTime);
+            _blockPreviewCamera.Update(
+                _input.MoveDirection,
+                deltaTime,
+                _worldMap,
+                TerrainTilePixelSize);
             return;
         }
 
-        Vector2f oldFocus = _blockTerrainPreviewRenderer.GetCameraCenter(
-            _worldMap,
-            TerrainTilePixelSize,
-            _camera.ElevationDegrees);
-        Vector2f oldCenter = _camera.View.Center;
-        UpdateCameraMovement(deltaTime);
-        Vector2f movedCenter = _camera.View.Center;
-        Vector2f newFocus = _blockTerrainPreviewRenderer.GetCameraCenter(
-            _worldMap,
-            TerrainTilePixelSize,
-            _camera.ElevationDegrees);
-
-        Vector2f panOffset = new(
-            oldCenter.X - oldFocus.X,
-            oldCenter.Y - oldFocus.Y);
-        Vector2f movement = new(
-            movedCenter.X - oldCenter.X,
-            movedCenter.Y - oldCenter.Y);
-
-        _camera.CenterOnPosition(new Vector2f(
-            newFocus.X + panOffset.X + movement.X,
-            newFocus.Y + panOffset.Y + movement.Y));
+        _camera.Update(_input.MoveDirection, deltaTime);
     }
 
-    private void RotateBlockPreviewAzimuth(float deltaDegrees)
-    {
-        Vector2f rotatedCameraCenter =
-            _blockTerrainPreviewRenderer.RotateCameraCenterForAzimuth(
-                _worldMap,
-                _camera.View.Center,
-                TerrainTilePixelSize,
-                _camera.ElevationDegrees,
-                deltaDegrees);
-
-        _camera.RotateAzimuth(deltaDegrees);
-        _camera.CenterOnPosition(rotatedCameraCenter);
-    }
+    private void RotateBlockPreviewAzimuth(float deltaDegrees) =>
+        _blockPreviewCamera.RotateAzimuth(deltaDegrees, _worldMap, TerrainTilePixelSize);
 
     private void AdjustBlockPreviewElevation(float deltaDegrees)
     {
-        if (!_camera.AdjustElevation(deltaDegrees))
+        if (!_blockPreviewCamera.AdjustElevation(deltaDegrees))
             return;
 
         Console.WriteLine(
-            $"[Terrain preview] Target elevation: {_camera.TargetElevationDegrees:0}°. " +
+            $"[Terrain preview] Target elevation: {_blockPreviewCamera.TargetElevationDegrees:0}°. " +
             "Transition is smooth; NumPad +/-: change angle.");
     }
 
@@ -4863,10 +4838,12 @@ public sealed class GameRenderer
 
             case GameMenuActionType.SetCameraPanSensitivity:
                 _camera.SetPanSensitivity(action.Value);
+                _blockPreviewCamera.SetPanSensitivity(action.Value);
                 break;
 
             case GameMenuActionType.SetKeyboardMoveSensitivity:
                 _camera.SetMoveSensitivity(action.Value);
+                _blockPreviewCamera.SetMoveSensitivity(action.Value);
                 break;
 
             case GameMenuActionType.ToggleGrid:
@@ -4925,6 +4902,7 @@ public sealed class GameRenderer
             return;
 
         _camera.Resize(new Vector2f(size.X, size.Y));
+        _blockPreviewCamera.Resize(new Vector2f(size.X, size.Y));
 
         // Keep the selector synchronized with the actual client size, including
         // manual resize/maximize and any size the OS adjusts after applying it.

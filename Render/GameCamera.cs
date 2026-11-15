@@ -9,10 +9,6 @@ public sealed class GameCamera : IDisposable
 {
     private const float InverseSqrtTwo = 0.70710678118f;
     private const float SqrtTwo = 1.41421356237f;
-    private const float MinimumElevationDegrees = 15f;
-    private const float MaximumElevationDegrees = 90f;
-    private const float ElevationSmoothing = 7.5f;
-
     private static readonly string[] ScreenNorthLabels =
     {
         "СЗ", "С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З"
@@ -24,9 +20,6 @@ public sealed class GameCamera : IDisposable
     private float _zoomLevel = 1.0f;
     private float _panSensitivity = 1f;
     private float _moveSensitivity = 1f;
-    private float _azimuthDegrees;
-    private float _elevationDegrees = 30f;
-    private float _targetElevationDegrees = 30f;
     private Vector2f _targetPosition;
     private Vector2f _viewportSize;
     private bool _isometricProjectionEnabled = false;
@@ -36,9 +29,6 @@ public sealed class GameCamera : IDisposable
     public View View => _view;
     public bool IsometricProjectionEnabled => _isometricProjectionEnabled;
     public int RotationStep => _rotationStep;
-    public float AzimuthDegrees => _azimuthDegrees;
-    public float ElevationDegrees => _elevationDegrees;
-    public float TargetElevationDegrees => _targetElevationDegrees;
     public float PanSensitivity => _panSensitivity;
     public float MoveSensitivity => _moveSensitivity;
 
@@ -93,7 +83,6 @@ public sealed class GameCamera : IDisposable
             return;
 
         _isometricProjectionEnabled = enabled;
-        _azimuthDegrees = 0f;
         ApplyProjection();
     }
 
@@ -105,45 +94,6 @@ public sealed class GameCamera : IDisposable
 
     private static float ClampSensitivity(float value) =>
         float.IsFinite(value) ? Math.Clamp(value, 0.1f, 4f) : 1f;
-
-    public void RotateAzimuth(float deltaDegrees)
-    {
-        if (_isometricProjectionEnabled ||
-            !float.IsFinite(deltaDegrees) ||
-            MathF.Abs(deltaDegrees) < 0.0001f)
-        {
-            return;
-        }
-
-        _azimuthDegrees = (_azimuthDegrees + deltaDegrees) % 360f;
-        if (_azimuthDegrees < 0f)
-            _azimuthDegrees += 360f;
-    }
-
-    public void ResetAzimuth()
-    {
-        _azimuthDegrees = 0f;
-    }
-
-    public bool AdjustElevation(float deltaDegrees)
-    {
-        if (_isometricProjectionEnabled ||
-            !float.IsFinite(deltaDegrees) ||
-            MathF.Abs(deltaDegrees) < 0.0001f)
-        {
-            return false;
-        }
-
-        float next = Math.Clamp(
-            _targetElevationDegrees + deltaDegrees,
-            MinimumElevationDegrees,
-            MaximumElevationDegrees);
-        if (MathF.Abs(next - _targetElevationDegrees) < 0.0001f)
-            return false;
-
-        _targetElevationDegrees = next;
-        return true;
-    }
 
     public void RotateClockwise()
     {
@@ -202,16 +152,6 @@ public sealed class GameCamera : IDisposable
     {
         if (deltaTime <= 0f)
             return;
-
-        float elevationDelta = _targetElevationDegrees - _elevationDegrees;
-        if (MathF.Abs(elevationDelta) > 0.001f)
-        {
-            float elevationLerp =
-                1f - MathF.Exp(-ElevationSmoothing * deltaTime);
-            _elevationDegrees += elevationDelta * elevationLerp;
-            if (MathF.Abs(_targetElevationDegrees - _elevationDegrees) < 0.02f)
-                _elevationDegrees = _targetElevationDegrees;
-        }
 
         if (moveDirection.LengthSquared() > 0f)
         {
