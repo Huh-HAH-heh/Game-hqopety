@@ -230,7 +230,7 @@ public sealed class WorldMap
             throw new ArgumentOutOfRangeException(nameof(width));
         }
         if (zLevel < 0 || heightInMeters <= 0 ||
-            (long)(zLevel + heightInMeters) * HeightUnitsPerMeter > LayerCount)
+            ((long)zLevel + heightInMeters) * HeightUnitsPerMeter > LayerCount)
         {
             throw new ArgumentOutOfRangeException(nameof(heightInMeters));
         }
@@ -1310,6 +1310,10 @@ public sealed class WorldMap
             globalY / TerrainRegion.TilesPerSide);
 
         int columnIndex = GetColumnIndex(globalX, globalY);
+        if (Blocks.Volumes.HasOverridesInColumn(globalX, globalY))
+            Blocks.Volumes.ClearVolume(globalX, globalY, 0, 1, 1, LayerCount);
+        _volumeSurfaceHeights[columnIndex] = 0;
+
         int regionX = globalX / TerrainRegion.TilesPerSide;
         int regionY = globalY / TerrainRegion.TilesPerSide;
         int localIndex =
