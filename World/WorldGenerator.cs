@@ -61,14 +61,11 @@ public static class WorldGenerator
                 1,
                 worldMap.TileHeight / 12);
 
-        float canyonSpacing =
-            rampDistance * 2f;
-
         float[] canyonFloorY =
             new float[worldMap.TileWidth];
 
-        // Large, slowly winding canyon belts: lower frequencies make the
-        // landforms span hundreds of tiles rather than looking like small noise.
+        // One large, slowly winding canyon crosses the map. Low frequencies
+        // keep its course broad and natural instead of repeating parallel belts.
         for (int x = 0; x < worldMap.TileWidth; x++)
         {
             float dx =
@@ -108,16 +105,10 @@ public static class WorldGenerator
                     broadRelief * 15f +
                     mediumRelief * 6f;
 
-                float nearestCanyonOffset =
-                    MathF.Round(
-                        warpedOffset /
-                        canyonSpacing) *
-                    canyonSpacing;
-
-                float distanceFromFloor =
-                    MathF.Abs(
-                        warpedOffset -
-                        nearestCanyonOffset);
+                // Measure from this single canyon's centerline. Quantizing to
+                // multiples of a spacing value creates several parallel canyons
+                // and long repeated cliff bands across the entire map.
+                float distanceFromFloor = MathF.Abs(warpedOffset);
 
                 // Narrow low canyon floor, a short and steep escarpment,
                 // then a broad high plateau. The one-meter vertical grid stays intact.
