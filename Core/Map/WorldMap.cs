@@ -295,10 +295,12 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Compresses large, uniform simple-fill patches into macro volumes.
-    /// Smaller or irregular terrain columns remain in the existing backing.
+    /// Packs a height field into one sparse hierarchy of large cuboid volumes.
+    /// Every region first stores its shared lower volume as one macro block.
+    /// Regions with different heights are split recursively; only the varying
+    /// upper parts become smaller child volumes. All cells remain exact.
     /// </summary>
-    public int CompactUniformBlockVolumes(int minimumBlockSize = 8)
+    public int CompactUniformBlockVolumes(int minimumBlockSize = 32)
     {
         if (!UsesDiscreteBlockTerrain)
             throw new InvalidOperationException("Discrete block terrain is not enabled.");
@@ -316,10 +318,10 @@ public sealed class WorldMap
         while (rootSize < requiredSize)
             rootSize = checked(rootSize * 2);
 
-        int compacted = CompactUniformRegion(
-            0, 0, rootSize, minimumBlockSize);
+        int volumeCount = CompactHierarchicalRegion(
+            0, 0, rootSize, minimumBlockSize, 0);
 
-        if (compacted > 0)
+        if (volumeCount > 0)
         {
             TerrainVersion++;
             TerrainGeometryVersion++;
@@ -327,80 +329,162 @@ public sealed class WorldMap
                 _regionTerrainVersions[i]++;
         }
 
-        return compacted;
+        return volumeCount;
     }
 
-    private int CompactUniformRegion(
+    private int CompactHierarchicalRegion(
         int x,
         int y,
         int size,
-        int minimumBlockSize)
+        int minimumBlockSize,
+        int baseLayer)
     {
-        if (x >= TileWidth || y >= TileHeight || size < minimumBlockSize)
+        if (x >= TileWidth || y >= TileHeight)
             return 0;
 
-        if (x + size <= TileWidth && y + size <= TileHeight)
+        if (x + size <= TileWidth &&
+            y + size <= TileHeight &&
+            TryGetBlockRegionSummary(
+                x, y, size, baseLayer,
+                out ushort materialId,
+                out int minimumRemaining,
+                out int maximumRemaining))
         {
-            int firstIndex = GetColumnIndex(x, y);
-            ushort height = _surfaceHeights[firstIndex];
-            ushort materialId = _columnMaterialIds[firstIndex];
-            bool uniform = _simpleFillColumns[firstIndex] &&
-                height > 0 && materialId != 0;
+            int volumeCount = 0;
 
-            for (int localY = 0; localY < size && uniform; localY++)
+            // A large region can share the same lower layers even when its
+            // surface heights differ. Store that common part once.
+            bool isMacroRegion = size >= minimumBlockSize;
+            bool isUniformRegion = minimumRemaining == maximumRemaining;
+            if (minimumRemaining > 0 &&
+                (isMacroRegion || isUniformRegion || size == 1))
             {
-                int row = GetColumnIndex(x, y + localY);
-                for (int localX = 0; localX < size; localX++)
-                {
-                    int index = row + localX;
-                    if (!_simpleFillColumns[index] ||
-                        _surfaceHeights[index] != height ||
-                        _columnMaterialIds[index] != materialId)
-                    {
-                        uniform = false;
-                        break;
-                    }
-                }
+                Blocks.Volumes.SetVolume(
+                    x, y, baseLayer,
+                    size, size, minimumRemaining,
+                    materialId);
+                volumeCount++;
+                baseLayer += minimumRemaining;
             }
 
-            if (uniform)
+            if (maximumRemaining <= minimumRemaining)
             {
-                int filledLayers = Math.Clamp(
-                    (height + LayerHeightUnits - 1) / LayerHeightUnits,
+                MarkBlockRegionCompacted(x, y, size);
+                return volumeCount;
+            }
+
+            if (size == 1)
+            {
+                MarkBlockRegionCompacted(x, y, size);
+                return volumeCount;
+            }
+
+            int half = size / 2;
+            volumeCount += CompactHierarchicalRegion(
+                x, y, half, minimumBlockSize, baseLayer);
+            volumeCount += CompactHierarchicalRegion(
+                x + half, y, half, minimumBlockSize, baseLayer);
+            volumeCount += CompactHierarchicalRegion(
+                x, y + half, half, minimumBlockSize, baseLayer);
+            volumeCount += CompactHierarchicalRegion(
+                x + half, y + half, half, minimumBlockSize, baseLayer);
+            return volumeCount;
+        }
+
+        if (size == 1)
+            return 0;
+
+        int childSize = size / 2;
+        return
+            CompactHierarchicalRegion(
+                x, y, childSize, minimumBlockSize, baseLayer) +
+            CompactHierarchicalRegion(
+                x + childSize, y, childSize, minimumBlockSize, baseLayer) +
+            CompactHierarchicalRegion(
+                x, y + childSize, childSize, minimumBlockSize, baseLayer) +
+            CompactHierarchicalRegion(
+                x + childSize, y + childSize,
+                childSize, minimumBlockSize, baseLayer);
+    }
+
+    private bool TryGetBlockRegionSummary(
+        int x,
+        int y,
+        int size,
+        int baseLayer,
+        out ushort materialId,
+        out int minimumRemaining,
+        out int maximumRemaining)
+    {
+        materialId = 0;
+        minimumRemaining = int.MaxValue;
+        maximumRemaining = 0;
+
+        for (int localY = 0; localY < size; localY++)
+        {
+            int row = GetColumnIndex(x, y + localY);
+            for (int localX = 0; localX < size; localX++)
+            {
+                int index = row + localX;
+                if (!_simpleFillColumns[index])
+                    return false;
+
+                int totalLayers = Math.Clamp(
+                    (_surfaceHeights[index] + LayerHeightUnits - 1) /
+                    LayerHeightUnits,
                     0,
                     LayerCount);
-                Blocks.Volumes.SetVolume(
-                    x, y, 0,
-                    size, size, filledLayers,
-                    materialId);
+                int remaining = Math.Max(0, totalLayers - baseLayer);
 
-                for (int localY = 0; localY < size; localY++)
+                if (remaining > 0)
                 {
-                    int row = GetColumnIndex(x, y + localY);
-                    for (int localX = 0; localX < size; localX++)
-                    {
-                        int index = row + localX;
-                        _simpleFillColumns[index] = false;
-                        _columnMaterialIds[index] = 0;
-                        _volumeSurfaceHeights[index] =
-                            checked((ushort)(filledLayers * LayerHeightUnits));
-                        _rangeCache[index] = null;
-                    }
+                    ushort columnMaterial = _columnMaterialIds[index];
+                    if (columnMaterial == 0)
+                        return false;
+
+                    if (materialId == 0)
+                        materialId = columnMaterial;
+                    else if (materialId != columnMaterial)
+                        return false;
                 }
 
-                return 1;
+                minimumRemaining = Math.Min(minimumRemaining, remaining);
+                maximumRemaining = Math.Max(maximumRemaining, remaining);
             }
         }
 
-        if (size <= minimumBlockSize)
-            return 0;
+        if (minimumRemaining == int.MaxValue)
+            minimumRemaining = 0;
 
-        int half = size / 2;
-        return
-            CompactUniformRegion(x, y, half, minimumBlockSize) +
-            CompactUniformRegion(x + half, y, half, minimumBlockSize) +
-            CompactUniformRegion(x, y + half, half, minimumBlockSize) +
-            CompactUniformRegion(x + half, y + half, half, minimumBlockSize);
+        return true;
+    }
+
+    private void MarkBlockRegionCompacted(int x, int y, int size)
+    {
+        for (int localY = 0; localY < size; localY++)
+        {
+            int row = GetColumnIndex(x, y + localY);
+            for (int localX = 0; localX < size; localX++)
+                MarkBlockColumnCompacted(row + localX);
+        }
+    }
+
+    private void MarkBlockColumnCompacted(int columnIndex)
+    {
+        if (!_simpleFillColumns[columnIndex])
+            return;
+
+        int totalLayers = Math.Clamp(
+            (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
+            LayerHeightUnits,
+            0,
+            LayerCount);
+
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
+        _volumeSurfaceHeights[columnIndex] =
+            checked((ushort)(totalLayers * LayerHeightUnits));
+        _rangeCache[columnIndex] = null;
     }
 
     /// <summary>
