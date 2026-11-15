@@ -83,21 +83,39 @@ public sealed class GameCamera : IDisposable
         ApplyProjection();
     }
 
-    public void RotateClockwise()
+    public void RotateClockwise(Vector2f orbitCenter)
     {
-        if (!_isometricProjectionEnabled)
-            return;
-
-        _rotationStep = (_rotationStep + 1) & 7;
-        ApplyRotation();
+        OrbitAround(orbitCenter, 1);
     }
 
-    public void RotateCounterClockwise()
+    public void RotateCounterClockwise(Vector2f orbitCenter)
+    {
+        OrbitAround(orbitCenter, -1);
+    }
+
+    private void OrbitAround(Vector2f orbitCenter, int direction)
     {
         if (!_isometricProjectionEnabled)
             return;
 
-        _rotationStep = (_rotationStep + 7) & 7;
+        const float stepDegrees = 45f;
+        float deltaDegrees = direction * stepDegrees;
+        float radians = deltaDegrees * MathF.PI / 180f;
+        float cosine = MathF.Cos(radians);
+        float sine = MathF.Sin(radians);
+
+        // Move the camera centre along an arc around the world-space pivot.
+        // The view orientation changes by the same step so the pivot stays
+        // fixed on screen instead of the map simply spinning in place.
+        float offsetX = _targetPosition.X - orbitCenter.X;
+        float offsetY = _targetPosition.Y - orbitCenter.Y;
+
+        _targetPosition = new Vector2f(
+            orbitCenter.X + cosine * offsetX - sine * offsetY,
+            orbitCenter.Y + sine * offsetX + cosine * offsetY);
+
+        _view.Center = _targetPosition;
+        _rotationStep = (_rotationStep + direction + 8) & 7;
         ApplyRotation();
     }
 
@@ -169,7 +187,7 @@ public sealed class GameCamera : IDisposable
     {
         float halfViewWidth = MathF.Abs(view.Size.X) * 0.5f;
         float halfViewHeight = MathF.Abs(view.Size.Y) * 0.5f;
-        float radians = view.Rotation * MathF.PI / 180f;
+        float radians = view.Rotation.Radians;
         float cosine = MathF.Abs(MathF.Cos(radians));
         float sine = MathF.Abs(MathF.Sin(radians));
 
@@ -179,7 +197,7 @@ public sealed class GameCamera : IDisposable
 
     private Vector2f ScreenUnitsToWorld(float localX, float localY)
     {
-        float radians = _view.Rotation * MathF.PI / 180f;
+        float radians = _view.Rotation.Radians;
         float cosine = MathF.Cos(radians);
         float sine = MathF.Sin(radians);
 
@@ -202,13 +220,13 @@ public sealed class GameCamera : IDisposable
         _view.Size = new Vector2f(
             _viewportSize.X * _zoomLevel,
             _viewportSize.Y * _zoomLevel);
-        _view.Rotation = 0f;
+        _view.Rotation = Angle.Zero;
     }
 
     private void ApplyRotation()
     {
         if (_isometricProjectionEnabled)
-            _view.Rotation = -45f + _rotationStep * 45f;
+            _view.Rotation = Angle.FromDegrees(-45f + _rotationStep * 45f);
     }
 
     public void Dispose()
