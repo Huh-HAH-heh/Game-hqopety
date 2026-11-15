@@ -53,10 +53,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         // Keep the detailed 1 m mesh for close inspection only.
         // At normal overview zoom, larger patches avoid submitting tens of
         // thousands of individual block faces to the GPU.
-        int step = pixelsPerTile < 3.5f ? 16
-            : pixelsPerTile < 7f ? 8
-            : pixelsPerTile < 14f ? 4
-            : pixelsPerTile < 28f ? 2
+        int step = pixelsPerTile < 1.25f ? 64
+            : pixelsPerTile < 2.5f ? 32
+            : pixelsPerTile < 5f ? 16
+            : pixelsPerTile < 10f ? 8
+            : pixelsPerTile < 20f ? 4
+            : pixelsPerTile < 40f ? 2
             : 1;
 
         bool cameraMovedOutsideCache =
