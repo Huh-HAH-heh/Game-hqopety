@@ -1,6 +1,29 @@
 using System;
+using System.Collections.Generic;
 
 namespace Core.Map;
+
+/// <summary>
+/// One solid leaf of the macro-volume octree. Size is measured in map cells
+/// and 0.1 m Z layers; changing a smaller region splits only its owning path.
+/// </summary>
+public readonly struct BlockVolumeLeaf
+{
+    public int X { get; }
+    public int Y { get; }
+    public int Z { get; }
+    public int Size { get; }
+    public ushort MaterialId { get; }
+
+    public BlockVolumeLeaf(int x, int y, int z, int size, ushort materialId)
+    {
+        X = x;
+        Y = y;
+        Z = z;
+        Size = size;
+        MaterialId = materialId;
+    }
+}
 
 /// <summary>
 /// Sparse octree for uniform cuboid volumes. A large homogeneous region is
@@ -47,6 +70,16 @@ public sealed class BlockVolumeTree
         _root.State != NodeState.Inherit || _root.Children != null;
 
     public int SolidLeafCount => CountSolidLeaves(_root);
+    public int AllocatedNodeCount => CountNodes(_root);
+
+    /// <summary>
+    /// Enumerates the current solid leaves. A uniform macro volume is returned
+    /// as one leaf; after a partial edit, only its subdivided children appear.
+    /// </summary>
+    public IEnumerable<BlockVolumeLeaf> EnumerateSolidLeaves()
+    {
+        return EnumerateSolidLeaves(_root, 0, 0, 0, _rootSize);
+    }
 
     public BlockVolumeTree(int width, int height, int depth)
     {
@@ -515,6 +548,40 @@ public sealed class BlockVolumeTree
                 half, x, y, firstLayer, lastLayer);
     }
 
+    private static IEnumerable<BlockVolumeLeaf> EnumerateSolidLeaves(
+        Node node,
+        int nodeX,
+        int nodeY,
+        int nodeZ,
+        int nodeSize)
+    {
+        Node[]? children = node.Children;
+        if (children == null)
+        {
+            if (node.State == NodeState.Solid)
+            {
+                yield return new BlockVolumeLeaf(
+                    nodeX, nodeY, nodeZ, nodeSize, node.MaterialId);
+            }
+
+            yield break;
+        }
+
+        int half = nodeSize / 2;
+        for (int childIndex = 0; childIndex < children.Length; childIndex++)
+        {
+            foreach (BlockVolumeLeaf leaf in EnumerateSolidLeaves(
+                children[childIndex],
+                nodeX + ((childIndex & 1) != 0 ? half : 0),
+                nodeY + ((childIndex & 2) != 0 ? half : 0),
+                nodeZ + ((childIndex & 4) != 0 ? half : 0),
+                half))
+            {
+                yield return leaf;
+            }
+        }
+    }
+
     private static int CountSolidLeaves(Node node)
     {
         Node[]? children = node.Children;
@@ -524,6 +591,18 @@ public sealed class BlockVolumeTree
         int count = 0;
         for (int i = 0; i < children.Length; i++)
             count += CountSolidLeaves(children[i]);
+        return count;
+    }
+
+    private static int CountNodes(Node node)
+    {
+        Node[]? children = node.Children;
+        if (children == null)
+            return 1;
+
+        int count = 1;
+        for (int i = 0; i < children.Length; i++)
+            count += CountNodes(children[i]);
         return count;
     }
 }
