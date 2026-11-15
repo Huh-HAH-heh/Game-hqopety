@@ -1163,7 +1163,7 @@ public sealed class GameRenderer
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
             $"LastHit={snapshot.LastHitPart} | " +
             $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
-            $"Орбита камеры={_camera.OrbitSectorLabel} (Q/E: 45°) | " +
+            $"Камера Yaw={_camera.YawDegrees:0}° Pitch={_camera.PitchDegrees:0}° | " +
             "ПКМ=приказ/атака  ПКМ+перетаскивание=поворот и наклон камеры  Shift+click=выделение  СКМ=панорама  Колесо=масштаб | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
