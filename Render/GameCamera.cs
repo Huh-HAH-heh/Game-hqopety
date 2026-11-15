@@ -116,7 +116,6 @@ public sealed class GameCamera : IDisposable
 
         _view.Center = _targetPosition;
         _rotationStep = (_rotationStep + direction + 8) & 7;
-        ApplyRotation();
     }
 
     public void HandleZoom(float delta)
@@ -226,7 +225,7 @@ public sealed class GameCamera : IDisposable
     private void ApplyRotation()
     {
         if (_isometricProjectionEnabled)
-            _view.Rotation = Angle.FromDegrees(-45f + _rotationStep * 45f);
+            _view.Rotation = Angle.FromDegrees(-45f);
     }
 
     public void Dispose()
