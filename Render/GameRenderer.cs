@@ -3321,7 +3321,10 @@ public sealed class GameRenderer
         _window =
             new RenderWindow(
                 VideoMode.DesktopMode,
-                "RimClone");
+                "RimClone",
+                Styles.Default,
+                State.Windowed,
+                new ContextSettings(24, 0));
 
         _window.SetFramerateLimit(60);
         _camera.Resize(
