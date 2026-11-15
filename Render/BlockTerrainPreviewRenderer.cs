@@ -68,7 +68,14 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             }
 
             if (GpuFaces.Update(vertices))
+            {
                 Faces.Clear();
+            }
+            else
+            {
+                GpuFaces.Dispose();
+                GpuFaces = null;
+            }
         }
 
         public void Draw(RenderWindow window)
