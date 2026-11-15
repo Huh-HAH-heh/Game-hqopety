@@ -6,6 +6,7 @@ namespace World;
 public static class WorldGenerator
 {
     private const ushort BaseMaterialId = 1;
+    private const int MacroBlockMinimumSize = 32;
 
     public static void Generate(
         WorldMap worldMap,
@@ -15,7 +16,8 @@ public static class WorldGenerator
         worldMap.Water.Clear();
         GenerateBaseTerrain(worldMap);
         worldMap.EnableDiscreteBlockTerrain();
-        int macroVolumeCount = worldMap.CompactUniformBlockVolumes(8);
+        int macroVolumeCount =
+            worldMap.CompactUniformBlockVolumes(MacroBlockMinimumSize);
         GenerateTraversalBlocks(worldMap);
 
         if (writeLog)
@@ -24,7 +26,8 @@ public static class WorldGenerator
                 "[WorldGenerator] " +
                 $"Дискретный блочный рельеф создан: " +
                 $"{worldMap.Blocks.Width}x{worldMap.Blocks.Height}, шаг Z = 1 м, " +
-                $"макрообъёмов: {macroVolumeCount}, листьев дерева: {worldMap.Blocks.Volumes.SolidLeafCount}.");
+                $"макрообъёмов (от {MacroBlockMinimumSize}x{MacroBlockMinimumSize} м): {macroVolumeCount}, " +
+                $"листьев дерева: {worldMap.Blocks.Volumes.SolidLeafCount}.");
         }
     }
 
