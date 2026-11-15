@@ -1164,7 +1164,7 @@ public sealed class GameRenderer
             $"LastHit={snapshot.LastHitPart} | " +
             $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
             $"Орбита камеры={_camera.OrbitSectorLabel} (Q/E: 45°) | " +
-            "RMB=движение/атака  Shift+click=добавить выделение  СКМ=панорама  Колесо=масштаб  ESC=меню | " +
+            "ПКМ=приказ/атака  ПКМ+перетаскивание=поворот и наклон камеры  Shift+click=выделение  СКМ=панорама  Колесо=масштаб | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
 
