@@ -3326,6 +3326,10 @@ public sealed class GameRenderer
                 State.Windowed,
                 new ContextSettings(24, 0));
 
+        Console.WriteLine(
+            $"[Render] GPU vertex buffers: {(VertexBuffer.Available ? "ON" : "CPU fallback")}; " +
+            $"depth buffer: {_window.Settings.DepthBits} bit.");
+
         _window.SetFramerateLimit(60);
         _camera.Resize(
             new Vector2f(
