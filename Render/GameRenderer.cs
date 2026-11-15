@@ -102,6 +102,12 @@ public sealed class GameRenderer
     };
     private bool _isPanningCamera;
     private Vector2i _lastCameraPanPixel;
+    private bool _isRightCameraButtonDown;
+    private bool _rightCameraDragStarted;
+    private Vector2i _rightCameraPressPixel;
+    private Vector2i _lastCameraRotatePixel;
+    private Vector2f _rightCameraOrbitCenter;
+    private const int CameraRotateDragThreshold = 4;
     private Vector2i _selectionDragStartPixel;
     private Vector2i _selectionDragCurrentPixel;
     private Vector2f _selectionDragStartWorld;
@@ -3232,6 +3238,172 @@ public sealed class GameRenderer
         }
     }
 
+    private void HandleRightMouseClick(Vector2i position)
+    {
+
+    _isSelectingUnits = false;
+    _selectionBox.Size = new Vector2f(0f, 0f);
+
+    Vector2f contextCoordinates = _uiView != null
+        ? _window.MapPixelToCoords(position, _uiView)
+        : new Vector2f(position.X, position.Y);
+    Vector2i contextPosition = new(
+        (int)contextCoordinates.X,
+        (int)contextCoordinates.Y);
+
+    if (_unitGroupCardOverlay?.Contains(contextPosition) == true ||
+        _unitMovementModeOverlay?.Contains(contextPosition) == true ||
+        _simulationControlOverlay?.Contains(contextPosition) == true ||
+        _combatStatusOverlay?.Contains(contextPosition) == true ||
+        _debugLayersOverlay?.Contains(contextPosition) == true ||
+        (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(contextPosition) == true) ||
+        (_liveAiEvolutionTrainer.Status?.HasStarted == true &&
+         _aiEvolutionOverlay?.Contains(contextPosition) == true) ||
+        _informationLayersRenderer?.ContainsHud(contextPosition) == true)
+    {
+        return;
+    }
+
+    for (int i = _unitCards.Count - 1; i >= 0; i--)
+    {
+        if (_unitCards[i].Overlay.Contains(contextPosition))
+            return;
+    }
+
+    if (_menuPage == GameMenuPage.Closed &&
+        _contextMenuOverlay != null)
+    {
+        SimulationFrameSnapshot? inputSnapshot = GetInputSnapshot();
+        Vector2f worldPosition = _window.MapPixelToCoords(position, _camera.View);
+        float pixelsPerUnit = TerrainTilePixelSize *
+            _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
+        float hitPadding = 4f / MathF.Max(1f, pixelsPerUnit);
+        float minimumMarkerRadius = 2f / MathF.Max(1f, pixelsPerUnit);
+
+        RenderUnitState contextUnit = default;
+        bool hasUnit = inputSnapshot != null &&
+            TryPickWorldUnit(
+                inputSnapshot,
+                worldPosition.X / TerrainTilePixelSize,
+                worldPosition.Y / TerrainTilePixelSize,
+                hitPadding,
+                minimumMarkerRadius,
+                out contextUnit);
+
+        UnitId[] selectedIds = inputSnapshot == null
+            ? Array.Empty<UnitId>()
+            : CaptureSelectedUnitIds(inputSnapshot);
+        int selectedSquadId = GetFullySelectedSquadId();
+        bool canCreateSquad = SquadControlsEnabled &&
+            selectedIds.Length >= 2 && selectedSquadId == 0;
+        bool canSendSquad = SquadControlsEnabled && selectedSquadId != 0;
+        bool canAttackTarget = hasUnit &&
+            selectedIds.Length > 0 &&
+            inputSnapshot != null &&
+            IsHostileToSelection(inputSnapshot, contextUnit);
+        bool canMoveSelected = !hasUnit && selectedIds.Length > 0;
+        bool clickedSelectedUnit = false;
+        if (hasUnit)
+        {
+            UnitId clickedId = new(contextUnit.Index, contextUnit.Generation);
+            for (int i = 0; i < selectedIds.Length; i++)
+            {
+                if (selectedIds[i] == clickedId)
+                {
+                    clickedSelectedUnit = true;
+                    break;
+                }
+            }
+        }
+        bool canHoldSelected = selectedIds.Length > 0;
+        bool canConfigureWeapons = clickedSelectedUnit && selectedIds.Length > 0;
+        ContextMenuMovementMode movementMode =
+            GetSelectionMovementMode(selectedIds);
+
+        float destinationX = Math.Clamp(
+            worldPosition.X / TerrainTilePixelSize,
+            0.5f,
+            _worldMap.MaxTileX - 0.5f);
+        float destinationY = Math.Clamp(
+            worldPosition.Y / TerrainTilePixelSize,
+            0.5f,
+            _worldMap.MaxTileY - 0.5f);
+        int destinationTileX = Math.Clamp(
+            (int)MathF.Floor(destinationX), 0, _worldMap.MaxTileX);
+        int destinationTileY = Math.Clamp(
+            (int)MathF.Floor(destinationY), 0, _worldMap.MaxTileY);
+        _contextMenuDestination = new Vector3(
+            destinationX,
+            destinationY,
+            _worldMap.GetSurfaceHeight(destinationTileX, destinationTileY));
+
+        _contextMenuUnit = hasUnit
+            ? new UnitId(contextUnit.Index, contextUnit.Generation)
+            : default;
+
+        if (hasUnit && canAttackTarget)
+        {
+            UnitId[] attackUnits = selectedIds;
+            UnitId attackTarget = new(contextUnit.Index, contextUnit.Generation);
+            _contextMenuUnit = default;
+            _contextMenuOverlay.Close();
+            ExecuteSimulationCommand(() =>
+                IssueAttackOrder(attackUnits, attackTarget));
+            return;
+        }
+
+        bool shiftHeld =
+            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
+            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
+
+        if (!hasUnit && selectedIds.Length > 0 && !shiftHeld)
+        {
+            if (!_movementTestMode &&
+                SquadControlsEnabled &&
+                selectedIds.Length > 1 &&
+                TryBeginMoveLine(position))
+                return;
+
+            UnitId[] moveUnits = selectedIds;
+            Vector3 destination = _contextMenuDestination;
+            _contextMenuUnit = default;
+            _contextMenuOverlay.Close();
+            ExecuteSimulationCommand(() =>
+            {
+                if (_movementTestMode)
+                    IssueMovementTestMoveOrder(moveUnits, destination);
+                else
+                    IssueMoveOrderToPoint(moveUnits, destination);
+            });
+            return;
+        }
+
+        _contextMenuOverlay.ToggleAt(
+            contextPosition,
+            _window.Size.X,
+            _window.Size.Y,
+            hasUnit,
+            selectedIds.Length > 1,
+            canCreateSquad,
+            canSendSquad,
+            canAttackTarget,
+            canMoveSelected,
+            canHoldSelected,
+            canConfigureWeapons,
+            movementMode);
+
+        if (!_contextMenuOverlay.IsOpen)
+            _contextMenuUnit = default;
+    }
+    else
+    {
+        _contextMenuUnit = default;
+        _contextMenuOverlay?.Close();
+    }
+
+    return;
+    }
+
     private void InitializeWindow()
     {
         _window =
@@ -3423,166 +3595,41 @@ public sealed class GameRenderer
 
                 if (e.Button == Mouse.Button.Right)
                 {
-                    _isSelectingUnits = false;
-                    _selectionBox.Size = new Vector2f(0f, 0f);
+                    if (_menuPage != GameMenuPage.Closed)
+                        return;
 
-                    Vector2f contextCoordinates = _uiView != null
+                    Vector2f rightUiCoordinates = _uiView != null
                         ? _window.MapPixelToCoords(e.Position, _uiView)
                         : new Vector2f(e.Position.X, e.Position.Y);
-                    Vector2i contextPosition = new(
-                        (int)contextCoordinates.X,
-                        (int)contextCoordinates.Y);
+                    Vector2i rightUiPosition = new(
+                        (int)rightUiCoordinates.X,
+                        (int)rightUiCoordinates.Y);
 
-                    if (_unitGroupCardOverlay?.Contains(contextPosition) == true ||
-                        _unitMovementModeOverlay?.Contains(contextPosition) == true ||
-                        _simulationControlOverlay?.Contains(contextPosition) == true ||
-                        _combatStatusOverlay?.Contains(contextPosition) == true ||
-                        _debugLayersOverlay?.Contains(contextPosition) == true ||
-                        (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(contextPosition) == true) ||
+                    bool overUi =
+                        _unitGroupCardOverlay?.Contains(rightUiPosition) == true ||
+                        _unitMovementModeOverlay?.Contains(rightUiPosition) == true ||
+                        _simulationControlOverlay?.Contains(rightUiPosition) == true ||
+                        _combatStatusOverlay?.Contains(rightUiPosition) == true ||
+                        _debugLayersOverlay?.Contains(rightUiPosition) == true ||
+                        (_showUtilityAiDebug && _utilityAiDebugOverlay?.Contains(rightUiPosition) == true) ||
                         (_liveAiEvolutionTrainer.Status?.HasStarted == true &&
-                         _aiEvolutionOverlay?.Contains(contextPosition) == true) ||
-                        _informationLayersRenderer?.ContainsHud(contextPosition) == true)
-                    {
+                         _aiEvolutionOverlay?.Contains(rightUiPosition) == true) ||
+                        _informationLayersRenderer?.ContainsHud(rightUiPosition) == true ||
+                        _contextMenuOverlay?.Contains(rightUiPosition) == true;
+
+                    for (int i = _unitCards.Count - 1; i >= 0 && !overUi; i--)
+                        overUi = _unitCards[i].Overlay.Contains(rightUiPosition);
+
+                    if (overUi)
                         return;
-                    }
 
-                    for (int i = _unitCards.Count - 1; i >= 0; i--)
-                    {
-                        if (_unitCards[i].Overlay.Contains(contextPosition))
-                            return;
-                    }
-
-                    if (_menuPage == GameMenuPage.Closed &&
-                        _contextMenuOverlay != null)
-                    {
-                        SimulationFrameSnapshot? inputSnapshot = GetInputSnapshot();
-                        Vector2f worldPosition = _window.MapPixelToCoords(e.Position, _camera.View);
-                        float pixelsPerUnit = TerrainTilePixelSize *
-                            _window.Size.X / MathF.Max(1f, _camera.View.Size.X);
-                        float hitPadding = 4f / MathF.Max(1f, pixelsPerUnit);
-                        float minimumMarkerRadius = 2f / MathF.Max(1f, pixelsPerUnit);
-
-                        RenderUnitState contextUnit = default;
-                        bool hasUnit = inputSnapshot != null &&
-                            TryPickWorldUnit(
-                                inputSnapshot,
-                                worldPosition.X / TerrainTilePixelSize,
-                                worldPosition.Y / TerrainTilePixelSize,
-                                hitPadding,
-                                minimumMarkerRadius,
-                                out contextUnit);
-
-                        UnitId[] selectedIds = inputSnapshot == null
-                            ? Array.Empty<UnitId>()
-                            : CaptureSelectedUnitIds(inputSnapshot);
-                        int selectedSquadId = GetFullySelectedSquadId();
-                        bool canCreateSquad = SquadControlsEnabled &&
-                            selectedIds.Length >= 2 && selectedSquadId == 0;
-                        bool canSendSquad = SquadControlsEnabled && selectedSquadId != 0;
-                        bool canAttackTarget = hasUnit &&
-                            selectedIds.Length > 0 &&
-                            inputSnapshot != null &&
-                            IsHostileToSelection(inputSnapshot, contextUnit);
-                        bool canMoveSelected = !hasUnit && selectedIds.Length > 0;
-                        bool clickedSelectedUnit = false;
-                        if (hasUnit)
-                        {
-                            UnitId clickedId = new(contextUnit.Index, contextUnit.Generation);
-                            for (int i = 0; i < selectedIds.Length; i++)
-                            {
-                                if (selectedIds[i] == clickedId)
-                                {
-                                    clickedSelectedUnit = true;
-                                    break;
-                                }
-                            }
-                        }
-                        bool canHoldSelected = selectedIds.Length > 0;
-                        bool canConfigureWeapons = clickedSelectedUnit && selectedIds.Length > 0;
-                        ContextMenuMovementMode movementMode =
-                            GetSelectionMovementMode(selectedIds);
-
-                        float destinationX = Math.Clamp(
-                            worldPosition.X / TerrainTilePixelSize,
-                            0.5f,
-                            _worldMap.MaxTileX - 0.5f);
-                        float destinationY = Math.Clamp(
-                            worldPosition.Y / TerrainTilePixelSize,
-                            0.5f,
-                            _worldMap.MaxTileY - 0.5f);
-                        int destinationTileX = Math.Clamp(
-                            (int)MathF.Floor(destinationX), 0, _worldMap.MaxTileX);
-                        int destinationTileY = Math.Clamp(
-                            (int)MathF.Floor(destinationY), 0, _worldMap.MaxTileY);
-                        _contextMenuDestination = new Vector3(
-                            destinationX,
-                            destinationY,
-                            _worldMap.GetSurfaceHeight(destinationTileX, destinationTileY));
-
-                        _contextMenuUnit = hasUnit
-                            ? new UnitId(contextUnit.Index, contextUnit.Generation)
-                            : default;
-
-                        if (hasUnit && canAttackTarget)
-                        {
-                            UnitId[] attackUnits = selectedIds;
-                            UnitId attackTarget = new(contextUnit.Index, contextUnit.Generation);
-                            _contextMenuUnit = default;
-                            _contextMenuOverlay.Close();
-                            ExecuteSimulationCommand(() =>
-                                IssueAttackOrder(attackUnits, attackTarget));
-                            return;
-                        }
-
-                        bool shiftHeld =
-                            Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                            Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-
-                        if (!hasUnit && selectedIds.Length > 0 && !shiftHeld)
-                        {
-                            if (!_movementTestMode &&
-                                SquadControlsEnabled &&
-                                selectedIds.Length > 1 &&
-                                TryBeginMoveLine(e.Position))
-                                return;
-
-                            UnitId[] moveUnits = selectedIds;
-                            Vector3 destination = _contextMenuDestination;
-                            _contextMenuUnit = default;
-                            _contextMenuOverlay.Close();
-                            ExecuteSimulationCommand(() =>
-                            {
-                                if (_movementTestMode)
-                                    IssueMovementTestMoveOrder(moveUnits, destination);
-                                else
-                                    IssueMoveOrderToPoint(moveUnits, destination);
-                            });
-                            return;
-                        }
-
-                        _contextMenuOverlay.ToggleAt(
-                            contextPosition,
-                            _window.Size.X,
-                            _window.Size.Y,
-                            hasUnit,
-                            selectedIds.Length > 1,
-                            canCreateSquad,
-                            canSendSquad,
-                            canAttackTarget,
-                            canMoveSelected,
-                            canHoldSelected,
-                            canConfigureWeapons,
-                            movementMode);
-
-                        if (!_contextMenuOverlay.IsOpen)
-                            _contextMenuUnit = default;
-                    }
-                    else
-                    {
-                        _contextMenuUnit = default;
-                        _contextMenuOverlay?.Close();
-                    }
-
+                    _isRightCameraButtonDown = true;
+                    _rightCameraDragStarted = false;
+                    _rightCameraPressPixel = e.Position;
+                    _lastCameraRotatePixel = e.Position;
+                    _rightCameraOrbitCenter = GetDynamicCameraOrbitCenter();
+                    _isSelectingUnits = false;
+                    _selectionBox.Size = new Vector2f(0f, 0f);
                     return;
                 }
 
@@ -3882,6 +3929,30 @@ public sealed class GameRenderer
         _window.MouseMoved +=
             (_, e) =>
             {
+                if (_isRightCameraButtonDown)
+                {
+                    int totalX = e.Position.X - _rightCameraPressPixel.X;
+                    int totalY = e.Position.Y - _rightCameraPressPixel.Y;
+                    if (!_rightCameraDragStarted &&
+                        totalX * totalX + totalY * totalY >=
+                        CameraRotateDragThreshold * CameraRotateDragThreshold)
+                    {
+                        _rightCameraDragStarted = true;
+                    }
+
+                    if (_rightCameraDragStarted)
+                    {
+                        Vector2f rotateDelta = new(
+                            e.Position.X - _lastCameraRotatePixel.X,
+                            e.Position.Y - _lastCameraRotatePixel.Y);
+                        _camera.RotateByMouse(
+                            rotateDelta,
+                            _rightCameraOrbitCenter);
+                        _lastCameraRotatePixel = e.Position;
+                        return;
+                    }
+                }
+
                 Vector2f dragUiCoordinates = _uiView != null
                     ? _window.MapPixelToCoords(e.Position, _uiView)
                     : new Vector2f(e.Position.X, e.Position.Y);
@@ -4046,6 +4117,19 @@ public sealed class GameRenderer
                 if (e.Button == Mouse.Button.Middle)
                 {
                     _isPanningCamera = false;
+                    return;
+                }
+
+                if (e.Button == Mouse.Button.Right)
+                {
+                    bool wasPressed = _isRightCameraButtonDown;
+                    bool wasDragged = _rightCameraDragStarted;
+                    _isRightCameraButtonDown = false;
+                    _rightCameraDragStarted = false;
+
+                    if (wasPressed && !wasDragged && !_showBlockTerrainPreview)
+                        HandleRightMouseClick(e.Position);
+
                     return;
                 }
 
