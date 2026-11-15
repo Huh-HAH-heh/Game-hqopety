@@ -15,6 +15,7 @@ public static class WorldGenerator
         worldMap.Water.Clear();
         GenerateBaseTerrain(worldMap);
         worldMap.EnableDiscreteBlockTerrain();
+        int macroVolumeCount = worldMap.CompactUniformBlockVolumes(8);
         GenerateTraversalBlocks(worldMap);
 
         if (writeLog)
@@ -22,7 +23,8 @@ public static class WorldGenerator
             Console.WriteLine(
                 "[WorldGenerator] " +
                 $"Дискретный блочный рельеф создан: " +
-                $"{worldMap.Blocks.Width}x{worldMap.Blocks.Height}, шаг Z = 1 м.");
+                $"{worldMap.Blocks.Width}x{worldMap.Blocks.Height}, шаг Z = 1 м, " +
+                $"макрообъёмов: {macroVolumeCount}, листьев дерева: {worldMap.Blocks.Volumes.SolidLeafCount}.");
         }
     }
 
