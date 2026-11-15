@@ -325,7 +325,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
                 AppendVisibleSideFaces(
                     worldMap, x, y, size,
-                    Math.Min(minimumDetailSize, BlockTerrain.HorizontalBlockSize),
+                    MinimumBlockSize,
                     Math.Max(1, size / BlockTerrain.HorizontalBlockSize), tileSize,
                     groundDepthScale, verticalScale,
                     drawBlockOutline,
@@ -740,9 +740,11 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _ => MaximumAdaptiveBlockSize
         };
 
+        // Terrain samples are exact at 1 m and generated blocks occupy 4 x 4 m.
+        // Never replace a mixed region larger than that with its highest sample.
         return isCameraRotating
-            ? Math.Max(detailSize, BlockTerrain.HorizontalBlockSize)
-            : detailSize;
+            ? BlockTerrain.HorizontalBlockSize
+            : Math.Min(detailSize, BlockTerrain.HorizontalBlockSize);
     }
 
     private void CollectAdaptiveBlocks(
@@ -766,15 +768,14 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             return;
         }
 
-        if (size <= minimumDetailSize)
+        if (size <= MinimumBlockSize)
         {
-            // At coarse LOD, represent the patch by its highest occupied sample.
-            // This avoids dropping a hill just because the patch's first tile is empty.
-            GetPatchRepresentative(
-                worldMap, x, y, size,
-                out surfaceLevel, out materialId);
+            // Mixed patches are split down to the actual 1 m sample. Picking the
+            // maximum value creates false plateaus, cliffs and long parallel walls.
+            surfaceLevel = worldMap.Blocks.GetSurfaceLevel(x, y);
+            materialId = worldMap.Blocks.GetMaterialId(x, y);
             if (surfaceLevel > 0 && materialId != 0)
-                AddVisibleBlock(x, y, size, surfaceLevel, materialId, centerX, centerY);
+                AddVisibleBlock(x, y, 1, surfaceLevel, materialId, centerX, centerY);
             return;
         }
 
@@ -783,35 +784,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         CollectAdaptiveBlocks(worldMap, x + half, y, half, minimumDetailSize, centerX, centerY);
         CollectAdaptiveBlocks(worldMap, x, y + half, half, minimumDetailSize, centerX, centerY);
         CollectAdaptiveBlocks(worldMap, x + half, y + half, half, minimumDetailSize, centerX, centerY);
-    }
-
-    private static void GetPatchRepresentative(
-        WorldMap worldMap,
-        int x,
-        int y,
-        int size,
-        out int surfaceLevel,
-        out ushort materialId)
-    {
-        surfaceLevel = 0;
-        materialId = 0;
-        BlockTerrain blocks = worldMap.Blocks;
-        int maxX = Math.Min(worldMap.TileWidth, x + size);
-        int maxY = Math.Min(worldMap.TileHeight, y + size);
-
-        for (int tileY = y; tileY < maxY; tileY++)
-        {
-            for (int tileX = x; tileX < maxX; tileX++)
-            {
-                int candidateLevel = blocks.GetSurfaceLevel(tileX, tileY);
-                ushort candidateMaterial = blocks.GetMaterialId(tileX, tileY);
-                if (candidateLevel <= surfaceLevel || candidateMaterial == 0)
-                    continue;
-
-                surfaceLevel = candidateLevel;
-                materialId = candidateMaterial;
-            }
-        }
     }
 
     private static bool TryGetUniformPatch(
@@ -825,8 +797,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     {
         surfaceLevel = 0;
         materialId = 0;
-        if (x + size > worldMap.TileWidth || y + size > worldMap.TileHeight)
+        if (size > BlockTerrain.HorizontalBlockSize ||
+            x + size > worldMap.TileWidth ||
+            y + size > worldMap.TileHeight)
+        {
             return false;
+        }
 
         BlockTerrain blocks = worldMap.Blocks;
         surfaceLevel = blocks.GetSurfaceLevel(x, y);
@@ -838,7 +814,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             {
                 if (blocks.GetSurfaceLevel(tileX, tileY) != surfaceLevel ||
                     blocks.GetMaterialId(tileX, tileY) != materialId ||
-                    (size > minimumDetailSize && blocks.IsTransitionCell(tileX, tileY)))
+                    (size > 1 && blocks.IsTransitionCell(tileX, tileY)))
                 {
                     return false;
                 }

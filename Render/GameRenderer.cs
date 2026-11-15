@@ -4398,6 +4398,7 @@ public sealed class GameRenderer
 
         if (_showBlockTerrainPreview)
         {
+            _showBlockPreviewXray = false;
             _normalCameraCenter = _camera.View.Center;
             _blockPreviewRestoreIsometricProjection = _camera.IsometricProjectionEnabled;
             _camera.SetIsometricProjection(false);
