@@ -10,7 +10,7 @@ public sealed class GameCamera : IDisposable
     private const float InverseSqrtTwo = 0.70710678118f;
     private const float SqrtTwo = 1.41421356237f;
 
-    private static readonly string[] ScreenNorthLabels =
+    private static readonly string[] OrbitSectorLabels =
     {
         "СЗ", "С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З"
     };
@@ -29,9 +29,8 @@ public sealed class GameCamera : IDisposable
     public bool IsometricProjectionEnabled => _isometricProjectionEnabled;
     public int RotationStep => _rotationStep;
 
-    // The label describes the compass direction currently pointing to the top
-    // of the screen. Q/E moves it through the eight 45-degree orientations.
-    public string DirectionLabel => ScreenNorthLabels[_rotationStep];
+    // Q/E tracks the camera's orbital sector around the current world pivot.
+    public string OrbitSectorLabel => OrbitSectorLabels[_rotationStep];
 
     public GameCamera(
         Vector2f startPosition,
@@ -104,9 +103,8 @@ public sealed class GameCamera : IDisposable
         float cosine = MathF.Cos(radians);
         float sine = MathF.Sin(radians);
 
-        // Move the camera centre along an arc around the world-space pivot.
-        // The view orientation changes by the same step so the pivot stays
-        // fixed on screen instead of the map simply spinning in place.
+        // Move only the camera centre along an arc around the world-space pivot.
+        // Keep the isometric view angle fixed; Q/E must not roll the view.
         float offsetX = _targetPosition.X - orbitCenter.X;
         float offsetY = _targetPosition.Y - orbitCenter.Y;
 
