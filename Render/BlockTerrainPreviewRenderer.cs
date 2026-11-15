@@ -129,11 +129,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         float pixelsPerTile = tileSize * window.Size.X /
             MathF.Max(1f, cameraView.Size.X);
         // Keep roughly 2-3 screen pixels per smallest terrain patch.
-        // As the camera pulls back, stop subdividing terrain that cannot be
-        // resolved on screen. Rotation keeps the existing 4 m performance floor.
-        int minimumDetailSize = GetMinimumDetailSize(
-            pixelsPerTile,
-            isCameraRotating);
+        // Detail depends only on zoom: rotation must not change surface geometry
+        // or make walls overlap larger top patches.
+        int minimumDetailSize = GetMinimumDetailSize(pixelsPerTile);
 
         bool cameraMovedOutsideCache =
             MathF.Abs(cameraView.Center.X - _cachedCameraCenter.X) >
@@ -231,8 +229,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 // Fine 1 m detail is kept in the terrain silhouette and shading.
                 // Drawing a full outline around every tiny patch creates many
                 // duplicate edge quads, so the visible grid starts at the 4 m block.
-                bool drawBlockOutline =
-                    drawBlockGrid && size >= BlockTerrain.HorizontalBlockSize;
+                bool drawBlockOutline = drawBlockGrid;
 
                 // Top faces and vertical faces must share the same depth queue.
                 // Drawing every top face first lets distant walls overwrite nearer terrain.
@@ -242,10 +239,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
                 if (drawBlockOutline)
                 {
-                    // Every internal edge is emitted once: north and west.
-                    // East and south are only needed at the outer map boundary.
-                    AppendLineAsQuad(topFaces, north, east, seamColor);
-                    AppendLineAsQuad(topFaces, west, north, seamColor);
+                    // Draw the 4 m construction grid even when LOD has split
+                    // the top into 1 m cells. Each grid edge is emitted once.
+                    if (y % BlockTerrain.HorizontalBlockSize == 0)
+                        AppendLineAsQuad(topFaces, north, east, seamColor);
+                    if (x % BlockTerrain.HorizontalBlockSize == 0)
+                        AppendLineAsQuad(topFaces, west, north, seamColor);
 
                     if (x + size >= worldMap.TileWidth)
                         AppendLineAsQuad(topFaces, east, south, seamColor);
@@ -656,26 +655,14 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             _ => new Color(180, 192, 205, 255)
         };
 
-    private static int GetMinimumDetailSize(
-        float pixelsPerTile,
-        bool isCameraRotating)
-    {
-        int detailSize = pixelsPerTile switch
+    private static int GetMinimumDetailSize(float pixelsPerTile) =>
+        pixelsPerTile switch
         {
             >= 3f => MinimumBlockSize,
             >= 1.5f => 2,
-            >= 0.75f => 4,
-            >= 0.375f => 8,
-            >= 0.1875f => 16,
+            >= 0.75f => BlockTerrain.HorizontalBlockSize,
             _ => MaximumAdaptiveBlockSize
         };
-
-        // Terrain samples are exact at 1 m and generated blocks occupy 4 x 4 m.
-        // Never replace a mixed region larger than that with its highest sample.
-        return isCameraRotating
-            ? BlockTerrain.HorizontalBlockSize
-            : Math.Min(detailSize, BlockTerrain.HorizontalBlockSize);
-    }
 
     private void CollectAdaptiveBlocks(
         WorldMap worldMap,
