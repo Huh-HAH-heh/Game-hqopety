@@ -340,7 +340,12 @@ public sealed class UnitRenderSystem : IDisposable
         Vector3[] positions = units.Position;
         float[] hitPoints = simulation.Health.OverallHitPoints;
 
-        PreparePreviewRenderOrder(active, positions, azimuthDegrees);
+        PreparePreviewRenderOrder(
+            active,
+            positions,
+            units.Height,
+            azimuthDegrees,
+            elevationDegrees);
 
         for (int order = 0; order < active.Length; order++)
         {
@@ -463,7 +468,7 @@ public sealed class UnitRenderSystem : IDisposable
         _vertices.Clear();
         _bodyOutlines.Clear();
         _selection.Clear();
-        PreparePreviewRenderOrder(units, azimuthDegrees);
+        PreparePreviewRenderOrder(units, azimuthDegrees, elevationDegrees);
 
         for (int order = 0; order < units.Length; order++)
         {
@@ -575,13 +580,21 @@ public sealed class UnitRenderSystem : IDisposable
     private void PreparePreviewRenderOrder(
         ReadOnlySpan<int> active,
         Vector3[] positions,
-        float azimuthDegrees)
+        float[] heights,
+        float azimuthDegrees,
+        float elevationDegrees)
     {
         EnsureRenderOrderCapacity(active.Length);
         float radians = (float.IsFinite(azimuthDegrees) ? azimuthDegrees : 0f) *
             (MathF.PI / 180f);
         float cosine = MathF.Cos(radians);
         float sine = MathF.Sin(radians);
+        float elevationRadians = Math.Clamp(
+            float.IsFinite(elevationDegrees) ? elevationDegrees : 30f,
+            15f, 90f) * (MathF.PI / 180f);
+        float planarDepthScale =
+            MathF.Cos(elevationRadians) / MathF.Cos(MathF.PI / 6f);
+        float verticalDepthScale = MathF.Sin(elevationRadians);
 
         for (int i = 0; i < active.Length; i++)
         {
@@ -589,7 +602,10 @@ public sealed class UnitRenderSystem : IDisposable
             Vector3 position = positions[index];
             float rotatedX = cosine * position.X - sine * position.Y;
             float rotatedY = sine * position.X + cosine * position.Y;
-            _renderDepthKeys[i] = rotatedX + rotatedY;
+            float bodyCenterZ = position.Z + MathF.Max(0f, heights[index]) * 0.5f;
+            _renderDepthKeys[i] =
+                (rotatedX + rotatedY) * planarDepthScale +
+                bodyCenterZ * verticalDepthScale;
             _renderOrder[i] = index;
         }
 
@@ -598,20 +614,30 @@ public sealed class UnitRenderSystem : IDisposable
 
     private void PreparePreviewRenderOrder(
         RenderUnitState[] units,
-        float azimuthDegrees)
+        float azimuthDegrees,
+        float elevationDegrees)
     {
         EnsureRenderOrderCapacity(units.Length);
         float radians = (float.IsFinite(azimuthDegrees) ? azimuthDegrees : 0f) *
             (MathF.PI / 180f);
         float cosine = MathF.Cos(radians);
         float sine = MathF.Sin(radians);
+        float elevationRadians = Math.Clamp(
+            float.IsFinite(elevationDegrees) ? elevationDegrees : 30f,
+            15f, 90f) * (MathF.PI / 180f);
+        float planarDepthScale =
+            MathF.Cos(elevationRadians) / MathF.Cos(MathF.PI / 6f);
+        float verticalDepthScale = MathF.Sin(elevationRadians);
 
         for (int i = 0; i < units.Length; i++)
         {
             Vector3 position = units[i].Position;
             float rotatedX = cosine * position.X - sine * position.Y;
             float rotatedY = sine * position.X + cosine * position.Y;
-            _renderDepthKeys[i] = rotatedX + rotatedY;
+            float bodyCenterZ = position.Z + MathF.Max(0f, units[i].Height) * 0.5f;
+            _renderDepthKeys[i] =
+                (rotatedX + rotatedY) * planarDepthScale +
+                bodyCenterZ * verticalDepthScale;
             _renderOrder[i] = i;
         }
 

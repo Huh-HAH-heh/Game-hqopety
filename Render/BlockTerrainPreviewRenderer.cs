@@ -72,6 +72,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     private readonly VertexArray _xrayFill = new(PrimitiveType.Triangles);
     private readonly VertexArray _xrayHatch = new(PrimitiveType.Triangles);
     private float _projectionTileSize, _projectionGroundDepthScale, _projectionVerticalScale;
+    private float _depthPlanarScale = 1f;
+    private float _depthVerticalScale;
     private int _occlusionBucketSize = 1;
     private int _nextOcclusionBatch;
     private bool _cacheValid;
@@ -116,6 +118,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         _projectionTileSize = tileSize;
         _projectionGroundDepthScale = groundDepthScale;
         _projectionVerticalScale = verticalScale;
+        _depthPlanarScale =
+            MathF.Cos(elevationRadians) / MathF.Cos(MathF.PI / 6f);
+        _depthVerticalScale = MathF.Sin(elevationRadians);
         float highestMeters = GetHighestHeightMeters(worldMap);
         if (!float.IsFinite(cameraAzimuthDegrees))
             cameraAzimuthDegrees = 0f;
@@ -347,11 +352,13 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         return batch.Faces;
     }
 
-    private float GetCameraDepth(float x, float y)
+    private float GetCameraDepth(float x, float y, float heightMeters)
     {
         float rotatedX = _rotationCosine * x - _rotationSine * y;
         float rotatedY = _rotationSine * x + _rotationCosine * y;
-        return rotatedX + rotatedY;
+        float planarDepth = rotatedX + rotatedY;
+        return planarDepth * _depthPlanarScale +
+            heightMeters * _depthVerticalScale;
     }
 
 
@@ -402,7 +409,10 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             float bodyHeight = Math.Clamp(
                 float.IsFinite(unit.Height) && unit.Height > 0.3f ? unit.Height : 1.6f,
                 0.45f, 3.2f);
-            float unitDepth = GetCameraDepth(unit.X, unit.Y);
+            float unitDepth = GetCameraDepth(
+                unit.X,
+                unit.Y,
+                unit.Z + bodyHeight * 0.5f);
 
             int corner = 0;
             for (int zIndex = 0; zIndex < 2; zIndex++)
@@ -763,7 +773,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             Size = size,
             Height = surfaceLevel,
             MaterialId = materialId,
-            Depth = rotatedX + rotatedY
+            Depth = (rotatedX + rotatedY) * _depthPlanarScale +
+                surfaceLevel * _depthVerticalScale
         });
     }
 
@@ -900,7 +911,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         Vector2f bottomB = ProjectLevelPoint(
             worldMap, bx, by, bottomHeightB, tileSize,
             groundDepthScale, verticalScale);
-        float edgeDepth = GetCameraDepth((ax + bx) * 0.5f, (ay + by) * 0.5f);
+        float faceCenterHeight =
+            (topHeightA + topHeightB + bottomHeightA + bottomHeightB) * 0.25f;
+        float edgeDepth = GetCameraDepth(
+            (ax + bx) * 0.5f,
+            (ay + by) * 0.5f,
+            faceCenterHeight);
         VertexArray occlusionFaces = GetOcclusionFaces(edgeDepth);
         AppendQuad(occlusionFaces, topA, topB, bottomB, bottomA, color);
         _occlusionFaces.Add(new OcclusionFace(topA, topB, bottomB, bottomA, edgeDepth));
