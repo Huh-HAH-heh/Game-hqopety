@@ -4308,6 +4308,59 @@ public sealed class GameRenderer
         }
     }
 
+    private Vector2f GetDynamicCameraOrbitCenter()
+    {
+        SimulationFrameSnapshot? snapshot = GetInputSnapshot();
+        if (snapshot != null)
+        {
+            float selectedX = 0f;
+            float selectedY = 0f;
+            int selectedCount = 0;
+
+            float allX = 0f;
+            float allY = 0f;
+            int allCount = 0;
+
+            RenderUnitState[] units = snapshot.Units;
+            for (int i = 0; i < units.Length; i++)
+            {
+                RenderUnitState unit = units[i];
+                if (unit.HitPoints <= 0f)
+                    continue;
+
+                allX += unit.Position.X;
+                allY += unit.Position.Y;
+                allCount++;
+
+                UnitId id = new(unit.Index, unit.Generation);
+                if (!_selectedUnits.Contains(id))
+                    continue;
+
+                selectedX += unit.Position.X;
+                selectedY += unit.Position.Y;
+                selectedCount++;
+            }
+
+            if (selectedCount > 0)
+            {
+                return new Vector2f(
+                    selectedX / selectedCount * TerrainTilePixelSize,
+                    selectedY / selectedCount * TerrainTilePixelSize);
+            }
+
+            if (allCount > 0)
+            {
+                return new Vector2f(
+                    allX / allCount * TerrainTilePixelSize,
+                    allY / allCount * TerrainTilePixelSize);
+            }
+        }
+
+        return new Vector2f(
+            _worldMap.TileWidth * TerrainTilePixelSize * 0.5f,
+            _worldMap.TileHeight * TerrainTilePixelSize * 0.5f);
+    }
+
     private void HandleKey(Keyboard.Key key)
     {
         if (_showBlockTerrainPreview)
@@ -4383,10 +4436,11 @@ public sealed class GameRenderer
             _unitCards.Count == 0 &&
             !_showUtilityAiDebug)
         {
+            Vector2f orbitCenter = GetDynamicCameraOrbitCenter();
             if (key == Keyboard.Key.Q)
-                _camera.RotateCounterClockwise();
+                _camera.RotateCounterClockwise(orbitCenter);
             else
-                _camera.RotateClockwise();
+                _camera.RotateClockwise(orbitCenter);
 
             Console.WriteLine(
                 $"[CAMERA] Верх карты: {_camera.DirectionLabel}. Q/E — поворот на 45 градусов.");
