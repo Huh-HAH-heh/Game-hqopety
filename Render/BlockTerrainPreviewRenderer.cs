@@ -312,11 +312,9 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
     private void BeginOcclusionBatchBuild(int bucketSize)
     {
-        // Keep wall ordering finer than large adaptive LOD patches. The
-        // horizontal block size is the coarsest useful depth precision.
-        _occlusionBucketSize = Math.Max(
-            1,
-            Math.Min(bucketSize, BlockTerrain.HorizontalBlockSize));
+        // Surface samples and wall segments are addressed on the 1 m grid.
+        // Keep painter-order bands at that same resolution regardless of LOD.
+        _occlusionBucketSize = 1;
         _activeOcclusionBatches.Clear();
         _occlusionBatchLookup.Clear();
         _occlusionFaces.Clear();
@@ -798,50 +796,65 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         Color xFacingColor = new Color(55, 61, 65, 255);
         Color yFacingColor = new Color(39, 45, 49, 255);
 
+        // The visible side for each axis is determined by the camera-depth
+        // gradient. Near a diagonal view one axis becomes edge-on; drawing it
+        // anyway creates zero-area wall strips and long rasterization artifacts.
+        const float edgeOnThreshold = 0.025f;
+        float xDepthDirection = _rotationCosine + _rotationSine;
+        float yDepthDirection = _rotationCosine - _rotationSine;
+        bool showXSide = MathF.Abs(xDepthDirection) > edgeOnThreshold;
+        bool showYSide = MathF.Abs(yDepthDirection) > edgeOnThreshold;
+
         for (int offset = 0; offset < blockSize; offset += edgeSegmentSize)
         {
             int segmentSize = Math.Min(edgeSegmentSize, blockSize - offset);
 
-            if (_rotationCosine + _rotationSine >= 0f)
+            if (showXSide)
             {
-                int segmentX = x + blockSize - segmentSize;
-                int segmentY = y + offset;
-                AppendSourceEdge(worldMap, segmentX, segmentY, 1, 0, segmentSize,
-                    x + blockSize, segmentY, x + blockSize, segmentY + segmentSize,
-                    eastZ, southZ, tileSize,
-                    groundDepthScale, verticalScale, drawBlockGrid,
-                    verticalGroupHeight, xFacingColor);
-            }
-            else
-            {
-                int segmentX = x;
-                int segmentY = y + offset;
-                AppendSourceEdge(worldMap, segmentX, segmentY, -1, 0, segmentSize,
-                    x, segmentY + segmentSize, x, segmentY,
-                    westZ, northZ, tileSize,
-                    groundDepthScale, verticalScale, drawBlockGrid,
-                    verticalGroupHeight, xFacingColor);
+                if (xDepthDirection > 0f)
+                {
+                    int segmentX = x + blockSize - segmentSize;
+                    int segmentY = y + offset;
+                    AppendSourceEdge(worldMap, segmentX, segmentY, 1, 0, segmentSize,
+                        x + blockSize, segmentY, x + blockSize, segmentY + segmentSize,
+                        eastZ, southZ, tileSize,
+                        groundDepthScale, verticalScale, drawBlockGrid,
+                        verticalGroupHeight, xFacingColor);
+                }
+                else
+                {
+                    int segmentX = x;
+                    int segmentY = y + offset;
+                    AppendSourceEdge(worldMap, segmentX, segmentY, -1, 0, segmentSize,
+                        x, segmentY + segmentSize, x, segmentY,
+                        westZ, northZ, tileSize,
+                        groundDepthScale, verticalScale, drawBlockGrid,
+                        verticalGroupHeight, xFacingColor);
+                }
             }
 
-            if (_rotationCosine - _rotationSine >= 0f)
+            if (showYSide)
             {
-                int segmentX = x + offset;
-                int segmentY = y + blockSize - segmentSize;
-                AppendSourceEdge(worldMap, segmentX, segmentY, 0, 1, segmentSize,
-                    segmentX + segmentSize, y + blockSize, segmentX, y + blockSize,
-                    southZ, westZ, tileSize,
-                    groundDepthScale, verticalScale, drawBlockGrid,
-                    verticalGroupHeight, yFacingColor);
-            }
-            else
-            {
-                int segmentX = x + offset;
-                int segmentY = y;
-                AppendSourceEdge(worldMap, segmentX, segmentY, 0, -1, segmentSize,
-                    segmentX, y, segmentX + segmentSize, y,
-                    northZ, eastZ, tileSize,
-                    groundDepthScale, verticalScale, drawBlockGrid,
-                    verticalGroupHeight, yFacingColor);
+                if (yDepthDirection > 0f)
+                {
+                    int segmentX = x + offset;
+                    int segmentY = y + blockSize - segmentSize;
+                    AppendSourceEdge(worldMap, segmentX, segmentY, 0, 1, segmentSize,
+                        segmentX + segmentSize, y + blockSize, segmentX, y + blockSize,
+                        southZ, westZ, tileSize,
+                        groundDepthScale, verticalScale, drawBlockGrid,
+                        verticalGroupHeight, yFacingColor);
+                }
+                else
+                {
+                    int segmentX = x + offset;
+                    int segmentY = y;
+                    AppendSourceEdge(worldMap, segmentX, segmentY, 0, -1, segmentSize,
+                        segmentX, y, segmentX + segmentSize, y,
+                        northZ, eastZ, tileSize,
+                        groundDepthScale, verticalScale, drawBlockGrid,
+                        verticalGroupHeight, yFacingColor);
+                }
             }
         }
     }
