@@ -1157,7 +1157,7 @@ public sealed class GameRenderer
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
             $"LastHit={snapshot.LastHitPart} | " +
             $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
-            $"Верх карты={_camera.DirectionLabel} (Q/E: 45°) | " +
+            $"Орбита камеры={_camera.OrbitSectorLabel} (Q/E: 45°) | " +
             "RMB=движение/атака  Shift+click=добавить выделение  СКМ=панорама  Колесо=масштаб  ESC=меню | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
@@ -4443,7 +4443,7 @@ public sealed class GameRenderer
                 _camera.RotateClockwise(orbitCenter);
 
             Console.WriteLine(
-                $"[CAMERA] Верх карты: {_camera.DirectionLabel}. Q/E — поворот на 45 градусов.");
+                $"[CAMERA] Сектор орбиты: {_camera.OrbitSectorLabel}. Q/E — перемещение камеры на 45 градусов.");
             return;
         }
 
