@@ -973,14 +973,65 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         Vector2f bottomB = ProjectLevelPoint(
             worldMap, bx, by, bottomHeightB, tileSize,
             groundDepthScale, verticalScale);
+
+        // Keep one full polygon for X-ray clipping, but render the actual wall
+        // as 1 m vertical bands. A single 40-50 m quad has a huge depth range;
+        // sorting it by its centroid makes it cover terrain that is in front.
         float faceCenterHeight =
             (topHeightA + topHeightB + bottomHeightA + bottomHeightB) * 0.25f;
+        float edgeCenterX = (ax + bx) * 0.5f;
+        float edgeCenterY = (ay + by) * 0.5f;
         float edgeDepth = GetCameraDepth(
-            (ax + bx) * 0.5f,
-            (ay + by) * 0.5f,
+            edgeCenterX,
+            edgeCenterY,
             faceCenterHeight);
-        QueueDepthQuad(edgeDepth, topA, topB, bottomB, bottomA, color);
-        _occlusionFaces.Add(new OcclusionFace(topA, topB, bottomB, bottomA, edgeDepth));
+        _occlusionFaces.Add(new OcclusionFace(
+            topA, topB, bottomB, bottomA, edgeDepth));
+
+        float maximumWallHeight = MathF.Max(
+            topHeightA - bottomHeightA,
+            topHeightB - bottomHeightB);
+        int verticalSegments = Math.Max(
+            1,
+            (int)MathF.Ceiling(maximumWallHeight));
+
+        for (int segment = 0; segment < verticalSegments; segment++)
+        {
+            float t0 = segment / (float)verticalSegments;
+            float t1 = (segment + 1f) / verticalSegments;
+
+            float lowerA = bottomHeightA + (topHeightA - bottomHeightA) * t0;
+            float lowerB = bottomHeightB + (topHeightB - bottomHeightB) * t0;
+            float upperA = bottomHeightA + (topHeightA - bottomHeightA) * t1;
+            float upperB = bottomHeightB + (topHeightB - bottomHeightB) * t1;
+
+            Vector2f bandTopA = ProjectLevelPoint(
+                worldMap, ax, ay, upperA, tileSize,
+                groundDepthScale, verticalScale);
+            Vector2f bandTopB = ProjectLevelPoint(
+                worldMap, bx, by, upperB, tileSize,
+                groundDepthScale, verticalScale);
+            Vector2f bandBottomA = ProjectLevelPoint(
+                worldMap, ax, ay, lowerA, tileSize,
+                groundDepthScale, verticalScale);
+            Vector2f bandBottomB = ProjectLevelPoint(
+                worldMap, bx, by, lowerB, tileSize,
+                groundDepthScale, verticalScale);
+
+            float bandCenterHeight =
+                (upperA + upperB + lowerA + lowerB) * 0.25f;
+            float bandDepth = GetCameraDepth(
+                edgeCenterX,
+                edgeCenterY,
+                bandCenterHeight);
+            QueueDepthQuad(
+                bandDepth,
+                bandTopA,
+                bandTopB,
+                bandBottomB,
+                bandBottomA,
+                color);
+        }
 
         if (drawBlockGrid)
         {
