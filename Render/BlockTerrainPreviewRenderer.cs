@@ -253,14 +253,17 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                         AppendLineAsQuad(topFaces, south, west, seamColor);
                 }
 
-                AppendVisibleSideFaces(
-                    worldMap, x, y, size,
-                    MinimumBlockSize,
-                    Math.Max(1, size / BlockTerrain.HorizontalBlockSize), tileSize,
-                    groundDepthScale, verticalScale,
-                    drawBlockOutline,
-                    northZ, eastZ, southZ, westZ);
             }
+
+            // Vertical faces are extracted from actual neighbouring 1 m
+            // height samples, never from adaptive top-patch boundaries.
+            AppendVisibleSideFaces(
+                worldMap,
+                minX, maxX, minY, maxY,
+                tileSize,
+                groundDepthScale,
+                verticalScale,
+                drawBlockGrid);
 
             _activeOcclusionBatches.Sort(static (left, right) =>
                 left.Depth.CompareTo(right.Depth));
@@ -779,81 +782,77 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
     private void AppendVisibleSideFaces(
         WorldMap worldMap,
-        int x,
-        int y,
-        int blockSize,
-        int edgeSegmentSize,
-        int verticalGroupHeight,
+        int minX,
+        int maxX,
+        int minY,
+        int maxY,
         float tileSize,
         float groundDepthScale,
         float verticalScale,
-        bool drawBlockGrid,
-        float northZ,
-        float eastZ,
-        float southZ,
-        float westZ)
+        bool drawBlockGrid)
     {
-        Color xFacingColor = new Color(55, 61, 65, 255);
-        Color yFacingColor = new Color(39, 45, 49, 255);
-
-        // The visible side for each axis is determined by the camera-depth
-        // gradient. Near a diagonal view one axis becomes edge-on; drawing it
-        // anyway creates zero-area wall strips and long rasterization artifacts.
         const float edgeOnThreshold = 0.025f;
         float xDepthDirection = _rotationCosine + _rotationSine;
         float yDepthDirection = _rotationCosine - _rotationSine;
         bool showXSide = MathF.Abs(xDepthDirection) > edgeOnThreshold;
         bool showYSide = MathF.Abs(yDepthDirection) > edgeOnThreshold;
 
-        for (int offset = 0; offset < blockSize; offset += edgeSegmentSize)
+        Color xFacingColor = new Color(55, 61, 65, 255);
+        Color yFacingColor = new Color(39, 45, 49, 255);
+        BlockTerrain blocks = worldMap.Blocks;
+
+        for (int y = minY; y <= maxY; y++)
         {
-            int segmentSize = Math.Min(edgeSegmentSize, blockSize - offset);
-
-            if (showXSide)
+            for (int x = minX; x <= maxX; x++)
             {
-                if (xDepthDirection > 0f)
-                {
-                    int segmentX = x + blockSize - segmentSize;
-                    int segmentY = y + offset;
-                    AppendSourceEdge(worldMap, segmentX, segmentY, 1, 0, segmentSize,
-                        x + blockSize, segmentY, x + blockSize, segmentY + segmentSize,
-                        eastZ, southZ, tileSize,
-                        groundDepthScale, verticalScale, drawBlockGrid,
-                        verticalGroupHeight, xFacingColor);
-                }
-                else
-                {
-                    int segmentX = x;
-                    int segmentY = y + offset;
-                    AppendSourceEdge(worldMap, segmentX, segmentY, -1, 0, segmentSize,
-                        x, segmentY + segmentSize, x, segmentY,
-                        westZ, northZ, tileSize,
-                        groundDepthScale, verticalScale, drawBlockGrid,
-                        verticalGroupHeight, xFacingColor);
-                }
-            }
+                int surfaceLevel = blocks.GetSurfaceLevel(x, y);
+                if (surfaceLevel <= 0 || blocks.GetMaterialId(x, y) == 0)
+                    continue;
 
-            if (showYSide)
-            {
-                if (yDepthDirection > 0f)
+                float height = surfaceLevel;
+
+                if (showXSide)
                 {
-                    int segmentX = x + offset;
-                    int segmentY = y + blockSize - segmentSize;
-                    AppendSourceEdge(worldMap, segmentX, segmentY, 0, 1, segmentSize,
-                        segmentX + segmentSize, y + blockSize, segmentX, y + blockSize,
-                        southZ, westZ, tileSize,
-                        groundDepthScale, verticalScale, drawBlockGrid,
-                        verticalGroupHeight, yFacingColor);
+                    if (xDepthDirection > 0f)
+                    {
+                        AppendSourceEdge(
+                            worldMap, x, y, 1, 0, 1,
+                            x + 1f, y, x + 1f, y + 1f,
+                            height, height,
+                            tileSize, groundDepthScale, verticalScale,
+                            drawBlockGrid, 1, xFacingColor);
+                    }
+                    else
+                    {
+                        AppendSourceEdge(
+                            worldMap, x, y, -1, 0, 1,
+                            x, y + 1f, x, y,
+                            height, height,
+                            tileSize, groundDepthScale, verticalScale,
+                            drawBlockGrid, 1, xFacingColor);
+                    }
                 }
-                else
+
+                if (showYSide)
                 {
-                    int segmentX = x + offset;
-                    int segmentY = y;
-                    AppendSourceEdge(worldMap, segmentX, segmentY, 0, -1, segmentSize,
-                        segmentX, y, segmentX + segmentSize, y,
-                        northZ, eastZ, tileSize,
-                        groundDepthScale, verticalScale, drawBlockGrid,
-                        verticalGroupHeight, yFacingColor);
+                    if (yDepthDirection > 0f)
+                    {
+                        AppendSourceEdge(
+                            worldMap, x, y, 0, 1, 1,
+                            x + 1f, y + 1f, x, y + 1f,
+                            height, height,
+                            tileSize, groundDepthScale, verticalScale,
+                            drawBlockGrid, 1, yFacingColor);
+                    }
+                    else
+                    {
+                        AppendSourceEdge(
+                            worldMap, x, y, 0, -1, 1,
+                            x, y, x + 1f, y,
+                            height, height,
+                            tileSize, groundDepthScale, verticalScale,
+                            drawBlockGrid, 1, yFacingColor);
+                    }
                 }
             }
         }
