@@ -8,7 +8,6 @@ namespace RimClone.Render;
 public sealed class GameCamera : IDisposable
 {
     private const float InverseSqrtTwo = 0.70710678118f;
-    private const float SqrtTwo = 1.41421356237f;
 
     private static readonly string[] OrbitSectorLabels =
     {
@@ -23,13 +22,17 @@ public sealed class GameCamera : IDisposable
     private Vector2f _viewportSize;
     private bool _isometricProjectionEnabled = true;
     private int _rotationStep;
+    private float _yawDegrees;
+    private float _pitchDegrees = 45f;
 
     public float ZoomLevel => _zoomLevel;
     public View View => _view;
     public bool IsometricProjectionEnabled => _isometricProjectionEnabled;
     public int RotationStep => _rotationStep;
+    public float PitchDegrees => _pitchDegrees;
+    public float YawDegrees => _yawDegrees;
 
-    // Q/E tracks the camera's orbital sector around the current world pivot.
+    // Q/E and RMB drag track the camera's orbital sector around the current world pivot.
     public string OrbitSectorLabel => OrbitSectorLabels[_rotationStep];
 
     public GameCamera(
@@ -82,38 +85,58 @@ public sealed class GameCamera : IDisposable
         ApplyProjection();
     }
 
-    public void RotateClockwise(Vector2f orbitCenter)
-    {
-        OrbitAround(orbitCenter, 1);
-    }
+    public void RotateClockwise(Vector2f orbitCenter) =>
+        RotateYaw(45f, orbitCenter);
 
-    public void RotateCounterClockwise(Vector2f orbitCenter)
-    {
-        OrbitAround(orbitCenter, -1);
-    }
+    public void RotateCounterClockwise(Vector2f orbitCenter) =>
+        RotateYaw(-45f, orbitCenter);
 
-    private void OrbitAround(Vector2f orbitCenter, int direction)
+    public void RotateByMouse(Vector2f pixelDelta, Vector2f orbitCenter)
     {
         if (!_isometricProjectionEnabled)
             return;
 
-        const float stepDegrees = 45f;
-        float deltaDegrees = direction * stepDegrees;
+        const float yawSensitivity = 0.32f;
+        const float pitchSensitivity = 0.22f;
+
+        if (pixelDelta.X != 0f)
+            RotateYaw(pixelDelta.X * yawSensitivity, orbitCenter);
+
+        if (pixelDelta.Y != 0f)
+        {
+            _pitchDegrees = Math.Clamp(
+                _pitchDegrees - pixelDelta.Y * pitchSensitivity,
+                20f,
+                80f);
+            ApplyProjection();
+        }
+    }
+
+    private void RotateYaw(float deltaDegrees, Vector2f orbitCenter)
+    {
+        if (!_isometricProjectionEnabled || deltaDegrees == 0f)
+            return;
+
         float radians = deltaDegrees * MathF.PI / 180f;
         float cosine = MathF.Cos(radians);
         float sine = MathF.Sin(radians);
 
-        // Move only the camera centre along an arc around the world-space pivot.
-        // Keep the isometric view angle fixed; Q/E must not roll the view.
+        // Orbit the camera centre around the captured world-space pivot.
         float offsetX = _targetPosition.X - orbitCenter.X;
         float offsetY = _targetPosition.Y - orbitCenter.Y;
-
         _targetPosition = new Vector2f(
             orbitCenter.X + cosine * offsetX - sine * offsetY,
             orbitCenter.Y + sine * offsetX + cosine * offsetY);
 
         _view.Center = _targetPosition;
-        _rotationStep = (_rotationStep + direction + 8) & 7;
+
+        _yawDegrees = (_yawDegrees + deltaDegrees) % 360f;
+        if (_yawDegrees < 0f)
+            _yawDegrees += 360f;
+
+        _rotationStep =
+            ((int)MathF.Round(_yawDegrees / 45f) % 8 + 8) % 8;
+        ApplyRotation();
     }
 
     public void HandleZoom(float delta)
@@ -160,7 +183,9 @@ public sealed class GameCamera : IDisposable
         {
             float zoomSpeed = _moveSpeed * Math.Clamp(_zoomLevel, 0.05f, 24f);
             float localScaleX = _isometricProjectionEnabled ? InverseSqrtTwo : 1f;
-            float localScaleY = _isometricProjectionEnabled ? SqrtTwo : 1f;
+            float localScaleY = _isometricProjectionEnabled
+                ? 1f / MathF.Sin(_pitchDegrees * MathF.PI / 180f)
+                : 1f;
 
             float localX = moveDirection.X * zoomSpeed * localScaleX * deltaTime;
             float localY = moveDirection.Y * zoomSpeed * localScaleY * deltaTime;
@@ -207,9 +232,11 @@ public sealed class GameCamera : IDisposable
     {
         if (_isometricProjectionEnabled)
         {
+            float pitchRadians = _pitchDegrees * MathF.PI / 180f;
+            float pitchScale = 1f / MathF.Sin(pitchRadians);
             _view.Size = new Vector2f(
                 _viewportSize.X * _zoomLevel * InverseSqrtTwo,
-                _viewportSize.Y * _zoomLevel * SqrtTwo);
+                _viewportSize.Y * _zoomLevel * pitchScale);
             ApplyRotation();
             return;
         }
@@ -223,7 +250,7 @@ public sealed class GameCamera : IDisposable
     private void ApplyRotation()
     {
         if (_isometricProjectionEnabled)
-            _view.Rotation = Angle.FromDegrees(-45f);
+            _view.Rotation = Angle.FromDegrees(-45f + _yawDegrees);
     }
 
     public void Dispose()
