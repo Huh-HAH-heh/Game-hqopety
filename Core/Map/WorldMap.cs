@@ -295,10 +295,10 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Packs a height field into one sparse hierarchy of large cuboid volumes.
-    /// Every region first stores its shared lower volume as one macro block.
-    /// Regions with different heights are split recursively; only the varying
-    /// upper parts become smaller child volumes. All cells remain exact.
+    /// Packs shared lower terrain into large macro volumes. Regions that
+    /// cannot share a common base are split recursively down to the requested
+    /// block size; finer height differences stay in the existing compact
+    /// column backing instead of creating one object per tile.
     /// </summary>
     public int CompactUniformBlockVolumes(int minimumBlockSize = 32)
     {
@@ -339,7 +339,7 @@ public sealed class WorldMap
         int minimumBlockSize,
         int baseLayer)
     {
-        if (x >= TileWidth || y >= TileHeight)
+        if (x >= TileWidth || y >= TileHeight || size < minimumBlockSize)
             return 0;
 
         if (x + size <= TileWidth &&
@@ -351,14 +351,10 @@ public sealed class WorldMap
                 out int maximumRemaining))
         {
             int volumeCount = 0;
-
-            // A large region can share the same lower layers even when its
-            // surface heights differ. Store that common part once.
-            bool isMacroRegion = size >= minimumBlockSize;
-            bool isUniformRegion = minimumRemaining == maximumRemaining;
-            if (minimumRemaining > 0 &&
-                (isMacroRegion || isUniformRegion || size == 1))
+            if (minimumRemaining > 0)
             {
+                // Store the shared lower part once for this whole region.
+                // Higher, varying surfaces continue to use the fine backing.
                 Blocks.Volumes.SetVolume(
                     x, y, baseLayer,
                     size, size, minimumRemaining,
@@ -367,15 +363,9 @@ public sealed class WorldMap
                 baseLayer += minimumRemaining;
             }
 
-            if (maximumRemaining <= minimumRemaining)
+            if (maximumRemaining <= minimumRemaining ||
+                size <= minimumBlockSize)
             {
-                MarkBlockRegionCompacted(x, y, size);
-                return volumeCount;
-            }
-
-            if (size == 1)
-            {
-                MarkBlockRegionCompacted(x, y, size);
                 return volumeCount;
             }
 
@@ -390,9 +380,6 @@ public sealed class WorldMap
                 x + half, y + half, half, minimumBlockSize, baseLayer);
             return volumeCount;
         }
-
-        if (size == 1)
-            return 0;
 
         int childSize = size / 2;
         return
@@ -457,34 +444,6 @@ public sealed class WorldMap
             minimumRemaining = 0;
 
         return true;
-    }
-
-    private void MarkBlockRegionCompacted(int x, int y, int size)
-    {
-        for (int localY = 0; localY < size; localY++)
-        {
-            int row = GetColumnIndex(x, y + localY);
-            for (int localX = 0; localX < size; localX++)
-                MarkBlockColumnCompacted(row + localX);
-        }
-    }
-
-    private void MarkBlockColumnCompacted(int columnIndex)
-    {
-        if (!_simpleFillColumns[columnIndex])
-            return;
-
-        int totalLayers = Math.Clamp(
-            (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
-            LayerHeightUnits,
-            0,
-            LayerCount);
-
-        _simpleFillColumns[columnIndex] = false;
-        _columnMaterialIds[columnIndex] = 0;
-        _volumeSurfaceHeights[columnIndex] =
-            checked((ushort)(totalLayers * LayerHeightUnits));
-        _rangeCache[columnIndex] = null;
     }
 
     /// <summary>
