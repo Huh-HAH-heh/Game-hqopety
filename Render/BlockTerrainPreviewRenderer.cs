@@ -180,8 +180,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             maxY = Math.Min(worldMap.MaxTileY, maxY);
 
             _visibleBlocks.Clear();
-            float centerX = worldMap.TileWidth * 0.5f;
-            float centerY = worldMap.TileHeight * 0.5f;
             int firstBlockX = minX / MaximumAdaptiveBlockSize * MaximumAdaptiveBlockSize;
             int firstBlockY = minY / MaximumAdaptiveBlockSize * MaximumAdaptiveBlockSize;
             for (int y = firstBlockY; y <= maxY; y += MaximumAdaptiveBlockSize)
@@ -190,7 +188,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 {
                     CollectAdaptiveBlocks(
                         worldMap, x, y, MaximumAdaptiveBlockSize,
-                        minimumDetailSize, centerX, centerY);
+                        minimumDetailSize);
                 }
             }
 
@@ -678,9 +676,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         int x,
         int y,
         int size,
-        int minimumDetailSize,
-        float centerX,
-        float centerY)
+        int minimumDetailSize)
     {
         if (x >= worldMap.TileWidth || y >= worldMap.TileHeight)
             return;
@@ -690,7 +686,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 out int surfaceLevel, out ushort materialId))
         {
             if (surfaceLevel > 0 && materialId != 0)
-                AddVisibleBlock(x, y, size, surfaceLevel, materialId, centerX, centerY);
+                AddVisibleBlock(x, y, size, surfaceLevel, materialId);
             return;
         }
 
@@ -701,15 +697,15 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             surfaceLevel = worldMap.Blocks.GetSurfaceLevel(x, y);
             materialId = worldMap.Blocks.GetMaterialId(x, y);
             if (surfaceLevel > 0 && materialId != 0)
-                AddVisibleBlock(x, y, 1, surfaceLevel, materialId, centerX, centerY);
+                AddVisibleBlock(x, y, 1, surfaceLevel, materialId);
             return;
         }
 
         int half = size >> 1;
-        CollectAdaptiveBlocks(worldMap, x, y, half, minimumDetailSize, centerX, centerY);
-        CollectAdaptiveBlocks(worldMap, x + half, y, half, minimumDetailSize, centerX, centerY);
-        CollectAdaptiveBlocks(worldMap, x, y + half, half, minimumDetailSize, centerX, centerY);
-        CollectAdaptiveBlocks(worldMap, x + half, y + half, half, minimumDetailSize, centerX, centerY);
+        CollectAdaptiveBlocks(worldMap, x, y, half, minimumDetailSize);
+        CollectAdaptiveBlocks(worldMap, x + half, y, half, minimumDetailSize);
+        CollectAdaptiveBlocks(worldMap, x, y + half, half, minimumDetailSize);
+        CollectAdaptiveBlocks(worldMap, x + half, y + half, half, minimumDetailSize);
     }
 
     private static bool TryGetUniformPatch(
@@ -756,14 +752,13 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         int y,
         int size,
         int surfaceLevel,
-        ushort materialId,
-        float centerX,
-        float centerY)
+        ushort materialId)
     {
-        float localX = x + size * 0.5f - centerX;
-        float localY = y + size * 0.5f - centerY;
-        float rotatedX = _rotationCosine * localX - _rotationSine * localY;
-        float rotatedY = _rotationSine * localX + _rotationCosine * localY;
+        // Use absolute map coordinates, matching wall and unit depth keys.
+        float centerX = x + size * 0.5f;
+        float centerY = y + size * 0.5f;
+        float rotatedX = _rotationCosine * centerX - _rotationSine * centerY;
+        float rotatedY = _rotationSine * centerX + _rotationCosine * centerY;
 
         _visibleBlocks.Add(new BlockDrawItem
         {
