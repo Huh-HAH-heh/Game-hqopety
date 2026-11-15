@@ -31,13 +31,15 @@ public sealed class BlockTerrain
 
     public int Width { get; }
     public int Height { get; }
+    public BlockVolumeTree Volumes { get; }
 
-    public BlockTerrain(int width, int height)
+    public BlockTerrain(int width, int height, int depth = 500)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         Width = width;
         Height = height;
+        Volumes = new BlockVolumeTree(width, height, depth);
         int count = checked(width * height);
         _surfaceLevels = new int[count];
         _materialIds = new ushort[count];
