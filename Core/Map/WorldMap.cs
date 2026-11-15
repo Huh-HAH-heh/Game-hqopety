@@ -300,7 +300,7 @@ public sealed class WorldMap
     /// block size; finer height differences stay in the existing compact
     /// column backing instead of creating one object per tile.
     /// </summary>
-    public int CompactUniformBlockVolumes(int minimumBlockSize = 32)
+    public int CompactHierarchicalBlockVolumes(int minimumBlockSize = 32)
     {
         if (!UsesDiscreteBlockTerrain)
             throw new InvalidOperationException("Discrete block terrain is not enabled.");
@@ -331,6 +331,9 @@ public sealed class WorldMap
 
         return volumeCount;
     }
+
+    public int CompactUniformBlockVolumes(int minimumBlockSize = 32) =>
+        CompactHierarchicalBlockVolumes(minimumBlockSize);
 
     private int CompactHierarchicalRegion(
         int x,
