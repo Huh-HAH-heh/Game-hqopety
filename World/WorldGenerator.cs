@@ -17,7 +17,7 @@ public static class WorldGenerator
         GenerateBaseTerrain(worldMap);
         worldMap.EnableDiscreteBlockTerrain();
         int macroVolumeCount =
-            worldMap.CompactUniformBlockVolumes(MacroBlockMinimumSize);
+            worldMap.CompactHierarchicalBlockVolumes(MacroBlockMinimumSize);
         GenerateTraversalBlocks(worldMap);
 
         if (writeLog)
