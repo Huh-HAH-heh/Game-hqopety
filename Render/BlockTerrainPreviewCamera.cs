@@ -25,7 +25,6 @@ public sealed class BlockTerrainPreviewCamera : IDisposable
     private float _moveSensitivity = 1f;
     private float _azimuthDegrees;
     private float _renderAzimuthDegrees;
-    private float _interactiveRotationDegrees;
     private bool _isInteractiveRotation;
     private float _elevationDegrees = 30f;
     private float _targetElevationDegrees = 30f;
@@ -145,12 +144,7 @@ public sealed class BlockTerrainPreviewCamera : IDisposable
 
     public void BeginInteractiveRotation()
     {
-        if (_isInteractiveRotation)
-            return;
-
         _isInteractiveRotation = true;
-        _interactiveRotationDegrees = 0f;
-        _view.Rotation = Angle.FromDegrees(0f);
     }
 
     public void RotateAzimuth(float deltaDegrees, WorldMap worldMap, float tilePixelSize)
@@ -158,61 +152,28 @@ public sealed class BlockTerrainPreviewCamera : IDisposable
         if (!float.IsFinite(deltaDegrees) || MathF.Abs(deltaDegrees) < 0.0001f)
             return;
 
+        // Transform the camera centre between the old and new projected world
+        // bases. Rotating View itself only spins the finished 2D image and gives
+        // the wrong result whenever the projection is not top-down.
+        _view.Center = RotateProjectedPosition(
+            _view.Center,
+            deltaDegrees,
+            worldMap,
+            tilePixelSize);
+        _targetPosition = RotateProjectedPosition(
+            _targetPosition,
+            deltaDegrees,
+            worldMap,
+            tilePixelSize);
+
         _azimuthDegrees = WrapDegrees(_azimuthDegrees + deltaDegrees);
-        if (_isInteractiveRotation)
-        {
-            _interactiveRotationDegrees += deltaDegrees;
-            _view.Rotation = Angle.FromDegrees(
-                GetInteractiveScreenRotation(_interactiveRotationDegrees));
-            return;
-        }
-
-        _view.Center = RotateProjectedPosition(_view.Center, deltaDegrees, worldMap, tilePixelSize);
-        _targetPosition = RotateProjectedPosition(_targetPosition, deltaDegrees, worldMap, tilePixelSize);
         _renderAzimuthDegrees = _azimuthDegrees;
         _view.Rotation = Angle.FromDegrees(0f);
     }
 
-    public void EndInteractiveRotation(WorldMap worldMap, float tilePixelSize)
+    public void EndInteractiveRotation()
     {
-        if (!_isInteractiveRotation)
-            return;
-
-        float totalDelta = _interactiveRotationDegrees;
         _isInteractiveRotation = false;
-        if (MathF.Abs(totalDelta) > 0.0001f)
-        {
-            _view.Center = RotateProjectedPosition(_view.Center, totalDelta, worldMap, tilePixelSize);
-            _targetPosition = RotateProjectedPosition(_targetPosition, totalDelta, worldMap, tilePixelSize);
-        }
-
-        _renderAzimuthDegrees = _azimuthDegrees;
-        _interactiveRotationDegrees = 0f;
-        _view.Rotation = Angle.FromDegrees(0f);
-    }
-
-    private float GetInteractiveScreenRotation(float deltaDegrees)
-    {
-        float elevationRadians = Math.Clamp(_elevationDegrees, 15f, 90f) *
-            (MathF.PI / 180f);
-        float verticalToHorizontal = MathF.Max(
-            0.001f,
-            MathF.Sin(elevationRadians));
-        float radians = (deltaDegrees % 360f) * (MathF.PI / 180f);
-        float sine = MathF.Sin(radians);
-        float cosine = MathF.Cos(radians);
-
-        // The projected ground transform for an azimuth change is:
-        // [ cos(delta)  -sin(delta) / sin(elevation) ]
-        // [ sin(delta) * sin(elevation)   cos(delta) ]
-        // Extract its closest pure screen rotation (polar decomposition).
-        // SFML View stores camera orientation, so the view angle has the
-        // opposite sign to the rotation applied to the rendered world.
-        float projectedWorldRotation = MathF.Atan2(
-            sine * (verticalToHorizontal + 1f / verticalToHorizontal),
-            2f * cosine);
-
-        return -projectedWorldRotation * (180f / MathF.PI);
     }
 
     private static float WrapDegrees(float degrees)
