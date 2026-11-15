@@ -27,7 +27,8 @@ public static class WorldGenerator
                 $"Дискретный блочный рельеф создан: " +
                 $"{worldMap.Blocks.Width}x{worldMap.Blocks.Height}, шаг Z = 1 м, " +
                 $"макрообъёмов (от {MacroBlockMinimumSize}x{MacroBlockMinimumSize} м): {macroVolumeCount}, " +
-                $"листьев дерева: {worldMap.Blocks.Volumes.SolidLeafCount}.");
+                $"листьев дерева: {worldMap.Blocks.Volumes.SolidLeafCount}, " +
+                $"узлов дерева: {worldMap.Blocks.Volumes.AllocatedNodeCount}.");
         }
     }
 
