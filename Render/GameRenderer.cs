@@ -791,8 +791,7 @@ public sealed class GameRenderer
                 _blockPreviewCamera.View,
                 TerrainTilePixelSize,
                 _blockPreviewCamera.AzimuthDegrees,
-                _blockPreviewCamera.ElevationDegrees,
-                _isRotatingCamera);
+                _blockPreviewCamera.ElevationDegrees);
             _lastTerrainDrawMilliseconds =
                 Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 

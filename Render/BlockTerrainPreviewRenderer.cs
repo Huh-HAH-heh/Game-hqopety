@@ -95,8 +95,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         View cameraView,
         float tilePixelSize,
         float cameraAzimuthDegrees,
-        float elevationDegrees,
-        bool isCameraRotating)
+        float elevationDegrees)
     {
         if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize <= 0f)
             return;
