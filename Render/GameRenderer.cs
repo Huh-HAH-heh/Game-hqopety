@@ -174,6 +174,7 @@ public sealed class GameRenderer
     private bool _showUnitRig = true;
     private bool _showBlockTerrainPreview;
     private Vector2f _normalCameraCenter;
+    private bool _normalCameraIsometricProjectionEnabled;
     private bool _closeRequested;
     private bool _graphicsRecoveryPending;
 
@@ -1163,10 +1164,15 @@ public sealed class GameRenderer
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
             $"LastHit={snapshot.LastHitPart} | " +
             $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
-            $"Камера Yaw={_camera.YawDegrees:0}° Pitch={_camera.PitchDegrees:0}° | " +
-            "ПКМ=приказ/атака  ПКМ+перетаскивание=поворот и наклон камеры  Shift+click=выделение  СКМ=панорама  Колесо=масштаб | " +
+            $"Камера={GetCameraModeLabel()} | I=переключить проекцию | " +
+            "ПКМ=приказ/атака  ПКМ+перетаскивание=поворот камеры в изометрии  Shift+click=выделение  СКМ=панорама  Колесо=масштаб | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
+
+    private string GetCameraModeLabel() =>
+        _camera.IsometricProjectionEnabled
+            ? $"Isometric Yaw={_camera.YawDegrees:0}° Pitch={_camera.PitchDegrees:0}°"
+            : "Top-down 2D";
 
     private string BuildWindowTitle()
     {
@@ -1339,7 +1345,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама";
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама  Камера={GetCameraModeLabel()}  I=проекция";
     }
 
     private void StartSimulationThread()
@@ -4375,6 +4381,7 @@ public sealed class GameRenderer
         if (_showBlockTerrainPreview)
         {
             _normalCameraCenter = _camera.View.Center;
+            _normalCameraIsometricProjectionEnabled = _camera.IsometricProjectionEnabled;
             _camera.SetIsometricProjection(false);
             _camera.CenterOnPosition(
                 BlockTerrainPreviewRenderer.GetCameraCenter(
@@ -4386,10 +4393,19 @@ public sealed class GameRenderer
         }
         else
         {
-            _camera.SetIsometricProjection(true);
+            _camera.SetIsometricProjection(_normalCameraIsometricProjectionEnabled);
             _camera.CenterOnPosition(_normalCameraCenter);
-            Console.WriteLine("[Terrain preview] Isometric game view restored.");
+            Console.WriteLine("[Terrain preview] Game camera view restored.");
         }
+    }
+
+    private void ToggleCameraProjection()
+    {
+        bool enabled = !_camera.IsometricProjectionEnabled;
+        _camera.SetIsometricProjection(enabled);
+        Console.WriteLine(enabled
+            ? "[CAMERA] Изометрическая проекция включена. ПКМ-перетаскивание/Q/E — поворот камеры."
+            : "[CAMERA] Возвращён обычный вид сверху 2D.");
     }
 
     private Vector2f GetDynamicCameraOrbitCenter()
@@ -4467,6 +4483,19 @@ public sealed class GameRenderer
             return;
         }
 
+        if (key == Keyboard.Key.I &&
+            _menuPage == GameMenuPage.Closed &&
+            _bodyRigEditorOverlay?.IsOpen != true &&
+            _debugLayersOverlay?.IsOpen != true &&
+            _contextMenuOverlay?.IsOpen != true &&
+            _unitGroupCardOverlay?.IsOpen != true &&
+            _unitCards.Count == 0 &&
+            !_showUtilityAiDebug)
+        {
+            ToggleCameraProjection();
+            return;
+        }
+
         if (key is Keyboard.Key.PageUp or Keyboard.Key.PageDown)
         {
             bool raiseSlice = key == Keyboard.Key.PageUp;
@@ -4512,7 +4541,8 @@ public sealed class GameRenderer
             return;
         }
 
-        if ((key is Keyboard.Key.Q or Keyboard.Key.E) &&
+        if (_camera.IsometricProjectionEnabled &&
+            (key is Keyboard.Key.Q or Keyboard.Key.E) &&
             _menuPage == GameMenuPage.Closed &&
             _debugLayersOverlay?.IsOpen != true &&
             _contextMenuOverlay?.IsOpen != true &&
