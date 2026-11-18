@@ -1164,7 +1164,7 @@ public sealed class GameRenderer
             $"Suppression S={snapshot.SuppressedCount} P={snapshot.PanickedCount} | " +
             $"LastHit={snapshot.LastHitPart} | " +
             $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м | " +
-            $"Камера={GetCameraModeLabel()} | I=переключить проекцию | " +
+            $"Камера={GetCameraModeLabel()} | Tab=переключить проекцию | " +
             "ПКМ=приказ/атака  ПКМ+перетаскивание=поворот камеры в изометрии  Shift+click=выделение  СКМ=панорама  Колесо=масштаб | " +
             $"Vision {vision} | Hearing {(_showHearingDebug ? "ON" : "OFF")}";
     }
@@ -1345,7 +1345,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама  Камера={GetCameraModeLabel()}  I=проекция";
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама  Камера={GetCameraModeLabel()}  Tab=проекция";
     }
 
     private void StartSimulationThread()
@@ -4483,7 +4483,7 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.I &&
+        if (key == Keyboard.Key.Tab &&
             _menuPage == GameMenuPage.Closed &&
             _bodyRigEditorOverlay?.IsOpen != true &&
             _debugLayersOverlay?.IsOpen != true &&
