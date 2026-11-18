@@ -1508,6 +1508,107 @@ public sealed class WorldMap
         MarkTerrainChanged(globalX, globalY);
     }
 
+    public void SetRegionSolidHeight(
+        int regionX,
+        int regionY,
+        ushort height,
+        ushort materialId)
+    {
+        if (regionX < 0 || regionX >= RegionsX ||
+            regionY < 0 || regionY >= RegionsY)
+        {
+            throw new IndexOutOfRangeException();
+        }
+
+        WorldRegion region = _worldRegions[regionX + regionY * RegionsX];
+        int clampedHeight = Math.Min(
+            (int)height,
+            LayerCount * LayerHeightUnits);
+
+        if (materialId == 0)
+            clampedHeight = 0;
+
+        if (UsesDiscreteBlockTerrain)
+        {
+            clampedHeight = Math.Clamp(
+                (int)MathF.Round(
+                    clampedHeight / (float)HeightUnitsPerMeter,
+                    MidpointRounding.AwayFromZero) * HeightUnitsPerMeter,
+                0,
+                LayerCount * LayerHeightUnits);
+        }
+
+        ushort normalizedHeight = checked((ushort)clampedHeight);
+        ushort normalizedMaterial = clampedHeight > 0
+            ? materialId
+            : (ushort)0;
+
+        if (region.HasUniformSurface &&
+            region.UniformSurfaceHeightUnits == normalizedHeight &&
+            region.UniformSurfaceMaterialId == normalizedMaterial)
+        {
+            return;
+        }
+
+        if (Blocks.Volumes.HasOverrides)
+        {
+            Blocks.Volumes.ClearVolume(
+                region.TileOriginX,
+                region.TileOriginY,
+                0,
+                region.TileWidth,
+                region.TileHeight,
+                LayerCount);
+        }
+
+        int filledLayers = clampedHeight == 0
+            ? 0
+            : Math.Clamp(
+                (clampedHeight + LayerHeightUnits - 1) / LayerHeightUnits,
+                0,
+                LayerCount);
+
+        for (int z = 0; z < LayerCount; z++)
+        {
+            region.GetTerrainSlice(z).SetUniformMaterial(
+                z < filledLayers ? normalizedMaterial : (ushort)0);
+        }
+
+        for (int row = 0; row < region.TileHeight; row++)
+        {
+            int index = GetColumnIndex(
+                region.TileOriginX,
+                region.TileOriginY + row);
+
+            Array.Fill(_surfaceHeights, normalizedHeight, index, region.TileWidth);
+            Array.Clear(_volumeSurfaceHeights, index, region.TileWidth);
+            Array.Fill(_columnMaterialIds, normalizedMaterial, index, region.TileWidth);
+            Array.Fill(_simpleFillColumns, true, index, region.TileWidth);
+            Array.Clear(_rangeCache, index, region.TileWidth);
+        }
+
+        if (UsesDiscreteBlockTerrain)
+        {
+            int levels = (int)MathF.Round(
+                clampedHeight / (float)HeightUnitsPerMeter,
+                MidpointRounding.AwayFromZero);
+
+            Blocks.SetSurfaceRegion(
+                region.TileOriginX,
+                region.TileOriginY,
+                region.TileWidth,
+                region.TileHeight,
+                levels,
+                normalizedMaterial);
+        }
+
+        region.SetUniformSurface(normalizedHeight, normalizedMaterial);
+
+        NavigationVersion++;
+        TerrainVersion++;
+        TerrainGeometryVersion++;
+    }
+
     public void SetSolidHeight(
         int globalX,
         int globalY,
