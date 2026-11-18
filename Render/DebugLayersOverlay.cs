@@ -14,43 +14,49 @@ public enum DebugLayerType
     AiState,
     Suppression,
     Memory,
-    UtilityAi
+    UtilityAi,
+    MovementVectors,
+    MovementForces,
+    OrderPaths
 }
 
 public sealed class DebugLayersOverlay : IDisposable
 {
-    private const float Width = 292f;
+    private const float Width = 360f;
     private const float HeaderHeight = 34f;
     private const float RowHeight = 34f;
-    private const int LayerCount = 7;
+    private const int LayerCount = 10;
     private const float Height = HeaderHeight + LayerCount * RowHeight + 30f;
 
     private static readonly string[] LayerLabels =
     {
-        "Зрение — конус и видимые зоны",
+        "Зрение — конусы и видимые зоны",
         "Слух — звуки и оценки бойцов",
         "Прицеливание — линии к цели",
-        "ИИ — цели и маршруты",
+        "ИИ — состояния и маршруты",
         "Подавление — стресс и паника",
-        "Память выбранной пешки",
-        "Utility AI — оценки и причины выбора"
+        "Память — контакты выбранной пешки",
+        "Utility AI — оценки",
+        "Движение — векторы скорости",
+        "Движение — силы мотора",
+        "A* — путь выбранных юнитов"
     };
 
     private readonly RectangleShape _panel = new(new Vector2f(Width, Height))
     {
-        FillColor = new Color(15, 21, 30, 248),
-        OutlineColor = new Color(82, 105, 131, 245),
+        FillColor = new Color(17, 22, 30, 250),
+        OutlineColor = new Color(76, 94, 116, 255),
         OutlineThickness = 1f
     };
 
     private readonly RectangleShape _header = new(new Vector2f(Width - 2f, HeaderHeight))
     {
-        FillColor = new Color(31, 42, 56, 255)
+        FillColor = new Color(31, 40, 52, 255)
     };
 
     private readonly RectangleShape _accent = new(new Vector2f(3f, Height - 2f))
     {
-        FillColor = new Color(90, 175, 225, 235)
+        FillColor = new Color(112, 164, 218, 245)
     };
 
     private readonly RectangleShape _closeButton = new(new Vector2f(24f, 24f))
@@ -99,9 +105,10 @@ public sealed class DebugLayersOverlay : IDisposable
         if (_font == null)
             return;
 
-        _title = new Text(_font, "СЛОИ ОТЛАДКИ  •  V", 13)
+        _title = new Text(_font, "ИНФО", 14)
         {
-            FillColor = new Color(235, 241, 249)
+            FillColor = new Color(239, 243, 249),
+            Style = Text.Styles.Bold
         };
         _closeLabel = new Text(_font, "×", 17)
         {
@@ -115,7 +122,7 @@ public sealed class DebugLayersOverlay : IDisposable
         {
             FillColor = new Color(14, 24, 33)
         };
-        _footer = new Text(_font, "Галочки управляют слоями независимо", 10)
+        _footer = new Text(_font, "V — слои • голубой Move • красный Attack • зелёный Stealth", 9)
         {
             FillColor = new Color(145, 160, 178)
         };
@@ -214,7 +221,10 @@ public sealed class DebugLayersOverlay : IDisposable
         bool showAiState,
         bool showSuppression,
         bool showMemory,
-        bool showUtilityAi)
+        bool showUtilityAi,
+        bool showMovementVectors,
+        bool showMovementForces,
+        bool showOrderPaths)
     {
         if (!IsOpen)
             return;
@@ -237,7 +247,10 @@ public sealed class DebugLayersOverlay : IDisposable
             showAiState,
             showSuppression,
             showMemory,
-            showUtilityAi
+            showUtilityAi,
+            showMovementVectors,
+            showMovementForces,
+            showOrderPaths
         };
 
         float firstRowY = _panel.Position.Y + HeaderHeight + 3f;

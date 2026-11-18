@@ -82,173 +82,168 @@ public sealed class MassCombatTestScene
             $"Blue {AliveBlue} | " +
             $"Red {AliveRed} | " +
             $"Alive {AliveUnits} | " +
+            $"RUINED CITY | Walls, rubble, craters | " +
             $"Projectiles {simulation.Projectiles.ActiveCount} | " +
             $"Hits {simulation.Projectiles.TotalHits - _hitsAtReset} | " +
             $"Time {_elapsed:0.0}s";
     }
 
+    public void Stop(UnitSimulation simulation)
+    {
+        if (_initialized)
+        {
+            for (int i = 0; i < _units.Length; i++)
+            {
+                if (simulation.Units.TryGetIndex(_units[i], out _))
+                    simulation.Destroy(_units[i]);
+
+                _units[i] = default;
+                _side[i] = 0;
+            }
+        }
+
+        simulation.Projectiles.Clear();
+        _initialized = false;
+        _elapsed = 0f;
+        _hitsAtReset = simulation.Projectiles.TotalHits;
+        AliveUnits = 0;
+        AliveBlue = 0;
+        AliveRed = 0;
+    }
+
     private void BuildTerrain(
         WorldMap worldMap)
     {
-        int centerX =
-            worldMap.TileWidth / 2;
+        int centerX = worldMap.TileWidth / 2;
+        int centerY = worldMap.TileHeight / 2;
+        const int blendWidth = 64;
+        int arenaMinX = Math.Max(4, centerX - 64);
+        int arenaMaxX = Math.Min(worldMap.MaxTileX - 4, centerX + 64);
+        int arenaMinY = Math.Max(4, centerY - 48);
+        int arenaMaxY = Math.Min(worldMap.MaxTileY - 4, centerY + 48);
+        int minX = Math.Max(4, arenaMinX - blendWidth);
+        int maxX = Math.Min(worldMap.MaxTileX - 4, arenaMaxX + blendWidth);
+        int minY = Math.Max(4, arenaMinY - blendWidth);
+        int maxY = Math.Min(worldMap.MaxTileY - 4, arenaMaxY + blendWidth);
 
-        int centerY =
-            worldMap.TileHeight / 2;
-
-        int minX =
-            Math.Max(
-                4,
-                centerX - 64);
-
-        int maxX =
-            Math.Min(
-                worldMap.MaxTileX - 4,
-                centerX + 64);
-
-        int minY =
-            Math.Max(
-                4,
-                centerY - 48);
-
-        int maxY =
-            Math.Min(
-                worldMap.MaxTileY - 4,
-                centerY + 48);
-
-        for (int y = minY;
-             y <= maxY;
-             y++)
+        for (int y = minY; y <= maxY; y++)
         {
-            for (int x = minX;
-                 x <= maxX;
-                 x++)
+            for (int x = minX; x <= maxX; x++)
             {
-                float dx =
-                    x - centerX;
+                float dx = x - centerX;
+                float dy = y - centerY;
 
-                float dy =
-                    y - centerY;
+                // Broken street grid: roads bend, narrow and reconnect at offset junctions.
+                float streetYNorth =
+                    -29f + MathF.Sin(dx * 0.052f + 0.3f) * 4.8f +
+                    MathF.Sin(dx * 0.13f) * 1.2f;
+                float streetYMain =
+                    1.5f + MathF.Sin(dx * 0.047f + 0.8f) * 5.5f +
+                    MathF.Sin(dx * 0.15f + 1.4f) * 1.3f;
+                float streetYSouth =
+                    29f + MathF.Sin(dx * 0.045f + 2.1f) * 4.2f;
 
+                float streetXWest =
+                    -46f + MathF.Sin(dy * 0.055f + 0.7f) * 3.5f;
+                float streetXMidWest =
+                    -15f + MathF.Sin(dy * 0.061f + 1.4f) * 3.0f;
+                float streetXMidEast =
+                    17f + MathF.Sin(dy * 0.052f + 2.0f) * 3.6f;
+                float streetXEast =
+                    47f + MathF.Sin(dy * 0.048f + 0.4f) * 3.2f;
+
+                float streetDistance = MathF.Min(
+                    MathF.Min(
+                        MathF.Min(
+                            MathF.Abs(dy - streetYNorth),
+                            MathF.Abs(dy - streetYMain)),
+                        MathF.Abs(dy - streetYSouth)),
+                    MathF.Min(
+                        MathF.Min(
+                            MathF.Abs(dx - streetXWest),
+                            MathF.Abs(dx - streetXMidWest)),
+                        MathF.Min(
+                            MathF.Abs(dx - streetXMidEast),
+                            MathF.Abs(dx - streetXEast))));
+
+                // Streets sit lower than the broken building plots around them.
+                float roadCut = 1f - SmoothStep(2.1f, 5.4f, streetDistance);
                 float height =
-                    BaseTerrainHeight;
+                    BaseTerrainHeight +
+                    0.55f * MathF.Sin(dx * 0.16f + MathF.Sin(dy * 0.08f)) +
+                    0.42f * MathF.Cos(dy * 0.19f - dx * 0.04f) -
+                    roadCut * 1.25f;
 
-                // Large central valley.
-                float valley =
-                    8f *
-                    MathF.Exp(
-                        -(dx * dx) /
-                        (2f * 42f * 42f));
+                // Surviving wall cores become hard blockers; collapsed gaps and rubble
+                // aprons remain walkable and are still represented by surface height.
+                bool hasHardWall = false;
+                height += RuinedBuildingHeight(dx, dy, -32f, -15f, 9.5f, 7f, 0.12f, 0.4f, out bool wallOne);
+                hasHardWall |= wallOne;
+                height += RuinedBuildingHeight(dx, dy, -1f, -16f, 8f, 7.5f, -0.16f, 1.7f, out bool wallTwo);
+                hasHardWall |= wallTwo;
+                height += RuinedBuildingHeight(dx, dy, 31f, -15f, 9f, 7f, 0.10f, 2.8f, out bool wallThree);
+                hasHardWall |= wallThree;
+                height += RuinedBuildingHeight(dx, dy, -45f, 14f, 8f, 8.5f, -0.18f, 3.9f, out bool wallFour);
+                hasHardWall |= wallFour;
+                height += RuinedBuildingHeight(dx, dy, -26f, 38f, 10f, 6.5f, 0.18f, 5.1f, out bool wallFive);
+                hasHardWall |= wallFive;
+                height += RuinedBuildingHeight(dx, dy, 7f, 37f, 9f, 7f, -0.13f, 6.2f, out bool wallSix);
+                hasHardWall |= wallSix;
+                height += RuinedBuildingHeight(dx, dy, 39f, 36f, 10f, 7.5f, 0.16f, 7.3f, out bool wallSeven);
+                hasHardWall |= wallSeven;
+                height += RuinedBuildingHeight(dx, dy, 48f, -2f, 7f, 8f, -0.22f, 8.4f, out bool wallEight);
+                hasHardWall |= wallEight;
 
-                height -= valley;
+                // Cross-street debris and collapsed facades create staggered choke points,
+                // but leave several gaps so a squad can flank instead of hitting a wall.
+                float debrisOne = GaussianHill(dx, dy, -11f, -2f, 4.2f, 2.1f);
+                float debrisTwo = GaussianHill(dx, dy, 14f, 5f, 5.2f, 2.5f);
+                float debrisThree = GaussianHill(dx, dy, -39f, -2f, 4.8f, 2.0f);
+                float debrisFour = GaussianHill(dx, dy, 31f, 12f, 5.5f, 2.2f);
+                height += debrisOne + debrisTwo + debrisThree + debrisFour;
 
-                // Two broad hills.
-                height +=
-                    8f *
-                    MathF.Exp(
-                        -(
-                            (dx + 26f) *
-                            (dx + 26f) +
-                            dy * dy) /
-                        (2f * 18f * 18f));
+                // Bomb craters with broken, non-circular rims.
+                height += CraterRelief(dx, dy, -18f, 18f, 8.5f, 6.5f, 0.3f);
+                height += CraterRelief(dx, dy, 22f, -35f, 7.5f, 5.5f, 1.8f);
+                height += CraterRelief(dx, dy, 51f, 20f, 6f, 8f, 2.9f);
 
-                height +=
-                    10f *
-                    MathF.Exp(
-                        -(
-                            (dx - 30f) *
-                            (dx - 30f) +
-                            (dy - 12f) *
-                            (dy - 12f)) /
-                        (2f * 20f * 20f));
+                // Keep slopes climbable for the movement system; silhouettes and
+                // LOS are broken by 2-5 m ruin heights, not by navigation blockers.
+                height = Math.Clamp(height, 3.5f, 17f);
 
-                // Long diagonal ridge.
-                float ridge =
-                    MathF.Abs(
-                        dy -
-                        dx * 0.34f);
-
-                if (ridge < 3.0f)
+                float edgeDistance = MathF.Max(
+                    MathF.Max(arenaMinX - x, x - arenaMaxX),
+                    MathF.Max(arenaMinY - y, y - arenaMaxY));
+                float blend = edgeDistance <= 0f
+                    ? 1f
+                    : 1f - SmoothStep(0f, blendWidth, edgeDistance);
+                if (blend < 1f)
                 {
-                    height +=
-                        7f *
-                        (1f -
-                         ridge / 3.0f);
+                    // Fade the city outskirts into the original canyon terrain.
+                    // This removes the artificial height step at the arena rectangle.
+                    float existingHeight = worldMap.GetSurfaceHeight(x, y);
+                    height = existingHeight + (height - existingHeight) * blend;
                 }
 
-                // Broken side ridge with passes.
-                float sideRidge =
-                    MathF.Abs(dx + 8f);
-
-                if (sideRidge < 2.5f)
-                {
-                    float pass =
-                        MathF.Abs(
-                            dy % 18f);
-
-                    float factor =
-                        pass < 3f
-                            ? pass / 3f
-                            : 1f;
-
-                    height +=
-                        6f *
-                        factor;
-                }
-
-                // Small terrain noise creates uneven sight lines.
-                height +=
-                    1.4f *
-                    MathF.Sin(
-                        x * 0.31f) *
-                    MathF.Cos(
-                        y * 0.27f);
-
-                // Keep the two deployment shelves traversable.
-                if (MathF.Abs(dx) > 50f)
-                {
-                    height =
-                        8.5f +
-                        0.8f *
-                        MathF.Sin(
-                            y * 0.22f);
-                }
-
-                // Artificial fortified rocks / hard cover.
-                if (IsCoverBlock(
-                        x,
-                        y,
-                        centerX,
-                        centerY))
-                {
-                    height += 7f;
-                }
-
-                ushort heightUnits =
-                    checked(
-                        (ushort)Math.Clamp(
-                            MathF.Round(
-                                MathF.Max(
-                                    3f,
-                                    height) *
-                                10f),
-                            0f,
-                            ushort.MaxValue));
-
-                ushort material =
-                    IsCoverBlock(
-                        x,
-                        y,
-                        centerX,
-                        centerY)
-                        ? (ushort)2
-                        : (ushort)1;
+                bool isRubble = blend > 0.55f && roadCut < 0.55f &&
+                    (debrisOne + debrisTwo + debrisThree + debrisFour > 0.45f ||
+                     height > BaseTerrainHeight + 2.0f);
+                ushort material = isRubble ? (ushort)2 : (ushort)1;
+                ushort heightUnits = checked(
+                    (ushort)MathF.Round(height * WorldMap.HeightUnitsPerMeter));
 
                 worldMap.SetSolidHeight(
                     x,
                     y,
                     heightUnits,
                     material);
+
+                // This scene owns the generated arena: clear stale blockers there,
+                // then publish only surviving wall cores to navigation and movement.
+                worldMap.SetNavigationBlocked(
+                    x,
+                    y,
+                    blend > 0.55f && hasHardWall);
             }
         }
 
@@ -260,35 +255,104 @@ public sealed class MassCombatTestScene
             maxY);
     }
 
-    private static bool IsCoverBlock(
-        int x,
-        int y,
-        int centerX,
-        int centerY)
+    private static float RuinedBuildingHeight(
+        float dx,
+        float dy,
+        float centerX,
+        float centerY,
+        float halfWidth,
+        float halfDepth,
+        float rotation,
+        float seed,
+        out bool isHardWallSegment)
     {
-        int dx = x - centerX;
-        int dy = y - centerY;
+        float offsetX = dx - centerX;
+        float offsetY = dy - centerY;
+        float sin = MathF.Sin(rotation);
+        float cos = MathF.Cos(rotation);
+        float localX = offsetX * cos + offsetY * sin;
+        float localY = -offsetX * sin + offsetY * cos;
 
-        if (Math.Abs(dx - 28) <= 2 &&
-            Math.Abs(dy) <= 10)
+        float edgeX = MathF.Abs(localX) - halfWidth;
+        float edgeY = MathF.Abs(localY) - halfDepth;
+        float outsideX = MathF.Max(0f, edgeX);
+        float outsideY = MathF.Max(0f, edgeY);
+        float signedDistance =
+            MathF.Sqrt(outsideX * outsideX + outsideY * outsideY) +
+            MathF.Min(MathF.Max(edgeX, edgeY), 0f);
+
+        // A broken wall ring, with some full-height stubs and several collapsed gaps.
+        float tangent = MathF.Abs(edgeX) > MathF.Abs(edgeY) ? localY : localX;
+        float wallGaps =
+            0.18f + 0.82f * MathF.Abs(MathF.Sin(tangent * 0.31f + seed));
+        float wallBand =
+            1f - SmoothStep(0.45f, 2.8f, MathF.Abs(signedDistance));
+        float walls = 4.1f * wallBand * wallGaps;
+        isHardWallSegment =
+            MathF.Abs(signedDistance) <= 0.65f &&
+            walls >= 2.25f;
+
+        // Sloped rubble aprons connect the remaining walls to street level.
+        float apron =
+            1.55f * MathF.Exp(-(signedDistance * signedDistance) / 13f);
+
+        // Inside the footprint only broken piles remain; there is no intact roof.
+        float interior = 1f - SmoothStep(-1.5f, 1.8f, signedDistance);
+        float collapsedRoof =
+            interior * (
+                GaussianHill(localX, localY, -halfWidth * 0.32f, -halfDepth * 0.15f, 3.8f, 2.0f) +
+                GaussianHill(localX, localY, halfWidth * 0.30f, halfDepth * 0.34f, 3.2f, 1.7f));
+
+        return walls + apron + collapsedRoof;
+    }
+
+    private static float CraterRelief(
+        float dx,
+        float dy,
+        float centerX,
+        float centerY,
+        float radiusX,
+        float radiusY,
+        float seed)
+    {
+        float nx = (dx - centerX) / radiusX;
+        float ny = (dy - centerY) / radiusY;
+        float angle = MathF.Atan2(ny, nx);
+        float roughRadius =
+            MathF.Sqrt(nx * nx + ny * ny) +
+            0.09f * MathF.Sin(angle * 5f + seed) +
+            0.06f * MathF.Cos(angle * 3f - seed);
+
+        if (roughRadius < 0.62f)
+            return -2.0f * (1f - roughRadius / 0.62f);
+
+        if (roughRadius < 1.05f)
         {
-            return true;
+            float rim = 1f - MathF.Abs(roughRadius - 0.82f) / 0.23f;
+            return 1.7f * MathF.Max(0f, rim);
         }
 
-        if (Math.Abs(dx + 24) <= 2 &&
-            Math.Abs(dy - 18) <= 12)
-        {
-            return true;
-        }
+        return 0f;
+    }
 
-        if (Math.Abs(dx) <= 2 &&
-            dy >= 10 &&
-            dy <= 24)
-        {
-            return true;
-        }
+    private static float GaussianHill(
+        float dx,
+        float dy,
+        float centerX,
+        float centerY,
+        float radius,
+        float height)
+    {
+        float offsetX = dx - centerX;
+        float offsetY = dy - centerY;
+        float distanceSquared = offsetX * offsetX + offsetY * offsetY;
+        return height * MathF.Exp(-distanceSquared / (2f * radius * radius));
+    }
 
-        return false;
+    private static float SmoothStep(float min, float max, float value)
+    {
+        float t = Math.Clamp((value - min) / (max - min), 0f, 1f);
+        return t * t * (3f - 2f * t);
     }
 
     private static void ClearTestWater(
@@ -400,6 +464,8 @@ public sealed class MassCombatTestScene
                 1,
                 worldMap.MaxTileY - 1);
 
+        ResolveSpawnCell(simulation, worldMap, ref tileX, ref tileY);
+
         float z =
             worldMap.GetSurfaceHeight(
                 tileX,
@@ -495,17 +561,101 @@ public sealed class MassCombatTestScene
             }
         }
 
-        if (testIndex % 11 == 0)
-        {
-            simulation.SetPosture(
-                id,
-                UnitPosture.Crouching);
-        }
-
         SetCombatTarget(
             simulation,
             id,
             side);
+    }
+
+    private static void ResolveSpawnCell(
+        UnitSimulation simulation,
+        WorldMap worldMap,
+        ref int tileX,
+        ref int tileY,
+        int ignoredUnit = -1,
+        bool avoidOccupied = true)
+    {
+        if (IsSpawnCellUsable(
+                simulation, worldMap, tileX, tileY, ignoredUnit, avoidOccupied))
+            return;
+
+        const int maximumSearchRadius = 8;
+        float bestDistanceSquared = float.PositiveInfinity;
+        int bestX = tileX;
+        int bestY = tileY;
+
+        for (int radius = 1; radius <= maximumSearchRadius; radius++)
+        {
+            for (int offsetY = -radius; offsetY <= radius; offsetY++)
+            {
+                for (int offsetX = -radius; offsetX <= radius; offsetX++)
+                {
+                    if (Math.Max(Math.Abs(offsetX), Math.Abs(offsetY)) != radius)
+                        continue;
+
+                    int candidateX = tileX + offsetX;
+                    int candidateY = tileY + offsetY;
+                    if (candidateX < 1 || candidateY < 1 ||
+                        candidateX >= worldMap.MaxTileX ||
+                        candidateY >= worldMap.MaxTileY ||
+                        !IsSpawnCellUsable(
+                            simulation, worldMap, candidateX, candidateY,
+                            ignoredUnit, avoidOccupied))
+                    {
+                        continue;
+                    }
+
+                    float distanceSquared =
+                        offsetX * offsetX + offsetY * offsetY;
+                    if (distanceSquared >= bestDistanceSquared)
+                        continue;
+
+                    bestDistanceSquared = distanceSquared;
+                    bestX = candidateX;
+                    bestY = candidateY;
+                }
+            }
+
+            if (bestDistanceSquared < float.PositiveInfinity)
+                break;
+        }
+
+        tileX = bestX;
+        tileY = bestY;
+    }
+
+    private static bool IsSpawnCellUsable(
+        UnitSimulation simulation,
+        WorldMap worldMap,
+        int tileX,
+        int tileY,
+        int ignoredUnit,
+        bool avoidOccupied)
+    {
+        if (worldMap.IsNavigationBlocked(tileX, tileY) ||
+            worldMap.GetSurfaceLayer(tileX, tileY) < 0)
+            return false;
+
+        if (!avoidOccupied)
+            return true;
+
+        Vector2 candidate = new(tileX + 0.5f, tileY + 0.5f);
+        ReadOnlySpan<int> active = simulation.Units.ActiveIndices;
+        for (int i = 0; i < active.Length; i++)
+        {
+            int other = active[i];
+            if (other == ignoredUnit)
+                continue;
+
+            Vector3 position = simulation.Units.Position[other];
+            Vector2 offset = candidate - new Vector2(position.X, position.Y);
+            float minimumDistance =
+                simulation.Units.Radius[other] + 0.35f;
+            if (offset.LengthSquared() < minimumDistance * minimumDistance)
+                return false;
+        }
+
+        return true;
     }
 
     private void ResetUnits(
@@ -566,6 +716,9 @@ public sealed class MassCombatTestScene
                     1,
                     worldMap.MaxTileY - 1);
 
+            ResolveSpawnCell(
+                simulation, worldMap, ref tileX, ref tileY, index, avoidOccupied: false);
+
             simulation.Units.Position[index] =
                 new Vector3(
                     tileX + 0.5f,
@@ -599,9 +752,7 @@ public sealed class MassCombatTestScene
 
             simulation.SetPosture(
                 _units[i],
-                i % 11 == 0
-                    ? UnitPosture.Crouching
-                    : UnitPosture.Standing);
+                UnitPosture.Standing);
 
             RestoreHealth(
                 simulation,

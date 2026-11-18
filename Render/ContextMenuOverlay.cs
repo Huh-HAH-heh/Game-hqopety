@@ -6,6 +6,14 @@ using SFML.System;
 
 namespace RimClone.Render;
 
+public enum ContextMenuMovementMode : byte
+{
+    None = 0,
+    MoveAtWill = 1,
+    HoldPosition = 2,
+    Mixed = 3
+}
+
 public enum ContextMenuActionType
 {
     None,
@@ -16,12 +24,19 @@ public enum ContextMenuActionType
     OpenSelectionOverview,
     CreateSquad,
     SendSquad,
-    AttackTarget
+    AttackTarget,
+    MoveSelectedHere,
+    MoveSelectedHereAsColumn,
+    HoldSelected,
+    CycleFireMode,
+    CycleAimMode,
+    CycleTargetMode,
+    CycleAmmunition
 }
 
 public sealed class ContextMenuOverlay : IDisposable
 {
-    private const float Width = 224f;
+    private const float Width = 268f;
     private const float EmptyHeight = 58f;
     private const float HeaderHeight = 26f;
     private const float RowHeight = 30f;
@@ -50,16 +65,25 @@ public sealed class ContextMenuOverlay : IDisposable
         OutlineThickness = 0.5f
     };
 
+    private readonly CircleShape _movementModeBadge = new(8f)
+    {
+        FillColor = new Color(22, 31, 41, 255),
+        OutlineColor = new Color(100, 130, 158, 230),
+        OutlineThickness = 1f
+    };
+
     private readonly Font? _font;
     private readonly Text? _title;
     private readonly Text? _emptyLabel;
     private readonly Text? _actionLabel;
+    private readonly Text? _movementModeGlyph;
     private readonly List<ContextMenuActionType> _actions = new();
     private readonly List<string> _labels = new();
 
     private float _dragOffsetX;
     private float _dragOffsetY;
     private bool _dragging;
+    private ContextMenuMovementMode _movementMode;
 
     public bool IsOpen { get; private set; }
 
@@ -83,6 +107,12 @@ public sealed class ContextMenuOverlay : IDisposable
         {
             FillColor = new Color(224, 233, 244)
         };
+
+        _movementModeGlyph = new Text(_font, "", 12)
+        {
+            FillColor = new Color(235, 242, 248),
+            Style = Text.Styles.Bold
+        };
     }
 
     public void ToggleAt(
@@ -93,7 +123,11 @@ public sealed class ContextMenuOverlay : IDisposable
         bool hasMultipleUnits,
         bool canCreateSquad,
         bool canSendSquad,
-        bool canAttackTarget)
+        bool canAttackTarget,
+        bool canMoveSelected,
+        bool canHoldSelected = false,
+        bool canConfigureWeapons = false,
+        ContextMenuMovementMode movementMode = ContextMenuMovementMode.None)
     {
         if (IsOpen && _panel.GetGlobalBounds().Contains(position))
         {
@@ -109,7 +143,11 @@ public sealed class ContextMenuOverlay : IDisposable
             hasMultipleUnits,
             canCreateSquad,
             canSendSquad,
-            canAttackTarget);
+            canAttackTarget,
+            canMoveSelected,
+            canHoldSelected,
+            canConfigureWeapons,
+            movementMode);
     }
 
     public void OpenAt(
@@ -120,9 +158,14 @@ public sealed class ContextMenuOverlay : IDisposable
         bool hasMultipleUnits,
         bool canCreateSquad,
         bool canSendSquad,
-        bool canAttackTarget)
+        bool canAttackTarget,
+        bool canMoveSelected,
+        bool canHoldSelected = false,
+        bool canConfigureWeapons = false,
+        ContextMenuMovementMode movementMode = ContextMenuMovementMode.None)
     {
         _actions.Clear();
+        _movementMode = movementMode;
         _labels.Clear();
         _dragging = false;
 
@@ -134,8 +177,22 @@ public sealed class ContextMenuOverlay : IDisposable
             AddAction(ContextMenuActionType.GiveWater, "Вода (+0,5 л)");
         }
 
+        if (canHoldSelected)
+            AddAction(ContextMenuActionType.HoldSelected, "Удерживать позицию");
+
+        if (canConfigureWeapons)
+        {
+            AddAction(ContextMenuActionType.CycleFireMode, "Переключить режим огня");
+            AddAction(ContextMenuActionType.CycleAimMode, "Переключить режим прицеливания");
+            AddAction(ContextMenuActionType.CycleTargetMode, "Переключить режим выбора цели");
+            AddAction(ContextMenuActionType.CycleAmmunition, "Следующий тип боеприпаса");
+        }
+
         if (canAttackTarget)
             AddAction(ContextMenuActionType.AttackTarget, "Атаковать цель");
+
+        if (canMoveSelected)
+            AddAction(ContextMenuActionType.MoveSelectedHere, "Переместить сюда");
 
         if (canSendSquad)
             AddAction(ContextMenuActionType.SendSquad, "Отправить отряд сюда");
@@ -254,6 +311,40 @@ public sealed class ContextMenuOverlay : IDisposable
         window.Draw(_header);
         window.Draw(_accent);
 
+        if (_movementMode != ContextMenuMovementMode.None)
+        {
+            Color indicatorColor = _movementMode switch
+            {
+                ContextMenuMovementMode.MoveAtWill => new Color(105, 190, 145, 255),
+                ContextMenuMovementMode.HoldPosition => new Color(218, 171, 91, 255),
+                _ => new Color(225, 184, 104, 255)
+            };
+            _movementModeBadge.FillColor = new Color(18, 27, 36, 255);
+            _movementModeBadge.OutlineColor = indicatorColor;
+            _movementModeBadge.Position = new Vector2f(
+                _panel.Position.X + Width - 24f,
+                _panel.Position.Y + 5f);
+            window.Draw(_movementModeBadge);
+
+            if (_movementModeGlyph != null)
+            {
+                _movementModeGlyph.DisplayedString = _movementMode switch
+                {
+                    ContextMenuMovementMode.MoveAtWill => "↔",
+                    ContextMenuMovementMode.HoldPosition => "■",
+                    _ => "?"
+                };
+                _movementModeGlyph.FillColor = indicatorColor;
+                FloatRect glyphBounds = _movementModeGlyph.GetLocalBounds();
+                _movementModeGlyph.Position = new Vector2f(
+                    _movementModeBadge.Position.X + 8f -
+                        (glyphBounds.Width * 0.5f + glyphBounds.Left),
+                    _movementModeBadge.Position.Y + 8f -
+                        (glyphBounds.Height * 0.5f + glyphBounds.Top));
+                window.Draw(_movementModeGlyph);
+            }
+        }
+
         if (_title != null)
             window.Draw(_title);
 
@@ -347,10 +438,12 @@ public sealed class ContextMenuOverlay : IDisposable
         _title?.Dispose();
         _emptyLabel?.Dispose();
         _actionLabel?.Dispose();
+        _movementModeGlyph?.Dispose();
         _font?.Dispose();
         _panel.Dispose();
         _header.Dispose();
         _accent.Dispose();
         _actionButton.Dispose();
+        _movementModeBadge.Dispose();
     }
 }

@@ -48,6 +48,51 @@ public sealed class AiEvolutionOverlay : IDisposable
     private readonly Text? _lastCandidate;
     private readonly Text? _message;
     private readonly Text? _controls;
+    private float _x = 12f;
+    private float _y = 218f;
+    private float _dragOffsetX;
+    private float _dragOffsetY;
+    private bool _dragging;
+    private bool _hasPosition;
+
+    public bool Contains(Vector2i position) =>
+        _panel.GetGlobalBounds().Contains(position);
+
+    public bool HandleMousePressed(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!Contains(position))
+            return false;
+
+        if (_header.GetGlobalBounds().Contains(position))
+        {
+            _dragging = true;
+            _dragOffsetX = position.X - _panel.Position.X;
+            _dragOffsetY = position.Y - _panel.Position.Y;
+        }
+
+        return true;
+    }
+
+    public bool HandleMouseMoved(Vector2i position, uint windowWidth, uint windowHeight)
+    {
+        if (!_dragging)
+            return false;
+
+        _x = Math.Clamp(position.X - _dragOffsetX, 8f,
+            Math.Max(8f, windowWidth - Width - 8f));
+        _y = Math.Clamp(position.Y - _dragOffsetY, 8f,
+            Math.Max(8f, windowHeight - Height - 8f));
+        Layout(windowWidth, windowHeight);
+        return true;
+    }
+
+    public bool HandleMouseReleased()
+    {
+        if (!_dragging)
+            return false;
+        _dragging = false;
+        return true;
+    }
 
     public AiEvolutionOverlay()
     {
@@ -64,7 +109,7 @@ public sealed class AiEvolutionOverlay : IDisposable
         _genes = CreateText("", 9, false);
         _lastCandidate = CreateText("", 9, true);
         _message = CreateText("", 9, false);
-        _controls = CreateText("F5 — остановить и применить лучшую версию", 9, true);
+        _controls = CreateText("Остановка и применение профиля — меню тестовых сцен", 9, true);
     }
 
     public void Draw(RenderWindow window, uint windowWidth, uint windowHeight, AiEvolutionStatus status)
@@ -77,13 +122,9 @@ public sealed class AiEvolutionOverlay : IDisposable
             return;
         }
 
-        // The panel sits below the combat HUD and remains in screen coordinates.
-        float x = 12f;
-        float y = 218f;
-        if (windowHeight < y + Height)
-            y = Math.Max(8f, windowHeight - Height - 8f);
-        if (windowWidth < Width + 16f)
-            x = 8f;
+        Layout(windowWidth, windowHeight);
+        float x = _panel.Position.X;
+        float y = _panel.Position.Y;
 
         _panel.Position = new Vector2f(x, y);
         _header.Position = new Vector2f(x + 1f, y + 1f);
@@ -153,7 +194,7 @@ public sealed class AiEvolutionOverlay : IDisposable
 
         _controls.Position = new Vector2f(x + 12f, y + 231f);
         _controls.DisplayedString = status.IsRunning
-            ? $"F5 — остановить и применить лучшую версию  ·  файл: {Path.GetFileName(status.BestProfilePath)}"
+            ? $"Остановка — меню тестовых сцен  ·  файл: {Path.GetFileName(status.BestProfilePath)}"
             : $"Лучший профиль сохранён отдельно  ·  файл: {Path.GetFileName(status.BestProfilePath)}";
 
         window.Draw(_panel);
@@ -172,6 +213,21 @@ public sealed class AiEvolutionOverlay : IDisposable
         window.Draw(_lastCandidate);
         window.Draw(_message);
         window.Draw(_controls);
+    }
+
+    private void Layout(uint windowWidth, uint windowHeight)
+    {
+        if (!_hasPosition)
+        {
+            _x = 12f;
+            _y = 218f;
+            _hasPosition = true;
+        }
+
+        _x = Math.Clamp(_x, 8f, Math.Max(8f, windowWidth - Width - 8f));
+        _y = Math.Clamp(_y, 8f, Math.Max(8f, windowHeight - Height - 8f));
+        _panel.Position = new Vector2f(_x, _y);
+        _header.Position = new Vector2f(_x + 1f, _y + 1f);
     }
 
     private Text CreateText(string value, uint size, bool bold) =>
