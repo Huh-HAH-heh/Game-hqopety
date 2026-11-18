@@ -103,15 +103,29 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
             int maxRegionX = maxX / TerrainRegion.TilesPerSide;
             int minRegionY = minY / TerrainRegion.TilesPerSide;
             int maxRegionY = maxY / TerrainRegion.TilesPerSide;
+            bool hasMixedRegion = false;
+
             for (int regionY = minRegionY; regionY <= maxRegionY; regionY++)
             {
                 for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
                 {
                     WorldRegion? region = worldMap.GetWorldRegion(regionX, regionY);
                     if (region != null && !region.HasUniformSurface)
-                        step = Math.Min(step, TerrainRegion.TilesPerSide / 4);
+                    {
+                        hasMixedRegion = true;
+                        break;
+                    }
                 }
+
+                if (hasMixedRegion)
+                    break;
             }
+
+            // Uniform regions stay one patch even when the camera is close.
+            // Mixed regions restore enough detail to reveal local block edits.
+            step = hasMixedRegion
+                ? Math.Min(step, TerrainRegion.TilesPerSide / 4)
+                : TerrainRegion.TilesPerSide;
 
             minX = minX / step * step;
             minY = minY / step * step;
