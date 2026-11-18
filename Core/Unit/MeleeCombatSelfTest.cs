@@ -34,7 +34,7 @@ public static class MeleeCombatSelfTest
 
         bool staggerStopsMovement = false;
         var movementSystem = new UnitMovementSystem();
-        var worldMap = new WorldMap(regionsX: 10, regionsY: 10, layerCount: 16);
+        var worldMap = new WorldMap(regionsX: 3, regionsY: 3, layerCount: 16);
 
         for (int i = 0; i < 600; i++)
         {

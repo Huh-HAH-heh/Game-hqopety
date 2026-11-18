@@ -169,7 +169,9 @@ public sealed class MovementTestScene
         }
 
         worldMap.EnableDiscreteBlockTerrain();
-        WorldGenerator.GenerateTraversalBlocks(worldMap);
+
+        // Ramp generation is intentionally disabled while terrain regions
+        // use flat, uniform block surfaces.
 
         // The core course now fades into the pre-existing world terrain.
         // There is no invisible navigation boundary at the old rectangular edge.

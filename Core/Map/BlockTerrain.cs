@@ -18,16 +18,147 @@ public enum BlockDirection : byte
 }
 
 /// <summary>
-/// Connectivity data for the discrete 1 m block world.
-/// Solid volume is stored by WorldMap; this class stores exposed surfaces
-/// and explicit ramp/stair connectors between adjacent block columns.
+/// Region-compressed surface data for the discrete block world.
+/// Uniform regions store one surface level and material. Per-tile arrays
+/// are allocated only when a region receives a local surface or transition edit.
+/// Solid volume remains in the sparse world volume tree.
 /// </summary>
 public sealed class BlockTerrain
 {
-    private readonly int[] _surfaceLevels;
-    private readonly ushort[] _materialIds;
-    private readonly BlockTransitionType[] _transitionTypes;
-    private readonly BlockDirection[] _transitionDirections;
+    private sealed class RegionData
+    {
+        private int _uniformSurfaceLevel;
+        private ushort _uniformMaterialId;
+
+        private int[]? _surfaceLevels;
+        private ushort[]? _materialIds;
+        private BlockTransitionType[]? _transitionTypes;
+        private BlockDirection[]? _transitionDirections;
+
+        public int Width { get; }
+        public int Height { get; }
+        private int CellCount => Width * Height;
+
+        public RegionData(int width, int height)
+        {
+            Width = width;
+            Height = height;
+        }
+
+        public int GetSurfaceLevel(int index) =>
+            _surfaceLevels != null
+                ? _surfaceLevels[index]
+                : _uniformSurfaceLevel;
+
+        public ushort GetMaterialId(int index) =>
+            _materialIds != null
+                ? _materialIds[index]
+                : _uniformMaterialId;
+
+        public BlockTransitionType GetTransitionType(int index) =>
+            _transitionTypes != null
+                ? _transitionTypes[index]
+                : BlockTransitionType.None;
+
+        public BlockDirection GetTransitionDirection(int index) =>
+            _transitionDirections != null
+                ? _transitionDirections[index]
+                : BlockDirection.North;
+
+        public void SetSurfaceLevel(
+            int index,
+            int level,
+            ushort materialId)
+        {
+            level = Math.Max(0, level);
+            materialId = level > 0 ? materialId : (ushort)0;
+
+            if (_surfaceLevels == null &&
+                level == _uniformSurfaceLevel &&
+                materialId == _uniformMaterialId)
+            {
+                if (level <= 0)
+                    ClearTransition(index);
+
+                return;
+            }
+
+            EnsureSurfaceArrays();
+            _surfaceLevels![index] = level;
+            _materialIds![index] = materialId;
+
+            if (level <= 0)
+                ClearTransition(index);
+        }
+
+        public void SetUniformSurface(int level, ushort materialId)
+        {
+            _uniformSurfaceLevel = Math.Max(0, level);
+            _uniformMaterialId =
+                _uniformSurfaceLevel > 0 ? materialId : (ushort)0;
+
+            _surfaceLevels = null;
+            _materialIds = null;
+            _transitionTypes = null;
+            _transitionDirections = null;
+        }
+
+        public void SetTransition(
+            int index,
+            BlockTransitionType type,
+            BlockDirection direction)
+        {
+            if (type == BlockTransitionType.None &&
+                _transitionTypes == null)
+            {
+                return;
+            }
+
+            EnsureTransitionArrays();
+            _transitionTypes![index] = type;
+            _transitionDirections![index] = direction;
+        }
+
+        public void ClearTransitions()
+        {
+            _transitionTypes = null;
+            _transitionDirections = null;
+        }
+
+        private void EnsureSurfaceArrays()
+        {
+            if (_surfaceLevels != null)
+                return;
+
+            _surfaceLevels = new int[CellCount];
+            _materialIds = new ushort[CellCount];
+
+            Array.Fill(_surfaceLevels, _uniformSurfaceLevel);
+            Array.Fill(_materialIds, _uniformMaterialId);
+        }
+
+        private void EnsureTransitionArrays()
+        {
+            if (_transitionTypes != null)
+                return;
+
+            _transitionTypes = new BlockTransitionType[CellCount];
+            _transitionDirections = new BlockDirection[CellCount];
+        }
+
+        private void ClearTransition(int index)
+        {
+            if (_transitionTypes == null)
+                return;
+
+            _transitionTypes[index] = BlockTransitionType.None;
+            _transitionDirections![index] = BlockDirection.North;
+        }
+    }
+
+    private readonly RegionData[] _regions;
+    private readonly int _regionsX;
+    private readonly int _regionsY;
 
     public int Width { get; }
     public int Height { get; }
@@ -37,57 +168,136 @@ public sealed class BlockTerrain
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+
         Width = width;
         Height = height;
         Volumes = new BlockVolumeTree(width, height, depth);
-        int count = checked(width * height);
-        _surfaceLevels = new int[count];
-        _materialIds = new ushort[count];
-        _transitionTypes = new BlockTransitionType[count];
-        _transitionDirections = new BlockDirection[count];
+
+        int regionSize = TerrainRegion.TilesPerSide;
+        _regionsX = (width + regionSize - 1) / regionSize;
+        _regionsY = (height + regionSize - 1) / regionSize;
+        _regions = new RegionData[checked(_regionsX * _regionsY)];
+
+        for (int regionY = 0; regionY < _regionsY; regionY++)
+        {
+            for (int regionX = 0; regionX < _regionsX; regionX++)
+            {
+                int regionWidth = Math.Min(
+                    regionSize,
+                    width - regionX * regionSize);
+                int regionHeight = Math.Min(
+                    regionSize,
+                    height - regionY * regionSize);
+
+                _regions[regionX + regionY * _regionsX] =
+                    new RegionData(regionWidth, regionHeight);
+            }
+        }
     }
 
     public int GetSurfaceLevel(int x, int y) =>
-        IsInside(x, y) ? _surfaceLevels[x + y * Width] : -1;
+        IsInside(x, y)
+            ? GetRegion(x, y).GetSurfaceLevel(GetLocalIndex(x, y))
+            : -1;
 
     public ushort GetMaterialId(int x, int y) =>
-        IsInside(x, y) ? _materialIds[x + y * Width] : (ushort)0;
+        IsInside(x, y)
+            ? GetRegion(x, y).GetMaterialId(GetLocalIndex(x, y))
+            : (ushort)0;
 
     public BlockTransitionType GetTransitionType(int x, int y) =>
-        IsInside(x, y) ? _transitionTypes[x + y * Width] : BlockTransitionType.None;
+        IsInside(x, y)
+            ? GetRegion(x, y).GetTransitionType(GetLocalIndex(x, y))
+            : BlockTransitionType.None;
 
     public BlockDirection GetTransitionDirection(int x, int y) =>
-        IsInside(x, y) ? _transitionDirections[x + y * Width] : BlockDirection.North;
+        IsInside(x, y)
+            ? GetRegion(x, y).GetTransitionDirection(GetLocalIndex(x, y))
+            : BlockDirection.North;
 
     public bool IsTransitionCell(int x, int y) =>
         GetTransitionType(x, y) != BlockTransitionType.None;
 
-    internal void SetSurfaceLevel(int x, int y, int level, ushort materialId)
+    internal void SetSurfaceRegion(
+        int startX,
+        int startY,
+        int width,
+        int height,
+        int level,
+        ushort materialId)
     {
-        if (!IsInside(x, y)) throw new ArgumentOutOfRangeException(nameof(x));
-        int index = x + y * Width;
-        _surfaceLevels[index] = Math.Max(0, level);
-        _materialIds[index] = level > 0 ? materialId : (ushort)0;
-        if (level <= 0)
+        if (startX < 0 || startY < 0 ||
+            width <= 0 || height <= 0 ||
+            (long)startX + width > Width ||
+            (long)startY + height > Height)
         {
-            _transitionTypes[index] = BlockTransitionType.None;
-            _transitionDirections[index] = BlockDirection.North;
+            throw new ArgumentOutOfRangeException(nameof(width));
+        }
+
+        int regionSize = TerrainRegion.TilesPerSide;
+        if (startX % regionSize == 0 &&
+            startY % regionSize == 0)
+        {
+            int regionX = startX / regionSize;
+            int regionY = startY / regionSize;
+            RegionData region = _regions[regionX + regionY * _regionsX];
+
+            if (width == region.Width && height == region.Height)
+            {
+                region.SetUniformSurface(level, materialId);
+                return;
+            }
+        }
+
+        int normalizedLevel = Math.Max(0, level);
+        ushort normalizedMaterial =
+            normalizedLevel > 0 ? materialId : (ushort)0;
+
+        for (int row = 0; row < height; row++)
+        {
+            int y = startY + row;
+            for (int column = 0; column < width; column++)
+            {
+                int x = startX + column;
+                SetSurfaceLevel(x, y, normalizedLevel, normalizedMaterial);
+            }
         }
     }
 
-    internal void SetTransition(
-        int x, int y, BlockTransitionType type, BlockDirection direction)
+    internal void SetSurfaceLevel(
+        int x,
+        int y,
+        int level,
+        ushort materialId)
     {
-        if (!IsInside(x, y)) throw new ArgumentOutOfRangeException(nameof(x));
-        int index = x + y * Width;
-        _transitionTypes[index] = type;
-        _transitionDirections[index] = direction;
+        if (!IsInside(x, y))
+            throw new ArgumentOutOfRangeException(nameof(x));
+
+        GetRegion(x, y).SetSurfaceLevel(
+            GetLocalIndex(x, y),
+            level,
+            materialId);
+    }
+
+    internal void SetTransition(
+        int x,
+        int y,
+        BlockTransitionType type,
+        BlockDirection direction)
+    {
+        if (!IsInside(x, y))
+            throw new ArgumentOutOfRangeException(nameof(x));
+
+        GetRegion(x, y).SetTransition(
+            GetLocalIndex(x, y),
+            type,
+            direction);
     }
 
     internal void ClearTransitions()
     {
-        Array.Clear(_transitionTypes);
-        Array.Clear(_transitionDirections);
+        for (int i = 0; i < _regions.Length; i++)
+            _regions[i].ClearTransitions();
     }
 
     /// <summary>Tests the explicit connector between adjacent surface columns.</summary>
@@ -106,7 +316,6 @@ public sealed class BlockTerrain
         if (fromLevel <= 0 || toLevel <= 0)
             return false;
 
-        // A horizontal move between equal-height block tops needs no connector.
         if (fromLevel == toLevel)
             return true;
 
@@ -150,7 +359,10 @@ public sealed class BlockTerrain
         if (type == BlockTransitionType.None)
             return level;
 
-        GetDirectionDelta(GetTransitionDirection(tileX, tileY), out int dx, out int dy);
+        GetDirectionDelta(
+            GetTransitionDirection(tileX, tileY),
+            out int dx,
+            out int dy);
         int rise = GetSurfaceLevel(tileX + dx, tileY + dy) - (int)level;
         if (rise <= 0 ||
             (type == BlockTransitionType.Ramp && rise != 1) ||
@@ -171,8 +383,25 @@ public sealed class BlockTerrain
             return level + progress * rise;
 
         int steps = Math.Max(3, rise * 3);
-        int completed = Math.Clamp((int)MathF.Floor(progress * steps + 0.0001f), 0, steps);
+        int completed = Math.Clamp(
+            (int)MathF.Floor(progress * steps + 0.0001f),
+            0,
+            steps);
         return level + rise * (completed / (float)steps);
+    }
+
+    private RegionData GetRegion(int x, int y)
+    {
+        int regionX = x / TerrainRegion.TilesPerSide;
+        int regionY = y / TerrainRegion.TilesPerSide;
+        return _regions[regionX + regionY * _regionsX];
+    }
+
+    private int GetLocalIndex(int x, int y)
+    {
+        RegionData region = GetRegion(x, y);
+        return x % TerrainRegion.TilesPerSide +
+               y % TerrainRegion.TilesPerSide * region.Width;
     }
 
     private bool IsInside(int x, int y) =>
@@ -188,7 +417,10 @@ public sealed class BlockTerrain
             _ => false
         };
 
-    private static void GetDirectionDelta(BlockDirection direction, out int dx, out int dy)
+    private static void GetDirectionDelta(
+        BlockDirection direction,
+        out int dx,
+        out int dy)
     {
         dx = direction switch
         {

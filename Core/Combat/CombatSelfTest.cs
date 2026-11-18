@@ -1598,8 +1598,8 @@ public static class CombatSelfTest
     private static bool TestVisionBoundedCandidateSampling()
     {
         WorldMap worldMap = new WorldMap(
-            regionsX: 10,
-            regionsY: 10,
+            regionsX: 3,
+            regionsY: 3,
             layerCount: 10);
         UnitSimulation simulation = new UnitSimulation(256, 2048);
 
@@ -1645,8 +1645,8 @@ public static class CombatSelfTest
     private static bool TestVisionCloseHostilesSpatiallySampled()
     {
         WorldMap worldMap = new WorldMap(
-            regionsX: 5,
-            regionsY: 5,
+            regionsX: 2,
+            regionsY: 2,
             layerCount: 64);
         worldMap.SetSolidHeight(20, 20, 10, 1);
         worldMap.SetSolidHeight(21, 20, 20, 1);

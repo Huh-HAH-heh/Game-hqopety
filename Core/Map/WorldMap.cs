@@ -14,6 +14,8 @@ public sealed class WorldMap
     public int RegionsX { get; }
     public int RegionsY { get; }
 
+    public ReadOnlySpan<WorldRegion> WorldRegions => _worldRegions;
+
     public int TileWidth =>
         RegionsX * TerrainRegion.TilesPerSide;
 
@@ -35,17 +37,17 @@ public sealed class WorldMap
 
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly TerrainLayer[] _layers;
+    private readonly WorldRegion[] _worldRegions;
     private readonly ushort[] _surfaceHeights;
     private readonly ushort[] _volumeSurfaceHeights;
     private readonly bool[] _navigationBlocked;
     private readonly bool[] _simpleFillColumns;
     private readonly ushort[] _columnMaterialIds;
     private readonly TileRange[]?[] _rangeCache;
-    private readonly long[] _regionTerrainVersions;
 
     public WorldMap(
-        int regionsX = 16,
-        int regionsY = 16,
+        int regionsX = 4,
+        int regionsY = 4,
         int layerCount = DefaultTerrainLayerCount)
     {
         if (regionsX <= 0)
@@ -85,6 +87,17 @@ public sealed class WorldMap
                     this);
         }
 
+        _worldRegions = new WorldRegion[checked(regionsX * regionsY)];
+        for (int regionY = 0; regionY < regionsY; regionY++)
+        {
+            for (int regionX = 0; regionX < regionsX; regionX++)
+            {
+                int index = regionX + regionY * regionsX;
+                _worldRegions[index] =
+                    new WorldRegion(regionX, regionY, _layers);
+            }
+        }
+
         _surfaceHeights = new ushort[columnCount];
         _volumeSurfaceHeights = new ushort[columnCount];
         Blocks = new BlockTerrain(width, height, layerCount);
@@ -93,7 +106,6 @@ public sealed class WorldMap
         Array.Fill(_simpleFillColumns, true);
         _columnMaterialIds = new ushort[columnCount];
         _rangeCache = new TileRange[]?[columnCount];
-        _regionTerrainVersions = new long[checked(regionsX * regionsY)];
 
         Water =
             new WaterLayer(
@@ -122,7 +134,7 @@ public sealed class WorldMap
                      x++)
                 {
                     version = version * 31 +
-                        _regionTerrainVersions[x + y * RegionsX];
+                        _worldRegions[x + y * RegionsX].TerrainVersion;
                 }
             }
         }
@@ -132,6 +144,10 @@ public sealed class WorldMap
 
     private void MarkTerrainChanged(int x, int y)
     {
+        int regionX = x / TerrainRegion.TilesPerSide;
+        int regionY = y / TerrainRegion.TilesPerSide;
+        _worldRegions[regionX + regionY * RegionsX].MarkTerrainChanged();
+
         if (UsesDiscreteBlockTerrain)
         {
             int topLayer = FindTopOccupiedLayer(x, y, LayerCount - 1);
@@ -146,10 +162,6 @@ public sealed class WorldMap
 
         TerrainVersion++;
         TerrainGeometryVersion++;
-
-        int regionX = x / TerrainRegion.TilesPerSide;
-        int regionY = y / TerrainRegion.TilesPerSide;
-        _regionTerrainVersions[regionX + regionY * RegionsX]++;
     }
 
     public void EnableDiscreteBlockTerrain()
@@ -158,26 +170,87 @@ public sealed class WorldMap
             return;
 
         Blocks.Volumes.Clear();
+        Blocks.ClearTransitions();
         Array.Clear(_volumeSurfaceHeights);
         UsesDiscreteBlockTerrain = true;
-        for (int y = 0; y < TileHeight; y++)
+
+        // Uniform regions convert in bulk. Only regions with local tile edits
+        // fall back to per-column conversion.
+        for (int i = 0; i < _worldRegions.Length; i++)
         {
-            for (int x = 0; x < TileWidth; x++)
+            WorldRegion region = _worldRegions[i];
+            if (region.HasUniformSurface)
             {
-                ushort oldHeight = _surfaceHeights[GetColumnIndex(x, y)];
-                ushort material = GetMaterialId(x, y, 0);
                 int levels = (int)MathF.Round(
-                    oldHeight / (float)HeightUnitsPerMeter,
+                    region.UniformSurfaceHeightUnits /
+                    (float)HeightUnitsPerMeter,
                     MidpointRounding.AwayFromZero);
-                SetSolidHeight(
-                    x, y,
-                    checked((ushort)(levels * HeightUnitsPerMeter)),
-                    material);
+                ushort heightUnits = checked((ushort)(
+                    levels * HeightUnitsPerMeter));
+                ushort materialId = heightUnits > 0
+                    ? region.UniformSurfaceMaterialId
+                    : (ushort)0;
+                int filledLayers = heightUnits == 0
+                    ? 0
+                    : Math.Clamp(
+                        (heightUnits + LayerHeightUnits - 1) / LayerHeightUnits,
+                        0,
+                        LayerCount);
+
+                for (int z = 0; z < LayerCount; z++)
+                {
+                    region.GetTerrainSlice(z).SetUniformMaterial(
+                        z < filledLayers ? materialId : (ushort)0);
+                }
+
+                for (int row = 0; row < region.TileHeight; row++)
+                {
+                    int index = GetColumnIndex(
+                        region.TileOriginX,
+                        region.TileOriginY + row);
+                    Array.Fill(_surfaceHeights, heightUnits, index, region.TileWidth);
+                    Array.Fill(_columnMaterialIds, materialId, index, region.TileWidth);
+                    Array.Fill(_simpleFillColumns, true, index, region.TileWidth);
+                    Array.Clear(_rangeCache, index, region.TileWidth);
+                }
+
+                Blocks.SetSurfaceRegion(
+                    region.TileOriginX,
+                    region.TileOriginY,
+                    region.TileWidth,
+                    region.TileHeight,
+                    levels,
+                    materialId);
+
+                region.SetUniformSurface(heightUnits, materialId);
+                continue;
+            }
+
+            for (int localY = 0; localY < region.TileHeight; localY++)
+            {
+                int globalY = region.TileOriginY + localY;
+                for (int localX = 0; localX < region.TileWidth; localX++)
+                {
+                    int globalX = region.TileOriginX + localX;
+                    int columnIndex = GetColumnIndex(globalX, globalY);
+                    ushort oldHeight = _surfaceHeights[columnIndex];
+                    ushort material = GetMaterialId(globalX, globalY, 0);
+                    int levels = (int)MathF.Round(
+                        oldHeight / (float)HeightUnitsPerMeter,
+                        MidpointRounding.AwayFromZero);
+
+                    SetSolidHeight(
+                        globalX,
+                        globalY,
+                        checked((ushort)(levels * HeightUnitsPerMeter)),
+                        material);
+                }
             }
         }
 
         NavigationVersion++;
         TerrainVersion++;
+        TerrainGeometryVersion++;
     }
 
     public void DisableDiscreteBlockTerrain()
@@ -187,9 +260,13 @@ public sealed class WorldMap
 
         UsesDiscreteBlockTerrain = false;
         Blocks.Volumes.Clear();
+        Blocks.ClearTransitions();
         Array.Clear(_volumeSurfaceHeights);
         NavigationVersion++;
         TerrainVersion++;
+        TerrainGeometryVersion++;
+        for (int i = 0; i < _worldRegions.Length; i++)
+            _worldRegions[i].MarkGeometryChanged();
     }
 
     public void SetBlockStack(int x, int y, int heightInMeters, ushort materialId)
@@ -325,8 +402,8 @@ public sealed class WorldMap
         {
             TerrainVersion++;
             TerrainGeometryVersion++;
-            for (int i = 0; i < _regionTerrainVersions.Length; i++)
-                _regionTerrainVersions[i]++;
+            for (int i = 0; i < _worldRegions.Length; i++)
+                _worldRegions[i].MarkGeometryChanged();
         }
 
         return volumeCount;
@@ -594,8 +671,8 @@ public sealed class WorldMap
         NavigationVersion++;
         TerrainVersion++;
         TerrainGeometryVersion++;
-        for (int i = 0; i < _regionTerrainVersions.Length; i++)
-            _regionTerrainVersions[i]++;
+        for (int i = 0; i < _worldRegions.Length; i++)
+            _worldRegions[i].MarkGeometryChanged();
     }
 
     public float GetSurfaceHeightAt(float x, float y)
@@ -648,8 +725,21 @@ public sealed class WorldMap
         if (Blocks.Volumes.TryGetMaterialId(x, y, z, out ushort volumeMaterial))
             return volumeMaterial;
 
-        int columnIndex = GetColumnIndex(x, y);
+        WorldRegion? worldRegion = GetWorldRegionAtTile(x, y);
+        if (worldRegion != null && worldRegion.HasUniformSurface)
+        {
+            int filledLayers = Math.Clamp(
+                (worldRegion.UniformSurfaceHeightUnits +
+                 LayerHeightUnits - 1) / LayerHeightUnits,
+                0,
+                LayerCount);
 
+            return z < filledLayers
+                ? worldRegion.UniformSurfaceMaterialId
+                : (ushort)0;
+        }
+
+        int columnIndex = GetColumnIndex(x, y);
         if (_simpleFillColumns[columnIndex])
         {
             int filledLayers = Math.Clamp(
@@ -731,7 +821,24 @@ public sealed class WorldMap
 
         int columnIndex = GetColumnIndex(x, y);
         int lastLayer = Math.Min(maxLayer, LayerCount - 1);
-        int baseTop = FindBaseTopOccupiedLayer(x, y, columnIndex, lastLayer);
+
+        WorldRegion? worldRegion = GetWorldRegionAtTile(x, y);
+        int baseTop;
+        if (worldRegion != null && worldRegion.HasUniformSurface)
+        {
+            int filledLayers = Math.Clamp(
+                (worldRegion.UniformSurfaceHeightUnits +
+                 LayerHeightUnits - 1) / LayerHeightUnits,
+                0,
+                LayerCount);
+            baseTop = worldRegion.UniformSurfaceMaterialId == 0
+                ? -1
+                : Math.Min(filledLayers - 1, lastLayer);
+        }
+        else
+        {
+            baseTop = FindBaseTopOccupiedLayer(x, y, columnIndex, lastLayer);
+        }
 
         if (!Blocks.Volumes.HasOverridesInColumn(x, y))
             return baseTop;
@@ -877,8 +984,10 @@ public sealed class WorldMap
         if (!IsInside(x, y))
             return -1;
 
-        ushort height =
-            _surfaceHeights[GetColumnIndex(x, y)];
+        WorldRegion? region = GetWorldRegionAtTile(x, y);
+        ushort height = region != null && region.HasUniformSurface
+            ? region.UniformSurfaceHeightUnits
+            : _surfaceHeights[GetColumnIndex(x, y)];
 
         if (height == 0)
             return -1;
@@ -894,6 +1003,33 @@ public sealed class WorldMap
 
     public int GetHighestOccupiedLayer()
     {
+        bool allRegionsUniform = true;
+        ushort highestUniformHeight = 0;
+        for (int i = 0; i < _worldRegions.Length; i++)
+        {
+            WorldRegion region = _worldRegions[i];
+            if (!region.HasUniformSurface)
+            {
+                allRegionsUniform = false;
+                break;
+            }
+
+            highestUniformHeight = Math.Max(
+                highestUniformHeight,
+                region.UniformSurfaceHeightUnits);
+        }
+
+        if (allRegionsUniform)
+        {
+            if (highestUniformHeight == 0)
+                return -1;
+
+            int highestLayer =
+                (highestUniformHeight + LayerHeightUnits - 1) /
+                LayerHeightUnits - 1;
+            return Math.Min(LayerCount - 1, highestLayer);
+        }
+
         int highest = -1;
 
         for (int i = 0; i < _surfaceHeights.Length; i++)
@@ -917,8 +1053,38 @@ public sealed class WorldMap
     }
 
     // ============================================================
+    // Logical world regions
+    // A WorldRegion spans the complete vertical stack of one XY tile area.
+    // ============================================================
+
+    public WorldRegion? GetWorldRegion(
+        int regionX,
+        int regionY)
+    {
+        if (regionX < 0 || regionX >= RegionsX ||
+            regionY < 0 || regionY >= RegionsY)
+        {
+            return null;
+        }
+
+        return _worldRegions[regionX + regionY * RegionsX];
+    }
+
+    public WorldRegion? GetWorldRegionAtTile(
+        int globalX,
+        int globalY)
+    {
+        if (!IsInside(globalX, globalY))
+            return null;
+
+        return GetWorldRegion(
+            globalX / TerrainRegion.TilesPerSide,
+            globalY / TerrainRegion.TilesPerSide);
+    }
+
+    // ============================================================
+    // Compatibility access to the Z=0 TerrainRegion.
     // Tile/navigation metadata is shared between Z levels.
-    // Voxel regions themselves belong to exactly one TerrainLayer.
     // ============================================================
 
     public TerrainRegion? GetRegion(
@@ -1382,7 +1548,6 @@ public sealed class WorldMap
                 LayerCount * LayerHeightUnits);
         }
 
-        bool wasSimpleFill = _simpleFillColumns[columnIndex];
         int previousLayers =
             (_surfaceHeights[columnIndex] +
              LayerHeightUnits - 1) /
@@ -1396,25 +1561,17 @@ public sealed class WorldMap
 
         _rangeCache[columnIndex] = null;
 
-        // Only touch the old/new occupied height span.
-        // This avoids clearing and refilling unused vertical layers
-        // whenever a terrain generator replaces its height.
-        if (!wasSimpleFill)
+        // A local height edit materializes only this tile's vertical column
+        // inside the owning region. Uniform neighbouring tiles stay compressed.
+        int layersToUpdate = Math.Max(previousLayers, filledLayers);
+        for (int z = 0; z < layersToUpdate; z++)
         {
-            int layersToUpdate =
-                Math.Max(
-                    previousLayers,
-                    filledLayers);
-
-            for (int z = 0; z < layersToUpdate; z++)
-            {
-                _layers[z].GetRegion(regionX, regionY)!
-                    .SetMaterialIdAtIndex(
-                        localIndex,
-                        z < filledLayers
-                            ? materialId
-                            : (ushort)0);
-            }
+            _layers[z].GetRegion(regionX, regionY)!
+                .SetMaterialIdAtIndex(
+                    localIndex,
+                    z < filledLayers
+                        ? materialId
+                        : (ushort)0);
         }
 
         _surfaceHeights[columnIndex] =
@@ -1437,6 +1594,10 @@ public sealed class WorldMap
     {
         if (!IsInside(globalX, globalY))
             return 0;
+
+        WorldRegion? region = GetWorldRegionAtTile(globalX, globalY);
+        if (region != null && region.HasUniformSurface)
+            return region.UniformSurfaceHeightUnits;
 
         int index = GetColumnIndex(globalX, globalY);
         return Math.Max(_surfaceHeights[index], _volumeSurfaceHeights[index]);
@@ -1523,6 +1684,8 @@ public sealed class WorldMap
     {
         int globalX = columnIndex % TileWidth;
         int globalY = columnIndex / TileWidth;
+        GetWorldRegionAtTile(globalX, globalY)?.InvalidateUniformSurface();
+
         int topLayer = FindTopOccupiedLayer(
             globalX, globalY, LayerCount - 1);
 

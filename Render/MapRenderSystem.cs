@@ -138,8 +138,6 @@ void main()
 
     private readonly VertexArray _gridVertices =
         new VertexArray(PrimitiveType.Lines);
-    private readonly VertexArray _blockTransitionVertices =
-        new VertexArray(PrimitiveType.Lines);
     private readonly VertexArray _waterVertices =
         new VertexArray(PrimitiveType.Triangles);
 
@@ -311,11 +309,19 @@ void main()
         // in, but reduce vertex work when zoomed out.
         double visibleCellEstimate =
             (double)viewSize.X / tilePixelSize * (viewSize.Y / tilePixelSize);
-        int requestedLodStep = visibleCellEstimate >= 150_000d
-            ? 3
-            : visibleCellEstimate >= 45_000d
-                ? 2
-                : 1;
+        // At world scale one mesh patch represents one complete region.
+        // Zooming in progressively restores sub-region and tile detail.
+        int requestedLodStep = visibleCellEstimate >= 1_800_000d
+            ? TerrainRegion.TilesPerSide
+            : visibleCellEstimate >= 650_000d
+                ? TerrainRegion.TilesPerSide / 2
+                : visibleCellEstimate >= 220_000d
+                    ? TerrainRegion.TilesPerSide / 4
+                    : visibleCellEstimate >= 70_000d
+                        ? 12
+                        : visibleCellEstimate >= 25_000d
+                            ? 4
+                            : 1;
 
         // Terrain edits invalidate only the touched XY region. A nav flag or
         // a change in another region must not flush all GPU terrain meshes.
@@ -366,21 +372,6 @@ void main()
             lodStep,
             tilePixelSize,
             maxLayer);
-
-        // Discrete ramps are rendered as sloped block surfaces in the terrain
-        // mesh. The old arrow/line overlay was only a debug marker.
-        if (!worldMap.UsesDiscreteBlockTerrain)
-        {
-            DrawBlockTransitions(
-                window,
-                worldMap,
-                minTileX,
-                maxTileX,
-                minTileY,
-                maxTileY,
-                tilePixelSize,
-                DisplayedMaxLayer);
-        }
 
         // Auxiliary terrain layers must follow the mesh that is actually visible.
         maxLayer = DisplayedMaxLayer;
@@ -535,7 +526,10 @@ void main()
                  regionX++)
             {
                 int regionIndex = regionX + regionY * worldMap.RegionsX;
-                TerrainChunkKey key = new TerrainChunkKey(regionIndex, lodStep, visibleMaxLayer);
+                int regionLodStep = GetRegionLodStep(
+                    worldMap, regionX, regionY, lodStep);
+                TerrainChunkKey key = new TerrainChunkKey(
+                    regionIndex, regionLodStep, visibleMaxLayer);
 
                 long regionVersion =
                     worldMap.GetRegionTerrainVersion(regionX, regionY);
@@ -615,8 +609,16 @@ void main()
                 geometryMaxLayer,
                 buildSliceOverlay);
 
+            int regionLodStep = GetRegionLodStep(
+                worldMap,
+                pending.RegionX,
+                pending.RegionY,
+                lodStep);
             _terrainChunks.Add(
-                new TerrainChunkKey(pending.RegionIndex, lodStep, visibleMaxLayer),
+                new TerrainChunkKey(
+                    pending.RegionIndex,
+                    regionLodStep,
+                    visibleMaxLayer),
                 mesh);
             _cachedTerrainVertexCount += mesh.VertexCount;
             mesh.LastUsedFrame = _frameNumber;
@@ -642,10 +644,18 @@ void main()
 
             if (_fallbackMaxLayer < 0 ||
                 (!_terrainChunks.TryGetValue(
-                    new TerrainChunkKey(regionIndex, lodStep, _fallbackMaxLayer),
+                    new TerrainChunkKey(
+                        regionIndex,
+                        GetRegionLodStep(
+                            worldMap, pending.RegionX, pending.RegionY, lodStep),
+                        _fallbackMaxLayer),
                     out fallback) &&
                  !_terrainChunks.TryGetValue(
-                    new TerrainChunkKey(regionIndex, _fallbackLodStep, _fallbackMaxLayer),
+                    new TerrainChunkKey(
+                        regionIndex,
+                        GetRegionLodStep(
+                            worldMap, pending.RegionX, pending.RegionY, _fallbackLodStep),
+                        _fallbackMaxLayer),
                     out fallback)))
                 continue;
 
@@ -801,6 +811,80 @@ void main()
             : left.RegionIndex.CompareTo(right.RegionIndex);
     }
 
+    private static int GetRegionLodStep(
+        WorldMap worldMap,
+        int regionX,
+        int regionY,
+        int requestedLodStep)
+    {
+        WorldRegion? region = worldMap.GetWorldRegion(regionX, regionY);
+        if (region == null)
+            return requestedLodStep;
+
+        if (region.HasUniformSurface)
+            return TerrainRegion.TilesPerSide;
+
+        return Math.Min(
+            requestedLodStep,
+            TerrainRegion.TilesPerSide / 4);
+    }
+
+    private TerrainChunkMesh BuildUniformTerrainChunk(
+        WorldMap worldMap,
+        int regionX,
+        int regionY,
+        float tilePixelSize,
+        int visibleMaxLayer,
+        bool buildSliceOverlay)
+    {
+        _buildingTerrainVertexCount = 0;
+
+        int minTileX = regionX * TerrainRegion.TilesPerSide;
+        int minTileY = regionY * TerrainRegion.TilesPerSide;
+        int maxTileX = Math.Min(
+            worldMap.MaxTileX,
+            minTileX + TerrainRegion.TilesPerSide - 1);
+        int maxTileY = Math.Min(
+            worldMap.MaxTileY,
+            minTileY + TerrainRegion.TilesPerSide - 1);
+
+        int sampleX = minTileX + (maxTileX - minTileX) / 2;
+        int sampleY = minTileY + (maxTileY - minTileY) / 2;
+        int surfaceLayer = FindVisibleTopLayer(
+            worldMap, sampleX, sampleY, visibleMaxLayer);
+
+        if (surfaceLayer >= 0)
+        {
+            float height = surfaceLayer + 1f;
+            AppendTerrainQuad(
+                minTileX * tilePixelSize,
+                minTileY * tilePixelSize,
+                (maxTileX + 1) * tilePixelSize,
+                (maxTileY + 1) * tilePixelSize,
+                height, height, height, height,
+                surfaceLayer);
+        }
+
+        TerrainChunkMesh mesh = CreateTerrainChunkMesh(_buildingTerrainVertexCount);
+        mesh.RegionTerrainVersion =
+            worldMap.GetRegionTerrainVersion(regionX, regionY);
+
+        if (buildSliceOverlay)
+        {
+            BuildChunkSliceOverlay(
+                mesh,
+                worldMap,
+                minTileX, maxTileX,
+                minTileY, maxTileY,
+                TerrainRegion.TilesPerSide,
+                tilePixelSize,
+                visibleMaxLayer);
+        }
+
+        TerrainMeshRebuildCount++;
+        return mesh;
+    }
+
     private TerrainChunkMesh BuildTerrainChunk(
         WorldMap worldMap,
         int regionX,
@@ -810,6 +894,10 @@ void main()
         int visibleMaxLayer,
         bool buildSliceOverlay)
     {
+        WorldRegion? worldRegion = worldMap.GetWorldRegion(regionX, regionY);
+        lodStep = GetRegionLodStep(
+            worldMap, regionX, regionY, lodStep);
+
         if (worldMap.UsesDiscreteBlockTerrain)
         {
             return BuildDiscreteBlockTerrainChunk(
@@ -817,6 +905,17 @@ void main()
                 regionX,
                 regionY,
                 lodStep,
+                tilePixelSize,
+                visibleMaxLayer,
+                buildSliceOverlay);
+        }
+
+        if (worldRegion != null && worldRegion.HasUniformSurface)
+        {
+            return BuildUniformTerrainChunk(
+                worldMap,
+                regionX,
+                regionY,
                 tilePixelSize,
                 visibleMaxLayer,
                 buildSliceOverlay);
@@ -968,42 +1067,10 @@ void main()
                 float bottom = Math.Min(
                     worldMap.TileHeight, y + lodStep) * tilePixelSize;
 
-                float high = surfaceLayer + 1f;
-                float low = Math.Max(
-                    0f,
-                    high - WorldMap.HeightUnitsPerMeter);
-                float topLeft = high;
-                float topRight = high;
-                float bottomRight = high;
-                float bottomLeft = high;
-
-                if (worldMap.Blocks.GetTransitionType(x, y) ==
-                    BlockTransitionType.Ramp)
-                {
-                    switch (worldMap.Blocks.GetTransitionDirection(x, y))
-                    {
-                        case BlockDirection.North:
-                            bottomLeft = low;
-                            bottomRight = low;
-                            break;
-                        case BlockDirection.East:
-                            topLeft = low;
-                            bottomLeft = low;
-                            break;
-                        case BlockDirection.South:
-                            topLeft = low;
-                            topRight = low;
-                            break;
-                        case BlockDirection.West:
-                            topRight = low;
-                            bottomRight = low;
-                            break;
-                    }
-                }
-
+                float height = surfaceLayer + 1f;
                 AppendTerrainQuad(
                     left, top, right, bottom,
-                    topLeft, topRight, bottomRight, bottomLeft,
+                    height, height, height, height,
                     surfaceLayer);
             }
         }
@@ -1039,19 +1106,6 @@ void main()
 
                     if (neighbourLayer >= surfaceLayer)
                         continue;
-
-                    // A ramp joins these two surfaces; do not draw a vertical
-                    // wall over its upper edge.
-                    BlockTransitionType neighbourTransition =
-                        worldMap.Blocks.GetTransitionType(neighbourX, neighbourY);
-                    BlockDirection reverseDirection =
-                        (BlockDirection)(((int)direction + 2) & 3);
-                    if (neighbourTransition == BlockTransitionType.Ramp &&
-                        worldMap.Blocks.GetTransitionDirection(
-                            neighbourX, neighbourY) == reverseDirection)
-                    {
-                        continue;
-                    }
 
                     float differenceMeters =
                         (surfaceLayer - neighbourLayer) /
@@ -1179,11 +1233,14 @@ void main()
     {
         _terrainPreviewVertices.Clear();
 
-        int previewStep = Math.Clamp(lodStep * 2, 2, 6);
+        int previewStep = Math.Clamp(
+            lodStep * 2,
+            2,
+            TerrainRegion.TilesPerSide);
         long viewportCells =
             (long)(maxTileX - minTileX + 1) *
             (maxTileY - minTileY + 1);
-        while (previewStep < 32 &&
+        while (previewStep < TerrainRegion.TilesPerSide &&
                viewportCells / ((long)previewStep * previewStep) > 6000)
         {
             previewStep *= 2;
@@ -1614,99 +1671,6 @@ void main()
         }
     }
 
-    private void DrawBlockTransitions(
-        RenderWindow window,
-        WorldMap worldMap,
-        int minTileX,
-        int maxTileX,
-        int minTileY,
-        int maxTileY,
-        float tilePixelSize,
-        int visibleMaxLayer)
-    {
-        _blockTransitionVertices.Clear();
-        if (!worldMap.UsesDiscreteBlockTerrain || tilePixelSize < 2f)
-            return;
-
-        Color rampColor = new Color(224, 185, 112, 230);
-        Color stairsColor = new Color(128, 185, 210, 230);
-        for (int y = minTileY; y <= maxTileY; y++)
-        {
-            for (int x = minTileX; x <= maxTileX; x++)
-            {
-                BlockTransitionType type = worldMap.Blocks.GetTransitionType(x, y);
-                if (type == BlockTransitionType.None ||
-                    worldMap.GetSurfaceLayer(x, y) > visibleMaxLayer)
-                {
-                    continue;
-                }
-
-                BlockDirection direction = worldMap.Blocks.GetTransitionDirection(x, y);
-                float left = x * tilePixelSize;
-                float top = y * tilePixelSize;
-                float centerX = left + tilePixelSize * 0.5f;
-                float centerY = top + tilePixelSize * 0.5f;
-                GetBlockDirectionDelta(direction, out int dx, out int dy);
-                Color color = type == BlockTransitionType.Ramp
-                    ? rampColor
-                    : stairsColor;
-
-                if (type == BlockTransitionType.Ramp)
-                {
-                    float endX = centerX + dx * tilePixelSize * 0.28f;
-                    float endY = centerY + dy * tilePixelSize * 0.28f;
-                    AppendLine(
-                        _blockTransitionVertices,
-                        centerX - dx * tilePixelSize * 0.22f,
-                        centerY - dy * tilePixelSize * 0.22f,
-                        endX,
-                        endY,
-                        color);
-                    AppendLine(
-                        _blockTransitionVertices,
-                        endX,
-                        endY,
-                        endX - dx * tilePixelSize * 0.13f - dy * tilePixelSize * 0.11f,
-                        endY - dy * tilePixelSize * 0.13f + dx * tilePixelSize * 0.11f,
-                        color);
-                    AppendLine(
-                        _blockTransitionVertices,
-                        endX,
-                        endY,
-                        endX - dx * tilePixelSize * 0.13f + dy * tilePixelSize * 0.11f,
-                        endY - dy * tilePixelSize * 0.13f - dx * tilePixelSize * 0.11f,
-                        color);
-                    continue;
-                }
-
-                // Three transverse treads form a compact top-down stair glyph.
-                for (int tread = 1; tread <= 3; tread++)
-                {
-                    float progress = tread / 4f - 0.5f;
-                    float treadX = centerX + dx * tilePixelSize * progress;
-                    float treadY = centerY + dy * tilePixelSize * progress;
-                    AppendLine(
-                        _blockTransitionVertices,
-                        treadX - dy * tilePixelSize * 0.28f,
-                        treadY + dx * tilePixelSize * 0.28f,
-                        treadX + dy * tilePixelSize * 0.28f,
-                        treadY - dx * tilePixelSize * 0.28f,
-                        color);
-                }
-                AppendLine(
-                    _blockTransitionVertices,
-                    centerX - dx * tilePixelSize * 0.34f,
-                    centerY - dy * tilePixelSize * 0.34f,
-                    centerX + dx * tilePixelSize * 0.34f,
-                    centerY + dy * tilePixelSize * 0.34f,
-                    color);
-            }
-        }
-
-        if (_blockTransitionVertices.VertexCount > 0)
-            window.Draw(_blockTransitionVertices);
-    }
-
     private static void GetBlockDirectionDelta(
         BlockDirection direction,
         out int dx,
@@ -1803,7 +1767,6 @@ void main()
         _terrainLayerShader?.Dispose();
         _terrainLayerShader = null;
         _gridVertices.Dispose();
-        _blockTransitionVertices.Dispose();
         _waterVertices.Dispose();
          _terrainVertices = Array.Empty<Vertex>();
         _smoothedChunkHeights = Array.Empty<float>();

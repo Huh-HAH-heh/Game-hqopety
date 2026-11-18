@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Core.Map;
 
 namespace World;
@@ -6,7 +7,6 @@ namespace World;
 public static class WorldGenerator
 {
     private const ushort BaseMaterialId = 1;
-    private const int MacroBlockMinimumSize = 32;
 
     public static void Generate(
         WorldMap worldMap,
@@ -14,25 +14,41 @@ public static class WorldGenerator
     {
         worldMap.DisableDiscreteBlockTerrain();
         worldMap.Water.Clear();
+
         GenerateBaseTerrain(worldMap);
         worldMap.EnableDiscreteBlockTerrain();
-        int macroVolumeCount =
-            worldMap.CompactHierarchicalBlockVolumes(MacroBlockMinimumSize);
-        GenerateTraversalBlocks(worldMap);
 
         if (writeLog)
-        {
-            Console.WriteLine(
-                "[WorldGenerator] " +
-                $"Дискретный блочный рельеф создан: " +
-                $"{worldMap.Blocks.Width}x{worldMap.Blocks.Height}, шаг Z = 1 м, " +
-                $"макрообъёмов (от {MacroBlockMinimumSize}x{MacroBlockMinimumSize} м): {macroVolumeCount}, " +
-                $"листьев дерева: {worldMap.Blocks.Volumes.SolidLeafCount}, " +
-                $"узлов дерева: {worldMap.Blocks.Volumes.AllocatedNodeCount}.");
-        }
+            WriteRegionSummary(worldMap);
     }
 
-    public static void GenerateSmooth(WorldMap worldMap, bool writeLog = true)
+    private static void WriteRegionSummary(WorldMap worldMap)
+    {
+        ushort minHeight = ushort.MaxValue;
+        ushort maxHeight = 0;
+        HashSet<ushort> levels = new();
+
+        foreach (WorldRegion region in worldMap.WorldRegions)
+        {
+            ushort height = region.UniformSurfaceHeightUnits;
+            minHeight = Math.Min(minHeight, height);
+            maxHeight = Math.Max(maxHeight, height);
+            levels.Add(height);
+        }
+
+        Console.WriteLine(
+            "[WorldGenerator] " +
+            $"Регионы: {worldMap.RegionsX}x{worldMap.RegionsY}, " +
+            $"размер: {TerrainRegion.TilesPerSide}x{TerrainRegion.TilesPerSide} тайлов; " +
+            "все блоки внутри региона на одном уровне. " +
+            $"Диапазон высот: {minHeight * 0.1f:0.#}-{maxHeight * 0.1f:0.#} м, " +
+            $"разных уровней: {levels.Count}; " +
+            $"карта: {worldMap.TileWidth}x{worldMap.TileHeight} тайлов.");
+    }
+
+    public static void GenerateSmooth(
+        WorldMap worldMap,
+        bool writeLog = true)
     {
         worldMap.DisableDiscreteBlockTerrain();
         worldMap.Water.Clear();
@@ -42,112 +58,26 @@ public static class WorldGenerator
         {
             Console.WriteLine(
                 "[WorldGenerator] " +
-                $"Плавный тест каньона создан: " +
-                $"{worldMap.LayerCount} уровней, шаг высоты 0,1 м.");
+                $"Создана тестовая карта из {worldMap.RegionsX * worldMap.RegionsY} " +
+                $"плоских регионов {TerrainRegion.TilesPerSide}x{TerrainRegion.TilesPerSide}.");
         }
-    }
-
-    public static void GenerateTraversalBlocks(WorldMap worldMap)
-    {
-        if (!worldMap.UsesDiscreteBlockTerrain)
-            worldMap.EnableDiscreteBlockTerrain();
-
-        worldMap.ClearBlockTransitions();
-        for (int y = 1; y < worldMap.TileHeight - 1; y++)
-        {
-            for (int x = 1; x < worldMap.TileWidth - 1; x++)
-            {
-                int level = worldMap.Blocks.GetSurfaceLevel(x, y);
-                if (level <= 0)
-                    continue;
-
-                int bestDifference = 0;
-                BlockDirection bestDirection = BlockDirection.North;
-
-                // Rotate the tie-break order per cell. When two or more
-                // neighbours are equally high, generation must not always
-                // prefer North; all four ramp orientations should occur.
-                int directionOffset = (x + y * 3) & 3;
-                for (int offset = 0; offset < 4; offset++)
-                {
-                    BlockDirection candidateDirection =
-                        (BlockDirection)((directionOffset + offset) & 3);
-                    GetDirectionDelta(candidateDirection, out int dx, out int dy);
-                    int neighborLevel = worldMap.Blocks.GetSurfaceLevel(x + dx, y + dy);
-                    int difference = neighborLevel - level;
-                    if (difference > bestDifference)
-                    {
-                        bestDifference = difference;
-                        bestDirection = candidateDirection;
-                    }
-                }
-
-                // A one-metre step is traversable only when this lower tile
-                // explicitly contains a ramp. Larger cliffs remain solid walls.
-                if (bestDifference != 1)
-                    continue;
-
-                worldMap.SetRamp(x, y, bestDirection);
-            }
-        }
-    }
-
-    private static void GetDirectionDelta(
-        BlockDirection direction,
-        out int dx,
-        out int dy)
-    {
-        dx = direction switch
-        {
-            BlockDirection.East => 1,
-            BlockDirection.West => -1,
-            _ => 0
-        };
-        dy = direction switch
-        {
-            BlockDirection.South => 1,
-            BlockDirection.North => -1,
-            _ => 0
-        };
     }
 
     private static void GenerateBaseTerrain(
         WorldMap worldMap)
     {
-        int centerX =
-            worldMap.TileWidth / 2;
+        int centerX = worldMap.TileWidth / 2;
+        int centerY = worldMap.TileHeight / 2;
+        int rampDistance = Math.Max(1, worldMap.TileHeight / 12);
+        float canyonSpacing = rampDistance * 2f;
 
-        int centerY =
-            worldMap.TileHeight / 2;
+        float[] canyonFloorY = new float[worldMap.TileWidth];
 
-        int layerCount =
-            worldMap.LayerCount;
-
-        // A winding canyon crosses the camera's starting view.
-        // Its floor reaches the bottom layer. Heights are stored in 0.1 m layers.
-        int rampDistance =
-            Math.Max(
-                1,
-                worldMap.TileHeight / 12);
-
-        float canyonSpacing =
-            rampDistance * 2f;
-
-        float[] canyonFloorY =
-            new float[worldMap.TileWidth];
-
-        // Large, slowly winding canyon belts: lower frequencies make the
-        // landforms span hundreds of tiles rather than looking like small noise.
         for (int x = 0; x < worldMap.TileWidth; x++)
         {
-            float dx =
-                x - centerX;
-
-            float broadBend =
-                FractalNoise(x, centerY, 0.0025f, 17) * 30f;
-
-            float smallBend =
-                FractalNoise(x, centerY, 0.009f, 43) * 11f;
+            float dx = x - centerX;
+            float broadBend = FractalNoise(x, centerY, 0.0025f, 17) * 30f;
+            float smallBend = FractalNoise(x, centerY, 0.009f, 43) * 11f;
 
             canyonFloorY[x] =
                 centerY +
@@ -158,69 +88,57 @@ public static class WorldGenerator
                 smallBend;
         }
 
-        for (int y = 0; y < worldMap.TileHeight; y++)
+        // One height sample generates the whole region. Tile-level detail is
+        // preserved in storage and can be expanded by later local edits.
+        for (int regionY = 0; regionY < worldMap.RegionsY; regionY++)
         {
-            for (int x = 0; x < worldMap.TileWidth; x++)
+            for (int regionX = 0; regionX < worldMap.RegionsX; regionX++)
             {
-                float broadRelief =
-                    FractalNoise(x, y, 0.0028f, 101);
+                WorldRegion region = worldMap.GetWorldRegion(regionX, regionY)!;
+                int x = region.TileOriginX + region.TileWidth / 2;
+                int y = region.TileOriginY + region.TileHeight / 2;
 
-                float mediumRelief =
-                    FractalNoise(x, y, 0.0085f, 211);
+                float broadRelief = FractalNoise(x, y, 0.0028f, 101);
+                float mediumRelief = FractalNoise(x, y, 0.0085f, 211);
+                float fineRelief = ValueNoise(x * 0.032f, y * 0.032f, 307);
 
-                float fineRelief =
-                    ValueNoise(x * 0.032f, y * 0.032f, 307);
-
-                // Distort the winding canyon path without softening its cliffs.
                 float warpedOffset =
                     y - canyonFloorY[x] +
                     broadRelief * 15f +
                     mediumRelief * 6f;
 
                 float nearestCanyonOffset =
-                    MathF.Round(
-                        warpedOffset /
-                        canyonSpacing) *
-                    canyonSpacing;
-
+                    MathF.Round(warpedOffset / canyonSpacing) * canyonSpacing;
                 float distanceFromFloor =
-                    MathF.Abs(
-                        warpedOffset -
-                        nearestCanyonOffset);
+                    MathF.Abs(warpedOffset - nearestCanyonOffset);
 
-                // Narrow low canyon floor, a short and steep escarpment,
-                // then a broad high plateau. The one-meter vertical grid stays intact.
-                float floorWidth =
-                    rampDistance * 0.22f;
-
-                float cliffEnd =
-                    rampDistance * 0.36f;
-
+                // The sampling interval is now one full region, so the
+                // canyon profile is widened to remain visible at this scale.
+                float floorWidth = rampDistance * 0.55f;
+                float cliffEnd = rampDistance;
+                float plateauEnd = rampDistance * 1.75f;
                 float shapedHeight;
 
                 if (distanceFromFloor < floorWidth)
                 {
                     shapedHeight =
-                        2f +
-                        distanceFromFloor / floorWidth * 3f;
+                        2f + distanceFromFloor / floorWidth * 3f;
                 }
                 else if (distanceFromFloor < cliffEnd)
                 {
                     float amount =
                         (distanceFromFloor - floorWidth) /
                         (cliffEnd - floorWidth);
-
-                    shapedHeight =
-                        Lerp(5f, 38f, amount);
+                    shapedHeight = Lerp(5f, 38f, amount);
                 }
                 else
                 {
-                    float amount =
+                    float amount = Math.Clamp(
                         (distanceFromFloor - cliffEnd) /
-                        (rampDistance - cliffEnd);
-
-                    shapedHeight =
-                        Lerp(38f, 48f, amount);
+                        (plateauEnd - cliffEnd),
+                        0f,
+                        1f);
+                    shapedHeight = Lerp(38f, 48f, amount);
                 }
 
                 shapedHeight +=
@@ -228,49 +146,49 @@ public static class WorldGenerator
                     mediumRelief * 2f +
                     fineRelief * 1.2f;
 
-                // Large flat-topped mesa to one side of the central canyon.
-                shapedHeight =
-                    ApplyMesa(
-                        x,
-                        y,
-                        centerX + 58f,
-                        centerY - 9f,
-                        48f,
-                        36f,
-                        shapedHeight,
-                        mediumRelief,
-                        fineRelief);
+                float regionScale =
+                    TerrainRegion.TilesPerSide / 48f;
 
-                // Deep basin with a raised, steep outer rim on the opposite side.
-                shapedHeight =
-                    ApplyRimmedBasin(
-                        x,
-                        y,
-                        centerX - 61f,
-                        centerY + 19f,
-                        40f,
-                        29f,
-                        shapedHeight,
-                        broadRelief,
-                        mediumRelief,
-                        fineRelief);
+                // These landforms used to be smaller than one region.
+                // Scale them with the region step so their silhouettes survive
+                // coarse one-height-per-region generation.
+                shapedHeight = ApplyMesa(
+                    x, y,
+                    centerX + 58f * regionScale,
+                    centerY - 9f * regionScale,
+                    48f * regionScale,
+                    36f * regionScale,
+                    shapedHeight,
+                    mediumRelief,
+                    fineRelief);
 
-                int heightLayers =
-                    Math.Clamp(
-                        (int)MathF.Round(
-                            shapedHeight *
-                            WorldMap.HeightUnitsPerMeter /
-                            WorldMap.LayerHeightUnits),
-                        1,
-                        layerCount);
+                shapedHeight = ApplyRimmedBasin(
+                    x, y,
+                    centerX - 61f * regionScale,
+                    centerY + 19f * regionScale,
+                    40f * regionScale,
+                    29f * regionScale,
+                    shapedHeight,
+                    broadRelief,
+                    mediumRelief,
+                    fineRelief);
 
-                worldMap.SetSolidHeight(
-                    x,
-                    y,
-                    checked(
-                        (ushort)(
-                            heightLayers *
-                            WorldMap.LayerHeightUnits)),
+                // Region heights are deliberately stepped so region
+                // boundaries are easy to inspect before detailed terrain returns.
+                shapedHeight = MathF.Round(shapedHeight / 2f) * 2f;
+
+                int heightUnits = Math.Clamp(
+                    (int)MathF.Round(
+                        shapedHeight *
+                        WorldMap.HeightUnitsPerMeter /
+                        WorldMap.LayerHeightUnits),
+                    1,
+                    worldMap.LayerCount);
+
+                worldMap.SetRegionSolidHeight(
+                    regionX,
+                    regionY,
+                    checked((ushort)heightUnits),
                     BaseMaterialId);
             }
         }
@@ -294,30 +212,17 @@ public static class WorldGenerator
         if (distance >= 1f)
             return currentHeight;
 
-        float topHeight =
-            43f +
-            mediumRelief * 1.5f +
-            fineRelief;
-
+        float topHeight = 43f + mediumRelief * 1.5f + fineRelief;
         if (distance <= 0.62f)
             return topHeight;
 
         if (distance <= 0.76f)
-        {
-            float amount = (distance - 0.62f) / 0.14f;
-            return Lerp(topHeight, 12f, amount);
-        }
+            return Lerp(topHeight, 12f, (distance - 0.62f) / 0.14f);
 
         if (distance <= 0.88f)
-        {
-            float amount = (distance - 0.76f) / 0.12f;
-            return Lerp(12f, 7f, amount);
-        }
+            return Lerp(12f, 7f, (distance - 0.76f) / 0.12f);
 
-        return Lerp(
-            7f,
-            currentHeight,
-            (distance - 0.88f) / 0.12f);
+        return Lerp(7f, currentHeight, (distance - 0.88f) / 0.12f);
     }
 
     private static float ApplyRimmedBasin(
@@ -349,27 +254,15 @@ public static class WorldGenerator
         }
 
         if (distance <= 0.70f)
-        {
-            float amount = (distance - 0.52f) / 0.18f;
-            return Lerp(5f, 40f, amount);
-        }
+            return Lerp(5f, 40f, (distance - 0.52f) / 0.18f);
 
         if (distance <= 0.80f)
-        {
-            float amount = (distance - 0.70f) / 0.10f;
-            return Lerp(40f, 34f, amount);
-        }
+            return Lerp(40f, 34f, (distance - 0.70f) / 0.10f);
 
         if (distance <= 0.92f)
-        {
-            float amount = (distance - 0.80f) / 0.12f;
-            return Lerp(34f, 11f, amount);
-        }
+            return Lerp(34f, 11f, (distance - 0.80f) / 0.12f);
 
-        return Lerp(
-            11f,
-            currentHeight,
-            (distance - 0.92f) / 0.08f);
+        return Lerp(11f, currentHeight, (distance - 0.92f) / 0.08f);
     }
 
     private static float FractalNoise(
@@ -385,12 +278,10 @@ public static class WorldGenerator
 
         for (int octave = 0; octave < 3; octave++)
         {
-            total +=
-                ValueNoise(
-                    x * frequency,
-                    y * frequency,
-                    seed + octave * 1013) *
-                amplitude;
+            total += ValueNoise(
+                x * frequency,
+                y * frequency,
+                seed + octave * 1013) * amplitude;
 
             amplitudeSum += amplitude;
             amplitude *= 0.5f;
@@ -449,5 +340,4 @@ public static class WorldGenerator
     {
         return a + (b - a) * amount;
     }
-
 }

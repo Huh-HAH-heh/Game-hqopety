@@ -3,12 +3,12 @@ using System;
 namespace Core.Map;
 
 /// <summary>
-/// A region owned by exactly one TerrainLayer (one Z level).
+/// A 192 x 192 terrain storage slice at one Z level inside a WorldRegion.
 /// Each entry is a 1 x 1 x 0.1 meter terrain cell's material ID.
 /// </summary>
 public sealed class TerrainRegion
 {
-    public const int TilesPerSide = 48;
+    public const int TilesPerSide = 192;
 
     public const int TotalTiles =
         TilesPerSide * TilesPerSide;
@@ -18,7 +18,7 @@ public sealed class TerrainRegion
     public int ZLevel { get; }
 
     // Most voxel chunks are entirely empty or entirely solid at a given Z.
-    // Store those chunks as one material ID and allocate the 48x48 buffer
+    // Store those chunks as one material ID and allocate the 192x192 buffer
     // only for layers that actually contain mixed materials.
     private ushort[]? _materialIds;
     private ulong[]? _overrideBits;
@@ -146,6 +146,11 @@ public sealed class TerrainRegion
             throw new IndexOutOfRangeException();
 
         SetCellMaterial(localIndex, materialId);
+    }
+
+    internal void SetUniformMaterial(ushort materialId)
+    {
+        CollapseUniform(materialId);
     }
 
     internal void Clear()

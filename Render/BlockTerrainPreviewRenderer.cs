@@ -53,12 +53,12 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         // Keep the detailed 1 m mesh for close inspection only.
         // At normal overview zoom, larger patches avoid submitting tens of
         // thousands of individual block faces to the GPU.
-        int step = pixelsPerTile < 1.25f ? 64
-            : pixelsPerTile < 2.5f ? 32
-            : pixelsPerTile < 5f ? 16
-            : pixelsPerTile < 10f ? 8
-            : pixelsPerTile < 20f ? 4
-            : pixelsPerTile < 40f ? 2
+        int step = pixelsPerTile < 1.25f ? TerrainRegion.TilesPerSide
+            : pixelsPerTile < 2.5f ? TerrainRegion.TilesPerSide / 2
+            : pixelsPerTile < 5f ? TerrainRegion.TilesPerSide / 4
+            : pixelsPerTile < 10f ? 24
+            : pixelsPerTile < 20f ? 8
+            : pixelsPerTile < 40f ? 4
             : 1;
 
         bool cameraMovedOutsideCache =
@@ -96,7 +96,23 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                 out int maxX,
                 out int minY,
                 out int maxY);
-    
+
+            // Preserve local sub-region structure whenever any visible region
+            // has diverged from its generated uniform surface.
+            int minRegionX = minX / TerrainRegion.TilesPerSide;
+            int maxRegionX = maxX / TerrainRegion.TilesPerSide;
+            int minRegionY = minY / TerrainRegion.TilesPerSide;
+            int maxRegionY = maxY / TerrainRegion.TilesPerSide;
+            for (int regionY = minRegionY; regionY <= maxRegionY; regionY++)
+            {
+                for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
+                {
+                    WorldRegion? region = worldMap.GetWorldRegion(regionX, regionY);
+                    if (region != null && !region.HasUniformSurface)
+                        step = Math.Min(step, TerrainRegion.TilesPerSide / 4);
+                }
+            }
+
             minX = minX / step * step;
             minY = minY / step * step;
             maxX = Math.Min(worldMap.MaxTileX, maxX);
@@ -117,68 +133,17 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
     
                     int surfaceLayer = worldMap.FindTopOccupiedLayer(
                         x, y, worldMap.LayerCount - 1);
-                    float baseHeight;
-                    BlockDirection rampDirection = BlockDirection.North;
-                    bool isRamp;
+                    if (surfaceLayer < 0)
+                        continue;
 
-                    if (step == 1)
-                    {
-                        if (surfaceLayer < 0)
-                            continue;
+                    float baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
+                    if (baseHeight <= 0f)
+                        baseHeight = (surfaceLayer + 1f) * 0.1f;
 
-                        baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
-                        if (baseHeight <= 0f)
-                            baseHeight = (surfaceLayer + 1f) * 0.1f;
-
-                        isRamp = TryGetValidRamp(
-                            worldMap,
-                            x,
-                            y,
-                            out rampDirection,
-                            out _);
-                    }
-                    else if (TrySummarizeRampPatch(
-                                 worldMap,
-                                 x,
-                                 y,
-                                 step,
-                                 out rampDirection,
-                                 out baseHeight))
-                    {
-                        // Several one-metre ramps collapse to one coarse ramp
-                        // for this patch. At distant LOD we keep only the
-                        // dominant direction, rather than appending every ramp.
-                        isRamp = true;
-                    }
-                    else
-                    {
-                        if (surfaceLayer < 0)
-                            continue;
-
-                        baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
-                        if (baseHeight <= 0f)
-                            baseHeight = (surfaceLayer + 1f) * 0.1f;
-
-                        isRamp = false;
-                    }
-
-                    BlockTransitionType transition = isRamp
-                        ? BlockTransitionType.Ramp
-                        : BlockTransitionType.None;
                     float northZ = baseHeight;
                     float eastZ = baseHeight;
                     float southZ = baseHeight;
                     float westZ = baseHeight;
-
-                    if (isRamp)
-                    {
-                        ApplyRampSlope(
-                            rampDirection,
-                            ref northZ,
-                            ref eastZ,
-                            ref southZ,
-                            ref westZ);
-                    }
 
                     Vector2f north = Project(x, y, northZ, tileSize);
                     Vector2f east = Project(x + step, y, eastZ, tileSize);
@@ -210,7 +175,7 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
                     ushort materialId = surfaceLayer >= 0
                         ? worldMap.GetMaterialId(x, y, surfaceLayer)
                         : (ushort)0;
-                    Color topColor = GetTopColor(materialId, baseHeight, transition);
+                    Color topColor = GetTopColor(materialId, baseHeight);
                     AppendTopFace(_blockFaces, north, east, south, west, topColor);
     
                     // Thin seams expose the individual metre blocks without
@@ -235,133 +200,6 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
         window.Draw(_blockFaces);
         if (pixelsPerTile >= 2.4f)
             window.Draw(_blockSeams);
-    }
-
-    private static bool TryGetValidRamp(
-        WorldMap worldMap,
-        int x,
-        int y,
-        out BlockDirection direction,
-        out float baseHeight)
-    {
-        direction = worldMap.Blocks.GetTransitionDirection(x, y);
-        baseHeight = worldMap.Blocks.GetSurfaceLevel(x, y);
-
-        if (worldMap.Blocks.GetTransitionType(x, y) != BlockTransitionType.Ramp ||
-            baseHeight <= 0f)
-        {
-            return false;
-        }
-
-        GetDirectionDelta(direction, out int dx, out int dy);
-        return worldMap.Blocks.GetSurfaceLevel(x + dx, y + dy) ==
-               baseHeight + 1f;
-    }
-
-    private static void GetDirectionDelta(
-        BlockDirection direction,
-        out int dx,
-        out int dy)
-    {
-        dx = direction switch
-        {
-            BlockDirection.East => 1,
-            BlockDirection.West => -1,
-            _ => 0
-        };
-        dy = direction switch
-        {
-            BlockDirection.South => 1,
-            BlockDirection.North => -1,
-            _ => 0
-        };
-    }
-
-    private static void ApplyRampSlope(
-        BlockDirection direction,
-        ref float northZ,
-        ref float eastZ,
-        ref float southZ,
-        ref float westZ)
-    {
-        switch (direction)
-        {
-            case BlockDirection.North:
-                northZ += 1f;
-                eastZ += 1f;
-                break;
-            case BlockDirection.East:
-                eastZ += 1f;
-                southZ += 1f;
-                break;
-            case BlockDirection.South:
-                southZ += 1f;
-                westZ += 1f;
-                break;
-            case BlockDirection.West:
-                westZ += 1f;
-                northZ += 1f;
-                break;
-        }
-    }
-
-    private static bool TrySummarizeRampPatch(
-        WorldMap worldMap,
-        int startX,
-        int startY,
-        int step,
-        out BlockDirection dominantDirection,
-        out float averageBaseHeight)
-    {
-        Span<int> directionCounts = stackalloc int[4];
-        int totalRamps = 0;
-        float heightSum = 0f;
-
-        int maxX = Math.Min(worldMap.MaxTileX, startX + step - 1);
-        int maxY = Math.Min(worldMap.MaxTileY, startY + step - 1);
-        for (int y = startY; y <= maxY; y++)
-        {
-            for (int x = startX; x <= maxX; x++)
-            {
-                if (!TryGetValidRamp(
-                        worldMap,
-                        x,
-                        y,
-                        out BlockDirection direction,
-                        out float baseHeight))
-                {
-                    continue;
-                }
-
-                directionCounts[(int)direction]++;
-                totalRamps++;
-                heightSum += baseHeight;
-            }
-        }
-
-        int bestDirection = -1;
-        int bestCount = 0;
-        for (int direction = 0; direction < directionCounts.Length; direction++)
-        {
-            if (directionCounts[direction] > bestCount)
-            {
-                bestCount = directionCounts[direction];
-                bestDirection = direction;
-            }
-        }
-
-        // Mixed patches with no clear majority should not invent a ramp
-        // direction. They stay a flat distant-LOD surface instead.
-        if (totalRamps == 0 || bestCount * 2 <= totalRamps)
-        {
-            dominantDirection = BlockDirection.North;
-            averageBaseHeight = 0f;
-            return false;
-        }
-
-        dominantDirection = (BlockDirection)bestDirection;
-        averageBaseHeight = heightSum / totalRamps;
-        return true;
     }
 
     private void AppendSideFace(
@@ -467,12 +305,8 @@ public sealed class BlockTerrainPreviewRenderer : IDisposable
 
     private static Color GetTopColor(
         ushort materialId,
-        float heightMeters,
-        BlockTransitionType transition)
+        float heightMeters)
     {
-        if (transition == BlockTransitionType.Ramp)
-            return new Color(157, 132, 91, 255);
-
         int shade = Math.Clamp(103 + (int)(heightMeters * 0.35f), 92, 132);
         int materialTint = materialId == 1 ? 0 : (materialId % 3) * 5;
         return new Color(
