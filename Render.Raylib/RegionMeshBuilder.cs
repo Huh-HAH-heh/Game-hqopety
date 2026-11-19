@@ -27,8 +27,8 @@ internal static class RegionMeshBuilder
 {
     /// <summary>
     /// Builds one GPU batch for a 192x192 storage region. Its surface is sampled
-    /// from 4x4-tile render regions, so small edits do not create individual
-    /// draw calls or GPU objects for every render region.
+    /// from 4x4-tile render regions. Uniform areas are merged into large quads;
+    /// detailed areas retain the smaller patch geometry.
     /// </summary>
     public static RegionGpuMesh Build(
         TerrainRenderSnapshot terrain,
@@ -41,13 +41,30 @@ internal static class RegionMeshBuilder
         int firstRenderX = storageRegionX * patchesPerSide;
         int firstRenderY = storageRegionY * patchesPerSide;
 
-        float maximumHeight = 0f;
-        int quadCount = CountQuads(
+        bool uniform = TryGetUniformSurface(
             terrain,
             firstRenderX,
             firstRenderY,
             patchesPerSide,
-            ref maximumHeight);
+            out float uniformHeight,
+            out ushort uniformMaterial);
+
+        float maximumHeight = 0f;
+        int quadCount = uniform
+            ? CountUniformQuads(
+                terrain,
+                firstRenderX,
+                firstRenderY,
+                patchesPerSide,
+                uniformHeight,
+                uniformMaterial,
+                ref maximumHeight)
+            : CountDetailedQuads(
+                terrain,
+                firstRenderX,
+                firstRenderY,
+                patchesPerSide,
+                ref maximumHeight);
 
         RegionGpuMesh result = new()
         {
@@ -81,6 +98,264 @@ internal static class RegionMeshBuilder
         int vertexOffset = 0;
         int indexOffset = 0;
 
+        if (uniform)
+        {
+            BuildUniformGeometry(
+                terrain,
+                firstRenderX,
+                firstRenderY,
+                patchesPerSide,
+                uniformHeight,
+                uniformMaterial,
+                vertices,
+                normals,
+                colors,
+                indices,
+                ref vertexOffset,
+                ref indexOffset);
+        }
+        else
+        {
+            BuildDetailedGeometry(
+                terrain,
+                firstRenderX,
+                firstRenderY,
+                patchesPerSide,
+                vertices,
+                normals,
+                colors,
+                indices,
+                ref vertexOffset,
+                ref indexOffset);
+        }
+
+        UploadMesh(ref mesh, false);
+        result.Mesh = mesh;
+        result.IsUploaded = true;
+        return result;
+    }
+
+    private static bool TryGetUniformSurface(
+        TerrainRenderSnapshot terrain,
+        int firstRenderX,
+        int firstRenderY,
+        int patchesPerSide,
+        out float height,
+        out ushort materialId)
+    {
+        height = terrain.GetHeightMeters(firstRenderX, firstRenderY);
+        materialId = terrain.GetMaterialId(firstRenderX, firstRenderY);
+
+        for (int y = 0; y < patchesPerSide; y++)
+        {
+            for (int x = 0; x < patchesPerSide; x++)
+            {
+                int renderX = firstRenderX + x;
+                int renderY = firstRenderY + y;
+
+                if (terrain.GetHeightMeters(renderX, renderY) != height ||
+                    terrain.GetMaterialId(renderX, renderY) != materialId)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static int CountUniformQuads(
+        TerrainRenderSnapshot terrain,
+        int firstRenderX,
+        int firstRenderY,
+        int patchesPerSide,
+        float height,
+        ushort materialId,
+        ref float maximumHeight)
+    {
+        if (height <= 0f || materialId == 0)
+            return 0;
+
+        maximumHeight = height;
+        int quadCount = 1;
+        
+        for (int i = 0; i < patchesPerSide; i++)
+        {
+            if (height > terrain.GetHeightMeters(firstRenderX + i, firstRenderY - 1))
+                quadCount++;
+            if (height > terrain.GetHeightMeters(firstRenderX + i, firstRenderY + patchesPerSide))
+                quadCount++;
+            if (height > terrain.GetHeightMeters(firstRenderX - 1, firstRenderY + i))
+                quadCount++;
+            if (height > terrain.GetHeightMeters(firstRenderX + patchesPerSide, firstRenderY + i))
+                quadCount++;
+        }
+
+        return quadCount;
+    }
+
+    private static void BuildUniformGeometry(
+        TerrainRenderSnapshot terrain,
+        int firstRenderX,
+        int firstRenderY,
+        int patchesPerSide,
+        float height,
+        ushort materialId,
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset)
+    {
+        if (height <= 0f || materialId == 0)
+            return;
+
+        float x0 = firstRenderX * terrain.RegionSize;
+        float x1 = x0 + terrain.StorageRegionSize;
+        float z0 = firstRenderY * terrain.RegionSize;
+        float z1 = z0 + terrain.StorageRegionSize;
+        Color topColor = GetSurfaceColor(height);
+        Color wallColor = Darken(topColor, 0.57f);
+
+        AddQuad(
+            vertices, normals, colors, indices,
+            ref vertexOffset, ref indexOffset,
+            new Vector3(x0, height, z0),
+            new Vector3(x1, height, z0),
+            new Vector3(x1, height, z1),
+            new Vector3(x0, height, z1),
+            Vector3.UnitY,
+            topColor,
+            reverseWinding: true);
+
+        for (int i = 0; i < patchesPerSide; i++)
+        {
+            float north = terrain.GetHeightMeters(firstRenderX + i, firstRenderY - 1);
+            if (height > north)
+            {
+                float segmentX0 = x0 + i * terrain.RegionSize;
+                float segmentX1 = segmentX0 + terrain.RegionSize;
+                AddQuad(
+                    vertices, normals, colors, indices,
+                    ref vertexOffset, ref indexOffset,
+                    new Vector3(segmentX0, height, z0),
+                    new Vector3(segmentX1, height, z0),
+                    new Vector3(segmentX1, north, z0),
+                    new Vector3(segmentX0, north, z0),
+                    -Vector3.UnitZ,
+                    wallColor);
+            }
+
+            float south = terrain.GetHeightMeters(
+                firstRenderX + i,
+                firstRenderY + patchesPerSide);
+            if (height > south)
+            {
+                float segmentX0 = x0 + i * terrain.RegionSize;
+                float segmentX1 = segmentX0 + terrain.RegionSize;
+                AddQuad(
+                    vertices, normals, colors, indices,
+                    ref vertexOffset, ref indexOffset,
+                    new Vector3(segmentX1, height, z1),
+                    new Vector3(segmentX0, height, z1),
+                    new Vector3(segmentX0, south, z1),
+                    new Vector3(segmentX1, south, z1),
+                    Vector3.UnitZ,
+                    wallColor);
+            }
+
+            float west = terrain.GetHeightMeters(
+                firstRenderX - 1,
+                firstRenderY + i);
+            if (height > west)
+            {
+                float segmentZ0 = z0 + i * terrain.RegionSize;
+                float segmentZ1 = segmentZ0 + terrain.RegionSize;
+                AddQuad(
+                    vertices, normals, colors, indices,
+                    ref vertexOffset, ref indexOffset,
+                    new Vector3(x0, height, segmentZ1),
+                    new Vector3(x0, height, segmentZ0),
+                    new Vector3(x0, west, segmentZ0),
+                    new Vector3(x0, west, segmentZ1),
+                    -Vector3.UnitX,
+                    wallColor);
+            }
+
+            float east = terrain.GetHeightMeters(
+                firstRenderX + patchesPerSide,
+                firstRenderY + i);
+            if (height > east)
+            {
+                float segmentZ0 = z0 + i * terrain.RegionSize;
+                float segmentZ1 = segmentZ0 + terrain.RegionSize;
+                AddQuad(
+                    vertices, normals, colors, indices,
+                    ref vertexOffset, ref indexOffset,
+                    new Vector3(x1, height, segmentZ0),
+                    new Vector3(x1, height, segmentZ1),
+                    new Vector3(x1, east, segmentZ1),
+                    new Vector3(x1, east, segmentZ0),
+                    Vector3.UnitX,
+                    wallColor);
+            }
+        }
+    }
+
+    private static int CountDetailedQuads(
+        TerrainRenderSnapshot terrain,
+        int firstRenderX,
+        int firstRenderY,
+        int patchesPerSide,
+        ref float maximumHeight)
+    {
+        int quadCount = 0;
+
+        for (int localY = 0; localY < patchesPerSide; localY++)
+        {
+            int renderY = firstRenderY + localY;
+
+            for (int localX = 0; localX < patchesPerSide; localX++)
+            {
+                int renderX = firstRenderX + localX;
+                float height = terrain.GetHeightMeters(renderX, renderY);
+
+                if (height <= 0f ||
+                    terrain.GetMaterialId(renderX, renderY) == 0)
+                {
+                    continue;
+                }
+
+                maximumHeight = MathF.Max(maximumHeight, height);
+                quadCount++;
+
+                if (height > terrain.GetHeightMeters(renderX, renderY - 1))
+                    quadCount++;
+                if (height > terrain.GetHeightMeters(renderX, renderY + 1))
+                    quadCount++;
+                if (height > terrain.GetHeightMeters(renderX - 1, renderY))
+                    quadCount++;
+                if (height > terrain.GetHeightMeters(renderX + 1, renderY))
+                    quadCount++;
+            }
+        }
+
+        return quadCount;
+    }
+
+    private static void BuildDetailedGeometry(
+        TerrainRenderSnapshot terrain,
+        int firstRenderX,
+        int firstRenderY,
+        int patchesPerSide,
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset)
+    {
         for (int localY = 0; localY < patchesPerSide; localY++)
         {
             int renderY = firstRenderY + localY;
@@ -175,52 +450,6 @@ internal static class RegionMeshBuilder
                 }
             }
         }
-
-        UploadMesh(ref mesh, false);
-        result.Mesh = mesh;
-        result.IsUploaded = true;
-        return result;
-    }
-
-    private static int CountQuads(
-        TerrainRenderSnapshot terrain,
-        int firstRenderX,
-        int firstRenderY,
-        int patchesPerSide,
-        ref float maximumHeight)
-    {
-        int quadCount = 0;
-
-        for (int localY = 0; localY < patchesPerSide; localY++)
-        {
-            int renderY = firstRenderY + localY;
-
-            for (int localX = 0; localX < patchesPerSide; localX++)
-            {
-                int renderX = firstRenderX + localX;
-                float height = terrain.GetHeightMeters(renderX, renderY);
-
-                if (height <= 0f ||
-                    terrain.GetMaterialId(renderX, renderY) == 0)
-                {
-                    continue;
-                }
-
-                maximumHeight = MathF.Max(maximumHeight, height);
-                quadCount++;
-
-                if (height > terrain.GetHeightMeters(renderX, renderY - 1))
-                    quadCount++;
-                if (height > terrain.GetHeightMeters(renderX, renderY + 1))
-                    quadCount++;
-                if (height > terrain.GetHeightMeters(renderX - 1, renderY))
-                    quadCount++;
-                if (height > terrain.GetHeightMeters(renderX + 1, renderY))
-                    quadCount++;
-            }
-        }
-
-        return quadCount;
     }
 
     private static void AddQuad(
