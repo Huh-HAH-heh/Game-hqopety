@@ -12,7 +12,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 {
     private readonly RegionGpuMesh[] _regionMeshes;
     private readonly Material _material;
-    private bool _undergroundSliceMode;
     private bool _disposed;
 
     public int DrawCallsLastFrame { get; private set; }
@@ -30,8 +29,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     {
         ThrowIfDisposed();
 
-        bool rebuildAll = _undergroundSliceMode;
-        _undergroundSliceMode = false;
+        bool rebuildAll = false;
 
         for (int regionY = 0; regionY < terrain.StorageRegionsY; regionY++)
         {
@@ -59,10 +57,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         }
     }
 
-    public void SynchronizeUndergroundSlice(TerrainRenderSnapshot terrain)
+    public void SynchronizeCutaway(TerrainRenderSnapshot terrain)
     {
         ThrowIfDisposed();
-        _undergroundSliceMode = true;
 
         for (int regionY = 0; regionY < terrain.StorageRegionsY; regionY++)
         {
@@ -70,7 +67,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             {
                 int index = regionX + regionY * terrain.StorageRegionsX;
                 _regionMeshes[index]?.Dispose();
-                _regionMeshes[index] = RegionMeshBuilder.BuildUndergroundSlice(
+                _regionMeshes[index] = RegionMeshBuilder.Build(
                     terrain,
                     regionX,
                     regionY);
