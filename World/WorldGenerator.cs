@@ -140,7 +140,7 @@ public static class WorldGenerator
                 shapedHeight = ApplyMesa(
                     sampleX, sampleY,
                     centerX + 58f, centerY - 9f,
-                    48f, 36f,
+                    74f, 56f,
                     shapedHeight,
                     mediumRelief,
                     fineRelief);
@@ -172,22 +172,23 @@ public static class WorldGenerator
         int caveCenterX = centerX + 58;
         int caveCenterY = centerY - 9;
         int tunnelStartX = Math.Clamp(
-            caveCenterX - 26,
+            caveCenterX - 6,
             0,
-            worldMap.TileWidth - 52);
+            worldMap.TileWidth - 12);
         int tunnelStartY = Math.Clamp(
-            caveCenterY - 7,
+            caveCenterY - 26,
             0,
-            worldMap.TileHeight - 12);
+            worldMap.TileHeight - 52);
 
-        // A 52 m tunnel and a wider chamber are carved inside the generated
-        // mesa. The 4x4 m shaft connects the underground system to the surface.
+        // The tunnel runs across the mesa's short axis. Both ends stay inside
+        // the high plateau and are sealed by rock; only the vertical shaft
+        // connects the underground system to the surface.
         worldMap.CarveStaticVolume(
             tunnelStartX,
             tunnelStartY,
             zLevel: 14,
-            width: 52,
-            depth: 12,
+            width: 12,
+            depth: 52,
             heightInMeters: 5);
 
         worldMap.CarveStaticVolume(
@@ -254,8 +255,16 @@ public static class WorldGenerator
         }
 
         ushort solidOutsideTunnel = worldMap.GetMaterialId(
+            proofX - 12,
+            proofY,
+            proofSliceLayer);
+        ushort northTunnelCap = worldMap.GetMaterialId(
             proofX,
-            proofY - 16,
+            tunnelStartY - 1,
+            proofSliceLayer);
+        ushort southTunnelCap = worldMap.GetMaterialId(
+            proofX,
+            tunnelStartY + 52,
             proofSliceLayer);
         ushort openedShaftSurface = worldMap.GetSurfaceHeightUnits(
             shaftX + 2,
@@ -264,6 +273,8 @@ public static class WorldGenerator
         if (!hasAirGap ||
             !hasSolidFloor ||
             solidOutsideTunnel == 0 ||
+            northTunnelCap == 0 ||
+            southTunnelCap == 0 ||
             openedShaftSurface >= 20 * WorldMap.HeightUnitsPerMeter)
         {
             throw new InvalidOperationException(
@@ -274,14 +285,14 @@ public static class WorldGenerator
         if (writeLog)
         {
             Console.WriteLine(
-                "[WorldGenerator] Static cave verified: " +
-                $"air at {proofSliceLayer * 0.1f:0.0}m, " +
-                "solid floor at 11m, solid wall outside, open shaft.");
+                "[WorldGenerator] Enclosed tunnel verified: " +
+                $"air at {proofSliceLayer * 0.1f:0.0}m, solid floor at 11m, " +
+                "solid side wall, both end caps closed, shaft open.");
             Console.WriteLine(
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
                 $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
-                "static cave: 52m tunnel + 20x20m chamber + 4x4m surface shaft.");
+                "static cave: enclosed 52m tunnel + 20x20m chamber + 4x4m shaft.");
         }
     }
 
