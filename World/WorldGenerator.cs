@@ -266,6 +266,10 @@ public static class WorldGenerator
             proofX,
             tunnelStartY + 52,
             proofSliceLayer);
+        ushort tunnelRoof = worldMap.GetMaterialId(
+            proofX,
+            tunnelStartY + 4,
+            19 * WorldMap.HeightUnitsPerMeter);
         ushort openedShaftSurface = worldMap.GetSurfaceHeightUnits(
             shaftX + 2,
             shaftY + 2);
@@ -275,6 +279,7 @@ public static class WorldGenerator
             solidOutsideTunnel == 0 ||
             northTunnelCap == 0 ||
             southTunnelCap == 0 ||
+            tunnelRoof == 0 ||
             openedShaftSurface >= 20 * WorldMap.HeightUnitsPerMeter)
         {
             throw new InvalidOperationException(
@@ -287,7 +292,7 @@ public static class WorldGenerator
             Console.WriteLine(
                 "[WorldGenerator] Enclosed tunnel verified: " +
                 $"air at {proofSliceLayer * 0.1f:0.0}m, solid floor at 11m, " +
-                "solid side wall, both end caps closed, shaft open.");
+                "solid floor and roof, side walls, both end caps closed, shaft open.");
             Console.WriteLine(
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
