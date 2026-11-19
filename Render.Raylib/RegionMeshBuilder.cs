@@ -338,7 +338,7 @@ internal static class RegionMeshBuilder
             ref vertexOffset, ref indexOffset,
             a, b, c, d,
             Vector3.UnitY,
-            ContourColor,
+            BrightContourColor,
             reverseWinding: true);
     }
 
