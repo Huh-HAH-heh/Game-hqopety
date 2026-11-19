@@ -1,4 +1,5 @@
 using System.Numerics;
+using Core.Map;
 using Raylib_cs;
 using static Raylib_cs.Raylib;
 
@@ -241,13 +242,10 @@ internal static class RegionMeshBuilder
                 terrain,
                 renderX,
                 renderY - 1,
-                renderX,
-                renderY,
-                cutLayer,
                 visibleStart,
                 visibleEnd,
                 range.MaterialId,
-                side: 0,
+                0,
                 x0, x1, z0, z1,
                 neighbourBuffer,
                 quads);
@@ -256,13 +254,10 @@ internal static class RegionMeshBuilder
                 terrain,
                 renderX,
                 renderY + 1,
-                renderX,
-                renderY,
-                cutLayer,
                 visibleStart,
                 visibleEnd,
                 range.MaterialId,
-                side: 1,
+                1,
                 x0, x1, z0, z1,
                 neighbourBuffer,
                 quads);
@@ -271,13 +266,10 @@ internal static class RegionMeshBuilder
                 terrain,
                 renderX - 1,
                 renderY,
-                renderX,
-                renderY,
-                cutLayer,
                 visibleStart,
                 visibleEnd,
                 range.MaterialId,
-                side: 2,
+                2,
                 x0, x1, z0, z1,
                 neighbourBuffer,
                 quads);
@@ -286,13 +278,10 @@ internal static class RegionMeshBuilder
                 terrain,
                 renderX + 1,
                 renderY,
-                renderX,
-                renderY,
-                cutLayer,
                 visibleStart,
                 visibleEnd,
                 range.MaterialId,
-                side: 3,
+                3,
                 x0, x1, z0, z1,
                 neighbourBuffer,
                 quads);
@@ -328,9 +317,6 @@ internal static class RegionMeshBuilder
         TerrainRenderSnapshot terrain,
         int neighbourX,
         int neighbourY,
-        int currentX,
-        int currentY,
-        int cutLayer,
         int visibleStart,
         int visibleEnd,
         ushort materialId,
