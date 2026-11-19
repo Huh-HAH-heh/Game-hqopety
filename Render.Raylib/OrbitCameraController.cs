@@ -193,32 +193,32 @@ internal sealed class OrbitCameraController
 
     private void PanByMouseDelta(Vector2 mouseDelta)
     {
-        Vector2 cursor = new(
-            GetScreenWidth() * 0.5f,
-            GetScreenHeight() * 0.5f);
-        Vector2 previousCursor = cursor - mouseDelta;
+        float viewportHeight = Math.Max(1, GetScreenHeight());
+        float worldUnitsPerPixel =
+            2f * _desiredDistance *
+            MathF.Tan(FieldOfViewDegrees * MathF.PI / 360f) /
+            viewportHeight;
 
-        if (!TryGetTargetPlanePoint(
-                cursor,
-                _desiredTarget,
-                _desiredYawRadians,
-                _desiredPitchRadians,
-                _desiredDistance,
-                out Vector3 currentPoint) ||
-            !TryGetTargetPlanePoint(
-                previousCursor,
-                _desiredTarget,
-                _desiredYawRadians,
-                _desiredPitchRadians,
-                _desiredDistance,
-                out Vector3 previousPoint))
-        {
-            return;
-        }
+        float sinPitch = MathF.Max(
+            0.25f,
+            MathF.Sin(_desiredPitchRadians));
 
-        // Move the camera opposite to the pointer's ground-plane displacement.
-        _desiredTarget.X += previousPoint.X - currentPoint.X;
-        _desiredTarget.Z += previousPoint.Z - currentPoint.Z;
+        Vector3 right = new(
+            MathF.Cos(_desiredYawRadians),
+            0f,
+            -MathF.Sin(_desiredYawRadians));
+
+        Vector3 groundForward = new(
+            -MathF.Sin(_desiredYawRadians),
+            0f,
+            -MathF.Cos(_desiredYawRadians));
+
+        // Use the analytic screen-to-ground scale. Ray/plane intersections
+        // become unstable near the horizon and made MMB panning stop abruptly.
+        _desiredTarget -= right *
+            (mouseDelta.X * worldUnitsPerPixel);
+        _desiredTarget -= groundForward *
+            (mouseDelta.Y * worldUnitsPerPixel / sinPitch);
     }
 
     private void UpdateZoomInput()
