@@ -25,45 +25,47 @@ internal sealed class RegionGpuMesh : IDisposable
 
 internal static class RegionMeshBuilder
 {
-    private const int MaximumQuads = 5;
-
+    /// <summary>
+    /// Builds one GPU batch for a 192x192 storage region. Its surface is sampled
+    /// from 4x4-tile render regions, so small edits do not create individual
+    /// draw calls or GPU objects for every render region.
+    /// </summary>
     public static RegionGpuMesh Build(
         TerrainRenderSnapshot terrain,
-        int regionX,
-        int regionY)
+        int storageRegionX,
+        int storageRegionY)
     {
-        int regionIndex = regionX + regionY * terrain.RegionsX;
-        float height = terrain.HeightsMeters[regionIndex];
+        int storageIndex =
+            storageRegionX + storageRegionY * terrain.StorageRegionsX;
+        int patchesPerSide = terrain.RenderRegionsPerStorageRegion;
+        int firstRenderX = storageRegionX * patchesPerSide;
+        int firstRenderY = storageRegionY * patchesPerSide;
+
+        float maximumHeight = 0f;
+        int quadCount = CountQuads(
+            terrain,
+            firstRenderX,
+            firstRenderY,
+            patchesPerSide,
+            ref maximumHeight);
 
         RegionGpuMesh result = new()
         {
-            RegionVersion = terrain.RegionVersions[regionIndex],
+            RegionVersion = terrain.SourceRegionVersions[storageIndex],
             BoundsCenter = new Vector3(
-                (regionX + 0.5f) * terrain.RegionSize,
-                height * 0.5f,
-                (regionY + 0.5f) * terrain.RegionSize),
+                (storageRegionX + 0.5f) * terrain.StorageRegionSize,
+                maximumHeight * 0.5f,
+                (storageRegionY + 0.5f) * terrain.StorageRegionSize),
             BoundsRadius = MathF.Sqrt(
-                terrain.RegionSize * terrain.RegionSize * 0.5f +
-                height * height * 0.25f)
+                terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f +
+                maximumHeight * maximumHeight * 0.25f)
         };
 
-        ushort materialId = terrain.MaterialIds[regionIndex];
-        if (height <= 0f || materialId == 0)
+        if (quadCount == 0)
             return result;
 
-        float north = GetHeight(terrain, regionX, regionY - 1);
-        float south = GetHeight(terrain, regionX, regionY + 1);
-        float west = GetHeight(terrain, regionX - 1, regionY);
-        float east = GetHeight(terrain, regionX + 1, regionY);
-
-        int quadCount = 1;
-        if (height > north) quadCount++;
-        if (height > south) quadCount++;
-        if (height > west) quadCount++;
-        if (height > east) quadCount++;
-
-        int vertexCount = quadCount * 4;
-        int triangleCount = quadCount * 2;
+        int vertexCount = checked(quadCount * 4);
+        int triangleCount = checked(quadCount * 2);
 
         Mesh mesh = new(vertexCount, triangleCount);
         mesh.AllocVertices();
@@ -76,79 +78,102 @@ internal static class RegionMeshBuilder
         Span<byte> colors = mesh.ColorsAs<byte>();
         Span<ushort> indices = mesh.IndicesAs<ushort>();
 
-        float x0 = regionX * terrain.RegionSize;
-        float x1 = x0 + terrain.RegionSize;
-        float z0 = regionY * terrain.RegionSize;
-        float z1 = z0 + terrain.RegionSize;
-
-        Color topColor = GetSurfaceColor(height);
-        Color wallColor = Darken(topColor, 0.57f);
         int vertexOffset = 0;
         int indexOffset = 0;
 
-        // Region top. Winding is reversed so its normal points upward (+Y).
-        AddQuad(
-            vertices, normals, colors, indices,
-            ref vertexOffset, ref indexOffset,
-            new Vector3(x0, height, z0),
-            new Vector3(x1, height, z0),
-            new Vector3(x1, height, z1),
-            new Vector3(x0, height, z1),
-            Vector3.UnitY,
-            topColor,
-            reverseWinding: true);
-
-        // Only the higher region emits a shared vertical edge.
-        if (height > north)
+        for (int localY = 0; localY < patchesPerSide; localY++)
         {
-            AddQuad(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                new Vector3(x0, height, z0),
-                new Vector3(x1, height, z0),
-                new Vector3(x1, north, z0),
-                new Vector3(x0, north, z0),
-                -Vector3.UnitZ,
-                wallColor);
-        }
+            int renderY = firstRenderY + localY;
 
-        if (height > south)
-        {
-            AddQuad(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                new Vector3(x1, height, z1),
-                new Vector3(x0, height, z1),
-                new Vector3(x0, south, z1),
-                new Vector3(x1, south, z1),
-                Vector3.UnitZ,
-                wallColor);
-        }
+            for (int localX = 0; localX < patchesPerSide; localX++)
+            {
+                int renderX = firstRenderX + localX;
+                float height = terrain.GetHeightMeters(renderX, renderY);
+                ushort materialId = terrain.GetMaterialId(renderX, renderY);
 
-        if (height > west)
-        {
-            AddQuad(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                new Vector3(x0, height, z1),
-                new Vector3(x0, height, z0),
-                new Vector3(x0, west, z0),
-                new Vector3(x0, west, z1),
-                -Vector3.UnitX,
-                wallColor);
-        }
+                if (height <= 0f || materialId == 0)
+                    continue;
 
-        if (height > east)
-        {
-            AddQuad(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                new Vector3(x1, height, z0),
-                new Vector3(x1, height, z1),
-                new Vector3(x1, east, z1),
-                new Vector3(x1, east, z0),
-                Vector3.UnitX,
-                wallColor);
+                float x0 = renderX * terrain.RegionSize;
+                float x1 = MathF.Min(
+                    x0 + terrain.RegionSize,
+                    terrain.WorldWidth);
+                float z0 = renderY * terrain.RegionSize;
+                float z1 = MathF.Min(
+                    z0 + terrain.RegionSize,
+                    terrain.WorldDepth);
+
+                Color topColor = GetSurfaceColor(height);
+                Color wallColor = Darken(topColor, 0.57f);
+
+                AddQuad(
+                    vertices, normals, colors, indices,
+                    ref vertexOffset, ref indexOffset,
+                    new Vector3(x0, height, z0),
+                    new Vector3(x1, height, z0),
+                    new Vector3(x1, height, z1),
+                    new Vector3(x0, height, z1),
+                    Vector3.UnitY,
+                    topColor,
+                    reverseWinding: true);
+
+                float north = terrain.GetHeightMeters(renderX, renderY - 1);
+                float south = terrain.GetHeightMeters(renderX, renderY + 1);
+                float west = terrain.GetHeightMeters(renderX - 1, renderY);
+                float east = terrain.GetHeightMeters(renderX + 1, renderY);
+
+                if (height > north)
+                {
+                    AddQuad(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        new Vector3(x0, height, z0),
+                        new Vector3(x1, height, z0),
+                        new Vector3(x1, north, z0),
+                        new Vector3(x0, north, z0),
+                        -Vector3.UnitZ,
+                        wallColor);
+                }
+
+                if (height > south)
+                {
+                    AddQuad(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        new Vector3(x1, height, z1),
+                        new Vector3(x0, height, z1),
+                        new Vector3(x0, south, z1),
+                        new Vector3(x1, south, z1),
+                        Vector3.UnitZ,
+                        wallColor);
+                }
+
+                if (height > west)
+                {
+                    AddQuad(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        new Vector3(x0, height, z1),
+                        new Vector3(x0, height, z0),
+                        new Vector3(x0, west, z0),
+                        new Vector3(x0, west, z1),
+                        -Vector3.UnitX,
+                        wallColor);
+                }
+
+                if (height > east)
+                {
+                    AddQuad(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        new Vector3(x1, height, z0),
+                        new Vector3(x1, height, z1),
+                        new Vector3(x1, east, z1),
+                        new Vector3(x1, east, z0),
+                        Vector3.UnitX,
+                        wallColor);
+                }
+            }
         }
 
         UploadMesh(ref mesh, false);
@@ -157,20 +182,45 @@ internal static class RegionMeshBuilder
         return result;
     }
 
-    private static float GetHeight(
+    private static int CountQuads(
         TerrainRenderSnapshot terrain,
-        int regionX,
-        int regionY)
+        int firstRenderX,
+        int firstRenderY,
+        int patchesPerSide,
+        ref float maximumHeight)
     {
-        if (regionX < 0 || regionY < 0 ||
-            regionX >= terrain.RegionsX ||
-            regionY >= terrain.RegionsY)
+        int quadCount = 0;
+
+        for (int localY = 0; localY < patchesPerSide; localY++)
         {
-            return 0f;
+            int renderY = firstRenderY + localY;
+
+            for (int localX = 0; localX < patchesPerSide; localX++)
+            {
+                int renderX = firstRenderX + localX;
+                float height = terrain.GetHeightMeters(renderX, renderY);
+
+                if (height <= 0f ||
+                    terrain.GetMaterialId(renderX, renderY) == 0)
+                {
+                    continue;
+                }
+
+                maximumHeight = MathF.Max(maximumHeight, height);
+                quadCount++;
+
+                if (height > terrain.GetHeightMeters(renderX, renderY - 1))
+                    quadCount++;
+                if (height > terrain.GetHeightMeters(renderX, renderY + 1))
+                    quadCount++;
+                if (height > terrain.GetHeightMeters(renderX - 1, renderY))
+                    quadCount++;
+                if (height > terrain.GetHeightMeters(renderX + 1, renderY))
+                    quadCount++;
+            }
         }
 
-        return terrain.HeightsMeters[
-            regionX + regionY * terrain.RegionsX];
+        return quadCount;
     }
 
     private static void AddQuad(
@@ -206,19 +256,19 @@ internal static class RegionMeshBuilder
 
         if (reverseWinding)
         {
-            indices[indexOffset] = (ushort)(start);
+            indices[indexOffset] = (ushort)start;
             indices[indexOffset + 1] = (ushort)(start + 2);
             indices[indexOffset + 2] = (ushort)(start + 1);
-            indices[indexOffset + 3] = (ushort)(start);
+            indices[indexOffset + 3] = (ushort)start;
             indices[indexOffset + 4] = (ushort)(start + 3);
             indices[indexOffset + 5] = (ushort)(start + 2);
         }
         else
         {
-            indices[indexOffset] = (ushort)(start);
+            indices[indexOffset] = (ushort)start;
             indices[indexOffset + 1] = (ushort)(start + 1);
             indices[indexOffset + 2] = (ushort)(start + 2);
-            indices[indexOffset + 3] = (ushort)(start);
+            indices[indexOffset + 3] = (ushort)start;
             indices[indexOffset + 4] = (ushort)(start + 2);
             indices[indexOffset + 5] = (ushort)(start + 3);
         }
