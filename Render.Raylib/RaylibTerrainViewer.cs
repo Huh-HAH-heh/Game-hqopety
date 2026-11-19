@@ -61,8 +61,8 @@ public static class RaylibTerrainViewer
                                 terrain.WorldWidth * 0.5f + 58f,
                                 16f,
                                 terrain.WorldDepth * 0.5f - 9f),
-                            52f,
-                            pitchRadians: 0.84f);
+                            38f,
+                            pitchRadians: 0.68f);
                     }
                     else
                     {
