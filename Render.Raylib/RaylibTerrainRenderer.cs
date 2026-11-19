@@ -106,8 +106,12 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 continue;
             }
 
-            DrawMesh(region.Mesh, _material, Matrix4x4.Identity);
-            drawCalls++;
+            foreach (Mesh mesh in region.Meshes)
+            {
+                DrawMesh(mesh, _material, Matrix4x4.Identity);
+                drawCalls++;
+            }
+
             visibleRegions++;
         }
 
