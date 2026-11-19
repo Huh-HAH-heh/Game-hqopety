@@ -3,41 +3,62 @@ using Core.Map;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Presentation-owned, compact copy of the world surface.
-/// The renderer reads only these flat arrays and never queries WorldMap while drawing.
+/// Presentation-owned surface snapshot.
+/// The overlay is partitioned into 4x4-tile render regions while the simulation
+/// keeps its larger storage regions. The renderer never queries WorldMap.
 /// </summary>
 public sealed class TerrainRenderSnapshot
 {
+    public const int RenderRegionSizeInTiles = 4;
+
     private readonly float[] _heightsMeters;
     private readonly ushort[] _materialIds;
-    private readonly long[] _regionVersions;
+    private readonly long[] _sourceRegionVersions;
 
     public int RegionsX { get; }
     public int RegionsY { get; }
-    public int RegionSize { get; }
+    public int RegionSize => RenderRegionSizeInTiles;
     public int RegionCount => _heightsMeters.Length;
+
+    public int StorageRegionsX { get; }
+    public int StorageRegionsY { get; }
+    public int StorageRegionCount => _sourceRegionVersions.Length;
+    public int StorageRegionSize { get; }
+    public int RenderRegionsPerStorageRegion { get; }
 
     public float WorldWidth => RegionsX * RegionSize;
     public float WorldDepth => RegionsY * RegionSize;
     public float MaximumHeightMeters { get; private set; }
     public long SourceWorldVersion { get; private set; }
 
-    internal float[] HeightsMeters => _heightsMeters;
-    internal ushort[] MaterialIds => _materialIds;
-    internal long[] RegionVersions => _regionVersions;
+    internal long[] SourceRegionVersions => _sourceRegionVersions;
+
+    private bool _initialized;
 
     private TerrainRenderSnapshot(WorldMap worldMap)
     {
-        RegionsX = worldMap.RegionsX;
-        RegionsY = worldMap.RegionsY;
-        RegionSize = TerrainRegion.TilesPerSide;
+        StorageRegionsX = worldMap.RegionsX;
+        StorageRegionsY = worldMap.RegionsY;
+        StorageRegionSize = TerrainRegion.TilesPerSide;
 
-        int count = checked(RegionsX * RegionsY);
-        _heightsMeters = new float[count];
-        _materialIds = new ushort[count];
-        _regionVersions = new long[count];
+        if (StorageRegionSize % RenderRegionSizeInTiles != 0)
+        {
+            throw new InvalidOperationException(
+                "Storage region size must be divisible by the render region size.");
+        }
 
-        Array.Fill(_regionVersions, long.MinValue);
+        RenderRegionsPerStorageRegion =
+            StorageRegionSize / RenderRegionSizeInTiles;
+
+        RegionsX = checked(StorageRegionsX * RenderRegionsPerStorageRegion);
+        RegionsY = checked(StorageRegionsY * RenderRegionsPerStorageRegion);
+
+        _heightsMeters = new float[checked(RegionsX * RegionsY)];
+        _materialIds = new ushort[_heightsMeters.Length];
+        _sourceRegionVersions =
+            new long[checked(StorageRegionsX * StorageRegionsY)];
+
+        Array.Fill(_sourceRegionVersions, long.MinValue);
         RefreshFromWorld(worldMap);
     }
 
@@ -47,79 +68,156 @@ public sealed class TerrainRenderSnapshot
         return new TerrainRenderSnapshot(worldMap);
     }
 
+    internal float GetHeightMeters(int regionX, int regionY)
+    {
+        if (regionX < 0 || regionY < 0 ||
+            regionX >= RegionsX || regionY >= RegionsY)
+        {
+            return 0f;
+        }
+
+        return _heightsMeters[regionX + regionY * RegionsX];
+    }
+
+    internal ushort GetMaterialId(int regionX, int regionY)
+    {
+        if (regionX < 0 || regionY < 0 ||
+            regionX >= RegionsX || regionY >= RegionsY)
+        {
+            return 0;
+        }
+
+        return _materialIds[regionX + regionY * RegionsX];
+    }
+
     /// <summary>
-    /// Copies only regions whose terrain revision changed.
+    /// Copies only storage regions whose own or adjacent terrain revision changed.
+    /// Each storage region is sampled at a 4x4-tile presentation resolution.
     /// Call on the owning/game thread, never from the render worker.
     /// </summary>
     public bool RefreshFromWorld(WorldMap worldMap)
     {
         ArgumentNullException.ThrowIfNull(worldMap);
 
-        if (worldMap.RegionsX != RegionsX ||
-            worldMap.RegionsY != RegionsY)
+        if (worldMap.RegionsX != StorageRegionsX ||
+            worldMap.RegionsY != StorageRegionsY)
         {
             throw new InvalidOperationException(
                 "World topology changed. Create a new terrain snapshot.");
         }
 
-        if (SourceWorldVersion == worldMap.TerrainVersion &&
-            _regionVersions.All(version => version != long.MinValue))
-        {
+        if (_initialized && SourceWorldVersion == worldMap.TerrainVersion)
             return false;
-        }
 
         bool changed = false;
-        float maximumHeight = 0f;
         ReadOnlySpan<WorldRegion> regions = worldMap.WorldRegions;
 
         for (int i = 0; i < regions.Length; i++)
         {
             WorldRegion region = regions[i];
-            if (_regionVersions[i] != region.TerrainVersion)
-            {
-                float heightMeters;
-                ushort materialId;
+            long regionVersion = worldMap.GetRegionTerrainVersion(
+                region.RegionX,
+                region.RegionY);
 
-                if (region.HasUniformSurface)
-                {
-                    heightMeters = region.UniformSurfaceHeightUnits * 0.1f;
-                    materialId = region.UniformSurfaceMaterialId;
-                }
-                else
-                {
-                    int sampleX = region.TileOriginX + region.TileWidth / 2;
-                    int sampleY = region.TileOriginY + region.TileHeight / 2;
-                    ushort heightUnits = worldMap.GetSurfaceHeightUnits(sampleX, sampleY);
+            if (_sourceRegionVersions[i] == regionVersion)
+                continue;
 
-                    heightMeters = heightUnits * 0.1f;
-                    materialId = 0;
-
-                    if (heightUnits > 0)
-                    {
-                        int topLayer = Math.Clamp(
-                            (heightUnits + WorldMap.LayerHeightUnits - 1) /
-                            WorldMap.LayerHeightUnits - 1,
-                            0,
-                            worldMap.LayerCount - 1);
-
-                        materialId = worldMap.GetMaterialId(
-                            sampleX,
-                            sampleY,
-                            topLayer);
-                    }
-                }
-
-                _heightsMeters[i] = heightMeters;
-                _materialIds[i] = materialId;
-                _regionVersions[i] = region.TerrainVersion;
-                changed = true;
-            }
-
-            maximumHeight = MathF.Max(maximumHeight, _heightsMeters[i]);
+            CopyStorageRegion(worldMap, region);
+            _sourceRegionVersions[i] = regionVersion;
+            changed = true;
         }
 
-        MaximumHeightMeters = maximumHeight;
+        if (changed)
+        {
+            float maximumHeight = 0f;
+            for (int i = 0; i < _heightsMeters.Length; i++)
+                maximumHeight = MathF.Max(maximumHeight, _heightsMeters[i]);
+
+            MaximumHeightMeters = maximumHeight;
+        }
+
         SourceWorldVersion = worldMap.TerrainVersion;
+        _initialized = true;
         return changed;
+    }
+
+    private void CopyStorageRegion(
+        WorldMap worldMap,
+        WorldRegion region)
+    {
+        int firstRenderX =
+            region.RegionX * RenderRegionsPerStorageRegion;
+        int firstRenderY =
+            region.RegionY * RenderRegionsPerStorageRegion;
+
+        float uniformHeight = region.HasUniformSurface
+            ? region.UniformSurfaceHeightUnits * 0.1f
+            : 0f;
+        ushort uniformMaterial = region.HasUniformSurface
+            ? region.UniformSurfaceMaterialId
+            : (ushort)0;
+
+        for (int localY = 0;
+             localY < RenderRegionsPerStorageRegion;
+             localY++)
+        {
+            int rowStart =
+                firstRenderX +
+                (firstRenderY + localY) * RegionsX;
+
+            if (region.HasUniformSurface)
+            {
+                Array.Fill(
+                    _heightsMeters,
+                    uniformHeight,
+                    rowStart,
+                    RenderRegionsPerStorageRegion);
+                Array.Fill(
+                    _materialIds,
+                    uniformMaterial,
+                    rowStart,
+                    RenderRegionsPerStorageRegion);
+                continue;
+            }
+
+            for (int localX = 0;
+                 localX < RenderRegionsPerStorageRegion;
+                 localX++)
+            {
+                int sampleX = region.TileOriginX +
+                    localX * RegionSize + RegionSize / 2;
+                int sampleY = region.TileOriginY +
+                    localY * RegionSize + RegionSize / 2;
+
+                ushort heightUnits =
+                    worldMap.GetSurfaceHeightUnits(sampleX, sampleY);
+                int index = rowStart + localX;
+
+                _heightsMeters[index] = heightUnits * 0.1f;
+                _materialIds[index] = GetSurfaceMaterial(
+                    worldMap,
+                    sampleX,
+                    sampleY,
+                    heightUnits);
+            }
+        }
+    }
+
+    private static ushort GetSurfaceMaterial(
+        WorldMap worldMap,
+        int x,
+        int y,
+        ushort heightUnits)
+    {
+        if (heightUnits == 0)
+            return 0;
+
+        int topLayer = Math.Clamp(
+            (heightUnits + WorldMap.LayerHeightUnits - 1) /
+            WorldMap.LayerHeightUnits - 1,
+            0,
+            worldMap.LayerCount - 1);
+
+        return worldMap.GetMaterialId(x, y, topLayer);
     }
 }
