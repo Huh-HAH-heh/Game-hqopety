@@ -51,6 +51,7 @@ internal sealed class OrbitCameraController
     }
 
     public Camera3D Camera { get; private set; }
+    public float TargetHeightMeters => _target.Y;
 
     public OrbitCameraController(TerrainRenderSnapshot terrain)
     {
@@ -192,34 +193,32 @@ internal sealed class OrbitCameraController
 
     private void PanByMouseDelta(Vector2 mouseDelta)
     {
-        float viewportHeight = Math.Max(1, GetScreenHeight());
-        float halfFovTangent =
-            MathF.Tan(FieldOfViewDegrees * MathF.PI / 360f);
-        float sinPitch = MathF.Max(0.15f, MathF.Sin(_desiredPitchRadians));
+        Vector2 cursor = new(
+            GetScreenWidth() * 0.5f,
+            GetScreenHeight() * 0.5f);
+        Vector2 previousCursor = cursor - mouseDelta;
 
-        // Horizontal and vertical screen directions project differently onto
-        // the ground when the camera is tilted.
-        float horizontalUnitsPerPixel =
-            2f * _desiredDistance * sinPitch *
-            halfFovTangent / viewportHeight;
-        float verticalUnitsPerPixel =
-            2f * _desiredDistance * halfFovTangent /
-            (viewportHeight * sinPitch);
+        if (!TryGetTargetPlanePoint(
+                cursor,
+                _desiredTarget,
+                _desiredYawRadians,
+                _desiredPitchRadians,
+                _desiredDistance,
+                out Vector3 currentPoint) ||
+            !TryGetTargetPlanePoint(
+                previousCursor,
+                _desiredTarget,
+                _desiredYawRadians,
+                _desiredPitchRadians,
+                _desiredDistance,
+                out Vector3 previousPoint))
+        {
+            return;
+        }
 
-        Vector3 right = new(
-            MathF.Cos(_desiredYawRadians),
-            0f,
-            -MathF.Sin(_desiredYawRadians));
-
-        Vector3 groundForward = new(
-            -MathF.Sin(_desiredYawRadians),
-            0f,
-            -MathF.Cos(_desiredYawRadians));
-
-        _desiredTarget -= right *
-            (mouseDelta.X * horizontalUnitsPerPixel);
-        _desiredTarget += groundForward *
-            (mouseDelta.Y * verticalUnitsPerPixel);
+        // Move the camera opposite to the pointer's ground-plane displacement.
+        _desiredTarget.X += previousPoint.X - currentPoint.X;
+        _desiredTarget.Z += previousPoint.Z - currentPoint.Z;
     }
 
     private void UpdateZoomInput()
@@ -345,7 +344,7 @@ internal sealed class OrbitCameraController
 
             // Move by a fraction of the visible map per second, not over half
             // of the world in one second at the initial zoom level.
-            float speed = MathF.Max(12f, _desiredDistance * 0.20f);
+            float speed = MathF.Max(5f, _desiredDistance * 0.075f);
             if (IsKeyDown(KeyboardKey.LeftShift) ||
                 IsKeyDown(KeyboardKey.RightShift))
             {
@@ -361,7 +360,7 @@ internal sealed class OrbitCameraController
 
         if (verticalInput != 0f)
         {
-            float speed = MathF.Max(20f, _desiredDistance * 0.24f);
+            float speed = Math.Clamp(_desiredDistance * 0.006f, 1f, 8f);
             _desiredTarget.Y = Math.Max(
                 0f,
                 _desiredTarget.Y + verticalInput * speed * deltaTime);
@@ -432,11 +431,14 @@ internal sealed class OrbitCameraController
             -MathF.Cos(yaw) * MathF.Sin(pitch)));
     }
 
-    public void FocusOn(Vector3 target, float distance)
+    public void FocusOn(Vector3 target, float distance, float pitchRadians)
     {
         _desiredTarget = target;
         _desiredYawRadians = 0f;
-        _desiredPitchRadians = TopDownPitch;
+        _desiredPitchRadians = Math.Clamp(
+            pitchRadians,
+            MinimumPitch,
+            MaximumPitch);
         _desiredDistance = Math.Clamp(
             distance,
             _minimumDistance,
