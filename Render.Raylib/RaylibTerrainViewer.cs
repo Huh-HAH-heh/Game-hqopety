@@ -51,7 +51,7 @@ public static class RaylibTerrainViewer
                     renderer.Synchronize(terrain);
 
                 BeginDrawing();
-                ClearBackground(new Color(17, 21, 28, 255));
+                ClearBackground(new Color(0, 0, 0, 255));
 
                 renderer.Draw(
                     terrain,
@@ -75,9 +75,9 @@ public static class RaylibTerrainViewer
         TerrainRenderSnapshot terrain,
         RaylibTerrainRenderer renderer)
     {
-        DrawRectangle(12, 12, 430, 164, new Color(10, 14, 20, 220));
+        DrawRectangle(12, 12, 448, 178, new Color(0, 0, 0, 235));
 
-        DrawText("RIMCLONE / RAYLIB TERRAIN", 24, 22, 18, Color.RayWhite);
+        DrawText("RIMCLONE / TOP-DOWN TERRAIN", 24, 22, 18, Color.RayWhite);
         DrawText(
             $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
             24,
@@ -107,9 +107,9 @@ public static class RaylibTerrainViewer
             Color.LightGray);
 
         DrawText(
-            "WASD move | RMB rotate | MMB pan | Wheel zoom | Shift boost | Q/E altitude | Esc exit",
+            "WASD move | RMB orbit | MMB pan | Wheel zoom | Shift boost | Q/E altitude | Esc exit",
             24,
-            184,
+            196,
             14,
             Color.RayWhite);
     }
