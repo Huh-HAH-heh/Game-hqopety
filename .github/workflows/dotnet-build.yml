@@ -9,6 +9,7 @@ on:
       - feature/unit-navigation-800-battle
       - feature/prone-crawl-silhouette
       - feature/rimworld-like-ai
+      - feature/raylib-terrain-renderer
   pull_request:
     branches:
       - main
