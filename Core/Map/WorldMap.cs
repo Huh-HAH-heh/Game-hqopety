@@ -1264,11 +1264,12 @@ public sealed class WorldMap
 
             for (int z = 1; z <= LayerCount; z++)
             {
-                ushort currentMaterial = z < LayerCount
-                    ? GetMaterialId(globalX, globalY, z)
-                    : (ushort.MaxValue);
+                bool endOfColumn = z == LayerCount;
+                ushort currentMaterial = endOfColumn
+                    ? (ushort)0
+                    : GetMaterialId(globalX, globalY, z);
 
-                if (z < LayerCount && currentMaterial == volumeRunMaterial)
+                if (!endOfColumn && currentMaterial == volumeRunMaterial)
                     continue;
 
                 volumeRanges[volumeRangeCount++] = new TileRange
@@ -1281,7 +1282,7 @@ public sealed class WorldMap
                         : StateSolid
                 };
 
-                if (z < LayerCount)
+                if (!endOfColumn)
                 {
                     volumeRunStart = z;
                     volumeRunMaterial = currentMaterial;
