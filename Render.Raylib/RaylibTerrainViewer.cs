@@ -61,7 +61,7 @@ public static class RaylibTerrainViewer
                                 terrain.WorldWidth * 0.5f + 58f,
                                 16f,
                                 terrain.WorldDepth * 0.5f - 9f),
-                            110f,
+                            90f,
                             pitchRadians: 1.02f);
                     }
                     else
@@ -173,7 +173,9 @@ public static class RaylibTerrainViewer
             Color.RayWhite);
 
         DrawText(
-            "WASD move | RMB orbit | MMB pan | Wheel zoom to cursor | T fit top view | Shift boost | Q/E altitude | Esc exit",
+            cutawayMode
+                ? "WASD move | RMB orbit | MMB pan | Wheel zoom | Q/E cut height | Shift boost | C surface | Esc exit"
+                : "WASD move | RMB orbit | MMB pan | Wheel zoom | T fit top view | Shift boost | Q/E altitude | C cut | Esc exit",
             24,
             196,
             14,
