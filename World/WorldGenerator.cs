@@ -192,59 +192,63 @@ public static class WorldGenerator
             heightInMeters: 3,
             materialId: 3);
 
-        // Two fully enclosed underground levels. Their ends stay buried
-        // inside the mesa; the only connection is an internal vertical shaft.
-        int lowerTunnelX = caveCenterX - 32;
-        int lowerTunnelY = caveCenterY - 4;
-        int upperTunnelX = caveCenterX - 4;
-        int upperTunnelY = caveCenterY - 28;
-
-        worldMap.CarveStaticVolume(
-            lowerTunnelX,
+        // The lower passage crosses the mesa and opens at both canyon flanks.
+        // Its centre line bends in XY and changes floor height / cross-section;
+        // this is a through-tunnel, not a blind horizontal adit.
+        int lowerTunnelStartX = caveCenterX - 64;
+        int lowerTunnelY = caveCenterY;
+        int lowerTunnelLength = 128;
+        CarveWindingTunnel(
+            worldMap,
+            lowerTunnelStartX,
             lowerTunnelY,
-            zLevel: 14,
-            width: 64,
-            depth: 8,
-            heightInMeters: 5);
+            lowerTunnelLength,
+            horizontal: true,
+            floorLevel: 14,
+            lateralSway: 5,
+            seed: 19);
 
+        // First underground chamber and a second, sealed passage on a higher
+        // stratum. The upper tunnel bends independently of the lower one.
         worldMap.CarveStaticVolume(
-            Math.Clamp(caveCenterX - 10, 0, worldMap.TileWidth - 20),
-            Math.Clamp(caveCenterY - 10, 0, worldMap.TileHeight - 20),
+            caveCenterX - 10,
+            caveCenterY - 10,
             zLevel: 12,
             width: 20,
             depth: 20,
             heightInMeters: 8);
 
-        worldMap.CarveStaticVolume(
+        int upperTunnelX = caveCenterX;
+        int upperTunnelStartY = caveCenterY - 20;
+        int upperTunnelLength = 40;
+        CarveWindingTunnel(
+            worldMap,
             upperTunnelX,
-            upperTunnelY,
-            zLevel: 26,
-            width: 8,
-            depth: 56,
-            heightInMeters: 5);
+            upperTunnelStartY,
+            upperTunnelLength,
+            horizontal: false,
+            floorLevel: 26,
+            lateralSway: 3,
+            seed: 37);
 
         worldMap.CarveStaticVolume(
-            Math.Clamp(caveCenterX - 10, 0, worldMap.TileWidth - 20),
-            Math.Clamp(caveCenterY - 10, 0, worldMap.TileHeight - 20),
+            caveCenterX - 10,
+            caveCenterY - 10,
             zLevel: 24,
             width: 20,
             depth: 20,
             heightInMeters: 8);
 
-        // The 6x6 m connector overlaps both chambers, joining two different
-        // cave elevations without opening either level to the surface.
-        worldMap.CarveStaticVolume(
-            caveCenterX - 3,
-            caveCenterY - 3,
-            zLevel: 18,
-            width: 6,
-            depth: 6,
-            heightInMeters: 8);
+        // A rising internal passage joins the two levels. Its overlapping
+        // sections create a walkable sloped connection instead of a surface shaft.
+        CarveWindingConnector(worldMap, caveCenterX, caveCenterY);
 
         int proofSliceLower = 16 * WorldMap.HeightUnitsPerMeter;
         int proofSliceUpper = 28 * WorldMap.HeightUnitsPerMeter;
+        float lowerProofT = 40f / lowerTunnelLength;
         int lowerProbeX = caveCenterX - 24;
-        int lowerProbeY = caveCenterY - 4;
+        int lowerProbeY = lowerTunnelY +
+            GetTunnelLateralOffset(lowerProofT, 5);
         int upperProbeX = caveCenterX;
         int upperProbeY = caveCenterY + 16;
 
@@ -262,40 +266,51 @@ public static class WorldGenerator
             22 * WorldMap.HeightUnitsPerMeter) == 0;
 
         bool lowerFloorSolid = worldMap.GetMaterialId(
-            lowerProbeX,
-            lowerProbeY,
-            13 * WorldMap.HeightUnitsPerMeter) != 0;
+            caveCenterX,
+            caveCenterY,
+            11 * WorldMap.HeightUnitsPerMeter) != 0;
         bool lowerRoofSolid = worldMap.GetMaterialId(
-            lowerProbeX,
-            lowerProbeY,
-            19 * WorldMap.HeightUnitsPerMeter) != 0;
+            caveCenterX,
+            caveCenterY,
+            20 * WorldMap.HeightUnitsPerMeter) != 0;
         bool upperFloorSolid = worldMap.GetMaterialId(
-            upperProbeX,
-            upperProbeY,
-            25 * WorldMap.HeightUnitsPerMeter) != 0;
+            caveCenterX,
+            caveCenterY,
+            23 * WorldMap.HeightUnitsPerMeter) != 0;
         bool upperRoofSolid = worldMap.GetMaterialId(
-            upperProbeX,
-            upperProbeY,
-            31 * WorldMap.HeightUnitsPerMeter) != 0;
+            caveCenterX,
+            caveCenterY,
+            32 * WorldMap.HeightUnitsPerMeter) != 0;
 
-        bool lowerEndsSealed =
+        int lowerPortalWestX = lowerTunnelStartX;
+        int lowerPortalEastX = lowerTunnelStartX + lowerTunnelLength;
+        ushort westPortalSurface = worldMap.GetSurfaceHeightUnits(
+            lowerPortalWestX,
+            lowerTunnelY);
+        ushort eastPortalSurface = worldMap.GetSurfaceHeightUnits(
+            lowerPortalEastX,
+            lowerTunnelY);
+
+        bool lowerPortalsOpen =
+            westPortalSurface < 14 * WorldMap.HeightUnitsPerMeter &&
+            eastPortalSurface < 14 * WorldMap.HeightUnitsPerMeter &&
             worldMap.GetMaterialId(
-                lowerTunnelX - 1,
-                lowerTunnelY + 4,
-                proofSliceLower) != 0 &&
+                lowerPortalWestX,
+                lowerTunnelY,
+                proofSliceLower) == 0 &&
             worldMap.GetMaterialId(
-                lowerTunnelX + 64,
-                lowerTunnelY + 4,
-                proofSliceLower) != 0;
+                lowerPortalEastX,
+                lowerTunnelY,
+                proofSliceLower) == 0;
 
         bool upperEndsSealed =
             worldMap.GetMaterialId(
-                upperTunnelX + 4,
-                upperTunnelY - 1,
+                upperTunnelX,
+                upperTunnelStartY - 1,
                 proofSliceUpper) != 0 &&
             worldMap.GetMaterialId(
-                upperTunnelX + 4,
-                upperTunnelY + 56,
+                upperTunnelX,
+                upperTunnelStartY + upperTunnelLength + 1,
                 proofSliceUpper) != 0;
 
         ushort lowerStratum = worldMap.GetMaterialId(
@@ -326,7 +341,7 @@ public static class WorldGenerator
             !lowerRoofSolid ||
             !upperFloorSolid ||
             !upperRoofSolid ||
-            !lowerEndsSealed ||
+            !lowerPortalsOpen ||
             !upperEndsSealed ||
             lowerStratum != 2 ||
             upperStratum != 3 ||
@@ -334,7 +349,7 @@ public static class WorldGenerator
         {
             throw new InvalidOperationException(
                 "3D cave proof failed: expected two enclosed levels, solid floors/roofs, " +
-                "sealed tunnel ends, an internal connector and an unbroken surface.");
+                "two open lower portals, sealed upper tunnel ends, an internal ramp and an unbroken mesa top.");
         }
 
         if (writeLog)
@@ -342,12 +357,87 @@ public static class WorldGenerator
             Console.WriteLine(
                 "[WorldGenerator] 3D terrain verified: " +
                 "two enclosed tunnel levels at 16m/28m, internal connector, " +
-                "solid floors/roofs, sealed ends, continuous surface and strata at 9m/27m.");
+                "solid floors/roofs, two lower portals, sealed upper passage, continuous surface and strata at 9m/27m.");
             Console.WriteLine(
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
                 $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
-                "static geology: two closed 64m/56m tunnel levels + chambers + internal connector.");
+                "static geology: 128m winding through-tunnel + 40m upper passage + chambers + rising connector.");
+        }
+    }
+
+    private static void CarveWindingTunnel(
+        WorldMap worldMap,
+        int startX,
+        int startY,
+        int lengthMeters,
+        bool horizontal,
+        int floorLevel,
+        int lateralSway,
+        int seed)
+    {
+        const int step = 4;
+        int steps = lengthMeters / step;
+
+        for (int index = 0; index <= steps; index++)
+        {
+            float t = index / (float)steps;
+            int lateralOffset = GetTunnelLateralOffset(t, lateralSway);
+            int centerX = horizontal
+                ? startX + index * step
+                : startX + lateralOffset;
+            int centerY = horizontal
+                ? startY + lateralOffset
+                : startY + index * step;
+
+            int floorOffset = (int)MathF.Round(
+                MathF.Sin(t * MathF.Tau * 1.5f + seed * 0.001f) * 0.6f);
+            int currentFloor = Math.Max(1, floorLevel + floorOffset);
+
+            // Most of the passage is 8m wide; periodic 12m pockets and
+            // taller sections break the uniform mine-shaft silhouette.
+            int width = index % 9 == 4 ? 12 : 8;
+            int depth = index % 13 == 7 ? 12 : 8;
+            int height = index % 11 == 5 ? 6 : 5;
+
+            worldMap.CarveStaticVolume(
+                centerX - width / 2,
+                centerY - depth / 2,
+                currentFloor,
+                width,
+                depth,
+                height);
+        }
+    }
+
+    private static int GetTunnelLateralOffset(float t, int sway)
+    {
+        return (int)MathF.Round(
+            MathF.Sin(t * MathF.Tau * 2f) * sway +
+            MathF.Sin(t * MathF.Tau * 5f) * sway * 0.2f);
+    }
+
+    private static void CarveWindingConnector(
+        WorldMap worldMap,
+        int centerX,
+        int centerY)
+    {
+        const int sectionSize = 8;
+        const int sectionHeight = 6;
+
+        for (int index = 0; index < 4; index++)
+        {
+            int sectionX = centerX - 8 + index * 4;
+            int sectionY = centerY - 4 + index * 4;
+            int floorLevel = 16 + index * 2;
+
+            worldMap.CarveStaticVolume(
+                sectionX - sectionSize / 2,
+                sectionY - sectionSize / 2,
+                floorLevel,
+                sectionSize,
+                sectionSize,
+                sectionHeight);
         }
     }
 
