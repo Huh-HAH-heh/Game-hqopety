@@ -1609,6 +1609,77 @@ public sealed class WorldMap
         TerrainGeometryVersion++;
     }
 
+    /// <summary>
+    /// Replaces the world surface from a compact grid of uniform XY patches.
+    /// Each sample covers patchSize x patchSize tiles. Values are written to
+    /// flat surface caches without materializing every vertical voxel.
+    /// Intended for bulk world generation before simulation starts.
+    /// </summary>
+    public void SetSurfaceHeightPatches(
+        ReadOnlySpan<ushort> patchHeights,
+        int patchSize,
+        ushort materialId)
+    {
+        if (UsesDiscreteBlockTerrain)
+            throw new InvalidOperationException(
+                "Surface patches must be generated before enabling discrete block terrain.");
+
+        if (patchSize <= 0 ||
+            TileWidth % patchSize != 0 ||
+            TileHeight % patchSize != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(patchSize));
+        }
+
+        int patchesX = TileWidth / patchSize;
+        int patchesY = TileHeight / patchSize;
+        if (patchHeights.Length != checked(patchesX * patchesY))
+            throw new ArgumentException(
+                "Patch height grid does not match the world dimensions.",
+                nameof(patchHeights));
+
+        Blocks.Volumes.Clear();
+        Blocks.ClearTransitions();
+        Array.Clear(_volumeSurfaceHeights);
+
+        for (int patchY = 0; patchY < patchesY; patchY++)
+        {
+            int firstTileY = patchY * patchSize;
+            int patchRow = patchY * patchesX;
+
+            for (int localY = 0; localY < patchSize; localY++)
+            {
+                int rowStart = GetColumnIndex(0, firstTileY + localY);
+
+                for (int patchX = 0; patchX < patchesX; patchX++)
+                {
+                    int sourceIndex = patchRow + patchX;
+                    int targetIndex = rowStart + patchX * patchSize;
+                    int height = Math.Min(
+                        (int)patchHeights[sourceIndex],
+                        LayerCount * LayerHeightUnits);
+
+                    ushort storedHeight = checked((ushort)height);
+                    ushort storedMaterial = height > 0 && materialId != 0
+                        ? materialId
+                        : (ushort)0;
+
+                    Array.Fill(_surfaceHeights, storedHeight, targetIndex, patchSize);
+                    Array.Fill(_columnMaterialIds, storedMaterial, targetIndex, patchSize);
+                    Array.Fill(_simpleFillColumns, true, targetIndex, patchSize);
+                    Array.Clear(_rangeCache, targetIndex, patchSize);
+                }
+            }
+        }
+
+        for (int i = 0; i < _worldRegions.Length; i++)
+            _worldRegions[i].MarkTerrainChanged();
+
+        NavigationVersion++;
+        TerrainVersion++;
+        TerrainGeometryVersion++;
+    }
+
     public void SetSolidHeight(
         int globalX,
         int globalY,
