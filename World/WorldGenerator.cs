@@ -276,16 +276,18 @@ public static class WorldGenerator
             caveCenterY,
             11 * WorldMap.HeightUnitsPerMeter) != 0;
         bool lowerRoofSolid = worldMap.GetMaterialId(
-            caveCenterX,
-            caveCenterY,
+            lowerProbeX,
+            lowerProbeY,
             20 * WorldMap.HeightUnitsPerMeter) != 0;
+        int upperChamberProbeX = caveCenterX + 8;
+        int upperChamberProbeY = caveCenterY - 8;
         bool upperFloorSolid = worldMap.GetMaterialId(
-            caveCenterX,
-            caveCenterY,
+            upperChamberProbeX,
+            upperChamberProbeY,
             23 * WorldMap.HeightUnitsPerMeter) != 0;
         bool upperRoofSolid = worldMap.GetMaterialId(
-            caveCenterX,
-            caveCenterY,
+            upperChamberProbeX,
+            upperChamberProbeY,
             32 * WorldMap.HeightUnitsPerMeter) != 0;
 
         int lowerPortalWestX = lowerTunnelStartX;
