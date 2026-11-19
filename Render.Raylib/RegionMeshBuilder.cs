@@ -188,13 +188,13 @@ internal static class RegionMeshBuilder
             float east = terrain.GetRenderHeightMeters(firstRenderX + patchesPerSide, firstRenderY + i);
 
             if (height > north)
-                quadCount += 1 + CountElevationLines(north, height);
+                quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(north, height));
             if (height > south)
-                quadCount += 1 + CountElevationLines(south, height);
+                quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(south, height));
             if (height > west)
-                quadCount += 1 + CountElevationLines(west, height);
+                quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(west, height));
             if (height > east)
-                quadCount += 1 + CountElevationLines(east, height);
+                quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(east, height));
         }
 
         return quadCount;
@@ -250,7 +250,8 @@ internal static class RegionMeshBuilder
                     new Vector3(segmentX0, height, z0),
                     new Vector3(segmentX1, height, z0),
                     north,
-                    -Vector3.UnitZ);
+                    -Vector3.UnitZ,
+                    includeContours: !terrain.CutawayEnabled);
             }
 
             float south = terrain.GetRenderHeightMeters(
@@ -264,7 +265,8 @@ internal static class RegionMeshBuilder
                     new Vector3(segmentX1, height, z1),
                     new Vector3(segmentX0, height, z1),
                     south,
-                    Vector3.UnitZ);
+                    Vector3.UnitZ,
+                    includeContours: !terrain.CutawayEnabled);
             }
 
             float west = terrain.GetRenderHeightMeters(
@@ -278,7 +280,8 @@ internal static class RegionMeshBuilder
                     new Vector3(x0, height, segmentZ1),
                     new Vector3(x0, height, segmentZ0),
                     west,
-                    -Vector3.UnitX);
+                    -Vector3.UnitX,
+                    includeContours: !terrain.CutawayEnabled);
             }
 
             float east = terrain.GetRenderHeightMeters(
@@ -292,7 +295,8 @@ internal static class RegionMeshBuilder
                     new Vector3(x1, height, segmentZ0),
                     new Vector3(x1, height, segmentZ1),
                     east,
-                    Vector3.UnitX);
+                    Vector3.UnitX,
+                    includeContours: !terrain.CutawayEnabled);
             }
         }
     }
@@ -346,7 +350,7 @@ internal static class RegionMeshBuilder
         return quadCount;
     }
 
-    private const int CutHatchLinesPerPatch = 3;
+    private const int CutHatchLinesPerPatch = 2;
     private const float CutHatchHalfWidth = 0.035f;
     private const float CutHatchLift = 0.045f;
     private static readonly Color CutHatchColor = new(205, 211, 219, 255);
@@ -376,11 +380,11 @@ internal static class RegionMeshBuilder
     {
         float y = height + CutHatchLift;
         const float strokeLength = 0.72f;
-        const float strokeSpacing = 1.05f;
+        const float strokeSpacing = 1.2f;
 
         for (int i = 0; i < CutHatchLinesPerPatch; i++)
         {
-            float startX = x0 + 0.35f + i * strokeSpacing;
+            float startX = x0 + 0.65f + i * 1.2f;
             float startZ = z0 + 0.35f;
             float endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
             float endZ = MathF.Min(startZ + strokeLength, z1 - 0.15f);
@@ -485,7 +489,8 @@ internal static class RegionMeshBuilder
                         new Vector3(x0, height, z0),
                         new Vector3(x1, height, z0),
                         north,
-                        -Vector3.UnitZ);
+                        -Vector3.UnitZ,
+                    includeContours: !terrain.CutawayEnabled);
                 }
 
                 float south = terrain.GetRenderHeightMeters(renderX, renderY + 1);
@@ -497,7 +502,8 @@ internal static class RegionMeshBuilder
                         new Vector3(x1, height, z1),
                         new Vector3(x0, height, z1),
                         south,
-                        Vector3.UnitZ);
+                        Vector3.UnitZ,
+                    includeContours: !terrain.CutawayEnabled);
                 }
 
                 float west = terrain.GetRenderHeightMeters(renderX - 1, renderY);
@@ -509,7 +515,8 @@ internal static class RegionMeshBuilder
                         new Vector3(x0, height, z1),
                         new Vector3(x0, height, z0),
                         west,
-                        -Vector3.UnitX);
+                        -Vector3.UnitX,
+                    includeContours: !terrain.CutawayEnabled);
                 }
 
                 float east = terrain.GetRenderHeightMeters(renderX + 1, renderY);
@@ -521,7 +528,8 @@ internal static class RegionMeshBuilder
                         new Vector3(x1, height, z0),
                         new Vector3(x1, height, z1),
                         east,
-                        Vector3.UnitX);
+                        Vector3.UnitX,
+                    includeContours: !terrain.CutawayEnabled);
                 }
             }
         }
@@ -550,7 +558,8 @@ internal static class RegionMeshBuilder
         Vector3 upperStart,
         Vector3 upperEnd,
         float lowerHeight,
-        Vector3 normal)
+        Vector3 normal,
+        bool includeContours = true)
     {
         float upperHeight = upperStart.Y;
         Color wallColor = Darken(
@@ -567,14 +576,17 @@ internal static class RegionMeshBuilder
             normal,
             wallColor);
 
-        AddElevationLines(
-            vertices, normals, colors, indices,
-            ref vertexOffset, ref indexOffset,
-            upperStart,
-            upperEnd,
-            lowerHeight,
-            upperHeight,
-            normal);
+        if (includeContours)
+        {
+            AddElevationLines(
+                vertices, normals, colors, indices,
+                ref vertexOffset, ref indexOffset,
+                upperStart,
+                upperEnd,
+                lowerHeight,
+                upperHeight,
+                normal);
+        }
     }
 
     private static void AddElevationLines(
