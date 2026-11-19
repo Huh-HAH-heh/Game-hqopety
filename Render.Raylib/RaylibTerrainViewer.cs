@@ -28,6 +28,10 @@ public static class RaylibTerrainViewer
 
         OrbitCameraController camera = new(terrain);
         RaylibTerrainRenderer? renderer = null;
+        bool undergroundSliceMode = false;
+        int undergroundSliceLayer = Math.Min(
+            16 * WorldMap.HeightUnitsPerMeter,
+            worldMap.LayerCount - 1);
 
         try
         {
@@ -41,14 +45,55 @@ public static class RaylibTerrainViewer
                 $"world: {terrain.WorldWidth:0}x{terrain.WorldDepth:0} m, " +
                 $"maximum height: {terrain.MaximumHeightMeters:0.0} m.");
 
+            Console.WriteLine(
+                "[Raylib] Underground demo: 52m tunnel, 20x20m chamber, " +
+                "4x4m surface shaft at 16m slice. Press C to inspect it.");
+
             while (!WindowShouldClose())
             {
                 float deltaTime = Math.Clamp(GetFrameTime(), 0f, 0.05f);
 
-                camera.Update(deltaTime);
+                if (IsKeyPressed(KeyboardKey.C))
+                {
+                    undergroundSliceMode = !undergroundSliceMode;
+
+                    if (undergroundSliceMode)
+                    {
+                        terrain.RefreshUndergroundSlice(
+                            worldMap,
+                            undergroundSliceLayer);
+                        renderer.SynchronizeUndergroundSlice(terrain);
+
+                        camera.FocusOn(
+                            new System.Numerics.Vector3(
+                                terrain.WorldWidth * 0.5f + 58f,
+                                terrain.SliceHeightMeters,
+                                terrain.WorldDepth * 0.5f - 9f),
+                            110f);
+                    }
+                    else
+                    {
+                        renderer.Synchronize(terrain);
+                        camera.ResetTopDownView();
+                    }
+                }
 
                 if (terrain.RefreshFromWorld(worldMap))
-                    renderer.Synchronize(terrain);
+                {
+                    if (undergroundSliceMode)
+                    {
+                        terrain.RefreshUndergroundSlice(
+                            worldMap,
+                            undergroundSliceLayer);
+                        renderer.SynchronizeUndergroundSlice(terrain);
+                    }
+                    else
+                    {
+                        renderer.Synchronize(terrain);
+                    }
+                }
+
+                camera.Update(deltaTime);
 
                 BeginDrawing();
                 ClearBackground(new Color(0, 0, 0, 255));
@@ -59,7 +104,7 @@ public static class RaylibTerrainViewer
                     GetScreenWidth(),
                     GetScreenHeight());
 
-                DrawHud(terrain, renderer);
+                DrawHud(terrain, renderer, undergroundSliceMode);
                 EndDrawing();
             }
         }
@@ -73,11 +118,19 @@ public static class RaylibTerrainViewer
 
     private static void DrawHud(
         TerrainRenderSnapshot terrain,
-        RaylibTerrainRenderer renderer)
+        RaylibTerrainRenderer renderer,
+        bool undergroundSliceMode)
     {
         DrawRectangle(12, 12, 448, 178, new Color(0, 0, 0, 235));
 
-        DrawText("RIMCLONE / TOP-DOWN TERRAIN", 24, 22, 18, Color.RayWhite);
+        DrawText(
+            undergroundSliceMode
+                ? $"RIMCLONE / UNDERGROUND SLICE {terrain.SliceHeightMeters:0.0} M"
+                : "RIMCLONE / TOP-DOWN TERRAIN",
+            24,
+            22,
+            18,
+            Color.RayWhite);
         DrawText(
             $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
             24,
@@ -105,6 +158,15 @@ public static class RaylibTerrainViewer
             120,
             14,
             Color.LightGray);
+
+        DrawText(
+            undergroundSliceMode
+                ? "C return to surface | slice samples real voxel occupancy"
+                : "C inspect underground tunnel | T fit top view",
+            24,
+            146,
+            14,
+            Color.RayWhite);
 
         DrawText(
             "WASD move | RMB orbit | MMB pan | Wheel zoom to cursor | T fit top view | Shift boost | Q/E altitude | Esc exit",
