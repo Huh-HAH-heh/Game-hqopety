@@ -242,6 +242,26 @@ public sealed class TerrainRenderSnapshot
         return index >= 0 && _caveIntervals.ContainsKey(index);
     }
 
+    internal bool IsCutawayVoidAt(int regionX, int regionY)
+    {
+        if (!CutawayEnabled)
+            return false;
+
+        ReadOnlySpan<CaveInterval> intervals =
+            GetCaveIntervals(regionX, regionY);
+
+        foreach (CaveInterval interval in intervals)
+        {
+            if (CutawayLayer >= interval.StartLayer &&
+                CutawayLayer < interval.EndLayer)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Rebuilds the visible terrain at a horizontal cut plane. Cells above the
     /// plane are clipped. Solid cells on the plane become hatched cut faces;
