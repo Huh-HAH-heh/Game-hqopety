@@ -50,16 +50,131 @@ public static class WorldGenerator
         WorldMap worldMap,
         bool writeLog = true)
     {
+        ArgumentNullException.ThrowIfNull(worldMap);
+
         worldMap.DisableDiscreteBlockTerrain();
         worldMap.Water.Clear();
-        GenerateBaseTerrain(worldMap);
+
+        const int patchSize = 4;
+        int patchesX = worldMap.TileWidth / patchSize;
+        int patchesY = worldMap.TileHeight / patchSize;
+        ushort[] heights = new ushort[checked(patchesX * patchesY)];
+
+        int centerX = worldMap.TileWidth / 2;
+        int centerY = worldMap.TileHeight / 2;
+        int rampDistance = Math.Max(1, worldMap.TileHeight / 12);
+        float canyonSpacing = rampDistance * 2f;
+        float[] canyonFloorY = new float[worldMap.TileWidth];
+
+        // Restored from the earlier detailed canyon map. Evaluate its terrain
+        // profile at the centre of each 4x4-tile render patch.
+        for (int x = 0; x < worldMap.TileWidth; x++)
+        {
+            float dx = x - centerX;
+            float broadBend = FractalNoise(x, centerY, 0.0025f, 17) * 30f;
+            float smallBend = FractalNoise(x, centerY, 0.009f, 43) * 11f;
+
+            canyonFloorY[x] =
+                centerY +
+                MathF.Sin(dx * 0.010f) * 13f +
+                MathF.Sin(dx * 0.0035f) * 28f +
+                MathF.Sin(dx * 0.032f) * 3f +
+                broadBend +
+                smallBend;
+        }
+
+        for (int patchY = 0; patchY < patchesY; patchY++)
+        {
+            int sampleY = patchY * patchSize + patchSize / 2;
+
+            for (int patchX = 0; patchX < patchesX; patchX++)
+            {
+                int sampleX = patchX * patchSize + patchSize / 2;
+
+                float broadRelief = FractalNoise(sampleX, sampleY, 0.0028f, 101);
+                float mediumRelief = FractalNoise(sampleX, sampleY, 0.0085f, 211);
+                float fineRelief = ValueNoise(
+                    sampleX * 0.032f,
+                    sampleY * 0.032f,
+                    307);
+
+                float warpedOffset =
+                    sampleY - canyonFloorY[sampleX] +
+                    broadRelief * 15f +
+                    mediumRelief * 6f;
+
+                float nearestCanyonOffset =
+                    MathF.Round(warpedOffset / canyonSpacing) * canyonSpacing;
+                float distanceFromFloor =
+                    MathF.Abs(warpedOffset - nearestCanyonOffset);
+
+                float floorWidth = rampDistance * 0.22f;
+                float cliffEnd = rampDistance * 0.36f;
+                float shapedHeight;
+
+                if (distanceFromFloor < floorWidth)
+                {
+                    shapedHeight =
+                        2f + distanceFromFloor / floorWidth * 3f;
+                }
+                else if (distanceFromFloor < cliffEnd)
+                {
+                    float amount =
+                        (distanceFromFloor - floorWidth) /
+                        (cliffEnd - floorWidth);
+                    shapedHeight = Lerp(5f, 38f, amount);
+                }
+                else
+                {
+                    float amount =
+                        (distanceFromFloor - cliffEnd) /
+                        (rampDistance - cliffEnd);
+                    shapedHeight = Lerp(38f, 48f, amount);
+                }
+
+                shapedHeight +=
+                    broadRelief * 2.5f +
+                    mediumRelief * 2f +
+                    fineRelief * 1.2f;
+
+                shapedHeight = ApplyMesa(
+                    sampleX, sampleY,
+                    centerX + 58f, centerY - 9f,
+                    48f, 36f,
+                    shapedHeight,
+                    mediumRelief,
+                    fineRelief);
+
+                shapedHeight = ApplyRimmedBasin(
+                    sampleX, sampleY,
+                    centerX - 61f, centerY + 19f,
+                    40f, 29f,
+                    shapedHeight,
+                    broadRelief,
+                    mediumRelief,
+                    fineRelief);
+
+                int heightUnits = Math.Clamp(
+                    (int)MathF.Round(
+                        shapedHeight *
+                        WorldMap.HeightUnitsPerMeter /
+                        WorldMap.LayerHeightUnits),
+                    1,
+                    worldMap.LayerCount);
+
+                heights[patchX + patchY * patchesX] =
+                    checked((ushort)(heightUnits * WorldMap.LayerHeightUnits));
+            }
+        }
+
+        worldMap.SetSurfaceHeightPatches(heights, patchSize, BaseMaterialId);
 
         if (writeLog)
         {
             Console.WriteLine(
-                "[WorldGenerator] " +
-                $"Создана тестовая карта из {worldMap.RegionsX * worldMap.RegionsY} " +
-                $"плоских регионов {TerrainRegion.TilesPerSide}x{TerrainRegion.TilesPerSide}.");
+                "[WorldGenerator] Detailed canyon preview restored: " +
+                $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
+                $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles.");
         }
     }
 
