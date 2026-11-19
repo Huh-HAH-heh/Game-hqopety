@@ -433,30 +433,45 @@ internal sealed class OrbitCameraController
 
     public void FocusOn(Vector3 target, float distance, float pitchRadians)
     {
+        _target = target;
         _desiredTarget = target;
+
+        _yawRadians = 0f;
         _desiredYawRadians = 0f;
-        _desiredPitchRadians = Math.Clamp(
+
+        _pitchRadians = Math.Clamp(
             pitchRadians,
             MinimumPitch,
             MaximumPitch);
-        _desiredDistance = Math.Clamp(
+        _desiredPitchRadians = _pitchRadians;
+
+        _distance = Math.Clamp(
             distance,
             _minimumDistance,
             _maximumDistance);
+        _desiredDistance = _distance;
 
         ResetSmoothing();
+        UpdateCamera();
     }
 
     public void ResetTopDownView()
     {
+        _target = _topDownTarget;
         _desiredTarget = _topDownTarget;
+
+        _yawRadians = 0f;
         _desiredYawRadians = 0f;
+        _pitchRadians = TopDownPitch;
         _desiredPitchRadians = TopDownPitch;
-        _desiredDistance = CalculateFitDistance(
+
+        _distance = CalculateFitDistance(
             GetScreenWidth(),
             GetScreenHeight());
+        _desiredDistance = _distance;
 
         ResetSmoothing();
+        UpdateCamera();
     }
 
     private void ResetSmoothing()
