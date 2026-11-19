@@ -14,7 +14,7 @@ public static class RaylibGameBootstrap
             regionsX: 12,
             regionsY: 12);
 
-        WorldGenerator.Generate(worldMap);
+        WorldGenerator.GenerateSmooth(worldMap);
         RaylibTerrainViewer.Run(worldMap);
     }
 }
