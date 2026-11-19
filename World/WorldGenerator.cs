@@ -200,134 +200,157 @@ public static class WorldGenerator
             heightInMeters: 3,
             materialId: 3);
 
-        // The tunnel runs across the mesa's short axis. Both ends stay inside
-        // the high plateau and are sealed by rock; only the vertical shaft
-        // connects the underground system to the surface.
+        // Two fully enclosed underground levels. Their ends stay buried
+        // inside the mesa; the only connection is an internal vertical shaft.
+        int lowerTunnelX = caveCenterX - 32;
+        int lowerTunnelY = caveCenterY - 4;
+        int upperTunnelX = caveCenterX - 4;
+        int upperTunnelY = caveCenterY - 28;
+
         worldMap.CarveStaticVolume(
-            tunnelStartX,
-            tunnelStartY,
+            lowerTunnelX,
+            lowerTunnelY,
             zLevel: 14,
-            width: 12,
-            depth: 52,
+            width: 64,
+            depth: 8,
             heightInMeters: 5);
 
         worldMap.CarveStaticVolume(
             Math.Clamp(caveCenterX - 10, 0, worldMap.TileWidth - 20),
-            Math.Clamp(caveCenterY - 11, 0, worldMap.TileHeight - 20),
+            Math.Clamp(caveCenterY - 10, 0, worldMap.TileHeight - 20),
             zLevel: 12,
             width: 20,
             depth: 20,
             heightInMeters: 8);
 
-        int shaftX = Math.Clamp(
-            caveCenterX - 2,
-            0,
-            worldMap.TileWidth - 4);
-        int shaftY = Math.Clamp(
+        worldMap.CarveStaticVolume(
+            upperTunnelX,
+            upperTunnelY,
+            zLevel: 26,
+            width: 8,
+            depth: 56,
+            heightInMeters: 5);
+
+        worldMap.CarveStaticVolume(
+            Math.Clamp(caveCenterX - 10, 0, worldMap.TileWidth - 20),
+            Math.Clamp(caveCenterY - 10, 0, worldMap.TileHeight - 20),
+            zLevel: 24,
+            width: 20,
+            depth: 20,
+            heightInMeters: 8);
+
+        // The 6x6 m connector overlaps both chambers, joining two different
+        // cave elevations without opening either level to the surface.
+        worldMap.CarveStaticVolume(
+            caveCenterX - 3,
             caveCenterY - 3,
-            0,
-            worldMap.TileHeight - 4);
-        int maximumWorldHeightMeters =
-            worldMap.LayerCount / WorldMap.HeightUnitsPerMeter;
+            zLevel: 18,
+            width: 6,
+            depth: 6,
+            heightInMeters: 8);
 
-        if (maximumWorldHeightMeters > 20)
-        {
-            ushort shaftSurfaceHeight = worldMap.GetSurfaceHeightUnits(
-                shaftX + 2,
-                shaftY + 2);
-            int shaftTopMeters = Math.Clamp(
-                (shaftSurfaceHeight + WorldMap.HeightUnitsPerMeter - 1) /
-                WorldMap.HeightUnitsPerMeter,
-                21,
-                maximumWorldHeightMeters);
+        int proofSliceLower = 16 * WorldMap.HeightUnitsPerMeter;
+        int proofSliceUpper = 28 * WorldMap.HeightUnitsPerMeter;
+        bool lowerAir = worldMap.GetMaterialId(
+            caveCenterX,
+            caveCenterY - 4,
+            proofSliceLower) == 0;
+        bool upperAir = worldMap.GetMaterialId(
+            caveCenterX + 4,
+            caveCenterY,
+            proofSliceUpper) == 0;
+        bool connectorAir = worldMap.GetMaterialId(
+            caveCenterX,
+            caveCenterY,
+            22 * WorldMap.HeightUnitsPerMeter) == 0;
 
-            worldMap.CarveStaticVolume(
-                shaftX,
-                shaftY,
-                zLevel: 20,
-                width: 4,
-                depth: 4,
-                heightInMeters: shaftTopMeters - 20);
-        }
+        bool lowerFloorSolid = worldMap.GetMaterialId(
+            caveCenterX,
+            caveCenterY - 4,
+            13 * WorldMap.HeightUnitsPerMeter) != 0;
+        bool lowerRoofSolid = worldMap.GetMaterialId(
+            caveCenterX,
+            caveCenterY - 4,
+            19 * WorldMap.HeightUnitsPerMeter) != 0;
+        bool upperFloorSolid = worldMap.GetMaterialId(
+            caveCenterX + 4,
+            caveCenterY,
+            23 * WorldMap.HeightUnitsPerMeter) != 0;
+        bool upperRoofSolid = worldMap.GetMaterialId(
+            caveCenterX + 4,
+            caveCenterY,
+            32 * WorldMap.HeightUnitsPerMeter) != 0;
 
-        int proofX = caveCenterX;
-        int proofY = caveCenterY;
-        int proofSliceLayer = 16 * WorldMap.HeightUnitsPerMeter;
-        bool hasAirGap = false;
-        bool hasSolidFloor = false;
+        bool lowerEndsSealed =
+            worldMap.GetMaterialId(
+                lowerTunnelX - 1,
+                lowerTunnelY + 4,
+                proofSliceLower) != 0 &&
+            worldMap.GetMaterialId(
+                lowerTunnelX + 64,
+                lowerTunnelY + 4,
+                proofSliceLower) != 0;
 
-        foreach (TileRange range in worldMap.GetTileRanges(proofX, proofY))
-        {
-            if (range.State == WorldMap.StateEmpty &&
-                range.StartZ <= proofSliceLayer &&
-                range.EndZ > proofSliceLayer)
-            {
-                hasAirGap = true;
-            }
+        bool upperEndsSealed =
+            worldMap.GetMaterialId(
+                upperTunnelX + 4,
+                upperTunnelY - 1,
+                proofSliceUpper) != 0 &&
+            worldMap.GetMaterialId(
+                upperTunnelX + 4,
+                upperTunnelY + 56,
+                proofSliceUpper) != 0;
 
-            int floorProbeLayer = 11 * WorldMap.HeightUnitsPerMeter;
-            if (range.State == WorldMap.StateSolid &&
-                range.StartZ <= floorProbeLayer &&
-                range.EndZ > floorProbeLayer)
-            {
-                hasSolidFloor = true;
-            }
-        }
-
-        ushort solidOutsideTunnel = worldMap.GetMaterialId(
-            proofX - 12,
-            proofY,
-            proofSliceLayer);
         ushort lowerStratum = worldMap.GetMaterialId(
-            proofX - 12,
-            proofY,
+            caveCenterX - 20,
+            caveCenterY - 20,
             9 * WorldMap.HeightUnitsPerMeter);
         ushort upperStratum = worldMap.GetMaterialId(
-            proofX - 12,
-            proofY,
+            caveCenterX - 20,
+            caveCenterY - 20,
             27 * WorldMap.HeightUnitsPerMeter);
-        ushort northTunnelCap = worldMap.GetMaterialId(
-            proofX,
-            tunnelStartY - 1,
-            proofSliceLayer);
-        ushort southTunnelCap = worldMap.GetMaterialId(
-            proofX,
-            tunnelStartY + 52,
-            proofSliceLayer);
-        ushort tunnelRoof = worldMap.GetMaterialId(
-            proofX,
-            tunnelStartY + 4,
-            19 * WorldMap.HeightUnitsPerMeter);
-        ushort openedShaftSurface = worldMap.GetSurfaceHeightUnits(
-            shaftX + 2,
-            shaftY + 2);
 
-        if (!hasAirGap ||
-            !hasSolidFloor ||
-            solidOutsideTunnel == 0 ||
+        ushort surfaceCoverHeight = worldMap.GetSurfaceHeightUnits(
+            caveCenterX,
+            caveCenterY);
+        int surfaceLayer = Math.Max(
+            0,
+            surfaceCoverHeight / WorldMap.LayerHeightUnits - 1);
+        bool surfaceSealed = surfaceCoverHeight > 35 * WorldMap.HeightUnitsPerMeter &&
+            worldMap.GetMaterialId(
+                caveCenterX,
+                caveCenterY,
+                surfaceLayer) != 0;
+
+        if (!lowerAir ||
+            !upperAir ||
+            !connectorAir ||
+            !lowerFloorSolid ||
+            !lowerRoofSolid ||
+            !upperFloorSolid ||
+            !upperRoofSolid ||
+            !lowerEndsSealed ||
+            !upperEndsSealed ||
             lowerStratum != 2 ||
             upperStratum != 3 ||
-            northTunnelCap == 0 ||
-            southTunnelCap == 0 ||
-            tunnelRoof == 0 ||
-            openedShaftSurface >= 20 * WorldMap.HeightUnitsPerMeter)
+            !surfaceSealed)
         {
             throw new InvalidOperationException(
-                "Static cave proof failed: expected an air tunnel, solid floor, " +
-                "solid rock outside the tunnel and an open surface shaft.");
+                "3D cave proof failed: expected two enclosed levels, solid floors/roofs, " +
+                "sealed tunnel ends, an internal connector and an unbroken surface.");
         }
 
         if (writeLog)
         {
             Console.WriteLine(
                 "[WorldGenerator] 3D terrain verified: " +
-                "solid strata at 9m/27m, tunnel air at 16m, floor/roof/walls " +
-                "solid, both ends sealed and vertical shaft open.");
+                "two enclosed tunnel levels at 16m/28m, internal connector, " +
+                "solid floors/roofs, sealed ends, continuous surface and strata at 9m/27m.");
             Console.WriteLine(
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
                 $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
-                "static geology: strata 2/3; enclosed 52m tunnel + chamber + shaft.");
+                "static geology: two closed 64m/56m tunnel levels + chambers + internal connector.");
         }
     }
 
