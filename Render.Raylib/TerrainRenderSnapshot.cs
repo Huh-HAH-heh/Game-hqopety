@@ -1,6 +1,9 @@
+using System.Collections.Generic;
 using Core.Map;
 
 namespace RimClone.Render.Raylib;
+
+internal readonly record struct CaveInterval(int StartLayer, int EndLayer);
 
 /// <summary>
 /// Presentation-owned surface snapshot.
@@ -17,7 +20,9 @@ public sealed class TerrainRenderSnapshot
     private readonly ushort[] _cutMaterialIds;
     private readonly bool[] _cutFaces;
     private readonly long[] _sourceRegionVersions;
+    private readonly Dictionary<int, CaveInterval[]> _caveIntervals = new();
     private long _cutSourceWorldVersion = long.MinValue;
+    private long _caveSourceWorldVersion = long.MinValue;
 
     public int RegionsX { get; }
     public int RegionsY { get; }
@@ -149,7 +154,89 @@ public sealed class TerrainRenderSnapshot
 
         SourceWorldVersion = worldMap.TerrainVersion;
         _initialized = true;
-        return changed;
+
+        bool cavesChanged = RefreshCaveIntervals(worldMap);
+        return changed || cavesChanged;
+    }
+
+    private bool RefreshCaveIntervals(WorldMap worldMap)
+    {
+        if (_caveSourceWorldVersion == worldMap.TerrainVersion)
+            return false;
+
+        _caveIntervals.Clear();
+
+        for (int renderY = 0; renderY < RegionsY; renderY++)
+        {
+            int tileY = renderY * RegionSize + RegionSize / 2;
+
+            for (int renderX = 0; renderX < RegionsX; renderX++)
+            {
+                int tileX = renderX * RegionSize + RegionSize / 2;
+
+                if (!worldMap.Blocks.Volumes.HasEmptyOverridesInColumn(
+                        tileX,
+                        tileY))
+                {
+                    continue;
+                }
+
+                ushort surfaceUnits =
+                    worldMap.GetSurfaceHeightUnits(tileX, tileY);
+                ReadOnlySpan<TileRange> ranges =
+                    worldMap.GetTileRanges(tileX, tileY);
+
+                List<CaveInterval>? intervals = null;
+
+                foreach (TileRange range in ranges)
+                {
+                    if (range.State != WorldMap.StateEmpty ||
+                        range.StartZ == 0 ||
+                        range.EndZ >= surfaceUnits)
+                    {
+                        continue;
+                    }
+
+                    int startLayer =
+                        range.StartZ / WorldMap.LayerHeightUnits;
+                    int endLayer =
+                        range.EndZ / WorldMap.LayerHeightUnits;
+
+                    if (endLayer <= startLayer)
+                        continue;
+
+                    intervals ??= new List<CaveInterval>(2);
+                    intervals.Add(new CaveInterval(startLayer, endLayer));
+                }
+
+                if (intervals is { Count: > 0 })
+                {
+                    _caveIntervals.Add(
+                        renderX + renderY * RegionsX,
+                        intervals.ToArray());
+                }
+            }
+        }
+
+        _caveSourceWorldVersion = worldMap.TerrainVersion;
+        return true;
+    }
+
+    internal ReadOnlySpan<CaveInterval> GetCaveIntervals(
+        int regionX,
+        int regionY)
+    {
+        int index = GetIndex(regionX, regionY);
+        return index >= 0 &&
+               _caveIntervals.TryGetValue(index, out CaveInterval[]? intervals)
+            ? intervals
+            : ReadOnlySpan<CaveInterval>.Empty;
+    }
+
+    internal bool HasCaveIntervals(int regionX, int regionY)
+    {
+        int index = GetIndex(regionX, regionY);
+        return index >= 0 && _caveIntervals.ContainsKey(index);
     }
 
     /// <summary>
