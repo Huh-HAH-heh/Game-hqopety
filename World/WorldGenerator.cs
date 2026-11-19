@@ -198,17 +198,35 @@ public static class WorldGenerator
             depth: 20,
             heightInMeters: 8);
 
-        if (worldMap.LayerCount / WorldMap.HeightUnitsPerMeter > 20)
+        int shaftX = Math.Clamp(
+            caveCenterX - 2,
+            0,
+            worldMap.TileWidth - 4);
+        int shaftY = Math.Clamp(
+            caveCenterY - 3,
+            0,
+            worldMap.TileHeight - 4);
+        int maximumWorldHeightMeters =
+            worldMap.LayerCount / WorldMap.HeightUnitsPerMeter;
+
+        if (maximumWorldHeightMeters > 20)
         {
+            ushort shaftSurfaceHeight = worldMap.GetSurfaceHeightUnits(
+                shaftX + 2,
+                shaftY + 2);
+            int shaftTopMeters = Math.Clamp(
+                (shaftSurfaceHeight + WorldMap.HeightUnitsPerMeter - 1) /
+                WorldMap.HeightUnitsPerMeter,
+                21,
+                maximumWorldHeightMeters);
+
             worldMap.CarveStaticVolume(
-                Math.Clamp(caveCenterX - 2, 0, worldMap.TileWidth - 4),
-                Math.Clamp(caveCenterY - 3, 0, worldMap.TileHeight - 4),
+                shaftX,
+                shaftY,
                 zLevel: 20,
                 width: 4,
                 depth: 4,
-                heightInMeters: Math.Min(
-                    23,
-                    worldMap.LayerCount / WorldMap.HeightUnitsPerMeter - 20));
+                heightInMeters: shaftTopMeters - 20);
         }
 
         if (writeLog)
