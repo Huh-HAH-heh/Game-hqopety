@@ -16,10 +16,13 @@ internal sealed class OrbitCameraController
     private const float MovementSmoothTime = 0.12f;
     private const float ZoomSmoothTime = 0.15f;
     private const float MinimumPitch = 0.22f;
-    private const float MaximumPitch = 1.565f;
+    private const float TopDownPitch = 1.565f;
+    private const float MaximumPitch = TopDownPitch;
 
     private readonly float _minimumDistance;
     private readonly float _maximumDistance;
+    private Vector3 _topDownTarget;
+    private float _topDownDistance;
 
     private Vector3 _target;
     private Vector3 _desiredTarget;
@@ -61,15 +64,17 @@ internal sealed class OrbitCameraController
             terrain.WorldDepth * 0.5f);
 
         _desiredTarget = _target;
+        _topDownTarget = _target;
 
         _yawRadians = 0f;
         _desiredYawRadians = _yawRadians;
 
-        _pitchRadians = 1.565f;
+        _pitchRadians = TopDownPitch;
         _desiredPitchRadians = _pitchRadians;
 
         _distance = largestWorldAxis * 1.15f;
         _desiredDistance = _distance;
+        _topDownDistance = _distance;
 
         _minimumDistance = 18f;
         _maximumDistance = largestWorldAxis * 3.5f;
@@ -216,6 +221,19 @@ internal sealed class OrbitCameraController
 
     private void UpdateKeyboardInput(float deltaTime)
     {
+        if (IsKeyPressed(KeyboardKey.T))
+        {
+            _desiredTarget = _topDownTarget;
+            _desiredYawRadians = 0f;
+            _desiredPitchRadians = TopDownPitch;
+            _desiredDistance = _topDownDistance;
+
+            _targetVelocity = Vector3.Zero;
+            _yawVelocity = 0f;
+            _pitchVelocity = 0f;
+            _distanceVelocity = 0f;
+        }
+
         float moveX = 0f;
         float moveZ = 0f;
 
