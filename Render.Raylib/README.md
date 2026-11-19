@@ -67,7 +67,7 @@ upload, draw and disposal are restricted to the render thread.
 - upper passage: 32 m long, inside the mesa at 26 m depth, with both ends sealed;
 - lower and upper chambers: 20 x 20 m, with floors at 12 m and 24 m;
 - a rising internal connector joins the two elevations without piercing the surface;
-- separate material bands occupy 8-10 m and 26-29 m.
+- separate material bands occupy 8-10 m and 26-29 m, only where the original surface provides enough overburden to contain them.
 
 The lower passage is a through-tunnel with two portals, not a blind adit. Its
 centreline curves and its cross-section varies; the upper level remains enclosed.
@@ -81,10 +81,11 @@ air gaps. The generator verifies the lower portals, empty tunnel interiors,
 solid floors and roofs, sealed upper passage, connector and geological bands.
 
 Press **C** to enable the visual cutaway. Terrain above the camera focus plane
-is hidden. The section height follows `Camera.Target.Y` at 0.1 m resolution
-and is clamped to the world's actual 50 m vertical extent. Camera focus moves
-smoothly; GPU cut meshes refresh in 0.5 m increments to avoid rebuilding the
-whole terrain mesh for every tiny camera movement. **Q/E** move the plane,
+is hidden. The section height follows `Camera.Target.Y` and is clamped to the world's
+actual 50 m vertical extent. Camera focus moves smoothly; GPU cut meshes
+refresh in 0.5 m increments to avoid rebuilding the whole terrain mesh for
+every tiny camera movement. The terrain's underlying voxel resolution remains
+0.1 m. **Q/E** move the plane,
 **PageUp/PageDown** step by 1 m, and **Shift+Wheel** also moves it by 1 m.
 Ordinary wheel input zooms the view.
 
