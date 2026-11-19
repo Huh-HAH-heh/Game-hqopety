@@ -169,7 +169,8 @@ public sealed class WorldMap
         if (UsesDiscreteBlockTerrain)
             return;
 
-        Blocks.Volumes.Clear();
+        // Preserve static cave and tunnel empty overrides created before
+        // block simulation is enabled.
         Blocks.ClearTransitions();
         Array.Clear(_volumeSurfaceHeights);
         UsesDiscreteBlockTerrain = true;
@@ -238,6 +239,18 @@ public sealed class WorldMap
                     int levels = (int)MathF.Round(
                         oldHeight / (float)HeightUnitsPerMeter,
                         MidpointRounding.AwayFromZero);
+
+                    if (Blocks.Volumes.HasOverridesInColumn(globalX, globalY))
+                    {
+                        // Keep the compact implicit base column and its sparse
+                        // empty override; do not erase the cave through SetSolidHeight.
+                        Blocks.SetSurfaceLevel(
+                            globalX,
+                            globalY,
+                            levels,
+                            material);
+                        continue;
+                    }
 
                     SetSolidHeight(
                         globalX,
