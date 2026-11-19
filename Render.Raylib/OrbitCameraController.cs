@@ -11,11 +11,11 @@ namespace RimClone.Render.Raylib;
 internal sealed class OrbitCameraController
 {
     private const float FieldOfViewDegrees = 55f;
-    private const float RotationSensitivity = 0.0018f;
-    private const float RotationSmoothTime = 0.055f;
-    private const float MovementSmoothTime = 0.075f;
-    private const float ZoomSmoothTime = 0.095f;
-    private const float MinimumPitch = 0.53f;
+    private const float RotationSensitivity = 0.0022f;
+    private const float RotationSmoothTime = 0.045f;
+    private const float MovementSmoothTime = 0.060f;
+    private const float ZoomSmoothTime = 0.075f;
+    private const float MinimumPitch = 0.30f;
     private const float TopDownPitch = 1.54f;
     private const float MaximumPitch = TopDownPitch;
     private const float FitMargin = 1.08f;
@@ -73,7 +73,7 @@ internal sealed class OrbitCameraController
         _pitchRadians = TopDownPitch;
         _desiredPitchRadians = _pitchRadians;
 
-        _minimumDistance = 18f;
+        _minimumDistance = 4f;
         _maximumDistance = largestWorldAxis * 3.5f;
 
         _distance = CalculateFitDistance(
@@ -318,6 +318,11 @@ internal sealed class OrbitCameraController
         if (IsKeyPressed(KeyboardKey.T))
             ResetTopDownView();
 
+        if (IsKeyPressed(KeyboardKey.PageUp))
+            _desiredTarget.Y = Math.Min(500f, _desiredTarget.Y + 1f);
+        if (IsKeyPressed(KeyboardKey.PageDown))
+            _desiredTarget.Y = Math.Max(0f, _desiredTarget.Y - 1f);
+
         float moveX = 0f;
         float moveZ = 0f;
 
@@ -360,7 +365,7 @@ internal sealed class OrbitCameraController
 
         if (verticalInput != 0f)
         {
-            float speed = Math.Clamp(_desiredDistance * 0.006f, 1f, 8f);
+            float speed = Math.Clamp(_desiredDistance * 0.018f, 1.5f, 7f);
             _desiredTarget.Y = Math.Max(
                 0f,
                 _desiredTarget.Y + verticalInput * speed * deltaTime);
