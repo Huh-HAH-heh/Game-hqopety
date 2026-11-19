@@ -16,7 +16,7 @@ internal sealed class OrbitCameraController
     private const float MovementSmoothTime = 0.12f;
     private const float ZoomSmoothTime = 0.15f;
     private const float MinimumPitch = 0.22f;
-    private const float MaximumPitch = 1.36f;
+    private const float MaximumPitch = 1.565f;
 
     private readonly float _minimumDistance;
     private readonly float _maximumDistance;
@@ -57,7 +57,7 @@ internal sealed class OrbitCameraController
 
         _target = new Vector3(
             terrain.WorldWidth * 0.5f,
-            MathF.Max(1f, terrain.MaximumHeightMeters * 0.18f),
+            MathF.Max(1f, terrain.MaximumHeightMeters * 0.12f),
             terrain.WorldDepth * 0.5f);
 
         _desiredTarget = _target;
@@ -65,10 +65,10 @@ internal sealed class OrbitCameraController
         _yawRadians = 0f;
         _desiredYawRadians = _yawRadians;
 
-        _pitchRadians = 0.72f;
+        _pitchRadians = 1.565f;
         _desiredPitchRadians = _pitchRadians;
 
-        _distance = largestWorldAxis * 0.76f;
+        _distance = largestWorldAxis * 1.15f;
         _desiredDistance = _distance;
 
         _minimumDistance = 18f;
