@@ -198,32 +198,33 @@ internal sealed class OrbitCameraController
 
     private void PanByMouseDelta(Vector2 mouseDelta)
     {
-        float viewportHeight = Math.Max(1, GetScreenHeight());
-        float worldUnitsPerPixel =
-            2f * _desiredDistance *
-            MathF.Tan(FieldOfViewDegrees * MathF.PI / 360f) /
-            viewportHeight;
+        Vector2 center = new(
+            GetScreenWidth() * 0.5f,
+            GetScreenHeight() * 0.5f);
 
-        float sinPitch = MathF.Max(
-            0.48f,
-            MathF.Sin(_desiredPitchRadians));
+        // Treat MMB as grabbing the ground under the cursor. Intersect two
+        // screen rays with the focus plane instead of estimating movement in
+        // world units; this remains stable at every supported camera pitch.
+        if (!TryGetTargetPlanePoint(
+                center - mouseDelta,
+                _desiredTarget,
+                _desiredYawRadians,
+                _desiredPitchRadians,
+                _desiredDistance,
+                out Vector3 pointBefore) ||
+            !TryGetTargetPlanePoint(
+                center,
+                _desiredTarget,
+                _desiredYawRadians,
+                _desiredPitchRadians,
+                _desiredDistance,
+                out Vector3 pointAfter))
+        {
+            return;
+        }
 
-        Vector3 right = new(
-            MathF.Cos(_desiredYawRadians),
-            0f,
-            -MathF.Sin(_desiredYawRadians));
-
-        Vector3 groundForward = new(
-            -MathF.Sin(_desiredYawRadians),
-            0f,
-            -MathF.Cos(_desiredYawRadians));
-
-        // Use the analytic screen-to-ground scale. Ray/plane intersections
-        // become unstable near the horizon and made MMB panning stop abruptly.
-        _desiredTarget -= right *
-            (mouseDelta.X * worldUnitsPerPixel);
-        _desiredTarget += groundForward *
-            (mouseDelta.Y * worldUnitsPerPixel / sinPitch);
+        _desiredTarget.X += pointBefore.X - pointAfter.X;
+        _desiredTarget.Z += pointBefore.Z - pointAfter.Z;
     }
 
     private void UpdateZoomInput()
@@ -324,8 +325,14 @@ internal sealed class OrbitCameraController
         float distanceToPlane =
             (target.Y - cameraPosition.Y) / rayDirection.Y;
 
-        if (distanceToPlane <= 0f)
+        // The far upper edge of a shallow perspective view can intersect the
+        // focus plane far beyond the visible scene. Refuse that anchor rather
+        // than causing a sudden multi-hundred-metre pan during zoom.
+        if (distanceToPlane <= 0f ||
+            distanceToPlane > distance * 8f)
+        {
             return false;
+        }
 
         point = cameraPosition + rayDirection * distanceToPlane;
         return true;
