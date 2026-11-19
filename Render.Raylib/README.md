@@ -106,7 +106,9 @@ roofs, sealed upper passage, connector and geological bands.
 Press **C** to enable the visual cutaway. Material above the camera focus plane is
 clipped, not deleted from WorldMap. The section height follows `Camera.Target.Y`
 and is clamped to the world's 50 m vertical extent. The underlying voxel resolution
-remains 0.1 m; the displayed cut plane updates in 0.5 m increments.
+remains 0.1 m; the displayed cut plane updates in 0.5 m increments. Only
+camera-visible storage regions rebuild when the plane moves; off-screen batches
+are refreshed when they enter view.
 
 Cut faces are hatched. Base rock uses diagonal strokes, the 8-10 m stratum uses
 horizontal bedding marks, and the 26-29 m stratum uses the opposite diagonal.
