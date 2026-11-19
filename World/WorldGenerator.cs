@@ -229,8 +229,54 @@ public static class WorldGenerator
                 heightInMeters: shaftTopMeters - 20);
         }
 
+        int proofX = caveCenterX;
+        int proofY = caveCenterY;
+        int proofSliceLayer = 16 * WorldMap.HeightUnitsPerMeter;
+        bool hasAirGap = false;
+        bool hasSolidFloor = false;
+
+        foreach (TileRange range in worldMap.GetTileRanges(proofX, proofY))
+        {
+            if (range.State == WorldMap.StateEmpty &&
+                range.StartZ <= proofSliceLayer &&
+                range.EndZ > proofSliceLayer)
+            {
+                hasAirGap = true;
+            }
+
+            int floorProbeLayer = 11 * WorldMap.HeightUnitsPerMeter;
+            if (range.State == WorldMap.StateSolid &&
+                range.StartZ <= floorProbeLayer &&
+                range.EndZ > floorProbeLayer)
+            {
+                hasSolidFloor = true;
+            }
+        }
+
+        ushort solidOutsideTunnel = worldMap.GetMaterialId(
+            proofX,
+            proofY - 16,
+            proofSliceLayer);
+        ushort openedShaftSurface = worldMap.GetSurfaceHeightUnits(
+            shaftX + 2,
+            shaftY + 2);
+
+        if (!hasAirGap ||
+            !hasSolidFloor ||
+            solidOutsideTunnel == 0 ||
+            openedShaftSurface >= 20 * WorldMap.HeightUnitsPerMeter)
+        {
+            throw new InvalidOperationException(
+                "Static cave proof failed: expected an air tunnel, solid floor, " +
+                "solid rock outside the tunnel and an open surface shaft.");
+        }
+
         if (writeLog)
         {
+            Console.WriteLine(
+                "[WorldGenerator] Static cave verified: " +
+                $"air at {proofSliceLayer * 0.1f:0.0}m, " +
+                "solid floor at 11m, solid wall outside, open shaft.");
             Console.WriteLine(
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
