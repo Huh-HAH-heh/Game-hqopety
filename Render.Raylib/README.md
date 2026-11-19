@@ -68,7 +68,10 @@ regions.
 
 ## Top-down terrain style
 
-The initial camera is nearly vertical. Surface patches use a black-to-charcoal
-height palette; thin white contour strokes appear only along height transitions.
-There is no permanent white tile grid, so the lines identify relief details
-instead of covering the map.
+The initial camera is nearly vertical, with a camera-relative up axis so the
+view basis remains stable instead of becoming parallel to world-up. The camera
+fits the whole map for the current window aspect ratio, pans at a zoom-aware
+speed, and zooms toward the cursor. Surface patches use a black-to-charcoal
+height palette. Cliff faces carry white elevation marks only at 5 m intervals;
+their brightness alternates between bright white and muted gray. There is no
+permanent tile grid.
