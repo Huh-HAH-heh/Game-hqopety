@@ -81,10 +81,13 @@ public static class RaylibTerrainViewer
                     // The horizontal section is anchored to the camera's
                     // look-at height, quantized to one-metre steps. Q/E move
                     // continuously; PageUp/PageDown step by one metre.
+                    const float cutStepMeters = 0.5f;
+                    int layersPerCutStep = (int)MathF.Round(
+                        cutStepMeters * WorldMap.HeightUnitsPerMeter);
                     int cutLayer = Math.Clamp(
                         (int)MathF.Round(
-                            camera.Camera.Target.Y *
-                            WorldMap.HeightUnitsPerMeter),
+                            camera.Camera.Target.Y / cutStepMeters) *
+                            layersPerCutStep,
                         0,
                         worldMap.LayerCount - 1);
 
