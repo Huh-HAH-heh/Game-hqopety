@@ -227,10 +227,13 @@ public sealed class TerrainRenderSnapshot
         int regionY)
     {
         int index = GetIndex(regionX, regionY);
-        return index >= 0 &&
-               _caveIntervals.TryGetValue(index, out CaveInterval[]? intervals)
-            ? intervals
-            : ReadOnlySpan<CaveInterval>.Empty;
+        if (index >= 0 &&
+            _caveIntervals.TryGetValue(index, out CaveInterval[]? intervals))
+        {
+            return intervals;
+        }
+
+        return ReadOnlySpan<CaveInterval>.Empty;
     }
 
     internal bool HasCaveIntervals(int regionX, int regionY)
