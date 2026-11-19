@@ -83,7 +83,7 @@ public static class RaylibTerrainViewer
             24,
             50,
             17,
-            Color.Lime);
+            Color.RayWhite);
 
         DrawText(
             $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
