@@ -82,9 +82,11 @@ solid floors and roofs, sealed upper passage, connector and geological bands.
 
 Press **C** to enable the visual cutaway. Terrain above the camera focus plane
 is hidden. The section height follows `Camera.Target.Y` at 0.1 m resolution
-and is clamped to the world's actual 50 m vertical extent. **Q/E** move the
-plane smoothly, **PageUp/PageDown** step by 1 m, and **Shift+Wheel** also moves
-the plane by 1 m. Ordinary wheel input zooms the view.
+and is clamped to the world's actual 50 m vertical extent. Camera focus moves
+smoothly; GPU cut meshes refresh in 0.5 m increments to avoid rebuilding the
+whole terrain mesh for every tiny camera movement. **Q/E** move the plane,
+**PageUp/PageDown** step by 1 m, and **Shift+Wheel** also moves it by 1 m.
+Ordinary wheel input zooms the view.
 
 Cut faces are hatched. The base material uses diagonal strokes, the 8-10 m
 stratum uses horizontal bedding marks, and the 26-29 m stratum uses the
