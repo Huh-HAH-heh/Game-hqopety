@@ -5,57 +5,79 @@ renderer and does not own world-generation or simulation state.
 
 ## Responsibilities
 
-- `TerrainRenderSnapshot` copies terrain surface data into flat presentation arrays.
-- `RaylibTerrainRenderer` owns GPU resources and draws cached storage-region batches.
-- `RegionMeshBuilder` builds one GPU mesh per 192x192 storage region.
-- `OrbitCameraController` owns presentation camera state and input.
+- `TerrainRenderSnapshot` stores compact surface data plus exact vertical solid/air
+  intervals for columns with cave, stratum or local voxel overrides.
+- `RaylibTerrainRenderer` owns GPU resources and draws cached volumetric batches.
+- `RegionMeshBuilder` builds exposed top, bottom and side faces from vertical intervals.
+- `OrbitCameraController` owns RTS orbit, pan, zoom and cut-plane controls.
 - `RaylibTerrainViewer` owns the window and frame loop.
 
 ## Terrain region layout
 
-The terrain presentation overlay is divided into **4x4-tile render regions**.
-The existing world/simulation storage remains at 192x192 tiles for now; this keeps
-the 500-level world data layout and the 2304x2304 world dimensions unchanged.
+The presentation grid uses **4x4-tile render cells**. World storage remains grouped
+into 192x192-tile regions; the full map is still 2304x2304 metres with 500 vertical
+layers at 0.1 m per layer.
 
-Each 192x192 storage region contains 48x48 render regions. Those small regions
-are sampled independently into the presentation snapshot, then combined into one
-GPU mesh per storage region. Adjacent patches with identical height and material
-are merged into larger faces; height discontinuities keep their own cliff faces.
-This keeps local terrain sampling fine-grained while avoiding hundreds of thousands
-of GPU objects and draw calls.
+Each storage region contains 48x48 render cells. For safe 16-bit GPU indices, the
+mesher normally produces four 24x24-cell submeshes per storage region. Very dense
+areas split recursively into smaller batches. This keeps terrain as a small number
+of GPU meshes rather than one object per tile or voxel.
+
+## Volumetric geometry
+
+The renderer no longer treats terrain as only a top-height surface. Every sampled
+column is described by ordered vertical intervals of solid material and air.
+Simple terrain remains a compact height/material pair. Only columns containing
+strata, carved caves or other vertical edits retain their full interval list.
+
+The mesh builder emits:
+
+- upper faces of solid ground and lower floors exposed beneath caves;
+- undersides of cave roofs and ceilings;
+- vertical walls wherever solid material borders an air interval;
+- side faces along ordinary terrain height differences;
+- distinct cut faces and material-specific hatching at the current cut plane.
+
+Adjacent solid columns do not emit internal walls, so the result is a continuous
+volume. Empty intervals remain true holes: they are not painted as dark floor tiles.
 
 ## Data flow
 
 ```text
-WorldMap / WorldRegion (192x192 storage)
+WorldMap / sparse BlockVolumeTree
         |
         v
-TerrainRenderSnapshot (4x4 render regions, flat arrays + revisions)
+TerrainRenderSnapshot
+  compact surface + vertical solid/air intervals
         |
         v
-RegionMeshBuilder (one batched mesh per storage region)
+RegionMeshBuilder
+  4x4 render cells -> bounded volumetric submeshes
         |
         v
-RaylibTerrainRenderer (GPU batches + frustum culling)
+RaylibTerrainRenderer
+  cached GPU batches + frustum culling
         |
         v
 Raylib window
 ```
 
-The renderer reads the snapshot only. It does not query WorldMap during drawing.
-Storage-region revisions invalidate only affected GPU batches (plus adjacent
-batches whose shared cliff edges may have changed). GPU resource creation,
-upload, draw and disposal are restricted to the render thread.
+The renderer reads the snapshot only. It does not query WorldMap while drawing.
+GPU resource creation, upload, draw and disposal are restricted to the render thread.
+Normal terrain edits invalidate affected storage batches; moving the cut plane rebuilds
+the visible volume at 0.5 m steps.
 
 ## Controls
 
-- WASD: move in the camera's horizontal plane at a zoom-scaled RTS speed
-- Right mouse button + drag: orbit; dragging right rotates the camera to the right
-- Middle mouse button + drag: screen-space pan with a tilt-aware ground scale
-- Mouse wheel: zoom toward the cursor position when the focus-plane intersection is valid
-- Left Shift / Right Shift: faster movement
+- WASD: move the camera focus across the terrain
+- Right mouse button + drag: orbit around the focus; dragging right rotates right
+- Middle mouse button + drag: grab-and-pan using screen-ray intersections with the focus plane
+- Mouse wheel: zoom toward the cursor when the ground anchor is visible
+- Left Shift / Right Shift: faster WASD movement
+- C: toggle visual cutaway mode and focus on the underground test network
 - Q / E: move the camera focus and cut plane vertically
-- PageUp / PageDown: move the cut plane by exactly one metre
+- PageUp / PageDown: step the cut plane by exactly 1 metre
+- Shift + mouse wheel: adjust the cut plane by 1 metre
 - T: return to the fitted top-down view
 - Escape: exit
 
@@ -63,58 +85,43 @@ upload, draw and disposal are restricted to the render thread.
 
 `WorldGenerator.GenerateSmooth` creates a real multi-level volume system inside the mesa:
 
-- lower through-tunnel: 80 m long, normally 8 m wide and 5 m high, with occasional 12 m chambers and 6 m clearances; it bends in plan and opens through both canyon flanks;
+- lower through-tunnel: 80 m long, normally 8 m wide and 5 m high, with occasional
+  12 m pockets and 6 m clearances; it bends in plan and opens through both canyon flanks;
 - upper passage: 32 m long, inside the mesa at 26 m depth, with both ends sealed;
 - lower and upper chambers: 20 x 20 m, with floors at 12 m and 24 m;
 - a rising internal connector joins the two elevations without piercing the surface;
-- separate material bands occupy 8-10 m and 26-29 m, only where the original surface provides enough overburden to contain them.
+- separate material bands occupy 8-10 m and 26-29 m where the original surface
+  provides enough overburden.
 
 The lower passage is a through-tunnel with two portals, not a blind adit. Its
 centreline curves and its cross-section varies; the upper level remains enclosed.
-The connector is made from overlapping rising sections, not a vertical shaft.
 
-`WorldMap.CarveStaticVolume` writes empty overrides into the sparse 3D
-`BlockVolumeTree`. The underlying terrain remains an implicit solid column,
-so the generator does not materialize the whole 500-layer map into voxels.
-`GetMaterialId(x,y,z)` and `GetTileRanges(x,y)` resolve the actual solids and
-air gaps. The generator verifies the lower portals, empty tunnel interiors,
-solid floors and roofs, sealed upper passage, connector and geological bands.
+`WorldMap.CarveStaticVolume` and `SetStaticVolume` write empty/solid overrides into
+the sparse 3D `BlockVolumeTree`. The underlying terrain remains an implicit solid
+column, so the generator does not materialize the whole 500-layer map into voxels.
+`GetMaterialId(x,y,z)` and `GetTileRanges(x,y)` resolve actual solids and air gaps.
+The generator verifies the lower portals, empty tunnel interiors, solid floors and
+roofs, sealed upper passage, connector and geological bands.
 
-Press **C** to enable the visual cutaway. Terrain above the camera focus plane
-is hidden. The section height follows `Camera.Target.Y` and is clamped to the world's
-actual 50 m vertical extent. Camera focus moves smoothly; GPU cut meshes
-refresh in 0.5 m increments to avoid rebuilding the whole terrain mesh for
-every tiny camera movement. The terrain's underlying voxel resolution remains
-0.1 m. **Q/E** move the plane,
-**PageUp/PageDown** step by 1 m, and **Shift+Wheel** also moves it by 1 m.
-Ordinary wheel input zooms the view.
+Press **C** to enable the visual cutaway. Material above the camera focus plane is
+clipped, not deleted from WorldMap. The section height follows `Camera.Target.Y`
+and is clamped to the world's 50 m vertical extent. The underlying voxel resolution
+remains 0.1 m; the displayed cut plane updates in 0.5 m increments.
 
-Cut faces are hatched. The base material uses diagonal strokes, the 8-10 m
-stratum uses horizontal bedding marks, and the 26-29 m stratum uses the
-opposite diagonal. Tunnel floors and vertical cave walls are built from actual
-voxel intervals; the cutaway wall builder avoids emitting duplicate faces.
-Press C again to restore the full surface.
+Cut faces are hatched. Base rock uses diagonal strokes, the 8-10 m stratum uses
+horizontal bedding marks, and the 26-29 m stratum uses the opposite diagonal.
+Tunnel floors, ceilings and vertical cave walls come from the actual 3D occupancy
+intervals. Press C again to restore the full terrain volume.
 
-The inspection camera has a minimum 35-degree elevation above the horizon.
-This keeps every screen ray pointed down at the cut plane, so cursor-anchored
-zoom and middle-button panning remain usable across the viewport. The top-down
-view remains available with **T**.
+## Camera
 
-## Current milestone
+The inspection camera has a 45-degree field of view and can tilt down to 28.6 degrees
+above the horizon, exposing vertical terrain and cave walls rather than forcing a
+near-top-down view. The minimum angle keeps all screen rays aimed at the focus plane.
+Middle-button panning uses two screen-ray/plane intersections, avoiding the drift
+caused by a hand-estimated world-units-per-pixel scale. Zoom anchoring is rejected
+when a cursor ray hits the focus plane too far outside the visible area.
 
-The viewer restores the earlier winding canyon, mesa and rimmed basin layout.
-Heights are generated at the 4x4-tile render-patch scale and stored in compact
-surface arrays; vertical voxel layers are not materialized during preview
-generation. The render batches remain grouped by the larger 192x192 storage
-regions.
-
-
-## Top-down terrain style
-
-The initial camera is nearly vertical, with a camera-relative up axis so the
-view basis remains stable instead of becoming parallel to world-up. The camera
-fits the whole map for the current window aspect ratio, pans at a zoom-aware
-speed, and zooms toward the cursor. Surface patches use a black-to-charcoal
-height palette. Cliff faces carry white elevation marks only at 5 m intervals;
-their brightness alternates between bright white and muted gray. There is no
-permanent tile grid.
+The fitted top-down view remains available with **T**. The regular surface view keeps
+the black-to-charcoal palette, with thin 5 m elevation marks alternating between
+bright white and muted gray; there is no permanent tile grid.
