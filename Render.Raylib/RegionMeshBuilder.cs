@@ -135,219 +135,6 @@ internal static class RegionMeshBuilder
         return result;
     }
 
-    /// <summary>
-    /// Builds a horizontal underground section from voxel occupancy. Empty
-    /// cells are omitted, leaving cave and tunnel voids visible as black space.
-    /// </summary>
-    public static RegionGpuMesh BuildUndergroundSlice(
-        TerrainRenderSnapshot terrain,
-        int storageRegionX,
-        int storageRegionY)
-    {
-        int storageIndex =
-            storageRegionX + storageRegionY * terrain.StorageRegionsX;
-        int patchesPerSide = terrain.RenderRegionsPerStorageRegion;
-        int firstRenderX = storageRegionX * patchesPerSide;
-        int firstRenderY = storageRegionY * patchesPerSide;
-        float sliceHeight = terrain.SliceHeightMeters;
-
-        int quadCount = CountUndergroundSliceQuads(
-            terrain,
-            firstRenderX,
-            firstRenderY,
-            patchesPerSide);
-
-        RegionGpuMesh result = new()
-        {
-            RegionVersion = terrain.SourceRegionVersions[storageIndex],
-            BoundsCenter = new Vector3(
-                (storageRegionX + 0.5f) * terrain.StorageRegionSize,
-                sliceHeight,
-                (storageRegionY + 0.5f) * terrain.StorageRegionSize),
-            BoundsRadius = MathF.Sqrt(
-                terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f + 4f)
-        };
-
-        if (quadCount == 0)
-            return result;
-
-        int vertexCount = checked(quadCount * 4);
-        int triangleCount = checked(quadCount * 2);
-        Mesh mesh = new(vertexCount, triangleCount);
-        mesh.AllocVertices();
-        mesh.AllocNormals();
-        mesh.AllocColors();
-        mesh.AllocIndices();
-
-        Span<Vector3> vertices = mesh.VerticesAs<Vector3>();
-        Span<Vector3> normals = mesh.NormalsAs<Vector3>();
-        Span<byte> colors = mesh.ColorsAs<byte>();
-        Span<ushort> indices = mesh.IndicesAs<ushort>();
-
-        int vertexOffset = 0;
-        int indexOffset = 0;
-        const float lineHalfWidth = 0.065f;
-
-        for (int localY = 0; localY < patchesPerSide; localY++)
-        {
-            int renderY = firstRenderY + localY;
-            float z0 = renderY * terrain.RegionSize;
-            float z1 = z0 + terrain.RegionSize;
-
-            for (int localX = 0; localX < patchesPerSide; localX++)
-            {
-                int renderX = firstRenderX + localX;
-                ushort materialId =
-                    terrain.GetSliceMaterialId(renderX, renderY);
-
-                if (materialId == 0)
-                    continue;
-
-                float x0 = renderX * terrain.RegionSize;
-                float x1 = x0 + terrain.RegionSize;
-
-                AddQuad(
-                    vertices, normals, colors, indices,
-                    ref vertexOffset, ref indexOffset,
-                    new Vector3(x0, sliceHeight, z0),
-                    new Vector3(x1, sliceHeight, z0),
-                    new Vector3(x1, sliceHeight, z1),
-                    new Vector3(x0, sliceHeight, z1),
-                    Vector3.UnitY,
-                    GetSliceColor(materialId),
-                    reverseWinding: true);
-
-                if (terrain.GetSliceMaterialId(renderX, renderY - 1) == 0)
-                {
-                    AddSliceBoundary(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        x0, x1, z0, sliceHeight,
-                        lineHalfWidth,
-                        alongX: true);
-                }
-
-                if (terrain.GetSliceMaterialId(renderX, renderY + 1) == 0)
-                {
-                    AddSliceBoundary(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        x0, x1, z1, sliceHeight,
-                        lineHalfWidth,
-                        alongX: true);
-                }
-
-                if (terrain.GetSliceMaterialId(renderX - 1, renderY) == 0)
-                {
-                    AddSliceBoundary(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        z0, z1, x0, sliceHeight,
-                        lineHalfWidth,
-                        alongX: false);
-                }
-
-                if (terrain.GetSliceMaterialId(renderX + 1, renderY) == 0)
-                {
-                    AddSliceBoundary(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        z0, z1, x1, sliceHeight,
-                        lineHalfWidth,
-                        alongX: false);
-                }
-            }
-        }
-
-        UploadMesh(ref mesh, false);
-        result.Mesh = mesh;
-        result.IsUploaded = true;
-        return result;
-    }
-
-    private static int CountUndergroundSliceQuads(
-        TerrainRenderSnapshot terrain,
-        int firstRenderX,
-        int firstRenderY,
-        int patchesPerSide)
-    {
-        int quadCount = 0;
-
-        for (int localY = 0; localY < patchesPerSide; localY++)
-        {
-            int renderY = firstRenderY + localY;
-
-            for (int localX = 0; localX < patchesPerSide; localX++)
-            {
-                int renderX = firstRenderX + localX;
-                if (terrain.GetSliceMaterialId(renderX, renderY) == 0)
-                    continue;
-
-                quadCount++;
-
-                if (terrain.GetSliceMaterialId(renderX, renderY - 1) == 0)
-                    quadCount++;
-                if (terrain.GetSliceMaterialId(renderX, renderY + 1) == 0)
-                    quadCount++;
-                if (terrain.GetSliceMaterialId(renderX - 1, renderY) == 0)
-                    quadCount++;
-                if (terrain.GetSliceMaterialId(renderX + 1, renderY) == 0)
-                    quadCount++;
-            }
-        }
-
-        return quadCount;
-    }
-
-    private static void AddSliceBoundary(
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset,
-        float start,
-        float end,
-        float fixedCoordinate,
-        float height,
-        float halfWidth,
-        bool alongX)
-    {
-        Vector3 a;
-        Vector3 b;
-        Vector3 c;
-        Vector3 d;
-
-        if (alongX)
-        {
-            a = new Vector3(start, height, fixedCoordinate - halfWidth);
-            b = new Vector3(end, height, fixedCoordinate - halfWidth);
-            c = new Vector3(end, height, fixedCoordinate + halfWidth);
-            d = new Vector3(start, height, fixedCoordinate + halfWidth);
-        }
-        else
-        {
-            a = new Vector3(fixedCoordinate - halfWidth, height, start);
-            b = new Vector3(fixedCoordinate - halfWidth, height, end);
-            c = new Vector3(fixedCoordinate + halfWidth, height, end);
-            d = new Vector3(fixedCoordinate + halfWidth, height, start);
-        }
-
-        AddQuad(
-            vertices, normals, colors, indices,
-            ref vertexOffset, ref indexOffset,
-            a, b, c, d,
-            Vector3.UnitY,
-            BrightContourColor,
-            reverseWinding: true);
-    }
-
-    private static Color GetSliceColor(ushort materialId)
-    {
-        int value = 24 + materialId % 5 * 2;
-        return new Color(value, value + 1, value + 3, 255);
-    }
-
     private static bool TryGetUniformSurface(
         TerrainRenderSnapshot terrain,
         int firstRenderX,
@@ -356,8 +143,8 @@ internal static class RegionMeshBuilder
         out float height,
         out ushort materialId)
     {
-        height = terrain.GetHeightMeters(firstRenderX, firstRenderY);
-        materialId = terrain.GetMaterialId(firstRenderX, firstRenderY);
+        height = terrain.GetRenderHeightMeters(firstRenderX, firstRenderY);
+        materialId = terrain.GetRenderMaterialId(firstRenderX, firstRenderY);
 
         for (int y = 0; y < patchesPerSide; y++)
         {
@@ -366,8 +153,9 @@ internal static class RegionMeshBuilder
                 int renderX = firstRenderX + x;
                 int renderY = firstRenderY + y;
 
-                if (terrain.GetHeightMeters(renderX, renderY) != height ||
-                    terrain.GetMaterialId(renderX, renderY) != materialId)
+                if (terrain.IsCutFace(renderX, renderY) ||
+                    terrain.GetRenderHeightMeters(renderX, renderY) != height ||
+                    terrain.GetRenderMaterialId(renderX, renderY) != materialId)
                 {
                     return false;
                 }
@@ -394,10 +182,10 @@ internal static class RegionMeshBuilder
         
         for (int i = 0; i < patchesPerSide; i++)
         {
-            float north = terrain.GetHeightMeters(firstRenderX + i, firstRenderY - 1);
-            float south = terrain.GetHeightMeters(firstRenderX + i, firstRenderY + patchesPerSide);
-            float west = terrain.GetHeightMeters(firstRenderX - 1, firstRenderY + i);
-            float east = terrain.GetHeightMeters(firstRenderX + patchesPerSide, firstRenderY + i);
+            float north = terrain.GetRenderHeightMeters(firstRenderX + i, firstRenderY - 1);
+            float south = terrain.GetRenderHeightMeters(firstRenderX + i, firstRenderY + patchesPerSide);
+            float west = terrain.GetRenderHeightMeters(firstRenderX - 1, firstRenderY + i);
+            float east = terrain.GetRenderHeightMeters(firstRenderX + patchesPerSide, firstRenderY + i);
 
             if (height > north)
                 quadCount += 1 + CountElevationLines(north, height);
@@ -453,7 +241,7 @@ internal static class RegionMeshBuilder
             float segmentZ0 = z0 + i * terrain.RegionSize;
             float segmentZ1 = segmentZ0 + terrain.RegionSize;
 
-            float north = terrain.GetHeightMeters(firstRenderX + i, firstRenderY - 1);
+            float north = terrain.GetRenderHeightMeters(firstRenderX + i, firstRenderY - 1);
             if (height > north)
             {
                 AddWallAndContours(
@@ -465,7 +253,7 @@ internal static class RegionMeshBuilder
                     -Vector3.UnitZ);
             }
 
-            float south = terrain.GetHeightMeters(
+            float south = terrain.GetRenderHeightMeters(
                 firstRenderX + i,
                 firstRenderY + patchesPerSide);
             if (height > south)
@@ -479,7 +267,7 @@ internal static class RegionMeshBuilder
                     Vector3.UnitZ);
             }
 
-            float west = terrain.GetHeightMeters(
+            float west = terrain.GetRenderHeightMeters(
                 firstRenderX - 1,
                 firstRenderY + i);
             if (height > west)
@@ -493,7 +281,7 @@ internal static class RegionMeshBuilder
                     -Vector3.UnitX);
             }
 
-            float east = terrain.GetHeightMeters(
+            float east = terrain.GetRenderHeightMeters(
                 firstRenderX + patchesPerSide,
                 firstRenderY + i);
             if (height > east)
@@ -525,10 +313,10 @@ internal static class RegionMeshBuilder
             for (int localX = 0; localX < patchesPerSide; localX++)
             {
                 int renderX = firstRenderX + localX;
-                float height = terrain.GetHeightMeters(renderX, renderY);
+                float height = terrain.GetRenderHeightMeters(renderX, renderY);
 
                 if (height <= 0f ||
-                    terrain.GetMaterialId(renderX, renderY) == 0)
+                    terrain.GetRenderMaterialId(renderX, renderY) == 0)
                 {
                     continue;
                 }
@@ -536,10 +324,10 @@ internal static class RegionMeshBuilder
                 maximumHeight = MathF.Max(maximumHeight, height);
                 quadCount++;
 
-                float north = terrain.GetHeightMeters(renderX, renderY - 1);
-                float south = terrain.GetHeightMeters(renderX, renderY + 1);
-                float west = terrain.GetHeightMeters(renderX - 1, renderY);
-                float east = terrain.GetHeightMeters(renderX + 1, renderY);
+                float north = terrain.GetRenderHeightMeters(renderX, renderY - 1);
+                float south = terrain.GetRenderHeightMeters(renderX, renderY + 1);
+                float west = terrain.GetRenderHeightMeters(renderX - 1, renderY);
+                float east = terrain.GetRenderHeightMeters(renderX + 1, renderY);
 
                 if (height > north)
                     quadCount += 1 + CountElevationLines(north, height);
@@ -549,10 +337,81 @@ internal static class RegionMeshBuilder
                     quadCount += 1 + CountElevationLines(west, height);
                 if (height > east)
                     quadCount += 1 + CountElevationLines(east, height);
+
+                if (terrain.IsCutFace(renderX, renderY))
+                    quadCount += CutHatchLinesPerPatch;
             }
         }
 
         return quadCount;
+    }
+
+    private const int CutHatchLinesPerPatch = 3;
+    private const float CutHatchHalfWidth = 0.035f;
+    private const float CutHatchLift = 0.045f;
+    private static readonly Color CutHatchColor = new(205, 211, 219, 255);
+
+    private static Color GetCutFaceColor(float height)
+    {
+        Color baseColor = GetSurfaceColor(height);
+        return new Color(
+            Math.Min(255, baseColor.R + 5),
+            Math.Min(255, baseColor.G + 5),
+            Math.Min(255, baseColor.B + 7),
+            255);
+    }
+
+    private static void AddCutHatching(
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset,
+        float x0,
+        float x1,
+        float z0,
+        float z1,
+        float height)
+    {
+        float y = height + CutHatchLift;
+        const float strokeLength = 0.72f;
+        const float strokeSpacing = 1.05f;
+
+        for (int i = 0; i < CutHatchLinesPerPatch; i++)
+        {
+            float startX = x0 + 0.35f + i * strokeSpacing;
+            float startZ = z0 + 0.35f;
+            float endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
+            float endZ = MathF.Min(startZ + strokeLength, z1 - 0.15f);
+
+            if (endX <= startX || endZ <= startZ)
+                continue;
+
+            Vector2 direction = Vector2.Normalize(new Vector2(
+                endX - startX,
+                endZ - startZ));
+            Vector2 halfWidth = new(
+                -direction.Y * CutHatchHalfWidth,
+                direction.X * CutHatchHalfWidth);
+
+            Vector3 a = new(
+                startX + halfWidth.X, y, startZ + halfWidth.Y);
+            Vector3 b = new(
+                endX + halfWidth.X, y, endZ + halfWidth.Y);
+            Vector3 c = new(
+                endX - halfWidth.X, y, endZ - halfWidth.Y);
+            Vector3 d = new(
+                startX - halfWidth.X, y, startZ - halfWidth.Y);
+
+            AddQuad(
+                vertices, normals, colors, indices,
+                ref vertexOffset, ref indexOffset,
+                a, b, c, d,
+                Vector3.UnitY,
+                CutHatchColor,
+                reverseWinding: true);
+        }
     }
 
     private const float ContourIntervalMeters = 5f;
@@ -581,8 +440,8 @@ internal static class RegionMeshBuilder
             for (int localX = 0; localX < patchesPerSide; localX++)
             {
                 int renderX = firstRenderX + localX;
-                float height = terrain.GetHeightMeters(renderX, renderY);
-                ushort materialId = terrain.GetMaterialId(renderX, renderY);
+                float height = terrain.GetRenderHeightMeters(renderX, renderY);
+                ushort materialId = terrain.GetRenderMaterialId(renderX, renderY);
 
                 if (height <= 0f || materialId == 0)
                     continue;
@@ -604,10 +463,20 @@ internal static class RegionMeshBuilder
                     new Vector3(x1, height, z1),
                     new Vector3(x0, height, z1),
                     Vector3.UnitY,
-                    GetSurfaceColor(height),
+                    terrain.IsCutFace(renderX, renderY)
+                        ? GetCutFaceColor(height)
+                        : GetSurfaceColor(height),
                     reverseWinding: true);
 
-                float north = terrain.GetHeightMeters(renderX, renderY - 1);
+                if (terrain.IsCutFace(renderX, renderY))
+                {
+                    AddCutHatching(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        x0, x1, z0, z1, height);
+                }
+
+                float north = terrain.GetRenderHeightMeters(renderX, renderY - 1);
                 if (height > north)
                 {
                     AddWallAndContours(
@@ -619,7 +488,7 @@ internal static class RegionMeshBuilder
                         -Vector3.UnitZ);
                 }
 
-                float south = terrain.GetHeightMeters(renderX, renderY + 1);
+                float south = terrain.GetRenderHeightMeters(renderX, renderY + 1);
                 if (height > south)
                 {
                     AddWallAndContours(
@@ -631,7 +500,7 @@ internal static class RegionMeshBuilder
                         Vector3.UnitZ);
                 }
 
-                float west = terrain.GetHeightMeters(renderX - 1, renderY);
+                float west = terrain.GetRenderHeightMeters(renderX - 1, renderY);
                 if (height > west)
                 {
                     AddWallAndContours(
@@ -643,7 +512,7 @@ internal static class RegionMeshBuilder
                         -Vector3.UnitX);
                 }
 
-                float east = terrain.GetHeightMeters(renderX + 1, renderY);
+                float east = terrain.GetRenderHeightMeters(renderX + 1, renderY);
                 if (height > east)
                 {
                     AddWallAndContours(
