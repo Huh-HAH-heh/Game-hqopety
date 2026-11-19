@@ -6,31 +6,43 @@ renderer and does not own world-generation or simulation state.
 ## Responsibilities
 
 - `TerrainRenderSnapshot` copies terrain surface data into flat presentation arrays.
-- `RaylibTerrainRenderer` owns GPU resources and draws region meshes.
-- `RegionMeshBuilder` generates one cached mesh per world region.
+- `RaylibTerrainRenderer` owns GPU resources and draws cached storage-region batches.
+- `RegionMeshBuilder` builds one GPU mesh per 192x192 storage region.
 - `OrbitCameraController` owns presentation camera state and input.
 - `RaylibTerrainViewer` owns the window and frame loop.
+
+## Terrain region layout
+
+The terrain presentation overlay is divided into **4x4-tile render regions**.
+The existing world/simulation storage remains at 192x192 tiles for now; this keeps
+the 500-level world data layout and the 2304x2304 world dimensions unchanged.
+
+Each 192x192 storage region contains 48x48 render regions. Those small regions
+are sampled independently into the presentation snapshot, then combined into one
+GPU mesh per storage region. This keeps local terrain sampling fine-grained while
+avoiding hundreds of thousands of GPU objects and draw calls.
 
 ## Data flow
 
 ```text
-WorldMap / WorldRegion
+WorldMap / WorldRegion (192x192 storage)
         |
         v
-TerrainRenderSnapshot (flat arrays + region revisions)
+TerrainRenderSnapshot (4x4 render regions, flat arrays + revisions)
         |
         v
-RegionMeshBuilder (CPU mesh data)
+RegionMeshBuilder (one batched mesh per storage region)
         |
         v
-RaylibTerrainRenderer (GPU meshes + frustum culling)
+RaylibTerrainRenderer (GPU batches + frustum culling)
         |
         v
 Raylib window
 ```
 
 The renderer reads the snapshot only. It does not query WorldMap during drawing.
-Region revisions invalidate only the affected GPU mesh. GPU resource creation,
+Storage-region revisions invalidate only affected GPU batches (plus adjacent
+batches whose shared cliff edges may have changed). GPU resource creation,
 upload, draw and disposal are restricted to the render thread.
 
 ## Controls
@@ -45,7 +57,8 @@ upload, draw and disposal are restricted to the render thread.
 
 ## Current milestone
 
-The current world generator produces one uniform surface height per region, so
-each region is rendered as a cached top patch with vertical cliff faces at height
-discontinuities. This deliberately avoids per-tile draw calls. Dense, locally
-edited region surfaces and distance-based LOD are subsequent renderer milestones.
+The current world generator still creates a uniform surface height per 192x192
+storage region. The render overlay now has 4x4-tile sampling and can display
+fine-grained height differences when the underlying tile surface data contains
+them. Generating richer local relief and adding distance-based LOD are separate
+next steps.
