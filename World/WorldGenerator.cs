@@ -219,8 +219,8 @@ public static class WorldGenerator
             heightInMeters: 8);
 
         int upperTunnelX = caveCenterX;
-        int upperTunnelStartY = caveCenterY - 20;
-        int upperTunnelLength = 40;
+        int upperTunnelStartY = caveCenterY - 16;
+        int upperTunnelLength = 32;
         CarveWindingTunnel(
             worldMap,
             upperTunnelX,
@@ -250,7 +250,7 @@ public static class WorldGenerator
         int lowerProbeY = lowerTunnelY +
             GetTunnelLateralOffset(lowerProofT, 5);
         int upperProbeX = caveCenterX;
-        int upperProbeY = caveCenterY + 16;
+        int upperProbeY = caveCenterY + 12;
 
         bool lowerAir = worldMap.GetMaterialId(
             lowerProbeX,
@@ -306,11 +306,11 @@ public static class WorldGenerator
         bool upperEndsSealed =
             worldMap.GetMaterialId(
                 upperTunnelX,
-                upperTunnelStartY - 1,
+                upperTunnelStartY - 5,
                 proofSliceUpper) != 0 &&
             worldMap.GetMaterialId(
                 upperTunnelX,
-                upperTunnelStartY + upperTunnelLength + 1,
+                upperTunnelStartY + upperTunnelLength + 5,
                 proofSliceUpper) != 0;
 
         ushort lowerStratum = worldMap.GetMaterialId(
@@ -362,7 +362,7 @@ public static class WorldGenerator
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
                 $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
-                "static geology: 128m winding through-tunnel + 40m upper passage + chambers + rising connector.");
+                "static geology: 128m winding through-tunnel + 32m upper passage + chambers + rising connector.");
         }
     }
 
