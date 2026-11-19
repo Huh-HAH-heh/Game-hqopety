@@ -19,8 +19,10 @@ the 500-level world data layout and the 2304x2304 world dimensions unchanged.
 
 Each 192x192 storage region contains 48x48 render regions. Those small regions
 are sampled independently into the presentation snapshot, then combined into one
-GPU mesh per storage region. This keeps local terrain sampling fine-grained while
-avoiding hundreds of thousands of GPU objects and draw calls.
+GPU mesh per storage region. Adjacent patches with identical height and material
+are merged into larger faces; height discontinuities keep their own cliff faces.
+This keeps local terrain sampling fine-grained while avoiding hundreds of thousands
+of GPU objects and draw calls.
 
 ## Data flow
 
