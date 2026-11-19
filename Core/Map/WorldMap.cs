@@ -372,6 +372,63 @@ public sealed class WorldMap
     }
 
     /// <summary>
+    /// Carves an empty cuboid into the static height-field backing without
+    /// enabling discrete block simulation or materializing every voxel column.
+    /// Coordinates X/Y are map tiles; Z, width and height use metres.
+    /// The sparse volume tree stores the empty override over the implicit solid
+    /// columns, so caves and tunnels remain compact in memory.
+    /// </summary>
+    public void CarveStaticVolume(
+        int x,
+        int y,
+        int zLevel,
+        int width,
+        int depth,
+        int heightInMeters)
+    {
+        if (x < 0 || y < 0 || width <= 0 || depth <= 0 ||
+            (long)x + width > TileWidth ||
+            (long)y + depth > TileHeight)
+        {
+            throw new ArgumentOutOfRangeException(nameof(width));
+        }
+
+        if (zLevel < 0 || heightInMeters <= 0 ||
+            ((long)zLevel + heightInMeters) * HeightUnitsPerMeter > LayerCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(heightInMeters));
+        }
+
+        int firstLayer = checked(zLevel * HeightUnitsPerMeter);
+        int heightLayers = checked(heightInMeters * HeightUnitsPerMeter);
+
+        Blocks.Volumes.SetVolume(
+            x,
+            y,
+            firstLayer,
+            width,
+            depth,
+            heightLayers,
+            materialId: 0);
+
+        for (int localY = 0; localY < depth; localY++)
+        {
+            for (int localX = 0; localX < width; localX++)
+            {
+                int globalX = x + localX;
+                int globalY = y + localY;
+                int columnIndex = GetColumnIndex(globalX, globalY);
+
+                _rangeCache[columnIndex] = null;
+                RecalculateSurfaceHeight(columnIndex);
+                MarkTerrainChanged(globalX, globalY);
+            }
+        }
+
+        NavigationVersion++;
+    }
+
+    /// <summary>
     /// Packs shared lower terrain into large macro volumes. Regions that
     /// cannot share a common base are split recursively down to the requested
     /// block size; finer height differences stay in the existing compact
@@ -1194,6 +1251,48 @@ public sealed class WorldMap
             return cached;
 
         int totalHeightUnits = LayerCount * LayerHeightUnits;
+
+        // Volume overrides may cut air gaps through an otherwise implicit
+        // solid column. Resolve those ranges through the merged occupancy query
+        // instead of trusting the original simple-fill height.
+        if (Blocks.Volumes.HasOverridesInColumn(globalX, globalY))
+        {
+            Span<TileRange> volumeRanges = stackalloc TileRange[LayerCount];
+            int volumeRangeCount = 0;
+            int volumeRunStart = 0;
+            ushort volumeRunMaterial = GetMaterialId(globalX, globalY, 0);
+
+            for (int z = 1; z <= LayerCount; z++)
+            {
+                ushort currentMaterial = z < LayerCount
+                    ? GetMaterialId(globalX, globalY, z)
+                    : (ushort.MaxValue);
+
+                if (z < LayerCount && currentMaterial == volumeRunMaterial)
+                    continue;
+
+                volumeRanges[volumeRangeCount++] = new TileRange
+                {
+                    StartZ = (ushort)(volumeRunStart * LayerHeightUnits),
+                    EndZ = (ushort)(z * LayerHeightUnits),
+                    MaterialId = volumeRunMaterial,
+                    State = volumeRunMaterial == 0
+                        ? StateEmpty
+                        : StateSolid
+                };
+
+                if (z < LayerCount)
+                {
+                    volumeRunStart = z;
+                    volumeRunMaterial = currentMaterial;
+                }
+            }
+
+            cached = new TileRange[volumeRangeCount];
+            volumeRanges[..volumeRangeCount].CopyTo(cached);
+            _rangeCache[columnIndex] = cached;
+            return cached;
+        }
 
         // The generated terrain is a continuous, single-material column.
         // Keep that common case O(1): don't scan all 500 Z levels on every
