@@ -61,8 +61,8 @@ public static class RaylibTerrainViewer
                                 terrain.WorldWidth * 0.5f + 58f,
                                 16f,
                                 terrain.WorldDepth * 0.5f - 9f),
-                            90f,
-                            pitchRadians: 1.02f);
+                            52f,
+                            pitchRadians: 0.84f);
                     }
                     else
                     {
@@ -78,11 +78,11 @@ public static class RaylibTerrainViewer
 
                 if (cutawayMode)
                 {
-                    // The visual section follows the camera focus height,
-                    // quantized to one-metre steps to avoid rebuilding meshes
-                    // for every 0.1 m camera interpolation step.
+                    // The horizontal section is anchored to the camera's
+                    // look-at height, quantized to one-metre steps. Q/E move
+                    // continuously; PageUp/PageDown step by one metre.
                     int cutLayer = Math.Clamp(
-                        (int)MathF.Round(camera.TargetHeightMeters) *
+                        (int)MathF.Round(camera.Camera.Target.Y) *
                             WorldMap.HeightUnitsPerMeter,
                         0,
                         worldMap.LayerCount - 1);
@@ -165,8 +165,8 @@ public static class RaylibTerrainViewer
 
         DrawText(
             cutawayMode
-                ? "C surface view | Q/E move cut plane | RMB orbit the exposed volume"
-                : "C cut terrain at camera focus height | T fit top view",
+                ? "C surface view | Q/E cut height | PgUp/PgDn +/-1m | RMB orbit volume"
+                : "C cut terrain at camera focus height | Q/E or PgUp/PgDn adjust | T fit top view",
             24,
             146,
             14,
@@ -174,8 +174,8 @@ public static class RaylibTerrainViewer
 
         DrawText(
             cutawayMode
-                ? "WASD move | RMB orbit | MMB pan | Wheel zoom | Q/E cut height | Shift boost | C surface | Esc exit"
-                : "WASD move | RMB orbit | MMB pan | Wheel zoom | T fit top view | Shift boost | Q/E altitude | C cut | Esc exit",
+                ? "WASD move | RMB orbit | MMB pan | Wheel zoom | Q/E cut height | PgUp/PgDn +/-1m | C surface | Esc exit"
+                : "WASD move | RMB orbit | MMB pan | Wheel zoom | T fit top view | Q/E height | PgUp/PgDn +/-1m | C cut | Esc exit",
             24,
             196,
             14,
