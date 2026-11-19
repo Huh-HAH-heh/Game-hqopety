@@ -91,9 +91,7 @@ public static class RaylibTerrainViewer
                         0,
                         worldMap.LayerCount - 1);
 
-                    bool cutChanged = terrain.RefreshCutawaySlice(
-                        worldMap,
-                        cutLayer);
+                    bool cutChanged = terrain.SetCutawayLayer(cutLayer);
 
                     if (terrainChanged || cutChanged)
                         renderer.SynchronizeCutaway(terrain);
