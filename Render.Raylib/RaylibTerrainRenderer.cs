@@ -25,11 +25,11 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         Synchronize(terrain);
     }
 
-    public void Synchronize(TerrainRenderSnapshot terrain)
+    public void Synchronize(
+        TerrainRenderSnapshot terrain,
+        bool forceRebuild = false)
     {
         ThrowIfDisposed();
-
-        bool rebuildAll = false;
 
         for (int regionY = 0; regionY < terrain.StorageRegionsY; regionY++)
         {
@@ -39,7 +39,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 RegionGpuMesh? existing = _regionMeshes[index];
                 long version = terrain.SourceRegionVersions[index];
 
-                if (!rebuildAll &&
+                if (!forceRebuild &&
                     existing != null &&
                     existing.RegionVersion == version)
                 {
