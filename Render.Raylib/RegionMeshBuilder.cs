@@ -6,7 +6,7 @@ namespace RimClone.Render.Raylib;
 
 internal sealed class RegionGpuMesh : IDisposable
 {
-    public Mesh Mesh;
+    public Mesh[] Meshes = Array.Empty<Mesh>();
     public bool IsUploaded;
     public long RegionVersion;
     public Vector3 BoundsCenter;
@@ -17,18 +17,45 @@ internal sealed class RegionGpuMesh : IDisposable
         if (!IsUploaded)
             return;
 
-        UnloadMesh(Mesh);
-        Mesh = default;
+        foreach (Mesh mesh in Meshes)
+            UnloadMesh(mesh);
+
+        Meshes = Array.Empty<Mesh>();
         IsUploaded = false;
     }
 }
 
 internal static class RegionMeshBuilder
 {
+    private const int SubChunksPerAxis = 2;
+    private const int MaximumQuadsPerMesh = 15_000;
+    private const float UnitsPerMeter = 0.1f;
+
+    private const float ContourIntervalMeters = 5f;
+    private const float ContourHalfHeight = 0.055f;
+    private const float ContourOffset = 0.035f;
+
+    private const int CutHatchLinesPerPatch = 4;
+    private const float CutHatchHalfWidth = 0.035f;
+    private const float CutHatchLift = 0.045f;
+
+    private static readonly Color BrightContourColor = new(246, 248, 250, 255);
+    private static readonly Color DimContourColor = new(168, 173, 181, 255);
+    private static readonly Color CutHatchColor = new(205, 211, 219, 255);
+
+    private readonly record struct TerrainQuad(
+        Vector3 A,
+        Vector3 B,
+        Vector3 C,
+        Vector3 D,
+        Vector3 Normal,
+        Color Color,
+        bool ReverseWinding);
+
     /// <summary>
-    /// Builds one GPU batch for a 192x192 storage region. Its surface is sampled
-    /// from 4x4-tile render regions. Uniform areas are merged into large quads;
-    /// detailed areas retain the smaller patch geometry.
+    /// Builds a volumetric mesh for one 192x192 storage region. Each 4x4-tile
+    /// render cell is reconstructed from all of its vertical solid/air intervals.
+    /// The two-by-two sub-batching keeps 16-bit GPU indices safely bounded.
     /// </summary>
     public static RegionGpuMesh Build(
         TerrainRenderSnapshot terrain,
@@ -40,368 +67,483 @@ internal static class RegionMeshBuilder
         int patchesPerSide = terrain.RenderRegionsPerStorageRegion;
         int firstRenderX = storageRegionX * patchesPerSide;
         int firstRenderY = storageRegionY * patchesPerSide;
-
-        bool uniform = TryGetUniformSurface(
-            terrain,
-            firstRenderX,
-            firstRenderY,
-            patchesPerSide,
-            out float uniformHeight,
-            out ushort uniformMaterial);
-
-        float maximumHeight = 0f;
-        int quadCount = uniform
-            ? CountUniformQuads(
-                terrain,
-                firstRenderX,
-                firstRenderY,
-                patchesPerSide,
-                uniformHeight,
-                uniformMaterial,
-                ref maximumHeight)
-            : CountDetailedQuads(
-                terrain,
-                firstRenderX,
-                firstRenderY,
-                patchesPerSide,
-                ref maximumHeight);
+        int chunkSize = patchesPerSide / SubChunksPerAxis;
 
         RegionGpuMesh result = new()
         {
             RegionVersion = terrain.SourceRegionVersions[storageIndex],
             BoundsCenter = new Vector3(
                 (storageRegionX + 0.5f) * terrain.StorageRegionSize,
-                maximumHeight * 0.5f,
+                terrain.MaximumHeightMeters * 0.5f,
                 (storageRegionY + 0.5f) * terrain.StorageRegionSize),
             BoundsRadius = MathF.Sqrt(
                 terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f +
-                maximumHeight * maximumHeight * 0.25f)
+                terrain.MaximumHeightMeters * terrain.MaximumHeightMeters * 0.25f)
         };
 
-        if (quadCount == 0)
-            return result;
+        List<Mesh> meshes = new(SubChunksPerAxis * SubChunksPerAxis);
 
-        int vertexCount = checked(quadCount * 4);
-        int triangleCount = checked(quadCount * 2);
-
-        Mesh mesh = new(vertexCount, triangleCount);
-        mesh.AllocVertices();
-        mesh.AllocNormals();
-        mesh.AllocColors();
-        mesh.AllocIndices();
-
-        Span<Vector3> vertices = mesh.VerticesAs<Vector3>();
-        Span<Vector3> normals = mesh.NormalsAs<Vector3>();
-        Span<byte> colors = mesh.ColorsAs<byte>();
-        Span<ushort> indices = mesh.IndicesAs<ushort>();
-
-        int vertexOffset = 0;
-        int indexOffset = 0;
-
-        if (uniform)
+        for (int chunkY = 0; chunkY < SubChunksPerAxis; chunkY++)
         {
-            BuildUniformGeometry(
-                terrain,
-                firstRenderX,
-                firstRenderY,
-                patchesPerSide,
-                uniformHeight,
-                uniformMaterial,
-                vertices,
-                normals,
-                colors,
-                indices,
-                ref vertexOffset,
-                ref indexOffset);
-        }
-        else
-        {
-            BuildDetailedGeometry(
-                terrain,
-                firstRenderX,
-                firstRenderY,
-                patchesPerSide,
-                vertices,
-                normals,
-                colors,
-                indices,
-                ref vertexOffset,
-                ref indexOffset);
-        }
-
-        UploadMesh(ref mesh, false);
-        result.Mesh = mesh;
-        result.IsUploaded = true;
-        return result;
-    }
-
-    private static bool TryGetUniformSurface(
-        TerrainRenderSnapshot terrain,
-        int firstRenderX,
-        int firstRenderY,
-        int patchesPerSide,
-        out float height,
-        out ushort materialId)
-    {
-        height = terrain.GetRenderHeightMeters(firstRenderX, firstRenderY);
-        materialId = terrain.GetRenderMaterialId(firstRenderX, firstRenderY);
-
-        for (int y = 0; y < patchesPerSide; y++)
-        {
-            for (int x = 0; x < patchesPerSide; x++)
+            for (int chunkX = 0; chunkX < SubChunksPerAxis; chunkX++)
             {
-                int renderX = firstRenderX + x;
-                int renderY = firstRenderY + y;
-
-                if (terrain.IsCutFace(renderX, renderY) ||
-                    terrain.HasCaveIntervals(renderX, renderY) ||
-                    terrain.GetRenderHeightMeters(renderX, renderY) != height ||
-                    terrain.GetRenderMaterialId(renderX, renderY) != materialId)
-                {
-                    return false;
-                }
+                BuildChunkMeshes(
+                    terrain,
+                    firstRenderX + chunkX * chunkSize,
+                    firstRenderY + chunkY * chunkSize,
+                    chunkSize,
+                    meshes);
             }
         }
 
-        return true;
+        result.Meshes = meshes.ToArray();
+        result.IsUploaded = result.Meshes.Length > 0;
+        return result;
     }
 
-    private static int CountUniformQuads(
+    private static void BuildChunkMeshes(
         TerrainRenderSnapshot terrain,
         int firstRenderX,
         int firstRenderY,
-        int patchesPerSide,
-        float height,
-        ushort materialId,
-        ref float maximumHeight)
+        int size,
+        List<Mesh> output)
     {
-        if (height <= 0f || materialId == 0)
-            return 0;
+        List<TerrainQuad> quads = new(Math.Min(size * size * 10, MaximumQuadsPerMesh));
+        Span<TileRange> rangesBuffer = stackalloc TileRange[terrain.LayerCount];
+        Span<TileRange> neighbourBuffer = stackalloc TileRange[terrain.LayerCount];
 
-        maximumHeight = height;
-        int quadCount = 1;
-        
-        for (int i = 0; i < patchesPerSide; i++)
+        int cutLayer = terrain.CutawayEnabled
+            ? terrain.CutawayLayer
+            : terrain.LayerCount;
+
+        for (int localY = 0; localY < size; localY++)
         {
-            float north = terrain.GetRenderHeightMeters(firstRenderX + i, firstRenderY - 1);
-            float south = terrain.GetRenderHeightMeters(firstRenderX + i, firstRenderY + patchesPerSide);
-            float west = terrain.GetRenderHeightMeters(firstRenderX - 1, firstRenderY + i);
-            float east = terrain.GetRenderHeightMeters(firstRenderX + patchesPerSide, firstRenderY + i);
+            int renderY = firstRenderY + localY;
 
-            if (height > north)
-                quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(north, height));
-            if (height > south)
-                quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(south, height));
-            if (height > west)
-                quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(west, height));
-            if (height > east)
-                quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(east, height));
+            for (int localX = 0; localX < size; localX++)
+            {
+                int renderX = firstRenderX + localX;
+
+                AddColumnGeometry(
+                    terrain,
+                    renderX,
+                    renderY,
+                    cutLayer,
+                    rangesBuffer,
+                    neighbourBuffer,
+                    quads);
+            }
         }
 
-        return quadCount;
+        if (quads.Count > MaximumQuadsPerMesh && size > 4)
+        {
+            int half = size / 2;
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, output);
+            return;
+        }
+
+        if (quads.Count > MaximumQuadsPerMesh)
+        {
+            throw new InvalidOperationException(
+                "A terrain micro-batch exceeded the 16-bit mesh index limit.");
+        }
+
+        if (quads.Count > 0)
+            output.Add(Upload(quads));
     }
 
-    private static void BuildUniformGeometry(
+    private static void AddColumnGeometry(
         TerrainRenderSnapshot terrain,
-        int firstRenderX,
-        int firstRenderY,
-        int patchesPerSide,
-        float height,
-        ushort materialId,
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset)
+        int renderX,
+        int renderY,
+        int cutLayer,
+        Span<TileRange> rangesBuffer,
+        Span<TileRange> neighbourBuffer,
+        List<TerrainQuad> quads)
     {
-        if (height <= 0f || materialId == 0)
+        int rangeCount = terrain.CopyColumnRanges(
+            renderX,
+            renderY,
+            rangesBuffer);
+
+        if (rangeCount == 0)
             return;
 
-        float x0 = firstRenderX * terrain.RegionSize;
-        float x1 = x0 + terrain.StorageRegionSize;
-        float z0 = firstRenderY * terrain.RegionSize;
-        float z1 = z0 + terrain.StorageRegionSize;
-        Color topColor = GetSurfaceColor(height);
+        ReadOnlySpan<TileRange> ranges = rangesBuffer[..rangeCount];
 
-        AddQuad(
-            vertices, normals, colors, indices,
-            ref vertexOffset, ref indexOffset,
+        float x0 = renderX * terrain.RegionSize;
+        float x1 = MathF.Min(x0 + terrain.RegionSize, terrain.WorldWidth);
+        float z0 = renderY * terrain.RegionSize;
+        float z1 = MathF.Min(z0 + terrain.RegionSize, terrain.WorldDepth);
+
+        for (int rangeIndex = 0; rangeIndex < ranges.Length; rangeIndex++)
+        {
+            TileRange range = ranges[rangeIndex];
+            if (range.State != WorldMap.StateSolid ||
+                range.MaterialId == 0 ||
+                range.StartZ >= cutLayer)
+            {
+                continue;
+            }
+
+            int visibleStart = range.StartZ;
+            int visibleEnd = Math.Min(range.EndZ, cutLayer);
+            if (visibleEnd <= visibleStart)
+                continue;
+
+            bool cutFace = terrain.CutawayEnabled &&
+                visibleStart < cutLayer &&
+                range.EndZ >= cutLayer;
+            bool airAbove = cutFace ||
+                rangeIndex == ranges.Length - 1 ||
+                ranges[rangeIndex + 1].State == WorldMap.StateEmpty;
+            bool airBelow = rangeIndex > 0 &&
+                ranges[rangeIndex - 1].State == WorldMap.StateEmpty;
+
+            float bottom = visibleStart * UnitsPerMeter;
+            float top = visibleEnd * UnitsPerMeter;
+
+            if (airAbove)
+            {
+                AddHorizontalFace(
+                    quads,
+                    x0, x1, z0, z1,
+                    top,
+                    range.MaterialId,
+                    isTop: true,
+                    isCutFace: cutFace);
+
+                if (cutFace)
+                {
+                    AddCutHatching(
+                        quads,
+                        x0, x1, z0, z1,
+                        top,
+                        range.MaterialId);
+                }
+            }
+
+            if (airBelow)
+            {
+                AddHorizontalFace(
+                    quads,
+                    x0, x1, z0, z1,
+                    bottom,
+                    range.MaterialId,
+                    isTop: false,
+                    isCutFace: false);
+            }
+
+            AddExposedSide(
+                terrain,
+                renderX,
+                renderY - 1,
+                renderX,
+                renderY,
+                cutLayer,
+                visibleStart,
+                visibleEnd,
+                range.MaterialId,
+                side: 0,
+                x0, x1, z0, z1,
+                neighbourBuffer,
+                quads);
+
+            AddExposedSide(
+                terrain,
+                renderX,
+                renderY + 1,
+                renderX,
+                renderY,
+                cutLayer,
+                visibleStart,
+                visibleEnd,
+                range.MaterialId,
+                side: 1,
+                x0, x1, z0, z1,
+                neighbourBuffer,
+                quads);
+
+            AddExposedSide(
+                terrain,
+                renderX - 1,
+                renderY,
+                renderX,
+                renderY,
+                cutLayer,
+                visibleStart,
+                visibleEnd,
+                range.MaterialId,
+                side: 2,
+                x0, x1, z0, z1,
+                neighbourBuffer,
+                quads);
+
+            AddExposedSide(
+                terrain,
+                renderX + 1,
+                renderY,
+                renderX,
+                renderY,
+                cutLayer,
+                visibleStart,
+                visibleEnd,
+                range.MaterialId,
+                side: 3,
+                x0, x1, z0, z1,
+                neighbourBuffer,
+                quads);
+        }
+    }
+
+    private static void AddHorizontalFace(
+        List<TerrainQuad> quads,
+        float x0,
+        float x1,
+        float z0,
+        float z1,
+        float height,
+        ushort materialId,
+        bool isTop,
+        bool isCutFace)
+    {
+        Color color = isCutFace
+            ? GetCutFaceColor(height, materialId)
+            : GetSurfaceColor(height, materialId);
+
+        quads.Add(new TerrainQuad(
             new Vector3(x0, height, z0),
             new Vector3(x1, height, z0),
             new Vector3(x1, height, z1),
             new Vector3(x0, height, z1),
-            Vector3.UnitY,
-            topColor,
-            reverseWinding: true);
-
-        for (int i = 0; i < patchesPerSide; i++)
-        {
-            float segmentX0 = x0 + i * terrain.RegionSize;
-            float segmentX1 = segmentX0 + terrain.RegionSize;
-            float segmentZ0 = z0 + i * terrain.RegionSize;
-            float segmentZ1 = segmentZ0 + terrain.RegionSize;
-
-            float north = terrain.GetRenderHeightMeters(firstRenderX + i, firstRenderY - 1);
-            if (height > north)
-            {
-                AddWallAndContours(
-                    vertices, normals, colors, indices,
-                    ref vertexOffset, ref indexOffset,
-                    new Vector3(segmentX0, height, z0),
-                    new Vector3(segmentX1, height, z0),
-                    north,
-                    -Vector3.UnitZ,
-                    includeContours: !terrain.CutawayEnabled);
-            }
-
-            float south = terrain.GetRenderHeightMeters(
-                firstRenderX + i,
-                firstRenderY + patchesPerSide);
-            if (height > south)
-            {
-                AddWallAndContours(
-                    vertices, normals, colors, indices,
-                    ref vertexOffset, ref indexOffset,
-                    new Vector3(segmentX1, height, z1),
-                    new Vector3(segmentX0, height, z1),
-                    south,
-                    Vector3.UnitZ,
-                    includeContours: !terrain.CutawayEnabled);
-            }
-
-            float west = terrain.GetRenderHeightMeters(
-                firstRenderX - 1,
-                firstRenderY + i);
-            if (height > west)
-            {
-                AddWallAndContours(
-                    vertices, normals, colors, indices,
-                    ref vertexOffset, ref indexOffset,
-                    new Vector3(x0, height, segmentZ1),
-                    new Vector3(x0, height, segmentZ0),
-                    west,
-                    -Vector3.UnitX,
-                    includeContours: !terrain.CutawayEnabled);
-            }
-
-            float east = terrain.GetRenderHeightMeters(
-                firstRenderX + patchesPerSide,
-                firstRenderY + i);
-            if (height > east)
-            {
-                AddWallAndContours(
-                    vertices, normals, colors, indices,
-                    ref vertexOffset, ref indexOffset,
-                    new Vector3(x1, height, segmentZ0),
-                    new Vector3(x1, height, segmentZ1),
-                    east,
-                    Vector3.UnitX,
-                    includeContours: !terrain.CutawayEnabled);
-            }
-        }
+            isTop ? Vector3.UnitY : -Vector3.UnitY,
+            color,
+            ReverseWinding: isTop));
     }
 
-    private static int CountDetailedQuads(
+    private static void AddExposedSide(
         TerrainRenderSnapshot terrain,
-        int firstRenderX,
-        int firstRenderY,
-        int patchesPerSide,
-        ref float maximumHeight)
+        int neighbourX,
+        int neighbourY,
+        int currentX,
+        int currentY,
+        int cutLayer,
+        int visibleStart,
+        int visibleEnd,
+        ushort materialId,
+        int side,
+        float x0,
+        float x1,
+        float z0,
+        float z1,
+        Span<TileRange> neighbourBuffer,
+        List<TerrainQuad> quads)
     {
-        int quadCount = 0;
-
-        for (int localY = 0; localY < patchesPerSide; localY++)
+        if (neighbourX < 0 || neighbourY < 0 ||
+            neighbourX >= terrain.RegionsX ||
+            neighbourY >= terrain.RegionsY)
         {
-            int renderY = firstRenderY + localY;
-
-            for (int localX = 0; localX < patchesPerSide; localX++)
-            {
-                int renderX = firstRenderX + localX;
-                float height = terrain.GetRenderHeightMeters(renderX, renderY);
-
-                if (height <= 0f ||
-                    terrain.GetRenderMaterialId(renderX, renderY) == 0)
-                {
-                    continue;
-                }
-
-                maximumHeight = MathF.Max(maximumHeight, height);
-                quadCount++;
-
-                float north = terrain.GetRenderHeightMeters(renderX, renderY - 1);
-                float south = terrain.GetRenderHeightMeters(renderX, renderY + 1);
-                float west = terrain.GetRenderHeightMeters(renderX - 1, renderY);
-                float east = terrain.GetRenderHeightMeters(renderX + 1, renderY);
-
-                if (height > north &&
-                    !terrain.IsCutawayVoidAt(renderX, renderY - 1))
-                {
-                    quadCount += 1 +
-                        (terrain.CutawayEnabled ? 0 : CountElevationLines(north, height));
-                }
-                if (height > south &&
-                    !terrain.IsCutawayVoidAt(renderX, renderY + 1))
-                {
-                    quadCount += 1 +
-                        (terrain.CutawayEnabled ? 0 : CountElevationLines(south, height));
-                }
-                if (height > west &&
-                    !terrain.IsCutawayVoidAt(renderX - 1, renderY))
-                {
-                    quadCount += 1 +
-                        (terrain.CutawayEnabled ? 0 : CountElevationLines(west, height));
-                }
-                if (height > east &&
-                    !terrain.IsCutawayVoidAt(renderX + 1, renderY))
-                {
-                    quadCount += 1 +
-                        (terrain.CutawayEnabled ? 0 : CountElevationLines(east, height));
-                }
-
-                if (terrain.IsCutFace(renderX, renderY))
-                    quadCount += CutHatchLinesPerPatch;
-
-                quadCount += CountCaveWallQuads(
-                    terrain,
-                    renderX,
-                    renderY);
-            }
+            AddSideSegment(
+                quads,
+                x0, x1, z0, z1,
+                visibleStart,
+                visibleEnd,
+                materialId,
+                side);
+            return;
         }
 
-        return quadCount;
+        int neighbourCount = terrain.CopyColumnRanges(
+            neighbourX,
+            neighbourY,
+            neighbourBuffer);
+        ReadOnlySpan<TileRange> neighbourRanges =
+            neighbourBuffer[..neighbourCount];
+
+        foreach (TileRange neighbourRange in neighbourRanges)
+        {
+            if (neighbourRange.State != WorldMap.StateEmpty)
+                continue;
+
+            int exposedStart = Math.Max(
+                visibleStart,
+                neighbourRange.StartZ);
+            int exposedEnd = Math.Min(
+                visibleEnd,
+                neighbourRange.EndZ);
+
+            if (exposedEnd <= exposedStart)
+                continue;
+
+            AddSideSegment(
+                quads,
+                x0, x1, z0, z1,
+                exposedStart,
+                exposedEnd,
+                materialId,
+                side);
+        }
     }
 
-    private const int CutHatchLinesPerPatch = 4;
-    private const float CutHatchHalfWidth = 0.035f;
-    private const float CutHatchLift = 0.045f;
-    private static readonly Color CutHatchColor = new(205, 211, 219, 255);
-
-    private static Color GetCutFaceColor(float height, ushort materialId)
+    private static void AddSideSegment(
+        List<TerrainQuad> quads,
+        float x0,
+        float x1,
+        float z0,
+        float z1,
+        int startLayer,
+        int endLayer,
+        ushort materialId,
+        int side)
     {
-        Color baseColor = GetSurfaceColor(height);
-        int materialOffset = materialId switch
-        {
-            2 => 9,
-            3 => -5,
-            _ => 0
-        };
-        int value = Math.Clamp(baseColor.R + 5 + materialOffset, 4, 80);
+        float bottom = startLayer * UnitsPerMeter;
+        float top = endLayer * UnitsPerMeter;
+        Color wallColor = Darken(
+            GetSurfaceColor((bottom + top) * 0.5f, materialId),
+            0.57f);
 
-        return new Color(
-            value,
-            Math.Min(255, value + 1),
-            Math.Min(255, value + 3),
-            255);
+        Vector3 a;
+        Vector3 b;
+        Vector3 c;
+        Vector3 d;
+        Vector3 normal;
+
+        switch (side)
+        {
+            case 0: // North (-Z)
+                a = new Vector3(x0, top, z0);
+                b = new Vector3(x1, top, z0);
+                c = new Vector3(x1, bottom, z0);
+                d = new Vector3(x0, bottom, z0);
+                normal = -Vector3.UnitZ;
+                break;
+
+            case 1: // South (+Z)
+                a = new Vector3(x1, top, z1);
+                b = new Vector3(x0, top, z1);
+                c = new Vector3(x0, bottom, z1);
+                d = new Vector3(x1, bottom, z1);
+                normal = Vector3.UnitZ;
+                break;
+
+            case 2: // West (-X)
+                a = new Vector3(x0, top, z1);
+                b = new Vector3(x0, top, z0);
+                c = new Vector3(x0, bottom, z0);
+                d = new Vector3(x0, bottom, z1);
+                normal = -Vector3.UnitX;
+                break;
+
+            default: // East (+X)
+                a = new Vector3(x1, top, z0);
+                b = new Vector3(x1, top, z1);
+                c = new Vector3(x1, bottom, z1);
+                d = new Vector3(x1, bottom, z0);
+                normal = Vector3.UnitX;
+                break;
+        }
+
+        quads.Add(new TerrainQuad(
+            a, b, c, d,
+            normal,
+            wallColor,
+            ReverseWinding: false));
+
+        AddElevationMarks(
+            quads,
+            x0, x1, z0, z1,
+            startLayer,
+            endLayer,
+            side);
+    }
+
+    private static void AddElevationMarks(
+        List<TerrainQuad> quads,
+        float x0,
+        float x1,
+        float z0,
+        float z1,
+        int startLayer,
+        int endLayer,
+        int side)
+    {
+        int firstLevel = (int)MathF.Ceiling(
+            startLayer / (5f * WorldMap.HeightUnitsPerMeter));
+        int lastLevel = (int)MathF.Floor(
+            endLayer / (5f * WorldMap.HeightUnitsPerMeter));
+
+        for (int levelIndex = firstLevel; levelIndex <= lastLevel; levelIndex++)
+        {
+            float level = levelIndex * 5f;
+            float lineBottom = MathF.Max(
+                startLayer * UnitsPerMeter,
+                level - ContourHalfHeight);
+            float lineTop = MathF.Min(
+                endLayer * UnitsPerMeter,
+                level + ContourHalfHeight);
+
+            if (lineTop <= lineBottom)
+                continue;
+
+            Vector3 normal = side switch
+            {
+                0 => -Vector3.UnitZ,
+                1 => Vector3.UnitZ,
+                2 => -Vector3.UnitX,
+                _ => Vector3.UnitX
+            };
+            Vector3 offset = normal * ContourOffset;
+
+            Vector3 a;
+            Vector3 b;
+            Vector3 c;
+            Vector3 d;
+
+            switch (side)
+            {
+                case 0:
+                    a = new Vector3(x0, lineTop, z0) + offset;
+                    b = new Vector3(x1, lineTop, z0) + offset;
+                    c = new Vector3(x1, lineBottom, z0) + offset;
+                    d = new Vector3(x0, lineBottom, z0) + offset;
+                    break;
+                case 1:
+                    a = new Vector3(x1, lineTop, z1) + offset;
+                    b = new Vector3(x0, lineTop, z1) + offset;
+                    c = new Vector3(x0, lineBottom, z1) + offset;
+                    d = new Vector3(x1, lineBottom, z1) + offset;
+                    break;
+                case 2:
+                    a = new Vector3(x0, lineTop, z1) + offset;
+                    b = new Vector3(x0, lineTop, z0) + offset;
+                    c = new Vector3(x0, lineBottom, z0) + offset;
+                    d = new Vector3(x0, lineBottom, z1) + offset;
+                    break;
+                default:
+                    a = new Vector3(x1, lineTop, z0) + offset;
+                    b = new Vector3(x1, lineTop, z1) + offset;
+                    c = new Vector3(x1, lineBottom, z1) + offset;
+                    d = new Vector3(x1, lineBottom, z0) + offset;
+                    break;
+            }
+
+            Color color = (levelIndex & 1) == 0
+                ? BrightContourColor
+                : DimContourColor;
+
+            quads.Add(new TerrainQuad(
+                a, b, c, d,
+                normal,
+                color,
+                ReverseWinding: false));
+        }
     }
 
     private static void AddCutHatching(
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset,
+        List<TerrainQuad> quads,
         float x0,
         float x1,
         float z0,
@@ -422,14 +564,12 @@ internal static class RegionMeshBuilder
             switch (materialId)
             {
                 case 2:
-                    // Fine horizontal bedding marks.
                     startZ = z0 + 0.35f + i * 0.88f;
                     endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
                     endZ = startZ;
                     break;
 
                 case 3:
-                    // Opposite diagonal marks distinguish the deeper stratum.
                     startZ = z1 - 0.35f - i * 0.88f;
                     endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
                     endZ = MathF.Max(startZ - strokeLength, z0 + 0.15f);
@@ -466,505 +606,87 @@ internal static class RegionMeshBuilder
             Vector3 d = new(
                 startX - halfWidth.X, y, startZ - halfWidth.Y);
 
-            AddQuad(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
+            quads.Add(new TerrainQuad(
                 a, b, c, d,
                 Vector3.UnitY,
                 CutHatchColor,
-                reverseWinding: true);
+                ReverseWinding: true));
         }
     }
 
-    private const float ContourIntervalMeters = 5f;
-    private const float ContourHalfHeight = 0.055f;
-    private const float ContourOffset = 0.035f;
-
-    private static readonly Color BrightContourColor = new(246, 248, 250, 255);
-    private static readonly Color DimContourColor = new(168, 173, 181, 255);
-
-    private static readonly Color CaveWallColor = new(43, 46, 51, 255);
-
-    private static int CountCaveWallQuads(
-        TerrainRenderSnapshot terrain,
-        int renderX,
-        int renderY)
+    private static Color GetSurfaceColor(float height, ushort materialId)
     {
-        if (!terrain.CutawayEnabled)
-            return 0;
+        float amount = Math.Clamp(height / 50f, 0f, 1f);
+        int value = (int)MathF.Round(7f + amount * 34f);
 
-        ReadOnlySpan<CaveInterval> intervals =
-            terrain.GetCaveIntervals(renderX, renderY);
-        int count = 0;
-
-        foreach (CaveInterval interval in intervals)
+        value += materialId switch
         {
-            int visibleEnd = Math.Min(
-                interval.EndLayer,
-                terrain.CutawayLayer);
+            2 => 9,
+            3 => -5,
+            _ => 0
+        };
 
-            if (visibleEnd <= interval.StartLayer)
-                continue;
-
-            count += CountCaveWallSegments(
-                interval.StartLayer,
-                visibleEnd,
-                terrain.GetCaveIntervals(renderX, renderY - 1));
-            count += CountCaveWallSegments(
-                interval.StartLayer,
-                visibleEnd,
-                terrain.GetCaveIntervals(renderX, renderY + 1));
-            count += CountCaveWallSegments(
-                interval.StartLayer,
-                visibleEnd,
-                terrain.GetCaveIntervals(renderX - 1, renderY));
-            count += CountCaveWallSegments(
-                interval.StartLayer,
-                visibleEnd,
-                terrain.GetCaveIntervals(renderX + 1, renderY));
-        }
-
-        return count;
+        value = Math.Clamp(value, 4, 85);
+        return new Color(
+            value,
+            Math.Min(255, value + 1),
+            Math.Min(255, value + 3),
+            255);
     }
 
-    private static int CountCaveWallSegments(
-        int startLayer,
-        int endLayer,
-        ReadOnlySpan<CaveInterval> neighbourIntervals)
+    private static Color GetCutFaceColor(float height, ushort materialId)
     {
-        int cursor = startLayer;
-        int count = 0;
+        Color baseColor = GetSurfaceColor(height, materialId);
+        int value = Math.Clamp(baseColor.R + 5, 4, 90);
 
-        foreach (CaveInterval neighbour in neighbourIntervals)
-        {
-            if (neighbour.EndLayer <= cursor ||
-                neighbour.StartLayer >= endLayer)
-            {
-                continue;
-            }
-
-            if (neighbour.StartLayer > cursor)
-                count++;
-
-            cursor = Math.Max(cursor, neighbour.EndLayer);
-            if (cursor >= endLayer)
-                break;
-        }
-
-        if (cursor < endLayer)
-            count++;
-
-        return count;
+        return new Color(
+            value,
+            Math.Min(255, value + 1),
+            Math.Min(255, value + 3),
+            255);
     }
 
-    private static void BuildCaveWalls(
-        TerrainRenderSnapshot terrain,
-        int renderX,
-        int renderY,
-        float x0,
-        float x1,
-        float z0,
-        float z1,
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset)
+    private static Color Darken(Color color, float amount)
     {
-        if (!terrain.CutawayEnabled)
-            return;
-
-        ReadOnlySpan<CaveInterval> intervals =
-            terrain.GetCaveIntervals(renderX, renderY);
-
-        foreach (CaveInterval interval in intervals)
-        {
-            int visibleEnd = Math.Min(
-                interval.EndLayer,
-                terrain.CutawayLayer);
-
-            if (visibleEnd <= interval.StartLayer)
-                continue;
-
-            AddCaveWallSegments(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                x0, x1, z0, z1,
-                interval.StartLayer, visibleEnd,
-                terrain.GetCaveIntervals(renderX, renderY - 1),
-                side: 0);
-            AddCaveWallSegments(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                x0, x1, z0, z1,
-                interval.StartLayer, visibleEnd,
-                terrain.GetCaveIntervals(renderX, renderY + 1),
-                side: 1);
-            AddCaveWallSegments(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                x0, x1, z0, z1,
-                interval.StartLayer, visibleEnd,
-                terrain.GetCaveIntervals(renderX - 1, renderY),
-                side: 2);
-            AddCaveWallSegments(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                x0, x1, z0, z1,
-                interval.StartLayer, visibleEnd,
-                terrain.GetCaveIntervals(renderX + 1, renderY),
-                side: 3);
-        }
+        return new Color(
+            (int)(color.R * amount),
+            (int)(color.G * amount),
+            (int)(color.B * amount),
+            255);
     }
 
-    private static void AddCaveWallSegments(
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset,
-        float x0,
-        float x1,
-        float z0,
-        float z1,
-        int startLayer,
-        int endLayer,
-        ReadOnlySpan<CaveInterval> neighbourIntervals,
-        int side)
+    private static Mesh Upload(List<TerrainQuad> quads)
     {
-        int cursor = startLayer;
+        int vertexCount = checked(quads.Count * 4);
+        int triangleCount = checked(quads.Count * 2);
 
-        foreach (CaveInterval neighbour in neighbourIntervals)
+        Mesh mesh = new(vertexCount, triangleCount);
+        mesh.AllocVertices();
+        mesh.AllocNormals();
+        mesh.AllocColors();
+        mesh.AllocIndices();
+
+        Span<Vector3> vertices = mesh.VerticesAs<Vector3>();
+        Span<Vector3> normals = mesh.NormalsAs<Vector3>();
+        Span<byte> colors = mesh.ColorsAs<byte>();
+        Span<ushort> indices = mesh.IndicesAs<ushort>();
+
+        int vertexOffset = 0;
+        int indexOffset = 0;
+
+        foreach (TerrainQuad quad in quads)
         {
-            if (neighbour.EndLayer <= cursor ||
-                neighbour.StartLayer >= endLayer)
-            {
-                continue;
-            }
-
-            if (neighbour.StartLayer > cursor)
-            {
-                AddCaveWallSegment(
-                    vertices, normals, colors, indices,
-                    ref vertexOffset, ref indexOffset,
-                    x0, x1, z0, z1,
-                    cursor,
-                    Math.Min(neighbour.StartLayer, endLayer),
-                    side);
-            }
-
-            cursor = Math.Max(cursor, neighbour.EndLayer);
-            if (cursor >= endLayer)
-                return;
-        }
-
-        if (cursor < endLayer)
-        {
-            AddCaveWallSegment(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                x0, x1, z0, z1,
-                cursor,
-                endLayer,
-                side);
-        }
-    }
-
-    private static void AddCaveWallSegment(
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset,
-        float x0,
-        float x1,
-        float z0,
-        float z1,
-        int startLayer,
-        int endLayer,
-        int side)
-    {
-        float bottom = startLayer * 0.1f;
-        float top = endLayer * 0.1f;
-
-        Vector3 a;
-        Vector3 b;
-        Vector3 c;
-        Vector3 d;
-        Vector3 normal;
-
-        switch (side)
-        {
-            case 0: // North (-Z)
-                a = new Vector3(x0, top, z0);
-                b = new Vector3(x1, top, z0);
-                c = new Vector3(x1, bottom, z0);
-                d = new Vector3(x0, bottom, z0);
-                normal = -Vector3.UnitZ;
-                break;
-            case 1: // South (+Z)
-                a = new Vector3(x1, top, z1);
-                b = new Vector3(x0, top, z1);
-                c = new Vector3(x0, bottom, z1);
-                d = new Vector3(x1, bottom, z1);
-                normal = Vector3.UnitZ;
-                break;
-            case 2: // West (-X)
-                a = new Vector3(x0, top, z1);
-                b = new Vector3(x0, top, z0);
-                c = new Vector3(x0, bottom, z0);
-                d = new Vector3(x0, bottom, z1);
-                normal = -Vector3.UnitX;
-                break;
-            default: // East (+X)
-                a = new Vector3(x1, top, z0);
-                b = new Vector3(x1, top, z1);
-                c = new Vector3(x1, bottom, z1);
-                d = new Vector3(x1, bottom, z0);
-                normal = Vector3.UnitX;
-                break;
-        }
-
-        AddQuad(
-            vertices, normals, colors, indices,
-            ref vertexOffset, ref indexOffset,
-            a, b, c, d,
-            normal,
-            CaveWallColor);
-    }
-
-    private static void BuildDetailedGeometry(
-        TerrainRenderSnapshot terrain,
-        int firstRenderX,
-        int firstRenderY,
-        int patchesPerSide,
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset)
-    {
-        for (int localY = 0; localY < patchesPerSide; localY++)
-        {
-            int renderY = firstRenderY + localY;
-
-            for (int localX = 0; localX < patchesPerSide; localX++)
-            {
-                int renderX = firstRenderX + localX;
-                float height = terrain.GetRenderHeightMeters(renderX, renderY);
-                ushort materialId = terrain.GetRenderMaterialId(renderX, renderY);
-
-                if (height <= 0f || materialId == 0)
-                    continue;
-
-                float x0 = renderX * terrain.RegionSize;
-                float x1 = MathF.Min(
-                    x0 + terrain.RegionSize,
-                    terrain.WorldWidth);
-                float z0 = renderY * terrain.RegionSize;
-                float z1 = MathF.Min(
-                    z0 + terrain.RegionSize,
-                    terrain.WorldDepth);
-
-                AddQuad(
-                    vertices, normals, colors, indices,
-                    ref vertexOffset, ref indexOffset,
-                    new Vector3(x0, height, z0),
-                    new Vector3(x1, height, z0),
-                    new Vector3(x1, height, z1),
-                    new Vector3(x0, height, z1),
-                    Vector3.UnitY,
-                    terrain.IsCutFace(renderX, renderY)
-                        ? GetCutFaceColor(height, materialId)
-                        : GetSurfaceColor(height),
-                    reverseWinding: true);
-
-                if (terrain.IsCutFace(renderX, renderY))
-                {
-                    AddCutHatching(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        x0, x1, z0, z1, height, materialId);
-                }
-
-                float north = terrain.GetRenderHeightMeters(renderX, renderY - 1);
-                float north = terrain.GetRenderHeightMeters(renderX, renderY - 1);
-                if (height > north &&
-                    !terrain.IsCutawayVoidAt(renderX, renderY - 1))
-                {
-                    AddWallAndContours(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        new Vector3(x0, height, z0),
-                        new Vector3(x1, height, z0),
-                        north,
-                        -Vector3.UnitZ,
-                        includeContours: !terrain.CutawayEnabled);
-                }
-
-                float south = terrain.GetRenderHeightMeters(renderX, renderY + 1);
-                if (height > south &&
-                    !terrain.IsCutawayVoidAt(renderX, renderY + 1))
-                {
-                    AddWallAndContours(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        new Vector3(x1, height, z1),
-                        new Vector3(x0, height, z1),
-                        south,
-                        Vector3.UnitZ,
-                        includeContours: !terrain.CutawayEnabled);
-                }
-
-                float west = terrain.GetRenderHeightMeters(renderX - 1, renderY);
-                if (height > west &&
-                    !terrain.IsCutawayVoidAt(renderX - 1, renderY))
-                {
-                    AddWallAndContours(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        new Vector3(x0, height, z1),
-                        new Vector3(x0, height, z0),
-                        west,
-                        -Vector3.UnitX,
-                        includeContours: !terrain.CutawayEnabled);
-                }
-
-                float east = terrain.GetRenderHeightMeters(renderX + 1, renderY);
-                if (height > east &&
-                    !terrain.IsCutawayVoidAt(renderX + 1, renderY))
-                {
-                    AddWallAndContours(
-                        vertices, normals, colors, indices,
-                        ref vertexOffset, ref indexOffset,
-                        new Vector3(x1, height, z0),
-                        new Vector3(x1, height, z1),
-                        east,
-                        Vector3.UnitX,
-                        includeContours: !terrain.CutawayEnabled);
-                }
-
-                BuildCaveWalls(
-                    terrain,
-                    renderX,
-                    renderY,
-                    x0,
-                    x1,
-                    z0,
-                    z1,
-                    vertices,
-                    normals,
-                    colors,
-                    indices,
-                    ref vertexOffset,
-                    ref indexOffset);
-            }
-        }
-    }
-
-    private static int CountElevationLines(float lowerHeight, float upperHeight)
-    {
-        if (upperHeight <= lowerHeight)
-            return 0;
-
-        int firstLevel = (int)MathF.Ceiling(
-            (lowerHeight - 0.0001f) / ContourIntervalMeters);
-        int lastLevel = (int)MathF.Floor(
-            (upperHeight + 0.0001f) / ContourIntervalMeters);
-
-        return Math.Max(0, lastLevel - firstLevel + 1);
-    }
-
-    private static void AddWallAndContours(
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset,
-        Vector3 upperStart,
-        Vector3 upperEnd,
-        float lowerHeight,
-        Vector3 normal,
-        bool includeContours = true)
-    {
-        float upperHeight = upperStart.Y;
-        Color wallColor = Darken(
-            GetSurfaceColor((upperHeight + lowerHeight) * 0.5f),
-            0.57f);
-
-        AddQuad(
-            vertices, normals, colors, indices,
-            ref vertexOffset, ref indexOffset,
-            upperStart,
-            upperEnd,
-            new Vector3(upperEnd.X, lowerHeight, upperEnd.Z),
-            new Vector3(upperStart.X, lowerHeight, upperStart.Z),
-            normal,
-            wallColor);
-
-        if (includeContours)
-        {
-            AddElevationLines(
-                vertices, normals, colors, indices,
-                ref vertexOffset, ref indexOffset,
-                upperStart,
-                upperEnd,
-                lowerHeight,
-                upperHeight,
-                normal);
-        }
-    }
-
-    private static void AddElevationLines(
-        Span<Vector3> vertices,
-        Span<Vector3> normals,
-        Span<byte> colors,
-        Span<ushort> indices,
-        ref int vertexOffset,
-        ref int indexOffset,
-        Vector3 upperStart,
-        Vector3 upperEnd,
-        float lowerHeight,
-        float upperHeight,
-        Vector3 normal)
-    {
-        int firstLevel = (int)MathF.Ceiling(
-            (lowerHeight - 0.0001f) / ContourIntervalMeters);
-        int lastLevel = (int)MathF.Floor(
-            (upperHeight + 0.0001f) / ContourIntervalMeters);
-
-        Vector3 offset = normal * ContourOffset;
-
-        for (int levelIndex = firstLevel; levelIndex <= lastLevel; levelIndex++)
-        {
-            float level = levelIndex * ContourIntervalMeters;
-            float lineBottom = MathF.Max(lowerHeight, level - ContourHalfHeight);
-            float lineTop = MathF.Min(upperHeight, level + ContourHalfHeight);
-
-            if (lineTop <= lineBottom)
-                continue;
-
-            Vector3 a = new Vector3(upperStart.X, lineTop, upperStart.Z) + offset;
-            Vector3 b = new Vector3(upperEnd.X, lineTop, upperEnd.Z) + offset;
-            Vector3 c = new Vector3(upperEnd.X, lineBottom, upperEnd.Z) + offset;
-            Vector3 d = new Vector3(upperStart.X, lineBottom, upperStart.Z) + offset;
-
-            Color lineColor = (levelIndex & 1) == 0
-                ? BrightContourColor
-                : DimContourColor;
-
             AddQuad(
                 vertices, normals, colors, indices,
                 ref vertexOffset, ref indexOffset,
-                a, b, c, d,
-                normal,
-                lineColor);
+                quad.A, quad.B, quad.C, quad.D,
+                quad.Normal,
+                quad.Color,
+                quad.ReverseWinding);
         }
+
+        UploadMesh(ref mesh, false);
+        return mesh;
     }
 
     private static void AddQuad(
@@ -1019,29 +741,6 @@ internal static class RegionMeshBuilder
 
         vertexOffset += 4;
         indexOffset += 6;
-    }
-
-    private static Color GetSurfaceColor(float height)
-    {
-        // Restrained charcoal palette: canyon floors stay almost black,
-        // ridges and plateaus gain enough luminance to read from above.
-        float amount = Math.Clamp(height / 50f, 0f, 1f);
-        int value = (int)MathF.Round(7f + amount * 34f);
-
-        return new Color(
-            value,
-            Math.Min(255, value + 1),
-            Math.Min(255, value + 3),
-            255);
-    }
-
-    private static Color Darken(Color color, float amount)
-    {
-        return new Color(
-            (int)(color.R * amount),
-            (int)(color.G * amount),
-            (int)(color.B * amount),
-            255);
     }
 }
 
