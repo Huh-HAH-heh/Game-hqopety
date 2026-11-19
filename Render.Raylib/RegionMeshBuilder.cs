@@ -355,13 +355,21 @@ internal static class RegionMeshBuilder
     private const float CutHatchLift = 0.045f;
     private static readonly Color CutHatchColor = new(205, 211, 219, 255);
 
-    private static Color GetCutFaceColor(float height)
+    private static Color GetCutFaceColor(float height, ushort materialId)
     {
         Color baseColor = GetSurfaceColor(height);
+        int materialOffset = materialId switch
+        {
+            2 => 9,
+            3 => -5,
+            _ => 0
+        };
+        int value = Math.Clamp(baseColor.R + 5 + materialOffset, 4, 80);
+
         return new Color(
-            Math.Min(255, baseColor.R + 5),
-            Math.Min(255, baseColor.G + 5),
-            Math.Min(255, baseColor.B + 7),
+            value,
+            Math.Min(255, value + 1),
+            Math.Min(255, value + 3),
             255);
     }
 
@@ -467,7 +475,7 @@ internal static class RegionMeshBuilder
                     new Vector3(x0, height, z1),
                     Vector3.UnitY,
                     terrain.IsCutFace(renderX, renderY)
-                        ? GetCutFaceColor(height)
+                        ? GetCutFaceColor(height, materialId)
                         : GetSurfaceColor(height),
                     reverseWinding: true);
 
