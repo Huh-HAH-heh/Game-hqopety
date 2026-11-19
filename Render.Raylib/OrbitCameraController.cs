@@ -5,24 +5,24 @@ using static Raylib_cs.Raylib;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Smooth RTS-style orbit camera.
-/// Right mouse rotates, middle mouse pans, WASD moves, the wheel zooms.
-/// Camera state is damped with a time-based critically damped spring.
+/// RTS-style terrain camera:
+/// RMB orbits, MMB pans, wheel zooms toward the cursor, WASD moves.
 /// </summary>
 internal sealed class OrbitCameraController
 {
-    private const float RotationSensitivity = 0.0020f;
-    private const float RotationSmoothTime = 0.065f;
-    private const float MovementSmoothTime = 0.12f;
-    private const float ZoomSmoothTime = 0.15f;
-    private const float MinimumPitch = 0.22f;
-    private const float TopDownPitch = 1.565f;
+    private const float FieldOfViewDegrees = 55f;
+    private const float RotationSensitivity = 0.0018f;
+    private const float RotationSmoothTime = 0.055f;
+    private const float MovementSmoothTime = 0.075f;
+    private const float ZoomSmoothTime = 0.095f;
+    private const float MinimumPitch = 0.53f;
+    private const float TopDownPitch = 1.54f;
     private const float MaximumPitch = TopDownPitch;
+    private const float FitMargin = 1.08f;
 
     private readonly float _minimumDistance;
     private readonly float _maximumDistance;
-    private Vector3 _topDownTarget;
-    private float _topDownDistance;
+    private readonly Vector3 _topDownTarget;
 
     private Vector3 _target;
     private Vector3 _desiredTarget;
@@ -58,13 +58,13 @@ internal sealed class OrbitCameraController
             terrain.WorldWidth,
             terrain.WorldDepth);
 
-        _target = new Vector3(
+        _topDownTarget = new Vector3(
             terrain.WorldWidth * 0.5f,
             MathF.Max(1f, terrain.MaximumHeightMeters * 0.12f),
             terrain.WorldDepth * 0.5f);
 
+        _target = _topDownTarget;
         _desiredTarget = _target;
-        _topDownTarget = _target;
 
         _yawRadians = 0f;
         _desiredYawRadians = _yawRadians;
@@ -72,12 +72,15 @@ internal sealed class OrbitCameraController
         _pitchRadians = TopDownPitch;
         _desiredPitchRadians = _pitchRadians;
 
-        _distance = largestWorldAxis * 1.15f;
-        _desiredDistance = _distance;
-        _topDownDistance = _distance;
-
         _minimumDistance = 18f;
         _maximumDistance = largestWorldAxis * 3.5f;
+
+        _distance = CalculateFitDistance(
+            terrain.WorldWidth,
+            terrain.WorldDepth,
+            GetScreenWidth(),
+            GetScreenHeight());
+        _desiredDistance = _distance;
 
         UpdateCamera();
     }
@@ -87,7 +90,7 @@ internal sealed class OrbitCameraController
         if (deltaTime <= 0f)
             return;
 
-        // Prevent a debugger pause or window drag from producing a huge camera step.
+        // Avoid a large camera jump after a debugger pause or window drag.
         deltaTime = Math.Clamp(deltaTime, 0f, 0.05f);
 
         UpdateMouseMode();
@@ -173,7 +176,8 @@ internal sealed class OrbitCameraController
 
         if (_mouseMode == MouseMode.Orbit)
         {
-            _desiredYawRadians -= mouseDelta.X * RotationSensitivity;
+            // Dragging right moves the camera around the focus to the right.
+            _desiredYawRadians += mouseDelta.X * RotationSensitivity;
             _desiredPitchRadians = Math.Clamp(
                 _desiredPitchRadians - mouseDelta.Y * RotationSensitivity,
                 MinimumPitch,
@@ -183,26 +187,39 @@ internal sealed class OrbitCameraController
         }
 
         if (_mouseMode == MouseMode.Pan)
-        {
-            float viewportHeight = Math.Max(1, GetScreenHeight());
-            float worldUnitsPerPixel =
-                2f * _desiredDistance *
-                MathF.Tan(55f * MathF.PI / 360f) /
-                viewportHeight;
+            PanByMouseDelta(mouseDelta);
+    }
 
-            Vector3 right = new(
-                MathF.Cos(_desiredYawRadians),
-                0f,
-                -MathF.Sin(_desiredYawRadians));
+    private void PanByMouseDelta(Vector2 mouseDelta)
+    {
+        float viewportHeight = Math.Max(1, GetScreenHeight());
+        float halfFovTangent =
+            MathF.Tan(FieldOfViewDegrees * MathF.PI / 360f);
+        float sinPitch = MathF.Max(0.15f, MathF.Sin(_desiredPitchRadians));
 
-            Vector3 forward = new(
-                -MathF.Sin(_desiredYawRadians),
-                0f,
-                -MathF.Cos(_desiredYawRadians));
+        // Horizontal and vertical screen directions project differently onto
+        // the ground when the camera is tilted.
+        float horizontalUnitsPerPixel =
+            2f * _desiredDistance * sinPitch *
+            halfFovTangent / viewportHeight;
+        float verticalUnitsPerPixel =
+            2f * _desiredDistance * halfFovTangent /
+            (viewportHeight * sinPitch);
 
-            _desiredTarget -= right * (mouseDelta.X * worldUnitsPerPixel);
-            _desiredTarget += forward * (mouseDelta.Y * worldUnitsPerPixel);
-        }
+        Vector3 right = new(
+            MathF.Cos(_desiredYawRadians),
+            0f,
+            -MathF.Sin(_desiredYawRadians));
+
+        Vector3 groundForward = new(
+            -MathF.Sin(_desiredYawRadians),
+            0f,
+            -MathF.Cos(_desiredYawRadians));
+
+        _desiredTarget -= right *
+            (mouseDelta.X * horizontalUnitsPerPixel);
+        _desiredTarget += groundForward *
+            (mouseDelta.Y * verticalUnitsPerPixel);
     }
 
     private void UpdateZoomInput()
@@ -211,12 +228,89 @@ internal sealed class OrbitCameraController
         if (wheel == 0f)
             return;
 
-        // One wheel notch changes the target distance by about ten percent.
-        _desiredDistance *= MathF.Pow(0.90f, wheel);
+        Vector2 cursor = GetMousePosition();
+        bool hasAnchor = TryGetTargetPlanePoint(
+            cursor,
+            _desiredTarget,
+            _desiredYawRadians,
+            _desiredPitchRadians,
+            _desiredDistance,
+            out Vector3 pointBeforeZoom);
+
+        _desiredDistance *= MathF.Pow(0.88f, wheel);
         _desiredDistance = Math.Clamp(
             _desiredDistance,
             _minimumDistance,
             _maximumDistance);
+
+        if (!hasAnchor ||
+            !TryGetTargetPlanePoint(
+                cursor,
+                _desiredTarget,
+                _desiredYawRadians,
+                _desiredPitchRadians,
+                _desiredDistance,
+                out Vector3 pointAfterZoom))
+        {
+            return;
+        }
+
+        // Keep the point under the cursor stationary while zooming.
+        _desiredTarget.X += pointBeforeZoom.X - pointAfterZoom.X;
+        _desiredTarget.Z += pointBeforeZoom.Z - pointAfterZoom.Z;
+    }
+
+    private bool TryGetTargetPlanePoint(
+        Vector2 screenPosition,
+        Vector3 target,
+        float yaw,
+        float pitch,
+        float distance,
+        out Vector3 point)
+    {
+        point = default;
+
+        int viewportWidth = Math.Max(1, GetScreenWidth());
+        int viewportHeight = Math.Max(1, GetScreenHeight());
+
+        Vector3 cameraPosition = target + CalculateCameraOffset(
+            yaw,
+            pitch,
+            distance);
+
+        Vector3 forward = Vector3.Normalize(target - cameraPosition);
+        Vector3 right = Vector3.Normalize(
+            Vector3.Cross(forward, Vector3.UnitY));
+        Vector3 up = Vector3.Normalize(
+            Vector3.Cross(right, forward));
+
+        float aspect = viewportWidth / (float)viewportHeight;
+        float halfFovTangent =
+            MathF.Tan(FieldOfViewDegrees * MathF.PI / 360f);
+
+        float normalizedX =
+            (screenPosition.X / viewportWidth * 2f - 1f) *
+            aspect * halfFovTangent;
+        float normalizedY =
+            (1f - screenPosition.Y / viewportHeight * 2f) *
+            halfFovTangent;
+
+        Vector3 rayDirection = Vector3.Normalize(
+            forward +
+            right * normalizedX +
+            up * normalizedY);
+
+        if (MathF.Abs(rayDirection.Y) < 0.0001f)
+            return false;
+
+        float distanceToPlane =
+            (target.Y - cameraPosition.Y) / rayDirection.Y;
+
+        if (distanceToPlane <= 0f)
+            return false;
+
+        point = cameraPosition + rayDirection * distanceToPlane;
+        return true;
     }
 
     private void UpdateKeyboardInput(float deltaTime)
@@ -226,12 +320,11 @@ internal sealed class OrbitCameraController
             _desiredTarget = _topDownTarget;
             _desiredYawRadians = 0f;
             _desiredPitchRadians = TopDownPitch;
-            _desiredDistance = _topDownDistance;
+            _desiredDistance = CalculateFitDistance(
+                GetScreenWidth(),
+                GetScreenHeight());
 
-            _targetVelocity = Vector3.Zero;
-            _yawVelocity = 0f;
-            _pitchVelocity = 0f;
-            _distanceVelocity = 0f;
+            ResetSmoothing();
         }
 
         float moveX = 0f;
@@ -258,11 +351,13 @@ internal sealed class OrbitCameraController
             if (direction.LengthSquared() > 1f)
                 direction = Vector3.Normalize(direction);
 
-            float speed = MathF.Max(35f, _desiredDistance * 0.58f);
+            // Move by a fraction of the visible map per second, not over half
+            // of the world in one second at the initial zoom level.
+            float speed = MathF.Max(12f, _desiredDistance * 0.20f);
             if (IsKeyDown(KeyboardKey.LeftShift) ||
                 IsKeyDown(KeyboardKey.RightShift))
             {
-                speed *= 2.25f;
+                speed *= 2.2f;
             }
 
             _desiredTarget += direction * (speed * deltaTime);
@@ -274,29 +369,75 @@ internal sealed class OrbitCameraController
 
         if (verticalInput != 0f)
         {
-            float speed = MathF.Max(20f, _desiredDistance * 0.32f);
+            float speed = MathF.Max(20f, _desiredDistance * 0.24f);
             _desiredTarget.Y = Math.Max(
                 0f,
                 _desiredTarget.Y + verticalInput * speed * deltaTime);
         }
     }
 
+    private float CalculateFitDistance(int viewportWidth, int viewportHeight)
+    {
+        return CalculateFitDistance(
+            _topDownTarget.X * 2f,
+            _topDownTarget.Z * 2f,
+            viewportWidth,
+            viewportHeight);
+    }
+
+    private float CalculateFitDistance(
+        float worldWidth,
+        float worldDepth,
+        int viewportWidth,
+        int viewportHeight)
+    {
+        float aspect = Math.Max(1, viewportWidth) /
+            (float)Math.Max(1, viewportHeight);
+        float requiredVerticalSpan = MathF.Max(
+            worldDepth,
+            worldWidth / aspect);
+
+        float halfFovTangent =
+            MathF.Tan(FieldOfViewDegrees * MathF.PI / 360f);
+
+        return Math.Clamp(
+            requiredVerticalSpan * 0.5f / halfFovTangent * FitMargin,
+            _minimumDistance,
+            _maximumDistance);
+    }
+
+    private static Vector3 CalculateCameraOffset(
+        float yaw,
+        float pitch,
+        float distance)
+    {
+        float horizontalDistance = distance * MathF.Cos(pitch);
+
+        return new Vector3(
+            MathF.Sin(yaw) * horizontalDistance,
+            MathF.Sin(pitch) * distance,
+            MathF.Cos(yaw) * horizontalDistance);
+    }
+
     private void UpdateCamera()
     {
-        float horizontalDistance =
-            _distance * MathF.Cos(_pitchRadians);
-
-        Vector3 offset = new(
-            MathF.Sin(_yawRadians) * horizontalDistance,
-            MathF.Sin(_pitchRadians) * _distance,
-            MathF.Cos(_yawRadians) * horizontalDistance);
-
         Camera = new Camera3D(
-            _target + offset,
+            _target + CalculateCameraOffset(
+                _yawRadians,
+                _pitchRadians,
+                _distance),
             _target,
             Vector3.UnitY,
-            55f,
+            FieldOfViewDegrees,
             CameraProjection.Perspective);
+    }
+
+    private void ResetSmoothing()
+    {
+        _targetVelocity = Vector3.Zero;
+        _yawVelocity = 0f;
+        _pitchVelocity = 0f;
+        _distanceVelocity = 0f;
     }
 
     private static Vector3 SmoothDamp(
