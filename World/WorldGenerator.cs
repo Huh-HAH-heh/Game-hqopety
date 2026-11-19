@@ -195,9 +195,9 @@ public static class WorldGenerator
         // The lower passage crosses the mesa and opens at both canyon flanks.
         // Its centre line bends in XY and changes floor height / cross-section;
         // this is a through-tunnel, not a blind horizontal adit.
-        int lowerTunnelStartX = caveCenterX - 64;
+        int lowerTunnelStartX = caveCenterX - 40;
         int lowerTunnelY = caveCenterY;
-        int lowerTunnelLength = 128;
+        int lowerTunnelLength = 80;
         CarveWindingTunnel(
             worldMap,
             lowerTunnelStartX,
@@ -245,7 +245,7 @@ public static class WorldGenerator
 
         int proofSliceLower = 16 * WorldMap.HeightUnitsPerMeter;
         int proofSliceUpper = 28 * WorldMap.HeightUnitsPerMeter;
-        float lowerProofT = 40f / lowerTunnelLength;
+        float lowerProofT = 16f / lowerTunnelLength;
         int lowerProbeX = caveCenterX - 24;
         int lowerProbeY = lowerTunnelY +
             GetTunnelLateralOffset(lowerProofT, 5);
@@ -362,7 +362,7 @@ public static class WorldGenerator
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
                 $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
-                "static geology: 128m winding through-tunnel + 32m upper passage + chambers + rising connector.");
+                "static geology: 80m winding through-tunnel with two portals + 32m upper passage + chambers + rising connector.");
         }
     }
 
