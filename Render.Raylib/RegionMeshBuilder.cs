@@ -334,14 +334,30 @@ internal static class RegionMeshBuilder
                 float west = terrain.GetRenderHeightMeters(renderX - 1, renderY);
                 float east = terrain.GetRenderHeightMeters(renderX + 1, renderY);
 
-                if (height > north)
-                    quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(north, height));
-                if (height > south)
-                    quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(south, height));
-                if (height > west)
-                    quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(west, height));
-                if (height > east)
-                    quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(east, height));
+                if (height > north &&
+                    !terrain.IsCutawayVoidAt(renderX, renderY - 1))
+                {
+                    quadCount += 1 +
+                        (terrain.CutawayEnabled ? 0 : CountElevationLines(north, height));
+                }
+                if (height > south &&
+                    !terrain.IsCutawayVoidAt(renderX, renderY + 1))
+                {
+                    quadCount += 1 +
+                        (terrain.CutawayEnabled ? 0 : CountElevationLines(south, height));
+                }
+                if (height > west &&
+                    !terrain.IsCutawayVoidAt(renderX - 1, renderY))
+                {
+                    quadCount += 1 +
+                        (terrain.CutawayEnabled ? 0 : CountElevationLines(west, height));
+                }
+                if (height > east &&
+                    !terrain.IsCutawayVoidAt(renderX + 1, renderY))
+                {
+                    quadCount += 1 +
+                        (terrain.CutawayEnabled ? 0 : CountElevationLines(east, height));
+                }
 
                 if (terrain.IsCutFace(renderX, renderY))
                     quadCount += CutHatchLinesPerPatch;
@@ -390,7 +406,8 @@ internal static class RegionMeshBuilder
         float x1,
         float z0,
         float z1,
-        float height)
+        float height,
+        ushort materialId)
     {
         float y = height + CutHatchLift;
         const float strokeLength = 1.05f;
@@ -398,9 +415,32 @@ internal static class RegionMeshBuilder
         for (int i = 0; i < CutHatchLinesPerPatch; i++)
         {
             float startX = x0 + 0.35f + i * 0.88f;
-            float startZ = z0 + 0.35f;
-            float endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
-            float endZ = MathF.Min(startZ + strokeLength, z1 - 0.15f);
+            float startZ;
+            float endX;
+            float endZ;
+
+            switch (materialId)
+            {
+                case 2:
+                    // Fine horizontal bedding marks.
+                    startZ = z0 + 0.35f + i * 0.88f;
+                    endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
+                    endZ = startZ;
+                    break;
+
+                case 3:
+                    // Opposite diagonal marks distinguish the deeper stratum.
+                    startZ = z1 - 0.35f - i * 0.88f;
+                    endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
+                    endZ = MathF.Max(startZ - strokeLength, z0 + 0.15f);
+                    break;
+
+                default:
+                    startZ = z0 + 0.35f;
+                    endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
+                    endZ = MathF.Min(startZ + strokeLength, z1 - 0.15f);
+                    break;
+            }
 
             if (endX <= startX || endZ <= startZ)
                 continue;
@@ -743,11 +783,13 @@ internal static class RegionMeshBuilder
                     AddCutHatching(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
-                        x0, x1, z0, z1, height);
+                        x0, x1, z0, z1, height, materialId);
                 }
 
                 float north = terrain.GetRenderHeightMeters(renderX, renderY - 1);
-                if (height > north)
+                float north = terrain.GetRenderHeightMeters(renderX, renderY - 1);
+                if (height > north &&
+                    !terrain.IsCutawayVoidAt(renderX, renderY - 1))
                 {
                     AddWallAndContours(
                         vertices, normals, colors, indices,
@@ -756,11 +798,12 @@ internal static class RegionMeshBuilder
                         new Vector3(x1, height, z0),
                         north,
                         -Vector3.UnitZ,
-                    includeContours: !terrain.CutawayEnabled);
+                        includeContours: !terrain.CutawayEnabled);
                 }
 
                 float south = terrain.GetRenderHeightMeters(renderX, renderY + 1);
-                if (height > south)
+                if (height > south &&
+                    !terrain.IsCutawayVoidAt(renderX, renderY + 1))
                 {
                     AddWallAndContours(
                         vertices, normals, colors, indices,
@@ -769,11 +812,12 @@ internal static class RegionMeshBuilder
                         new Vector3(x0, height, z1),
                         south,
                         Vector3.UnitZ,
-                    includeContours: !terrain.CutawayEnabled);
+                        includeContours: !terrain.CutawayEnabled);
                 }
 
                 float west = terrain.GetRenderHeightMeters(renderX - 1, renderY);
-                if (height > west)
+                if (height > west &&
+                    !terrain.IsCutawayVoidAt(renderX - 1, renderY))
                 {
                     AddWallAndContours(
                         vertices, normals, colors, indices,
@@ -782,11 +826,12 @@ internal static class RegionMeshBuilder
                         new Vector3(x0, height, z0),
                         west,
                         -Vector3.UnitX,
-                    includeContours: !terrain.CutawayEnabled);
+                        includeContours: !terrain.CutawayEnabled);
                 }
 
                 float east = terrain.GetRenderHeightMeters(renderX + 1, renderY);
-                if (height > east)
+                if (height > east &&
+                    !terrain.IsCutawayVoidAt(renderX + 1, renderY))
                 {
                     AddWallAndContours(
                         vertices, normals, colors, indices,
@@ -795,7 +840,7 @@ internal static class RegionMeshBuilder
                         new Vector3(x1, height, z1),
                         east,
                         Vector3.UnitX,
-                    includeContours: !terrain.CutawayEnabled);
+                        includeContours: !terrain.CutawayEnabled);
                 }
 
                 BuildCaveWalls(
