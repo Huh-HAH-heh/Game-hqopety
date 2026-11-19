@@ -82,8 +82,9 @@ public static class RaylibTerrainViewer
                     // look-at height, quantized to one-metre steps. Q/E move
                     // continuously; PageUp/PageDown step by one metre.
                     int cutLayer = Math.Clamp(
-                        (int)MathF.Round(camera.Camera.Target.Y) *
-                            WorldMap.HeightUnitsPerMeter,
+                        (int)MathF.Round(
+                            camera.Camera.Target.Y *
+                            WorldMap.HeightUnitsPerMeter),
                         0,
                         worldMap.LayerCount - 1);
 
@@ -165,8 +166,8 @@ public static class RaylibTerrainViewer
 
         DrawText(
             cutawayMode
-                ? "C surface view | Q/E cut height | PgUp/PgDn +/-1m | RMB orbit volume"
-                : "C cut terrain at camera focus height | Q/E or PgUp/PgDn adjust | T fit top view",
+                ? "C surface view | Q/E cut | PgUp/PgDn +/-1m | Shift+Wheel +/-1m | RMB orbit"
+                : "C visual cut at focus height | Q/E or PgUp/PgDn adjust | Shift+Wheel cut | T top view",
             24,
             146,
             14,
@@ -174,8 +175,8 @@ public static class RaylibTerrainViewer
 
         DrawText(
             cutawayMode
-                ? "WASD move | RMB orbit | MMB pan | Wheel zoom | Q/E cut height | PgUp/PgDn +/-1m | C surface | Esc exit"
-                : "WASD move | RMB orbit | MMB pan | Wheel zoom | T fit top view | Q/E height | PgUp/PgDn +/-1m | C cut | Esc exit",
+                ? "WASD move | RMB orbit | MMB pan | Wheel zoom | Shift+Wheel slice | Q/E +/-height | PgUp/PgDn +/-1m | C surface | Esc exit"
+                : "WASD move | RMB orbit | MMB pan | Wheel zoom | Shift+Wheel slice | Q/E height | PgUp/PgDn +/-1m | C cut | T fit | Esc exit",
             24,
             196,
             14,
