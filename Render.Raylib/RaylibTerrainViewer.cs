@@ -43,8 +43,8 @@ public static class RaylibTerrainViewer
                 $"maximum height: {terrain.MaximumHeightMeters:0.0} m.");
 
             Console.WriteLine(
-                "[Raylib] Static cave demo: two sealed tunnel levels (14m and 26m), " +
-                "chambers and an internal connector. Press C for the 3D cutaway.");
+                "[Raylib] Static cave demo: 80m winding through-tunnel with two portals, " +
+                "sealed upper passage, chambers and rising connector. Press C for cutaway.");
 
             while (!WindowShouldClose())
             {
