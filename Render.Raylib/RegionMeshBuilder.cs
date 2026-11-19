@@ -249,8 +249,7 @@ internal static class RegionMeshBuilder
                     new Vector3(segmentX0, height, z0),
                     new Vector3(segmentX1, height, z0),
                     north,
-                    -Vector3.UnitZ
-                );
+                    -Vector3.UnitZ);
             }
 
             float south = terrain.GetHeightMeters(
@@ -264,8 +263,7 @@ internal static class RegionMeshBuilder
                     new Vector3(segmentX1, height, z1),
                     new Vector3(segmentX0, height, z1),
                     south,
-                    Vector3.UnitZ
-                );
+                    Vector3.UnitZ);
             }
 
             float west = terrain.GetHeightMeters(
@@ -279,8 +277,7 @@ internal static class RegionMeshBuilder
                     new Vector3(x0, height, segmentZ1),
                     new Vector3(x0, height, segmentZ0),
                     west,
-                    -Vector3.UnitX
-                );
+                    -Vector3.UnitX);
             }
 
             float east = terrain.GetHeightMeters(
@@ -294,8 +291,7 @@ internal static class RegionMeshBuilder
                     new Vector3(x1, height, segmentZ0),
                     new Vector3(x1, height, segmentZ1),
                     east,
-                    Vector3.UnitX
-                );
+                    Vector3.UnitX);
             }
         }
     }
@@ -407,8 +403,7 @@ internal static class RegionMeshBuilder
                         new Vector3(x0, height, z0),
                         new Vector3(x1, height, z0),
                         north,
-                        -Vector3.UnitZ
-                );
+                        -Vector3.UnitZ);
                 }
 
                 float south = terrain.GetHeightMeters(renderX, renderY + 1);
@@ -420,8 +415,7 @@ internal static class RegionMeshBuilder
                         new Vector3(x1, height, z1),
                         new Vector3(x0, height, z1),
                         south,
-                        Vector3.UnitZ
-                );
+                        Vector3.UnitZ);
                 }
 
                 float west = terrain.GetHeightMeters(renderX - 1, renderY);
@@ -433,8 +427,7 @@ internal static class RegionMeshBuilder
                         new Vector3(x0, height, z1),
                         new Vector3(x0, height, z0),
                         west,
-                        -Vector3.UnitX
-                );
+                        -Vector3.UnitX);
                 }
 
                 float east = terrain.GetHeightMeters(renderX + 1, renderY);
@@ -446,8 +439,7 @@ internal static class RegionMeshBuilder
                         new Vector3(x1, height, z0),
                         new Vector3(x1, height, z1),
                         east,
-                        Vector3.UnitX
-                );
+                        Vector3.UnitX);
                 }
             }
         }
