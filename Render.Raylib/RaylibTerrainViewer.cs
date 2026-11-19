@@ -67,7 +67,7 @@ public static class RaylibTerrainViewer
                     else
                     {
                         terrain.DisableCutaway();
-                        renderer.Synchronize(terrain, forceRebuild: true);
+                        renderer.Synchronize(terrain);
                         camera.ResetTopDownView();
                     }
                 }
@@ -78,9 +78,9 @@ public static class RaylibTerrainViewer
 
                 if (cutawayMode)
                 {
-                    // The horizontal section is anchored to the camera's
-                    // look-at height, quantized to one-metre steps. Q/E move
-                    // continuously; PageUp/PageDown step by one metre.
+                    // The horizontal cut plane follows the camera focus,
+                    // quantized to 0.5 m. Q/E move continuously; PageUp/PageDown
+                    // and Shift+Wheel step by one metre.
                     const float cutStepMeters = 0.5f;
                     int layersPerCutStep = (int)MathF.Round(
                         cutStepMeters * WorldMap.HeightUnitsPerMeter);
@@ -91,15 +91,11 @@ public static class RaylibTerrainViewer
                         0,
                         worldMap.LayerCount - 1);
 
-                    bool cutChanged = terrain.SetCutawayLayer(cutLayer);
+                    terrain.SetCutawayLayer(cutLayer);
+                }
 
-                    if (terrainChanged || cutChanged)
-                        renderer.SynchronizeCutaway(terrain);
-                }
-                else if (terrainChanged)
-                {
+                if (terrainChanged)
                     renderer.Synchronize(terrain);
-                }
 
                 BeginDrawing();
                 ClearBackground(new Color(0, 0, 0, 255));
