@@ -251,13 +251,18 @@ public static class WorldGenerator
 
         int proofSliceLower = 16 * WorldMap.HeightUnitsPerMeter;
         int proofSliceUpper = 28 * WorldMap.HeightUnitsPerMeter;
+        int lowerProbeX = caveCenterX - 24;
+        int lowerProbeY = caveCenterY - 4;
+        int upperProbeX = caveCenterX;
+        int upperProbeY = caveCenterY + 16;
+
         bool lowerAir = worldMap.GetMaterialId(
-            caveCenterX,
-            caveCenterY - 4,
+            lowerProbeX,
+            lowerProbeY,
             proofSliceLower) == 0;
         bool upperAir = worldMap.GetMaterialId(
-            caveCenterX + 4,
-            caveCenterY,
+            upperProbeX,
+            upperProbeY,
             proofSliceUpper) == 0;
         bool connectorAir = worldMap.GetMaterialId(
             caveCenterX,
@@ -265,21 +270,21 @@ public static class WorldGenerator
             22 * WorldMap.HeightUnitsPerMeter) == 0;
 
         bool lowerFloorSolid = worldMap.GetMaterialId(
-            caveCenterX,
-            caveCenterY - 4,
+            lowerProbeX,
+            lowerProbeY,
             13 * WorldMap.HeightUnitsPerMeter) != 0;
         bool lowerRoofSolid = worldMap.GetMaterialId(
-            caveCenterX,
-            caveCenterY - 4,
+            lowerProbeX,
+            lowerProbeY,
             19 * WorldMap.HeightUnitsPerMeter) != 0;
         bool upperFloorSolid = worldMap.GetMaterialId(
-            caveCenterX + 4,
-            caveCenterY,
-            23 * WorldMap.HeightUnitsPerMeter) != 0;
+            upperProbeX,
+            upperProbeY,
+            25 * WorldMap.HeightUnitsPerMeter) != 0;
         bool upperRoofSolid = worldMap.GetMaterialId(
-            caveCenterX + 4,
-            caveCenterY,
-            32 * WorldMap.HeightUnitsPerMeter) != 0;
+            upperProbeX,
+            upperProbeY,
+            31 * WorldMap.HeightUnitsPerMeter) != 0;
 
         bool lowerEndsSealed =
             worldMap.GetMaterialId(
