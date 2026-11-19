@@ -107,7 +107,7 @@ public static class RaylibTerrainViewer
             Color.LightGray);
 
         DrawText(
-            "WASD move | RMB orbit | MMB pan | Wheel zoom | T top view | Shift boost | Q/E altitude | Esc exit",
+            "WASD move | RMB orbit | MMB pan | Wheel zoom to cursor | T fit top view | Shift boost | Q/E altitude | Esc exit",
             24,
             196,
             14,
