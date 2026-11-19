@@ -172,25 +172,20 @@ public static class WorldGenerator
         int caveCenterX = centerX + 58;
         int caveCenterY = centerY - 9;
 
-        // Two sparse material bands create real geological strata inside
-        // the mesa. They remain separate 3D materials at their own Z layers.
-        worldMap.SetStaticVolume(
-            caveCenterX - 40,
-            caveCenterY - 32,
-            zLevel: 8,
-            width: 80,
-            depth: 64,
-            heightInMeters: 2,
-            materialId: 2);
+        // Geological bands are inserted only where the original surface
+        // provides enough overburden. This keeps strata inside the massif
+        // instead of creating artificial raised shelves on low canyon slopes.
+        AddStratumBand(
+            worldMap, heights, patchesX, patchSize,
+            caveCenterX - 40, caveCenterY - 32,
+            width: 80, depth: 64,
+            zLevel: 8, thickness: 2, materialId: 2);
 
-        worldMap.SetStaticVolume(
-            caveCenterX - 40,
-            caveCenterY - 32,
-            zLevel: 26,
-            width: 80,
-            depth: 64,
-            heightInMeters: 3,
-            materialId: 3);
+        AddStratumBand(
+            worldMap, heights, patchesX, patchSize,
+            caveCenterX - 40, caveCenterY - 32,
+            width: 80, depth: 64,
+            zLevel: 26, thickness: 3, materialId: 3);
 
         // The lower passage crosses the mesa and opens at both canyon flanks.
         // Its centre line bends in XY and changes floor height / cross-section;
@@ -321,13 +316,15 @@ public static class WorldGenerator
                 upperTunnelStartY + upperTunnelLength + 5,
                 proofSliceUpper) != 0;
 
+        int stratumProbeX = caveCenterX - 12;
+        int stratumProbeY = caveCenterY - 20;
         ushort lowerStratum = worldMap.GetMaterialId(
-            caveCenterX - 20,
-            caveCenterY - 20,
+            stratumProbeX,
+            stratumProbeY,
             9 * WorldMap.HeightUnitsPerMeter);
         ushort upperStratum = worldMap.GetMaterialId(
-            caveCenterX - 20,
-            caveCenterY - 20,
+            stratumProbeX,
+            stratumProbeY,
             27 * WorldMap.HeightUnitsPerMeter);
 
         ushort surfaceCoverHeight = worldMap.GetSurfaceHeightUnits(
@@ -371,6 +368,72 @@ public static class WorldGenerator
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
                 $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
                 "static geology: 80m winding through-tunnel with two portals + 32m upper passage + chambers + rising connector.");
+        }
+    }
+
+    private static void AddStratumBand(
+        WorldMap worldMap,
+        ushort[] surfaceHeights,
+        int patchesX,
+        int patchSize,
+        int startX,
+        int startY,
+        int width,
+        int depth,
+        int zLevel,
+        int thickness,
+        ushort materialId)
+    {
+        int firstPatchX = Math.Max(
+            0,
+            (startX - patchSize / 2 + patchSize - 1) / patchSize);
+        int firstPatchY = Math.Max(
+            0,
+            (startY - patchSize / 2 + patchSize - 1) / patchSize);
+        int endPatchX = Math.Min(
+            patchesX,
+            (startX + width - patchSize / 2 + patchSize - 1) / patchSize);
+        int endPatchY = Math.Min(
+            worldMap.TileHeight / patchSize,
+            (startY + depth - patchSize / 2 + patchSize - 1) / patchSize);
+
+        int requiredSurfaceUnits = checked(
+            (zLevel + thickness) *
+            WorldMap.HeightUnitsPerMeter);
+
+        for (int patchY = firstPatchY; patchY < endPatchY; patchY++)
+        {
+            int runStart = -1;
+
+            for (int patchX = firstPatchX; patchX <= endPatchX; patchX++)
+            {
+                bool inside = patchX < endPatchX;
+                bool hasOverburden = inside &&
+                    surfaceHeights[patchX + patchY * patchesX] >=
+                    requiredSurfaceUnits;
+
+                if (hasOverburden)
+                {
+                    if (runStart < 0)
+                        runStart = patchX;
+
+                    continue;
+                }
+
+                if (runStart < 0)
+                    continue;
+
+                worldMap.SetStaticVolume(
+                    runStart * patchSize,
+                    patchY * patchSize,
+                    zLevel,
+                    (patchX - runStart) * patchSize,
+                    patchSize,
+                    thickness,
+                    materialId);
+
+                runStart = -1;
+            }
         }
     }
 
