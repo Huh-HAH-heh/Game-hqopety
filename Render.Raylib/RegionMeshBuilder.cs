@@ -135,6 +135,219 @@ internal static class RegionMeshBuilder
         return result;
     }
 
+    /// <summary>
+    /// Builds a horizontal underground section from voxel occupancy. Empty
+    /// cells are omitted, leaving cave and tunnel voids visible as black space.
+    /// </summary>
+    public static RegionGpuMesh BuildUndergroundSlice(
+        TerrainRenderSnapshot terrain,
+        int storageRegionX,
+        int storageRegionY)
+    {
+        int storageIndex =
+            storageRegionX + storageRegionY * terrain.StorageRegionsX;
+        int patchesPerSide = terrain.RenderRegionsPerStorageRegion;
+        int firstRenderX = storageRegionX * patchesPerSide;
+        int firstRenderY = storageRegionY * patchesPerSide;
+        float sliceHeight = terrain.SliceHeightMeters;
+
+        int quadCount = CountUndergroundSliceQuads(
+            terrain,
+            firstRenderX,
+            firstRenderY,
+            patchesPerSide);
+
+        RegionGpuMesh result = new()
+        {
+            RegionVersion = terrain.SourceRegionVersions[storageIndex],
+            BoundsCenter = new Vector3(
+                (storageRegionX + 0.5f) * terrain.StorageRegionSize,
+                sliceHeight,
+                (storageRegionY + 0.5f) * terrain.StorageRegionSize),
+            BoundsRadius = MathF.Sqrt(
+                terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f + 4f)
+        };
+
+        if (quadCount == 0)
+            return result;
+
+        int vertexCount = checked(quadCount * 4);
+        int triangleCount = checked(quadCount * 2);
+        Mesh mesh = new(vertexCount, triangleCount);
+        mesh.AllocVertices();
+        mesh.AllocNormals();
+        mesh.AllocColors();
+        mesh.AllocIndices();
+
+        Span<Vector3> vertices = mesh.VerticesAs<Vector3>();
+        Span<Vector3> normals = mesh.NormalsAs<Vector3>();
+        Span<byte> colors = mesh.ColorsAs<byte>();
+        Span<ushort> indices = mesh.IndicesAs<ushort>();
+
+        int vertexOffset = 0;
+        int indexOffset = 0;
+        const float lineHalfWidth = 0.065f;
+
+        for (int localY = 0; localY < patchesPerSide; localY++)
+        {
+            int renderY = firstRenderY + localY;
+            float z0 = renderY * terrain.RegionSize;
+            float z1 = z0 + terrain.RegionSize;
+
+            for (int localX = 0; localX < patchesPerSide; localX++)
+            {
+                int renderX = firstRenderX + localX;
+                ushort materialId =
+                    terrain.GetSliceMaterialId(renderX, renderY);
+
+                if (materialId == 0)
+                    continue;
+
+                float x0 = renderX * terrain.RegionSize;
+                float x1 = x0 + terrain.RegionSize;
+
+                AddQuad(
+                    vertices, normals, colors, indices,
+                    ref vertexOffset, ref indexOffset,
+                    new Vector3(x0, sliceHeight, z0),
+                    new Vector3(x1, sliceHeight, z0),
+                    new Vector3(x1, sliceHeight, z1),
+                    new Vector3(x0, sliceHeight, z1),
+                    Vector3.UnitY,
+                    GetSliceColor(materialId),
+                    reverseWinding: true);
+
+                if (terrain.GetSliceMaterialId(renderX, renderY - 1) == 0)
+                {
+                    AddSliceBoundary(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        x0, x1, z0, sliceHeight,
+                        lineHalfWidth,
+                        alongX: true);
+                }
+
+                if (terrain.GetSliceMaterialId(renderX, renderY + 1) == 0)
+                {
+                    AddSliceBoundary(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        x0, x1, z1, sliceHeight,
+                        lineHalfWidth,
+                        alongX: true);
+                }
+
+                if (terrain.GetSliceMaterialId(renderX - 1, renderY) == 0)
+                {
+                    AddSliceBoundary(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        z0, z1, x0, sliceHeight,
+                        lineHalfWidth,
+                        alongX: false);
+                }
+
+                if (terrain.GetSliceMaterialId(renderX + 1, renderY) == 0)
+                {
+                    AddSliceBoundary(
+                        vertices, normals, colors, indices,
+                        ref vertexOffset, ref indexOffset,
+                        z0, z1, x1, sliceHeight,
+                        lineHalfWidth,
+                        alongX: false);
+                }
+            }
+        }
+
+        UploadMesh(ref mesh, false);
+        result.Mesh = mesh;
+        result.IsUploaded = true;
+        return result;
+    }
+
+    private static int CountUndergroundSliceQuads(
+        TerrainRenderSnapshot terrain,
+        int firstRenderX,
+        int firstRenderY,
+        int patchesPerSide)
+    {
+        int quadCount = 0;
+
+        for (int localY = 0; localY < patchesPerSide; localY++)
+        {
+            int renderY = firstRenderY + localY;
+
+            for (int localX = 0; localX < patchesPerSide; localX++)
+            {
+                int renderX = firstRenderX + localX;
+                if (terrain.GetSliceMaterialId(renderX, renderY) == 0)
+                    continue;
+
+                quadCount++;
+
+                if (terrain.GetSliceMaterialId(renderX, renderY - 1) == 0)
+                    quadCount++;
+                if (terrain.GetSliceMaterialId(renderX, renderY + 1) == 0)
+                    quadCount++;
+                if (terrain.GetSliceMaterialId(renderX - 1, renderY) == 0)
+                    quadCount++;
+                if (terrain.GetSliceMaterialId(renderX + 1, renderY) == 0)
+                    quadCount++;
+            }
+        }
+
+        return quadCount;
+    }
+
+    private static void AddSliceBoundary(
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset,
+        float start,
+        float end,
+        float fixedCoordinate,
+        float height,
+        float halfWidth,
+        bool alongX)
+    {
+        Vector3 a;
+        Vector3 b;
+        Vector3 c;
+        Vector3 d;
+
+        if (alongX)
+        {
+            a = new Vector3(start, height, fixedCoordinate - halfWidth);
+            b = new Vector3(end, height, fixedCoordinate - halfWidth);
+            c = new Vector3(end, height, fixedCoordinate + halfWidth);
+            d = new Vector3(start, height, fixedCoordinate + halfWidth);
+        }
+        else
+        {
+            a = new Vector3(fixedCoordinate - halfWidth, height, start);
+            b = new Vector3(fixedCoordinate - halfWidth, height, end);
+            c = new Vector3(fixedCoordinate + halfWidth, height, end);
+            d = new Vector3(fixedCoordinate + halfWidth, height, start);
+        }
+
+        AddQuad(
+            vertices, normals, colors, indices,
+            ref vertexOffset, ref indexOffset,
+            a, b, c, d,
+            Vector3.UnitY,
+            ContourColor,
+            reverseWinding: true);
+    }
+
+    private static Color GetSliceColor(ushort materialId)
+    {
+        int value = 24 + materialId % 5 * 2;
+        return new Color(value, value + 1, value + 3, 255);
+    }
+
     private static bool TryGetUniformSurface(
         TerrainRenderSnapshot terrain,
         int firstRenderX,
