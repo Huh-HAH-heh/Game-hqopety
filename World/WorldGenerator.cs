@@ -171,14 +171,6 @@ public static class WorldGenerator
 
         int caveCenterX = centerX + 58;
         int caveCenterY = centerY - 9;
-        int tunnelStartX = Math.Clamp(
-            caveCenterX - 6,
-            0,
-            worldMap.TileWidth - 12);
-        int tunnelStartY = Math.Clamp(
-            caveCenterY - 26,
-            0,
-            worldMap.TileHeight - 52);
 
         // Two sparse material bands create real geological strata inside
         // the mesa. They remain separate 3D materials at their own Z layers.
