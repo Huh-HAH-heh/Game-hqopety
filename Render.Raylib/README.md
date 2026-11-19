@@ -51,39 +51,51 @@ upload, draw and disposal are restricted to the render thread.
 
 - WASD: move in the camera's horizontal plane at a zoom-scaled RTS speed
 - Right mouse button + drag: orbit; dragging right rotates the camera to the right
-- Middle mouse button + drag: pan by intersecting the old/new pointer rays with the camera focus plane
-- Mouse wheel: zoom toward the cursor position, keeping the pointed-at ground area anchored
+- Middle mouse button + drag: screen-space pan with a tilt-aware ground scale
+- Mouse wheel: zoom toward the cursor position when the focus-plane intersection is valid
 - Left Shift / Right Shift: faster movement
-- Q / E: move camera target vertically; in cutaway mode this moves the section plane
+- Q / E: move the camera focus and cut plane vertically
+- PageUp / PageDown: move the cut plane by exactly one metre
+- T: return to the fitted top-down view
 - Escape: exit
 
-## Static cave, tunnel and volumetric cutaway
+## Static multi-level cave and volumetric cutaway
 
-`WorldGenerator.GenerateSmooth` creates a sealed underground tunnel inside the
-raised mesa, not an open adit:
+`WorldGenerator.GenerateSmooth` builds two enclosed underground passages inside
+the mesa. Neither passage opens to the surface or to the outside edge of the hill:
 
-- a 52 m enclosed tunnel, 12 m wide and 5 m high;
-- solid rock at both tunnel ends and above its roof;
-- a connected 20 x 20 m chamber, 8 m high;
-- a 4 x 4 m vertical shaft from the chamber to the surface;
-- two embedded material strata at 9 m and 27 m (separate IDs, not color-only overlays).
+- lower tunnel: 64 m long, 8 m wide, 5 m high at 14 m depth;
+- lower chamber: 20 x 20 m, 8 m high at 12 m depth;
+- upper tunnel: 56 m long, 8 m wide, 5 m high at 26 m depth;
+- upper chamber: 20 x 20 m, 8 m high at 24 m depth;
+- internal connector: 6 x 6 m, joining the two cave levels between 18 m and 26 m.
+
+Two additional solid material bands at 8-10 m and 26-29 m demonstrate that
+different materials can coexist inside the same terrain volume. These are real
+volume materials, not surface-colour overlays.
 
 `WorldMap.CarveStaticVolume` writes empty overrides into the sparse 3D
-`BlockVolumeTree`. The base terrain remains an implicit solid column; the cut
-does not materialize the entire 500-layer world as individual voxels.
-`GetMaterialId(x,y,z)` and `GetTileRanges(x,y)` resolve the empty intervals and distinct material bands.
-World generation verifies both material strata, tunnel air, solid floor, roof,
-side wall, both sealed ends and the open shaft, and throws if any condition is false.
+`BlockVolumeTree`. The underlying terrain remains an implicit solid column;
+the generator does not materialize the whole 500-layer map into individual
+voxels. The render snapshot extracts only internal empty intervals at the
+4 x 4 m presentation scale. The GPU mesh builds cave side walls from those
+intervals and removes shared interior walls between connected empty cells.
 
-Press **C** in the Raylib viewer to enable a volumetric terrain cutaway.
-The visual clip plane follows the camera's focus height; **Q/E** lower or raise
-it in one-metre steps. Terrain above the plane is hidden, solid cross-sections
-are diagonally hatched, material IDs 2 and 3 use different charcoal tones, and
-cave cells expose their real floor below the plane.
-The angled camera shows the cave floor, vertical rock walls and the interior
-of the sealed horizontal tunnel rather than a flat plan view. Move the plane to
-9 m or 27 m to inspect the two geological bands. Press **C** again to restore
-the full surface.
+World generation checks both passages at 16 m and 28 m, their solid floors and
+roofs, sealed tunnel ends, the internal connector, the unbroken surface and
+both geological bands. It throws if any of these checks fail.
+
+Press **C** to enable the visual cutaway. The horizontal section follows the
+camera focus height. **Q/E** move it continuously; **PageUp/PageDown** step it
+by one metre. Terrain above the selected plane is hidden. Exposed solid sections
+are hatched, while cave cells reveal the real floor and vertical side walls.
+Move the plane to 9 m or 27 m to inspect the two material bands. Press **C**
+again to restore the full surface.
+
+The camera is adjusted for this inspection mode: it can zoom to 4 m, tilt down
+to a low oblique angle, and pan with a direct screen-to-ground scale that does
+not stop when the pointer crosses the horizon.
+
 ## Current milestone
 
 The viewer restores the earlier winding canyon, mesa and rimmed basin layout.
