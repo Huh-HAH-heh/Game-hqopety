@@ -61,40 +61,41 @@ upload, draw and disposal are restricted to the render thread.
 
 ## Static multi-level cave and volumetric cutaway
 
-`WorldGenerator.GenerateSmooth` builds two enclosed underground passages inside
-the mesa. Neither passage opens to the surface or to the outside edge of the hill:
+`WorldGenerator.GenerateSmooth` creates a real multi-level volume system inside the mesa:
 
-- lower tunnel: 64 m long, 8 m wide, 5 m high at 14 m depth;
-- lower chamber: 20 x 20 m, 8 m high at 12 m depth;
-- upper tunnel: 56 m long, 8 m wide, 5 m high at 26 m depth;
-- upper chamber: 20 x 20 m, 8 m high at 24 m depth;
-- internal connector: 6 x 6 m, joining the two cave levels between 18 m and 26 m.
+- lower through-tunnel: 80 m long, normally 8 m wide and 5 m high, with occasional 12 m chambers and 6 m clearances; it bends in plan and opens through both canyon flanks;
+- upper passage: 32 m long, inside the mesa at 26 m depth, with both ends sealed;
+- lower and upper chambers: 20 x 20 m, with floors at 12 m and 24 m;
+- a rising internal connector joins the two elevations without piercing the surface;
+- separate material bands occupy 8-10 m and 26-29 m.
 
-Two additional solid material bands at 8-10 m and 26-29 m demonstrate that
-different materials can coexist inside the same terrain volume. These are real
-volume materials, not surface-colour overlays.
+The lower passage is a through-tunnel with two portals, not a blind adit. Its
+centreline curves and its cross-section varies; the upper level remains enclosed.
+The connector is made from overlapping rising sections, not a vertical shaft.
 
 `WorldMap.CarveStaticVolume` writes empty overrides into the sparse 3D
-`BlockVolumeTree`. The underlying terrain remains an implicit solid column;
-the generator does not materialize the whole 500-layer map into individual
-voxels. The render snapshot extracts only internal empty intervals at the
-4 x 4 m presentation scale. The GPU mesh builds cave side walls from those
-intervals and removes shared interior walls between connected empty cells.
+`BlockVolumeTree`. The underlying terrain remains an implicit solid column,
+so the generator does not materialize the whole 500-layer map into voxels.
+`GetMaterialId(x,y,z)` and `GetTileRanges(x,y)` resolve the actual solids and
+air gaps. The generator verifies the lower portals, empty tunnel interiors,
+solid floors and roofs, sealed upper passage, connector and geological bands.
 
-World generation checks both passages at 16 m and 28 m, their solid floors and
-roofs, sealed tunnel ends, the internal connector, the unbroken surface and
-both geological bands. It throws if any of these checks fail.
+Press **C** to enable the visual cutaway. Terrain above the camera focus plane
+is hidden. The section height follows `Camera.Target.Y` at 0.1 m resolution
+and is clamped to the world's actual 50 m vertical extent. **Q/E** move the
+plane smoothly, **PageUp/PageDown** step by 1 m, and **Shift+Wheel** also moves
+the plane by 1 m. Ordinary wheel input zooms the view.
 
-Press **C** to enable the visual cutaway. The horizontal section follows the
-camera focus height. **Q/E** move it continuously; **PageUp/PageDown** step it
-by one metre. Terrain above the selected plane is hidden. Exposed solid sections
-are hatched, while cave cells reveal the real floor and vertical side walls.
-Move the plane to 9 m or 27 m to inspect the two material bands. Press **C**
-again to restore the full surface.
+Cut faces are hatched. The base material uses diagonal strokes, the 8-10 m
+stratum uses horizontal bedding marks, and the 26-29 m stratum uses the
+opposite diagonal. Tunnel floors and vertical cave walls are built from actual
+voxel intervals; the cutaway wall builder avoids emitting duplicate faces.
+Press C again to restore the full surface.
 
-The camera is adjusted for this inspection mode: it can zoom to 4 m, tilt down
-to a low oblique angle, and pan with a direct screen-to-ground scale that does
-not stop when the pointer crosses the horizon.
+The inspection camera has a minimum 35-degree elevation above the horizon.
+This keeps every screen ray pointed down at the cut plane, so cursor-anchored
+zoom and middle-button panning remain usable across the viewport. The top-down
+view remains available with **T**.
 
 ## Current milestone
 
