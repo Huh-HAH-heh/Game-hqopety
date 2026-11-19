@@ -13,7 +13,9 @@ public sealed class TerrainRenderSnapshot
 
     private readonly float[] _heightsMeters;
     private readonly ushort[] _materialIds;
+    private readonly ushort[] _sliceMaterialIds;
     private readonly long[] _sourceRegionVersions;
+    private long _sliceSourceWorldVersion = long.MinValue;
 
     public int RegionsX { get; }
     public int RegionsY { get; }
@@ -30,6 +32,9 @@ public sealed class TerrainRenderSnapshot
     public float WorldDepth => RegionsY * RegionSize;
     public float MaximumHeightMeters { get; private set; }
     public long SourceWorldVersion { get; private set; }
+    public int SliceLayer { get; private set; } = -1;
+    public float SliceHeightMeters =>
+        SliceLayer * WorldMap.LayerHeightUnits * 0.1f;
 
     internal long[] SourceRegionVersions => _sourceRegionVersions;
 
@@ -55,6 +60,7 @@ public sealed class TerrainRenderSnapshot
 
         _heightsMeters = new float[checked(RegionsX * RegionsY)];
         _materialIds = new ushort[_heightsMeters.Length];
+        _sliceMaterialIds = new ushort[_heightsMeters.Length];
         _sourceRegionVersions =
             new long[checked(StorageRegionsX * StorageRegionsY)];
 
@@ -139,6 +145,53 @@ public sealed class TerrainRenderSnapshot
         SourceWorldVersion = worldMap.TerrainVersion;
         _initialized = true;
         return changed;
+    }
+
+    /// <summary>
+    /// Samples a horizontal underground section from the actual 3D occupancy.
+    /// This is a presentation snapshot only; the renderer never reads WorldMap.
+    /// One material sample is taken at the centre of every 4x4-tile render patch.
+    /// </summary>
+    public bool RefreshUndergroundSlice(WorldMap worldMap, int layer)
+    {
+        ArgumentNullException.ThrowIfNull(worldMap);
+
+        if (layer < 0 || layer >= worldMap.LayerCount)
+            throw new ArgumentOutOfRangeException(nameof(layer));
+
+        if (SliceLayer == layer &&
+            _sliceSourceWorldVersion == worldMap.TerrainVersion)
+        {
+            return false;
+        }
+
+        for (int renderY = 0; renderY < RegionsY; renderY++)
+        {
+            int tileY = renderY * RegionSize + RegionSize / 2;
+            int rowStart = renderY * RegionsX;
+
+            for (int renderX = 0; renderX < RegionsX; renderX++)
+            {
+                int tileX = renderX * RegionSize + RegionSize / 2;
+                _sliceMaterialIds[rowStart + renderX] =
+                    worldMap.GetMaterialId(tileX, tileY, layer);
+            }
+        }
+
+        SliceLayer = layer;
+        _sliceSourceWorldVersion = worldMap.TerrainVersion;
+        return true;
+    }
+
+    internal ushort GetSliceMaterialId(int regionX, int regionY)
+    {
+        if (regionX < 0 || regionY < 0 ||
+            regionX >= RegionsX || regionY >= RegionsY)
+        {
+            return 0;
+        }
+
+        return _sliceMaterialIds[regionX + regionY * RegionsX];
     }
 
     private void CopyStorageRegion(
