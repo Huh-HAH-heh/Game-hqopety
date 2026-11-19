@@ -57,6 +57,28 @@ upload, draw and disposal are restricted to the render thread.
 - Q / E: move camera target vertically
 - Escape: exit
 
+## Static cave and tunnel proof
+
+`WorldGenerator.GenerateSmooth` now carves a real underground system into the
+static height-field terrain after generating the mesa:
+
+- a 52 m horizontal tunnel, 12 m wide and 5 m high;
+- a connected 20 x 20 m chamber, 8 m high;
+- a 4 x 4 m shaft cut from the surface down to the chamber.
+
+`WorldMap.CarveStaticVolume` writes empty overrides into the sparse 3D
+`BlockVolumeTree`. It does not enable discrete block simulation and does not
+materialize the full terrain into individual voxels. `GetMaterialId(x,y,z)` and
+`GetTileRanges(x,y)` resolve the empty interval over the implicit solid column.
+World generation checks that the tunnel is empty at 16 m, its floor remains solid,
+the rock beside it remains solid, and the shaft lowers the surface.
+
+Press **C** in the Raylib viewer to inspect the horizontal 16 m section. The renderer
+samples actual 3D material occupancy into the 4 x 4 m presentation grid: dark rock
+is drawn, empty tunnel cells are omitted, and white strokes mark the boundary
+between rock and air. The camera focuses on the test mesa automatically. Press C
+again to return to the normal height-map view.
+
 ## Current milestone
 
 The viewer restores the earlier winding canyon, mesa and rimmed basin layout.
