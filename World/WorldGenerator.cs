@@ -180,6 +180,26 @@ public static class WorldGenerator
             0,
             worldMap.TileHeight - 52);
 
+        // Two sparse material bands create real geological strata inside
+        // the mesa. They remain separate 3D materials at their own Z layers.
+        worldMap.SetStaticVolume(
+            caveCenterX - 40,
+            caveCenterY - 32,
+            zLevel: 8,
+            width: 80,
+            depth: 64,
+            heightInMeters: 2,
+            materialId: 2);
+
+        worldMap.SetStaticVolume(
+            caveCenterX - 40,
+            caveCenterY - 32,
+            zLevel: 26,
+            width: 80,
+            depth: 64,
+            heightInMeters: 3,
+            materialId: 3);
+
         // The tunnel runs across the mesa's short axis. Both ends stay inside
         // the high plateau and are sealed by rock; only the vertical shaft
         // connects the underground system to the surface.
@@ -258,6 +278,14 @@ public static class WorldGenerator
             proofX - 12,
             proofY,
             proofSliceLayer);
+        ushort lowerStratum = worldMap.GetMaterialId(
+            proofX - 12,
+            proofY,
+            9 * WorldMap.HeightUnitsPerMeter);
+        ushort upperStratum = worldMap.GetMaterialId(
+            proofX - 12,
+            proofY,
+            27 * WorldMap.HeightUnitsPerMeter);
         ushort northTunnelCap = worldMap.GetMaterialId(
             proofX,
             tunnelStartY - 1,
@@ -277,6 +305,8 @@ public static class WorldGenerator
         if (!hasAirGap ||
             !hasSolidFloor ||
             solidOutsideTunnel == 0 ||
+            lowerStratum != 2 ||
+            upperStratum != 3 ||
             northTunnelCap == 0 ||
             southTunnelCap == 0 ||
             tunnelRoof == 0 ||
@@ -290,14 +320,14 @@ public static class WorldGenerator
         if (writeLog)
         {
             Console.WriteLine(
-                "[WorldGenerator] Enclosed tunnel verified: " +
-                $"air at {proofSliceLayer * 0.1f:0.0}m, solid floor at 11m, " +
-                "solid floor and roof, side walls, both end caps closed, shaft open.");
+                "[WorldGenerator] 3D terrain verified: " +
+                "solid strata at 9m/27m, tunnel air at 16m, floor/roof/walls " +
+                "solid, both ends sealed and vertical shaft open.");
             Console.WriteLine(
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
                 $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
-                "static cave: enclosed 52m tunnel + 20x20m chamber + 4x4m shaft.");
+                "static geology: strata 2/3; enclosed 52m tunnel + chamber + shaft.");
         }
     }
 
