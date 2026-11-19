@@ -22,6 +22,7 @@ internal sealed class OrbitCameraController
 
     private readonly float _minimumDistance;
     private readonly float _maximumDistance;
+    private readonly float _maximumTargetHeightMeters;
     private readonly Vector3 _topDownTarget;
 
     private Vector3 _target;
@@ -59,9 +60,12 @@ internal sealed class OrbitCameraController
             terrain.WorldWidth,
             terrain.WorldDepth);
 
+        _maximumTargetHeightMeters = terrain.VerticalWorldExtentMeters;
         _topDownTarget = new Vector3(
             terrain.WorldWidth * 0.5f,
-            MathF.Max(1f, terrain.MaximumHeightMeters * 0.12f),
+            MathF.Min(
+                _maximumTargetHeightMeters,
+                MathF.Max(1f, terrain.MaximumHeightMeters * 0.12f)),
             terrain.WorldDepth * 0.5f);
 
         _target = _topDownTarget;
@@ -228,6 +232,19 @@ internal sealed class OrbitCameraController
         if (wheel == 0f)
             return;
 
+        bool adjustCutHeight =
+            IsKeyDown(KeyboardKey.LeftShift) ||
+            IsKeyDown(KeyboardKey.RightShift);
+
+        if (adjustCutHeight)
+        {
+            _desiredTarget.Y = Math.Clamp(
+                _desiredTarget.Y + wheel,
+                0f,
+                _maximumTargetHeightMeters);
+            return;
+        }
+
         Vector2 cursor = GetMousePosition();
         bool hasAnchor = TryGetTargetPlanePoint(
             cursor,
@@ -320,9 +337,13 @@ internal sealed class OrbitCameraController
             ResetTopDownView();
 
         if (IsKeyPressed(KeyboardKey.PageUp))
-            _desiredTarget.Y = Math.Min(500f, _desiredTarget.Y + 1f);
+            _desiredTarget.Y = Math.Min(
+                _maximumTargetHeightMeters,
+                _desiredTarget.Y + 1f);
         if (IsKeyPressed(KeyboardKey.PageDown))
-            _desiredTarget.Y = Math.Max(0f, _desiredTarget.Y - 1f);
+            _desiredTarget.Y = Math.Max(
+                0f,
+                _desiredTarget.Y - 1f);
 
         float moveX = 0f;
         float moveZ = 0f;
@@ -367,9 +388,10 @@ internal sealed class OrbitCameraController
         if (verticalInput != 0f)
         {
             float speed = Math.Clamp(_desiredDistance * 0.018f, 1.5f, 7f);
-            _desiredTarget.Y = Math.Max(
+            _desiredTarget.Y = Math.Clamp(
+                _desiredTarget.Y + verticalInput * speed * deltaTime,
                 0f,
-                _desiredTarget.Y + verticalInput * speed * deltaTime);
+                _maximumTargetHeightMeters);
         }
     }
 
@@ -439,6 +461,10 @@ internal sealed class OrbitCameraController
 
     public void FocusOn(Vector3 target, float distance, float pitchRadians)
     {
+        target.Y = Math.Clamp(
+            target.Y,
+            0f,
+            _maximumTargetHeightMeters);
         _target = target;
         _desiredTarget = target;
 
