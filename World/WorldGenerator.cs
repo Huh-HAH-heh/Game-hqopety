@@ -354,7 +354,7 @@ public static class WorldGenerator
             !surfaceSealed)
         {
             throw new InvalidOperationException(
-                "3D cave proof failed: expected two enclosed levels, solid floors/roofs, " +
+                "3D cave proof failed: expected a through-tunnel, sealed upper passage, solid floors/roofs, " +
                 "two open lower portals, sealed upper tunnel ends, an internal ramp and an unbroken mesa top.");
         }
 
@@ -362,7 +362,7 @@ public static class WorldGenerator
         {
             Console.WriteLine(
                 "[WorldGenerator] 3D terrain verified: " +
-                "two enclosed tunnel levels at 16m/28m, internal connector, " +
+                "through-tunnel at 16m, sealed upper passage at 28m, internal connector, " +
                 "solid floors/roofs, two lower portals, sealed upper passage, continuous surface and strata at 9m/27m.");
             Console.WriteLine(
                 "[WorldGenerator] Detailed canyon preview restored: " +
