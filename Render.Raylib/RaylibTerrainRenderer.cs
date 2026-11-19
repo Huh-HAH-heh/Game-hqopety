@@ -11,6 +11,7 @@ namespace RimClone.Render.Raylib;
 internal sealed class RaylibTerrainRenderer : IDisposable
 {
     private readonly RegionGpuMesh[] _regionMeshes;
+    private readonly RegionGpuMesh?[] _visibleRegionMeshes;
     private readonly Material _material;
     private bool _disposed;
 
@@ -21,6 +22,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public RaylibTerrainRenderer(TerrainRenderSnapshot terrain)
     {
         _regionMeshes = new RegionGpuMesh[terrain.StorageRegionCount];
+        _visibleRegionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
         _material = LoadMaterialDefault();
         Synchronize(terrain);
     }
@@ -57,26 +59,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         }
     }
 
-    public void SynchronizeCutaway(TerrainRenderSnapshot terrain)
-    {
-        ThrowIfDisposed();
-
-        for (int regionY = 0; regionY < terrain.StorageRegionsY; regionY++)
-        {
-            for (int regionX = 0; regionX < terrain.StorageRegionsX; regionX++)
-            {
-                int index = regionX + regionY * terrain.StorageRegionsX;
-                _regionMeshes[index]?.Dispose();
-                _regionMeshes[index] = RegionMeshBuilder.Build(
-                    terrain,
-                    regionX,
-                    regionY);
-
-                RebuiltRegions++;
-            }
-        }
-    }
-
     public void Draw(
         TerrainRenderSnapshot terrain,
         Camera3D camera,
@@ -85,15 +67,18 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     {
         ThrowIfDisposed();
 
-        int drawCalls = 0;
-        int visibleRegions = 0;
+        int visibleRegionCount = 0;
+        int visibleDrawCalls = 0;
+        int cutawayLayer = terrain.CutawayEnabled
+            ? terrain.CutawayLayer
+            : -1;
 
-        BeginMode3D(camera);
-
+        // Rebuild only batches visible to the current camera. Moving the cut
+        // plane therefore does not upload the entire 2304x2304 world every step.
         for (int i = 0; i < _regionMeshes.Length; i++)
         {
             RegionGpuMesh? region = _regionMeshes[i];
-            if (region == null || !region.IsUploaded)
+            if (region == null)
                 continue;
 
             if (!TerrainFrustum.IsSphereVisible(
@@ -106,19 +91,45 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 continue;
             }
 
+            if (region.RegionVersion != terrain.SourceRegionVersions[i] ||
+                region.CutawayLayer != cutawayLayer)
+            {
+                region.Dispose();
+
+                int regionX = i % terrain.StorageRegionsX;
+                int regionY = i / terrain.StorageRegionsX;
+                region = RegionMeshBuilder.Build(
+                    terrain,
+                    regionX,
+                    regionY);
+                _regionMeshes[i] = region;
+                RebuiltRegions++;
+            }
+
+            if (!region.IsUploaded)
+                continue;
+
+            _visibleRegionMeshes[visibleRegionCount++] = region;
+        }
+
+        BeginMode3D(camera);
+
+        for (int i = 0; i < visibleRegionCount; i++)
+        {
+            RegionGpuMesh region = _visibleRegionMeshes[i]!;
             foreach (Mesh mesh in region.Meshes)
             {
                 DrawMesh(mesh, _material, Matrix4x4.Identity);
-                drawCalls++;
+                visibleDrawCalls++;
             }
 
-            visibleRegions++;
+            _visibleRegionMeshes[i] = null;
         }
 
         EndMode3D();
 
-        DrawCallsLastFrame = drawCalls;
-        VisibleRegionsLastFrame = visibleRegions;
+        DrawCallsLastFrame = visibleDrawCalls;
+        VisibleRegionsLastFrame = visibleRegionCount;
     }
 
     public void Dispose()
