@@ -64,3 +64,11 @@ storage region. The render overlay now has 4x4-tile sampling and can display
 fine-grained height differences when the underlying tile surface data contains
 them. Generating richer local relief and adding distance-based LOD are separate
 next steps.
+
+
+## Top-down terrain style
+
+The initial camera is nearly vertical. Surface patches use a black-to-charcoal
+height palette; thin white contour strokes appear only along height transitions.
+There is no permanent white tile grid, so the lines identify relief details
+instead of covering the map.
