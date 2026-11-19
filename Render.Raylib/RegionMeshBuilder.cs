@@ -181,14 +181,19 @@ internal static class RegionMeshBuilder
         
         for (int i = 0; i < patchesPerSide; i++)
         {
-            if (height > terrain.GetHeightMeters(firstRenderX + i, firstRenderY - 1))
-                quadCount++;
-            if (height > terrain.GetHeightMeters(firstRenderX + i, firstRenderY + patchesPerSide))
-                quadCount++;
-            if (height > terrain.GetHeightMeters(firstRenderX - 1, firstRenderY + i))
-                quadCount++;
-            if (height > terrain.GetHeightMeters(firstRenderX + patchesPerSide, firstRenderY + i))
-                quadCount++;
+            float north = terrain.GetHeightMeters(firstRenderX + i, firstRenderY - 1);
+            float south = terrain.GetHeightMeters(firstRenderX + i, firstRenderY + patchesPerSide);
+            float west = terrain.GetHeightMeters(firstRenderX - 1, firstRenderY + i);
+            float east = terrain.GetHeightMeters(firstRenderX + patchesPerSide, firstRenderY + i);
+
+            if (height > north)
+                quadCount += 1 + CountElevationLines(north, height);
+            if (height > south)
+                quadCount += 1 + CountElevationLines(south, height);
+            if (height > west)
+                quadCount += 1 + CountElevationLines(west, height);
+            if (height > east)
+                quadCount += 1 + CountElevationLines(east, height);
         }
 
         return quadCount;
@@ -216,7 +221,6 @@ internal static class RegionMeshBuilder
         float z0 = firstRenderY * terrain.RegionSize;
         float z1 = z0 + terrain.StorageRegionSize;
         Color topColor = GetSurfaceColor(height);
-        Color wallColor = Darken(topColor, 0.57f);
 
         AddQuad(
             vertices, normals, colors, indices,
@@ -231,20 +235,22 @@ internal static class RegionMeshBuilder
 
         for (int i = 0; i < patchesPerSide; i++)
         {
+            float segmentX0 = x0 + i * terrain.RegionSize;
+            float segmentX1 = segmentX0 + terrain.RegionSize;
+            float segmentZ0 = z0 + i * terrain.RegionSize;
+            float segmentZ1 = segmentZ0 + terrain.RegionSize;
+
             float north = terrain.GetHeightMeters(firstRenderX + i, firstRenderY - 1);
             if (height > north)
             {
-                float segmentX0 = x0 + i * terrain.RegionSize;
-                float segmentX1 = segmentX0 + terrain.RegionSize;
-                AddQuad(
+                AddWallAndContours(
                     vertices, normals, colors, indices,
                     ref vertexOffset, ref indexOffset,
                     new Vector3(segmentX0, height, z0),
                     new Vector3(segmentX1, height, z0),
-                    new Vector3(segmentX1, north, z0),
-                    new Vector3(segmentX0, north, z0),
+                    north,
                     -Vector3.UnitZ,
-                    wallColor);
+                    alongX: true);
             }
 
             float south = terrain.GetHeightMeters(
@@ -252,17 +258,14 @@ internal static class RegionMeshBuilder
                 firstRenderY + patchesPerSide);
             if (height > south)
             {
-                float segmentX0 = x0 + i * terrain.RegionSize;
-                float segmentX1 = segmentX0 + terrain.RegionSize;
-                AddQuad(
+                AddWallAndContours(
                     vertices, normals, colors, indices,
                     ref vertexOffset, ref indexOffset,
                     new Vector3(segmentX1, height, z1),
                     new Vector3(segmentX0, height, z1),
-                    new Vector3(segmentX0, south, z1),
-                    new Vector3(segmentX1, south, z1),
+                    south,
                     Vector3.UnitZ,
-                    wallColor);
+                    alongX: true);
             }
 
             float west = terrain.GetHeightMeters(
@@ -270,17 +273,14 @@ internal static class RegionMeshBuilder
                 firstRenderY + i);
             if (height > west)
             {
-                float segmentZ0 = z0 + i * terrain.RegionSize;
-                float segmentZ1 = segmentZ0 + terrain.RegionSize;
-                AddQuad(
+                AddWallAndContours(
                     vertices, normals, colors, indices,
                     ref vertexOffset, ref indexOffset,
                     new Vector3(x0, height, segmentZ1),
                     new Vector3(x0, height, segmentZ0),
-                    new Vector3(x0, west, segmentZ0),
-                    new Vector3(x0, west, segmentZ1),
+                    west,
                     -Vector3.UnitX,
-                    wallColor);
+                    alongX: false);
             }
 
             float east = terrain.GetHeightMeters(
@@ -288,17 +288,14 @@ internal static class RegionMeshBuilder
                 firstRenderY + i);
             if (height > east)
             {
-                float segmentZ0 = z0 + i * terrain.RegionSize;
-                float segmentZ1 = segmentZ0 + terrain.RegionSize;
-                AddQuad(
+                AddWallAndContours(
                     vertices, normals, colors, indices,
                     ref vertexOffset, ref indexOffset,
                     new Vector3(x1, height, segmentZ0),
                     new Vector3(x1, height, segmentZ1),
-                    new Vector3(x1, east, segmentZ1),
-                    new Vector3(x1, east, segmentZ0),
+                    east,
                     Vector3.UnitX,
-                    wallColor);
+                    alongX: false);
             }
         }
     }
@@ -330,23 +327,31 @@ internal static class RegionMeshBuilder
                 maximumHeight = MathF.Max(maximumHeight, height);
                 quadCount++;
 
-                if (height > terrain.GetHeightMeters(renderX, renderY - 1))
-                    quadCount++;
-                if (height > terrain.GetHeightMeters(renderX, renderY + 1))
-                    quadCount++;
-                if (height > terrain.GetHeightMeters(renderX - 1, renderY))
-                    quadCount++;
-                if (height > terrain.GetHeightMeters(renderX + 1, renderY))
-                    quadCount++;
+                float north = terrain.GetHeightMeters(renderX, renderY - 1);
+                float south = terrain.GetHeightMeters(renderX, renderY + 1);
+                float west = terrain.GetHeightMeters(renderX - 1, renderY);
+                float east = terrain.GetHeightMeters(renderX + 1, renderY);
+
+                if (height > north)
+                    quadCount += 1 + CountElevationLines(north, height);
+                if (height > south)
+                    quadCount += 1 + CountElevationLines(south, height);
+                if (height > west)
+                    quadCount += 1 + CountElevationLines(west, height);
+                if (height > east)
+                    quadCount += 1 + CountElevationLines(east, height);
             }
         }
 
         return quadCount;
     }
 
-    private const float ContourHalfWidth = 0.09f;
-    private const float ContourLift = 0.035f;
-    private static readonly Color ContourColor = new(232, 236, 242, 255);
+    private const float ContourIntervalMeters = 5f;
+    private const float ContourHalfHeight = 0.055f;
+    private const float ContourOffset = 0.035f;
+
+    private static readonly Color BrightContourColor = new(246, 248, 250, 255);
+    private static readonly Color DimContourColor = new(168, 173, 181, 255);
 
     private static void BuildDetailedGeometry(
         TerrainRenderSnapshot terrain,
@@ -393,78 +398,157 @@ internal static class RegionMeshBuilder
                     GetSurfaceColor(height),
                     reverseWinding: true);
 
-                // Only the higher side emits a contour. No permanent tile grid.
-                if (height > terrain.GetHeightMeters(renderX, renderY - 1))
+                float north = terrain.GetHeightMeters(renderX, renderY - 1);
+                if (height > north)
                 {
-                    AddContourEdge(
+                    AddWallAndContours(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
                         new Vector3(x0, height, z0),
                         new Vector3(x1, height, z0),
+                        north,
+                        -Vector3.UnitZ,
                         alongX: true);
                 }
 
-                if (height > terrain.GetHeightMeters(renderX, renderY + 1))
+                float south = terrain.GetHeightMeters(renderX, renderY + 1);
+                if (height > south)
                 {
-                    AddContourEdge(
+                    AddWallAndContours(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
-                        new Vector3(x0, height, z1),
                         new Vector3(x1, height, z1),
+                        new Vector3(x0, height, z1),
+                        south,
+                        Vector3.UnitZ,
                         alongX: true);
                 }
 
-                if (height > terrain.GetHeightMeters(renderX - 1, renderY))
+                float west = terrain.GetHeightMeters(renderX - 1, renderY);
+                if (height > west)
                 {
-                    AddContourEdge(
+                    AddWallAndContours(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
-                        new Vector3(x0, height, z0),
                         new Vector3(x0, height, z1),
+                        new Vector3(x0, height, z0),
+                        west,
+                        -Vector3.UnitX,
                         alongX: false);
                 }
 
-                if (height > terrain.GetHeightMeters(renderX + 1, renderY))
+                float east = terrain.GetHeightMeters(renderX + 1, renderY);
+                if (height > east)
                 {
-                    AddContourEdge(
+                    AddWallAndContours(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
                         new Vector3(x1, height, z0),
                         new Vector3(x1, height, z1),
+                        east,
+                        Vector3.UnitX,
                         alongX: false);
                 }
             }
         }
     }
 
-    private static void AddContourEdge(
+    private static int CountElevationLines(float lowerHeight, float upperHeight)
+    {
+        if (upperHeight <= lowerHeight)
+            return 0;
+
+        int firstLevel = (int)MathF.Ceiling(
+            (lowerHeight - 0.0001f) / ContourIntervalMeters);
+        int lastLevel = (int)MathF.Floor(
+            (upperHeight + 0.0001f) / ContourIntervalMeters);
+
+        return Math.Max(0, lastLevel - firstLevel + 1);
+    }
+
+    private static void AddWallAndContours(
         Span<Vector3> vertices,
         Span<Vector3> normals,
         Span<byte> colors,
         Span<ushort> indices,
         ref int vertexOffset,
         ref int indexOffset,
-        Vector3 start,
-        Vector3 end,
+        Vector3 upperStart,
+        Vector3 upperEnd,
+        float lowerHeight,
+        Vector3 normal,
         bool alongX)
     {
-        float y = start.Y + ContourLift;
-        Vector3 halfWidth = alongX
-            ? new Vector3(0f, 0f, ContourHalfWidth)
-            : new Vector3(ContourHalfWidth, 0f, 0f);
-
-        Vector3 a = new Vector3(start.X, y, start.Z) - halfWidth;
-        Vector3 b = new Vector3(end.X, y, end.Z) - halfWidth;
-        Vector3 c = new Vector3(end.X, y, end.Z) + halfWidth;
-        Vector3 d = new Vector3(start.X, y, start.Z) + halfWidth;
+        float upperHeight = upperStart.Y;
+        Color wallColor = Darken(
+            GetSurfaceColor((upperHeight + lowerHeight) * 0.5f),
+            0.57f);
 
         AddQuad(
             vertices, normals, colors, indices,
             ref vertexOffset, ref indexOffset,
-            a, b, c, d,
-            Vector3.UnitY,
-            ContourColor,
-            reverseWinding: true);
+            upperStart,
+            upperEnd,
+            new Vector3(upperEnd.X, lowerHeight, upperEnd.Z),
+            new Vector3(upperStart.X, lowerHeight, upperStart.Z),
+            normal,
+            wallColor);
+
+        AddElevationLines(
+            vertices, normals, colors, indices,
+            ref vertexOffset, ref indexOffset,
+            upperStart,
+            upperEnd,
+            lowerHeight,
+            upperHeight,
+            normal);
+    }
+
+    private static void AddElevationLines(
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset,
+        Vector3 upperStart,
+        Vector3 upperEnd,
+        float lowerHeight,
+        float upperHeight,
+        Vector3 normal)
+    {
+        int firstLevel = (int)MathF.Ceiling(
+            (lowerHeight - 0.0001f) / ContourIntervalMeters);
+        int lastLevel = (int)MathF.Floor(
+            (upperHeight + 0.0001f) / ContourIntervalMeters);
+
+        Vector3 offset = normal * ContourOffset;
+
+        for (int levelIndex = firstLevel; levelIndex <= lastLevel; levelIndex++)
+        {
+            float level = levelIndex * ContourIntervalMeters;
+            float lineBottom = MathF.Max(lowerHeight, level - ContourHalfHeight);
+            float lineTop = MathF.Min(upperHeight, level + ContourHalfHeight);
+
+            if (lineTop <= lineBottom)
+                continue;
+
+            Vector3 a = new Vector3(upperStart.X, lineTop, upperStart.Z) + offset;
+            Vector3 b = new Vector3(upperEnd.X, lineTop, upperEnd.Z) + offset;
+            Vector3 c = new Vector3(upperEnd.X, lineBottom, upperEnd.Z) + offset;
+            Vector3 d = new Vector3(upperStart.X, lineBottom, upperStart.Z) + offset;
+
+            Color lineColor = (levelIndex & 1) == 0
+                ? BrightContourColor
+                : DimContourColor;
+
+            AddQuad(
+                vertices, normals, colors, indices,
+                ref vertexOffset, ref indexOffset,
+                a, b, c, d,
+                normal,
+                lineColor);
+        }
     }
 
     private static void AddQuad(
