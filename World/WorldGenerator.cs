@@ -169,12 +169,55 @@ public static class WorldGenerator
 
         worldMap.SetSurfaceHeightPatches(heights, patchSize, BaseMaterialId);
 
+        int caveCenterX = centerX + 58;
+        int caveCenterY = centerY - 9;
+        int tunnelStartX = Math.Clamp(
+            caveCenterX - 26,
+            0,
+            worldMap.TileWidth - 52);
+        int tunnelStartY = Math.Clamp(
+            caveCenterY - 7,
+            0,
+            worldMap.TileHeight - 12);
+
+        // A 52 m tunnel and a wider chamber are carved inside the generated
+        // mesa. The 4x4 m shaft connects the underground system to the surface.
+        worldMap.CarveStaticVolume(
+            tunnelStartX,
+            tunnelStartY,
+            zLevel: 14,
+            width: 52,
+            depth: 12,
+            heightInMeters: 5);
+
+        worldMap.CarveStaticVolume(
+            Math.Clamp(caveCenterX - 10, 0, worldMap.TileWidth - 20),
+            Math.Clamp(caveCenterY - 11, 0, worldMap.TileHeight - 20),
+            zLevel: 12,
+            width: 20,
+            depth: 20,
+            heightInMeters: 8);
+
+        if (worldMap.LayerCount / WorldMap.HeightUnitsPerMeter > 20)
+        {
+            worldMap.CarveStaticVolume(
+                Math.Clamp(caveCenterX - 2, 0, worldMap.TileWidth - 4),
+                Math.Clamp(caveCenterY - 3, 0, worldMap.TileHeight - 4),
+                zLevel: 20,
+                width: 4,
+                depth: 4,
+                heightInMeters: Math.Min(
+                    23,
+                    worldMap.LayerCount / WorldMap.HeightUnitsPerMeter - 20));
+        }
+
         if (writeLog)
         {
             Console.WriteLine(
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
-                $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles.");
+                $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
+                "static cave: 52m tunnel + 20x20m chamber + 4x4m surface shaft.");
         }
     }
 
