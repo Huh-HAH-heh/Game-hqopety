@@ -200,6 +200,9 @@ public static class WorldGenerator
         int lowerTunnelLength = 80;
         CarveWindingTunnel(
             worldMap,
+            heights,
+            patchesX,
+            patchSize,
             lowerTunnelStartX,
             lowerTunnelY,
             lowerTunnelLength,
@@ -223,6 +226,9 @@ public static class WorldGenerator
         int upperTunnelLength = 32;
         CarveWindingTunnel(
             worldMap,
+            heights,
+            patchesX,
+            patchSize,
             upperTunnelX,
             upperTunnelStartY,
             upperTunnelLength,
@@ -368,6 +374,9 @@ public static class WorldGenerator
 
     private static void CarveWindingTunnel(
         WorldMap worldMap,
+        ushort[] surfaceHeightPatches,
+        int patchesX,
+        int patchSize,
         int startX,
         int startY,
         int lengthMeters,
@@ -392,7 +401,17 @@ public static class WorldGenerator
 
             int floorOffset = (int)MathF.Round(
                 MathF.Sin(t * MathF.Tau * 1.5f + seed * 0.001f) * 0.6f);
-            int currentFloor = Math.Max(1, floorLevel + floorOffset);
+            int sampledX = Math.Clamp(centerX, 0, worldMap.TileWidth - 1);
+            int sampledY = Math.Clamp(centerY, 0, worldMap.TileHeight - 1);
+            ushort originalSurfaceUnits = surfaceHeightPatches[
+                sampledX / patchSize +
+                sampledY / patchSize * patchesX];
+            int terrainFloor = Math.Max(
+                1,
+                (int)MathF.Floor(originalSurfaceUnits * 0.1f) - 1);
+            int currentFloor = Math.Max(
+                1,
+                Math.Min(floorLevel + floorOffset, terrainFloor));
 
             // Most of the passage is 8m wide; periodic 12m pockets and
             // taller sections break the uniform mine-shaft silhouette.
