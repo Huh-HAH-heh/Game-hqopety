@@ -59,11 +59,11 @@ upload, draw and disposal are restricted to the render thread.
 
 ## Current milestone
 
-The current world generator still creates a uniform surface height per 192x192
-storage region. The render overlay now has 4x4-tile sampling and can display
-fine-grained height differences when the underlying tile surface data contains
-them. Generating richer local relief and adding distance-based LOD are separate
-next steps.
+The viewer restores the earlier winding canyon, mesa and rimmed basin layout.
+Heights are generated at the 4x4-tile render-patch scale and stored in compact
+surface arrays; vertical voxel layers are not materialized during preview
+generation. The render batches remain grouped by the larger 192x192 storage
+regions.
 
 
 ## Top-down terrain style
