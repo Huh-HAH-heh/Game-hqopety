@@ -51,10 +51,10 @@ upload, draw and disposal are restricted to the render thread.
 
 - WASD: move in the camera's horizontal plane at a zoom-scaled RTS speed
 - Right mouse button + drag: orbit; dragging right rotates the camera to the right
-- Middle mouse button + drag: pan in screen space with tilt-aware ground scaling
+- Middle mouse button + drag: pan by intersecting the old/new pointer rays with the camera focus plane
 - Mouse wheel: zoom toward the cursor position, keeping the pointed-at ground area anchored
 - Left Shift / Right Shift: faster movement
-- Q / E: move camera target vertically
+- Q / E: move camera target vertically; in cutaway mode this moves the section plane
 - Escape: exit
 
 ## Static cave, tunnel and volumetric cutaway
@@ -65,21 +65,25 @@ raised mesa, not an open adit:
 - a 52 m enclosed tunnel, 12 m wide and 5 m high;
 - solid rock at both tunnel ends and above its roof;
 - a connected 20 x 20 m chamber, 8 m high;
-- a 4 x 4 m vertical shaft from the chamber to the surface.
+- a 4 x 4 m vertical shaft from the chamber to the surface;
+- two embedded material strata at 9 m and 27 m (separate IDs, not color-only overlays).
 
 `WorldMap.CarveStaticVolume` writes empty overrides into the sparse 3D
 `BlockVolumeTree`. The base terrain remains an implicit solid column; the cut
 does not materialize the entire 500-layer world as individual voxels.
-`GetMaterialId(x,y,z)` and `GetTileRanges(x,y)` resolve the empty intervals.
-World generation verifies the tunnel air, solid floor, roof, side wall, both
-sealed ends and the open shaft, and throws if any condition is false.
+`GetMaterialId(x,y,z)` and `GetTileRanges(x,y)` resolve the empty intervals and distinct material bands.
+World generation verifies both material strata, tunnel air, solid floor, roof,
+side wall, both sealed ends and the open shaft, and throws if any condition is false.
 
 Press **C** in the Raylib viewer to enable a volumetric terrain cutaway.
 The visual clip plane follows the camera's focus height; **Q/E** lower or raise
 it in one-metre steps. Terrain above the plane is hidden, solid cross-sections
-are diagonally hatched, and cave cells expose their real floor below the plane.
-The angled camera shows the cave floor and vertical rock walls rather than a
-flat plan view. Press **C** again to restore the full surface.
+are diagonally hatched, material IDs 2 and 3 use different charcoal tones, and
+cave cells expose their real floor below the plane.
+The angled camera shows the cave floor, vertical rock walls and the interior
+of the sealed horizontal tunnel rather than a flat plan view. Move the plane to
+9 m or 27 m to inspect the two geological bands. Press **C** again to restore
+the full surface.
 ## Current milestone
 
 The viewer restores the earlier winding canyon, mesa and rimmed basin layout.
