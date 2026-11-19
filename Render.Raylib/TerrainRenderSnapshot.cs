@@ -38,6 +38,7 @@ public sealed class TerrainRenderSnapshot
     public float WorldWidth => RegionsX * RegionSize;
     public float WorldDepth => RegionsY * RegionSize;
     public float MaximumHeightMeters { get; private set; }
+    public float VerticalWorldExtentMeters { get; }
     public long SourceWorldVersion { get; private set; }
     public int CutawayLayer { get; private set; } = -1;
     public float CutawayHeightMeters =>
@@ -53,6 +54,8 @@ public sealed class TerrainRenderSnapshot
         StorageRegionsX = worldMap.RegionsX;
         StorageRegionsY = worldMap.RegionsY;
         StorageRegionSize = TerrainRegion.TilesPerSide;
+        VerticalWorldExtentMeters =
+            worldMap.LayerCount * WorldMap.LayerHeightUnits * 0.1f;
 
         if (StorageRegionSize % RenderRegionSizeInTiles != 0)
         {
