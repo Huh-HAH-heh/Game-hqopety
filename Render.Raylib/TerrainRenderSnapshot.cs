@@ -3,12 +3,10 @@ using Core.Map;
 
 namespace RimClone.Render.Raylib;
 
-internal readonly record struct CaveInterval(int StartLayer, int EndLayer);
-
 /// <summary>
-/// Presentation-owned surface snapshot.
-/// The overlay is partitioned into 4x4-tile render regions while the simulation
-/// keeps its larger storage regions. The renderer never queries WorldMap.
+/// Presentation-owned terrain data. Simple columns stay as compact height/material
+/// pairs; only columns with real vertical edits or sparse volume overrides copy
+/// their full solid/air interval list.
 /// </summary>
 public sealed class TerrainRenderSnapshot
 {
@@ -16,13 +14,11 @@ public sealed class TerrainRenderSnapshot
 
     private readonly float[] _heightsMeters;
     private readonly ushort[] _materialIds;
-    private readonly float[] _cutHeightsMeters;
-    private readonly ushort[] _cutMaterialIds;
-    private readonly bool[] _cutFaces;
     private readonly long[] _sourceRegionVersions;
-    private readonly Dictionary<int, CaveInterval[]> _caveIntervals = new();
-    private long _cutSourceWorldVersion = long.MinValue;
-    private long _caveSourceWorldVersion = long.MinValue;
+    private readonly Dictionary<int, TileRange[]> _complexColumnRanges = new();
+
+    private long _complexSourceWorldVersion = long.MinValue;
+    private bool _initialized;
 
     public int RegionsX { get; }
     public int RegionsY { get; }
@@ -35,11 +31,13 @@ public sealed class TerrainRenderSnapshot
     public int StorageRegionSize { get; }
     public int RenderRegionsPerStorageRegion { get; }
 
+    public int LayerCount { get; }
     public float WorldWidth => RegionsX * RegionSize;
     public float WorldDepth => RegionsY * RegionSize;
     public float MaximumHeightMeters { get; private set; }
     public float VerticalWorldExtentMeters { get; }
     public long SourceWorldVersion { get; private set; }
+
     public int CutawayLayer { get; private set; } = -1;
     public float CutawayHeightMeters =>
         CutawayLayer * WorldMap.LayerHeightUnits * 0.1f;
@@ -47,15 +45,14 @@ public sealed class TerrainRenderSnapshot
 
     internal long[] SourceRegionVersions => _sourceRegionVersions;
 
-    private bool _initialized;
-
     private TerrainRenderSnapshot(WorldMap worldMap)
     {
         StorageRegionsX = worldMap.RegionsX;
         StorageRegionsY = worldMap.RegionsY;
         StorageRegionSize = TerrainRegion.TilesPerSide;
+        LayerCount = worldMap.LayerCount;
         VerticalWorldExtentMeters =
-            worldMap.LayerCount * WorldMap.LayerHeightUnits * 0.1f;
+            LayerCount * WorldMap.LayerHeightUnits * 0.1f;
 
         if (StorageRegionSize % RenderRegionSizeInTiles != 0)
         {
@@ -71,9 +68,6 @@ public sealed class TerrainRenderSnapshot
 
         _heightsMeters = new float[checked(RegionsX * RegionsY)];
         _materialIds = new ushort[_heightsMeters.Length];
-        _cutHeightsMeters = new float[_heightsMeters.Length];
-        _cutMaterialIds = new ushort[_heightsMeters.Length];
-        _cutFaces = new bool[_heightsMeters.Length];
         _sourceRegionVersions =
             new long[checked(StorageRegionsX * StorageRegionsY)];
 
@@ -87,39 +81,18 @@ public sealed class TerrainRenderSnapshot
         return new TerrainRenderSnapshot(worldMap);
     }
 
-    internal float GetHeightMeters(int regionX, int regionY)
-    {
-        if (regionX < 0 || regionY < 0 ||
-            regionX >= RegionsX || regionY >= RegionsY)
-        {
-            return 0f;
-        }
-
-        return _heightsMeters[regionX + regionY * RegionsX];
-    }
-
-    internal ushort GetMaterialId(int regionX, int regionY)
-    {
-        if (regionX < 0 || regionY < 0 ||
-            regionX >= RegionsX || regionY >= RegionsY)
-        {
-            return 0;
-        }
-
-        return _materialIds[regionX + regionY * RegionsX];
-    }
-
     /// <summary>
-    /// Copies only storage regions whose own or adjacent terrain revision changed.
-    /// Each storage region is sampled at a 4x4-tile presentation resolution.
-    /// Call on the owning/game thread, never from the render worker.
+    /// Refreshes presentation data only when source terrain changes. A full
+    /// vertical interval copy is retained only for non-simple or volume-edited
+    /// columns; ordinary solid terrain stays compact.
     /// </summary>
     public bool RefreshFromWorld(WorldMap worldMap)
     {
         ArgumentNullException.ThrowIfNull(worldMap);
 
         if (worldMap.RegionsX != StorageRegionsX ||
-            worldMap.RegionsY != StorageRegionsY)
+            worldMap.RegionsY != StorageRegionsY ||
+            worldMap.LayerCount != LayerCount)
         {
             throw new InvalidOperationException(
                 "World topology changed. Create a new terrain snapshot.");
@@ -150,141 +123,28 @@ public sealed class TerrainRenderSnapshot
         {
             float maximumHeight = 0f;
             for (int i = 0; i < _heightsMeters.Length; i++)
-                maximumHeight = MathF.Max(maximumHeight, _heightsMeters[i]);
+            {
+                maximumHeight = MathF.Max(
+                    maximumHeight,
+                    _heightsMeters[i]);
+            }
 
             MaximumHeightMeters = maximumHeight;
         }
 
+        bool volumeDataChanged = RefreshComplexColumnRanges(worldMap);
+
         SourceWorldVersion = worldMap.TerrainVersion;
         _initialized = true;
-
-        bool cavesChanged = RefreshCaveIntervals(worldMap);
-        return changed || cavesChanged;
+        return changed || volumeDataChanged;
     }
 
-    private bool RefreshCaveIntervals(WorldMap worldMap)
+    private bool RefreshComplexColumnRanges(WorldMap worldMap)
     {
-        if (_caveSourceWorldVersion == worldMap.TerrainVersion)
+        if (_complexSourceWorldVersion == worldMap.TerrainVersion)
             return false;
 
-        _caveIntervals.Clear();
-
-        for (int renderY = 0; renderY < RegionsY; renderY++)
-        {
-            int tileY = renderY * RegionSize + RegionSize / 2;
-
-            for (int renderX = 0; renderX < RegionsX; renderX++)
-            {
-                int tileX = renderX * RegionSize + RegionSize / 2;
-
-                if (!worldMap.Blocks.Volumes.HasEmptyOverridesInColumn(
-                        tileX,
-                        tileY))
-                {
-                    continue;
-                }
-
-                ushort surfaceUnits =
-                    worldMap.GetSurfaceHeightUnits(tileX, tileY);
-                ReadOnlySpan<TileRange> ranges =
-                    worldMap.GetTileRanges(tileX, tileY);
-
-                List<CaveInterval>? intervals = null;
-
-                foreach (TileRange range in ranges)
-                {
-                    if (range.State != WorldMap.StateEmpty ||
-                        range.StartZ == 0 ||
-                        range.EndZ >= surfaceUnits)
-                    {
-                        continue;
-                    }
-
-                    int startLayer =
-                        range.StartZ / WorldMap.LayerHeightUnits;
-                    int endLayer =
-                        range.EndZ / WorldMap.LayerHeightUnits;
-
-                    if (endLayer <= startLayer)
-                        continue;
-
-                    intervals ??= new List<CaveInterval>(2);
-                    intervals.Add(new CaveInterval(startLayer, endLayer));
-                }
-
-                if (intervals is { Count: > 0 })
-                {
-                    _caveIntervals.Add(
-                        renderX + renderY * RegionsX,
-                        intervals.ToArray());
-                }
-            }
-        }
-
-        _caveSourceWorldVersion = worldMap.TerrainVersion;
-        return true;
-    }
-
-    internal ReadOnlySpan<CaveInterval> GetCaveIntervals(
-        int regionX,
-        int regionY)
-    {
-        int index = GetIndex(regionX, regionY);
-        if (index >= 0 &&
-            _caveIntervals.TryGetValue(index, out CaveInterval[]? intervals))
-        {
-            return intervals;
-        }
-
-        return ReadOnlySpan<CaveInterval>.Empty;
-    }
-
-    internal bool HasCaveIntervals(int regionX, int regionY)
-    {
-        int index = GetIndex(regionX, regionY);
-        return index >= 0 && _caveIntervals.ContainsKey(index);
-    }
-
-    internal bool IsCutawayVoidAt(int regionX, int regionY)
-    {
-        if (!CutawayEnabled)
-            return false;
-
-        ReadOnlySpan<CaveInterval> intervals =
-            GetCaveIntervals(regionX, regionY);
-
-        foreach (CaveInterval interval in intervals)
-        {
-            if (CutawayLayer >= interval.StartLayer &&
-                CutawayLayer < interval.EndLayer)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Rebuilds the visible terrain at a horizontal cut plane. Cells above the
-    /// plane are clipped. Solid cells on the plane become hatched cut faces;
-    /// cells inside caves expose their highest solid floor below the plane.
-    /// </summary>
-    public bool RefreshCutawaySlice(WorldMap worldMap, int layer)
-    {
-        ArgumentNullException.ThrowIfNull(worldMap);
-
-        if (layer < 0 || layer >= worldMap.LayerCount)
-            throw new ArgumentOutOfRangeException(nameof(layer));
-
-        if (CutawayEnabled &&
-            CutawayLayer == layer &&
-            _cutSourceWorldVersion == worldMap.TerrainVersion)
-        {
-            return false;
-        }
-
-        float cutHeight = layer * WorldMap.LayerHeightUnits * 0.1f;
+        _complexColumnRanges.Clear();
 
         for (int renderY = 0; renderY < RegionsY; renderY++)
         {
@@ -294,62 +154,144 @@ public sealed class TerrainRenderSnapshot
             for (int renderX = 0; renderX < RegionsX; renderX++)
             {
                 int tileX = renderX * RegionSize + RegionSize / 2;
-                int index = rowStart + renderX;
-                ushort surfaceUnits =
-                    worldMap.GetSurfaceHeightUnits(tileX, tileY);
-                float surfaceHeight = surfaceUnits * 0.1f;
 
-                if (surfaceUnits <= layer * WorldMap.LayerHeightUnits)
+                bool hasVolumeOverrides =
+                    worldMap.Blocks.Volumes.HasOverridesInColumn(
+                        tileX,
+                        tileY);
+
+                if (worldMap.IsColumnSimpleFill(tileX, tileY) &&
+                    !hasVolumeOverrides)
                 {
-                    _cutHeightsMeters[index] = surfaceHeight;
-                    int surfaceLayer = surfaceUnits == 0
-                        ? -1
-                        : Math.Clamp(
-                            (surfaceUnits + WorldMap.LayerHeightUnits - 1) /
-                            WorldMap.LayerHeightUnits - 1,
-                            0,
-                            worldMap.LayerCount - 1);
-
-                    _cutMaterialIds[index] = surfaceLayer >= 0
-                        ? worldMap.GetMaterialId(tileX, tileY, surfaceLayer)
-                        : (ushort)0;
-                    _cutFaces[index] = false;
                     continue;
                 }
 
-                ushort cutMaterial = worldMap.GetMaterialId(
-                    tileX,
-                    tileY,
-                    layer);
+                TileRange[] ranges =
+                    worldMap.GetTileRanges(tileX, tileY).ToArray();
 
-                if (cutMaterial != 0)
-                {
-                    _cutHeightsMeters[index] = cutHeight;
-                    _cutMaterialIds[index] = cutMaterial;
-                    _cutFaces[index] = true;
-                    continue;
-                }
-
-                // The plane intersects an empty cavity. Show the actual solid
-                // floor below it, not a flat plan-view map of the empty slice.
-                int floorLayer = worldMap.FindTopOccupiedLayer(
-                    tileX,
-                    tileY,
-                    layer - 1);
-
-                _cutHeightsMeters[index] = floorLayer >= 0
-                    ? (floorLayer + 1) * 0.1f
-                    : 0f;
-                _cutMaterialIds[index] = floorLayer >= 0
-                    ? worldMap.GetMaterialId(tileX, tileY, floorLayer)
-                    : (ushort)0;
-                _cutFaces[index] = false;
+                _complexColumnRanges.Add(
+                    rowStart + renderX,
+                    ranges);
             }
         }
 
+        _complexSourceWorldVersion = worldMap.TerrainVersion;
+        return true;
+    }
+
+    /// <summary>
+    /// Copies one render column's vertical occupancy intervals into caller
+    /// storage. The common height-field case is reconstructed from two values;
+    /// caves, strata and edited columns use their exact source intervals.
+    /// </summary>
+    internal int CopyColumnRanges(
+        int regionX,
+        int regionY,
+        Span<TileRange> destination)
+    {
+        if (regionX < 0 || regionY < 0 ||
+            regionX >= RegionsX || regionY >= RegionsY)
+        {
+            return 0;
+        }
+
+        int index = regionX + regionY * RegionsX;
+        if (_complexColumnRanges.TryGetValue(
+                index,
+                out TileRange[]? complexRanges))
+        {
+            if (destination.Length < complexRanges.Length)
+            {
+                throw new ArgumentException(
+                    "Destination is too small for the column ranges.",
+                    nameof(destination));
+            }
+
+            complexRanges.CopyTo(destination);
+            return complexRanges.Length;
+        }
+
+        if (destination.Length < 2)
+        {
+            throw new ArgumentException(
+                "Destination must hold at least two ranges.",
+                nameof(destination));
+        }
+
+        int filledLayers = Math.Clamp(
+            (int)MathF.Round(
+                _heightsMeters[index] /
+                (WorldMap.LayerHeightUnits * 0.1f)),
+            0,
+            LayerCount);
+        ushort materialId = _materialIds[index];
+
+        if (filledLayers <= 0 || materialId == 0)
+        {
+            destination[0] = new TileRange
+            {
+                StartZ = 0,
+                EndZ = checked((ushort)LayerCount),
+                MaterialId = 0,
+                State = WorldMap.StateEmpty
+            };
+            return 1;
+        }
+
+        destination[0] = new TileRange
+        {
+            StartZ = 0,
+            EndZ = checked((ushort)filledLayers),
+            MaterialId = materialId,
+            State = WorldMap.StateSolid
+        };
+
+        if (filledLayers >= LayerCount)
+            return 1;
+
+        destination[1] = new TileRange
+        {
+            StartZ = checked((ushort)filledLayers),
+            EndZ = checked((ushort)LayerCount),
+            MaterialId = 0,
+            State = WorldMap.StateEmpty
+        };
+
+        return 2;
+    }
+
+    internal float GetHeightMeters(int regionX, int regionY)
+    {
+        if (regionX < 0 || regionY < 0 ||
+            regionX >= RegionsX || regionY >= RegionsY)
+        {
+            return 0f;
+        }
+
+        return _heightsMeters[regionX + regionY * RegionsX];
+    }
+
+    internal ushort GetMaterialId(int regionX, int regionY)
+    {
+        if (regionX < 0 || regionY < 0 ||
+            regionX >= RegionsX || regionY >= RegionsY)
+        {
+            return 0;
+        }
+
+        return _materialIds[regionX + regionY * RegionsX];
+    }
+
+    public bool SetCutawayLayer(int layer)
+    {
+        if (layer < 0 || layer >= LayerCount)
+            throw new ArgumentOutOfRangeException(nameof(layer));
+
+        if (CutawayEnabled && CutawayLayer == layer)
+            return false;
+
         CutawayLayer = layer;
         CutawayEnabled = true;
-        _cutSourceWorldVersion = worldMap.TerrainVersion;
         return true;
     }
 
@@ -357,46 +299,6 @@ public sealed class TerrainRenderSnapshot
     {
         CutawayEnabled = false;
         CutawayLayer = -1;
-        _cutSourceWorldVersion = long.MinValue;
-    }
-
-    internal float GetRenderHeightMeters(int regionX, int regionY)
-    {
-        int index = GetIndex(regionX, regionY);
-        if (index < 0)
-            return 0f;
-
-        return CutawayEnabled
-            ? _cutHeightsMeters[index]
-            : _heightsMeters[index];
-    }
-
-    internal ushort GetRenderMaterialId(int regionX, int regionY)
-    {
-        int index = GetIndex(regionX, regionY);
-        if (index < 0)
-            return 0;
-
-        return CutawayEnabled
-            ? _cutMaterialIds[index]
-            : _materialIds[index];
-    }
-
-    internal bool IsCutFace(int regionX, int regionY)
-    {
-        int index = GetIndex(regionX, regionY);
-        return index >= 0 && CutawayEnabled && _cutFaces[index];
-    }
-
-    private int GetIndex(int regionX, int regionY)
-    {
-        if (regionX < 0 || regionY < 0 ||
-            regionX >= RegionsX || regionY >= RegionsY)
-        {
-            return -1;
-        }
-
-        return regionX + regionY * RegionsX;
     }
 
     private void CopyStorageRegion(
