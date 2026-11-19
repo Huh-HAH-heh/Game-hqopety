@@ -453,10 +453,10 @@ internal static class RegionMeshBuilder
             ? new Vector3(0f, 0f, ContourHalfWidth)
             : new Vector3(ContourHalfWidth, 0f, 0f);
 
-        Vector3 a = new(start.X, y, start.Z) - halfWidth;
-        Vector3 b = new(end.X, y, end.Z) - halfWidth;
-        Vector3 c = new(end.X, y, end.Z) + halfWidth;
-        Vector3 d = new(start.X, y, start.Z) + halfWidth;
+        Vector3 a = new Vector3(start.X, y, start.Z) - halfWidth;
+        Vector3 b = new Vector3(end.X, y, end.Z) - halfWidth;
+        Vector3 c = new Vector3(end.X, y, end.Z) + halfWidth;
+        Vector3 d = new Vector3(start.X, y, start.Z) + halfWidth;
 
         AddQuad(
             vertices, normals, colors, indices,
