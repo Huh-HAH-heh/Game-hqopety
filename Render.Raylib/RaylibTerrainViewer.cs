@@ -28,10 +28,7 @@ public static class RaylibTerrainViewer
 
         OrbitCameraController camera = new(terrain);
         RaylibTerrainRenderer? renderer = null;
-        bool undergroundSliceMode = false;
-        int undergroundSliceLayer = Math.Min(
-            16 * WorldMap.HeightUnitsPerMeter,
-            worldMap.LayerCount - 1);
+        bool cutawayMode = false;
 
         try
         {
@@ -46,8 +43,8 @@ public static class RaylibTerrainViewer
                 $"maximum height: {terrain.MaximumHeightMeters:0.0} m.");
 
             Console.WriteLine(
-                "[Raylib] Underground demo: 52m tunnel, 20x20m chamber, " +
-                "4x4m surface shaft at 16m slice. Press C to inspect it.");
+                "[Raylib] Static cave demo: enclosed 52m tunnel, chamber and vertical shaft. " +
+                "Press C for a camera-height cutaway; Q/E move the cut plane.");
 
             while (!WindowShouldClose())
             {
@@ -55,45 +52,52 @@ public static class RaylibTerrainViewer
 
                 if (IsKeyPressed(KeyboardKey.C))
                 {
-                    undergroundSliceMode = !undergroundSliceMode;
+                    cutawayMode = !cutawayMode;
 
-                    if (undergroundSliceMode)
+                    if (cutawayMode)
                     {
-                        terrain.RefreshUndergroundSlice(
-                            worldMap,
-                            undergroundSliceLayer);
-                        renderer.SynchronizeUndergroundSlice(terrain);
-
                         camera.FocusOn(
                             new System.Numerics.Vector3(
                                 terrain.WorldWidth * 0.5f + 58f,
-                                terrain.SliceHeightMeters,
+                                16f,
                                 terrain.WorldDepth * 0.5f - 9f),
-                            110f);
+                            110f,
+                            pitchRadians: 1.02f);
                     }
                     else
                     {
-                        renderer.Synchronize(terrain);
+                        terrain.DisableCutaway();
+                        renderer.Synchronize(terrain, forceRebuild: true);
                         camera.ResetTopDownView();
                     }
                 }
 
-                if (terrain.RefreshFromWorld(worldMap))
-                {
-                    if (undergroundSliceMode)
-                    {
-                        terrain.RefreshUndergroundSlice(
-                            worldMap,
-                            undergroundSliceLayer);
-                        renderer.SynchronizeUndergroundSlice(terrain);
-                    }
-                    else
-                    {
-                        renderer.Synchronize(terrain);
-                    }
-                }
-
                 camera.Update(deltaTime);
+
+                bool terrainChanged = terrain.RefreshFromWorld(worldMap);
+
+                if (cutawayMode)
+                {
+                    // The visual section follows the camera focus height,
+                    // quantized to one-metre steps to avoid rebuilding meshes
+                    // for every 0.1 m camera interpolation step.
+                    int cutLayer = Math.Clamp(
+                        (int)MathF.Round(camera.TargetHeightMeters) *
+                            WorldMap.HeightUnitsPerMeter,
+                        0,
+                        worldMap.LayerCount - 1);
+
+                    bool cutChanged = terrain.RefreshCutawaySlice(
+                        worldMap,
+                        cutLayer);
+
+                    if (terrainChanged || cutChanged)
+                        renderer.SynchronizeCutaway(terrain);
+                }
+                else if (terrainChanged)
+                {
+                    renderer.Synchronize(terrain);
+                }
 
                 BeginDrawing();
                 ClearBackground(new Color(0, 0, 0, 255));
@@ -104,7 +108,7 @@ public static class RaylibTerrainViewer
                     GetScreenWidth(),
                     GetScreenHeight());
 
-                DrawHud(terrain, renderer, undergroundSliceMode);
+                DrawHud(terrain, renderer, cutawayMode);
                 EndDrawing();
             }
         }
@@ -119,13 +123,13 @@ public static class RaylibTerrainViewer
     private static void DrawHud(
         TerrainRenderSnapshot terrain,
         RaylibTerrainRenderer renderer,
-        bool undergroundSliceMode)
+        bool cutawayMode)
     {
         DrawRectangle(12, 12, 448, 178, new Color(0, 0, 0, 235));
 
         DrawText(
-            undergroundSliceMode
-                ? $"RIMCLONE / UNDERGROUND SLICE {terrain.SliceHeightMeters:0.0} M"
+            cutawayMode
+                ? $"RIMCLONE / CUTAWAY @ {terrain.CutawayHeightMeters:0.0} M"
                 : "RIMCLONE / TOP-DOWN TERRAIN",
             24,
             22,
@@ -160,9 +164,9 @@ public static class RaylibTerrainViewer
             Color.LightGray);
 
         DrawText(
-            undergroundSliceMode
-                ? "C return to surface | slice samples real voxel occupancy"
-                : "C inspect underground tunnel | T fit top view",
+            cutawayMode
+                ? "C surface view | Q/E move cut plane | RMB orbit the exposed volume"
+                : "C cut terrain at camera focus height | T fit top view",
             24,
             146,
             14,
