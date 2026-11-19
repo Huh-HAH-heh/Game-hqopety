@@ -154,6 +154,7 @@ internal static class RegionMeshBuilder
                 int renderY = firstRenderY + y;
 
                 if (terrain.IsCutFace(renderX, renderY) ||
+                    terrain.HasCaveIntervals(renderX, renderY) ||
                     terrain.GetRenderHeightMeters(renderX, renderY) != height ||
                     terrain.GetRenderMaterialId(renderX, renderY) != materialId)
                 {
@@ -344,13 +345,18 @@ internal static class RegionMeshBuilder
 
                 if (terrain.IsCutFace(renderX, renderY))
                     quadCount += CutHatchLinesPerPatch;
+
+                quadCount += CountCaveWallQuads(
+                    terrain,
+                    renderX,
+                    renderY);
             }
         }
 
         return quadCount;
     }
 
-    private const int CutHatchLinesPerPatch = 2;
+    private const int CutHatchLinesPerPatch = 4;
     private const float CutHatchHalfWidth = 0.035f;
     private const float CutHatchLift = 0.045f;
     private static readonly Color CutHatchColor = new(205, 211, 219, 255);
@@ -387,11 +393,11 @@ internal static class RegionMeshBuilder
         float height)
     {
         float y = height + CutHatchLift;
-        const float strokeLength = 0.72f;
+        const float strokeLength = 1.05f;
 
         for (int i = 0; i < CutHatchLinesPerPatch; i++)
         {
-            float startX = x0 + 0.65f + i * 1.2f;
+            float startX = x0 + 0.35f + i * 0.88f;
             float startZ = z0 + 0.35f;
             float endX = MathF.Min(startX + strokeLength, x1 - 0.15f);
             float endZ = MathF.Min(startZ + strokeLength, z1 - 0.15f);
@@ -431,6 +437,259 @@ internal static class RegionMeshBuilder
 
     private static readonly Color BrightContourColor = new(246, 248, 250, 255);
     private static readonly Color DimContourColor = new(168, 173, 181, 255);
+
+    private static readonly Color CaveWallColor = new(43, 46, 51, 255);
+
+    private static int CountCaveWallQuads(
+        TerrainRenderSnapshot terrain,
+        int renderX,
+        int renderY)
+    {
+        if (!terrain.CutawayEnabled)
+            return 0;
+
+        ReadOnlySpan<CaveInterval> intervals =
+            terrain.GetCaveIntervals(renderX, renderY);
+        int count = 0;
+
+        foreach (CaveInterval interval in intervals)
+        {
+            int visibleEnd = Math.Min(
+                interval.EndLayer,
+                terrain.CutawayLayer);
+
+            if (visibleEnd <= interval.StartLayer)
+                continue;
+
+            count += CountCaveWallSegments(
+                interval.StartLayer,
+                visibleEnd,
+                terrain.GetCaveIntervals(renderX, renderY - 1));
+            count += CountCaveWallSegments(
+                interval.StartLayer,
+                visibleEnd,
+                terrain.GetCaveIntervals(renderX, renderY + 1));
+            count += CountCaveWallSegments(
+                interval.StartLayer,
+                visibleEnd,
+                terrain.GetCaveIntervals(renderX - 1, renderY));
+            count += CountCaveWallSegments(
+                interval.StartLayer,
+                visibleEnd,
+                terrain.GetCaveIntervals(renderX + 1, renderY));
+        }
+
+        return count;
+    }
+
+    private static int CountCaveWallSegments(
+        int startLayer,
+        int endLayer,
+        ReadOnlySpan<CaveInterval> neighbourIntervals)
+    {
+        int cursor = startLayer;
+        int count = 0;
+
+        foreach (CaveInterval neighbour in neighbourIntervals)
+        {
+            if (neighbour.EndLayer <= cursor ||
+                neighbour.StartLayer >= endLayer)
+            {
+                continue;
+            }
+
+            if (neighbour.StartLayer > cursor)
+                count++;
+
+            cursor = Math.Max(cursor, neighbour.EndLayer);
+            if (cursor >= endLayer)
+                break;
+        }
+
+        if (cursor < endLayer)
+            count++;
+
+        return count;
+    }
+
+    private static void BuildCaveWalls(
+        TerrainRenderSnapshot terrain,
+        int renderX,
+        int renderY,
+        float x0,
+        float x1,
+        float z0,
+        float z1,
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset)
+    {
+        if (!terrain.CutawayEnabled)
+            return;
+
+        ReadOnlySpan<CaveInterval> intervals =
+            terrain.GetCaveIntervals(renderX, renderY);
+
+        foreach (CaveInterval interval in intervals)
+        {
+            int visibleEnd = Math.Min(
+                interval.EndLayer,
+                terrain.CutawayLayer);
+
+            if (visibleEnd <= interval.StartLayer)
+                continue;
+
+            AddCaveWallSegments(
+                vertices, normals, colors, indices,
+                ref vertexOffset, ref indexOffset,
+                x0, x1, z0, z1,
+                interval.StartLayer, visibleEnd,
+                terrain.GetCaveIntervals(renderX, renderY - 1),
+                side: 0);
+            AddCaveWallSegments(
+                vertices, normals, colors, indices,
+                ref vertexOffset, ref indexOffset,
+                x0, x1, z0, z1,
+                interval.StartLayer, visibleEnd,
+                terrain.GetCaveIntervals(renderX, renderY + 1),
+                side: 1);
+            AddCaveWallSegments(
+                vertices, normals, colors, indices,
+                ref vertexOffset, ref indexOffset,
+                x0, x1, z0, z1,
+                interval.StartLayer, visibleEnd,
+                terrain.GetCaveIntervals(renderX - 1, renderY),
+                side: 2);
+            AddCaveWallSegments(
+                vertices, normals, colors, indices,
+                ref vertexOffset, ref indexOffset,
+                x0, x1, z0, z1,
+                interval.StartLayer, visibleEnd,
+                terrain.GetCaveIntervals(renderX + 1, renderY),
+                side: 3);
+        }
+    }
+
+    private static void AddCaveWallSegments(
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset,
+        float x0,
+        float x1,
+        float z0,
+        float z1,
+        int startLayer,
+        int endLayer,
+        ReadOnlySpan<CaveInterval> neighbourIntervals,
+        int side)
+    {
+        int cursor = startLayer;
+
+        foreach (CaveInterval neighbour in neighbourIntervals)
+        {
+            if (neighbour.EndLayer <= cursor ||
+                neighbour.StartLayer >= endLayer)
+            {
+                continue;
+            }
+
+            if (neighbour.StartLayer > cursor)
+            {
+                AddCaveWallSegment(
+                    vertices, normals, colors, indices,
+                    ref vertexOffset, ref indexOffset,
+                    x0, x1, z0, z1,
+                    cursor,
+                    Math.Min(neighbour.StartLayer, endLayer),
+                    side);
+            }
+
+            cursor = Math.Max(cursor, neighbour.EndLayer);
+            if (cursor >= endLayer)
+                return;
+        }
+
+        if (cursor < endLayer)
+        {
+            AddCaveWallSegment(
+                vertices, normals, colors, indices,
+                ref vertexOffset, ref indexOffset,
+                x0, x1, z0, z1,
+                cursor,
+                endLayer,
+                side);
+        }
+    }
+
+    private static void AddCaveWallSegment(
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset,
+        float x0,
+        float x1,
+        float z0,
+        float z1,
+        int startLayer,
+        int endLayer,
+        int side)
+    {
+        float bottom = startLayer * 0.1f;
+        float top = endLayer * 0.1f;
+
+        Vector3 a;
+        Vector3 b;
+        Vector3 c;
+        Vector3 d;
+        Vector3 normal;
+
+        switch (side)
+        {
+            case 0: // North (-Z)
+                a = new Vector3(x0, top, z0);
+                b = new Vector3(x1, top, z0);
+                c = new Vector3(x1, bottom, z0);
+                d = new Vector3(x0, bottom, z0);
+                normal = -Vector3.UnitZ;
+                break;
+            case 1: // South (+Z)
+                a = new Vector3(x1, top, z1);
+                b = new Vector3(x0, top, z1);
+                c = new Vector3(x0, bottom, z1);
+                d = new Vector3(x1, bottom, z1);
+                normal = Vector3.UnitZ;
+                break;
+            case 2: // West (-X)
+                a = new Vector3(x0, top, z1);
+                b = new Vector3(x0, top, z0);
+                c = new Vector3(x0, bottom, z0);
+                d = new Vector3(x0, bottom, z1);
+                normal = -Vector3.UnitX;
+                break;
+            default: // East (+X)
+                a = new Vector3(x1, top, z0);
+                b = new Vector3(x1, top, z1);
+                c = new Vector3(x1, bottom, z1);
+                d = new Vector3(x1, bottom, z0);
+                normal = Vector3.UnitX;
+                break;
+        }
+
+        AddQuad(
+            vertices, normals, colors, indices,
+            ref vertexOffset, ref indexOffset,
+            a, b, c, d,
+            normal,
+            CaveWallColor);
+    }
 
     private static void BuildDetailedGeometry(
         TerrainRenderSnapshot terrain,
@@ -538,6 +797,21 @@ internal static class RegionMeshBuilder
                         Vector3.UnitX,
                     includeContours: !terrain.CutawayEnabled);
                 }
+
+                BuildCaveWalls(
+                    terrain,
+                    renderX,
+                    renderY,
+                    x0,
+                    x1,
+                    z0,
+                    z1,
+                    vertices,
+                    normals,
+                    colors,
+                    indices,
+                    ref vertexOffset,
+                    ref indexOffset);
             }
         }
     }
