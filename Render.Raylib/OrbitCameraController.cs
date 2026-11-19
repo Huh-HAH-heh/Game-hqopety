@@ -10,12 +10,12 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class OrbitCameraController
 {
-    private const float FieldOfViewDegrees = 55f;
-    private const float RotationSensitivity = 0.0022f;
-    private const float RotationSmoothTime = 0.035f;
-    private const float MovementSmoothTime = 0.045f;
-    private const float ZoomSmoothTime = 0.085f;
-    private const float MinimumPitch = 0.62f;
+    private const float FieldOfViewDegrees = 45f;
+    private const float RotationSensitivity = 0.0018f;
+    private const float RotationSmoothTime = 0.055f;
+    private const float MovementSmoothTime = 0.075f;
+    private const float ZoomSmoothTime = 0.095f;
+    private const float MinimumPitch = 0.50f;
     private const float TopDownPitch = 1.54f;
     private const float MaximumPitch = TopDownPitch;
     private const float FitMargin = 1.08f;
@@ -77,7 +77,7 @@ internal sealed class OrbitCameraController
         _pitchRadians = TopDownPitch;
         _desiredPitchRadians = _pitchRadians;
 
-        _minimumDistance = 4f;
+        _minimumDistance = 2f;
         _maximumDistance = largestWorldAxis * 3.5f;
 
         _distance = CalculateFitDistance(
@@ -205,7 +205,7 @@ internal sealed class OrbitCameraController
             viewportHeight;
 
         float sinPitch = MathF.Max(
-            0.55f,
+            0.48f,
             MathF.Sin(_desiredPitchRadians));
 
         Vector3 right = new(
@@ -254,7 +254,7 @@ internal sealed class OrbitCameraController
             _desiredDistance,
             out Vector3 pointBeforeZoom);
 
-        _desiredDistance *= MathF.Pow(0.92f, wheel);
+        _desiredDistance *= MathF.Pow(0.88f, wheel);
         _desiredDistance = Math.Clamp(
             _desiredDistance,
             _minimumDistance,
