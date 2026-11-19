@@ -279,10 +279,11 @@ internal sealed class OrbitCameraController
             distance);
 
         Vector3 forward = Vector3.Normalize(target - cameraPosition);
-        Vector3 right = Vector3.Normalize(
-            Vector3.Cross(forward, Vector3.UnitY));
-        Vector3 up = Vector3.Normalize(
-            Vector3.Cross(right, forward));
+        Vector3 right = new(
+            MathF.Cos(yaw),
+            0f,
+            -MathF.Sin(yaw));
+        Vector3 up = CalculateCameraUp(yaw, pitch);
 
         float aspect = viewportWidth / (float)viewportHeight;
         float halfFovTangent =
@@ -427,9 +428,17 @@ internal sealed class OrbitCameraController
                 _pitchRadians,
                 _distance),
             _target,
-            Vector3.UnitY,
+            CalculateCameraUp(_yawRadians, _pitchRadians),
             FieldOfViewDegrees,
             CameraProjection.Perspective);
+    }
+
+    private static Vector3 CalculateCameraUp(float yaw, float pitch)
+    {
+        return Vector3.Normalize(new Vector3(
+            -MathF.Sin(yaw) * MathF.Sin(pitch),
+            MathF.Cos(pitch),
+            -MathF.Cos(yaw) * MathF.Sin(pitch)));
     }
 
     private void ResetSmoothing()
