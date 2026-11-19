@@ -344,6 +344,10 @@ internal static class RegionMeshBuilder
         return quadCount;
     }
 
+    private const float ContourHalfWidth = 0.09f;
+    private const float ContourLift = 0.035f;
+    private static readonly Color ContourColor = new(232, 236, 242, 255);
+
     private static void BuildDetailedGeometry(
         TerrainRenderSnapshot terrain,
         int firstRenderX,
@@ -378,9 +382,6 @@ internal static class RegionMeshBuilder
                     z0 + terrain.RegionSize,
                     terrain.WorldDepth);
 
-                Color topColor = GetSurfaceColor(height);
-                Color wallColor = Darken(topColor, 0.57f);
-
                 AddQuad(
                     vertices, normals, colors, indices,
                     ref vertexOffset, ref indexOffset,
@@ -389,67 +390,81 @@ internal static class RegionMeshBuilder
                     new Vector3(x1, height, z1),
                     new Vector3(x0, height, z1),
                     Vector3.UnitY,
-                    topColor,
+                    GetSurfaceColor(height),
                     reverseWinding: true);
 
-                float north = terrain.GetHeightMeters(renderX, renderY - 1);
-                float south = terrain.GetHeightMeters(renderX, renderY + 1);
-                float west = terrain.GetHeightMeters(renderX - 1, renderY);
-                float east = terrain.GetHeightMeters(renderX + 1, renderY);
-
-                if (height > north)
+                // Only the higher side emits a contour. No permanent tile grid.
+                if (height > terrain.GetHeightMeters(renderX, renderY - 1))
                 {
-                    AddQuad(
+                    AddContourEdge(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
                         new Vector3(x0, height, z0),
                         new Vector3(x1, height, z0),
-                        new Vector3(x1, north, z0),
-                        new Vector3(x0, north, z0),
-                        -Vector3.UnitZ,
-                        wallColor);
+                        alongX: true);
                 }
 
-                if (height > south)
+                if (height > terrain.GetHeightMeters(renderX, renderY + 1))
                 {
-                    AddQuad(
+                    AddContourEdge(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
+                        new Vector3(x0, height, z1),
                         new Vector3(x1, height, z1),
-                        new Vector3(x0, height, z1),
-                        new Vector3(x0, south, z1),
-                        new Vector3(x1, south, z1),
-                        Vector3.UnitZ,
-                        wallColor);
+                        alongX: true);
                 }
 
-                if (height > west)
+                if (height > terrain.GetHeightMeters(renderX - 1, renderY))
                 {
-                    AddQuad(
+                    AddContourEdge(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
-                        new Vector3(x0, height, z1),
                         new Vector3(x0, height, z0),
-                        new Vector3(x0, west, z0),
-                        new Vector3(x0, west, z1),
-                        -Vector3.UnitX,
-                        wallColor);
+                        new Vector3(x0, height, z1),
+                        alongX: false);
                 }
 
-                if (height > east)
+                if (height > terrain.GetHeightMeters(renderX + 1, renderY))
                 {
-                    AddQuad(
+                    AddContourEdge(
                         vertices, normals, colors, indices,
                         ref vertexOffset, ref indexOffset,
                         new Vector3(x1, height, z0),
                         new Vector3(x1, height, z1),
-                        new Vector3(x1, east, z1),
-                        new Vector3(x1, east, z0),
-                        Vector3.UnitX,
-                        wallColor);
+                        alongX: false);
                 }
             }
         }
+    }
+
+    private static void AddContourEdge(
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors,
+        Span<ushort> indices,
+        ref int vertexOffset,
+        ref int indexOffset,
+        Vector3 start,
+        Vector3 end,
+        bool alongX)
+    {
+        float y = start.Y + ContourLift;
+        Vector3 halfWidth = alongX
+            ? new Vector3(0f, 0f, ContourHalfWidth)
+            : new Vector3(ContourHalfWidth, 0f, 0f);
+
+        Vector3 a = new(start.X, y, start.Z) - halfWidth;
+        Vector3 b = new(end.X, y, end.Z) - halfWidth;
+        Vector3 c = new(end.X, y, end.Z) + halfWidth;
+        Vector3 d = new(start.X, y, start.Z) + halfWidth;
+
+        AddQuad(
+            vertices, normals, colors, indices,
+            ref vertexOffset, ref indexOffset,
+            a, b, c, d,
+            Vector3.UnitY,
+            ContourColor,
+            reverseWinding: true);
     }
 
     private static void AddQuad(
@@ -508,11 +523,15 @@ internal static class RegionMeshBuilder
 
     private static Color GetSurfaceColor(float height)
     {
-        float amount = Math.Clamp(height / 52f, 0f, 1f);
+        // Restrained charcoal palette: canyon floors stay almost black,
+        // ridges and plateaus gain enough luminance to read from above.
+        float amount = Math.Clamp(height / 50f, 0f, 1f);
+        int value = (int)MathF.Round(7f + amount * 34f);
+
         return new Color(
-            (int)(52f + amount * 68f),
-            (int)(74f + amount * 69f),
-            (int)(52f + amount * 66f),
+            value,
+            Math.Min(255, value + 1),
+            Math.Min(255, value + 3),
             255);
     }
 
