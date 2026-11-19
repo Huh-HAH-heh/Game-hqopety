@@ -57,28 +57,29 @@ upload, draw and disposal are restricted to the render thread.
 - Q / E: move camera target vertically
 - Escape: exit
 
-## Static cave and tunnel proof
+## Static cave, tunnel and volumetric cutaway
 
-`WorldGenerator.GenerateSmooth` now carves a real underground system into the
-static height-field terrain after generating the mesa:
+`WorldGenerator.GenerateSmooth` creates a sealed underground tunnel inside the
+raised mesa, not an open adit:
 
-- a 52 m horizontal tunnel, 12 m wide and 5 m high;
+- a 52 m enclosed tunnel, 12 m wide and 5 m high;
+- solid rock at both tunnel ends and above its roof;
 - a connected 20 x 20 m chamber, 8 m high;
-- a 4 x 4 m shaft cut from the surface down to the chamber.
+- a 4 x 4 m vertical shaft from the chamber to the surface.
 
 `WorldMap.CarveStaticVolume` writes empty overrides into the sparse 3D
-`BlockVolumeTree`. It does not enable discrete block simulation and does not
-materialize the full terrain into individual voxels. `GetMaterialId(x,y,z)` and
-`GetTileRanges(x,y)` resolve the empty interval over the implicit solid column.
-World generation checks that the tunnel is empty at 16 m, its floor remains solid,
-the rock beside it remains solid, and the shaft lowers the surface.
+`BlockVolumeTree`. The base terrain remains an implicit solid column; the cut
+does not materialize the entire 500-layer world as individual voxels.
+`GetMaterialId(x,y,z)` and `GetTileRanges(x,y)` resolve the empty intervals.
+World generation verifies the tunnel air, solid floor, roof, side wall, both
+sealed ends and the open shaft, and throws if any condition is false.
 
-Press **C** in the Raylib viewer to inspect the horizontal 16 m section. The renderer
-samples actual 3D material occupancy into the 4 x 4 m presentation grid: dark rock
-is drawn, empty tunnel cells are omitted, and white strokes mark the boundary
-between rock and air. The camera focuses on the test mesa automatically. Press C
-again to return to the normal height-map view.
-
+Press **C** in the Raylib viewer to enable a volumetric terrain cutaway.
+The visual clip plane follows the camera's focus height; **Q/E** lower or raise
+it in one-metre steps. Terrain above the plane is hidden, solid cross-sections
+are diagonally hatched, and cave cells expose their real floor below the plane.
+The angled camera shows the cave floor and vertical rock walls rather than a
+flat plan view. Press **C** again to restore the full surface.
 ## Current milestone
 
 The viewer restores the earlier winding canyon, mesa and rimmed basin layout.
