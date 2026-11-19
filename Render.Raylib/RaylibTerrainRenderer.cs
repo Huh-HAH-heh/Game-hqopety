@@ -5,8 +5,8 @@ using static Raylib_cs.Raylib;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Owns GPU resources and submits only visible, revision-valid region meshes.
-/// All GPU creation, upload, drawing and disposal happen on the render thread.
+/// Owns GPU resources and submits only visible, revision-valid storage-region
+/// batches. All GPU work is restricted to the render thread.
 /// </summary>
 internal sealed class RaylibTerrainRenderer : IDisposable
 {
@@ -20,7 +20,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
     public RaylibTerrainRenderer(TerrainRenderSnapshot terrain)
     {
-        _regionMeshes = new RegionGpuMesh[terrain.RegionCount];
+        _regionMeshes = new RegionGpuMesh[terrain.StorageRegionCount];
         _material = LoadMaterialDefault();
         Synchronize(terrain);
     }
@@ -29,13 +29,13 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     {
         ThrowIfDisposed();
 
-        for (int regionY = 0; regionY < terrain.RegionsY; regionY++)
+        for (int regionY = 0; regionY < terrain.StorageRegionsY; regionY++)
         {
-            for (int regionX = 0; regionX < terrain.RegionsX; regionX++)
+            for (int regionX = 0; regionX < terrain.StorageRegionsX; regionX++)
             {
-                int index = regionX + regionY * terrain.RegionsX;
+                int index = regionX + regionY * terrain.StorageRegionsX;
                 RegionGpuMesh? existing = _regionMeshes[index];
-                long version = terrain.RegionVersions[index];
+                long version = terrain.SourceRegionVersions[index];
 
                 if (existing != null && existing.RegionVersion == version)
                     continue;
