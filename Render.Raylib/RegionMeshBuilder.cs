@@ -442,8 +442,13 @@ internal static class RegionMeshBuilder
                     break;
             }
 
-            if (endX <= startX || endZ <= startZ)
+            if (endX <= startX ||
+                (materialId == 2 && MathF.Abs(endZ - startZ) > 0.001f) ||
+                (materialId == 3 && endZ >= startZ) ||
+                (materialId != 2 && materialId != 3 && endZ <= startZ))
+            {
                 continue;
+            }
 
             Vector2 direction = Vector2.Normalize(new Vector2(
                 endX - startX,
