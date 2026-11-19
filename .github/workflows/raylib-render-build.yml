@@ -1,0 +1,27 @@
+name: Raylib renderer build
+
+on:
+  push:
+    branches:
+      - feature/raylib-render-core
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore RimClone.sln
+
+      - name: Build
+        run: dotnet build RimClone.sln --configuration Release --no-restore

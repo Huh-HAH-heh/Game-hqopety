@@ -111,7 +111,7 @@ namespace RimClone
                 "[AI] Policy=Utility AI with shared perception, tactical movement, ranged/melee combat and " +
                 "contact memory. Behaviac decision runtime remains disabled.");
 
-            GameBootstrap.Run();
+            GameBootstrap.Run(args);
         }
     }
 }
