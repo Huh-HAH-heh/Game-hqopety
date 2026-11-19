@@ -207,7 +207,7 @@ public sealed class TerrainRenderSnapshot
                     nameof(destination));
             }
 
-            complexRanges.CopyTo(destination);
+            complexRanges.AsSpan().CopyTo(destination);
             return complexRanges.Length;
         }
 
