@@ -49,10 +49,10 @@ upload, draw and disposal are restricted to the render thread.
 
 ## Controls
 
-- WASD: move in the camera's horizontal plane
-- Right mouse button + drag: smooth orbit rotation
-- Middle mouse button + drag: pan across the terrain
-- Mouse wheel: smooth zoom
+- WASD: move in the camera's horizontal plane at a zoom-scaled RTS speed
+- Right mouse button + drag: orbit; dragging right rotates the camera to the right
+- Middle mouse button + drag: pan in screen space with tilt-aware ground scaling
+- Mouse wheel: zoom toward the cursor position, keeping the pointed-at ground area anchored
 - Left Shift / Right Shift: faster movement
 - Q / E: move camera target vertically
 - Escape: exit
