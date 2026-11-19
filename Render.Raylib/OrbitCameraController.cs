@@ -317,16 +317,7 @@ internal sealed class OrbitCameraController
     private void UpdateKeyboardInput(float deltaTime)
     {
         if (IsKeyPressed(KeyboardKey.T))
-        {
-            _desiredTarget = _topDownTarget;
-            _desiredYawRadians = 0f;
-            _desiredPitchRadians = TopDownPitch;
-            _desiredDistance = CalculateFitDistance(
-                GetScreenWidth(),
-                GetScreenHeight());
-
-            ResetSmoothing();
-        }
+            ResetTopDownView();
 
         float moveX = 0f;
         float moveZ = 0f;
@@ -439,6 +430,31 @@ internal sealed class OrbitCameraController
             -MathF.Sin(yaw) * MathF.Sin(pitch),
             MathF.Cos(pitch),
             -MathF.Cos(yaw) * MathF.Sin(pitch)));
+    }
+
+    public void FocusOn(Vector3 target, float distance)
+    {
+        _desiredTarget = target;
+        _desiredYawRadians = 0f;
+        _desiredPitchRadians = TopDownPitch;
+        _desiredDistance = Math.Clamp(
+            distance,
+            _minimumDistance,
+            _maximumDistance);
+
+        ResetSmoothing();
+    }
+
+    public void ResetTopDownView()
+    {
+        _desiredTarget = _topDownTarget;
+        _desiredYawRadians = 0f;
+        _desiredPitchRadians = TopDownPitch;
+        _desiredDistance = CalculateFitDistance(
+            GetScreenWidth(),
+            GetScreenHeight());
+
+        ResetSmoothing();
     }
 
     private void ResetSmoothing()
