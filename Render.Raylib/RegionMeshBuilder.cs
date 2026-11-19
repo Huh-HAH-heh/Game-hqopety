@@ -10,6 +10,7 @@ internal sealed class RegionGpuMesh : IDisposable
     public Mesh[] Meshes = Array.Empty<Mesh>();
     public bool IsUploaded;
     public long RegionVersion;
+    public int CutawayLayer;
     public Vector3 BoundsCenter;
     public float BoundsRadius;
 
@@ -73,6 +74,7 @@ internal static class RegionMeshBuilder
         RegionGpuMesh result = new()
         {
             RegionVersion = terrain.SourceRegionVersions[storageIndex],
+            CutawayLayer = terrain.CutawayEnabled ? terrain.CutawayLayer : -1,
             BoundsCenter = new Vector3(
                 (storageRegionX + 0.5f) * terrain.StorageRegionSize,
                 terrain.MaximumHeightMeters * 0.5f,
