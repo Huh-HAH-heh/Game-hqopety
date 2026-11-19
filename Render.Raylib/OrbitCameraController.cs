@@ -217,7 +217,7 @@ internal sealed class OrbitCameraController
         // become unstable near the horizon and made MMB panning stop abruptly.
         _desiredTarget -= right *
             (mouseDelta.X * worldUnitsPerPixel);
-        _desiredTarget -= groundForward *
+        _desiredTarget += groundForward *
             (mouseDelta.Y * worldUnitsPerPixel / sinPitch);
     }
 
