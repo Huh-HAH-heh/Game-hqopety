@@ -385,19 +385,19 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Carves an empty cuboid into the static height-field backing without
-    /// enabling discrete block simulation or materializing every voxel column.
-    /// Coordinates X/Y are map tiles; Z, width and height use metres.
-    /// The sparse volume tree stores the empty override over the implicit solid
-    /// columns, so caves and tunnels remain compact in memory.
+    /// Adds a static material cuboid to the sparse 3D volume backing.
+    /// Coordinates X/Y use map tiles; Z and height use metres.
+    /// Material zero creates an empty cut; nonzero materials create a solid
+    /// geological layer. The implicit height-field remains the base volume.
     /// </summary>
-    public void CarveStaticVolume(
+    public void SetStaticVolume(
         int x,
         int y,
         int zLevel,
         int width,
         int depth,
-        int heightInMeters)
+        int heightInMeters,
+        ushort materialId)
     {
         if (x < 0 || y < 0 || width <= 0 || depth <= 0 ||
             (long)x + width > TileWidth ||
@@ -422,7 +422,7 @@ public sealed class WorldMap
             width,
             depth,
             heightLayers,
-            materialId: 0);
+            materialId);
 
         for (int localY = 0; localY < depth; localY++)
         {
@@ -439,6 +439,23 @@ public sealed class WorldMap
         }
 
         NavigationVersion++;
+    }
+
+    /// <summary>
+    /// Carves a static empty cuboid without materializing the implicit terrain.
+    /// </summary>
+    public void CarveStaticVolume(
+        int x,
+        int y,
+        int zLevel,
+        int width,
+        int depth,
+        int heightInMeters)
+    {
+        SetStaticVolume(
+            x, y, zLevel,
+            width, depth, heightInMeters,
+            materialId: 0);
     }
 
     /// <summary>
