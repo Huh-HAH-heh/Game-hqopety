@@ -1890,6 +1890,16 @@ public sealed class WorldMap
     // One Z layer represents 0.1 m; stored height units remain decimeters.
     // ============================================================
 
+    /// <summary>
+    /// True when the column is represented by the compact implicit fill height
+    /// rather than individually authored vertical layer data.
+    /// </summary>
+    public bool IsColumnSimpleFill(int globalX, int globalY)
+    {
+        return IsInside(globalX, globalY) &&
+            _simpleFillColumns[GetColumnIndex(globalX, globalY)];
+    }
+
     public ushort GetSurfaceHeightUnits(
         int globalX,
         int globalY)
