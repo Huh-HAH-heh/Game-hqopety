@@ -12,10 +12,10 @@ internal sealed class OrbitCameraController
 {
     private const float FieldOfViewDegrees = 55f;
     private const float RotationSensitivity = 0.0022f;
-    private const float RotationSmoothTime = 0.045f;
-    private const float MovementSmoothTime = 0.060f;
-    private const float ZoomSmoothTime = 0.075f;
-    private const float MinimumPitch = 0.30f;
+    private const float RotationSmoothTime = 0.035f;
+    private const float MovementSmoothTime = 0.045f;
+    private const float ZoomSmoothTime = 0.085f;
+    private const float MinimumPitch = 0.62f;
     private const float TopDownPitch = 1.54f;
     private const float MaximumPitch = TopDownPitch;
     private const float FitMargin = 1.08f;
@@ -183,6 +183,7 @@ internal sealed class OrbitCameraController
                 _desiredPitchRadians - mouseDelta.Y * RotationSensitivity,
                 MinimumPitch,
                 MaximumPitch);
+            NormalizeYawRange();
 
             return;
         }
@@ -200,7 +201,7 @@ internal sealed class OrbitCameraController
             viewportHeight;
 
         float sinPitch = MathF.Max(
-            0.25f,
+            0.55f,
             MathF.Sin(_desiredPitchRadians));
 
         Vector3 right = new(
@@ -236,7 +237,7 @@ internal sealed class OrbitCameraController
             _desiredDistance,
             out Vector3 pointBeforeZoom);
 
-        _desiredDistance *= MathF.Pow(0.88f, wheel);
+        _desiredDistance *= MathF.Pow(0.92f, wheel);
         _desiredDistance = Math.Clamp(
             _desiredDistance,
             _minimumDistance,
@@ -477,6 +478,18 @@ internal sealed class OrbitCameraController
 
         ResetSmoothing();
         UpdateCamera();
+    }
+
+    private void NormalizeYawRange()
+    {
+        const float fullTurn = MathF.Tau;
+
+        if (MathF.Abs(_desiredYawRadians) < fullTurn * 8f)
+            return;
+
+        float offset = MathF.Round(_desiredYawRadians / fullTurn) * fullTurn;
+        _desiredYawRadians -= offset;
+        _yawRadians -= offset;
     }
 
     private void ResetSmoothing()
