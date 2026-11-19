@@ -334,13 +334,13 @@ internal static class RegionMeshBuilder
                 float east = terrain.GetRenderHeightMeters(renderX + 1, renderY);
 
                 if (height > north)
-                    quadCount += 1 + CountElevationLines(north, height);
+                    quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(north, height));
                 if (height > south)
-                    quadCount += 1 + CountElevationLines(south, height);
+                    quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(south, height));
                 if (height > west)
-                    quadCount += 1 + CountElevationLines(west, height);
+                    quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(west, height));
                 if (height > east)
-                    quadCount += 1 + CountElevationLines(east, height);
+                    quadCount += 1 + (terrain.CutawayEnabled ? 0 : CountElevationLines(east, height));
 
                 if (terrain.IsCutFace(renderX, renderY))
                     quadCount += CutHatchLinesPerPatch;
@@ -380,7 +380,6 @@ internal static class RegionMeshBuilder
     {
         float y = height + CutHatchLift;
         const float strokeLength = 0.72f;
-        const float strokeSpacing = 1.2f;
 
         for (int i = 0; i < CutHatchLinesPerPatch; i++)
         {
