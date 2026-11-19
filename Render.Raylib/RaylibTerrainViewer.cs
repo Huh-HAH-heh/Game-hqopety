@@ -35,7 +35,9 @@ public static class RaylibTerrainViewer
 
             Console.WriteLine(
                 "[Raylib] Terrain viewer started. " +
-                $"Regions: {terrain.RegionsX}x{terrain.RegionsY}, " +
+                $"render regions: {terrain.RegionsX}x{terrain.RegionsY} " +
+                $"({terrain.RegionSize}x{terrain.RegionSize} tiles), " +
+                $"GPU batches: {terrain.StorageRegionsX}x{terrain.StorageRegionsY}, " +
                 $"world: {terrain.WorldWidth:0}x{terrain.WorldDepth:0} m, " +
                 $"maximum height: {terrain.MaximumHeightMeters:0.0} m.");
 
@@ -73,7 +75,7 @@ public static class RaylibTerrainViewer
         TerrainRenderSnapshot terrain,
         RaylibTerrainRenderer renderer)
     {
-        DrawRectangle(12, 12, 390, 132, new Color(10, 14, 20, 220));
+        DrawRectangle(12, 12, 430, 164, new Color(10, 14, 20, 220));
 
         DrawText("RIMCLONE / RAYLIB TERRAIN", 24, 22, 18, Color.RayWhite);
         DrawText(
@@ -84,23 +86,30 @@ public static class RaylibTerrainViewer
             Color.Lime);
 
         DrawText(
-            $"VISIBLE REGIONS {renderer.VisibleRegionsLastFrame}/{terrain.RegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
+            $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
             24,
             76,
             14,
             Color.LightGray);
 
         DrawText(
-            $"GPU MESH REBUILDS {renderer.RebuiltRegions}",
+            $"VISIBLE GPU BATCHES {renderer.VisibleRegionsLastFrame}/{terrain.StorageRegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
             24,
             98,
             14,
             Color.LightGray);
 
         DrawText(
-            "WASD move | RMB rotate | Wheel zoom | Shift boost | Q/E altitude | Esc exit",
+            $"GPU MESH REBUILDS {renderer.RebuiltRegions}",
             24,
-            170,
+            120,
+            14,
+            Color.LightGray);
+
+        DrawText(
+            "WASD move | RMB rotate | MMB pan | Wheel zoom | Shift boost | Q/E altitude | Esc exit",
+            24,
+            184,
             14,
             Color.RayWhite);
     }
