@@ -56,6 +56,10 @@ internal sealed class RgbColorSetting
 
 internal sealed class TerrainPalette
 {
+    public TerrainPalette()
+    {
+    }
+
     public RgbColorSetting Lowlands { get; set; } = new(7, 8, 10);
     public RgbColorSetting Highlands { get; set; } = new(41, 42, 45);
     public RgbColorSetting CliffFaces { get; set; } = new(22, 23, 26);
@@ -136,6 +140,10 @@ internal sealed class TerrainPalette
 
 internal sealed class RaylibViewerSettings
 {
+    public RaylibViewerSettings()
+    {
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
