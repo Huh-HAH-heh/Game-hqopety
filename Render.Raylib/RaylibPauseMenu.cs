@@ -356,11 +356,11 @@ internal sealed class RaylibPauseMenu : IDisposable
             BeginSlider(SliderId.CameraZoom, mouse, panel);
         else if (HitSlider(mouse, panel, SliderId.CameraVertical, 546f))
             BeginSlider(SliderId.CameraVertical, mouse, panel);
-        else if (HitActionButton(mouse, panel, 624f))
+        else if (HitActionButton(mouse, panel, 604f))
             return RaylibMenuAction.ResetCamera;
-        else if (HitHalfActionButton(mouse, panel, 650f, left: true))
+        else if (HitHalfActionButton(mouse, panel, 656f, left: true))
             return RaylibMenuAction.FocusLowerTunnel;
-        else if (HitHalfActionButton(mouse, panel, 650f, left: false))
+        else if (HitHalfActionButton(mouse, panel, 656f, left: false))
             return RaylibMenuAction.FocusUpperPassage;
 
         SaveSettings();
@@ -724,7 +724,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         DrawRectangleLinesEx(bounds, 1f, new Color(74, 88, 106));
 
         DrawLabel(
-            expanded ? "▼" : "›",
+            expanded ? "▾" : "›",
             bounds.X + 12f,
             bounds.Y + 10f,
             19f,
@@ -823,11 +823,9 @@ internal sealed class RaylibPauseMenu : IDisposable
             "СКОРОСТЬ МАСШТАБИРОВАНИЯ", Settings.CameraZoomSpeed, "×");
         DrawSliderRow(panel, mouse, SliderId.CameraVertical, y + 382f,
             "СКОРОСТЬ ИЗМЕНЕНИЯ ВЫСОТЫ", Settings.CameraVerticalSpeed, "×");
-        DrawOptionRow(panel, mouse, y + 460f, "ТОЧКА ОБЗОРА",
-            "СБРОСИТЬ КАМЕРУ", 560f);
-        DrawLabel("БЫСТРОЕ ПЕРЕМЕЩЕНИЕ", panel.X + 304f, y + 530f, 14f,
-            new Color(218, 226, 236));
-        DrawHalfActionPair(panel, mouse, y + 486f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
+        DrawOptionRow(panel, mouse, y + 440f, "ТОЧКА ОБЗОРА",
+            "СБРОСИТЬ КАМЕРУ", 604f);
+        DrawHalfActionPair(panel, mouse, y + 492f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
     }
 
     private void DrawTerrainSettings(Rectangle panel, Vector2 mouse)
