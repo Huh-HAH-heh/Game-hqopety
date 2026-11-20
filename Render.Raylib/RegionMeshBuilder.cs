@@ -11,6 +11,7 @@ internal sealed class RegionGpuMesh : IDisposable
     public bool IsUploaded;
     public long RegionVersion;
     public int CutawayLayer;
+    public int PaletteVersion;
     public Vector3 BoundsCenter;
     public float BoundsRadius;
 
@@ -38,7 +39,6 @@ internal static class RegionMeshBuilder
     private const float CutHatchHalfWidth = 0.035f;
     private const float CutHatchLift = 0.045f;
 
-    private static readonly Color CutHatchColor = new(205, 211, 219, 255);
 
     private readonly record struct TerrainQuad(
         Vector3 A,
@@ -57,7 +57,9 @@ internal static class RegionMeshBuilder
     public static RegionGpuMesh Build(
         TerrainRenderSnapshot terrain,
         int storageRegionX,
-        int storageRegionY)
+        int storageRegionY,
+        TerrainPalette palette,
+        int paletteVersion)
     {
         int storageIndex =
             storageRegionX + storageRegionY * terrain.StorageRegionsX;
@@ -70,6 +72,7 @@ internal static class RegionMeshBuilder
         {
             RegionVersion = terrain.SourceRegionVersions[storageIndex],
             CutawayLayer = terrain.CutawayEnabled ? terrain.CutawayLayer : -1,
+            PaletteVersion = paletteVersion,
             BoundsCenter = new Vector3(
                 (storageRegionX + 0.5f) * terrain.StorageRegionSize,
                 terrain.MaximumHeightMeters * 0.5f,
@@ -90,6 +93,7 @@ internal static class RegionMeshBuilder
                     firstRenderX + chunkX * chunkSize,
                     firstRenderY + chunkY * chunkSize,
                     chunkSize,
+                    palette,
                     meshes);
             }
         }
@@ -104,6 +108,7 @@ internal static class RegionMeshBuilder
         int firstRenderX,
         int firstRenderY,
         int size,
+        TerrainPalette palette,
         List<Mesh> output)
     {
         List<TerrainQuad> quads = new(Math.Min(size * size * 10, MaximumQuadsPerMesh));
@@ -129,6 +134,7 @@ internal static class RegionMeshBuilder
                     cutLayer,
                     rangesBuffer,
                     neighbourBuffer,
+                    palette,
                     quads);
             }
         }
@@ -136,10 +142,10 @@ internal static class RegionMeshBuilder
         if (quads.Count > MaximumQuadsPerMesh && size > 4)
         {
             int half = size / 2;
-            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, output);
-            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, output);
-            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, output);
-            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, palette, output);
             return;
         }
 
@@ -160,6 +166,7 @@ internal static class RegionMeshBuilder
         int cutLayer,
         Span<TileRange> rangesBuffer,
         Span<TileRange> neighbourBuffer,
+        TerrainPalette palette,
         List<TerrainQuad> quads)
     {
         int rangeCount = terrain.CopyColumnRanges(
@@ -211,16 +218,18 @@ internal static class RegionMeshBuilder
                     x0, x1, z0, z1,
                     top,
                     range.MaterialId,
+                    palette,
                     isTop: true,
                     isCutFace: cutFace);
 
-                if (cutFace)
+                if (cutFace && palette.ShowCutHatching)
                 {
                     AddCutHatching(
                         quads,
                         x0, x1, z0, z1,
                         top,
-                        range.MaterialId);
+                        range.MaterialId,
+                        palette.GetHatchingColor());
                 }
             }
 
@@ -231,6 +240,7 @@ internal static class RegionMeshBuilder
                     x0, x1, z0, z1,
                     bottom,
                     range.MaterialId,
+                    palette,
                     isTop: false,
                     isCutFace: false);
             }
@@ -245,6 +255,7 @@ internal static class RegionMeshBuilder
                 0,
                 x0, x1, z0, z1,
                 neighbourBuffer,
+                palette,
                 quads);
 
             AddExposedSide(
@@ -257,6 +268,7 @@ internal static class RegionMeshBuilder
                 1,
                 x0, x1, z0, z1,
                 neighbourBuffer,
+                palette,
                 quads);
 
             AddExposedSide(
@@ -269,6 +281,7 @@ internal static class RegionMeshBuilder
                 2,
                 x0, x1, z0, z1,
                 neighbourBuffer,
+                palette,
                 quads);
 
             AddExposedSide(
@@ -281,6 +294,7 @@ internal static class RegionMeshBuilder
                 3,
                 x0, x1, z0, z1,
                 neighbourBuffer,
+                palette,
                 quads);
         }
     }
@@ -293,12 +307,13 @@ internal static class RegionMeshBuilder
         float z1,
         float height,
         ushort materialId,
+        TerrainPalette palette,
         bool isTop,
         bool isCutFace)
     {
         Color color = isCutFace
-            ? GetCutFaceColor(height, materialId)
-            : GetSurfaceColor(height, materialId);
+            ? palette.GetCutSurfaceColor(materialId)
+            : palette.GetSurfaceColor(height, materialId);
 
         quads.Add(new TerrainQuad(
             new Vector3(x0, height, z0),
@@ -323,6 +338,7 @@ internal static class RegionMeshBuilder
         float z0,
         float z1,
         Span<TileRange> neighbourBuffer,
+        TerrainPalette palette,
         List<TerrainQuad> quads)
     {
         if (neighbourX < 0 || neighbourY < 0 ||
@@ -335,7 +351,8 @@ internal static class RegionMeshBuilder
                 visibleStart,
                 visibleEnd,
                 materialId,
-                side);
+                side,
+                palette);
             return;
         }
 
@@ -367,7 +384,8 @@ internal static class RegionMeshBuilder
                 exposedStart,
                 exposedEnd,
                 materialId,
-                side);
+                side,
+                palette);
         }
     }
 
@@ -380,13 +398,12 @@ internal static class RegionMeshBuilder
         int startLayer,
         int endLayer,
         ushort materialId,
-        int side)
+        int side,
+        TerrainPalette palette)
     {
         float bottom = startLayer * UnitsPerMeter;
         float top = endLayer * UnitsPerMeter;
-        Color wallColor = Darken(
-            GetSurfaceColor((bottom + top) * 0.5f, materialId),
-            0.57f);
+        Color wallColor = palette.GetCliffColor(materialId);
 
         Vector3 a;
         Vector3 b;
@@ -445,7 +462,8 @@ internal static class RegionMeshBuilder
         float z0,
         float z1,
         float height,
-        ushort materialId)
+        ushort materialId,
+        Color hatchColor)
     {
         float y = height + CutHatchLift;
         const float strokeLength = 1.05f;
@@ -505,50 +523,9 @@ internal static class RegionMeshBuilder
             quads.Add(new TerrainQuad(
                 a, b, c, d,
                 Vector3.UnitY,
-                CutHatchColor,
+                hatchColor,
                 ReverseWinding: true));
         }
-    }
-
-    private static Color GetSurfaceColor(float height, ushort materialId)
-    {
-        float amount = Math.Clamp(height / 50f, 0f, 1f);
-        int value = (int)MathF.Round(7f + amount * 34f);
-
-        value += materialId switch
-        {
-            2 => 9,
-            3 => -5,
-            _ => 0
-        };
-
-        value = Math.Clamp(value, 4, 85);
-        return new Color(
-            value,
-            Math.Min(255, value + 1),
-            Math.Min(255, value + 3),
-            255);
-    }
-
-    private static Color GetCutFaceColor(float height, ushort materialId)
-    {
-        Color baseColor = GetSurfaceColor(height, materialId);
-        int value = Math.Clamp(baseColor.R + 5, 4, 90);
-
-        return new Color(
-            value,
-            Math.Min(255, value + 1),
-            Math.Min(255, value + 3),
-            255);
-    }
-
-    private static Color Darken(Color color, float amount)
-    {
-        return new Color(
-            (int)(color.R * amount),
-            (int)(color.G * amount),
-            (int)(color.B * amount),
-            255);
     }
 
     private static Mesh Upload(List<TerrainQuad> quads)
