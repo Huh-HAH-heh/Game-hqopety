@@ -162,7 +162,7 @@ public sealed class BlockTerrain
 
     public int Width { get; }
     public int Height { get; }
-    public BlockVolumeTree Volumes { get; }
+    public SparseVoxelStore Volumes { get; }
 
     public BlockTerrain(int width, int height, int depth = 500)
     {
@@ -171,7 +171,7 @@ public sealed class BlockTerrain
 
         Width = width;
         Height = height;
-        Volumes = new BlockVolumeTree(width, height, depth);
+        Volumes = new SparseVoxelStore(width, height, depth);
 
         int regionSize = TerrainRegion.TilesPerSide;
         _regionsX = (width + regionSize - 1) / regionSize;
