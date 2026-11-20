@@ -17,24 +17,36 @@ public static class RaylibTerrainViewer
         TerrainRenderSnapshot terrain =
             TerrainRenderSnapshot.Create(worldMap);
 
-        SetConfigFlags(
-            ConfigFlags.ResizableWindow |
-            ConfigFlags.VSyncHint |
-            ConfigFlags.Msaa4xHint);
+        RaylibViewerSettings settings = RaylibViewerSettings.Load();
 
-        InitWindow(1600, 900, "RimClone | Raylib Terrain Viewer");
-        SetTargetFPS(144);
+        ConfigFlags windowFlags = ConfigFlags.ResizableWindow;
+        if (settings.VSync)
+            windowFlags |= ConfigFlags.VSyncHint;
+        if (settings.Msaa4x)
+            windowFlags |= ConfigFlags.Msaa4xHint;
+
+        SetConfigFlags(windowFlags);
+        InitWindow(settings.WindowWidth, settings.WindowHeight, "RimClone | Raylib Terrain Viewer");
+        if (settings.Fullscreen)
+            ToggleFullscreen();
+
+        SetTargetFPS(settings.TargetFps);
         SetExitKey(KeyboardKey.Null);
 
         OrbitCameraController camera = new(terrain);
-        RaylibPauseMenu menu = new();
+        camera.ApplySettings(settings);
+        RaylibPauseMenu menu = new(settings);
         RaylibTerrainRenderer? renderer = null;
-        bool cutawayMode = false;
-        string focusName = "SURFACE";
+        bool cutawayMode = settings.CutawayEnabled;
+        string focusName = cutawayMode ? "LOWER TUNNEL" : "SURFACE";
+
+        if (cutawayMode)
+            FocusLowerTunnel(camera, terrain);
 
         try
         {
-            renderer = new RaylibTerrainRenderer(terrain);
+            renderer = new RaylibTerrainRenderer(terrain, settings.Palette);
+            int appliedPaletteRevision = menu.PaletteRevision;
 
             Console.WriteLine(
                 "[Raylib] Terrain viewer started. " +
@@ -74,6 +86,7 @@ public static class RaylibTerrainViewer
                     case RaylibMenuAction.FocusLowerTunnel:
                         cutawayMode = true;
                         menu.CutawayEnabled = true;
+                        menu.SaveSettings();
                         focusName = "LOWER TUNNEL";
                         FocusLowerTunnel(camera, terrain);
                         break;
@@ -81,12 +94,14 @@ public static class RaylibTerrainViewer
                     case RaylibMenuAction.FocusUpperPassage:
                         cutawayMode = true;
                         menu.CutawayEnabled = true;
+                        menu.SaveSettings();
                         focusName = "UPPER PASSAGE";
                         FocusUpperPassage(camera, terrain);
                         break;
 
                     case RaylibMenuAction.ToggleCutaway:
                         cutawayMode = menu.CutawayEnabled;
+                        menu.SaveSettings();
 
                         if (cutawayMode)
                         {
@@ -103,18 +118,26 @@ public static class RaylibTerrainViewer
                         break;
                 }
 
+                camera.ApplySettings(menu.Settings);
+
+                if (menu.PaletteRevision != appliedPaletteRevision)
+                {
+                    renderer.SetPalette(menu.Settings.Palette);
+                    appliedPaletteRevision = menu.PaletteRevision;
+                }
+
                 if (menu.IsOpen)
                 {
                     camera.ReleaseMouse();
                 }
                 else
                 {
-                    camera.RotationSensitivityMultiplier = menu.CameraSensitivity;
 
                     if (IsKeyPressed(KeyboardKey.F1))
                     {
                         cutawayMode = true;
                         menu.CutawayEnabled = true;
+                        menu.SaveSettings();
                         focusName = "LOWER TUNNEL";
                         FocusLowerTunnel(camera, terrain);
                     }
@@ -123,6 +146,7 @@ public static class RaylibTerrainViewer
                     {
                         cutawayMode = true;
                         menu.CutawayEnabled = true;
+                        menu.SaveSettings();
                         focusName = "UPPER PASSAGE";
                         FocusUpperPassage(camera, terrain);
                     }
@@ -131,6 +155,7 @@ public static class RaylibTerrainViewer
                     {
                         cutawayMode = !cutawayMode;
                         menu.CutawayEnabled = cutawayMode;
+                        menu.SaveSettings();
 
                         if (cutawayMode)
                         {
@@ -173,16 +198,17 @@ public static class RaylibTerrainViewer
                     renderer.Synchronize(terrain);
 
                 BeginDrawing();
-                ClearBackground(new Color(0, 0, 0, 255));
+                ClearBackground(menu.Settings.Palette.Background.ToRaylibColor());
 
                 renderer.Draw(
                     terrain,
                     camera.Camera,
                     GetScreenWidth(),
-                    GetScreenHeight());
+                    GetScreenHeight(),
+                    menu.Settings.RenderDistanceMeters);
 
                 if (menu.ShowHud)
-                    DrawHud(terrain, renderer, cutawayMode, focusName, menu.ShowControls);
+                    DrawHud(terrain, renderer, cutawayMode, focusName, menu.Settings);
 
                 menu.Draw();
                 EndDrawing();
@@ -228,7 +254,7 @@ public static class RaylibTerrainViewer
         RaylibTerrainRenderer renderer,
         bool cutawayMode,
         string focusName,
-        bool showControls)
+        RaylibViewerSettings settings)
     {
         DrawRectangle(12, 12, 640, 244, new Color(0, 0, 0, 235));
 
@@ -240,35 +266,38 @@ public static class RaylibTerrainViewer
             22,
             18,
             Color.RayWhite);
-        DrawText(
-            $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
-            24,
-            50,
-            17,
-            Color.RayWhite);
+        if (settings.ShowPerformanceStats)
+        {
+            DrawText(
+                $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
+                24,
+                50,
+                17,
+                Color.RayWhite);
 
-        DrawText(
-            $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
-            24,
-            76,
-            14,
-            Color.LightGray);
+            DrawText(
+                $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
+                24,
+                76,
+                14,
+                Color.LightGray);
 
-        DrawText(
-            $"VISIBLE GPU BATCHES {renderer.VisibleRegionsLastFrame}/{terrain.StorageRegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
-            24,
-            98,
-            14,
-            Color.LightGray);
+            DrawText(
+                $"VISIBLE GPU BATCHES {renderer.VisibleRegionsLastFrame}/{terrain.StorageRegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
+                24,
+                98,
+                14,
+                Color.LightGray);
 
-        DrawText(
-            $"GPU MESH REBUILDS {renderer.RebuiltRegions}",
-            24,
-            120,
-            14,
-            Color.LightGray);
+            DrawText(
+                $"GPU MESH REBUILDS {renderer.RebuiltRegions}",
+                24,
+                120,
+                14,
+                Color.LightGray);
+        }
 
-        if (showControls)
+        if (settings.ShowControls)
         {
             DrawText(
                 "F1 lower tunnel | F2 upper passage | C surface | T top-down view",
@@ -278,21 +307,24 @@ public static class RaylibTerrainViewer
                 Color.RayWhite);
         }
 
-        DrawText(
-            "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
-            24,
-            170,
-            14,
-            Color.LightGray);
+        if (settings.ShowCaveCoordinates)
+        {
+            DrawText(
+                "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
+                24,
+                170,
+                14,
+                Color.LightGray);
 
-        DrawText(
-            "UPPER: near X 1152 | Z 1136-1168 | HEIGHT 25-33 m",
-            24,
-            192,
-            14,
-            Color.LightGray);
+            DrawText(
+                "UPPER: near X 1152 | Z 1136-1168 | HEIGHT 25-33 m",
+                24,
+                192,
+                14,
+                Color.LightGray);
+        }
 
-        if (showControls)
+        if (settings.ShowControls)
         {
             DrawText(
                 "WASD move | RMB drag tilt/orbit | MMB pan | Wheel zoom | Q/E height | PgUp/PgDn 1m | Shift+Wheel",
