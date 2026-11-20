@@ -239,17 +239,25 @@ public sealed class TerrainRenderSnapshot
 
         if (UsesVoxelCells)
         {
-            // Simple columns are copied directly into the caller's stack buffer.
-            // This avoids allocating a TileRange[] for every ordinary 1x1 m cell.
-            if (_worldMap.Blocks.Volumes.TryGetSimpleColumn(
-                    regionX, regionY,
-                    out ushort topLayer,
-                    out ushort simpleMaterial))
+            // Common simple columns use the already-refreshed render snapshot.
+            // This avoids repeated voxel-store dictionary lookups while building
+            // adjacent faces for a visible mesh chunk.
+            if (_worldMap.IsColumnSimpleFill(regionX, regionY))
             {
                 if (destination.Length < 2)
                     throw new ArgumentException(
                         "Destination must hold at least two voxel ranges.",
                         nameof(destination));
+
+                int index = regionX + regionY * RegionsX;
+                int topLayer = Math.Clamp(
+                    (int)MathF.Round(
+                        _heightsMeters[index] /
+                            (WorldMap.LayerHeightUnits * 0.1f),
+                        MidpointRounding.AwayFromZero),
+                    0,
+                    LayerCount);
+                ushort simpleMaterial = _materialIds[index];
 
                 if (topLayer == 0 || simpleMaterial == 0)
                 {
@@ -266,7 +274,7 @@ public sealed class TerrainRenderSnapshot
                 destination[0] = new TileRange
                 {
                     StartZ = 0,
-                    EndZ = topLayer,
+                    EndZ = checked((ushort)topLayer),
                     MaterialId = simpleMaterial,
                     State = WorldMap.StateSolid
                 };
@@ -276,7 +284,7 @@ public sealed class TerrainRenderSnapshot
 
                 destination[1] = new TileRange
                 {
-                    StartZ = topLayer,
+                    StartZ = checked((ushort)topLayer),
                     EndZ = checked((ushort)LayerCount),
                     MaterialId = 0,
                     State = WorldMap.StateEmpty
