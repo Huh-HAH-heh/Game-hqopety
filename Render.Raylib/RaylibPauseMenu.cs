@@ -105,8 +105,12 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private static readonly int[] FontCodepoints = BuildFontCodepoints();
 
-    private readonly Font _font;
-    private readonly bool _ownsFont;
+    private readonly Font _smallFont;
+    private readonly Font _mediumFont;
+    private readonly Font _largeFont;
+    private readonly bool _ownsSmallFont;
+    private readonly bool _ownsMediumFont;
+    private readonly bool _ownsLargeFont;
 
     private MenuPage _page;
     private SettingsSection? _expandedSection = SettingsSection.Camera;
@@ -122,6 +126,7 @@ internal sealed class RaylibPauseMenu : IDisposable
     private bool _paletteSliderDirty;
 
     public RaylibViewerSettings Settings { get; }
+    public Font HudFont => _mediumFont;
     public bool IsOpen => _page != MenuPage.Closed;
     public bool ShowHud => Settings.ShowHud;
     public bool ShowControls => Settings.ShowControls;
@@ -140,8 +145,12 @@ internal sealed class RaylibPauseMenu : IDisposable
         Settings = settings ?? throw new ArgumentNullException(nameof(settings));
         Settings.Normalize();
 
-        _font = LoadMenuFont(out bool ownsFont);
-        _ownsFont = ownsFont;
+        _smallFont = LoadMenuFont(14, out bool ownsSmallFont);
+        _mediumFont = LoadMenuFont(20, out bool ownsMediumFont);
+        _largeFont = LoadMenuFont(24, out bool ownsLargeFont);
+        _ownsSmallFont = ownsSmallFont;
+        _ownsMediumFont = ownsMediumFont;
+        _ownsLargeFont = ownsLargeFont;
 
         SetTargetFPS(Settings.TargetFps);
     }
@@ -828,7 +837,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         DrawSliderRow(panel, mouse, SliderId.CameraZoom, y + 304f,
             "СКОРОСТЬ МАСШТАБИРОВАНИЯ", Settings.CameraZoomSpeed, "×");
         DrawSliderRow(panel, mouse, SliderId.CameraVertical, y + 382f,
-            "СКОРОСТЬ ИЗМЕНЕНИЯ ВЫСОТЫ", Settings.CameraVerticalSpeed, "×");
+            "СКОРОСТЬ СМЕНЫ СРЕЗА", Settings.CameraVerticalSpeed, "×");
         DrawOptionRow(panel, mouse, y + 440f, "ТОЧКА ОБЗОРА",
             "СБРОСИТЬ КАМЕРУ", 604f);
         DrawHalfActionPair(panel, mouse, y + 492f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
@@ -849,7 +858,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         DrawOptionRow(panel, mouse, y + 210f, "ВИД ПОВЕРХНОСТИ",
             "СБРОСИТЬ СРЕЗ И КАМЕРУ", 298f);
         DrawLabel(
-            "Срез двигается вместе с высотой фокуса камеры: Q/E и PgUp/PgDn.",
+            $"Срез: {Settings.CutawayHeightMeters:0.0} м. Q/E — плавно, PgUp/PgDn — 0.1 м; Shift+колесо — 0.1 м.",
             panel.X + 304f,
             y + 300f,
             12f,
@@ -1104,19 +1113,31 @@ internal sealed class RaylibPauseMenu : IDisposable
         DrawButtonAt(bounds, mouse, "НАЗАД");
     }
 
+    private Font GetFontForSize(float fontSize)
+    {
+        if (fontSize <= 14f)
+            return _smallFont;
+        if (fontSize <= 19f)
+            return _mediumFont;
+        return _largeFont;
+    }
+
     private void DrawLabel(string text, float x, float y, float fontSize, Color color)
     {
-        DrawTextEx(_font, text, new Vector2(x, y), fontSize, 1f, color);
+        Font font = GetFontForSize(fontSize);
+        Vector2 position = new(MathF.Round(x), MathF.Round(y));
+        DrawTextEx(font, text, position, fontSize, 0.5f, color);
     }
 
     private void DrawCenteredLabel(string text, Rectangle bounds, float fontSize, Color color)
     {
-        Vector2 measured = MeasureTextEx(_font, text, fontSize, 1f);
+        Font font = GetFontForSize(fontSize);
+        Vector2 measured = MeasureTextEx(font, text, fontSize, 0.5f);
         Vector2 position = new(
-            bounds.X + (bounds.Width - measured.X) * 0.5f,
-            bounds.Y + (bounds.Height - measured.Y) * 0.5f - 1f);
+            MathF.Round(bounds.X + (bounds.Width - measured.X) * 0.5f),
+            MathF.Round(bounds.Y + (bounds.Height - measured.Y) * 0.5f - 1f));
 
-        DrawTextEx(_font, text, position, fontSize, 1f, color);
+        DrawTextEx(font, text, position, fontSize, 0.5f, color);
     }
 
     private Rectangle GetPanelBounds()
@@ -1320,7 +1341,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         return codepoints.ToArray();
     }
 
-    private static Font LoadMenuFont(out bool ownsFont)
+    private static Font LoadMenuFont(int fontSize, out bool ownsFont)
     {
         string fontsFolder = Environment.GetFolderPath(
             Environment.SpecialFolder.Fonts);
@@ -1336,7 +1357,7 @@ internal sealed class RaylibPauseMenu : IDisposable
             {
                 Font font = LoadFontEx(
                     path,
-                    48,
+                    fontSize,
                     FontCodepoints,
                     FontCodepoints.Length);
 
@@ -1356,7 +1377,11 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     public void Dispose()
     {
-        if (_ownsFont)
-            UnloadFont(_font);
+        if (_ownsSmallFont)
+            UnloadFont(_smallFont);
+        if (_ownsMediumFont)
+            UnloadFont(_mediumFont);
+        if (_ownsLargeFont)
+            UnloadFont(_largeFont);
     }
 }
