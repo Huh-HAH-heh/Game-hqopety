@@ -15,14 +15,14 @@ internal sealed class OrbitCameraController
     private const float RotationSmoothTime = 0.055f;
     private const float MovementSmoothTime = 0.075f;
     private const float ZoomSmoothTime = 0.095f;
-    private const float MinimumPitch = 0.50f;
-    private const float TopDownPitch = 1.54f;
+    private const float MinimumPitch = 0.08f;
+    private const float TopDownPitch = 1.565f;
     private const float MaximumPitch = TopDownPitch;
+    private const float VerticalTargetLimitMeters = 500f;
     private const float FitMargin = 1.08f;
 
     private readonly float _minimumDistance;
     private readonly float _maximumDistance;
-    private readonly float _maximumTargetHeightMeters;
     private readonly Vector3 _topDownTarget;
 
     private Vector3 _target;
@@ -60,11 +60,10 @@ internal sealed class OrbitCameraController
             terrain.WorldWidth,
             terrain.WorldDepth);
 
-        _maximumTargetHeightMeters = terrain.VerticalWorldExtentMeters;
         _topDownTarget = new Vector3(
             terrain.WorldWidth * 0.5f,
             MathF.Min(
-                _maximumTargetHeightMeters,
+                terrain.VerticalWorldExtentMeters,
                 MathF.Max(1f, terrain.MaximumHeightMeters * 0.12f)),
             terrain.WorldDepth * 0.5f);
 
@@ -241,8 +240,8 @@ internal sealed class OrbitCameraController
         {
             _desiredTarget.Y = Math.Clamp(
                 _desiredTarget.Y + wheel,
-                0f,
-                _maximumTargetHeightMeters);
+                -VerticalTargetLimitMeters,
+                VerticalTargetLimitMeters);
             return;
         }
 
@@ -344,13 +343,15 @@ internal sealed class OrbitCameraController
             ResetTopDownView();
 
         if (IsKeyPressed(KeyboardKey.PageUp))
-            _desiredTarget.Y = Math.Min(
-                _maximumTargetHeightMeters,
-                _desiredTarget.Y + 1f);
+            _desiredTarget.Y = Math.Clamp(
+                _desiredTarget.Y + 1f,
+                -VerticalTargetLimitMeters,
+                VerticalTargetLimitMeters);
         if (IsKeyPressed(KeyboardKey.PageDown))
-            _desiredTarget.Y = Math.Max(
-                0f,
-                _desiredTarget.Y - 1f);
+            _desiredTarget.Y = Math.Clamp(
+                _desiredTarget.Y - 1f,
+                -VerticalTargetLimitMeters,
+                VerticalTargetLimitMeters);
 
         float moveX = 0f;
         float moveZ = 0f;
@@ -397,8 +398,8 @@ internal sealed class OrbitCameraController
             float speed = Math.Clamp(_desiredDistance * 0.018f, 1.5f, 7f);
             _desiredTarget.Y = Math.Clamp(
                 _desiredTarget.Y + verticalInput * speed * deltaTime,
-                0f,
-                _maximumTargetHeightMeters);
+                -VerticalTargetLimitMeters,
+                VerticalTargetLimitMeters);
         }
     }
 
@@ -470,8 +471,8 @@ internal sealed class OrbitCameraController
     {
         target.Y = Math.Clamp(
             target.Y,
-            0f,
-            _maximumTargetHeightMeters);
+            -VerticalTargetLimitMeters,
+            VerticalTargetLimitMeters);
         _target = target;
         _desiredTarget = target;
 

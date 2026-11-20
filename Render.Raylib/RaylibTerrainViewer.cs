@@ -29,6 +29,7 @@ public static class RaylibTerrainViewer
         OrbitCameraController camera = new(terrain);
         RaylibTerrainRenderer? renderer = null;
         bool cutawayMode = false;
+        string focusName = "SURFACE";
 
         try
         {
@@ -43,12 +44,26 @@ public static class RaylibTerrainViewer
                 $"maximum height: {terrain.MaximumHeightMeters:0.0} m.");
 
             Console.WriteLine(
-                "[Raylib] Static cave demo: 152m winding through-tunnel with two portals, " +
-                "sealed upper passage, chambers and rising connector. Press C for cutaway.");
+                "[Raylib] Cave locations: lower tunnel X 1134-1286, Z 1127-1159, H 14-20m; " +
+                "upper passage X 1200-1220, Z 1127-1159, H 26-34m. F1/F2 focus, C surface.");
 
             while (!WindowShouldClose())
             {
                 float deltaTime = Math.Clamp(GetFrameTime(), 0f, 0.05f);
+
+                if (IsKeyPressed(KeyboardKey.F1))
+                {
+                    cutawayMode = true;
+                    focusName = "LOWER TUNNEL";
+                    FocusLowerTunnel(camera, terrain);
+                }
+
+                if (IsKeyPressed(KeyboardKey.F2))
+                {
+                    cutawayMode = true;
+                    focusName = "UPPER PASSAGE";
+                    FocusUpperPassage(camera, terrain);
+                }
 
                 if (IsKeyPressed(KeyboardKey.C))
                 {
@@ -56,16 +71,12 @@ public static class RaylibTerrainViewer
 
                     if (cutawayMode)
                     {
-                        camera.FocusOn(
-                            new System.Numerics.Vector3(
-                                terrain.WorldWidth * 0.5f + 58f,
-                                16f,
-                                terrain.WorldDepth * 0.5f - 9f),
-                            55f,
-                            pitchRadians: 0.68f);
+                        focusName = "LOWER TUNNEL";
+                        FocusLowerTunnel(camera, terrain);
                     }
                     else
                     {
+                        focusName = "SURFACE";
                         terrain.DisableCutaway();
                         renderer.Synchronize(terrain);
                         camera.ResetTopDownView();
@@ -106,7 +117,7 @@ public static class RaylibTerrainViewer
                     GetScreenWidth(),
                     GetScreenHeight());
 
-                DrawHud(terrain, renderer, cutawayMode);
+                DrawHud(terrain, renderer, cutawayMode, focusName);
                 EndDrawing();
             }
         }
@@ -118,16 +129,43 @@ public static class RaylibTerrainViewer
         }
     }
 
+    private static void FocusLowerTunnel(
+        OrbitCameraController camera,
+        TerrainRenderSnapshot terrain)
+    {
+        camera.FocusOn(
+            new System.Numerics.Vector3(
+                terrain.WorldWidth * 0.5f + 58f,
+                22f,
+                terrain.WorldDepth * 0.5f - 9f),
+            42f,
+            pitchRadians: 0.82f);
+    }
+
+    private static void FocusUpperPassage(
+        OrbitCameraController camera,
+        TerrainRenderSnapshot terrain)
+    {
+        camera.FocusOn(
+            new System.Numerics.Vector3(
+                terrain.WorldWidth * 0.5f + 58f,
+                35f,
+                terrain.WorldDepth * 0.5f - 9f),
+            34f,
+            pitchRadians: 0.82f);
+    }
+
     private static void DrawHud(
         TerrainRenderSnapshot terrain,
         RaylibTerrainRenderer renderer,
-        bool cutawayMode)
+        bool cutawayMode,
+        string focusName)
     {
-        DrawRectangle(12, 12, 448, 178, new Color(0, 0, 0, 235));
+        DrawRectangle(12, 12, 640, 244, new Color(0, 0, 0, 235));
 
         DrawText(
             cutawayMode
-                ? $"RIMCLONE / CUTAWAY @ {terrain.CutawayHeightMeters:0.0} M"
+                ? $"RIMCLONE / {focusName} / CUT @ {terrain.CutawayHeightMeters:0.0} M"
                 : "RIMCLONE / TOP-DOWN TERRAIN",
             24,
             22,
@@ -162,20 +200,30 @@ public static class RaylibTerrainViewer
             Color.LightGray);
 
         DrawText(
-            cutawayMode
-                ? "C surface view | Q/E cut | PgUp/PgDn +/-1m | Shift+Wheel +/-1m | RMB orbit"
-                : "C visual cut at focus height | Q/E or PgUp/PgDn adjust | Shift+Wheel cut | T top view",
+            "F1 lower tunnel | F2 upper passage | C surface | T top-down view",
             24,
             146,
             14,
             Color.RayWhite);
 
         DrawText(
-            cutawayMode
-                ? "WASD move | RMB orbit | MMB pan | Wheel zoom | Shift+Wheel slice | Q/E +/-height | PgUp/PgDn +/-1m | C surface | Esc exit"
-                : "WASD move | RMB orbit | MMB pan | Wheel zoom | Shift+Wheel slice | Q/E height | PgUp/PgDn +/-1m | C cut | T fit | Esc exit",
+            "LOWER: X 1134-1286 | Z 1127-1159 | HEIGHT 14-20 m",
             24,
-            196,
+            170,
+            14,
+            Color.LightGray);
+
+        DrawText(
+            "UPPER: X 1200-1220 | Z 1127-1159 | HEIGHT 26-34 m",
+            24,
+            192,
+            14,
+            Color.LightGray);
+
+        DrawText(
+            "WASD move | RMB drag tilt/orbit | MMB pan | Wheel zoom | Q/E height | PgUp/PgDn 1m | Shift+Wheel",
+            24,
+            218,
             14,
             Color.RayWhite);
     }
