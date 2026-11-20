@@ -15,10 +15,9 @@ public static class RaylibTerrainViewer
     {
         ArgumentNullException.ThrowIfNull(worldMap);
 
-        TerrainRenderSnapshot terrain =
-            TerrainRenderSnapshot.Create(worldMap);
-
         RaylibViewerSettings settings = RaylibViewerSettings.Load();
+        TerrainRenderSnapshot terrain =
+            TerrainRenderSnapshot.Create(worldMap, settings.TerrainMode);
 
         ConfigFlags windowFlags = ConfigFlags.ResizableWindow;
         if (settings.VSync)
@@ -55,7 +54,10 @@ public static class RaylibTerrainViewer
 
         try
         {
-            renderer = new RaylibTerrainRenderer(terrain, settings.Palette);
+            renderer = new RaylibTerrainRenderer(
+                terrain,
+                settings.Palette,
+                settings.TerrainMode);
             int appliedPaletteRevision = menu.PaletteRevision;
 
             Console.WriteLine(
@@ -114,6 +116,29 @@ public static class RaylibTerrainViewer
                         menu.SaveSettings();
                         focusName = "UPPER PASSAGE";
                         FocusUpperPassage(camera, terrain);
+                        break;
+
+                    case RaylibMenuAction.RebuildTerrainMode:
+                        renderer.Dispose();
+                        terrain = TerrainRenderSnapshot.Create(
+                            worldMap,
+                            menu.Settings.TerrainMode);
+                        if (cutawayMode)
+                        {
+                            int currentCutLayer = Math.Clamp(
+                                (int)MathF.Round(
+                                    menu.Settings.CutawayHeightMeters /
+                                    (WorldMap.LayerHeightUnits * 0.1f)),
+                                0,
+                                worldMap.LayerCount - 1);
+                            terrain.SetCutawayLayer(currentCutLayer);
+                        }
+
+                        renderer = new RaylibTerrainRenderer(
+                            terrain,
+                            menu.Settings.Palette,
+                            menu.Settings.TerrainMode);
+                        appliedPaletteRevision = menu.PaletteRevision;
                         break;
 
                     case RaylibMenuAction.ToggleCutaway:
@@ -322,8 +347,10 @@ public static class RaylibTerrainViewer
         DrawHudText(
             font,
             cutawayMode
-                ? $"RIMCLONE / {focusName} / CUT @ {terrain.CutawayHeightMeters:0.0} M"
-                : "RIMCLONE / TOP-DOWN TERRAIN",
+                ? $"RIMCLONE / {settings.TerrainMode} / {focusName} / CUT @ {terrain.CutawayHeightMeters:0.0} M"
+                : settings.TerrainMode == TerrainRenderMode.Voxel
+                    ? "RIMCLONE / VOXEL TERRAIN"
+                    : "RIMCLONE / HEIGHTMAP FALLBACK",
             24, 22, 18f, Color.RayWhite);
 
         if (settings.ShowPerformanceStats)
