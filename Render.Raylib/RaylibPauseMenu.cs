@@ -161,6 +161,12 @@ internal sealed class RaylibPauseMenu : IDisposable
             _activeSlider = SliderId.None;
             _draggingMain = false;
             _draggingSettings = false;
+            if (_paletteSliderDirty)
+            {
+                PaletteRevision++;
+                _paletteSliderDirty = false;
+            }
+
             SaveSettings();
             return RaylibMenuAction.None;
         }
