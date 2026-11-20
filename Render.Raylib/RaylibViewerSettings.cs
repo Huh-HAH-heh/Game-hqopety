@@ -157,7 +157,6 @@ internal sealed class RaylibViewerSettings
     public float CameraVerticalSpeed { get; set; } = 1f;
 
     public bool CutawayEnabled { get; set; }
-    public bool CutHatchingEnabled { get; set; } = true;
 
     public bool ShowHud { get; set; } = true;
     public bool ShowControls { get; set; } = true;
