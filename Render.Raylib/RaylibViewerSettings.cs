@@ -128,14 +128,14 @@ internal sealed class TerrainPalette
             (byte)Math.Clamp((int)MathF.Round(color.R * red), 0, 255),
             (byte)Math.Clamp((int)MathF.Round(color.G * green), 0, 255),
             (byte)Math.Clamp((int)MathF.Round(color.B * blue), 0, 255),
-            255);
+            (byte)255);
     }
 
     private static Color Lerp(Color a, Color b, float amount) => new(
         (byte)Math.Clamp((int)MathF.Round(a.R + (b.R - a.R) * amount), 0, 255),
         (byte)Math.Clamp((int)MathF.Round(a.G + (b.G - a.G) * amount), 0, 255),
         (byte)Math.Clamp((int)MathF.Round(a.B + (b.B - a.B) * amount), 0, 255),
-        255);
+        (byte)255);
 }
 
 internal sealed class RaylibViewerSettings
