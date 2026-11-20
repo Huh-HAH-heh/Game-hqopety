@@ -13,7 +13,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 {
     private const int MaximumCoarseMeshBuildsPerFrame = 6;
     private const int MaximumFineMeshBuildsPerFrame = 2;
-    private const int MaximumCutSurfaceBuildsPerFrame = 12;
+    private const int MaximumCutSurfaceBuildsPerFrame = 24;
     private const float FineLodEnterDistanceMeters = 220f;
     private const float FineLodExitDistanceMeters = 290f;
 
@@ -56,7 +56,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
         void main()
         {
-            if (uCutEnabled != 0 && fragWorldPosition.y >= uCutHeight - 0.0001)
+            if (uCutEnabled != 0 && fragWorldPosition.y > uCutHeight + 0.0001)
                 discard;
 
             float diffuse = max(
