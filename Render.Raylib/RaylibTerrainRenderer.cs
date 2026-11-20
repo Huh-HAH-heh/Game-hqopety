@@ -217,6 +217,27 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         ThrowIfDisposed();
 
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
+        Vector3 worldCenter = new(
+            terrain.WorldWidth * 0.5f,
+            terrain.VerticalWorldExtentMeters * 0.5f,
+            terrain.WorldDepth * 0.5f);
+        float worldRadius = 0.5f * MathF.Sqrt(
+            terrain.WorldWidth * terrain.WorldWidth +
+            terrain.WorldDepth * terrain.WorldDepth +
+            terrain.VerticalWorldExtentMeters * terrain.VerticalWorldExtentMeters);
+        float cameraToWorldCenter = Vector3.Distance(camera.Position, worldCenter);
+        float farClip = MathF.Max(
+            1000f,
+            MathF.Max(
+                maximumViewDistanceMeters + 100f,
+                cameraToWorldCenter + worldRadius + 100f));
+        float nearClip = Math.Clamp(cameraDistance * 0.01f, 0.05f, 8f);
+
+        // Raylib's default far clip is designed for small scenes. Our world is
+        // kilometres wide, so keep the camera's projection and depth culling
+        // planes large enough for the active landscape.
+        Rlgl.SetClipPlanes(nearClip, farClip);
+
         bool canUseCoarseLod = _mode == TerrainRenderMode.Voxel &&
             _coarseTerrain != null;
         if (canUseCoarseLod)
