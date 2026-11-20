@@ -54,6 +54,11 @@ splits unusually dense areas.
 The smooth world generator samples its surface at 1 m XY spacing, giving the base
 surface the same horizontal resolution as the voxel store.
 
+Use `WorldMap.SetVoxel`/`ClearVoxel` for one 1x1x0.1 m cell, and
+`SetVoxelVolume`/`ClearVoxelVolume` for arbitrary cuboids in native voxel
+coordinates. Both paths edit the same SparseVoxelStore used by generation and
+rendering; material ID zero is air.
+
 The renderer caches a 4x4 m voxel overview and exact 1x1 m detail meshes. It changes
 to detail within 220 m of the camera focus and returns to overview beyond 290 m.
 Only the display resolution changes: the source store always retains its 1x1x0.1 m

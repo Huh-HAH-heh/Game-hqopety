@@ -251,9 +251,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         int visibleDrawCalls = 0;
         int baseBuildsThisFrame = 0;
         int cutBuildsThisFrame = 0;
-        int maximumBaseBuilds = _usingCoarseLod && canUseCoarseLod
-            ? MaximumCoarseMeshBuildsPerFrame
-            : MaximumFineMeshBuildsPerFrame;
+        int maximumBaseBuilds = canUseCoarseLod && !_usingCoarseLod
+            ? MaximumFineMeshBuildsPerFrame
+            : MaximumCoarseMeshBuildsPerFrame;
         int cutLayer = drawTerrain.CutawayEnabled ? drawTerrain.CutawayLayer : -1;
 
         for (int i = 0; i < drawMeshes.Length; i++)

@@ -321,6 +321,16 @@ public sealed class WorldMap
             materialId: 0);
 
     /// <summary>
+    /// Writes one native terrain voxel: 1 m x 1 m x 0.1 m.
+    /// Material ID zero clears the cell to air.
+    /// </summary>
+    public void SetVoxel(int x, int y, int zLayer, ushort materialId) =>
+        SetMaterialId(x, y, zLayer, materialId);
+
+    public void ClearVoxel(int x, int y, int zLayer) =>
+        SetVoxel(x, y, zLayer, materialId: 0);
+
+    /// <summary>
     /// Places or clears one large cuboid in the sparse voxel store.
     /// X/Y and width/depth use one-metre map cells. Z and height use metres.
     /// Material ID zero cuts an empty cuboid. Partial edits refine only the
