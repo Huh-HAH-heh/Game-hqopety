@@ -78,6 +78,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     private readonly TerrainRenderSnapshot? _coarseTerrain;
     private bool _usingCoarseLod = true;
     private int _activeVoxelCellSize = 1;
+    private int _regionBuildCursor;
     private readonly Material _material;
     private readonly Shader _voxelShader;
     private readonly bool _hasVoxelShader;
@@ -250,8 +251,11 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             : MaximumCoarseMeshBuildsPerFrame;
         int cutLayer = drawTerrain.CutawayEnabled ? drawTerrain.CutawayLayer : -1;
 
-        for (int i = 0; i < drawMeshes.Length; i++)
+        int regionCount = drawMeshes.Length;
+        int scanStart = regionCount == 0 ? 0 : _regionBuildCursor % regionCount;
+        for (int offset = 0; offset < regionCount; offset++)
         {
+            int i = (scanStart + offset) % regionCount;
             RegionGpuMesh? region = drawMeshes[i];
             GetRegionBounds(drawTerrain, i, out Vector3 center, out float radius);
 
@@ -310,17 +314,23 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 if (region.CutSurfaceLayer != cutLayer &&
                     cutBuildsThisFrame < MaximumCutSurfaceBuildsPerFrame)
                 {
-                    ClearCutMeshes(region);
                     int regionX = i % terrain.StorageRegionsX;
                     int regionY = i / terrain.StorageRegionsX;
-
-                    region.CutMeshes = RegionMeshBuilder.BuildVoxelCutSurface(
+                    Mesh[] rebuiltCutMeshes = RegionMeshBuilder.BuildVoxelCutSurface(
                         drawTerrain,
                         regionX,
                         regionY,
                         cutLayer,
                         _palette);
+
+                    // Build first and swap second. Never unload a valid cut cap
+                    // before its replacement has finished being generated.
+                    Mesh[] previousCutMeshes = region.CutMeshes;
+                    region.CutMeshes = rebuiltCutMeshes;
                     region.CutSurfaceLayer = cutLayer;
+                    foreach (Mesh mesh in previousCutMeshes)
+                        UnloadMesh(mesh);
+
                     cutBuildsThisFrame++;
                     CutSurfaceRebuilds++;
                 }
@@ -373,6 +383,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         EndMode3D();
 
         Array.Clear(_visibleRegionMeshes, 0, visibleRegionCount);
+        if (regionCount > 0)
+            _regionBuildCursor = (scanStart + 1) % regionCount;
         DrawCallsLastFrame = visibleDrawCalls;
         VisibleRegionsLastFrame = visibleRegionCount;
     }
