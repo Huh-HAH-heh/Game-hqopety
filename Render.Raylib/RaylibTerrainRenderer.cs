@@ -57,6 +57,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     private readonly RegionGpuMesh?[] _visibleRegionMeshes;
     private readonly Material _material;
     private readonly Shader _voxelShader;
+    private readonly bool _hasVoxelShader;
     private readonly int _cutEnabledLocation;
     private readonly int _cutHeightLocation;
     private readonly TerrainRenderMode _mode;
@@ -81,24 +82,40 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         _regionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
         _visibleRegionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
 
-        _voxelShader = LoadShaderFromMemory(
-            VoxelVertexShader,
-            VoxelFragmentShader);
-        if (!IsShaderValid(_voxelShader))
-            throw new InvalidOperationException(
-                "The voxel cutaway shader could not be created by the active graphics backend.");
-
-        _cutEnabledLocation = GetShaderLocation(_voxelShader, "uCutEnabled");
-        _cutHeightLocation = GetShaderLocation(_voxelShader, "uCutHeight");
-        if (_cutEnabledLocation < 0 || _cutHeightLocation < 0)
+        Material material = LoadMaterialDefault();
+        if (_mode == TerrainRenderMode.Voxel)
         {
-            UnloadShader(_voxelShader);
-            throw new InvalidOperationException(
-                "The voxel cutaway shader is missing a required uniform.");
+            _voxelShader = LoadShaderFromMemory(
+                VoxelVertexShader,
+                VoxelFragmentShader);
+            if (!IsShaderValid(_voxelShader))
+            {
+                UnloadMaterial(material);
+                throw new InvalidOperationException(
+                    "The voxel cutaway shader could not be created by the active graphics backend.");
+            }
+
+            _cutEnabledLocation = GetShaderLocation(_voxelShader, "uCutEnabled");
+            _cutHeightLocation = GetShaderLocation(_voxelShader, "uCutHeight");
+            if (_cutEnabledLocation < 0 || _cutHeightLocation < 0)
+            {
+                UnloadShader(_voxelShader);
+                UnloadMaterial(material);
+                throw new InvalidOperationException(
+                    "The voxel cutaway shader is missing a required uniform.");
+            }
+
+            material.Shader = _voxelShader;
+            _hasVoxelShader = true;
+        }
+        else
+        {
+            _voxelShader = default;
+            _cutEnabledLocation = -1;
+            _cutHeightLocation = -1;
+            _hasVoxelShader = false;
         }
 
-        Material material = LoadMaterialDefault();
-        material.Shader = _voxelShader;
         _material = material;
 
         // Mesh creation is deliberately lazy. Only visible storage regions are
@@ -260,6 +277,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
     private void SetVoxelCutShader(bool enabled, float height)
     {
+        if (!_hasVoxelShader)
+            return;
+
         int cutEnabled = enabled ? 1 : 0;
         SetShaderValue(
             _voxelShader,
@@ -314,7 +334,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             region?.Dispose();
 
         UnloadMaterial(_material);
-        UnloadShader(_voxelShader);
+        if (_hasVoxelShader)
+            UnloadShader(_voxelShader);
         _disposed = true;
     }
 
