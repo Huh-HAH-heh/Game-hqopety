@@ -345,8 +345,6 @@ internal sealed class RaylibPauseMenu : IDisposable
         {
             Settings.CameraMode = (RaylibCameraMode)(((int)Settings.CameraMode + 1) % 3);
             SaveSettings();
-            if (Settings.CameraMode == RaylibCameraMode.TopDown)
-                return RaylibMenuAction.ResetCamera;
         }
         else if (HitSlider(mouse, panel, SliderId.CameraMove, 234f))
             BeginSlider(SliderId.CameraMove, mouse, panel);
@@ -451,8 +449,10 @@ internal sealed class RaylibPauseMenu : IDisposable
             SetTargetFPS(Settings.TargetFps);
             SaveSettings();
         }
-        else if (HitSlider(mouse, panel, SliderId.RenderDistance, 164f))
+        else if (HitSlider(mouse, panel, SliderId.RenderDistance, 234f))
             BeginSlider(SliderId.RenderDistance, mouse, panel);
+        else if (HitActionButton(mouse, panel, 414f))
+            return ResetAllSettings();
 
         return RaylibMenuAction.None;
     }
@@ -580,6 +580,43 @@ internal sealed class RaylibPauseMenu : IDisposable
         TerrainColorSlot.CutHatching => Settings.Palette.CutHatching,
         _ => Settings.Palette.Background
     };
+
+    private RaylibMenuAction ResetAllSettings()
+    {
+        if (IsWindowFullscreen())
+            ToggleFullscreen();
+
+        int monitor = GetCurrentMonitor();
+        Settings.WindowWidth = Math.Max(960, Math.Min(1600, GetMonitorWidth(monitor)));
+        Settings.WindowHeight = Math.Max(540, Math.Min(900, GetMonitorHeight(monitor)));
+        Settings.Fullscreen = false;
+        Settings.TargetFps = 144;
+        Settings.VSync = true;
+        Settings.Msaa4x = true;
+
+        Settings.CameraMode = RaylibCameraMode.Rts;
+        Settings.CameraMoveSpeed = 1f;
+        Settings.CameraRotationSpeed = 1f;
+        Settings.CameraPanSpeed = 1f;
+        Settings.CameraZoomSpeed = 1f;
+        Settings.CameraVerticalSpeed = 1f;
+
+        Settings.CutawayEnabled = false;
+        Settings.ShowHud = true;
+        Settings.ShowControls = true;
+        Settings.ShowPerformanceStats = true;
+        Settings.ShowCaveCoordinates = true;
+        Settings.RenderDistanceMeters = 8000f;
+        Settings.Palette = new TerrainPalette();
+
+        SetWindowSize(Settings.WindowWidth, Settings.WindowHeight);
+        SetTargetFPS(Settings.TargetFps);
+        _palettePreset = 0;
+        PaletteRevision++;
+        SaveSettings();
+
+        return RaylibMenuAction.ResetCamera;
+    }
 
     private void ToggleFullscreenMode()
     {
@@ -920,6 +957,8 @@ internal sealed class RaylibPauseMenu : IDisposable
             y + 188f,
             12f,
             new Color(170, 184, 201));
+        DrawOptionRow(panel, mouse, y + 250f, "ПРОФИЛЬ НАСТРОЕК",
+            "СБРОСИТЬ ВСЁ", 414f);
     }
 
     private void DrawOptionRow(
