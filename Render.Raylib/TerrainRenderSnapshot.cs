@@ -25,6 +25,7 @@ public sealed class TerrainRenderSnapshot
     public int RegionsX { get; }
     public int RegionsY { get; }
     public int RegionSize { get; }
+    public bool IsVoxelMode { get; }
     public bool UsesVoxelCells => RegionSize == VoxelRenderRegionSizeInTiles;
     public int RegionCount => _heightsMeters.Length;
 
@@ -48,13 +49,17 @@ public sealed class TerrainRenderSnapshot
 
     internal long[] SourceRegionVersions => _sourceRegionVersions;
 
-    private TerrainRenderSnapshot(WorldMap worldMap, int renderRegionSizeInTiles)
+    private TerrainRenderSnapshot(
+        WorldMap worldMap,
+        int renderRegionSizeInTiles,
+        bool voxelMode)
     {
         if (renderRegionSizeInTiles <= 0)
             throw new ArgumentOutOfRangeException(nameof(renderRegionSizeInTiles));
 
         _worldMap = worldMap;
         RegionSize = renderRegionSizeInTiles;
+        IsVoxelMode = voxelMode;
         StorageRegionsX = worldMap.RegionsX;
         StorageRegionsY = worldMap.RegionsY;
         StorageRegionSize = TerrainRegion.TilesPerSide;
@@ -94,7 +99,34 @@ public sealed class TerrainRenderSnapshot
         int renderRegionSize = mode == TerrainRenderMode.Voxel
             ? VoxelRenderRegionSizeInTiles
             : HeightmapRenderRegionSizeInTiles;
-        return new TerrainRenderSnapshot(worldMap, renderRegionSize);
+        return new TerrainRenderSnapshot(
+            worldMap,
+            renderRegionSize,
+            voxelMode: mode == TerrainRenderMode.Voxel);
+    }
+
+    /// <summary>
+    /// Creates a coarser presentation snapshot from the same voxel world.
+    /// Each coarse cell samples one real source column and retains its full
+    /// vertical solid/air intervals when that source column is complex.
+    /// The underlying WorldMap is never resampled or modified.
+    /// </summary>
+    internal static TerrainRenderSnapshot CreateVoxelLod(
+        WorldMap worldMap,
+        int cellSizeInMeters = 4)
+    {
+        ArgumentNullException.ThrowIfNull(worldMap);
+        if (cellSizeInMeters <= VoxelRenderRegionSizeInTiles ||
+            cellSizeInMeters > TerrainRegion.TilesPerSide ||
+            TerrainRegion.TilesPerSide % cellSizeInMeters != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cellSizeInMeters));
+        }
+
+        return new TerrainRenderSnapshot(
+            worldMap,
+            cellSizeInMeters,
+            voxelMode: true);
     }
 
     /// <summary>
@@ -229,8 +261,9 @@ public sealed class TerrainRenderSnapshot
             return complexRanges.Length;
         }
 
-        if (UsesVoxelCells)
+        if (IsVoxelMode && UsesVoxelCells)
         {
+            // Full-resolution voxel mode resolves exact 1x1 m columns lazily.
             // Common simple columns use the already-refreshed render snapshot.
             // This avoids repeated voxel-store dictionary lookups while building
             // adjacent faces for a visible mesh chunk.

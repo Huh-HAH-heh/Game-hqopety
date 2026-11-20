@@ -167,7 +167,7 @@ internal static class RegionMeshBuilder
         int cutLayer,
         TerrainPalette palette)
     {
-        if (!terrain.UsesVoxelCells ||
+        if (!terrain.IsVoxelMode ||
             cutLayer < 0 ||
             cutLayer >= terrain.LayerCount)
         {
@@ -264,7 +264,8 @@ internal static class RegionMeshBuilder
                         z0,
                         height,
                         materialId,
-                        palette.GetHatchingColor());
+                        palette.GetHatchingColor(),
+                        terrain.RegionSize);
                 }
             }
         }
@@ -289,12 +290,13 @@ internal static class RegionMeshBuilder
         float z0,
         float height,
         ushort materialId,
-        Color color)
+        Color color,
+        float cellSize)
     {
-        const float halfLength = 0.24f;
-        const float halfWidth = 0.025f;
-        float centerX = x0 + 0.5f;
-        float centerZ = z0 + 0.5f;
+        float halfLength = cellSize * 0.24f;
+        float halfWidth = cellSize * 0.025f;
+        float centerX = x0 + cellSize * 0.5f;
+        float centerZ = z0 + cellSize * 0.5f;
 
         Vector2 start;
         Vector2 end;
