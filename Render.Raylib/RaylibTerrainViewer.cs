@@ -29,13 +29,23 @@ public static class RaylibTerrainViewer
         if (settings.Msaa4x)
             windowFlags |= ConfigFlags.Msaa4xHint;
 
-        int monitorWidth = Math.Max(960, GetMonitorWidth(0));
-        int monitorHeight = Math.Max(540, GetMonitorHeight(0));
+        SetConfigFlags(windowFlags);
+        InitWindow(
+            settings.WindowWidth,
+            settings.WindowHeight,
+            "RimClone | Raylib Terrain Viewer");
+
+        // Monitor queries require an initialized window/graphics context.
+        int monitor = Math.Max(0, GetCurrentMonitor());
+        int monitorWidth = Math.Max(960, GetMonitorWidth(monitor));
+        int monitorHeight = Math.Max(540, GetMonitorHeight(monitor));
 
         if (settings.Fullscreen)
         {
             settings.WindowWidth = monitorWidth;
             settings.WindowHeight = monitorHeight;
+            SetWindowSize(monitorWidth, monitorHeight);
+            ToggleFullscreen();
         }
         else
         {
@@ -43,13 +53,13 @@ public static class RaylibTerrainViewer
                 settings.WindowWidth, 960, Math.Max(960, monitorWidth - 32));
             settings.WindowHeight = Math.Clamp(
                 settings.WindowHeight, 540, Math.Max(540, monitorHeight - 64));
+            SetWindowSize(settings.WindowWidth, settings.WindowHeight);
+            SetWindowMinSize(
+                Math.Min(960, settings.WindowWidth),
+                Math.Min(540, settings.WindowHeight));
         }
 
-        SetConfigFlags(windowFlags);
-        InitWindow(settings.WindowWidth, settings.WindowHeight, "RimClone | Raylib Terrain Viewer");
-        SetWindowMinSize(960, 540);
-        if (settings.Fullscreen)
-            ToggleFullscreen();
+        settings.Save();
 
         SetTargetFPS(settings.TargetFps);
         SetExitKey(KeyboardKey.Null);
