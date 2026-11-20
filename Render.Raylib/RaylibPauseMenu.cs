@@ -353,9 +353,9 @@ internal sealed class RaylibPauseMenu : IDisposable
             BeginSlider(SliderId.CameraVertical, mouse, panel);
         else if (HitActionButton(mouse, panel, 624f))
             return RaylibMenuAction.ResetCamera;
-        else if (HitHalfActionButton(mouse, panel, 684f, left: true))
+        else if (HitHalfActionButton(mouse, panel, 650f, left: true))
             return RaylibMenuAction.FocusLowerTunnel;
-        else if (HitHalfActionButton(mouse, panel, 684f, left: false))
+        else if (HitHalfActionButton(mouse, panel, 650f, left: false))
             return RaylibMenuAction.FocusUpperPassage;
 
         SaveSettings();
@@ -762,7 +762,7 @@ internal sealed class RaylibPauseMenu : IDisposable
             "СБРОСИТЬ КАМЕРУ", 560f);
         DrawLabel("БЫСТРОЕ ПЕРЕМЕЩЕНИЕ", panel.X + 304f, y + 530f, 14f,
             new Color(218, 226, 236));
-        DrawHalfActionPair(panel, mouse, y + 520f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
+        DrawHalfActionPair(panel, mouse, y + 486f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
     }
 
     private void DrawTerrainSettings(Rectangle panel, Vector2 mouse)
@@ -774,8 +774,8 @@ internal sealed class RaylibPauseMenu : IDisposable
         DrawOptionRow(panel, mouse, y + 70f, "ШТРИХОВКА ГЕОЛОГИИ",
             Settings.Palette.ShowCutHatching ? "ВКЛ" : "ВЫКЛ", 158f,
             Settings.Palette.ShowCutHatching);
-        DrawOptionRow(panel, mouse, y + 140f, "ФОКУСИРОВКА",
-            "ВЫБРАТЬ ПРОХОД", 304f);
+        DrawLabel("ФОКУСИРОВКА", panel.X + 304f, y + 150f, 14f,
+            new Color(218, 226, 236));
         DrawHalfActionPair(panel, mouse, y + 140f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
         DrawOptionRow(panel, mouse, y + 210f, "ВИД ПОВЕРХНОСТИ",
             "СБРОСИТЬ СРЕЗ И КАМЕРУ", 298f);
@@ -1114,10 +1114,11 @@ internal sealed class RaylibPauseMenu : IDisposable
         float offsetY,
         bool left)
     {
-        float x = left
-            ? panel.X + 304f
-            : panel.X + panel.Width * 0.5f + 8f;
-        return new Rectangle(x, panel.Y + offsetY, (panel.Width - 350f) * 0.5f, 42f);
+        float contentX = panel.X + 304f;
+        float contentWidth = panel.Width - 344f;
+        float halfWidth = (contentWidth - 12f) * 0.5f;
+        float x = contentX + (left ? 0f : halfWidth + 12f);
+        return new Rectangle(x, panel.Y + offsetY, halfWidth, 42f);
     }
 
     private static bool HitHalfActionButton(
@@ -1230,15 +1231,7 @@ internal sealed class RaylibPauseMenu : IDisposable
     private static float Lerp(float a, float b, float amount) =>
         a + (b - a) * amount;
 
-    private void DrawDisplaySettingsDummy()
-    {
-    }
-
-    private void DrawButtonDummy()
-    {
-    }
-
-    private static int[] BuildFontCodepoints()
+remove dummy methods    private static int[] BuildFontCodepoints()
     {
         List<int> codepoints = new();
 
