@@ -84,17 +84,14 @@ internal sealed class RaylibPauseMenu : IDisposable
         "Окно, разрешение и качество сглаживания",
         "Режим обзора и скорость перемещения",
         "Тоннели, срезы и геологическая штриховка",
-        "Палитра поверхности, скал и подземных слоёв",
+        "Единый цвет поверхности и дешёвый направленный свет",
         "Информационные панели и подсказки",
         "Частота кадров и дистанция отрисовки"
     };
 
     private static readonly string[] ColorNames =
     {
-        "Низины",
-        "Возвышенности",
-        "Обнажённые скалы",
-        "Поверхность среза",
+        "Единый цвет рельефа",
         "Геологическая штриховка",
         "Фон окружения"
     };
@@ -422,7 +419,7 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private RaylibMenuAction HandleEnvironmentClick(Vector2 mouse, Rectangle panel)
     {
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < ColorNames.Length; i++)
         {
             if (!CheckCollisionPointRec(mouse, GetColorSlotBounds(panel, i)))
                 continue;
@@ -557,35 +554,23 @@ internal sealed class RaylibPauseMenu : IDisposable
         switch (_palettePreset)
         {
             case 0:
-                palette.Lowlands = new RgbColorSetting(7, 8, 10);
-                palette.Highlands = new RgbColorSetting(41, 42, 45);
-                palette.CliffFaces = new RgbColorSetting(22, 23, 26);
-                palette.CutSurface = new RgbColorSetting(14, 15, 18);
-                palette.CutHatching = new RgbColorSetting(125, 132, 142);
+                palette.BaseRock = new RgbColorSetting(28, 30, 33);
+                palette.CutHatching = new RgbColorSetting(76, 81, 89);
                 palette.Background = new RgbColorSetting(0, 0, 0);
                 break;
             case 1:
-                palette.Lowlands = new RgbColorSetting(16, 20, 25);
-                palette.Highlands = new RgbColorSetting(67, 80, 96);
-                palette.CliffFaces = new RgbColorSetting(24, 34, 47);
-                palette.CutSurface = new RgbColorSetting(19, 29, 42);
-                palette.CutHatching = new RgbColorSetting(134, 152, 171);
+                palette.BaseRock = new RgbColorSetting(24, 31, 39);
+                palette.CutHatching = new RgbColorSetting(83, 97, 111);
                 palette.Background = new RgbColorSetting(4, 8, 14);
                 break;
             case 2:
-                palette.Lowlands = new RgbColorSetting(14, 24, 17);
-                palette.Highlands = new RgbColorSetting(65, 78, 48);
-                palette.CliffFaces = new RgbColorSetting(22, 34, 19);
-                palette.CutSurface = new RgbColorSetting(18, 27, 16);
-                palette.CutHatching = new RgbColorSetting(125, 151, 111);
+                palette.BaseRock = new RgbColorSetting(24, 35, 26);
+                palette.CutHatching = new RgbColorSetting(79, 103, 74);
                 palette.Background = new RgbColorSetting(2, 7, 4);
                 break;
             default:
-                palette.Lowlands = new RgbColorSetting(38, 31, 22);
-                palette.Highlands = new RgbColorSetting(105, 89, 62);
-                palette.CliffFaces = new RgbColorSetting(43, 35, 24);
-                palette.CutSurface = new RgbColorSetting(57, 47, 32);
-                palette.CutHatching = new RgbColorSetting(163, 145, 112);
+                palette.BaseRock = new RgbColorSetting(43, 35, 27);
+                palette.CutHatching = new RgbColorSetting(111, 96, 76);
                 palette.Background = new RgbColorSetting(13, 10, 6);
                 break;
         }
@@ -597,10 +582,7 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private RgbColorSetting GetColor(TerrainColorSlot slot) => slot switch
     {
-        TerrainColorSlot.Lowlands => Settings.Palette.Lowlands,
-        TerrainColorSlot.Highlands => Settings.Palette.Highlands,
-        TerrainColorSlot.CliffFaces => Settings.Palette.CliffFaces,
-        TerrainColorSlot.CutSurface => Settings.Palette.CutSurface,
+        TerrainColorSlot.BaseRock => Settings.Palette.BaseRock,
         TerrainColorSlot.CutHatching => Settings.Palette.CutHatching,
         _ => Settings.Palette.Background
     };
@@ -847,6 +829,12 @@ internal sealed class RaylibPauseMenu : IDisposable
             "СКОРОСТЬ МАСШТАБИРОВАНИЯ", Settings.CameraZoomSpeed, "×");
         DrawSliderRow(panel, mouse, SliderId.CameraVertical, y + 382f,
             "СКОРОСТЬ СМЕНЫ СРЕЗА", Settings.CameraVerticalSpeed, "×");
+        DrawLabel(
+            "Shift + MMB: двигай мышь вверх/вниз, чтобы менять скорость камеры.",
+            panel.X + 304f,
+            y + 422f,
+            11f,
+            new Color(154, 168, 185));
         DrawOptionRow(panel, mouse, y + 440f, "ТОЧКА ОБЗОРА",
             "СБРОСИТЬ КАМЕРУ", 604f);
         DrawHalfActionPair(panel, mouse, y + 492f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
@@ -867,7 +855,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         DrawOptionRow(panel, mouse, y + 210f, "ВИД ПОВЕРХНОСТИ",
             "СБРОСИТЬ СРЕЗ И КАМЕРУ", 298f);
         DrawLabel(
-            $"Срез: {Settings.CutawayHeightMeters:0.0} м. Q/E — плавно, PgUp/PgDn — 0.1 м; Shift+колесо — 0.1 м.",
+            $"Срез: {Settings.CutawayHeightMeters:0.0} м. Q/E — 1,8 м/с, PgUp/PgDn — 0,1 м; Shift+колесо — 0,1 м.",
             panel.X + 304f,
             y + 300f,
             12f,
@@ -892,7 +880,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         DrawOptionRow(panel, mouse, y, "ГОТОВЫЕ ПАЛИТРЫ",
             "СМЕНИТЬ ПАЛИТРУ", 88f);
 
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < ColorNames.Length; i++)
         {
             Rectangle bounds = GetColorSlotBounds(panel, i);
             bool active = _selectedColorSlot == (TerrainColorSlot)i;
@@ -948,6 +936,12 @@ internal sealed class RaylibPauseMenu : IDisposable
             "Цвет применяется к мешам видимой местности по мере их обновления.",
             panel.X + 388f,
             y + 508f,
+            11f,
+            new Color(154, 168, 185));
+        DrawLabel(
+            "Свет: один направленный источник + рассеянный фон; без карт теней.",
+            panel.X + 304f,
+            y + 548f,
             11f,
             new Color(154, 168, 185));
     }

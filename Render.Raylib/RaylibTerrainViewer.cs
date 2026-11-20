@@ -293,7 +293,8 @@ public static class RaylibTerrainViewer
                         cutawayMode,
                         focusName,
                         menu.Settings,
-                        menu.HudFont);
+                        menu.HudFont,
+                        camera);
 
                 menu.Draw();
                 EndDrawing();
@@ -340,9 +341,10 @@ public static class RaylibTerrainViewer
         bool cutawayMode,
         string focusName,
         RaylibViewerSettings settings,
-        Font font)
+        Font font,
+        OrbitCameraController camera)
     {
-        DrawRectangle(12, 12, 640, 244, new Color(0, 0, 0, 235));
+        DrawRectangle(12, 12, 700, 268, new Color(0, 0, 0, 235));
 
         DrawHudText(
             font,
@@ -389,8 +391,11 @@ public static class RaylibTerrainViewer
         if (settings.ShowControls)
         {
             DrawHudText(font,
-                "WASD move | RMB orbit | MMB pan | Wheel zoom | Q/E slice | PgUp/PgDn 0.1m | Shift+Wheel",
+                $"WASD move x{camera.CurrentSpeedMultiplier:0.0} | RMB orbit | MMB pan | Shift+MMB speed",
                 24, 218, 14f, Color.RayWhite);
+            DrawHudText(font,
+                "Wheel zoom | Q/E faster slice | PgUp/PgDn 0.1m | Shift+Wheel 0.1m",
+                24, 240, 14f, Color.RayWhite);
         }
     }
 
@@ -437,7 +442,7 @@ public static class RaylibTerrainViewer
             verticalInput -= 1f;
 
         if (verticalInput != 0f)
-            change += verticalInput * 0.75f * speedMultiplier * deltaTime;
+            change += verticalInput * 1.8f * speedMultiplier * deltaTime;
 
         if (change == 0f)
             return false;

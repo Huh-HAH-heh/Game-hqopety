@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Numerics;
 using System.Text.Json;
 using Raylib_cs;
 
@@ -20,10 +21,7 @@ internal enum TerrainRenderMode : byte
 
 internal enum TerrainColorSlot : byte
 {
-    Lowlands,
-    Highlands,
-    CliffFaces,
-    CutSurface,
+    BaseRock,
     CutHatching,
     Background
 }
@@ -66,82 +64,79 @@ internal sealed class TerrainPalette
     {
     }
 
-    public RgbColorSetting Lowlands { get; set; } = new(7, 8, 10);
-    public RgbColorSetting Highlands { get; set; } = new(41, 42, 45);
-    public RgbColorSetting CliffFaces { get; set; } = new(22, 23, 26);
-    public RgbColorSetting CutSurface { get; set; } = new(14, 15, 18);
-    public RgbColorSetting CutHatching { get; set; } = new(125, 132, 142);
+    // One neutral rock albedo is shared by every terrain face. Depth comes
+    // from the directional light, not from height- or material-based colors.
+    public RgbColorSetting BaseRock { get; set; } = new(28, 30, 33);
+    public RgbColorSetting CutHatching { get; set; } = new(76, 81, 89);
     public RgbColorSetting Background { get; set; } = new(0, 0, 0);
     public bool ShowCutHatching { get; set; } = true;
 
-    public Color GetSurfaceColor(float height, ushort materialId)
-    {
-        float amount = Math.Clamp(height / 50f, 0f, 1f);
-        Color color = Lerp(Lowlands.ToRaylibColor(), Highlands.ToRaylibColor(), amount);
-        return ApplyMaterialTint(color, materialId);
-    }
+    // Cheap global lighting stub: one directional sun and an ambient floor.
+    // These values can later be driven by the world's time-of-day/light system.
+    public float SunDirectionX { get; set; } = -0.45f;
+    public float SunDirectionY { get; set; } = 0.82f;
+    public float SunDirectionZ { get; set; } = 0.35f;
+    public float AmbientLight { get; set; } = 0.34f;
+    public float SunIntensity { get; set; } = 0.82f;
 
-    public Color GetCliffColor(ushort materialId)
-    {
-        return ApplyMaterialTint(CliffFaces.ToRaylibColor(), materialId);
-    }
+    public Color GetSurfaceColor(float height, ushort materialId) =>
+        BaseRock.ToRaylibColor();
 
-    public Color GetCutSurfaceColor(ushort materialId)
-    {
-        return ApplyMaterialTint(CutSurface.ToRaylibColor(), materialId);
-    }
+    public Color GetCliffColor(ushort materialId) =>
+        BaseRock.ToRaylibColor();
+
+    public Color GetCutSurfaceColor(ushort materialId) =>
+        BaseRock.ToRaylibColor();
 
     public Color GetHatchingColor() => CutHatching.ToRaylibColor();
 
+    public Vector3 GetSunDirection()
+    {
+        Vector3 direction = new(SunDirectionX, SunDirectionY, SunDirectionZ);
+        if (direction.LengthSquared() < 0.0001f)
+            direction = new Vector3(-0.45f, 0.82f, 0.35f);
+        return Vector3.Normalize(direction);
+    }
+
+    public Color ApplyStaticLighting(Color color, Vector3 normal)
+    {
+        float diffuse = MathF.Max(0f,
+            Vector3.Dot(Vector3.Normalize(normal), GetSunDirection()));
+        float illumination = Math.Clamp(
+            AmbientLight + diffuse * SunIntensity, 0.05f, 1.5f);
+        return new Color(
+            (byte)Math.Clamp((int)MathF.Round(color.R * illumination), 0, 255),
+            (byte)Math.Clamp((int)MathF.Round(color.G * illumination), 0, 255),
+            (byte)Math.Clamp((int)MathF.Round(color.B * illumination), 0, 255),
+            color.A);
+    }
+
     public void Normalize()
     {
-        Lowlands ??= new RgbColorSetting(7, 8, 10);
-        Highlands ??= new RgbColorSetting(41, 42, 45);
-        CliffFaces ??= new RgbColorSetting(22, 23, 26);
-        CutSurface ??= new RgbColorSetting(14, 15, 18);
-        CutHatching ??= new RgbColorSetting(125, 132, 142);
+        BaseRock ??= new RgbColorSetting(28, 30, 33);
+        CutHatching ??= new RgbColorSetting(76, 81, 89);
         Background ??= new RgbColorSetting(0, 0, 0);
-
-        Lowlands.Normalize();
-        Highlands.Normalize();
-        CliffFaces.Normalize();
-        CutSurface.Normalize();
+        BaseRock.Normalize();
         CutHatching.Normalize();
         Background.Normalize();
-    }
 
-    private static Color ApplyMaterialTint(Color color, ushort materialId)
-    {
-        float red = 1f;
-        float green = 1f;
-        float blue = 1f;
+        if (!float.IsFinite(SunDirectionX)) SunDirectionX = -0.45f;
+        if (!float.IsFinite(SunDirectionY)) SunDirectionY = 0.82f;
+        if (!float.IsFinite(SunDirectionZ)) SunDirectionZ = 0.35f;
+        if (!float.IsFinite(AmbientLight)) AmbientLight = 0.34f;
+        if (!float.IsFinite(SunIntensity)) SunIntensity = 0.82f;
+        AmbientLight = Math.Clamp(AmbientLight, 0.05f, 1f);
+        SunIntensity = Math.Clamp(SunIntensity, 0f, 1.5f);
 
-        switch (materialId)
+        if (SunDirectionX * SunDirectionX +
+            SunDirectionY * SunDirectionY +
+            SunDirectionZ * SunDirectionZ < 0.0001f)
         {
-            case 2:
-                red = 1.08f;
-                green = 1.06f;
-                blue = 0.96f;
-                break;
-            case 3:
-                red = 0.88f;
-                green = 0.91f;
-                blue = 1.08f;
-                break;
+            SunDirectionX = -0.45f;
+            SunDirectionY = 0.82f;
+            SunDirectionZ = 0.35f;
         }
-
-        return new Color(
-            (byte)Math.Clamp((int)MathF.Round(color.R * red), 0, 255),
-            (byte)Math.Clamp((int)MathF.Round(color.G * green), 0, 255),
-            (byte)Math.Clamp((int)MathF.Round(color.B * blue), 0, 255),
-            (byte)255);
     }
-
-    private static Color Lerp(Color a, Color b, float amount) => new(
-        (byte)Math.Clamp((int)MathF.Round(a.R + (b.R - a.R) * amount), 0, 255),
-        (byte)Math.Clamp((int)MathF.Round(a.G + (b.G - a.G) * amount), 0, 255),
-        (byte)Math.Clamp((int)MathF.Round(a.B + (b.B - a.B) * amount), 0, 255),
-        (byte)255);
 }
 
 internal sealed class RaylibViewerSettings

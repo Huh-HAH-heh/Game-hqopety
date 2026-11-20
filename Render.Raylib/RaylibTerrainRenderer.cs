@@ -18,17 +18,20 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         #version 330
         in vec3 vertexPosition;
         in vec4 vertexColor;
+        in vec3 vertexNormal;
 
         uniform mat4 mvp;
         uniform mat4 matModel;
 
         out vec3 fragWorldPosition;
+        out vec3 fragWorldNormal;
         out vec4 fragColor;
 
         void main()
         {
             vec4 worldPosition = matModel * vec4(vertexPosition, 1.0);
             fragWorldPosition = worldPosition.xyz;
+            fragWorldNormal = normalize(mat3(matModel) * vertexNormal);
             fragColor = vertexColor;
             gl_Position = mvp * vec4(vertexPosition, 1.0);
         }
@@ -37,10 +40,14 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     private const string VoxelFragmentShader = """
         #version 330
         in vec3 fragWorldPosition;
+        in vec3 fragWorldNormal;
         in vec4 fragColor;
 
         uniform int uCutEnabled;
         uniform float uCutHeight;
+        uniform vec3 uSunDirection;
+        uniform float uAmbientLight;
+        uniform float uSunIntensity;
 
         out vec4 finalColor;
 
@@ -49,7 +56,16 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             if (uCutEnabled != 0 && fragWorldPosition.y >= uCutHeight - 0.0001)
                 discard;
 
-            finalColor = fragColor;
+            float diffuse = max(
+                dot(normalize(fragWorldNormal), normalize(uSunDirection)),
+                0.0);
+            float illumination = clamp(
+                uAmbientLight + diffuse * uSunIntensity,
+                0.05,
+                1.5);
+            finalColor = vec4(
+                fragColor.rgb * illumination,
+                fragColor.a);
         }
         """;
 
@@ -60,6 +76,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     private readonly bool _hasVoxelShader;
     private readonly int _cutEnabledLocation;
     private readonly int _cutHeightLocation;
+    private readonly int _sunDirectionLocation;
+    private readonly int _ambientLightLocation;
+    private readonly int _sunIntensityLocation;
     private readonly TerrainRenderMode _mode;
 
     private TerrainPalette _palette;
@@ -97,7 +116,14 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
             _cutEnabledLocation = GetShaderLocation(_voxelShader, "uCutEnabled");
             _cutHeightLocation = GetShaderLocation(_voxelShader, "uCutHeight");
-            if (_cutEnabledLocation < 0 || _cutHeightLocation < 0)
+            _sunDirectionLocation = GetShaderLocation(_voxelShader, "uSunDirection");
+            _ambientLightLocation = GetShaderLocation(_voxelShader, "uAmbientLight");
+            _sunIntensityLocation = GetShaderLocation(_voxelShader, "uSunIntensity");
+            if (_cutEnabledLocation < 0 ||
+                _cutHeightLocation < 0 ||
+                _sunDirectionLocation < 0 ||
+                _ambientLightLocation < 0 ||
+                _sunIntensityLocation < 0)
             {
                 UnloadShader(_voxelShader);
                 UnloadMaterial(material);
@@ -113,6 +139,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             _voxelShader = default;
             _cutEnabledLocation = -1;
             _cutHeightLocation = -1;
+            _sunDirectionLocation = -1;
+            _ambientLightLocation = -1;
+            _sunIntensityLocation = -1;
             _hasVoxelShader = false;
         }
 
@@ -235,6 +264,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         SetVoxelCutShader(
             enabled: _mode == TerrainRenderMode.Voxel && terrain.CutawayEnabled,
             height: terrain.CutawayHeightMeters);
+        SetVoxelLighting();
 
         BeginMode3D(camera);
 
@@ -290,6 +320,29 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             _voxelShader,
             _cutHeightLocation,
             height,
+            ShaderUniformDataType.Float);
+    }
+
+    private void SetVoxelLighting()
+    {
+        if (!_hasVoxelShader)
+            return;
+
+        Vector3 direction = _palette.GetSunDirection();
+        SetShaderValue(
+            _voxelShader,
+            _sunDirectionLocation,
+            direction,
+            ShaderUniformDataType.Vec3);
+        SetShaderValue(
+            _voxelShader,
+            _ambientLightLocation,
+            _palette.AmbientLight,
+            ShaderUniformDataType.Float);
+        SetShaderValue(
+            _voxelShader,
+            _sunIntensityLocation,
+            _palette.SunIntensity,
             ShaderUniformDataType.Float);
     }
 

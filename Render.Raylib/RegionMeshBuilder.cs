@@ -98,6 +98,7 @@ internal static class RegionMeshBuilder
                     chunkSize,
                     terrain.CutawayEnabled ? terrain.CutawayLayer : terrain.LayerCount,
                     generateCutFaces: true,
+                    applyStaticLighting: true,
                     palette,
                     meshes);
             }
@@ -148,6 +149,7 @@ internal static class RegionMeshBuilder
                     chunkSize,
                     terrain.LayerCount,
                     generateCutFaces: false,
+                    applyStaticLighting: false,
                     palette,
                     meshes);
             }
@@ -278,7 +280,7 @@ internal static class RegionMeshBuilder
         }
 
         if (quads.Count > 0)
-            output.Add(Upload(quads));
+            output.Add(Upload(quads, palette, applyStaticLighting: false));
     }
 
     private static void AddVoxelCutHatching(
@@ -336,6 +338,7 @@ internal static class RegionMeshBuilder
         int size,
         int cutLayer,
         bool generateCutFaces,
+        bool applyStaticLighting,
         TerrainPalette palette,
         List<Mesh> output)
     {
@@ -367,10 +370,10 @@ internal static class RegionMeshBuilder
         if (quads.Count > MaximumQuadsPerMesh && size > 4)
         {
             int half = size / 2;
-            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, cutLayer, generateCutFaces, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, cutLayer, generateCutFaces, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, cutLayer, generateCutFaces, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, cutLayer, generateCutFaces, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, cutLayer, generateCutFaces, applyStaticLighting, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, cutLayer, generateCutFaces, applyStaticLighting, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, cutLayer, generateCutFaces, applyStaticLighting, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, cutLayer, generateCutFaces, applyStaticLighting, palette, output);
             return;
         }
 
@@ -381,7 +384,7 @@ internal static class RegionMeshBuilder
         }
 
         if (quads.Count > 0)
-            output.Add(Upload(quads));
+            output.Add(Upload(quads, palette, applyStaticLighting));
     }
 
     private static void AddColumnGeometry(
@@ -755,7 +758,10 @@ internal static class RegionMeshBuilder
         }
     }
 
-    private static Mesh Upload(List<TerrainQuad> quads)
+    private static Mesh Upload(
+        List<TerrainQuad> quads,
+        TerrainPalette palette,
+        bool applyStaticLighting)
     {
         int vertexCount = checked(quads.Count * 4);
         int triangleCount = checked(quads.Count * 2);
@@ -781,7 +787,9 @@ internal static class RegionMeshBuilder
                 ref vertexOffset, ref indexOffset,
                 quad.A, quad.B, quad.C, quad.D,
                 quad.Normal,
-                quad.Color,
+                applyStaticLighting
+                    ? palette.ApplyStaticLighting(quad.Color, quad.Normal)
+                    : quad.Color,
                 quad.ReverseWinding);
         }
 

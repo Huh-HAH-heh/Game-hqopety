@@ -46,12 +46,14 @@ internal sealed class OrbitCameraController
     private MouseMode _mouseMode;
     private bool _ignoreFirstMouseDelta;
     private RaylibCameraMode _mode = RaylibCameraMode.Rts;
+    private float _interactiveSpeedMultiplier = 1f;
 
     private enum MouseMode : byte
     {
         None,
         Orbit,
-        Pan
+        Pan,
+        SpeedAdjust
     }
 
     public Camera3D Camera { get; private set; }
@@ -61,6 +63,8 @@ internal sealed class OrbitCameraController
     public float PanSpeedMultiplier { get; set; } = 1f;
     public float ZoomSpeedMultiplier { get; set; } = 1f;
     public float VerticalSpeedMultiplier { get; set; } = 1f;
+    public float InteractiveSpeedMultiplier => _interactiveSpeedMultiplier;
+    public float CurrentSpeedMultiplier => MovementSpeedMultiplier * _interactiveSpeedMultiplier;
     public RaylibCameraMode Mode => _mode;
 
     public OrbitCameraController(TerrainRenderSnapshot terrain)
@@ -155,7 +159,9 @@ internal sealed class OrbitCameraController
             }
             else if (IsMouseButtonPressed(MouseButton.Middle))
             {
-                _mouseMode = MouseMode.Pan;
+                _mouseMode = IsShiftDown()
+                    ? MouseMode.SpeedAdjust
+                    : MouseMode.Pan;
                 _ignoreFirstMouseDelta = true;
                 DisableCursor();
             }
@@ -166,7 +172,8 @@ internal sealed class OrbitCameraController
         bool released =
             (_mouseMode == MouseMode.Orbit &&
              IsMouseButtonReleased(MouseButton.Right)) ||
-            (_mouseMode == MouseMode.Pan &&
+            ((_mouseMode == MouseMode.Pan ||
+              _mouseMode == MouseMode.SpeedAdjust) &&
              IsMouseButtonReleased(MouseButton.Middle));
 
         if (released)
@@ -185,6 +192,17 @@ internal sealed class OrbitCameraController
         if (_ignoreFirstMouseDelta)
         {
             _ignoreFirstMouseDelta = false;
+            return;
+        }
+
+        if (_mouseMode == MouseMode.SpeedAdjust)
+        {
+            // Vertical drag changes camera speed exponentially for fine control
+            // at low values and a wide useful range at high values.
+            _interactiveSpeedMultiplier = Math.Clamp(
+                _interactiveSpeedMultiplier * MathF.Exp(-mouseDelta.Y * 0.006f),
+                0.1f,
+                10f);
             return;
         }
 
@@ -207,7 +225,7 @@ internal sealed class OrbitCameraController
 
     private void PanByMouseDelta(Vector2 mouseDelta)
     {
-        mouseDelta *= PanSpeedMultiplier;
+        mouseDelta *= PanSpeedMultiplier * _interactiveSpeedMultiplier;
         Vector2 center = new(
             GetScreenWidth() * 0.5f,
             GetScreenHeight() * 0.5f);
@@ -334,6 +352,10 @@ internal sealed class OrbitCameraController
         return true;
     }
 
+    private static bool IsShiftDown() =>
+        IsKeyDown(KeyboardKey.LeftShift) ||
+        IsKeyDown(KeyboardKey.RightShift);
+
     private void UpdateKeyboardInput(float deltaTime)
     {
         if (IsKeyPressed(KeyboardKey.T))
@@ -365,7 +387,12 @@ internal sealed class OrbitCameraController
 
             // Move by a fraction of the visible map per second, not over half
             // of the world in one second at the initial zoom level.
-            float speed = MathF.Max(5f, _desiredDistance * 0.075f) * MovementSpeedMultiplier;
+            // Movement follows the current view scale: close inspection is
+            // deliberately slow, while overview travel covers large distances.
+            float speed = Math.Clamp(
+                _desiredDistance * 0.14f,
+                1.5f,
+                240f) * MovementSpeedMultiplier * _interactiveSpeedMultiplier;
             if (IsKeyDown(KeyboardKey.LeftShift) ||
                 IsKeyDown(KeyboardKey.RightShift))
             {
