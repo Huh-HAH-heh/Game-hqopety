@@ -1370,13 +1370,16 @@ internal sealed class RaylibPauseMenu : IDisposable
 
             try
             {
+                // Rasterize glyphs at 2x the largest normal draw size.
+                // Bilinear downsampling preserves antialiased edges instead of
+                // exposing the pixel grid of a low-resolution atlas.
                 Font font = LoadFontEx(
                     path,
-                    fontSize,
+                    fontSize * 2,
                     FontCodepoints,
                     FontCodepoints.Length);
 
-                SetTextureFilter(font.Texture, TextureFilter.Point);
+                SetTextureFilter(font.Texture, TextureFilter.Bilinear);
                 ownsFont = true;
                 return font;
             }
