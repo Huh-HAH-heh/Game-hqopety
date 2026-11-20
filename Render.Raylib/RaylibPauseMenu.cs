@@ -144,7 +144,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         Settings.Normalize();
 
         _smallFont = LoadMenuFont(14, out bool ownsSmallFont);
-        _mediumFont = LoadMenuFont(20, out bool ownsMediumFont);
+        _mediumFont = LoadMenuFont(18, out bool ownsMediumFont);
         _largeFont = LoadMenuFont(24, out bool ownsLargeFont);
         _ownsSmallFont = ownsSmallFont;
         _ownsMediumFont = ownsMediumFont;
@@ -1376,7 +1376,7 @@ internal sealed class RaylibPauseMenu : IDisposable
                     FontCodepoints,
                     FontCodepoints.Length);
 
-                SetTextureFilter(font.Texture, TextureFilter.Bilinear);
+                SetTextureFilter(font.Texture, TextureFilter.Point);
                 ownsFont = true;
                 return font;
             }
