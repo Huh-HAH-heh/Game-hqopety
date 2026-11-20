@@ -239,17 +239,60 @@ public sealed class TerrainRenderSnapshot
 
         if (UsesVoxelCells)
         {
+            // Simple columns are copied directly into the caller's stack buffer.
+            // This avoids allocating a TileRange[] for every ordinary 1x1 m cell.
+            if (_worldMap.Blocks.Volumes.TryGetSimpleColumn(
+                    regionX, regionY,
+                    out ushort topLayer,
+                    out ushort simpleMaterial))
+            {
+                if (destination.Length < 2)
+                    throw new ArgumentException(
+                        "Destination must hold at least two voxel ranges.",
+                        nameof(destination));
+
+                if (topLayer == 0 || simpleMaterial == 0)
+                {
+                    destination[0] = new TileRange
+                    {
+                        StartZ = 0,
+                        EndZ = checked((ushort)LayerCount),
+                        MaterialId = 0,
+                        State = WorldMap.StateEmpty
+                    };
+                    return 1;
+                }
+
+                destination[0] = new TileRange
+                {
+                    StartZ = 0,
+                    EndZ = topLayer,
+                    MaterialId = simpleMaterial,
+                    State = WorldMap.StateSolid
+                };
+
+                if (topLayer >= LayerCount)
+                    return 1;
+
+                destination[1] = new TileRange
+                {
+                    StartZ = topLayer,
+                    EndZ = checked((ushort)LayerCount),
+                    MaterialId = 0,
+                    State = WorldMap.StateEmpty
+                };
+                return 2;
+            }
+
             ReadOnlySpan<TileRange> exactRanges =
                 _worldMap.GetTileRanges(regionX, regionY);
             if (exactRanges.IsEmpty)
                 return 0;
 
             if (destination.Length < exactRanges.Length)
-            {
                 throw new ArgumentException(
                     "Destination is too small for the voxel column ranges.",
                     nameof(destination));
-            }
 
             exactRanges.CopyTo(destination);
             return exactRanges.Length;
