@@ -63,8 +63,10 @@ internal sealed class OrbitCameraController
     public float PanSpeedMultiplier { get; set; } = 1f;
     public float ZoomSpeedMultiplier { get; set; } = 1f;
     public float VerticalSpeedMultiplier { get; set; } = 1f;
-    public float InteractiveSpeedMultiplier => _interactiveSpeedMultiplier;
-    public float CurrentSpeedMultiplier => MovementSpeedMultiplier * _interactiveSpeedMultiplier;
+    public float CurrentMovementSpeedMetersPerSecond =>
+        Math.Clamp(_desiredDistance * 0.14f, 1.5f, 240f) *
+        MovementSpeedMultiplier *
+        _interactiveSpeedMultiplier;
     public RaylibCameraMode Mode => _mode;
 
     public OrbitCameraController(TerrainRenderSnapshot terrain)
@@ -389,10 +391,7 @@ internal sealed class OrbitCameraController
             // of the world in one second at the initial zoom level.
             // Movement follows the current view scale: close inspection is
             // deliberately slow, while overview travel covers large distances.
-            float speed = Math.Clamp(
-                _desiredDistance * 0.14f,
-                1.5f,
-                240f) * MovementSpeedMultiplier * _interactiveSpeedMultiplier;
+            float speed = CurrentMovementSpeedMetersPerSecond;
             if (IsKeyDown(KeyboardKey.LeftShift) ||
                 IsKeyDown(KeyboardKey.RightShift))
             {

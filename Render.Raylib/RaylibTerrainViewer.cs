@@ -391,7 +391,7 @@ public static class RaylibTerrainViewer
         if (settings.ShowControls)
         {
             DrawHudText(font,
-                $"WASD move x{camera.CurrentSpeedMultiplier:0.0} | RMB orbit | MMB pan | Shift+MMB speed",
+                $"WASD {camera.CurrentMovementSpeedMetersPerSecond:0} m/s | RMB orbit | MMB pan | Shift+MMB speed",
                 24, 218, 14f, Color.RayWhite);
             DrawHudText(font,
                 "Wheel zoom | Q/E faster slice | PgUp/PgDn 0.1m | Shift+Wheel 0.1m",

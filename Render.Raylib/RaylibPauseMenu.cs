@@ -112,7 +112,7 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private MenuPage _page;
     private SettingsSection? _expandedSection = SettingsSection.Camera;
-    private TerrainColorSlot _selectedColorSlot = TerrainColorSlot.Lowlands;
+    private TerrainColorSlot _selectedColorSlot = TerrainColorSlot.BaseRock;
 
     private Vector2 _mainPosition;
     private Vector2 _settingsPosition;

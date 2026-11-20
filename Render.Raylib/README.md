@@ -93,10 +93,9 @@ original mesh-baked cutaway behavior.
 - C: toggle cutaway mode and focus on the lower through-tunnel
 - F1: focus on the lower through-tunnel (cut plane 17 m, inside the lower passage)
 - F2: focus on the sealed upper passage (cut plane 28 m, inside the upper passage)
-- Q / E: move the cut plane smoothly; camera focus remains independent
+- Q / E: move the cut plane smoothly at 1.8 m/s; camera focus remains independent
 - PageUp / PageDown: move the cut plane by exactly one 0.1 m voxel layer
 - Shift + mouse wheel: move the cut plane by one 0.1 m voxel layer per wheel notch
-- Q/E: move the cut plane smoothly at 1.8 m/s; camera focus remains independent
 - Shift + middle mouse + vertical drag: adjust camera speed on the fly (up = faster)
 - T: return to the fitted top-down view
 - Escape: exit
@@ -157,6 +156,6 @@ or shadow passes. Sun direction, intensity, and ambient strength are explicit pa
 settings so a future world lighting/time-of-day system can update them, and gameplay
 systems such as solar panels can query the same global sun direction.
 
-The fitted top-down view remains available with **T**. The regular surface view keeps
-the black-to-charcoal palette, with thin 5 m elevation marks alternating between
-bright white and muted gray; there is no permanent tile grid.
+The fitted top-down view remains available with **T**. The regular surface view uses
+one neutral dark rock color; directional face lighting provides volume without a
+permanent tile grid or shadow-map pass.
