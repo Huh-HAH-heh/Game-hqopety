@@ -27,7 +27,7 @@ public static class RaylibTerrainViewer
         SetExitKey(KeyboardKey.Null);
 
         OrbitCameraController camera = new(terrain);
-        using RaylibPauseMenu menu = new();
+        RaylibPauseMenu menu = new();
         RaylibTerrainRenderer? renderer = null;
         bool cutawayMode = false;
         string focusName = "SURFACE";
@@ -191,6 +191,7 @@ public static class RaylibTerrainViewer
         finally
         {
             camera.ReleaseMouse();
+            menu.Dispose();
             renderer?.Dispose();
             CloseWindow();
         }
