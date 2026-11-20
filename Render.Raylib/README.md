@@ -78,9 +78,9 @@ the visible volume at 0.5 m steps.
 - C: toggle cutaway mode and focus on the lower through-tunnel
 - F1: focus on the lower through-tunnel (cut plane 17 m, inside the lower passage)
 - F2: focus on the sealed upper passage (cut plane 28 m, inside the upper passage)
-- Q / E: move the camera focus and cut plane vertically; focus can move above and below the 0-50 m terrain volume
-- PageUp / PageDown: step the cut plane by exactly 1 metre
-- Shift + mouse wheel: adjust the cut plane by 1 metre
+- Q / E: move the cut plane smoothly; camera focus remains independent
+- PageUp / PageDown: move the cut plane by exactly one 0.1 m voxel layer
+- Shift + mouse wheel: move the cut plane by one 0.1 m voxel layer per wheel notch
 - T: return to the fitted top-down view
 - Escape: exit
 
@@ -107,9 +107,8 @@ The generator verifies the lower portals, empty tunnel interiors, solid floors a
 roofs, sealed upper passage, connector and geological bands.
 
 Press **C** to enable the visual cutaway. Material above the camera focus plane is
-clipped, not deleted from WorldMap. The section height follows `Camera.Target.Y`
-and is clamped to the world's 50 m vertical extent. The underlying voxel resolution
-remains 0.1 m; the displayed cut plane updates in 0.5 m increments. Only
+clipped, not deleted from WorldMap. The section height is stored independently from the camera focus, clamped to the
+world's vertical extent, and quantized to the 0.1 m voxel-layer grid. Only
 camera-visible storage regions rebuild when the plane moves; off-screen batches
 are refreshed when they enter view.
 
