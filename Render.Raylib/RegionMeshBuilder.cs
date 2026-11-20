@@ -8,6 +8,7 @@ namespace RimClone.Render.Raylib;
 internal sealed class RegionGpuMesh : IDisposable
 {
     public Mesh[] Meshes = Array.Empty<Mesh>();
+    public Mesh[] CutMeshes = Array.Empty<Mesh>();
     public bool IsUploaded;
     public long RegionVersion;
     public int CutawayLayer;
@@ -22,8 +23,11 @@ internal sealed class RegionGpuMesh : IDisposable
 
         foreach (Mesh mesh in Meshes)
             UnloadMesh(mesh);
+        foreach (Mesh mesh in CutMeshes)
+            UnloadMesh(mesh);
 
         Meshes = Array.Empty<Mesh>();
+        CutMeshes = Array.Empty<Mesh>();
         IsUploaded = false;
     }
 }
@@ -93,6 +97,7 @@ internal static class RegionMeshBuilder
                     firstRenderX + chunkX * chunkSize,
                     firstRenderY + chunkY * chunkSize,
                     chunkSize,
+                    terrain.CutawayEnabled ? terrain.CutawayLayer : terrain.LayerCount,
                     palette,
                     meshes);
             }
@@ -103,21 +108,238 @@ internal static class RegionMeshBuilder
         return result;
     }
 
+    public static RegionGpuMesh BuildVoxel(
+        TerrainRenderSnapshot terrain,
+        int storageRegionX,
+        int storageRegionY,
+        TerrainPalette palette,
+        int paletteVersion)
+    {
+        int storageIndex =
+            storageRegionX + storageRegionY * terrain.StorageRegionsX;
+        int patchesPerSide = terrain.RenderRegionsPerStorageRegion;
+        int firstRenderX = storageRegionX * patchesPerSide;
+        int firstRenderY = storageRegionY * patchesPerSide;
+        int chunkSize = patchesPerSide / SubChunksPerAxis;
+
+        RegionGpuMesh result = new()
+        {
+            RegionVersion = terrain.SourceRegionVersions[storageIndex],
+            CutawayLayer = -1,
+            PaletteVersion = paletteVersion,
+            BoundsCenter = new Vector3(
+                (storageRegionX + 0.5f) * terrain.StorageRegionSize,
+                terrain.MaximumHeightMeters * 0.5f,
+                (storageRegionY + 0.5f) * terrain.StorageRegionSize),
+            BoundsRadius = MathF.Sqrt(
+                terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f +
+                terrain.MaximumHeightMeters * terrain.MaximumHeightMeters * 0.25f)
+        };
+
+        List<Mesh> meshes = new(SubChunksPerAxis * SubChunksPerAxis);
+        for (int chunkY = 0; chunkY < SubChunksPerAxis; chunkY++)
+        {
+            for (int chunkX = 0; chunkX < SubChunksPerAxis; chunkX++)
+            {
+                BuildChunkMeshes(
+                    terrain,
+                    firstRenderX + chunkX * chunkSize,
+                    firstRenderY + chunkY * chunkSize,
+                    chunkSize,
+                    terrain.LayerCount,
+                    palette,
+                    meshes);
+            }
+        }
+
+        result.Meshes = meshes.ToArray();
+        result.IsUploaded = result.Meshes.Length > 0;
+        return result;
+    }
+
+    public static Mesh[] BuildVoxelCutSurface(
+        TerrainRenderSnapshot terrain,
+        int storageRegionX,
+        int storageRegionY,
+        int cutLayer,
+        TerrainPalette palette)
+    {
+        if (!terrain.UsesVoxelCells ||
+            cutLayer < 0 ||
+            cutLayer >= terrain.LayerCount)
+        {
+            return Array.Empty<Mesh>();
+        }
+
+        int patchesPerSide = terrain.RenderRegionsPerStorageRegion;
+        int firstRenderX = storageRegionX * patchesPerSide;
+        int firstRenderY = storageRegionY * patchesPerSide;
+        int chunkSize = patchesPerSide / SubChunksPerAxis;
+        List<Mesh> meshes = new(SubChunksPerAxis * SubChunksPerAxis);
+
+        for (int chunkY = 0; chunkY < SubChunksPerAxis; chunkY++)
+        {
+            for (int chunkX = 0; chunkX < SubChunksPerAxis; chunkX++)
+            {
+                BuildVoxelCutChunk(
+                    terrain,
+                    firstRenderX + chunkX * chunkSize,
+                    firstRenderY + chunkY * chunkSize,
+                    chunkSize,
+                    cutLayer,
+                    palette,
+                    meshes);
+            }
+        }
+
+        return meshes.ToArray();
+    }
+
+    private static void BuildVoxelCutChunk(
+        TerrainRenderSnapshot terrain,
+        int firstRenderX,
+        int firstRenderY,
+        int size,
+        int cutLayer,
+        TerrainPalette palette,
+        List<Mesh> output)
+    {
+        List<TerrainQuad> quads = new(Math.Min(size * size * 2, MaximumQuadsPerMesh));
+        Span<TileRange> rangesBuffer = stackalloc TileRange[terrain.LayerCount];
+        float height = cutLayer * UnitsPerMeter + 0.002f;
+
+        for (int localY = 0; localY < size; localY++)
+        {
+            int renderY = firstRenderY + localY;
+            float z0 = renderY * terrain.RegionSize;
+            float z1 = z0 + terrain.RegionSize;
+
+            for (int localX = 0; localX < size; localX++)
+            {
+                int renderX = firstRenderX + localX;
+                int rangeCount = terrain.CopyColumnRanges(
+                    renderX,
+                    renderY,
+                    rangesBuffer);
+                if (rangeCount == 0)
+                    continue;
+
+                ushort materialId = 0;
+                ReadOnlySpan<TileRange> ranges = rangesBuffer[..rangeCount];
+                foreach (TileRange range in ranges)
+                {
+                    if (range.State == WorldMap.StateSolid &&
+                        range.MaterialId != 0 &&
+                        range.StartZ < cutLayer &&
+                        range.EndZ >= cutLayer)
+                    {
+                        materialId = range.MaterialId;
+                        break;
+                    }
+                }
+
+                if (materialId == 0)
+                    continue;
+
+                float x0 = renderX * terrain.RegionSize;
+                float x1 = x0 + terrain.RegionSize;
+
+                AddHorizontalFace(
+                    quads,
+                    x0, x1, z0, z1,
+                    height,
+                    materialId,
+                    palette,
+                    isTop: true,
+                    isCutFace: true);
+
+                if (palette.ShowCutHatching)
+                {
+                    AddVoxelCutHatching(
+                        quads,
+                        x0,
+                        z0,
+                        height,
+                        materialId,
+                        palette.GetHatchingColor());
+                }
+            }
+        }
+
+        if (quads.Count > MaximumQuadsPerMesh && size > 1)
+        {
+            int half = size / 2;
+            BuildVoxelCutChunk(terrain, firstRenderX, firstRenderY, half, cutLayer, palette, output);
+            BuildVoxelCutChunk(terrain, firstRenderX + half, firstRenderY, half, cutLayer, palette, output);
+            BuildVoxelCutChunk(terrain, firstRenderX, firstRenderY + half, half, cutLayer, palette, output);
+            BuildVoxelCutChunk(terrain, firstRenderX + half, firstRenderY + half, half, cutLayer, palette, output);
+            return;
+        }
+
+        if (quads.Count > 0)
+            output.Add(Upload(quads));
+    }
+
+    private static void AddVoxelCutHatching(
+        List<TerrainQuad> quads,
+        float x0,
+        float z0,
+        float height,
+        ushort materialId,
+        Color color)
+    {
+        const float halfLength = 0.24f;
+        const float halfWidth = 0.025f;
+        float centerX = x0 + 0.5f;
+        float centerZ = z0 + 0.5f;
+
+        Vector2 start;
+        Vector2 end;
+        switch (materialId)
+        {
+            case 2:
+                start = new Vector2(centerX - halfLength, centerZ);
+                end = new Vector2(centerX + halfLength, centerZ);
+                break;
+            case 3:
+                start = new Vector2(centerX - halfLength, centerZ + halfLength);
+                end = new Vector2(centerX + halfLength, centerZ - halfLength);
+                break;
+            default:
+                start = new Vector2(centerX - halfLength, centerZ - halfLength);
+                end = new Vector2(centerX + halfLength, centerZ + halfLength);
+                break;
+        }
+
+        Vector2 direction = Vector2.Normalize(end - start);
+        Vector2 normal = new(-direction.Y, direction.X);
+        Vector2 offset = normal * halfWidth;
+        float y = height + CutHatchLift;
+
+        Vector3 a = new(start.X + offset.X, y, start.Y + offset.Y);
+        Vector3 b = new(end.X + offset.X, y, end.Y + offset.Y);
+        Vector3 c = new(end.X - offset.X, y, end.Y - offset.Y);
+        Vector3 d = new(start.X - offset.X, y, start.Y - offset.Y);
+
+        quads.Add(new TerrainQuad(
+            a, b, c, d,
+            Vector3.UnitY,
+            color,
+            ReverseWinding: true));
+    }
+
     private static void BuildChunkMeshes(
         TerrainRenderSnapshot terrain,
         int firstRenderX,
         int firstRenderY,
         int size,
+        int cutLayer,
         TerrainPalette palette,
         List<Mesh> output)
     {
         List<TerrainQuad> quads = new(Math.Min(size * size * 10, MaximumQuadsPerMesh));
         Span<TileRange> rangesBuffer = stackalloc TileRange[terrain.LayerCount];
         Span<TileRange> neighbourBuffer = stackalloc TileRange[terrain.LayerCount];
-
-        int cutLayer = terrain.CutawayEnabled
-            ? terrain.CutawayLayer
-            : terrain.LayerCount;
 
         for (int localY = 0; localY < size; localY++)
         {
@@ -142,10 +364,10 @@ internal static class RegionMeshBuilder
         if (quads.Count > MaximumQuadsPerMesh && size > 4)
         {
             int half = size / 2;
-            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, cutLayer, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, cutLayer, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, cutLayer, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, cutLayer, palette, output);
             return;
         }
 
