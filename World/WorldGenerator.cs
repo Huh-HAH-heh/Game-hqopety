@@ -190,9 +190,12 @@ public static class WorldGenerator
         // The lower passage crosses the mesa and opens at both canyon flanks.
         // Its centre line bends in XY and changes floor height / cross-section;
         // this is a through-tunnel, not a blind horizontal adit.
-        int lowerTunnelStartX = caveCenterX - 40;
+        // The mesa has a 74 m X radius. Put both portals beyond its edge;
+        // the previous +/-40 m endpoints were still buried under the plateau.
+        const int lowerTunnelHalfLength = 76;
+        int lowerTunnelStartX = caveCenterX - lowerTunnelHalfLength;
         int lowerTunnelY = caveCenterY;
-        int lowerTunnelLength = 80;
+        int lowerTunnelLength = lowerTunnelHalfLength * 2;
         CarveWindingTunnel(
             worldMap,
             heights,
@@ -354,7 +357,15 @@ public static class WorldGenerator
         {
             throw new InvalidOperationException(
                 "3D cave proof failed: expected a through-tunnel, sealed upper passage, solid floors/roofs, " +
-                "two open lower portals, sealed upper tunnel ends, an internal ramp and an unbroken mesa top.");
+                "two open lower portals, sealed upper tunnel ends, an internal ramp and an unbroken mesa top. " +
+                $"lowerAir={lowerAir}, upperAir={upperAir}, connectorAir={connectorAir}, " +
+                $"lowerFloorSolid={lowerFloorSolid}, lowerRoofSolid={lowerRoofSolid}, " +
+                $"upperFloorSolid={upperFloorSolid}, upperRoofSolid={upperRoofSolid}, " +
+                $"lowerPortalsOpen={lowerPortalsOpen} " +
+                $"(west={westPortalSurface / (float)WorldMap.HeightUnitsPerMeter:0.0}m, " +
+                $"east={eastPortalSurface / (float)WorldMap.HeightUnitsPerMeter:0.0}m), " +
+                $"upperEndsSealed={upperEndsSealed}, lowerStratum={lowerStratum}, " +
+                $"upperStratum={upperStratum}, surfaceSealed={surfaceSealed}.");
         }
 
         if (writeLog)
@@ -367,7 +378,7 @@ public static class WorldGenerator
                 "[WorldGenerator] Detailed canyon preview restored: " +
                 $"{patchesX}x{patchesY} patches at {patchSize}x{patchSize} tiles; " +
                 $"map {worldMap.TileWidth}x{worldMap.TileHeight} tiles; " +
-                "static geology: 80m winding through-tunnel with two portals + 32m upper passage + chambers + rising connector.");
+                "static geology: 152m winding through-tunnel with two portals + 32m upper passage + chambers + rising connector.");
         }
     }
 
