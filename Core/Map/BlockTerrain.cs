@@ -162,7 +162,8 @@ public sealed class BlockTerrain
 
     public int Width { get; }
     public int Height { get; }
-    public SparseVoxelStore Volumes { get; }
+    // Edits must pass through WorldMap so its navigation and render caches stay coherent.
+    internal SparseVoxelStore Volumes { get; }
 
     public BlockTerrain(int width, int height, int depth = 500)
     {
