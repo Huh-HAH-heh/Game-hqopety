@@ -543,7 +543,9 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private int _palettePreset;
 
-    private RgbColorSetting GetSelectedColor() => _selectedColorSlot switch
+    private RgbColorSetting GetSelectedColor() => GetColor(_selectedColorSlot);
+
+    private RgbColorSetting GetColor(TerrainColorSlot slot) => slot switch
     {
         TerrainColorSlot.Lowlands => Settings.Palette.Lowlands,
         TerrainColorSlot.Highlands => Settings.Palette.Highlands,
@@ -793,8 +795,6 @@ internal sealed class RaylibPauseMenu : IDisposable
         DrawOptionRow(panel, mouse, y, "ГОТОВЫЕ ПАЛИТРЫ",
             "СМЕНИТЬ ПАЛИТРУ", 88f);
 
-        const float gap = 10f;
-        float slotWidth = (SettingsContentWidth(panel) - gap * 2f) / 3f;
         for (int i = 0; i < 6; i++)
         {
             Rectangle bounds = GetColorSlotBounds(panel, i);
