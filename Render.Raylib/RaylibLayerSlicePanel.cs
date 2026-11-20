@@ -33,11 +33,36 @@ internal sealed class RaylibLayerSlicePanel
 
         if (IsKeyPressed(KeyboardKey.Tab))
         {
+            if (_draggingSlider)
+                _settingsCommitRequested = true;
+
             _isOpen = !_isOpen;
             _draggingSlider = false;
         }
 
         Vector2 mouse = GetMousePosition();
+
+        if (_isOpen && CheckCollisionPointRec(mouse, GetSliderHitBounds()))
+        {
+            float wheel = GetMouseWheelMove();
+            if (MathF.Abs(wheel) > 0.001f)
+            {
+                int maximumLayer = Math.Max(
+                    0,
+                    (int)MathF.Round(maximumCutHeight / LayerHeightMeters));
+                int currentLayer = Math.Clamp(
+                    (int)MathF.Round(settings.CutawayHeightMeters / LayerHeightMeters),
+                    0,
+                    maximumLayer);
+                int wheelSteps = Math.Sign(wheel) *
+                    Math.Max(1, (int)MathF.Round(MathF.Abs(wheel)));
+                int nextLayer = Math.Clamp(currentLayer + wheelSteps, 0, maximumLayer);
+
+                settings.CutawayEnabled = true;
+                settings.CutawayHeightMeters = nextLayer * LayerHeightMeters;
+                _settingsCommitRequested = true;
+            }
+        }
 
         if (IsMouseButtonPressed(MouseButton.Left))
         {
@@ -269,14 +294,14 @@ internal sealed class RaylibLayerSlicePanel
 
         DrawTextEx(
             font,
-            "Скрывается объём выше плоскости.",
+            "Колесо над ползунком: шаг 0,1 м.",
             new Vector2(panel.X + 14f, panel.Y + 282f),
             10f,
             0.25f,
             new Color(151, 164, 180, 225));
         DrawTextEx(
             font,
-            "Перетаскивай ползунок для смены слоя.",
+            "Объём выше плоскости скрывается.",
             new Vector2(panel.X + 14f, panel.Y + 299f),
             10f,
             0.25f,

@@ -115,7 +115,7 @@ original mesh-baked cutaway behavior.
 - Shift + mouse wheel: move the cut plane by one 0.1 m voxel layer per wheel notch
 - Shift + middle mouse + vertical drag: adjust camera speed on the fly (up = faster)
 - Tab or the small right-side **СЛОИ** tab: open/close the horizontal section panel
-- Drag its vertical slider to select a 0.1 m terrain layer; material above the plane is hidden
+- Drag its vertical slider to choose a layer; mouse wheel over the slider steps exactly 0.1 m at a time
 - T: return to the fitted top-down view
 - Escape: exit
 - Pause menu > Terrain and cuts > Geometry: switch between Voxel (primary) and Heightmap fallback
