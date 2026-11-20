@@ -86,7 +86,7 @@ public sealed class TerrainRenderSnapshot
     public static TerrainRenderSnapshot Create(WorldMap worldMap) =>
         Create(worldMap, TerrainRenderMode.HeightmapFallback);
 
-    public static TerrainRenderSnapshot Create(
+    internal static TerrainRenderSnapshot Create(
         WorldMap worldMap,
         TerrainRenderMode mode)
     {
