@@ -11,7 +11,7 @@ namespace RimClone.Render.Raylib;
 internal sealed class OrbitCameraController
 {
     private const float FieldOfViewDegrees = 45f;
-    private const float RotationSensitivity = 0.0018f;
+    private const float BaseRotationSensitivity = 0.0018f;
     private const float RotationSmoothTime = 0.055f;
     private const float MovementSmoothTime = 0.075f;
     private const float ZoomSmoothTime = 0.095f;
@@ -53,6 +53,7 @@ internal sealed class OrbitCameraController
 
     public Camera3D Camera { get; private set; }
     public float TargetHeightMeters => _target.Y;
+    public float RotationSensitivityMultiplier { get; set; } = 1f;
 
     public OrbitCameraController(TerrainRenderSnapshot terrain)
     {
@@ -181,9 +182,9 @@ internal sealed class OrbitCameraController
         if (_mouseMode == MouseMode.Orbit)
         {
             // Dragging right moves the camera around the focus to the right.
-            _desiredYawRadians += mouseDelta.X * RotationSensitivity;
+            _desiredYawRadians += mouseDelta.X * BaseRotationSensitivity * RotationSensitivityMultiplier;
             _desiredPitchRadians = Math.Clamp(
-                _desiredPitchRadians - mouseDelta.Y * RotationSensitivity,
+                _desiredPitchRadians - mouseDelta.Y * BaseRotationSensitivity * RotationSensitivityMultiplier,
                 MinimumPitch,
                 MaximumPitch);
             NormalizeYawRange();
