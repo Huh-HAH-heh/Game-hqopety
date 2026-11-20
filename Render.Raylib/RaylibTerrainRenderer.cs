@@ -75,6 +75,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
         int visibleRegionCount = 0;
         int visibleDrawCalls = 0;
+        int rebuiltThisFrame = 0;
+        const int maximumMeshRebuildsPerFrame = 6;
         int cutawayLayer = terrain.CutawayEnabled
             ? terrain.CutawayLayer
             : -1;
@@ -102,6 +104,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 region.CutawayLayer != cutawayLayer ||
                 region.PaletteVersion != _paletteVersion)
             {
+                if (rebuiltThisFrame >= maximumMeshRebuildsPerFrame)
+                    continue;
+
                 region.Dispose();
 
                 int regionX = i % terrain.StorageRegionsX;
@@ -114,6 +119,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                     _paletteVersion);
                 _regionMeshes[i] = region;
                 RebuiltRegions++;
+                rebuiltThisFrame++;
             }
 
             if (!region.IsUploaded)
