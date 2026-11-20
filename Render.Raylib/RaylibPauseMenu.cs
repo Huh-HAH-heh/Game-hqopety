@@ -1300,7 +1300,7 @@ internal sealed class RaylibPauseMenu : IDisposable
     private static float Lerp(float a, float b, float amount) =>
         a + (b - a) * amount;
 
-remove dummy methods    private static int[] BuildFontCodepoints()
+    private static int[] BuildFontCodepoints()
     {
         List<int> codepoints = new();
 
@@ -1334,8 +1334,15 @@ remove dummy methods    private static int[] BuildFontCodepoints()
 
             try
             {
+                Font font = LoadFontEx(
+                    path,
+                    48,
+                    FontCodepoints,
+                    FontCodepoints.Length);
+
+                SetTextureFilter(font.Texture, TextureFilter.Bilinear);
                 ownsFont = true;
-                return LoadFontEx(path, 24, FontCodepoints, FontCodepoints.Length);
+                return font;
             }
             catch
             {
