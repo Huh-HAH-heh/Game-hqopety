@@ -123,7 +123,8 @@ internal sealed class RaylibPauseMenu : IDisposable
 
         Rectangle panel = GetPanelBounds();
         Rectangle header = new(panel.X, panel.Y, panel.Width, 62f);
-        if (CheckCollisionPointRec(mouse, header))
+        if (CheckCollisionPointRec(mouse, header) &&
+            !(_page == MenuPage.Settings && HitCloseButton(mouse, panel)))
         {
             _draggingMain = _page == MenuPage.Main;
             _draggingSettings = _page == MenuPage.Settings;
@@ -184,7 +185,7 @@ internal sealed class RaylibPauseMenu : IDisposable
     {
         if (HitButton(mouse, panel, 78f, 36f))
         {
-            ToggleFullscreen();
+            ToggleFullscreenMode();
             return RaylibMenuAction.None;
         }
 
@@ -280,7 +281,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         return RaylibMenuAction.ResetCamera;
     }
 
-    private void ToggleFullscreen()
+    private void ToggleFullscreenMode()
     {
         if (IsWindowFullscreen())
         {
@@ -297,7 +298,7 @@ internal sealed class RaylibPauseMenu : IDisposable
     private void CycleResolution()
     {
         if (IsWindowFullscreen())
-            ToggleFullscreen();
+            ToggleFullscreenMode();
 
         int monitor = GetCurrentMonitor();
         int maxWidth = GetMonitorWidth(monitor);
@@ -318,12 +319,6 @@ internal sealed class RaylibPauseMenu : IDisposable
         }
 
         SetWindowSize(_windowedWidth, _windowedHeight);
-    }
-
-    private RaylibMenuAction ResetCameraAndCutaway()
-    {
-        CutawayEnabled = false;
-        return RaylibMenuAction.ResetCamera;
     }
 
     private void DrawMainMenu(Rectangle panel, Vector2 mouse)
