@@ -19,9 +19,6 @@ internal sealed class RegionGpuMesh : IDisposable
 
     public void Dispose()
     {
-        if (!IsUploaded)
-            return;
-
         foreach (Mesh mesh in Meshes)
             UnloadMesh(mesh);
         foreach (Mesh mesh in CutMeshes)
@@ -30,6 +27,7 @@ internal sealed class RegionGpuMesh : IDisposable
         Meshes = Array.Empty<Mesh>();
         CutMeshes = Array.Empty<Mesh>();
         IsUploaded = false;
+        CutSurfaceLayer = int.MinValue;
     }
 }
 
