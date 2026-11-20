@@ -66,7 +66,7 @@ Raylib window
 The renderer reads the snapshot only. It does not query WorldMap while drawing.
 GPU resource creation, upload, draw and disposal are restricted to the render thread.
 Normal terrain edits invalidate affected storage batches; moving the cut plane rebuilds
-the visible volume at 0.5 m steps.
+the visible volume at the 0.1 m voxel-layer resolution.
 
 ## Controls
 
