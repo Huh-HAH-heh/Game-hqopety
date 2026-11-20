@@ -13,7 +13,7 @@ public sealed class TerrainRenderSnapshot
     public const int VoxelRenderRegionSizeInTiles = 1;
     public const int HeightmapRenderRegionSizeInTiles = 4;
 
-    private readonly WorldMap _worldMap;
+    private WorldMap _worldMap;
     private readonly float[] _heightsMeters;
     private readonly ushort[] _materialIds;
     private readonly long[] _sourceRegionVersions;
