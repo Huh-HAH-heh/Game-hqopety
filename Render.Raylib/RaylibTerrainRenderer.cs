@@ -13,7 +13,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 {
     private const int MaximumCoarseMeshBuildsPerFrame = 6;
     private const int MaximumFineMeshBuildsPerFrame = 2;
-    private const int MaximumCutSurfaceBuildsPerFrame = 24;
+    private const int MaximumCutSurfaceBuildsPerFrame = 144;
     private const float FineLodEnterDistanceMeters = 220f;
     private const float FineLodExitDistanceMeters = 290f;
 
