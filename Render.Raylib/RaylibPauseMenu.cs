@@ -14,7 +14,8 @@ internal enum RaylibMenuAction : byte
     ResetCamera,
     FocusLowerTunnel,
     FocusUpperPassage,
-    ToggleCutaway
+    ToggleCutaway,
+    RebuildTerrainMode
 }
 
 internal sealed class RaylibPauseMenu : IDisposable
@@ -406,6 +407,14 @@ internal sealed class RaylibPauseMenu : IDisposable
             Settings.CutawayEnabled = false;
             SaveSettings();
             return RaylibMenuAction.ResetCamera;
+        }
+        else if (HitActionButton(mouse, panel, 514f))
+        {
+            Settings.TerrainMode = Settings.TerrainMode == TerrainRenderMode.Voxel
+                ? TerrainRenderMode.HeightmapFallback
+                : TerrainRenderMode.Voxel;
+            SaveSettings();
+            return RaylibMenuAction.RebuildTerrainMode;
         }
 
         return RaylibMenuAction.None;
@@ -863,6 +872,18 @@ internal sealed class RaylibPauseMenu : IDisposable
             y + 300f,
             12f,
             new Color(170, 184, 201));
+
+        DrawOptionRow(
+            panel,
+            mouse,
+            y + 350f,
+            "ГЕОМЕТРИЯ ТЕРРЕНА",
+            Settings.TerrainMode == TerrainRenderMode.Voxel
+                ? "ВОКСЕЛИ / 1 М"
+                : "КАРТА ВЫСОТ / РЕЗЕРВ",
+            514f,
+            active: Settings.TerrainMode == TerrainRenderMode.Voxel,
+            help: "Воксельный режим хранит отдельные ячейки и все вертикальные интервалы.");
     }
 
     private void DrawEnvironmentSettings(Rectangle panel, Vector2 mouse)
