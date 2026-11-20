@@ -62,6 +62,7 @@ internal sealed class TerrainPalette
     public RgbColorSetting CutSurface { get; set; } = new(14, 15, 18);
     public RgbColorSetting CutHatching { get; set; } = new(125, 132, 142);
     public RgbColorSetting Background { get; set; } = new(0, 0, 0);
+    public bool ShowCutHatching { get; set; } = true;
 
     public Color GetSurfaceColor(float height, ushort materialId)
     {
