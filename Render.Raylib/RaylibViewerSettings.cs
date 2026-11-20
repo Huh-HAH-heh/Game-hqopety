@@ -68,7 +68,7 @@ internal sealed class TerrainPalette
     // from the directional light, not from height- or material-based colors.
     public RgbColorSetting BaseRock { get; set; } = new(28, 30, 33);
     public RgbColorSetting CutHatching { get; set; } = new(76, 81, 89);
-    public RgbColorSetting Background { get; set; } = new(0, 0, 0);
+    public RgbColorSetting Background { get; set; } = new(18, 22, 29);
     public bool ShowCutHatching { get; set; } = true;
 
     // Cheap global lighting stub: one directional sun and an ambient floor.
@@ -115,7 +115,7 @@ internal sealed class TerrainPalette
     {
         BaseRock ??= new RgbColorSetting(28, 30, 33);
         CutHatching ??= new RgbColorSetting(76, 81, 89);
-        Background ??= new RgbColorSetting(0, 0, 0);
+        Background ??= new RgbColorSetting(18, 22, 29);
         BaseRock.Normalize();
         CutHatching.Normalize();
         Background.Normalize();
@@ -192,6 +192,12 @@ internal sealed class RaylibViewerSettings
                 JsonSerializer.Deserialize<RaylibViewerSettings>(json, JsonOptions);
 
             settings ??= new RaylibViewerSettings();
+
+            // Migrate the old pure-black default once. Custom non-black
+            // background colors remain untouched.
+            if (settings.Palette?.Background is { R: 0, G: 0, B: 0 })
+                settings.Palette.Background = new RgbColorSetting(18, 22, 29);
+
             settings.Normalize();
             return settings;
         }
