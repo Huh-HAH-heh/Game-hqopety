@@ -33,16 +33,11 @@ internal static class RegionMeshBuilder
     private const int MaximumQuadsPerMesh = 15_000;
     private const float UnitsPerMeter = 0.1f;
 
-    private const float ContourIntervalMeters = 5f;
-    private const float ContourHalfHeight = 0.055f;
-    private const float ContourOffset = 0.035f;
 
     private const int CutHatchLinesPerPatch = 4;
     private const float CutHatchHalfWidth = 0.035f;
     private const float CutHatchLift = 0.045f;
 
-    private static readonly Color BrightContourColor = new(246, 248, 250, 255);
-    private static readonly Color DimContourColor = new(168, 173, 181, 255);
     private static readonly Color CutHatchColor = new(205, 211, 219, 255);
 
     private readonly record struct TerrainQuad(
@@ -440,94 +435,7 @@ internal static class RegionMeshBuilder
             wallColor,
             ReverseWinding: false));
 
-        AddElevationMarks(
-            quads,
-            x0, x1, z0, z1,
-            startLayer,
-            endLayer,
-            side);
-    }
-
-    private static void AddElevationMarks(
-        List<TerrainQuad> quads,
-        float x0,
-        float x1,
-        float z0,
-        float z1,
-        int startLayer,
-        int endLayer,
-        int side)
-    {
-        int firstLevel = (int)MathF.Ceiling(
-            startLayer / (5f * WorldMap.HeightUnitsPerMeter));
-        int lastLevel = (int)MathF.Floor(
-            endLayer / (5f * WorldMap.HeightUnitsPerMeter));
-
-        for (int levelIndex = firstLevel; levelIndex <= lastLevel; levelIndex++)
-        {
-            float level = levelIndex * 5f;
-            float lineBottom = MathF.Max(
-                startLayer * UnitsPerMeter,
-                level - ContourHalfHeight);
-            float lineTop = MathF.Min(
-                endLayer * UnitsPerMeter,
-                level + ContourHalfHeight);
-
-            if (lineTop <= lineBottom)
-                continue;
-
-            Vector3 normal = side switch
-            {
-                0 => -Vector3.UnitZ,
-                1 => Vector3.UnitZ,
-                2 => -Vector3.UnitX,
-                _ => Vector3.UnitX
-            };
-            Vector3 offset = normal * ContourOffset;
-
-            Vector3 a;
-            Vector3 b;
-            Vector3 c;
-            Vector3 d;
-
-            switch (side)
-            {
-                case 0:
-                    a = new Vector3(x0, lineTop, z0) + offset;
-                    b = new Vector3(x1, lineTop, z0) + offset;
-                    c = new Vector3(x1, lineBottom, z0) + offset;
-                    d = new Vector3(x0, lineBottom, z0) + offset;
-                    break;
-                case 1:
-                    a = new Vector3(x1, lineTop, z1) + offset;
-                    b = new Vector3(x0, lineTop, z1) + offset;
-                    c = new Vector3(x0, lineBottom, z1) + offset;
-                    d = new Vector3(x1, lineBottom, z1) + offset;
-                    break;
-                case 2:
-                    a = new Vector3(x0, lineTop, z1) + offset;
-                    b = new Vector3(x0, lineTop, z0) + offset;
-                    c = new Vector3(x0, lineBottom, z0) + offset;
-                    d = new Vector3(x0, lineBottom, z1) + offset;
-                    break;
-                default:
-                    a = new Vector3(x1, lineTop, z0) + offset;
-                    b = new Vector3(x1, lineTop, z1) + offset;
-                    c = new Vector3(x1, lineBottom, z1) + offset;
-                    d = new Vector3(x1, lineBottom, z0) + offset;
-                    break;
-            }
-
-            Color color = (levelIndex & 1) == 0
-                ? BrightContourColor
-                : DimContourColor;
-
-            quads.Add(new TerrainQuad(
-                a, b, c, d,
-                normal,
-                color,
-                ReverseWinding: false));
-        }
+        // Bright elevation contour stripes removed from cliff faces.
     }
 
     private static void AddCutHatching(

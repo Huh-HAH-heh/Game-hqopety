@@ -35,6 +35,7 @@ The mesh builder emits:
 - upper faces of solid ground and lower floors exposed beneath caves;
 - undersides of cave roofs and ceilings;
 - vertical walls wherever solid material borders an air interval;
+- no bright white elevation stripes on cliff faces; cutaway geology hatching remains subdued
 - side faces along ordinary terrain height differences;
 - distinct cut faces and material-specific hatching at the current cut plane.
 

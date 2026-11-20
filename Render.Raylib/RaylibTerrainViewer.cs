@@ -44,8 +44,9 @@ public static class RaylibTerrainViewer
                 $"maximum height: {terrain.MaximumHeightMeters:0.0} m.");
 
             Console.WriteLine(
-                "[Raylib] Cave locations: lower tunnel X 1134-1286, Z 1127-1159, H 13-21m; " +
-                "upper passage X 1200-1220, Z 1127-1159, H 26-34m. F1/F2 focus, C surface.");
+                "[Raylib] Cave at map centre (1152,1152): lower tunnel X 1076-1228, " +
+                "Z about 1140-1164, H 13-21m; upper passage near X 1152, Z 1136-1168, " +
+                "H 25-33m. F1/F2 focus, C surface.");
 
             while (!WindowShouldClose())
             {
@@ -135,9 +136,9 @@ public static class RaylibTerrainViewer
     {
         camera.FocusOn(
             new System.Numerics.Vector3(
-                terrain.WorldWidth * 0.5f + 58f,
+                terrain.WorldWidth * 0.5f,
                 17f,
-                terrain.WorldDepth * 0.5f - 9f),
+                terrain.WorldDepth * 0.5f),
             108f,
             pitchRadians: 0.82f);
     }
@@ -148,9 +149,9 @@ public static class RaylibTerrainViewer
     {
         camera.FocusOn(
             new System.Numerics.Vector3(
-                terrain.WorldWidth * 0.5f + 58f,
+                terrain.WorldWidth * 0.5f,
                 28f,
-                terrain.WorldDepth * 0.5f - 9f),
+                terrain.WorldDepth * 0.5f),
             34f,
             pitchRadians: 0.82f);
     }
@@ -207,14 +208,14 @@ public static class RaylibTerrainViewer
             Color.RayWhite);
 
         DrawText(
-            "LOWER: X 1134-1286 | Z 1127-1159 | HEIGHT 13-21 m",
+            "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
             24,
             170,
             14,
             Color.LightGray);
 
         DrawText(
-            "UPPER: X 1200-1220 | Z 1127-1159 | HEIGHT 25-33 m",
+            "UPPER: near X 1152 | Z 1136-1168 | HEIGHT 25-33 m",
             24,
             192,
             14,

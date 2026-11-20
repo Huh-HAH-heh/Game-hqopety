@@ -139,7 +139,7 @@ public static class WorldGenerator
 
                 shapedHeight = ApplyMesa(
                     sampleX, sampleY,
-                    centerX + 58f, centerY - 9f,
+                    centerX, centerY,
                     74f, 56f,
                     shapedHeight,
                     mediumRelief,
@@ -169,8 +169,9 @@ public static class WorldGenerator
 
         worldMap.SetSurfaceHeightPatches(heights, patchSize, BaseMaterialId);
 
-        int caveCenterX = centerX + 58;
-        int caveCenterY = centerY - 9;
+        // Keep the complete cave system directly beneath the map centre.
+        int caveCenterX = centerX;
+        int caveCenterY = centerY;
 
         // Geological bands are inserted only where the original surface
         // provides enough overburden. This keeps strata inside the massif
