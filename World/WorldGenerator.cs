@@ -55,7 +55,7 @@ public static class WorldGenerator
         worldMap.DisableDiscreteBlockTerrain();
         worldMap.Water.Clear();
 
-        const int patchSize = 4;
+        const int patchSize = 1;
         int patchesX = worldMap.TileWidth / patchSize;
         int patchesY = worldMap.TileHeight / patchSize;
         ushort[] heights = new ushort[checked(patchesX * patchesY)];
