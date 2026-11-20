@@ -165,6 +165,7 @@ internal sealed class RaylibViewerSettings
     public float CameraVerticalSpeed { get; set; } = 1f;
 
     public bool CutawayEnabled { get; set; }
+    public float CutawayHeightMeters { get; set; } = 17f;
 
     public bool ShowHud { get; set; } = true;
     public bool ShowControls { get; set; } = true;
@@ -241,6 +242,10 @@ internal sealed class RaylibViewerSettings
         CameraZoomSpeed = Math.Clamp(CameraZoomSpeed, 0.25f, 4f);
         CameraVerticalSpeed = Math.Clamp(CameraVerticalSpeed, 0.25f, 4f);
         RenderDistanceMeters = Math.Clamp(RenderDistanceMeters, 500f, 18000f);
+
+        if (!float.IsFinite(CutawayHeightMeters))
+            CutawayHeightMeters = 17f;
+        CutawayHeightMeters = Math.Clamp(CutawayHeightMeters, 0f, 49.9f);
 
         Palette ??= new TerrainPalette();
         Palette.Normalize();
