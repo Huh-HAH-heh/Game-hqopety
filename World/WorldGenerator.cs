@@ -145,9 +145,11 @@ public static class WorldGenerator
                     mediumRelief,
                     fineRelief);
 
+                // Keep the rimmed basin clear of the central mesa's west
+                // portal so the through-tunnel remains open at both ends.
                 shapedHeight = ApplyRimmedBasin(
                     sampleX, sampleY,
-                    centerX - 61f, centerY + 19f,
+                    centerX - 160f, centerY + 100f,
                     40f, 29f,
                     shapedHeight,
                     broadRelief,
