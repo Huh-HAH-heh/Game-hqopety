@@ -867,30 +867,49 @@ internal static class TerrainFrustum
         int viewportHeight,
         float maximumDistance)
     {
-        Vector3 forward = Vector3.Normalize(camera.Target - camera.Position);
-        Vector3 right = Vector3.Normalize(Vector3.Cross(forward, camera.Up));
+        radius = Math.Max(0f, radius);
+        viewportWidth = Math.Max(1, viewportWidth);
+        viewportHeight = Math.Max(1, viewportHeight);
+        maximumDistance = Math.Clamp(maximumDistance, 500f, 18000f);
+
+        Vector3 forward = camera.Target - camera.Position;
+        if (forward.LengthSquared() < 0.000001f)
+            return true;
+
+        forward = Vector3.Normalize(forward);
+        Vector3 right = Vector3.Cross(forward, camera.Up);
+        if (right.LengthSquared() < 0.000001f)
+            return true;
+
+        right = Vector3.Normalize(right);
         Vector3 up = Vector3.Normalize(Vector3.Cross(right, forward));
-        Vector3 delta = center - camera.Position;
+        Vector3 toCenter = center - camera.Position;
 
-        float depth = Vector3.Dot(delta, forward);
-        const float nearPlane = 1f;
-        float farPlane = Math.Clamp(maximumDistance, 500f, 18000f);
+        float depth = Vector3.Dot(toCenter, forward);
+        float distanceFromFocus = Vector3.Distance(center, camera.Target);
 
-        if (depth + radius < nearPlane || depth - radius > farPlane)
+        // Render distance belongs to the focused landscape, not the camera
+        // altitude. The old camera-relative far test hid the complete map
+        // when the user zoomed out far enough.
+        if (depth + radius <= 0.05f ||
+            distanceFromFocus - radius > maximumDistance)
+        {
             return false;
+        }
 
         float tanVertical = MathF.Tan(camera.FovY * MathF.PI / 360f);
-        float aspect = viewportWidth / (float)Math.Max(1, viewportHeight);
+        float aspect = viewportWidth / (float)viewportHeight;
         float tanHorizontal = tanVertical * aspect;
-        float horizontalDistance = MathF.Abs(Vector3.Dot(delta, right));
-        float verticalDistance = MathF.Abs(Vector3.Dot(delta, up));
+        float horizontalDistance = MathF.Abs(Vector3.Dot(toCenter, right));
+        float verticalDistance = MathF.Abs(Vector3.Dot(toCenter, up));
 
+        // A sphere may intersect the frustum even when its centre is outside.
+        float positiveDepth = Math.Max(0f, depth);
         float horizontalLimit =
-            depth * tanHorizontal +
+            positiveDepth * tanHorizontal +
             radius * MathF.Sqrt(1f + tanHorizontal * tanHorizontal);
-
         float verticalLimit =
-            depth * tanVertical +
+            positiveDepth * tanVertical +
             radius * MathF.Sqrt(1f + tanVertical * tanVertical);
 
         return horizontalDistance <= horizontalLimit &&
