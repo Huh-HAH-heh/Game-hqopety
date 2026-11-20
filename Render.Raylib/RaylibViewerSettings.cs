@@ -44,7 +44,7 @@ internal sealed class RgbColorSetting
         (byte)Math.Clamp(R, 0, 255),
         (byte)Math.Clamp(G, 0, 255),
         (byte)Math.Clamp(B, 0, 255),
-        255);
+        (byte)255);
 
     public void Normalize()
     {
