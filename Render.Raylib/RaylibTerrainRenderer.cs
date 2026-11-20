@@ -13,14 +13,17 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     private readonly RegionGpuMesh[] _regionMeshes;
     private readonly RegionGpuMesh?[] _visibleRegionMeshes;
     private readonly Material _material;
+    private TerrainPalette _palette;
+    private int _paletteVersion;
     private bool _disposed;
 
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleRegionsLastFrame { get; private set; }
     public int RebuiltRegions { get; private set; }
 
-    public RaylibTerrainRenderer(TerrainRenderSnapshot terrain)
+    public RaylibTerrainRenderer(TerrainRenderSnapshot terrain, TerrainPalette palette)
     {
+        _palette = palette;
         _regionMeshes = new RegionGpuMesh[terrain.StorageRegionCount];
         _visibleRegionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
         _material = LoadMaterialDefault();
@@ -52,7 +55,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 _regionMeshes[index] = RegionMeshBuilder.Build(
                     terrain,
                     regionX,
-                    regionY);
+                    regionY,
+                    _palette,
+                    _paletteVersion);
 
                 RebuiltRegions++;
             }
@@ -63,7 +68,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         TerrainRenderSnapshot terrain,
         Camera3D camera,
         int viewportWidth,
-        int viewportHeight)
+        int viewportHeight,
+        float maximumViewDistanceMeters)
     {
         ThrowIfDisposed();
 
@@ -86,13 +92,15 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 region.BoundsCenter,
                 region.BoundsRadius,
                 viewportWidth,
-                viewportHeight))
+                viewportHeight,
+                maximumViewDistanceMeters))
             {
                 continue;
             }
 
             if (region.RegionVersion != terrain.SourceRegionVersions[i] ||
-                region.CutawayLayer != cutawayLayer)
+                region.CutawayLayer != cutawayLayer ||
+                region.PaletteVersion != _paletteVersion)
             {
                 region.Dispose();
 
@@ -101,7 +109,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 region = RegionMeshBuilder.Build(
                     terrain,
                     regionX,
-                    regionY);
+                    regionY,
+                    _palette,
+                    _paletteVersion);
                 _regionMeshes[i] = region;
                 RebuiltRegions++;
             }
@@ -130,6 +140,12 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
         DrawCallsLastFrame = visibleDrawCalls;
         VisibleRegionsLastFrame = visibleRegionCount;
+    }
+
+    public void SetPalette(TerrainPalette palette)
+    {
+        _palette = palette;
+        _paletteVersion++;
     }
 
     public void Dispose()
