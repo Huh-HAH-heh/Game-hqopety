@@ -26,6 +26,9 @@ internal sealed class OrbitCameraController
     private readonly float _minimumDistance;
     private readonly float _maximumDistance;
     private readonly Vector3 _topDownTarget;
+    private int _viewportWidth;
+    private int _viewportHeight;
+    private bool _fitViewActive = true;
 
     private Vector3 _target;
     private Vector3 _desiredTarget;
@@ -93,6 +96,8 @@ internal sealed class OrbitCameraController
 
         _minimumDistance = 2f;
         _maximumDistance = largestWorldAxis * 3.5f;
+        _viewportWidth = Math.Max(1, GetScreenWidth());
+        _viewportHeight = Math.Max(1, GetScreenHeight());
 
         _distance = CalculateFitDistance(
             terrain.WorldWidth,
@@ -109,6 +114,7 @@ internal sealed class OrbitCameraController
         float mouseWheel,
         bool mouseInputEnabled = true)
     {
+        UpdateViewportCalibration();
         if (deltaTime <= 0f)
             return;
 
@@ -155,6 +161,30 @@ internal sealed class OrbitCameraController
             ref _distanceVelocity,
             ZoomSmoothTime,
             deltaTime);
+
+        UpdateCamera();
+    }
+
+    private void UpdateViewportCalibration()
+    {
+        int width = Math.Max(1, GetScreenWidth());
+        int height = Math.Max(1, GetScreenHeight());
+        if (width == _viewportWidth && height == _viewportHeight)
+            return;
+
+        _viewportWidth = width;
+        _viewportHeight = height;
+
+        if (_fitViewActive)
+        {
+            _desiredDistance = CalculateFitDistance(
+                _topDownTarget.X * 2f,
+                _topDownTarget.Z * 2f,
+                width,
+                height);
+            _distance = _desiredDistance;
+            _distanceVelocity = 0f;
+        }
 
         UpdateCamera();
     }
@@ -221,6 +251,7 @@ internal sealed class OrbitCameraController
 
         if (_mouseMode == MouseMode.Orbit)
         {
+            _fitViewActive = false;
             // Dragging right moves the camera around the focus to the right.
             _desiredYawRadians += mouseDelta.X * BaseRotationSensitivity * RotationSensitivityMultiplier;
             _desiredPitchRadians = Math.Clamp(
@@ -264,6 +295,7 @@ internal sealed class OrbitCameraController
             return;
         }
 
+        _fitViewActive = false;
         _desiredTarget.X += pointBefore.X - pointAfter.X;
         _desiredTarget.Z += pointBefore.Z - pointAfter.Z;
     }
@@ -282,6 +314,7 @@ internal sealed class OrbitCameraController
             _desiredDistance,
             out Vector3 pointBeforeZoom);
 
+        _fitViewActive = false;
         _desiredDistance *= MathF.Pow(0.88f, wheel * ZoomSpeedMultiplier);
         _desiredDistance = Math.Clamp(
             _desiredDistance,
@@ -384,6 +417,7 @@ internal sealed class OrbitCameraController
 
         if (moveX != 0f || moveZ != 0f)
         {
+            _fitViewActive = false;
             Vector3 forward = new(
                 -MathF.Sin(_desiredYawRadians),
                 0f,
@@ -496,6 +530,7 @@ internal sealed class OrbitCameraController
 
         if (_mode == RaylibCameraMode.TopDown)
         {
+            _fitViewActive = true;
             _desiredYawRadians = 0f;
             _desiredPitchRadians = TopDownPitch;
             _yawRadians = 0f;
@@ -503,6 +538,7 @@ internal sealed class OrbitCameraController
         }
         else
         {
+            _fitViewActive = false;
             float minimumPitch = _mode == RaylibCameraMode.Rts
                 ? RtsMinimumPitch
                 : MinimumPitch;
@@ -523,6 +559,7 @@ internal sealed class OrbitCameraController
 
     public void FocusOn(Vector3 target, float distance, float pitchRadians)
     {
+        _fitViewActive = false;
         target.Y = Math.Clamp(
             target.Y,
             -VerticalTargetLimitMeters,
@@ -556,6 +593,7 @@ internal sealed class OrbitCameraController
 
     public void ResetTopDownView()
     {
+        _fitViewActive = true;
         _target = _topDownTarget;
         _desiredTarget = _topDownTarget;
 
