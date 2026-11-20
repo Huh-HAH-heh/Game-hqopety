@@ -15,10 +15,15 @@ renderer and does not own world-generation or simulation state.
 
 ## Terrain region layout
 
-The primary **Voxel** mode uses one render cell per 1x1 m map tile and exact 0.1 m
-vertical layers. The mesher reads the real solid/air intervals for each visible
-column and emits only exposed faces in all six directions. This is a volumetric
-voxel surface, not an interpolated height field.
+The primary **Voxel** mode follows the native world-cell dimensions: 1x1 m in X/Y
+and 0.1 m per vertical layer. Face generation and internal-face culling are symmetric
+in all six directions; the renderer does not invent horizontal detail below the
+world's 1 m storage resolution. A true 0.1 m cube grid would require 10x horizontal
+subdivision on both axes and a substantially denser mesh.
+
+The mesher reads the real solid/air intervals for each visible column and emits only
+exposed faces in all six directions. This is a volumetric voxel surface, not an
+interpolated height field.
 
 The world remains stored in 192x192-tile regions; the full map is 2304x2304 m with
 500 vertical layers at 0.1 m per layer. Simple columns stay compact, and detailed
