@@ -204,21 +204,22 @@ public sealed class WorldMap
                     for (int localX = 0; localX < region.TileWidth; localX++)
                     {
                         int worldX = region.TileOriginX + localX;
+                        int columnIndex = GetColumnIndex(worldX, worldY);
                         int levels;
                         ushort materialId;
 
-                        if (Blocks.Volumes.TryGetSimpleColumn(
-                                worldX, worldY,
-                                out ushort topExclusive,
-                                out ushort simpleMaterial))
+                        if (_simpleFillColumns[columnIndex])
                         {
                             levels = Math.Clamp(
                                 (int)MathF.Round(
-                                    topExclusive / (float)HeightUnitsPerMeter,
+                                    _surfaceHeights[columnIndex] /
+                                        (float)HeightUnitsPerMeter,
                                     MidpointRounding.AwayFromZero),
                                 0,
                                 LayerCount / HeightUnitsPerMeter);
-                            materialId = levels > 0 ? simpleMaterial : (ushort)0;
+                            materialId = levels > 0
+                                ? _columnMaterialIds[columnIndex]
+                                : (ushort)0;
                         }
                         else
                         {
