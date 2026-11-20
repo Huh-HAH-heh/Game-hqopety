@@ -308,22 +308,22 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private RaylibMenuAction HandleDisplayClick(Vector2 mouse, Rectangle panel)
     {
-        if (HitActionButton(mouse, panel, 88f))
+        if (HitActionButton(mouse, panel, 164f))
         {
             ToggleFullscreenMode();
             SaveSettings();
         }
-        else if (HitActionButton(mouse, panel, 158f))
+        else if (HitActionButton(mouse, panel, 234f))
         {
             CycleResolution();
             SaveSettings();
         }
-        else if (HitActionButton(mouse, panel, 228f))
+        else if (HitActionButton(mouse, panel, 304f))
         {
             Settings.VSync = !Settings.VSync;
             SaveSettings();
         }
-        else if (HitActionButton(mouse, panel, 298f))
+        else if (HitActionButton(mouse, panel, 374f))
         {
             Settings.Msaa4x = !Settings.Msaa4x;
             SaveSettings();
@@ -334,29 +334,28 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private RaylibMenuAction HandleCameraClick(Vector2 mouse, Rectangle panel)
     {
-        if (HitActionButton(mouse, panel, 88f))
+        if (HitActionButton(mouse, panel, 164f))
         {
             Settings.CameraMode = (RaylibCameraMode)(((int)Settings.CameraMode + 1) % 3);
+            SaveSettings();
             if (Settings.CameraMode == RaylibCameraMode.TopDown)
                 return RaylibMenuAction.ResetCamera;
-
-            SaveSettings();
         }
-        else if (HitSlider(mouse, panel, SliderId.CameraMove, 164f))
+        else if (HitSlider(mouse, panel, SliderId.CameraMove, 234f))
             BeginSlider(SliderId.CameraMove, mouse, panel);
-        else if (HitSlider(mouse, panel, SliderId.CameraRotation, 242f))
+        else if (HitSlider(mouse, panel, SliderId.CameraRotation, 312f))
             BeginSlider(SliderId.CameraRotation, mouse, panel);
-        else if (HitSlider(mouse, panel, SliderId.CameraPan, 320f))
+        else if (HitSlider(mouse, panel, SliderId.CameraPan, 390f))
             BeginSlider(SliderId.CameraPan, mouse, panel);
-        else if (HitSlider(mouse, panel, SliderId.CameraZoom, 398f))
+        else if (HitSlider(mouse, panel, SliderId.CameraZoom, 468f))
             BeginSlider(SliderId.CameraZoom, mouse, panel);
-        else if (HitSlider(mouse, panel, SliderId.CameraVertical, 476f))
+        else if (HitSlider(mouse, panel, SliderId.CameraVertical, 546f))
             BeginSlider(SliderId.CameraVertical, mouse, panel);
-        else if (HitActionButton(mouse, panel, 560f))
+        else if (HitActionButton(mouse, panel, 624f))
             return RaylibMenuAction.ResetCamera;
-        else if (HitHalfActionButton(mouse, panel, 620f, left: true))
+        else if (HitHalfActionButton(mouse, panel, 684f, left: true))
             return RaylibMenuAction.FocusLowerTunnel;
-        else if (HitHalfActionButton(mouse, panel, 620f, left: false))
+        else if (HitHalfActionButton(mouse, panel, 684f, left: false))
             return RaylibMenuAction.FocusUpperPassage;
 
         SaveSettings();
@@ -365,24 +364,24 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private RaylibMenuAction HandleTerrainClick(Vector2 mouse, Rectangle panel)
     {
-        if (HitActionButton(mouse, panel, 88f))
+        if (HitActionButton(mouse, panel, 164f))
         {
             Settings.CutawayEnabled = !Settings.CutawayEnabled;
             SaveSettings();
             return RaylibMenuAction.ToggleCutaway;
         }
 
-        if (HitActionButton(mouse, panel, 158f))
+        if (HitActionButton(mouse, panel, 234f))
         {
             Settings.Palette.ShowCutHatching = !Settings.Palette.ShowCutHatching;
             PaletteRevision++;
             SaveSettings();
         }
-        else if (HitHalfActionButton(mouse, panel, 228f, left: true))
+        else if (HitHalfActionButton(mouse, panel, 304f, left: true))
             return RaylibMenuAction.FocusLowerTunnel;
-        else if (HitHalfActionButton(mouse, panel, 228f, left: false))
+        else if (HitHalfActionButton(mouse, panel, 304f, left: false))
             return RaylibMenuAction.FocusUpperPassage;
-        else if (HitActionButton(mouse, panel, 298f))
+        else if (HitActionButton(mouse, panel, 374f))
         {
             Settings.CutawayEnabled = false;
             SaveSettings();
@@ -403,17 +402,17 @@ internal sealed class RaylibPauseMenu : IDisposable
             return RaylibMenuAction.None;
         }
 
-        if (HitActionButton(mouse, panel, 88f))
+        if (HitActionButton(mouse, panel, 164f))
         {
             ApplyNextPalettePreset();
             PaletteRevision++;
             SaveSettings();
         }
-        else if (HitSlider(mouse, panel, SliderId.PaletteRed, 242f))
+        else if (HitSlider(mouse, panel, SliderId.PaletteRed, 442f))
             BeginSlider(SliderId.PaletteRed, mouse, panel);
-        else if (HitSlider(mouse, panel, SliderId.PaletteGreen, 320f))
+        else if (HitSlider(mouse, panel, SliderId.PaletteGreen, 520f))
             BeginSlider(SliderId.PaletteGreen, mouse, panel);
-        else if (HitSlider(mouse, panel, SliderId.PaletteBlue, 398f))
+        else if (HitSlider(mouse, panel, SliderId.PaletteBlue, 598f))
             BeginSlider(SliderId.PaletteBlue, mouse, panel);
 
         return RaylibMenuAction.None;
@@ -421,13 +420,13 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private RaylibMenuAction HandleInterfaceClick(Vector2 mouse, Rectangle panel)
     {
-        if (HitActionButton(mouse, panel, 88f))
+        if (HitActionButton(mouse, panel, 164f))
             Settings.ShowHud = !Settings.ShowHud;
-        else if (HitActionButton(mouse, panel, 158f))
+        else if (HitActionButton(mouse, panel, 234f))
             Settings.ShowControls = !Settings.ShowControls;
-        else if (HitActionButton(mouse, panel, 228f))
+        else if (HitActionButton(mouse, panel, 304f))
             Settings.ShowPerformanceStats = !Settings.ShowPerformanceStats;
-        else if (HitActionButton(mouse, panel, 298f))
+        else if (HitActionButton(mouse, panel, 374f))
             Settings.ShowCaveCoordinates = !Settings.ShowCaveCoordinates;
         else
             return RaylibMenuAction.None;
@@ -438,7 +437,7 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private RaylibMenuAction HandlePerformanceClick(Vector2 mouse, Rectangle panel)
     {
-        if (HitActionButton(mouse, panel, 88f))
+        if (HitActionButton(mouse, panel, 164f))
         {
             int index = Array.IndexOf(FrameRateLimits, Settings.TargetFps);
             Settings.TargetFps = FrameRateLimits[(index + 1 + FrameRateLimits.Length) % FrameRateLimits.Length];
@@ -761,8 +760,9 @@ internal sealed class RaylibPauseMenu : IDisposable
             "СКОРОСТЬ ИЗМЕНЕНИЯ ВЫСОТЫ", Settings.CameraVerticalSpeed, "×");
         DrawOptionRow(panel, mouse, y + 460f, "ТОЧКА ОБЗОРА",
             "СБРОСИТЬ КАМЕРУ", 560f);
-        DrawOptionRow(panel, mouse, y + 520f, "БЫСТРОЕ ПЕРЕМЕЩЕНИЕ",
-            "НИЖНИЙ / ВЕРХНИЙ ТОННЕЛЬ", 620f);
+        DrawLabel("БЫСТРОЕ ПЕРЕМЕЩЕНИЕ", panel.X + 304f, y + 530f, 14f,
+            new Color(218, 226, 236));
+        DrawHalfActionPair(panel, mouse, y + 520f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
     }
 
     private void DrawTerrainSettings(Rectangle panel, Vector2 mouse)
@@ -775,7 +775,8 @@ internal sealed class RaylibPauseMenu : IDisposable
             Settings.Palette.ShowCutHatching ? "ВКЛ" : "ВЫКЛ", 158f,
             Settings.Palette.ShowCutHatching);
         DrawOptionRow(panel, mouse, y + 140f, "ФОКУСИРОВКА",
-            "НИЖНИЙ / ВЕРХНИЙ ТОННЕЛЬ", 228f);
+            "ВЫБРАТЬ ПРОХОД", 304f);
+        DrawHalfActionPair(panel, mouse, y + 140f, "НИЖНИЙ ТОННЕЛЬ", "ВЕРХНИЙ ПРОХОД");
         DrawOptionRow(panel, mouse, y + 210f, "ВИД ПОВЕРХНОСТИ",
             "СБРОСИТЬ СРЕЗ И КАМЕРУ", 298f);
         DrawLabel(
@@ -842,14 +843,14 @@ internal sealed class RaylibPauseMenu : IDisposable
 
         DrawRectangle(
             (int)(panel.X + 304f),
-            (int)(y + 520f),
+            (int)(y + 498f),
             70,
             36,
             selected.ToRaylibColor());
         DrawLabel(
             "Цвет применяется к мешам видимой местности по мере их обновления.",
             panel.X + 388f,
-            y + 530f,
+            y + 508f,
             11f,
             new Color(154, 168, 185));
     }
@@ -908,7 +909,7 @@ internal sealed class RaylibPauseMenu : IDisposable
         float x = panel.X + 304f;
         DrawLabel(label, x, y + 10f, 14f, new Color(218, 226, 236));
 
-        Rectangle button = GetActionBounds(panel, actionOffset);
+        Rectangle button = GetActionBounds(panel, y - panel.Y);
         DrawButtonAt(button, mouse, value, active);
 
         if (!string.IsNullOrWhiteSpace(help))
@@ -978,6 +979,17 @@ internal sealed class RaylibPauseMenu : IDisposable
             panel.Width - 56f,
             height);
         DrawButtonAt(bounds, mouse, text);
+    }
+
+    private void DrawHalfActionPair(
+        Rectangle panel,
+        Vector2 mouse,
+        float y,
+        string leftText,
+        string rightText)
+    {
+        DrawButtonAt(GetHalfActionBounds(panel, y - panel.Y, left: true), mouse, leftText);
+        DrawButtonAt(GetHalfActionBounds(panel, y - panel.Y, left: false), mouse, rightText);
     }
 
     private void DrawButtonAt(
