@@ -169,94 +169,53 @@ public sealed class WorldMap
         if (UsesDiscreteBlockTerrain)
             return;
 
-        // Preserve static cave and tunnel empty overrides created before
-        // block simulation is enabled.
         Blocks.ClearTransitions();
         Array.Clear(_volumeSurfaceHeights);
         UsesDiscreteBlockTerrain = true;
 
-        // Uniform regions convert in bulk. Only regions with local tile edits
-        // fall back to per-column conversion.
-        for (int i = 0; i < _worldRegions.Length; i++)
+        for (int regionY = 0; regionY < RegionsY; regionY++)
         {
-            WorldRegion region = _worldRegions[i];
-            if (region.HasUniformSurface)
+            for (int regionX = 0; regionX < RegionsX; regionX++)
             {
-                int levels = (int)MathF.Round(
-                    region.UniformSurfaceHeightUnits /
-                    (float)HeightUnitsPerMeter,
-                    MidpointRounding.AwayFromZero);
-                ushort heightUnits = checked((ushort)(
-                    levels * HeightUnitsPerMeter));
-                ushort materialId = heightUnits > 0
-                    ? region.UniformSurfaceMaterialId
-                    : (ushort)0;
-                int filledLayers = heightUnits == 0
-                    ? 0
-                    : Math.Clamp(
-                        (heightUnits + LayerHeightUnits - 1) / LayerHeightUnits,
+                WorldRegion region = _worldRegions[regionX + regionY * RegionsX];
+                if (region.HasUniformSurface)
+                {
+                    int levels = Math.Clamp(
+                        (int)MathF.Round(
+                            region.UniformSurfaceHeightUnits /
+                            (float)HeightUnitsPerMeter,
+                            MidpointRounding.AwayFromZero),
                         0,
-                        LayerCount);
+                        LayerCount / HeightUnitsPerMeter);
 
-                for (int z = 0; z < LayerCount; z++)
-                {
-                    region.GetTerrainSlice(z).SetUniformMaterial(
-                        z < filledLayers ? materialId : (ushort)0);
-                }
-
-                for (int row = 0; row < region.TileHeight; row++)
-                {
-                    int index = GetColumnIndex(
+                    Blocks.SetSurfaceRegion(
                         region.TileOriginX,
-                        region.TileOriginY + row);
-                    Array.Fill(_surfaceHeights, heightUnits, index, region.TileWidth);
-                    Array.Fill(_columnMaterialIds, materialId, index, region.TileWidth);
-                    Array.Fill(_simpleFillColumns, true, index, region.TileWidth);
-                    Array.Clear(_rangeCache, index, region.TileWidth);
+                        region.TileOriginY,
+                        region.TileWidth,
+                        region.TileHeight,
+                        levels,
+                        levels > 0 ? region.UniformSurfaceMaterialId : (ushort)0);
+                    continue;
                 }
 
-                Blocks.SetSurfaceRegion(
-                    region.TileOriginX,
-                    region.TileOriginY,
-                    region.TileWidth,
-                    region.TileHeight,
-                    levels,
-                    materialId);
-
-                region.SetUniformSurface(heightUnits, materialId);
-                continue;
-            }
-
-            for (int localY = 0; localY < region.TileHeight; localY++)
-            {
-                int globalY = region.TileOriginY + localY;
-                for (int localX = 0; localX < region.TileWidth; localX++)
+                for (int localY = 0; localY < region.TileHeight; localY++)
                 {
-                    int globalX = region.TileOriginX + localX;
-                    int columnIndex = GetColumnIndex(globalX, globalY);
-                    ushort oldHeight = _surfaceHeights[columnIndex];
-                    ushort material = GetMaterialId(globalX, globalY, 0);
-                    int levels = (int)MathF.Round(
-                        oldHeight / (float)HeightUnitsPerMeter,
-                        MidpointRounding.AwayFromZero);
-
-                    if (Blocks.Volumes.HasOverridesInColumn(globalX, globalY))
+                    int worldY = region.TileOriginY + localY;
+                    for (int localX = 0; localX < region.TileWidth; localX++)
                     {
-                        // Keep the compact implicit base column and its sparse
-                        // empty override; do not erase the cave through SetSolidHeight.
-                        Blocks.SetSurfaceLevel(
-                            globalX,
-                            globalY,
-                            levels,
-                            material);
-                        continue;
-                    }
+                        int worldX = region.TileOriginX + localX;
+                        int topLayer = Blocks.Volumes.FindHighestSolidLayerInColumn(
+                            worldX, worldY, LayerCount - 1);
+                        int levels = topLayer < 0
+                            ? 0
+                            : (topLayer + 1 + HeightUnitsPerMeter - 1) /
+                                HeightUnitsPerMeter;
+                        ushort materialId = topLayer < 0
+                            ? (ushort)0
+                            : GetMaterialId(worldX, worldY, topLayer);
 
-                    SetSolidHeight(
-                        globalX,
-                        globalY,
-                        checked((ushort)(levels * HeightUnitsPerMeter)),
-                        material);
+                        Blocks.SetSurfaceLevel(worldX, worldY, levels, materialId);
+                    }
                 }
             }
         }
@@ -271,8 +230,8 @@ public sealed class WorldMap
         if (!UsesDiscreteBlockTerrain)
             return;
 
+        // Disabling block-style movement must never erase terrain voxels.
         UsesDiscreteBlockTerrain = false;
-        Blocks.Volumes.Clear();
         Blocks.ClearTransitions();
         Array.Clear(_volumeSurfaceHeights);
         NavigationVersion++;
@@ -316,68 +275,24 @@ public sealed class WorldMap
         if (x < 0 || y < 0 || width <= 0 || depth <= 0 ||
             (long)x + width > TileWidth ||
             (long)y + depth > TileHeight)
-        {
             throw new ArgumentOutOfRangeException(nameof(width));
-        }
         if (zLevel < 0 || heightInMeters <= 0 ||
             ((long)zLevel + heightInMeters) * HeightUnitsPerMeter > LayerCount)
-        {
             throw new ArgumentOutOfRangeException(nameof(heightInMeters));
-        }
 
         int firstLayer = checked(zLevel * HeightUnitsPerMeter);
         int heightLayers = checked(heightInMeters * HeightUnitsPerMeter);
-
-        // A destructive cut must preserve any simple-fill terrain underneath
-        // the volume before the tree masks part of it.
-        if (materialId == 0)
-        {
-            for (int localY = 0; localY < depth; localY++)
-            {
-                for (int localX = 0; localX < width; localX++)
-                {
-                    int globalX = x + localX;
-                    int globalY = y + localY;
-                    int columnIndex = GetColumnIndex(globalX, globalY);
-                    MaterializeSimpleFillColumn(globalX, globalY, columnIndex);
-                }
-            }
-        }
-
         Blocks.Volumes.SetVolume(
-            x, y, firstLayer,
-            width, depth, heightLayers,
-            materialId);
+            x, y, firstLayer, width, depth, heightLayers, materialId);
 
-        int topLayer = firstLayer + heightLayers - 1;
-        ushort volumeHeight = checked((ushort)((topLayer + 1) * LayerHeightUnits));
-
-        for (int localY = 0; localY < depth; localY++)
+        for (int worldY = y; worldY < y + depth; worldY++)
         {
-            for (int localX = 0; localX < width; localX++)
+            for (int worldX = x; worldX < x + width; worldX++)
             {
-                int globalX = x + localX;
-                int globalY = y + localY;
-                int columnIndex = GetColumnIndex(globalX, globalY);
-                _rangeCache[columnIndex] = null;
-
-                if (materialId == 0)
-                {
-                    _simpleFillColumns[columnIndex] = false;
-                    _columnMaterialIds[columnIndex] = 0;
-                    RecalculateSurfaceHeight(columnIndex);
-                }
-                else if (!Blocks.Volumes.HasEmptyOverridesInColumn(globalX, globalY))
-                {
-                    _volumeSurfaceHeights[columnIndex] =
-                        Math.Max(_volumeSurfaceHeights[columnIndex], volumeHeight);
-                }
-                else
-                {
-                    RecalculateSurfaceHeight(columnIndex);
-                }
-
-                MarkTerrainChanged(globalX, globalY);
+                int index = GetColumnIndex(worldX, worldY);
+                _rangeCache[index] = null;
+                RecalculateSurfaceHeight(index);
+                MarkTerrainChanged(worldX, worldY);
             }
         }
 
@@ -402,39 +317,24 @@ public sealed class WorldMap
         if (x < 0 || y < 0 || width <= 0 || depth <= 0 ||
             (long)x + width > TileWidth ||
             (long)y + depth > TileHeight)
-        {
             throw new ArgumentOutOfRangeException(nameof(width));
-        }
-
         if (zLevel < 0 || heightInMeters <= 0 ||
             ((long)zLevel + heightInMeters) * HeightUnitsPerMeter > LayerCount)
-        {
             throw new ArgumentOutOfRangeException(nameof(heightInMeters));
-        }
 
         int firstLayer = checked(zLevel * HeightUnitsPerMeter);
         int heightLayers = checked(heightInMeters * HeightUnitsPerMeter);
-
         Blocks.Volumes.SetVolume(
-            x,
-            y,
-            firstLayer,
-            width,
-            depth,
-            heightLayers,
-            materialId);
+            x, y, firstLayer, width, depth, heightLayers, materialId);
 
-        for (int localY = 0; localY < depth; localY++)
+        for (int worldY = y; worldY < y + depth; worldY++)
         {
-            for (int localX = 0; localX < width; localX++)
+            for (int worldX = x; worldX < x + width; worldX++)
             {
-                int globalX = x + localX;
-                int globalY = y + localY;
-                int columnIndex = GetColumnIndex(globalX, globalY);
-
-                _rangeCache[columnIndex] = null;
-                RecalculateSurfaceHeight(columnIndex);
-                MarkTerrainChanged(globalX, globalY);
+                int index = GetColumnIndex(worldX, worldY);
+                _rangeCache[index] = null;
+                RecalculateSurfaceHeight(index);
+                MarkTerrainChanged(worldX, worldY);
             }
         }
 
@@ -470,30 +370,9 @@ public sealed class WorldMap
             throw new InvalidOperationException("Discrete block terrain is not enabled.");
         if (minimumBlockSize < 2 ||
             (minimumBlockSize & (minimumBlockSize - 1)) != 0)
-        {
             throw new ArgumentOutOfRangeException(nameof(minimumBlockSize));
-        }
 
-        Blocks.Volumes.Clear();
-        Array.Clear(_volumeSurfaceHeights);
-
-        int rootSize = 1;
-        int requiredSize = Math.Max(TileWidth, TileHeight);
-        while (rootSize < requiredSize)
-            rootSize = checked(rootSize * 2);
-
-        int volumeCount = CompactHierarchicalRegion(
-            0, 0, rootSize, minimumBlockSize, 0);
-
-        if (volumeCount > 0)
-        {
-            TerrainVersion++;
-            TerrainGeometryVersion++;
-            for (int i = 0; i < _worldRegions.Length; i++)
-                _worldRegions[i].MarkGeometryChanged();
-        }
-
-        return volumeCount;
+        return Blocks.Volumes.Compact();
     }
 
     public int CompactUniformBlockVolumes(int minimumBlockSize = 32) =>
@@ -631,33 +510,14 @@ public sealed class WorldMap
         if (zLevel < 0 || (zLevel + 1) * HeightUnitsPerMeter > LayerCount)
             throw new ArgumentOutOfRangeException(nameof(zLevel));
 
-        GetOrCreateRegion(
-            x / TerrainRegion.TilesPerSide,
-            y / TerrainRegion.TilesPerSide);
-
-        int columnIndex = GetColumnIndex(x, y);
-        MaterializeSimpleFillColumn(x, y, columnIndex);
-        int regionX = x / TerrainRegion.TilesPerSide;
-        int regionY = y / TerrainRegion.TilesPerSide;
-        int localIndex =
-            x % TerrainRegion.TilesPerSide +
-            (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
-        int firstLayer = zLevel * HeightUnitsPerMeter;
         Blocks.Volumes.SetVolume(
-            x, y, firstLayer,
+            x, y, zLevel * HeightUnitsPerMeter,
             1, 1, HeightUnitsPerMeter,
             materialId);
 
-        for (int z = firstLayer; z < firstLayer + HeightUnitsPerMeter; z++)
-        {
-            _layers[z].GetRegion(regionX, regionY)!
-                .SetMaterialIdAtIndex(localIndex, materialId);
-        }
-
-        _rangeCache[columnIndex] = null;
-        _simpleFillColumns[columnIndex] = false;
-        _columnMaterialIds[columnIndex] = 0;
-        RecalculateSurfaceHeight(columnIndex);
+        int index = GetColumnIndex(x, y);
+        _rangeCache[index] = null;
+        RecalculateSurfaceHeight(index);
         MarkTerrainChanged(x, y);
     }
 
@@ -671,29 +531,14 @@ public sealed class WorldMap
         if (zLevel < 0 || (zLevel + 1) * HeightUnitsPerMeter > LayerCount)
             throw new ArgumentOutOfRangeException(nameof(zLevel));
 
-        int columnIndex = GetColumnIndex(x, y);
-        MaterializeSimpleFillColumn(x, y, columnIndex);
-        int regionX = x / TerrainRegion.TilesPerSide;
-        int regionY = y / TerrainRegion.TilesPerSide;
-        int localIndex =
-            x % TerrainRegion.TilesPerSide +
-            (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
-        int firstLayer = zLevel * HeightUnitsPerMeter;
         Blocks.Volumes.SetVolume(
-            x, y, firstLayer,
+            x, y, zLevel * HeightUnitsPerMeter,
             1, 1, HeightUnitsPerMeter,
             0);
 
-        for (int z = firstLayer; z < firstLayer + HeightUnitsPerMeter; z++)
-        {
-            _layers[z].GetRegion(regionX, regionY)!
-                .SetMaterialIdAtIndex(localIndex, 0);
-        }
-
-        _rangeCache[columnIndex] = null;
-        _simpleFillColumns[columnIndex] = false;
-        _columnMaterialIds[columnIndex] = 0;
-        RecalculateSurfaceHeight(columnIndex);
+        int index = GetColumnIndex(x, y);
+        _rangeCache[index] = null;
+        RecalculateSurfaceHeight(index);
         MarkTerrainChanged(x, y);
     }
 
@@ -797,50 +642,8 @@ public sealed class WorldMap
         return _layers[z];
     }
 
-    public ushort GetMaterialId(
-        int x,
-        int y,
-        int z)
-    {
-        if (!IsInside(x, y) ||
-            z < 0 ||
-            z >= LayerCount)
-        {
-            return 0;
-        }
-
-        if (Blocks.Volumes.TryGetMaterialId(x, y, z, out ushort volumeMaterial))
-            return volumeMaterial;
-
-        WorldRegion? worldRegion = GetWorldRegionAtTile(x, y);
-        if (worldRegion != null && worldRegion.HasUniformSurface)
-        {
-            int filledLayers = Math.Clamp(
-                (worldRegion.UniformSurfaceHeightUnits +
-                 LayerHeightUnits - 1) / LayerHeightUnits,
-                0,
-                LayerCount);
-
-            return z < filledLayers
-                ? worldRegion.UniformSurfaceMaterialId
-                : (ushort)0;
-        }
-
-        int columnIndex = GetColumnIndex(x, y);
-        if (_simpleFillColumns[columnIndex])
-        {
-            int filledLayers = Math.Clamp(
-                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
-                LayerHeightUnits,
-                0,
-                LayerCount);
-
-            ushort materialId = _columnMaterialIds[columnIndex];
-            return z < filledLayers ? materialId : (ushort)0;
-        }
-
-        return _layers[z].GetMaterialIdAtIndex(columnIndex);
-    }
+    public ushort GetMaterialId(int x, int y, int z) =>
+        Blocks.Volumes.GetMaterialId(x, y, z);
 
     public void SetMaterialId(
         int x,
@@ -848,31 +651,13 @@ public sealed class WorldMap
         int z,
         ushort materialId)
     {
-        if (!IsInside(x, y) ||
-            z < 0 ||
-            z >= LayerCount)
-        {
+        if (!IsInside(x, y) || z < 0 || z >= LayerCount)
             throw new IndexOutOfRangeException();
-        }
 
-        GetOrCreateRegion(
-            x / TerrainRegion.TilesPerSide,
-            y / TerrainRegion.TilesPerSide);
-
-        int columnIndex = GetColumnIndex(x, y);
-        MaterializeSimpleFillColumn(x, y, columnIndex);
-        if (Blocks.Volumes.TryGetMaterialId(x, y, z, out _))
-            Blocks.Volumes.SetVoxel(x, y, z, materialId);
-
-        _layers[z].SetMaterialId(
-            x,
-            y,
-            materialId);
-
-        _rangeCache[columnIndex] = null;
-        _simpleFillColumns[columnIndex] = false;
-        _columnMaterialIds[columnIndex] = 0;
-        RecalculateSurfaceHeight(columnIndex);
+        Blocks.Volumes.SetVoxel(x, y, z, materialId);
+        int index = GetColumnIndex(x, y);
+        _rangeCache[index] = null;
+        RecalculateSurfaceHeight(index);
         MarkTerrainChanged(x, y);
     }
 
@@ -901,50 +686,9 @@ public sealed class WorldMap
 
     // Uppermost occupied voxel at or below a horizontal Z slice.
     // Uniform macro volumes resolve through the octree without scanning Z.
-    public int FindTopOccupiedLayer(int x, int y, int maxLayer)
-    {
-        if (!IsInside(x, y) || maxLayer < 0)
-            return -1;
-
-        int columnIndex = GetColumnIndex(x, y);
-        int lastLayer = Math.Min(maxLayer, LayerCount - 1);
-
-        WorldRegion? worldRegion = GetWorldRegionAtTile(x, y);
-        int baseTop;
-        if (worldRegion != null && worldRegion.HasUniformSurface)
-        {
-            int filledLayers = Math.Clamp(
-                (worldRegion.UniformSurfaceHeightUnits +
-                 LayerHeightUnits - 1) / LayerHeightUnits,
-                0,
-                LayerCount);
-            baseTop = worldRegion.UniformSurfaceMaterialId == 0
-                ? -1
-                : Math.Min(filledLayers - 1, lastLayer);
-        }
-        else
-        {
-            baseTop = FindBaseTopOccupiedLayer(x, y, columnIndex, lastLayer);
-        }
-
-        if (!Blocks.Volumes.HasOverridesInColumn(x, y))
-            return baseTop;
-
-        int volumeTop = Blocks.Volumes.FindHighestSolidLayerInColumn(
-            x, y, lastLayer);
-
-        if (!Blocks.Volumes.HasEmptyOverridesInColumn(x, y))
-            return Math.Max(baseTop, volumeTop);
-
-        // Only columns that have been carved need a precise merged lookup.
-        for (int z = Math.Max(baseTop, volumeTop); z >= 0; z--)
-        {
-            if (GetMaterialId(x, y, z) != 0)
-                return z;
-        }
-
-        return -1;
-    }
+    public int FindTopOccupiedLayer(int x, int y, int maxLayer) =>
+        Blocks.Volumes.FindHighestSolidLayerInColumn(
+            x, y, Math.Min(maxLayer, LayerCount - 1));
 
     private int FindBaseTopOccupiedLayer(
         int x,
@@ -988,53 +732,17 @@ public sealed class WorldMap
     }
 
     // Inclusive interval: is any voxel in this vertical column solid?
-    public bool IsColumnSolidBetween(int x, int y, int firstLayer, int lastLayer)
+    public bool IsColumnSolidBetween(
+        int x,
+        int y,
+        int firstLayer,
+        int lastLayer)
     {
         if (!IsInside(x, y))
             return true;
-        firstLayer = Math.Max(0, firstLayer);
-        lastLayer = Math.Min(LayerCount - 1, lastLayer);
-        if (firstLayer > lastLayer)
-            return false;
 
-        int columnIndex = GetColumnIndex(x, y);
-        if (Blocks.Volumes.HasEmptyOverridesInColumn(x, y))
-        {
-            for (int z = firstLayer; z <= lastLayer; z++)
-            {
-                if (GetMaterialId(x, y, z) != 0)
-                    return true;
-            }
-            return false;
-        }
-
-        if (Blocks.Volumes.HasSolidInColumnBetween(
-                x, y, firstLayer, lastLayer))
-        {
-            return true;
-        }
-
-        if (_simpleFillColumns[columnIndex])
-        {
-            if (_columnMaterialIds[columnIndex] == 0)
-                return false;
-            int filledLayers = Math.Clamp(
-                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
-                LayerHeightUnits, 0, LayerCount);
-            return firstLayer < filledLayers;
-        }
-
-        int regionX = x / TerrainRegion.TilesPerSide;
-        int regionY = y / TerrainRegion.TilesPerSide;
-        int localIndex = x % TerrainRegion.TilesPerSide +
-            (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
-        for (int z = firstLayer; z <= lastLayer; z++)
-        {
-            if (_layers[z].GetRegion(regionX, regionY)!
-                    .GetMaterialIdAtIndex(localIndex) != 0)
-                return true;
-        }
-        return false;
+        return Blocks.Volumes.HasSolidInColumnBetween(
+            x, y, firstLayer, lastLayer);
     }
 
     public bool IsColumnVolumeEmpty(int x, int y, int firstLayer, int lastLayer) =>
