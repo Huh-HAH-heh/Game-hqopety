@@ -6,15 +6,15 @@ namespace RimClone.Render.Raylib;
 
 /// <summary>
 /// RTS-style terrain camera:
-/// RMB orbits, MMB pans, wheel zooms toward the cursor, WASD moves.
+/// Shift+LMB orbits, MMB pans, wheel zooms toward the view focus, WASD moves.
 /// </summary>
 internal sealed class OrbitCameraController
 {
     private const float FieldOfViewDegrees = 45f;
-    private const float BaseRotationSensitivity = 0.0018f;
-    private const float RotationSmoothTime = 0.055f;
-    private const float MovementSmoothTime = 0.075f;
-    private const float ZoomSmoothTime = 0.095f;
+    private const float BaseRotationSensitivity = 0.0012f;
+    private const float RotationSmoothTime = 0.035f;
+    private const float MovementSmoothTime = 0.11f;
+    private const float ZoomSmoothTime = 0.12f;
     private const float MinimumPitch = 0.08f;
     private const float RtsMinimumPitch = 0.42f;
     private const float RtsMaximumPitch = 1.48f;
@@ -67,7 +67,7 @@ internal sealed class OrbitCameraController
     public float ZoomSpeedMultiplier { get; set; } = 1f;
     public float VerticalSpeedMultiplier { get; set; } = 1f;
     public float CurrentMovementSpeedMetersPerSecond =>
-        Math.Clamp(_desiredDistance * 0.14f, 1.5f, 240f) *
+        Math.Clamp(_desiredDistance * 0.10f, 1.5f, 180f) *
         MovementSpeedMultiplier *
         _interactiveSpeedMultiplier;
     public RaylibCameraMode Mode => _mode;
@@ -193,8 +193,7 @@ internal sealed class OrbitCameraController
     {
         if (_mouseMode == MouseMode.None)
         {
-            if (_mode != RaylibCameraMode.TopDown &&
-                IsMouseButtonPressed(MouseButton.Right))
+            if (IsMouseButtonDown(MouseButton.Left) && IsShiftDown())
             {
                 _mouseMode = MouseMode.Orbit;
                 _ignoreFirstMouseDelta = true;
@@ -214,7 +213,7 @@ internal sealed class OrbitCameraController
 
         bool released =
             (_mouseMode == MouseMode.Orbit &&
-             IsMouseButtonReleased(MouseButton.Right)) ||
+             (!IsMouseButtonDown(MouseButton.Left) || !IsShiftDown())) ||
             ((_mouseMode == MouseMode.Pan ||
               _mouseMode == MouseMode.SpeedAdjust) &&
              IsMouseButtonReleased(MouseButton.Middle));
@@ -305,37 +304,15 @@ internal sealed class OrbitCameraController
         if (wheel == 0f)
             return;
 
-        Vector2 cursor = GetMousePosition();
-        bool hasAnchor = TryGetTargetPlanePoint(
-            cursor,
-            _desiredTarget,
-            _desiredYawRadians,
-            _desiredPitchRadians,
-            _desiredDistance,
-            out Vector3 pointBeforeZoom);
-
+        // Zoom on the camera-target axis. Cursor anchoring used to move the
+        // focus point while zooming, which felt like sideways camera drift
+        // when the mouse was held or positioned near the viewport edge.
         _fitViewActive = false;
-        _desiredDistance *= MathF.Pow(0.88f, wheel * ZoomSpeedMultiplier);
+        _desiredDistance *= MathF.Pow(0.92f, wheel * ZoomSpeedMultiplier);
         _desiredDistance = Math.Clamp(
             _desiredDistance,
             _minimumDistance,
             _maximumDistance);
-
-        if (!hasAnchor ||
-            !TryGetTargetPlanePoint(
-                cursor,
-                _desiredTarget,
-                _desiredYawRadians,
-                _desiredPitchRadians,
-                _desiredDistance,
-                out Vector3 pointAfterZoom))
-        {
-            return;
-        }
-
-        // Keep the point under the cursor stationary while zooming.
-        _desiredTarget.X += pointBeforeZoom.X - pointAfterZoom.X;
-        _desiredTarget.Z += pointBeforeZoom.Z - pointAfterZoom.Z;
     }
 
     private bool TryGetTargetPlanePoint(
