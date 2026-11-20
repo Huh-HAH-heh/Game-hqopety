@@ -96,7 +96,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public int VisibleRegionsLastFrame { get; private set; }
     public int RebuiltRegions { get; private set; }
     public int CutSurfaceRebuilds { get; private set; }
-    public int ActiveVoxelCellSize => _activeVoxelCellSize;
+    public int ActiveRenderCellSize => _activeVoxelCellSize;
     public bool IsUsingCoarseVoxelLod => _mode == TerrainRenderMode.Voxel &&
         _coarseTerrain != null &&
         _usingCoarseLod;
@@ -274,7 +274,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
             bool baseIsStale =
                 region == null ||
-                region.RegionVersion != terrain.SourceRegionVersions[i] ||
+                region.RegionVersion != drawTerrain.SourceRegionVersions[i] ||
                 region.PaletteVersion != _paletteVersion ||
                 (_mode == TerrainRenderMode.HeightmapFallback &&
                  region.CutawayLayer != cutLayer);
@@ -290,9 +290,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 int regionY = i / terrain.StorageRegionsX;
                 region = _mode == TerrainRenderMode.Voxel
                     ? RegionMeshBuilder.BuildVoxel(
-                        terrain, regionX, regionY, _palette, _paletteVersion)
+                        drawTerrain, regionX, regionY, _palette, _paletteVersion)
                     : RegionMeshBuilder.Build(
-                        terrain, regionX, regionY, _palette, _paletteVersion);
+                        drawTerrain, regionX, regionY, _palette, _paletteVersion);
 
                 drawMeshes[i] = region;
                 RebuiltRegions++;
@@ -302,7 +302,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             if (region == null || !region.IsUploaded)
                 continue;
 
-            if (_mode == TerrainRenderMode.Voxel && terrain.CutawayEnabled)
+            if (_mode == TerrainRenderMode.Voxel && drawTerrain.CutawayEnabled)
             {
                 if (region.CutSurfaceLayer != cutLayer &&
                     cutBuildsThisFrame < MaximumCutSurfaceBuildsPerFrame)
@@ -312,7 +312,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                     int regionY = i / terrain.StorageRegionsX;
 
                     region.CutMeshes = RegionMeshBuilder.BuildVoxelCutSurface(
-                        terrain,
+                        drawTerrain,
                         regionX,
                         regionY,
                         cutLayer,
@@ -425,11 +425,11 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         int regionY = index / terrain.StorageRegionsX;
         center = new Vector3(
             (regionX + 0.5f) * terrain.StorageRegionSize,
-            terrain.MaximumHeightMeters * 0.5f,
+            terrain.VerticalWorldExtentMeters * 0.5f,
             (regionY + 0.5f) * terrain.StorageRegionSize);
         radius = MathF.Sqrt(
             terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f +
-            terrain.MaximumHeightMeters * terrain.MaximumHeightMeters * 0.25f);
+            terrain.VerticalWorldExtentMeters * terrain.VerticalWorldExtentMeters * 0.25f);
     }
 
     private static void ClearCutMeshes(RegionGpuMesh region)

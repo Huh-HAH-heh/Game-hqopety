@@ -47,11 +47,17 @@ them when visual variation is needed.
 
 The logical simulation region remains 192x192 m; the voxel backing itself is divided
 into 16x16 XY chunks and compressed by vertical runs. The current world is 2304x2304 m
-with 500 vertical layers at 0.1 m per layer. Complex run lists are read only for
-visible mesh batches. Mesh creation uses bounded submeshes and recursively splits
-unusually dense areas.
+with 500 vertical layers at 0.1 m per layer. Complex run lists are queried only when
+a visible mesh needs them. Mesh creation uses bounded submeshes and recursively
+splits unusually dense areas.
 
-The smooth world generator now samples its surface at 1 m XY spacing instead of repeating one 4x4 m height sample across sixteen columns. This gives the base surface the same horizontal resolution as the voxel store.
+The smooth world generator samples its surface at 1 m XY spacing, giving the base
+surface the same horizontal resolution as the voxel store.
+
+The renderer caches a 4x4 m voxel overview and exact 1x1 m detail meshes. It changes
+to detail within 220 m of the camera focus and returns to overview beyond 290 m.
+Only the display resolution changes: the source store always retains its 1x1x0.1 m
+cell resolution and all cave/strata intervals.
 
 
 The old **Heightmap fallback** remains available from the *Terrain and cuts*
@@ -101,12 +107,12 @@ Raylib window
 
 The renderer reads the snapshot only. It does not query WorldMap while drawing.
 GPU resource creation, upload, draw and disposal are restricted to the render thread.
-Normal terrain edits invalidate only affected storage batches. In Voxel mode, moving
-the cut plane does not rebuild the base terrain meshes: a fragment shader clips them
-at the new world-space height, and only the lightweight cut-cap meshes are refreshed
-for visible regions. Base meshes are built lazily with a six-region-per-frame budget;
-cut caps have their own twelve-region-per-frame budget. The fallback path retains its
-original mesh-baked cutaway behavior.
+Normal terrain edits invalidate affected storage batches. The voxel renderer maintains
+separate 4m overview and 1m detail caches, with hysteresis to prevent rapid switching.
+Complex coarse columns are queried only on demand. Moving the cut plane does not
+rebuild base voxel meshes: a fragment shader clips the selected volume and only
+visible horizontal caps are refreshed. Base mesh builds are limited to six coarse or
+two fine regions per frame, with a separate twelve-region cap-update budget.
 
 ## Controls
 
@@ -143,10 +149,10 @@ original mesh-baked cutaway behavior.
 The lower passage is a through-tunnel with two portals, not a blind adit. Its
 centreline curves and its cross-section varies; the upper level remains enclosed.
 
-`WorldMap.CarveStaticVolume` and `SetStaticVolume` write empty/solid overrides into
-the sparse 3D `BlockVolumeTree`. The underlying terrain remains an implicit solid
-column, so the generator does not materialize the whole 500-layer map into voxels.
-`GetMaterialId(x,y,z)` and `GetTileRanges(x,y)` resolve actual solids and air gaps.
+`WorldMap.CarveStaticVolume` and `SetStaticVolume` edit empty/solid voxel runs in
+`SparseVoxelStore`. The base surface is also represented by voxel runs; there is
+no separate implicit height-field geometry store. `GetMaterialId(x,y,z)` and
+`GetTileRanges(x,y)` resolve the actual solid and air intervals.
 The generator verifies the lower portals, empty tunnel interiors, solid floors and
 roofs, sealed upper passage, connector and geological bands.
 

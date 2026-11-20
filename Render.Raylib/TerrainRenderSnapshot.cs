@@ -195,10 +195,10 @@ public sealed class TerrainRenderSnapshot
 
         _complexColumnRanges.Clear();
 
-        // Voxel mode resolves exact 1x1 m columns on demand as visible chunks
-        // are meshed. This avoids scanning and retaining ranges for the entire
-        // multi-million-column world during snapshot creation.
-        if (UsesVoxelCells)
+        // Every voxel LOD resolves complex columns on demand from WorldMap.
+        // Its range cache retains queried columns, avoiding a full coarse-grid
+        // scan whenever the terrain changes.
+        if (IsVoxelMode)
         {
             _complexSourceWorldVersion = worldMap.TerrainVersion;
             return false;
@@ -261,13 +261,14 @@ public sealed class TerrainRenderSnapshot
             return complexRanges.Length;
         }
 
-        if (IsVoxelMode && UsesVoxelCells)
+        if (IsVoxelMode)
         {
-            // Full-resolution voxel mode resolves exact 1x1 m columns lazily.
-            // Common simple columns use the already-refreshed render snapshot.
-            // This avoids repeated voxel-store dictionary lookups while building
-            // adjacent faces for a visible mesh chunk.
-            if (_worldMap.IsColumnSimpleFill(regionX, regionY))
+            // Both fine and coarse voxel LODs sample an exact source column.
+            // Simple columns use the refreshed compact snapshot; complex
+            // columns are fetched lazily from WorldMap's shared range cache.
+            int sourceX = regionX * RegionSize + RegionSize / 2;
+            int sourceY = regionY * RegionSize + RegionSize / 2;
+            if (_worldMap.IsColumnSimpleFill(sourceX, sourceY))
             {
                 if (destination.Length < 2)
                     throw new ArgumentException(
@@ -318,7 +319,7 @@ public sealed class TerrainRenderSnapshot
             }
 
             ReadOnlySpan<TileRange> exactRanges =
-                _worldMap.GetTileRanges(regionX, regionY);
+                _worldMap.GetTileRanges(sourceX, sourceY);
             if (exactRanges.IsEmpty)
                 return 0;
 

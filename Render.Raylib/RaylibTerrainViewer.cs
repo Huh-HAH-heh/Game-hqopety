@@ -423,7 +423,9 @@ public static class RaylibTerrainViewer
                 $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
                 24, 50, 17f, Color.RayWhite);
             DrawHudText(font,
-                $"VOXEL LOD {renderer.ActiveVoxelCellSize}x{renderer.ActiveVoxelCellSize} m | Z 0.1 m",
+                settings.TerrainMode == TerrainRenderMode.Voxel
+                    ? $"VOXEL LOD {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m | Z 0.1 m"
+                    : $"HEIGHTMAP CELL {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m",
                 24, 76, 14f, Color.LightGray);
             DrawHudText(font,
                 $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",

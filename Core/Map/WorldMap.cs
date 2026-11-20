@@ -323,8 +323,8 @@ public sealed class WorldMap
     /// <summary>
     /// Places or clears one large cuboid in the sparse voxel store.
     /// X/Y and width/depth use one-metre map cells. Z and height use metres.
-    /// Material ID zero cuts an empty cuboid; editing a smaller part later
-    /// splits only the affected octree nodes.
+    /// Material ID zero cuts an empty cuboid. Partial edits refine only the
+    /// affected vertical columns in the 16x16 XY chunk.
     /// </summary>
     public void SetBlockVolume(
         int x,
@@ -368,7 +368,8 @@ public sealed class WorldMap
     /// Adds a static material cuboid to the sparse 3D voxel backing.
     /// Coordinates X/Y use map tiles; Z and height use metres.
     /// Material zero creates an empty cut; nonzero materials create a solid
-    /// geological layer. The implicit height-field remains the base volume.
+    /// geological layer. The surface itself is also stored as compressed
+    /// voxel occupancy; surface heights are derived caches for navigation.
     /// </summary>
     public void SetStaticVolume(
         int x,
@@ -652,7 +653,7 @@ public sealed class WorldMap
     }
 
     // Uppermost occupied voxel at or below a horizontal Z slice.
-    // Uniform macro volumes resolve through the octree without scanning Z.
+    // Uniform columns resolve through one compressed run without scanning Z.
     public int FindTopOccupiedLayer(int x, int y, int maxLayer)
     {
         if (!IsInside(x, y) || maxLayer < 0)

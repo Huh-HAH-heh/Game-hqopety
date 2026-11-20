@@ -78,11 +78,11 @@ internal static class RegionMeshBuilder
             PaletteVersion = paletteVersion,
             BoundsCenter = new Vector3(
                 (storageRegionX + 0.5f) * terrain.StorageRegionSize,
-                terrain.MaximumHeightMeters * 0.5f,
+                terrain.VerticalWorldExtentMeters * 0.5f,
                 (storageRegionY + 0.5f) * terrain.StorageRegionSize),
             BoundsRadius = MathF.Sqrt(
                 terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f +
-                terrain.MaximumHeightMeters * terrain.MaximumHeightMeters * 0.25f)
+                terrain.VerticalWorldExtentMeters * terrain.VerticalWorldExtentMeters * 0.25f)
         };
 
         List<Mesh> meshes = new(SubChunksPerAxis * SubChunksPerAxis);
@@ -130,11 +130,11 @@ internal static class RegionMeshBuilder
             PaletteVersion = paletteVersion,
             BoundsCenter = new Vector3(
                 (storageRegionX + 0.5f) * terrain.StorageRegionSize,
-                terrain.MaximumHeightMeters * 0.5f,
+                terrain.VerticalWorldExtentMeters * 0.5f,
                 (storageRegionY + 0.5f) * terrain.StorageRegionSize),
             BoundsRadius = MathF.Sqrt(
                 terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f +
-                terrain.MaximumHeightMeters * terrain.MaximumHeightMeters * 0.25f)
+                terrain.VerticalWorldExtentMeters * terrain.VerticalWorldExtentMeters * 0.25f)
         };
 
         List<Mesh> meshes = new(SubChunksPerAxis * SubChunksPerAxis);
