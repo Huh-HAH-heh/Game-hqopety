@@ -624,7 +624,8 @@ internal static class TerrainFrustum
         Vector3 center,
         float radius,
         int viewportWidth,
-        int viewportHeight)
+        int viewportHeight,
+        float maximumDistance)
     {
         Vector3 forward = Vector3.Normalize(camera.Target - camera.Position);
         Vector3 right = Vector3.Normalize(Vector3.Cross(forward, camera.Up));
@@ -633,7 +634,7 @@ internal static class TerrainFrustum
 
         float depth = Vector3.Dot(delta, forward);
         const float nearPlane = 1f;
-        const float farPlane = 18000f;
+        float farPlane = Math.Clamp(maximumDistance, 500f, 18000f);
 
         if (depth + radius < nearPlane || depth - radius > farPlane)
             return false;
