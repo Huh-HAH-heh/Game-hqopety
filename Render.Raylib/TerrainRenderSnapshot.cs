@@ -381,6 +381,54 @@ public sealed class TerrainRenderSnapshot
         return 2;
     }
 
+    /// <summary>
+    /// Returns the material exposed by a horizontal cut plane in one render cell.
+    /// The common bottom-filled case is resolved directly from the compact
+    /// height/material snapshot; only edited columns need their exact run list.
+    /// A run [StartZ, EndZ) has an exposed top face when EndZ equals the cut layer.
+    /// </summary>
+    internal ushort GetCutSurfaceMaterial(int regionX, int regionY, int cutLayer)
+    {
+        if (regionX < 0 || regionY < 0 ||
+            regionX >= RegionsX || regionY >= RegionsY ||
+            cutLayer <= 0 || cutLayer >= LayerCount)
+        {
+            return 0;
+        }
+
+        int index = regionX + regionY * RegionsX;
+        int sourceX = regionX * RegionSize + RegionSize / 2;
+        int sourceY = regionY * RegionSize + RegionSize / 2;
+
+        if (_worldMap.IsColumnSimpleFill(sourceX, sourceY))
+        {
+            int topLayer = Math.Clamp(
+                (int)MathF.Round(
+                    _heightsMeters[index] /
+                    (WorldMap.LayerHeightUnits * 0.1f),
+                    MidpointRounding.AwayFromZero),
+                0,
+                LayerCount);
+
+            return topLayer >= cutLayer
+                ? _materialIds[index]
+                : (ushort)0;
+        }
+
+        foreach (TileRange range in _worldMap.GetTileRanges(sourceX, sourceY))
+        {
+            if (range.State == WorldMap.StateSolid &&
+                range.MaterialId != 0 &&
+                range.StartZ < cutLayer &&
+                range.EndZ >= cutLayer)
+            {
+                return range.MaterialId;
+            }
+        }
+
+        return 0;
+    }
+
     internal float GetHeightMeters(int regionX, int regionY)
     {
         if (regionX < 0 || regionY < 0 ||
