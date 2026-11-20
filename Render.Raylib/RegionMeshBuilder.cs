@@ -209,7 +209,7 @@ internal static class RegionMeshBuilder
     {
         List<TerrainQuad> quads = new(Math.Min(size * size * 2, MaximumQuadsPerMesh));
         Span<TileRange> rangesBuffer = stackalloc TileRange[terrain.LayerCount];
-        float height = cutLayer * UnitsPerMeter + 0.002f;
+        float height = cutLayer * UnitsPerMeter;
 
         for (int localY = 0; localY < size; localY++)
         {
@@ -234,7 +234,7 @@ internal static class RegionMeshBuilder
                     if (range.State == WorldMap.StateSolid &&
                         range.MaterialId != 0 &&
                         range.StartZ < cutLayer &&
-                        range.EndZ >= cutLayer)
+                        range.EndZ > cutLayer)
                     {
                         materialId = range.MaterialId;
                         break;
