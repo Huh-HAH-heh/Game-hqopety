@@ -423,63 +423,123 @@ public static class RaylibTerrainViewer
         Font font,
         OrbitCameraController camera)
     {
-        DrawRectangle(12, 12, 700, 288, new Color(0, 0, 0, 235));
+        int screenWidth = Math.Max(1, GetScreenWidth());
+        int screenHeight = Math.Max(1, GetScreenHeight());
 
-        DrawHudText(
-            font,
+        // Scale the HUD from the real client viewport, not from a fixed
+        // 1600x900 layout. Text is also fitted to the panel's actual width.
+        float scale = Math.Clamp(
+            MathF.Min(screenWidth / 1600f, screenHeight / 900f),
+            0.72f,
+            1.35f);
+        float margin = MathF.Round(12f * scale);
+        float padding = MathF.Round(12f * scale);
+        float lineGap = MathF.Max(15f, 22f * scale);
+        float panelWidth = Math.Min(
+            720f * scale,
+            Math.Max(240f, screenWidth - margin * 2f));
+
+        List<(string Text, float Size, Color Color)> lines = new();
+        lines.Add((
             cutawayMode
                 ? $"RIMCLONE / {settings.TerrainMode} / {focusName} / CUT @ {terrain.CutawayHeightMeters:0.0} M"
                 : settings.TerrainMode == TerrainRenderMode.Voxel
                     ? "RIMCLONE / VOXEL TERRAIN"
                     : "RIMCLONE / HEIGHTMAP FALLBACK",
-            24, 22, 18f, Color.RayWhite);
+            18f,
+            Color.RayWhite));
 
         if (settings.ShowPerformanceStats)
         {
-            DrawHudText(font,
+            lines.Add((
                 $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
-                24, 50, 17f, Color.RayWhite);
-            DrawHudText(font,
+                16f,
+                Color.RayWhite));
+            lines.Add((
                 settings.TerrainMode == TerrainRenderMode.Voxel
                     ? $"VOXEL LOD {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m | Z 0.1 m"
                     : $"HEIGHTMAP CELL {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m",
-                24, 76, 14f, Color.LightGray);
-            DrawHudText(font,
+                13f,
+                Color.LightGray));
+            lines.Add((
                 $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
-                24, 96, 14f, Color.LightGray);
-            DrawHudText(font,
+                13f,
+                Color.LightGray));
+            lines.Add((
                 $"VISIBLE GPU BATCHES {renderer.VisibleRegionsLastFrame}/{terrain.StorageRegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
-                24, 118, 14f, Color.LightGray);
-            DrawHudText(font,
+                13f,
+                Color.LightGray));
+            lines.Add((
                 $"BASE MESH BUILDS {renderer.RebuiltRegions}   CUT CAP UPDATES {renderer.CutSurfaceRebuilds}",
-                24, 140, 14f, Color.LightGray);
+                13f,
+                Color.LightGray));
         }
 
         if (settings.ShowControls)
         {
-            DrawHudText(font,
+            lines.Add((
                 "F1 lower tunnel | F2 upper passage | C surface | Tab layers | T top-down view",
-                24, 166, 14f, Color.RayWhite);
+                13f,
+                Color.RayWhite));
         }
 
         if (settings.ShowCaveCoordinates)
         {
-            DrawHudText(font,
+            lines.Add((
                 "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
-                24, 190, 14f, Color.LightGray);
-            DrawHudText(font,
+                13f,
+                Color.LightGray));
+            lines.Add((
                 "UPPER: near X 1152 | Z 1136-1168 | HEIGHT 25-33 m",
-                24, 212, 14f, Color.LightGray);
+                13f,
+                Color.LightGray));
         }
 
         if (settings.ShowControls)
         {
-            DrawHudText(font,
+            lines.Add((
                 $"WASD {camera.CurrentMovementSpeedMetersPerSecond:0} m/s | RMB orbit | MMB pan | Shift+MMB speed",
-                24, 238, 14f, Color.RayWhite);
-            DrawHudText(font,
+                13f,
+                Color.RayWhite));
+            lines.Add((
                 "Wheel zoom | Q/E faster slice | PgUp/PgDn 0.1m | Shift+Wheel 0.1m",
-                24, 260, 14f, Color.RayWhite);
+                13f,
+                Color.RayWhite));
+        }
+
+        float panelHeight = padding * 2f + lines.Count * lineGap;
+        panelHeight = Math.Min(panelHeight, Math.Max(80f, screenHeight - margin * 2f));
+
+        DrawRectangle(
+            (int)margin,
+            (int)margin,
+            (int)panelWidth,
+            (int)panelHeight,
+            new Color(8, 12, 18, 224));
+
+        DrawRectangle(
+            (int)margin,
+            (int)margin,
+            3,
+            (int)panelHeight,
+            new Color(75, 92, 112, 235));
+
+        float textX = margin + padding;
+        float textY = margin + padding * 0.65f;
+        float maxTextWidth = panelWidth - padding * 2f - 4f;
+
+        foreach ((string text, float baseSize, Color color) in lines)
+        {
+            float fontSize = MathF.Max(9f, baseSize * scale);
+            DrawHudText(
+                font,
+                text,
+                textX,
+                textY,
+                fontSize,
+                maxTextWidth,
+                color);
+            textY += lineGap;
         }
     }
 
@@ -489,14 +549,31 @@ public static class RaylibTerrainViewer
         float x,
         float y,
         float fontSize,
+        float maximumWidth,
         Color color)
     {
+        string fittedText = text;
+        float minimumSize = 9f;
+
+        while (fontSize > minimumSize &&
+            MeasureTextEx(font, fittedText, fontSize, 0.4f).X > maximumWidth)
+        {
+            fontSize = Math.Max(minimumSize, fontSize - 0.5f);
+        }
+
+        // A narrow viewport should never allow text to bleed outside the HUD.
+        while (fittedText.Length > 4 &&
+            MeasureTextEx(font, fittedText, fontSize, 0.4f).X > maximumWidth)
+        {
+            fittedText = fittedText[..^4] + "...";
+        }
+
         DrawTextEx(
             font,
-            text,
+            fittedText,
             new Vector2(MathF.Round(x), MathF.Round(y)),
             fontSize,
-            0.5f,
+            0.4f,
             color);
     }
 
