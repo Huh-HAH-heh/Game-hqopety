@@ -365,8 +365,11 @@ public static class RaylibTerrainViewer
                 $"VISIBLE GPU BATCHES {renderer.VisibleRegionsLastFrame}/{terrain.StorageRegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
                 24, 98, 14f, Color.LightGray);
             DrawHudText(font,
-                $"GPU MESH REBUILDS {renderer.RebuiltRegions}",
+                $"BASE MESH REBUILDS {renderer.RebuiltRegions}",
                 24, 120, 14f, Color.LightGray);
+            DrawHudText(font,
+                $"CUT SURFACE UPDATES {renderer.CutSurfaceRebuilds}",
+                24, 142, 14f, Color.LightGray);
         }
 
         if (settings.ShowControls)
