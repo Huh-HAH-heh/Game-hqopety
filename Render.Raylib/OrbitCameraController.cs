@@ -104,7 +104,10 @@ internal sealed class OrbitCameraController
         UpdateCamera();
     }
 
-    public void Update(float deltaTime, float mouseWheel)
+    public void Update(
+        float deltaTime,
+        float mouseWheel,
+        bool mouseInputEnabled = true)
     {
         if (deltaTime <= 0f)
             return;
@@ -112,9 +115,17 @@ internal sealed class OrbitCameraController
         // Avoid a large camera jump after a debugger pause or window drag.
         deltaTime = Math.Clamp(deltaTime, 0f, 0.05f);
 
-        UpdateMouseMode();
-        UpdateMouseInput();
-        UpdateZoomInput(mouseWheel);
+        if (mouseInputEnabled)
+        {
+            UpdateMouseMode();
+            UpdateMouseInput();
+            UpdateZoomInput(mouseWheel);
+        }
+        else
+        {
+            ReleaseMouse();
+        }
+
         UpdateKeyboardInput(deltaTime);
 
         _target = SmoothDamp(

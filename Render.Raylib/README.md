@@ -25,6 +25,23 @@ The mesher reads the real solid/air intervals for each visible column and emits 
 exposed faces in all six directions. This is a volumetric voxel surface, not an
 interpolated height field.
 
+## World model and material descriptions
+
+WorldMap is authoritative for geometry and occupancy: 1 m horizontal cells, 0.1 m
+vertical layers, empty/solid intervals, and material IDs. BlockVolumeTree stores
+large uniform cuboids sparsely; ordinary columns keep their compact height/material
+representation. TerrainRenderSnapshot is a presentation cache only and never owns
+or changes world properties.
+
+The mathematical model and the descriptive material model are joined by MaterialId:
+a solid cell refers to a material definition, while the definition is shared by all
+cells using that ID. This avoids storing a large property object per voxel. The
+current code stores material IDs and occupancy, but does not yet provide a complete
+canonical material catalogue with density, hardness, porosity, heat capacity,
+conductivity, and permeability. Those physical values should live in shared material
+definitions and be consumed by simulation systems; the renderer should only read
+them when visual variation is needed.
+
 The world remains stored in 192x192-tile regions; the full map is 2304x2304 m with
 500 vertical layers at 0.1 m per layer. Simple columns stay compact, and detailed
 voxel ranges are resolved lazily as visible mesh batches are built. The mesh builder
@@ -97,6 +114,8 @@ original mesh-baked cutaway behavior.
 - PageUp / PageDown: move the cut plane by exactly one 0.1 m voxel layer
 - Shift + mouse wheel: move the cut plane by one 0.1 m voxel layer per wheel notch
 - Shift + middle mouse + vertical drag: adjust camera speed on the fly (up = faster)
+- Tab or the small right-side **СЛОИ** tab: open/close the horizontal section panel
+- Drag its vertical slider to select a 0.1 m terrain layer; material above the plane is hidden
 - T: return to the fitted top-down view
 - Escape: exit
 - Pause menu > Terrain and cuts > Geometry: switch between Voxel (primary) and Heightmap fallback

@@ -36,6 +36,7 @@ public static class RaylibTerrainViewer
         OrbitCameraController camera = new(terrain);
         camera.ApplySettings(settings);
         RaylibPauseMenu menu = new(settings);
+        RaylibLayerSlicePanel layerPanel = new();
         RaylibTerrainRenderer? renderer = null;
         bool cutawayMode = settings.CutawayEnabled;
         float maximumCutHeight = Math.Max(
@@ -82,7 +83,40 @@ public static class RaylibTerrainViewer
             {
                 float deltaTime = Math.Clamp(GetFrameTime(), 0f, 0.05f);
                 RaylibMenuAction menuAction = menu.Update();
-                float mouseWheel = menu.IsOpen ? 0f : GetMouseWheelMove();
+
+                if (menu.IsOpen)
+                {
+                    layerPanel.CancelInteraction();
+                    if (layerPanel.ConsumeSettingsCommit())
+                        menu.SaveSettings();
+                }
+                else
+                {
+                    layerPanel.Update(menu.Settings, maximumCutHeight);
+                    if (menu.Settings.CutawayEnabled != cutawayMode)
+                    {
+                        cutawayMode = menu.Settings.CutawayEnabled;
+                        if (cutawayMode)
+                        {
+                            focusName = "HORIZONTAL SECTION";
+                        }
+                        else
+                        {
+                            focusName = "SURFACE";
+                            terrain.DisableCutaway();
+                            renderer?.Synchronize(terrain);
+                        }
+                    }
+
+                    if (layerPanel.ConsumeSettingsCommit())
+                        menu.SaveSettings();
+                }
+
+                bool pointerOverLayerPanel =
+                    layerPanel.IsPointerOverPanel(GetMousePosition());
+                float mouseWheel = menu.IsOpen || pointerOverLayerPanel
+                    ? 0f
+                    : GetMouseWheelMove();
 
                 switch (menuAction)
                 {
@@ -254,7 +288,10 @@ public static class RaylibTerrainViewer
                     float cameraWheel = cutawayMode && shiftDown
                         ? 0f
                         : mouseWheel;
-                    camera.Update(deltaTime, cameraWheel);
+                    camera.Update(
+                        deltaTime,
+                        cameraWheel,
+                        mouseInputEnabled: !layerPanel.IsPointerOverPanel(GetMousePosition()));
                 }
 
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
@@ -295,6 +332,9 @@ public static class RaylibTerrainViewer
                         menu.Settings,
                         menu.HudFont,
                         camera);
+
+                if (!menu.IsOpen)
+                    layerPanel.Draw(menu.Settings, maximumCutHeight, menu.HudFont);
 
                 menu.Draw();
                 EndDrawing();
@@ -374,7 +414,7 @@ public static class RaylibTerrainViewer
         if (settings.ShowControls)
         {
             DrawHudText(font,
-                "F1 lower tunnel | F2 upper passage | C surface | T top-down view",
+                "F1 lower tunnel | F2 upper passage | C surface | Tab layers | T top-down view",
                 24, 146, 14f, Color.RayWhite);
         }
 
