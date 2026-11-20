@@ -10,8 +10,10 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 public sealed class TerrainRenderSnapshot
 {
-    public const int RenderRegionSizeInTiles = 4;
+    public const int VoxelRenderRegionSizeInTiles = 1;
+    public const int HeightmapRenderRegionSizeInTiles = 4;
 
+    private readonly WorldMap _worldMap;
     private readonly float[] _heightsMeters;
     private readonly ushort[] _materialIds;
     private readonly long[] _sourceRegionVersions;
@@ -22,7 +24,8 @@ public sealed class TerrainRenderSnapshot
 
     public int RegionsX { get; }
     public int RegionsY { get; }
-    public int RegionSize => RenderRegionSizeInTiles;
+    public int RegionSize { get; }
+    public bool UsesVoxelCells => RegionSize == VoxelRenderRegionSizeInTiles;
     public int RegionCount => _heightsMeters.Length;
 
     public int StorageRegionsX { get; }
@@ -45,8 +48,13 @@ public sealed class TerrainRenderSnapshot
 
     internal long[] SourceRegionVersions => _sourceRegionVersions;
 
-    private TerrainRenderSnapshot(WorldMap worldMap)
+    private TerrainRenderSnapshot(WorldMap worldMap, int renderRegionSizeInTiles)
     {
+        if (renderRegionSizeInTiles <= 0)
+            throw new ArgumentOutOfRangeException(nameof(renderRegionSizeInTiles));
+
+        _worldMap = worldMap;
+        RegionSize = renderRegionSizeInTiles;
         StorageRegionsX = worldMap.RegionsX;
         StorageRegionsY = worldMap.RegionsY;
         StorageRegionSize = TerrainRegion.TilesPerSide;
@@ -54,14 +62,14 @@ public sealed class TerrainRenderSnapshot
         VerticalWorldExtentMeters =
             LayerCount * WorldMap.LayerHeightUnits * 0.1f;
 
-        if (StorageRegionSize % RenderRegionSizeInTiles != 0)
+        if (StorageRegionSize % RegionSize != 0)
         {
             throw new InvalidOperationException(
                 "Storage region size must be divisible by the render region size.");
         }
 
         RenderRegionsPerStorageRegion =
-            StorageRegionSize / RenderRegionSizeInTiles;
+            StorageRegionSize / RegionSize;
 
         RegionsX = checked(StorageRegionsX * RenderRegionsPerStorageRegion);
         RegionsY = checked(StorageRegionsY * RenderRegionsPerStorageRegion);
@@ -75,10 +83,18 @@ public sealed class TerrainRenderSnapshot
         RefreshFromWorld(worldMap);
     }
 
-    public static TerrainRenderSnapshot Create(WorldMap worldMap)
+    public static TerrainRenderSnapshot Create(WorldMap worldMap) =>
+        Create(worldMap, TerrainRenderMode.HeightmapFallback);
+
+    public static TerrainRenderSnapshot Create(
+        WorldMap worldMap,
+        TerrainRenderMode mode)
     {
         ArgumentNullException.ThrowIfNull(worldMap);
-        return new TerrainRenderSnapshot(worldMap);
+        int renderRegionSize = mode == TerrainRenderMode.Voxel
+            ? VoxelRenderRegionSizeInTiles
+            : HeightmapRenderRegionSizeInTiles;
+        return new TerrainRenderSnapshot(worldMap, renderRegionSize);
     }
 
     /// <summary>
@@ -98,6 +114,7 @@ public sealed class TerrainRenderSnapshot
                 "World topology changed. Create a new terrain snapshot.");
         }
 
+        _worldMap = worldMap;
         if (_initialized && SourceWorldVersion == worldMap.TerrainVersion)
             return false;
 
@@ -145,6 +162,15 @@ public sealed class TerrainRenderSnapshot
             return false;
 
         _complexColumnRanges.Clear();
+
+        // Voxel mode resolves exact 1x1 m columns on demand as visible chunks
+        // are meshed. This avoids scanning and retaining ranges for the entire
+        // multi-million-column world during snapshot creation.
+        if (UsesVoxelCells)
+        {
+            _complexSourceWorldVersion = worldMap.TerrainVersion;
+            return false;
+        }
 
         for (int renderY = 0; renderY < RegionsY; renderY++)
         {
@@ -209,6 +235,24 @@ public sealed class TerrainRenderSnapshot
 
             complexRanges.AsSpan().CopyTo(destination);
             return complexRanges.Length;
+        }
+
+        if (UsesVoxelCells)
+        {
+            ReadOnlySpan<TileRange> exactRanges =
+                _worldMap.GetTileRanges(regionX, regionY);
+            if (exactRanges.IsEmpty)
+                return 0;
+
+            if (destination.Length < exactRanges.Length)
+            {
+                throw new ArgumentException(
+                    "Destination is too small for the voxel column ranges.",
+                    nameof(destination));
+            }
+
+            exactRanges.CopyTo(destination);
+            return exactRanges.Length;
         }
 
         if (destination.Length < 2)
