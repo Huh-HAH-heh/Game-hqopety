@@ -60,7 +60,7 @@ public static class RaylibTerrainViewer
                 $"[Settings] Saved viewer profile: {RaylibViewerSettings.GetSettingsPath()}");
 
             Console.WriteLine(
-                "[Raylib] Cave at map centre (1152,1152): lower tunnel X 1076-1228, "
+                "[Raylib] Cave at map centre (1152,1152): lower tunnel X 1076-1228, ",
                 "Z about 1140-1164, H 13-21m; upper passage near X 1152, Z 1136-1168, " +
                 "H 25-33m. F1/F2 focus, C surface.");
 
