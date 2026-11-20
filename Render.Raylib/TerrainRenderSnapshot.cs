@@ -181,16 +181,8 @@ public sealed class TerrainRenderSnapshot
             {
                 int tileX = renderX * RegionSize + RegionSize / 2;
 
-                bool hasVolumeOverrides =
-                    worldMap.Blocks.Volumes.HasOverridesInColumn(
-                        tileX,
-                        tileY);
-
-                if (worldMap.IsColumnSimpleFill(tileX, tileY) &&
-                    !hasVolumeOverrides)
-                {
+                if (worldMap.IsColumnSimpleFill(tileX, tileY))
                     continue;
-                }
 
                 TileRange[] ranges =
                     worldMap.GetTileRanges(tileX, tileY).ToArray();
@@ -249,15 +241,15 @@ public sealed class TerrainRenderSnapshot
                         "Destination must hold at least two voxel ranges.",
                         nameof(destination));
 
-                int index = regionX + regionY * RegionsX;
+                int snapshotIndex = regionX + regionY * RegionsX;
                 int topLayer = Math.Clamp(
                     (int)MathF.Round(
-                        _heightsMeters[index] /
+                        _heightsMeters[snapshotIndex] /
                             (WorldMap.LayerHeightUnits * 0.1f),
                         MidpointRounding.AwayFromZero),
                     0,
                     LayerCount);
-                ushort simpleMaterial = _materialIds[index];
+                ushort simpleMaterial = _materialIds[snapshotIndex];
 
                 if (topLayer == 0 || simpleMaterial == 0)
                 {
