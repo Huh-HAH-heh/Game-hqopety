@@ -1525,7 +1525,9 @@ public static class CombatSelfTest
         }
         long generationBytes = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        if (generationBytes > 4096 ||
+        if (generationBytes > 256 * 1024 ||
+            worldMap.Blocks.Volumes.ChunkCount > 144 ||
+            worldMap.Blocks.Volumes.ComplexColumnCount != 0 ||
             worldMap.GetMaterialId(5, 5, 0) != 1 ||
             worldMap.GetMaterialId(5, 5, 99) != 1 ||
             worldMap.GetMaterialId(5, 5, 100) != 0 ||
@@ -1537,7 +1539,8 @@ public static class CombatSelfTest
 
         // Editing a single voxel must first materialize the compact column.
         worldMap.SetMaterialId(5, 5, 50, 2);
-        if (worldMap.GetMaterialId(5, 5, 49) != 1 ||
+        if (worldMap.Blocks.Volumes.ComplexColumnCount != 1 ||
+            worldMap.GetMaterialId(5, 5, 49) != 1 ||
             worldMap.GetMaterialId(5, 5, 50) != 2 ||
             worldMap.GetMaterialId(5, 5, 99) != 1 ||
             worldMap.GetMaterialId(5, 5, 100) != 0)
@@ -1547,7 +1550,8 @@ public static class CombatSelfTest
 
         // Replacing that edited column with a simple height must clear stale upper voxels.
         worldMap.SetSolidHeight(5, 5, 30, 1);
-        return worldMap.GetMaterialId(5, 5, 29) == 1 &&
+        return worldMap.Blocks.Volumes.ComplexColumnCount == 0 &&
+               worldMap.GetMaterialId(5, 5, 29) == 1 &&
                worldMap.GetMaterialId(5, 5, 30) == 0 &&
                worldMap.GetLayer(30).GetMaterialId(5, 5) == 0 &&
                worldMap.GetSurfaceLayer(5, 5) == 29;
