@@ -12,6 +12,7 @@ internal sealed class RegionGpuMesh : IDisposable
     public bool IsUploaded;
     public long RegionVersion;
     public int CutawayLayer;
+    public int CutSurfaceLayer = int.MinValue;
     public int PaletteVersion;
     public Vector3 BoundsCenter;
     public float BoundsRadius;
@@ -98,6 +99,7 @@ internal static class RegionMeshBuilder
                     firstRenderY + chunkY * chunkSize,
                     chunkSize,
                     terrain.CutawayEnabled ? terrain.CutawayLayer : terrain.LayerCount,
+                    generateCutFaces: true,
                     palette,
                     meshes);
             }
@@ -147,6 +149,7 @@ internal static class RegionMeshBuilder
                     firstRenderY + chunkY * chunkSize,
                     chunkSize,
                     terrain.LayerCount,
+                    generateCutFaces: false,
                     palette,
                     meshes);
             }
@@ -334,6 +337,7 @@ internal static class RegionMeshBuilder
         int firstRenderY,
         int size,
         int cutLayer,
+        bool generateCutFaces,
         TerrainPalette palette,
         List<Mesh> output)
     {
@@ -354,6 +358,7 @@ internal static class RegionMeshBuilder
                     renderX,
                     renderY,
                     cutLayer,
+                    generateCutFaces,
                     rangesBuffer,
                     neighbourBuffer,
                     palette,
@@ -364,10 +369,10 @@ internal static class RegionMeshBuilder
         if (quads.Count > MaximumQuadsPerMesh && size > 4)
         {
             int half = size / 2;
-            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, cutLayer, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, cutLayer, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, cutLayer, palette, output);
-            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, cutLayer, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY, half, cutLayer, generateCutFaces, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY, half, cutLayer, generateCutFaces, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX, firstRenderY + half, half, cutLayer, generateCutFaces, palette, output);
+            BuildChunkMeshes(terrain, firstRenderX + half, firstRenderY + half, half, cutLayer, generateCutFaces, palette, output);
             return;
         }
 
@@ -386,6 +391,7 @@ internal static class RegionMeshBuilder
         int renderX,
         int renderY,
         int cutLayer,
+        bool generateCutFaces,
         Span<TileRange> rangesBuffer,
         Span<TileRange> neighbourBuffer,
         TerrainPalette palette,
@@ -421,7 +427,8 @@ internal static class RegionMeshBuilder
             if (visibleEnd <= visibleStart)
                 continue;
 
-            bool cutFace = terrain.CutawayEnabled &&
+            bool cutFace = generateCutFaces &&
+                terrain.CutawayEnabled &&
                 visibleStart < cutLayer &&
                 range.EndZ >= cutLayer;
             bool airAbove = cutFace ||
