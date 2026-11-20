@@ -11,8 +11,11 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class RaylibTerrainRenderer : IDisposable
 {
-    private const int MaximumBaseMeshBuildsPerFrame = 6;
+    private const int MaximumCoarseMeshBuildsPerFrame = 6;
+    private const int MaximumFineMeshBuildsPerFrame = 2;
     private const int MaximumCutSurfaceBuildsPerFrame = 12;
+    private const float FineLodEnterDistanceMeters = 220f;
+    private const float FineLodExitDistanceMeters = 290f;
 
     private const string VoxelVertexShader = """
         #version 330
@@ -70,7 +73,11 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         """;
 
     private readonly RegionGpuMesh?[] _regionMeshes;
+    private readonly RegionGpuMesh?[] _coarseRegionMeshes;
     private readonly RegionGpuMesh?[] _visibleRegionMeshes;
+    private readonly TerrainRenderSnapshot? _coarseTerrain;
+    private bool _usingCoarseLod = true;
+    private int _activeVoxelCellSize = 1;
     private readonly Material _material;
     private readonly Shader _voxelShader;
     private readonly bool _hasVoxelShader;
@@ -89,16 +96,28 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public int VisibleRegionsLastFrame { get; private set; }
     public int RebuiltRegions { get; private set; }
     public int CutSurfaceRebuilds { get; private set; }
+    public int ActiveVoxelCellSize => _activeVoxelCellSize;
+    public bool IsUsingCoarseVoxelLod => _mode == TerrainRenderMode.Voxel &&
+        _coarseTerrain != null &&
+        _usingCoarseLod;
 
     public RaylibTerrainRenderer(
         TerrainRenderSnapshot terrain,
         TerrainPalette palette,
-        TerrainRenderMode mode)
+        TerrainRenderMode mode,
+        TerrainRenderSnapshot? coarseTerrain = null)
     {
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
         _mode = mode;
+        _coarseTerrain = mode == TerrainRenderMode.Voxel &&
+            coarseTerrain?.IsVoxelMode == true
+                ? coarseTerrain
+                : null;
 
         _regionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
+        _coarseRegionMeshes = _coarseTerrain != null
+            ? new RegionGpuMesh?[terrain.StorageRegionCount]
+            : Array.Empty<RegionGpuMesh?>();
         _visibleRegionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
 
         Material material = LoadMaterialDefault();
@@ -149,27 +168,48 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
         // Mesh creation is deliberately lazy. Only visible storage regions are
         // meshed, with a bounded per-frame upload budget.
-        Synchronize(terrain);
+        Synchronize(terrain, _coarseTerrain);
     }
 
-    public void Synchronize(TerrainRenderSnapshot terrain, bool forceRebuild = false)
+    public void Synchronize(
+        TerrainRenderSnapshot terrain,
+        TerrainRenderSnapshot? coarseTerrain,
+        bool forceRebuild = false)
     {
         ThrowIfDisposed();
+        InvalidateMeshes(_regionMeshes, terrain.SourceRegionVersions, forceRebuild);
 
-        for (int i = 0; i < _regionMeshes.Length; i++)
+        if (_coarseRegionMeshes.Length > 0)
         {
-            RegionGpuMesh? existing = _regionMeshes[i];
-            long version = terrain.SourceRegionVersions[i];
+            TerrainRenderSnapshot source = coarseTerrain ?? _coarseTerrain!;
+            InvalidateMeshes(_coarseRegionMeshes, source.SourceRegionVersions, forceRebuild);
+        }
+    }
 
+    private static void InvalidateMeshes(
+        RegionGpuMesh?[] meshes,
+        long[] sourceVersions,
+        bool forceRebuild)
+    {
+        for (int i = 0; i < meshes.Length; i++)
+        {
+            RegionGpuMesh? existing = meshes[i];
             if (existing == null ||
-                (!forceRebuild && existing.RegionVersion == version))
+                (!forceRebuild && existing.RegionVersion == sourceVersions[i]))
             {
                 continue;
             }
 
             existing.Dispose();
-            _regionMeshes[i] = null;
+            meshes[i] = null;
         }
+    }
+
+    private static void DisposeMeshes(RegionGpuMesh?[] meshes)
+    {
+        foreach (RegionGpuMesh? mesh in meshes)
+            mesh?.Dispose();
+        Array.Clear(meshes);
     }
 
     public void Draw(
@@ -181,16 +221,45 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     {
         ThrowIfDisposed();
 
+        float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
+        bool canUseCoarseLod = _mode == TerrainRenderMode.Voxel &&
+            _coarseTerrain != null;
+        if (canUseCoarseLod)
+        {
+            bool nextCoarseState = _usingCoarseLod
+                ? cameraDistance > FineLodEnterDistanceMeters
+                : cameraDistance >= FineLodExitDistanceMeters;
+
+            if (nextCoarseState && !_usingCoarseLod)
+                DisposeMeshes(_regionMeshes);
+
+            _usingCoarseLod = nextCoarseState;
+        }
+
+        TerrainRenderSnapshot drawTerrain =
+            _usingCoarseLod && canUseCoarseLod
+                ? _coarseTerrain!
+                : terrain;
+        RegionGpuMesh?[] drawMeshes =
+            _usingCoarseLod && canUseCoarseLod
+                ? _coarseRegionMeshes
+                : _regionMeshes;
+
+        _activeVoxelCellSize = drawTerrain.RegionSize;
+
         int visibleRegionCount = 0;
         int visibleDrawCalls = 0;
         int baseBuildsThisFrame = 0;
         int cutBuildsThisFrame = 0;
-        int cutLayer = terrain.CutawayEnabled ? terrain.CutawayLayer : -1;
+        int maximumBaseBuilds = _usingCoarseLod && canUseCoarseLod
+            ? MaximumCoarseMeshBuildsPerFrame
+            : MaximumFineMeshBuildsPerFrame;
+        int cutLayer = drawTerrain.CutawayEnabled ? drawTerrain.CutawayLayer : -1;
 
-        for (int i = 0; i < _regionMeshes.Length; i++)
+        for (int i = 0; i < drawMeshes.Length; i++)
         {
-            RegionGpuMesh? region = _regionMeshes[i];
-            GetRegionBounds(terrain, i, out Vector3 center, out float radius);
+            RegionGpuMesh? region = drawMeshes[i];
+            GetRegionBounds(drawTerrain, i, out Vector3 center, out float radius);
 
             if (!TerrainFrustum.IsSphereVisible(
                 camera,
@@ -212,7 +281,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
             if (baseIsStale)
             {
-                if (baseBuildsThisFrame >= MaximumBaseMeshBuildsPerFrame)
+                if (baseBuildsThisFrame >= maximumBaseBuilds)
                     continue;
 
                 region?.Dispose();
@@ -225,7 +294,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                     : RegionMeshBuilder.Build(
                         terrain, regionX, regionY, _palette, _paletteVersion);
 
-                _regionMeshes[i] = region;
+                drawMeshes[i] = region;
                 RebuiltRegions++;
                 baseBuildsThisFrame++;
             }
@@ -262,8 +331,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         }
 
         SetVoxelCutShader(
-            enabled: _mode == TerrainRenderMode.Voxel && terrain.CutawayEnabled,
-            height: terrain.CutawayHeightMeters);
+            enabled: _mode == TerrainRenderMode.Voxel && drawTerrain.CutawayEnabled,
+            height: drawTerrain.CutawayHeightMeters);
         SetVoxelLighting();
 
         BeginMode3D(camera);
@@ -278,11 +347,11 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             }
         }
 
-        if (_mode == TerrainRenderMode.Voxel && terrain.CutawayEnabled)
+        if (_mode == TerrainRenderMode.Voxel && drawTerrain.CutawayEnabled)
         {
             // The base volume is clipped in the GPU. Cut caps are separate
             // meshes, rendered without clipping and rebuilt independently.
-            SetVoxelCutShader(enabled: false, height: terrain.CutawayHeightMeters);
+            SetVoxelCutShader(enabled: false, height: drawTerrain.CutawayHeightMeters);
 
             for (int i = 0; i < visibleRegionCount; i++)
             {
@@ -383,8 +452,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         if (_disposed)
             return;
 
-        foreach (RegionGpuMesh? region in _regionMeshes)
-            region?.Dispose();
+        DisposeMeshes(_regionMeshes);
+        DisposeMeshes(_coarseRegionMeshes);
 
         UnloadMaterial(_material);
         if (_hasVoxelShader)
