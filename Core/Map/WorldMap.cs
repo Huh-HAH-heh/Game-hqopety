@@ -204,15 +204,38 @@ public sealed class WorldMap
                     for (int localX = 0; localX < region.TileWidth; localX++)
                     {
                         int worldX = region.TileOriginX + localX;
-                        int topLayer = Blocks.Volumes.FindHighestSolidLayerInColumn(
-                            worldX, worldY, LayerCount - 1);
-                        int levels = topLayer < 0
-                            ? 0
-                            : (topLayer + 1 + HeightUnitsPerMeter - 1) /
-                                HeightUnitsPerMeter;
-                        ushort materialId = topLayer < 0
-                            ? (ushort)0
-                            : GetMaterialId(worldX, worldY, topLayer);
+                        int levels;
+                        ushort materialId;
+
+                        if (Blocks.Volumes.TryGetSimpleColumn(
+                                worldX, worldY,
+                                out ushort topExclusive,
+                                out ushort simpleMaterial))
+                        {
+                            levels = Math.Clamp(
+                                (int)MathF.Round(
+                                    topExclusive / (float)HeightUnitsPerMeter,
+                                    MidpointRounding.AwayFromZero),
+                                0,
+                                LayerCount / HeightUnitsPerMeter);
+                            materialId = levels > 0 ? simpleMaterial : (ushort)0;
+                        }
+                        else
+                        {
+                            int topLayer = Blocks.Volumes.FindHighestSolidLayerInColumn(
+                                worldX, worldY, LayerCount - 1);
+                            levels = topLayer < 0
+                                ? 0
+                                : Math.Clamp(
+                                    (int)MathF.Round(
+                                        (topLayer + 1) / (float)HeightUnitsPerMeter,
+                                        MidpointRounding.AwayFromZero),
+                                    0,
+                                    LayerCount / HeightUnitsPerMeter);
+                            materialId = topLayer < 0
+                                ? (ushort)0
+                                : GetMaterialId(worldX, worldY, topLayer);
+                        }
 
                         Blocks.SetSurfaceLevel(worldX, worldY, levels, materialId);
                     }
@@ -256,7 +279,48 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Places or clears one large cuboid in the sparse volume tree.
+    /// Writes one cuboid in native voxel coordinates. X/Y are 1 m cells;
+    /// Z and height are 0.1 m layers. Material zero removes the volume.
+    /// </summary>
+    public void SetVoxelVolume(
+        int x,
+        int y,
+        int zLayer,
+        int width,
+        int depth,
+        int heightLayers,
+        ushort materialId)
+    {
+        Blocks.Volumes.SetVolume(
+            x, y, zLayer, width, depth, heightLayers, materialId);
+
+        for (int worldY = y; worldY < y + depth; worldY++)
+        {
+            for (int worldX = x; worldX < x + width; worldX++)
+            {
+                int index = GetColumnIndex(worldX, worldY);
+                _rangeCache[index] = null;
+                RecalculateSurfaceHeight(index);
+                MarkTerrainChanged(worldX, worldY);
+            }
+        }
+
+        NavigationVersion++;
+    }
+
+    public void ClearVoxelVolume(
+        int x,
+        int y,
+        int zLayer,
+        int width,
+        int depth,
+        int heightLayers) =>
+        SetVoxelVolume(
+            x, y, zLayer, width, depth, heightLayers,
+            materialId: 0);
+
+    /// <summary>
+    /// Places or clears one large cuboid in the sparse voxel store.
     /// X/Y and width/depth use one-metre map cells. Z and height use metres.
     /// Material ID zero cuts an empty cuboid; editing a smaller part later
     /// splits only the affected octree nodes.
@@ -300,7 +364,7 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Adds a static material cuboid to the sparse 3D volume backing.
+    /// Adds a static material cuboid to the sparse 3D voxel backing.
     /// Coordinates X/Y use map tiles; Z and height use metres.
     /// Material zero creates an empty cut; nonzero materials create a solid
     /// geological layer. The implicit height-field remains the base volume.
@@ -377,120 +441,6 @@ public sealed class WorldMap
 
     public int CompactUniformBlockVolumes(int minimumBlockSize = 32) =>
         CompactHierarchicalBlockVolumes(minimumBlockSize);
-
-    private int CompactHierarchicalRegion(
-        int x,
-        int y,
-        int size,
-        int minimumBlockSize,
-        int baseLayer)
-    {
-        if (x >= TileWidth || y >= TileHeight || size < minimumBlockSize)
-            return 0;
-
-        if (x + size <= TileWidth &&
-            y + size <= TileHeight &&
-            TryGetBlockRegionSummary(
-                x, y, size, baseLayer,
-                out ushort materialId,
-                out int minimumRemaining,
-                out int maximumRemaining))
-        {
-            int volumeCount = 0;
-            if (minimumRemaining > 0)
-            {
-                // Store the shared lower part once for this whole region.
-                // Higher, varying surfaces continue to use the fine backing.
-                Blocks.Volumes.SetVolume(
-                    x, y, baseLayer,
-                    size, size, minimumRemaining,
-                    materialId);
-                volumeCount++;
-                baseLayer += minimumRemaining;
-            }
-
-            if (maximumRemaining <= minimumRemaining ||
-                size <= minimumBlockSize)
-            {
-                return volumeCount;
-            }
-
-            int half = size / 2;
-            volumeCount += CompactHierarchicalRegion(
-                x, y, half, minimumBlockSize, baseLayer);
-            volumeCount += CompactHierarchicalRegion(
-                x + half, y, half, minimumBlockSize, baseLayer);
-            volumeCount += CompactHierarchicalRegion(
-                x, y + half, half, minimumBlockSize, baseLayer);
-            volumeCount += CompactHierarchicalRegion(
-                x + half, y + half, half, minimumBlockSize, baseLayer);
-            return volumeCount;
-        }
-
-        int childSize = size / 2;
-        return
-            CompactHierarchicalRegion(
-                x, y, childSize, minimumBlockSize, baseLayer) +
-            CompactHierarchicalRegion(
-                x + childSize, y, childSize, minimumBlockSize, baseLayer) +
-            CompactHierarchicalRegion(
-                x, y + childSize, childSize, minimumBlockSize, baseLayer) +
-            CompactHierarchicalRegion(
-                x + childSize, y + childSize,
-                childSize, minimumBlockSize, baseLayer);
-    }
-
-    private bool TryGetBlockRegionSummary(
-        int x,
-        int y,
-        int size,
-        int baseLayer,
-        out ushort materialId,
-        out int minimumRemaining,
-        out int maximumRemaining)
-    {
-        materialId = 0;
-        minimumRemaining = int.MaxValue;
-        maximumRemaining = 0;
-
-        for (int localY = 0; localY < size; localY++)
-        {
-            int row = GetColumnIndex(x, y + localY);
-            for (int localX = 0; localX < size; localX++)
-            {
-                int index = row + localX;
-                if (!_simpleFillColumns[index])
-                    return false;
-
-                int totalLayers = Math.Clamp(
-                    (_surfaceHeights[index] + LayerHeightUnits - 1) /
-                    LayerHeightUnits,
-                    0,
-                    LayerCount);
-                int remaining = Math.Max(0, totalLayers - baseLayer);
-
-                if (remaining > 0)
-                {
-                    ushort columnMaterial = _columnMaterialIds[index];
-                    if (columnMaterial == 0)
-                        return false;
-
-                    if (materialId == 0)
-                        materialId = columnMaterial;
-                    else if (materialId != columnMaterial)
-                        return false;
-                }
-
-                minimumRemaining = Math.Min(minimumRemaining, remaining);
-                maximumRemaining = Math.Max(maximumRemaining, remaining);
-            }
-        }
-
-        if (minimumRemaining == int.MaxValue)
-            minimumRemaining = 0;
-
-        return true;
-    }
 
     /// <summary>
     /// Places one independent 1 x 1 x 1 m block at a discrete block Z level.
@@ -626,11 +576,10 @@ public sealed class WorldMap
     }
 
     // ============================================================
-    // LAYER -> REGION -> VOXEL STORAGE
-    // Every TerrainLayer owns its XY TerrainRegion grid.
-    // Each XY cell is 1 m across; each Z layer is 0.1 m tall.
-    // All 500 levels are stored densely to preserve full vertical detail.
-    // ID 0 means empty; every other ID identifies a material.
+    // VOXEL STORAGE AND COMPATIBILITY VIEWS
+    // SparseVoxelStore is the sole owner of solid/air occupancy.
+    // XY cells are 1 m x 1 m; vertical layers are 0.1 m.
+    // TerrainLayer/TerrainRegion are lazy read/write adapters only.
     // ============================================================
 
     public TerrainLayer GetLayer(
@@ -689,47 +638,6 @@ public sealed class WorldMap
     public int FindTopOccupiedLayer(int x, int y, int maxLayer) =>
         Blocks.Volumes.FindHighestSolidLayerInColumn(
             x, y, Math.Min(maxLayer, LayerCount - 1));
-
-    private int FindBaseTopOccupiedLayer(
-        int x,
-        int y,
-        int columnIndex,
-        int lastLayer)
-    {
-        if (_simpleFillColumns[columnIndex])
-        {
-            if (_columnMaterialIds[columnIndex] == 0)
-                return -1;
-
-            int filledLayers = Math.Clamp(
-                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
-                LayerHeightUnits, 0, LayerCount);
-            return Math.Min(filledLayers - 1, lastLayer);
-        }
-
-        int surfaceLayer = Math.Min(
-            lastLayer,
-            Math.Clamp(
-                (_surfaceHeights[columnIndex] + LayerHeightUnits - 1) /
-                LayerHeightUnits - 1,
-                -1,
-                LayerCount - 1));
-        if (surfaceLayer < 0)
-            return -1;
-
-        int regionX = x / TerrainRegion.TilesPerSide;
-        int regionY = y / TerrainRegion.TilesPerSide;
-        int localIndex = x % TerrainRegion.TilesPerSide +
-            (y % TerrainRegion.TilesPerSide) * TerrainRegion.TilesPerSide;
-        for (int z = surfaceLayer; z >= 0; z--)
-        {
-            if (_layers[z].GetRegion(regionX, regionY)!
-                    .GetMaterialIdAtIndex(localIndex) != 0)
-                return z;
-        }
-
-        return -1;
-    }
 
     // Inclusive interval: is any voxel in this vertical column solid?
     public bool IsColumnSolidBetween(

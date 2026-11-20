@@ -27,11 +27,14 @@ interpolated height field.
 
 ## World model and material descriptions
 
-WorldMap is authoritative for geometry and occupancy: 1 m horizontal cells, 0.1 m
-vertical layers, empty/solid intervals, and material IDs. BlockVolumeTree stores
-large uniform cuboids sparsely; ordinary columns keep their compact height/material
-representation. TerrainRenderSnapshot is a presentation cache only and never owns
-or changes world properties.
+WorldMap owns one authoritative SparseVoxelStore for geometry and occupancy:
+1 m horizontal cells, 0.1 m vertical layers, solid intervals, air gaps and material
+IDs. The store groups XY cells into 16x16 chunks. A normal column is represented by
+one compact solid run from the floor; a column with caves, overhangs or multiple
+materials switches to an arbitrary list of vertical solid runs. Air remains implicit.
+There is no separate heightfield or second volume tree backing the rendered terrain.
+TerrainLayer and TerrainRegion are lazy compatibility views; they do not own a
+second copy of voxel occupancy. TerrainRenderSnapshot is a presentation cache only.
 
 The mathematical model and the descriptive material model are joined by MaterialId:
 a solid cell refers to a material definition, while the definition is shared by all
@@ -42,10 +45,14 @@ conductivity, and permeability. Those physical values should live in shared mate
 definitions and be consumed by simulation systems; the renderer should only read
 them when visual variation is needed.
 
-The world remains stored in 192x192-tile regions; the full map is 2304x2304 m with
-500 vertical layers at 0.1 m per layer. Simple columns stay compact, and detailed
-voxel ranges are resolved lazily as visible mesh batches are built. The mesh builder
-uses bounded submeshes and recursively splits unusually dense areas.
+The logical simulation region remains 192x192 m; the voxel backing itself is divided
+into 16x16 XY chunks and compressed by vertical runs. The current world is 2304x2304 m
+with 500 vertical layers at 0.1 m per layer. Complex run lists are read only for
+visible mesh batches. Mesh creation uses bounded submeshes and recursively splits
+unusually dense areas.
+
+The smooth world generator now samples its surface at 1 m XY spacing instead of repeating one 4x4 m height sample across sixteen columns. This gives the base surface the same horizontal resolution as the voxel store.
+
 
 The old **Heightmap fallback** remains available from the *Terrain and cuts*
 settings section. It keeps the previous 4x4-tile sampling path and can be selected
@@ -55,8 +62,9 @@ without changing world data.
 
 The renderer no longer treats terrain as only a top-height surface. Every sampled
 column is described by ordered vertical intervals of solid material and air.
-Simple terrain remains a compact height/material pair. Only columns containing
-strata, carved caves or other vertical edits retain their full interval list.
+Ordinary terrain columns remain one compact vertical solid run. Columns containing
+strata, carved caves, overhangs or disconnected solid masses retain arbitrary ordered
+solid intervals. This is compression of voxel occupancy, not a separate heightfield.
 
 The mesh builder emits:
 
@@ -73,7 +81,7 @@ volume. Empty intervals remain true holes: they are not painted as dark floor ti
 ## Data flow
 
 ```text
-WorldMap / sparse BlockVolumeTree
+WorldMap / SparseVoxelStore
         |
         v
 TerrainRenderSnapshot

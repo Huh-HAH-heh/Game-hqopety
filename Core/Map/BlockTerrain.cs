@@ -21,7 +21,7 @@ public enum BlockDirection : byte
 /// Region-compressed surface data for the discrete block world.
 /// Uniform regions store one surface level and material. Per-tile arrays
 /// are allocated only when a region receives a local surface or transition edit.
-/// Solid volume remains in the sparse world volume tree.
+/// Solid/air occupancy is stored in the unified SparseVoxelStore.
 /// </summary>
 public sealed class BlockTerrain
 {
