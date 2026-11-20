@@ -5,23 +5,29 @@ renderer and does not own world-generation or simulation state.
 
 ## Responsibilities
 
-- `TerrainRenderSnapshot` stores compact surface data plus exact vertical solid/air
-  intervals for columns with cave, stratum or local voxel overrides.
-- `RaylibTerrainRenderer` owns GPU resources and draws cached volumetric batches.
+- `TerrainRenderSnapshot` stores compact surface data and resolves exact vertical
+  solid/air intervals for voxel columns as visible chunks are built.
+- `RaylibTerrainRenderer` owns GPU resources, draws cached volumetric batches and
+  clips voxel terrain with a world-space GPU cut plane.
 - `RegionMeshBuilder` builds exposed top, bottom and side faces from vertical intervals.
 - `OrbitCameraController` owns RTS orbit, pan, zoom and cut-plane controls.
 - `RaylibTerrainViewer` owns the window and frame loop.
 
 ## Terrain region layout
 
-The presentation grid uses **4x4-tile render cells**. World storage remains grouped
-into 192x192-tile regions; the full map is still 2304x2304 metres with 500 vertical
-layers at 0.1 m per layer.
+The primary **Voxel** mode uses one render cell per 1x1 m map tile and exact 0.1 m
+vertical layers. The mesher reads the real solid/air intervals for each visible
+column and emits only exposed faces in all six directions. This is a volumetric
+voxel surface, not an interpolated height field.
 
-Each storage region contains 48x48 render cells. For safe 16-bit GPU indices, the
-mesher normally produces four 24x24-cell submeshes per storage region. Very dense
-areas split recursively into smaller batches. This keeps terrain as a small number
-of GPU meshes rather than one object per tile or voxel.
+The world remains stored in 192x192-tile regions; the full map is 2304x2304 m with
+500 vertical layers at 0.1 m per layer. Simple columns stay compact, and detailed
+voxel ranges are resolved lazily as visible mesh batches are built. The mesh builder
+uses bounded submeshes and recursively splits unusually dense areas.
+
+The old **Heightmap fallback** remains available from the *Terrain and cuts*
+settings section. It keeps the previous 4x4-tile sampling path and can be selected
+without changing world data.
 
 ## Volumetric geometry
 
@@ -32,10 +38,10 @@ strata, carved caves or other vertical edits retain their full interval list.
 
 The mesh builder emits:
 
-- upper faces of solid ground and lower floors exposed beneath caves;
-- undersides of cave roofs and ceilings;
-- vertical walls wherever solid material borders an air interval;
-- no bright white elevation stripes on cliff faces; cutaway geology hatching remains subdued
+- upper and lower voxel faces exposed to air;
+- vertical walls in both horizontal axes wherever solid material borders an air interval;
+- no internal faces between adjacent solid cells, including across storage-region boundaries;
+- cutaway faces with subdued geology hatching
 - side faces along ordinary terrain height differences;
 - distinct cut faces and material-specific hatching at the current cut plane.
 
@@ -65,8 +71,12 @@ Raylib window
 
 The renderer reads the snapshot only. It does not query WorldMap while drawing.
 GPU resource creation, upload, draw and disposal are restricted to the render thread.
-Normal terrain edits invalidate affected storage batches; moving the cut plane rebuilds
-the visible volume at the 0.1 m voxel-layer resolution.
+Normal terrain edits invalidate only affected storage batches. In Voxel mode, moving
+the cut plane does not rebuild the base terrain meshes: a fragment shader clips them
+at the new world-space height, and only the lightweight cut-cap meshes are refreshed
+for visible regions. Base meshes are built lazily with a six-region-per-frame budget;
+cut caps have their own twelve-region-per-frame budget. The fallback path retains its
+original mesh-baked cutaway behavior.
 
 ## Controls
 
@@ -83,6 +93,7 @@ the visible volume at the 0.1 m voxel-layer resolution.
 - Shift + mouse wheel: move the cut plane by one 0.1 m voxel layer per wheel notch
 - T: return to the fitted top-down view
 - Escape: exit
+- Pause menu > Terrain and cuts > Geometry: switch between Voxel (primary) and Heightmap fallback
 
 ## Static multi-level cave and volumetric cutaway
 
