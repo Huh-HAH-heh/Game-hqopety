@@ -444,9 +444,9 @@ public static class RaylibTerrainViewer
             1.35f);
         float margin = MathF.Round(12f * scale);
         float padding = MathF.Round(12f * scale);
-        float lineGap = MathF.Max(15f, 22f * scale);
+        float lineGap = MathF.Max(20f, 23f * scale);
         float panelWidth = Math.Min(
-            720f * scale,
+            860f,
             Math.Max(240f, screenWidth - margin * 2f));
 
         List<(string Text, float Size, Color Color)> lines = new();
@@ -489,7 +489,7 @@ public static class RaylibTerrainViewer
         {
             lines.Add((
                 "F1 lower tunnel | F2 upper passage | C surface | Tab layers | T top-down view",
-                13f,
+                16f,
                 Color.RayWhite));
         }
 
@@ -497,23 +497,23 @@ public static class RaylibTerrainViewer
         {
             lines.Add((
                 "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
-                13f,
+                16f,
                 Color.LightGray));
             lines.Add((
                 "UPPER: near X 1152 | Z 1136-1168 | HEIGHT 25-33 m",
-                13f,
+                16f,
                 Color.LightGray));
         }
 
         if (settings.ShowControls)
         {
             lines.Add((
-                $"WASD {camera.CurrentMovementSpeedMetersPerSecond:0} m/s | RMB orbit | MMB pan | Shift+MMB speed",
-                13f,
+                $"WASD {camera.CurrentMovementSpeedMetersPerSecond:0} m/s | Shift+LMB orbit | MMB pan | Shift+MMB speed",
+                16f,
                 Color.RayWhite));
             lines.Add((
                 "Wheel zoom | Q/E faster slice | PgUp/PgDn 0.1m | Shift+Wheel 0.1m",
-                13f,
+                16f,
                 Color.RayWhite));
         }
 
@@ -540,7 +540,7 @@ public static class RaylibTerrainViewer
 
         foreach ((string text, float baseSize, Color color) in lines)
         {
-            float fontSize = MathF.Max(9f, baseSize * scale);
+            float fontSize = MathF.Round(Math.Clamp(baseSize, 16f, 18f));
             DrawHudText(
                 font,
                 text,
@@ -563,17 +563,17 @@ public static class RaylibTerrainViewer
         Color color)
     {
         string fittedText = text;
-        float minimumSize = 9f;
+        const float minimumSize = 14f;
 
         while (fontSize > minimumSize &&
-            MeasureTextEx(font, fittedText, fontSize, 0.4f).X > maximumWidth)
+            MeasureTextEx(font, fittedText, fontSize, 0f).X > maximumWidth)
         {
-            fontSize = Math.Max(minimumSize, fontSize - 0.5f);
+            fontSize -= 1f;
         }
 
         // A narrow viewport should never allow text to bleed outside the HUD.
         while (fittedText.Length > 4 &&
-            MeasureTextEx(font, fittedText, fontSize, 0.4f).X > maximumWidth)
+            MeasureTextEx(font, fittedText, fontSize, 0f).X > maximumWidth)
         {
             fittedText = fittedText[..^4] + "...";
         }
@@ -583,7 +583,7 @@ public static class RaylibTerrainViewer
             fittedText,
             new Vector2(MathF.Round(x), MathF.Round(y)),
             fontSize,
-            0.4f,
+            0f,
             color);
     }
 
