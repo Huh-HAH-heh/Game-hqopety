@@ -75,8 +75,8 @@ the visible volume at 0.5 m steps.
 - Mouse wheel: zoom toward the cursor when the ground anchor is visible
 - Left Shift / Right Shift: faster WASD movement
 - C: toggle cutaway mode and focus on the lower through-tunnel
-- F1: focus on the lower through-tunnel (cut plane 22 m, above its 19-20 m roof)
-- F2: focus on the sealed upper passage (cut plane 35 m, above its 32-34 m roof)
+- F1: focus on the lower through-tunnel (cut plane 17 m, inside the lower passage)
+- F2: focus on the sealed upper passage (cut plane 28 m, inside the upper passage)
 - Q / E: move the camera focus and cut plane vertically; focus can move above and below the 0-50 m terrain volume
 - PageUp / PageDown: step the cut plane by exactly 1 metre
 - Shift + mouse wheel: adjust the cut plane by 1 metre

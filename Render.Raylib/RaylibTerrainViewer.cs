@@ -136,7 +136,7 @@ public static class RaylibTerrainViewer
         camera.FocusOn(
             new System.Numerics.Vector3(
                 terrain.WorldWidth * 0.5f + 58f,
-                22f,
+                17f,
                 terrain.WorldDepth * 0.5f - 9f),
             108f,
             pitchRadians: 0.82f);
@@ -149,7 +149,7 @@ public static class RaylibTerrainViewer
         camera.FocusOn(
             new System.Numerics.Vector3(
                 terrain.WorldWidth * 0.5f + 58f,
-                35f,
+                28f,
                 terrain.WorldDepth * 0.5f - 9f),
             34f,
             pitchRadians: 0.82f);
@@ -214,7 +214,7 @@ public static class RaylibTerrainViewer
             Color.LightGray);
 
         DrawText(
-            "UPPER: X 1200-1220 | Z 1127-1159 | HEIGHT 26-34 m",
+            "UPPER: X 1200-1220 | Z 1127-1159 | HEIGHT 25-33 m",
             24,
             192,
             14,
