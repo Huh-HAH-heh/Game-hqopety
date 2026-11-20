@@ -591,8 +591,25 @@ public sealed class WorldMap
         return _layers[z];
     }
 
-    public ushort GetMaterialId(int x, int y, int z) =>
-        Blocks.Volumes.GetMaterialId(x, y, z);
+    public ushort GetMaterialId(int x, int y, int z)
+    {
+        if (!IsInside(x, y) || z < 0 || z >= LayerCount)
+            return 0;
+
+        int index = GetColumnIndex(x, y);
+        if (_simpleFillColumns[index])
+        {
+            int filledLayers = Math.Clamp(
+                (_surfaceHeights[index] + LayerHeightUnits - 1) /
+                    LayerHeightUnits,
+                0,
+                LayerCount);
+            ushort materialId = _columnMaterialIds[index];
+            return z < filledLayers ? materialId : (ushort)0;
+        }
+
+        return Blocks.Volumes.GetMaterialId(x, y, z);
+    }
 
     public void SetMaterialId(
         int x,
@@ -635,9 +652,28 @@ public sealed class WorldMap
 
     // Uppermost occupied voxel at or below a horizontal Z slice.
     // Uniform macro volumes resolve through the octree without scanning Z.
-    public int FindTopOccupiedLayer(int x, int y, int maxLayer) =>
-        Blocks.Volumes.FindHighestSolidLayerInColumn(
-            x, y, Math.Min(maxLayer, LayerCount - 1));
+    public int FindTopOccupiedLayer(int x, int y, int maxLayer)
+    {
+        if (!IsInside(x, y) || maxLayer < 0)
+            return -1;
+
+        int lastLayer = Math.Min(maxLayer, LayerCount - 1);
+        int index = GetColumnIndex(x, y);
+        if (_simpleFillColumns[index])
+        {
+            int filledLayers = Math.Clamp(
+                (_surfaceHeights[index] + LayerHeightUnits - 1) /
+                    LayerHeightUnits,
+                0,
+                LayerCount);
+            return filledLayers == 0
+                ? -1
+                : Math.Min(filledLayers - 1, lastLayer);
+        }
+
+        return Blocks.Volumes.FindHighestSolidLayerInColumn(
+            x, y, lastLayer);
+    }
 
     // Inclusive interval: is any voxel in this vertical column solid?
     public bool IsColumnSolidBetween(
@@ -649,8 +685,27 @@ public sealed class WorldMap
         if (!IsInside(x, y))
             return true;
 
+        int first = Math.Max(0, firstLayer);
+        int last = Math.Min(LayerCount - 1, lastLayer);
+        if (first > last)
+            return false;
+
+        int index = GetColumnIndex(x, y);
+        if (_simpleFillColumns[index])
+        {
+            if (_columnMaterialIds[index] == 0)
+                return false;
+
+            int filledLayers = Math.Clamp(
+                (_surfaceHeights[index] + LayerHeightUnits - 1) /
+                    LayerHeightUnits,
+                0,
+                LayerCount);
+            return first < filledLayers;
+        }
+
         return Blocks.Volumes.HasSolidInColumnBetween(
-            x, y, firstLayer, lastLayer);
+            x, y, first, last);
     }
 
     public bool IsColumnVolumeEmpty(int x, int y, int firstLayer, int lastLayer) =>
@@ -1184,7 +1239,8 @@ public sealed class WorldMap
     /// rather than individually authored vertical layer data.
     /// </summary>
     public bool IsColumnSimpleFill(int globalX, int globalY) =>
-        Blocks.Volumes.IsSimpleColumn(globalX, globalY);
+        IsInside(globalX, globalY) &&
+        _simpleFillColumns[GetColumnIndex(globalX, globalY)];
 
     public ushort GetSurfaceHeightUnits(
         int globalX,
@@ -1192,6 +1248,10 @@ public sealed class WorldMap
     {
         if (!IsInside(globalX, globalY))
             return 0;
+
+        int index = GetColumnIndex(globalX, globalY);
+        if (_simpleFillColumns[index])
+            return _surfaceHeights[index];
 
         int topLayer = Blocks.Volumes.FindHighestSolidLayerInColumn(
             globalX, globalY, LayerCount - 1);
@@ -1224,19 +1284,27 @@ public sealed class WorldMap
         int globalY = columnIndex / TileWidth;
         GetWorldRegionAtTile(globalX, globalY)?.InvalidateUniformSurface();
 
+        _volumeSurfaceHeights[columnIndex] = 0;
+
+        if (Blocks.Volumes.TryGetSimpleColumn(
+                globalX, globalY,
+                out ushort topExclusive,
+                out ushort simpleMaterial))
+        {
+            _surfaceHeights[columnIndex] =
+                checked((ushort)(topExclusive * LayerHeightUnits));
+            _simpleFillColumns[columnIndex] = true;
+            _columnMaterialIds[columnIndex] = simpleMaterial;
+            return;
+        }
+
         int topLayer = Blocks.Volumes.FindHighestSolidLayerInColumn(
             globalX, globalY, LayerCount - 1);
         _surfaceHeights[columnIndex] = topLayer < 0
             ? (ushort)0
             : checked((ushort)((topLayer + 1) * LayerHeightUnits));
-        _volumeSurfaceHeights[columnIndex] = 0;
-
-        _simpleFillColumns[columnIndex] =
-            Blocks.Volumes.TryGetSimpleColumn(
-                globalX, globalY, out _, out ushort material);
-        _columnMaterialIds[columnIndex] = _simpleFillColumns[columnIndex]
-            ? material
-            : (ushort)0;
+        _simpleFillColumns[columnIndex] = false;
+        _columnMaterialIds[columnIndex] = 0;
     }
 
     private int GetColumnIndex(
