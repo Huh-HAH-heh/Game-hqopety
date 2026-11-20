@@ -444,9 +444,9 @@ public static class RaylibTerrainViewer
             1.35f);
         float margin = MathF.Round(12f * scale);
         float padding = MathF.Round(12f * scale);
-        float lineGap = MathF.Max(20f, 23f * scale);
+        float lineGap = MathF.Max(23f, 26f * scale);
         float panelWidth = Math.Min(
-            860f,
+            980f,
             Math.Max(240f, screenWidth - margin * 2f));
 
         List<(string Text, float Size, Color Color)> lines = new();
@@ -456,20 +456,20 @@ public static class RaylibTerrainViewer
                 : settings.TerrainMode == TerrainRenderMode.Voxel
                     ? "RIMCLONE / VOXEL TERRAIN"
                     : "RIMCLONE / HEIGHTMAP FALLBACK",
-            18f,
+            20f,
             Color.RayWhite));
 
         if (settings.ShowPerformanceStats)
         {
             lines.Add((
                 $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
-                16f,
+                18f,
                 Color.RayWhite));
             lines.Add((
                 settings.TerrainMode == TerrainRenderMode.Voxel
                     ? $"VOXEL LOD {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m | Z 0.1 m"
                     : $"HEIGHTMAP CELL {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m",
-                13f,
+                17f,
                 Color.LightGray));
             lines.Add((
                 $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
@@ -489,7 +489,7 @@ public static class RaylibTerrainViewer
         {
             lines.Add((
                 "F1 lower tunnel | F2 upper passage | C surface | Tab layers | T top-down view",
-                16f,
+                18f,
                 Color.RayWhite));
         }
 
@@ -497,7 +497,7 @@ public static class RaylibTerrainViewer
         {
             lines.Add((
                 "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
-                16f,
+                18f,
                 Color.LightGray));
             lines.Add((
                 "UPPER: near X 1152 | Z 1136-1168 | HEIGHT 25-33 m",
@@ -540,7 +540,7 @@ public static class RaylibTerrainViewer
 
         foreach ((string text, float baseSize, Color color) in lines)
         {
-            float fontSize = MathF.Round(Math.Clamp(baseSize, 16f, 18f));
+            float fontSize = MathF.Round(Math.Clamp(baseSize, 17f, 20f));
             DrawHudText(
                 font,
                 text,
@@ -563,7 +563,7 @@ public static class RaylibTerrainViewer
         Color color)
     {
         string fittedText = text;
-        const float minimumSize = 14f;
+        const float minimumSize = 16f;
 
         while (fontSize > minimumSize &&
             MeasureTextEx(font, fittedText, fontSize, 0f).X > maximumWidth)
@@ -571,11 +571,18 @@ public static class RaylibTerrainViewer
             fontSize -= 1f;
         }
 
-        // A narrow viewport should never allow text to bleed outside the HUD.
+        // Remove complete trailing words rather than cutting glyph sequences.
         while (fittedText.Length > 4 &&
             MeasureTextEx(font, fittedText, fontSize, 0f).X > maximumWidth)
         {
-            fittedText = fittedText[..^4] + "...";
+            int lastSpace = fittedText.LastIndexOf(' ');
+            if (lastSpace <= 0)
+            {
+                fittedText = fittedText[..^1];
+                continue;
+            }
+
+            fittedText = fittedText[..lastSpace].TrimEnd() + "...";
         }
 
         DrawTextEx(
