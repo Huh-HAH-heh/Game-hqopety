@@ -117,7 +117,9 @@ separate 4m overview and 1m detail caches, with hysteresis to prevent rapid swit
 Complex coarse columns are queried only on demand. Moving the cut plane does not
 rebuild base voxel meshes: a fragment shader clips the selected volume and only
 visible horizontal caps are refreshed. Base mesh builds are limited to six coarse or
-two fine regions per frame, with a separate twelve-region cap-update budget.
+two fine regions per frame. Cut caps use a compact height/material fast path for
+simple columns and merge adjacent equal-material cells into longer quads; up to 144
+visible storage-region caps can be refreshed in one frame.
 
 ## Controls
 
@@ -197,3 +199,12 @@ systems such as solar panels can query the same global sun direction.
 The fitted top-down view remains available with **T**. The regular surface view uses
 one neutral dark rock color; directional face lighting provides volume without a
 permanent tile grid or shadow-map pass.
+
+
+## Multiple independent worlds
+
+`Core/World/WorldSimulationGroup.cs` provides one application-level update entry point
+for several independent `WorldMap + UnitSimulation` pairs. Each pair owns its own
+terrain, units, pause state and time scale. The current Raylib viewer is still bound
+to one terrain snapshot; shared multi-world rendering is a separate migration step
+documented in [multi-world voxel architecture](../docs/terrain/multi-world-voxel-architecture.md).
