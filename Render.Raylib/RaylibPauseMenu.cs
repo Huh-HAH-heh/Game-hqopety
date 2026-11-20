@@ -879,7 +879,7 @@ internal sealed class RaylibPauseMenu : IDisposable
             y + 350f,
             "ГЕОМЕТРИЯ ТЕРРЕНА",
             Settings.TerrainMode == TerrainRenderMode.Voxel
-                ? "ВОКСЕЛИ / 1 М"
+                ? "ВОКСЕЛИ / 1×1×0,1 М"
                 : "КАРТА ВЫСОТ / РЕЗЕРВ",
             514f,
             active: Settings.TerrainMode == TerrainRenderMode.Voxel,
