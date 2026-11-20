@@ -249,8 +249,9 @@ public static class WorldGenerator
 
         int proofSliceLower = 16 * WorldMap.HeightUnitsPerMeter;
         int proofSliceUpper = 28 * WorldMap.HeightUnitsPerMeter;
-        float lowerProofT = 16f / lowerTunnelLength;
         int lowerProbeX = caveCenterX - 24;
+        float lowerProofT =
+            (lowerProbeX - lowerTunnelStartX) / (float)lowerTunnelLength;
         int lowerProbeY = lowerTunnelY +
             GetTunnelLateralOffset(lowerProofT, 5);
         int upperProbeX = caveCenterX;
