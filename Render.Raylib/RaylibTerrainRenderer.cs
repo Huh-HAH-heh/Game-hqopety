@@ -5,14 +5,62 @@ using static Raylib_cs.Raylib;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Owns GPU resources and submits only visible, revision-valid storage-region
-/// batches. All GPU work is restricted to the render thread.
+/// Caches full terrain meshes per storage region. Voxel cutaway uses a GPU clip
+/// plane, so moving the plane never invalidates the underlying terrain meshes.
+/// Only the lightweight horizontal cut surfaces are rebuilt.
 /// </summary>
 internal sealed class RaylibTerrainRenderer : IDisposable
 {
-    private readonly RegionGpuMesh[] _regionMeshes;
+    private const int MaximumBaseMeshBuildsPerFrame = 6;
+    private const int MaximumCutSurfaceBuildsPerFrame = 12;
+
+    private const string VoxelVertexShader = """
+        #version 330
+        in vec3 vertexPosition;
+        in vec4 vertexColor;
+
+        uniform mat4 mvp;
+        uniform mat4 matModel;
+
+        out vec3 fragWorldPosition;
+        out vec4 fragColor;
+
+        void main()
+        {
+            vec4 worldPosition = matModel * vec4(vertexPosition, 1.0);
+            fragWorldPosition = worldPosition.xyz;
+            fragColor = vertexColor;
+            gl_Position = mvp * vec4(vertexPosition, 1.0);
+        }
+        """;
+
+    private const string VoxelFragmentShader = """
+        #version 330
+        in vec3 fragWorldPosition;
+        in vec4 fragColor;
+
+        uniform int uCutEnabled;
+        uniform float uCutHeight;
+
+        out vec4 finalColor;
+
+        void main()
+        {
+            if (uCutEnabled != 0 && fragWorldPosition.y >= uCutHeight - 0.0001)
+                discard;
+
+            finalColor = fragColor;
+        }
+        """;
+
+    private readonly RegionGpuMesh?[] _regionMeshes;
     private readonly RegionGpuMesh?[] _visibleRegionMeshes;
     private readonly Material _material;
+    private readonly Shader _voxelShader;
+    private readonly int _cutEnabledLocation;
+    private readonly int _cutHeightLocation;
+    private readonly TerrainRenderMode _mode;
+
     private TerrainPalette _palette;
     private int _paletteVersion;
     private bool _disposed;
@@ -20,47 +68,61 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleRegionsLastFrame { get; private set; }
     public int RebuiltRegions { get; private set; }
+    public int CutSurfaceRebuilds { get; private set; }
 
-    public RaylibTerrainRenderer(TerrainRenderSnapshot terrain, TerrainPalette palette)
+    public RaylibTerrainRenderer(
+        TerrainRenderSnapshot terrain,
+        TerrainPalette palette,
+        TerrainRenderMode mode)
     {
-        _palette = palette;
-        _regionMeshes = new RegionGpuMesh[terrain.StorageRegionCount];
+        _palette = palette ?? throw new ArgumentNullException(nameof(palette));
+        _mode = mode;
+
+        _regionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
         _visibleRegionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
-        _material = LoadMaterialDefault();
+
+        _voxelShader = LoadShaderFromMemory(
+            VoxelVertexShader,
+            VoxelFragmentShader);
+        if (!IsShaderValid(_voxelShader))
+            throw new InvalidOperationException(
+                "The voxel cutaway shader could not be created by the active graphics backend.");
+
+        _cutEnabledLocation = GetShaderLocation(_voxelShader, "uCutEnabled");
+        _cutHeightLocation = GetShaderLocation(_voxelShader, "uCutHeight");
+        if (_cutEnabledLocation < 0 || _cutHeightLocation < 0)
+        {
+            UnloadShader(_voxelShader);
+            throw new InvalidOperationException(
+                "The voxel cutaway shader is missing a required uniform.");
+        }
+
+        Material material = LoadMaterialDefault();
+        material.Shader = _voxelShader;
+        _material = material;
+
+        // Mesh creation is deliberately lazy. Only visible storage regions are
+        // meshed, with a bounded per-frame upload budget.
         Synchronize(terrain);
     }
 
-    public void Synchronize(
-        TerrainRenderSnapshot terrain,
-        bool forceRebuild = false)
+    public void Synchronize(TerrainRenderSnapshot terrain, bool forceRebuild = false)
     {
         ThrowIfDisposed();
 
-        for (int regionY = 0; regionY < terrain.StorageRegionsY; regionY++)
+        for (int i = 0; i < _regionMeshes.Length; i++)
         {
-            for (int regionX = 0; regionX < terrain.StorageRegionsX; regionX++)
+            RegionGpuMesh? existing = _regionMeshes[i];
+            long version = terrain.SourceRegionVersions[i];
+
+            if (existing == null ||
+                (!forceRebuild && existing.RegionVersion == version))
             {
-                int index = regionX + regionY * terrain.StorageRegionsX;
-                RegionGpuMesh? existing = _regionMeshes[index];
-                long version = terrain.SourceRegionVersions[index];
-
-                if (!forceRebuild &&
-                    existing != null &&
-                    existing.RegionVersion == version)
-                {
-                    continue;
-                }
-
-                existing?.Dispose();
-                _regionMeshes[index] = RegionMeshBuilder.Build(
-                    terrain,
-                    regionX,
-                    regionY,
-                    _palette,
-                    _paletteVersion);
-
-                RebuiltRegions++;
+                continue;
             }
+
+            existing.Dispose();
+            _regionMeshes[i] = null;
         }
     }
 
@@ -75,24 +137,19 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
         int visibleRegionCount = 0;
         int visibleDrawCalls = 0;
-        int rebuiltThisFrame = 0;
-        const int maximumMeshRebuildsPerFrame = 6;
-        int cutawayLayer = terrain.CutawayEnabled
-            ? terrain.CutawayLayer
-            : -1;
+        int baseBuildsThisFrame = 0;
+        int cutBuildsThisFrame = 0;
+        int cutLayer = terrain.CutawayEnabled ? terrain.CutawayLayer : -1;
 
-        // Rebuild only batches visible to the current camera. Moving the cut
-        // plane therefore does not upload the entire 2304x2304 world every step.
         for (int i = 0; i < _regionMeshes.Length; i++)
         {
             RegionGpuMesh? region = _regionMeshes[i];
-            if (region == null)
-                continue;
+            GetRegionBounds(terrain, i, out Vector3 center, out float radius);
 
             if (!TerrainFrustum.IsSphereVisible(
                 camera,
-                region.BoundsCenter,
-                region.BoundsRadius,
+                region?.BoundsCenter ?? center,
+                region?.BoundsRadius ?? radius,
                 viewportWidth,
                 viewportHeight,
                 maximumViewDistanceMeters))
@@ -100,33 +157,67 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 continue;
             }
 
-            if (region.RegionVersion != terrain.SourceRegionVersions[i] ||
-                region.CutawayLayer != cutawayLayer ||
-                region.PaletteVersion != _paletteVersion)
+            bool baseIsStale =
+                region == null ||
+                region.RegionVersion != terrain.SourceRegionVersions[i] ||
+                region.PaletteVersion != _paletteVersion ||
+                (_mode == TerrainRenderMode.HeightmapFallback &&
+                 region.CutawayLayer != cutLayer);
+
+            if (baseIsStale)
             {
-                if (rebuiltThisFrame >= maximumMeshRebuildsPerFrame)
+                if (baseBuildsThisFrame >= MaximumBaseMeshBuildsPerFrame)
                     continue;
 
-                region.Dispose();
+                region?.Dispose();
 
                 int regionX = i % terrain.StorageRegionsX;
                 int regionY = i / terrain.StorageRegionsX;
-                region = RegionMeshBuilder.Build(
-                    terrain,
-                    regionX,
-                    regionY,
-                    _palette,
-                    _paletteVersion);
+                region = _mode == TerrainRenderMode.Voxel
+                    ? RegionMeshBuilder.BuildVoxel(
+                        terrain, regionX, regionY, _palette, _paletteVersion)
+                    : RegionMeshBuilder.Build(
+                        terrain, regionX, regionY, _palette, _paletteVersion);
+
                 _regionMeshes[i] = region;
                 RebuiltRegions++;
-                rebuiltThisFrame++;
+                baseBuildsThisFrame++;
             }
 
-            if (!region.IsUploaded)
+            if (region == null || !region.IsUploaded)
                 continue;
+
+            if (_mode == TerrainRenderMode.Voxel && terrain.CutawayEnabled)
+            {
+                if (region.CutSurfaceLayer != cutLayer &&
+                    cutBuildsThisFrame < MaximumCutSurfaceBuildsPerFrame)
+                {
+                    ClearCutMeshes(region);
+                    int regionX = i % terrain.StorageRegionsX;
+                    int regionY = i / terrain.StorageRegionsX;
+
+                    region.CutMeshes = RegionMeshBuilder.BuildVoxelCutSurface(
+                        terrain,
+                        regionX,
+                        regionY,
+                        cutLayer,
+                        _palette);
+                    region.CutSurfaceLayer = cutLayer;
+                    cutBuildsThisFrame++;
+                    CutSurfaceRebuilds++;
+                }
+            }
+            else if (region.CutMeshes.Length > 0)
+            {
+                ClearCutMeshes(region);
+            }
 
             _visibleRegionMeshes[visibleRegionCount++] = region;
         }
+
+        SetVoxelCutShader(
+            enabled: _mode == TerrainRenderMode.Voxel && terrain.CutawayEnabled,
+            height: terrain.CutawayHeightMeters);
 
         BeginMode3D(camera);
 
@@ -138,19 +229,79 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 DrawMesh(mesh, _material, Matrix4x4.Identity);
                 visibleDrawCalls++;
             }
+        }
 
-            _visibleRegionMeshes[i] = null;
+        if (_mode == TerrainRenderMode.Voxel && terrain.CutawayEnabled)
+        {
+            // The base volume is clipped in the GPU. Cut caps are separate
+            // meshes, rendered without clipping and rebuilt independently.
+            SetVoxelCutShader(enabled: false, height: terrain.CutawayHeightMeters);
+
+            for (int i = 0; i < visibleRegionCount; i++)
+            {
+                RegionGpuMesh region = _visibleRegionMeshes[i]!;
+                if (region.CutSurfaceLayer != cutLayer)
+                    continue;
+
+                foreach (Mesh mesh in region.CutMeshes)
+                {
+                    DrawMesh(mesh, _material, Matrix4x4.Identity);
+                    visibleDrawCalls++;
+                }
+            }
         }
 
         EndMode3D();
 
+        Array.Clear(_visibleRegionMeshes, 0, visibleRegionCount);
         DrawCallsLastFrame = visibleDrawCalls;
         VisibleRegionsLastFrame = visibleRegionCount;
     }
 
+    private void SetVoxelCutShader(bool enabled, float height)
+    {
+        int cutEnabled = enabled ? 1 : 0;
+        SetShaderValue(
+            _voxelShader,
+            _cutEnabledLocation,
+            cutEnabled,
+            ShaderUniformDataType.Int);
+        SetShaderValue(
+            _voxelShader,
+            _cutHeightLocation,
+            height,
+            ShaderUniformDataType.Float);
+    }
+
+    private static void GetRegionBounds(
+        TerrainRenderSnapshot terrain,
+        int index,
+        out Vector3 center,
+        out float radius)
+    {
+        int regionX = index % terrain.StorageRegionsX;
+        int regionY = index / terrain.StorageRegionsX;
+        center = new Vector3(
+            (regionX + 0.5f) * terrain.StorageRegionSize,
+            terrain.MaximumHeightMeters * 0.5f,
+            (regionY + 0.5f) * terrain.StorageRegionSize);
+        radius = MathF.Sqrt(
+            terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f +
+            terrain.MaximumHeightMeters * terrain.MaximumHeightMeters * 0.25f);
+    }
+
+    private static void ClearCutMeshes(RegionGpuMesh region)
+    {
+        foreach (Mesh mesh in region.CutMeshes)
+            UnloadMesh(mesh);
+
+        region.CutMeshes = Array.Empty<Mesh>();
+        region.CutSurfaceLayer = int.MinValue;
+    }
+
     public void SetPalette(TerrainPalette palette)
     {
-        _palette = palette;
+        _palette = palette ?? throw new ArgumentNullException(nameof(palette));
         _paletteVersion++;
     }
 
@@ -163,6 +314,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             region?.Dispose();
 
         UnloadMaterial(_material);
+        UnloadShader(_voxelShader);
         _disposed = true;
     }
 
