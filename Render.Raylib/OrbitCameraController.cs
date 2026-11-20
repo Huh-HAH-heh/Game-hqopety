@@ -533,10 +533,15 @@ internal sealed class OrbitCameraController
         _yawRadians = 0f;
         _desiredYawRadians = 0f;
 
-        _pitchRadians = Math.Clamp(
-            pitchRadians,
-            MinimumPitch,
-            MaximumPitch);
+        float minimumPitch = _mode == RaylibCameraMode.Rts
+            ? RtsMinimumPitch
+            : MinimumPitch;
+        float maximumPitch = _mode == RaylibCameraMode.Rts
+            ? RtsMaximumPitch
+            : MaximumPitch;
+        _pitchRadians = _mode == RaylibCameraMode.TopDown
+            ? TopDownPitch
+            : Math.Clamp(pitchRadians, minimumPitch, maximumPitch);
         _desiredPitchRadians = _pitchRadians;
 
         _distance = Math.Clamp(
