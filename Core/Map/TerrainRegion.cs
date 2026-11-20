@@ -40,13 +40,15 @@ public sealed class TerrainRegion
 
     private readonly TerrainTileRegion?[] _tileRegions;
     private readonly int _regionIndex;
+    private readonly WorldMap? _ownerWorldMap;
 
     internal TerrainRegion(
         int regionX,
         int regionY,
         int zLevel,
         TerrainTileRegion?[] tileRegions,
-        int regionIndex)
+        int regionIndex,
+        WorldMap? ownerWorldMap = null)
     {
         if (regionX < 0)
             throw new ArgumentOutOfRangeException(nameof(regionX));
@@ -65,6 +67,7 @@ public sealed class TerrainRegion
         ZLevel = zLevel;
         _tileRegions = tileRegions;
         _regionIndex = regionIndex;
+        _ownerWorldMap = ownerWorldMap;
     }
 
     public ushort GetMaterialId(
@@ -73,6 +76,14 @@ public sealed class TerrainRegion
     {
         if (!IsInside(localX, localY))
             return 0;
+
+        if (_ownerWorldMap != null)
+        {
+            return _ownerWorldMap.GetMaterialId(
+                RegionX * TilesPerSide + localX,
+                RegionY * TilesPerSide + localY,
+                ZLevel);
+        }
 
         int index = localX + localY * TilesPerSide;
 
@@ -101,6 +112,16 @@ public sealed class TerrainRegion
         if (localIndex < 0 || localIndex >= TotalTiles)
             throw new IndexOutOfRangeException();
 
+        if (_ownerWorldMap != null)
+        {
+            int localX = localIndex % TilesPerSide;
+            int localY = localIndex / TilesPerSide;
+            return _ownerWorldMap.GetMaterialId(
+                RegionX * TilesPerSide + localX,
+                RegionY * TilesPerSide + localY,
+                ZLevel);
+        }
+
         if (_materialIds != null)
             return _materialIds[localIndex];
 
@@ -116,6 +137,16 @@ public sealed class TerrainRegion
     {
         if (!IsInside(localX, localY))
             throw new IndexOutOfRangeException();
+
+        if (_ownerWorldMap != null)
+        {
+            _ownerWorldMap.SetMaterialId(
+                RegionX * TilesPerSide + localX,
+                RegionY * TilesPerSide + localY,
+                ZLevel,
+                materialId);
+            return;
+        }
 
         SetCellMaterial(
             localX + localY * TilesPerSide,
@@ -145,16 +176,49 @@ public sealed class TerrainRegion
         if (localIndex < 0 || localIndex >= TotalTiles)
             throw new IndexOutOfRangeException();
 
+        if (_ownerWorldMap != null)
+        {
+            int localX = localIndex % TilesPerSide;
+            int localY = localIndex / TilesPerSide;
+            _ownerWorldMap.SetMaterialId(
+                RegionX * TilesPerSide + localX,
+                RegionY * TilesPerSide + localY,
+                ZLevel,
+                materialId);
+            return;
+        }
+
         SetCellMaterial(localIndex, materialId);
     }
 
     internal void SetUniformMaterial(ushort materialId)
     {
+        if (_ownerWorldMap != null)
+        {
+            int firstX = RegionX * TilesPerSide;
+            int firstY = RegionY * TilesPerSide;
+            for (int y = 0; y < TilesPerSide; y++)
+            {
+                for (int x = 0; x < TilesPerSide; x++)
+                {
+                    _ownerWorldMap.SetMaterialId(
+                        firstX + x, firstY + y, ZLevel, materialId);
+                }
+            }
+            return;
+        }
+
         CollapseUniform(materialId);
     }
 
     internal void Clear()
     {
+        if (_ownerWorldMap != null)
+        {
+            SetUniformMaterial(0);
+            return;
+        }
+
         _materialIds = null;
         _overrideBits = null;
         _uniformMaterialId = 0;
@@ -292,6 +356,23 @@ public sealed class TerrainRegion
 
     private ushort[] GetOrCreateMaterialBuffer()
     {
+        if (_ownerWorldMap != null)
+        {
+            _materialIds ??= new ushort[TotalTiles];
+            int firstX = RegionX * TilesPerSide;
+            int firstY = RegionY * TilesPerSide;
+            for (int y = 0; y < TilesPerSide; y++)
+            {
+                int row = y * TilesPerSide;
+                for (int x = 0; x < TilesPerSide; x++)
+                {
+                    _materialIds[row + x] = _ownerWorldMap.GetMaterialId(
+                        firstX + x, firstY + y, ZLevel);
+                }
+            }
+            return _materialIds;
+        }
+
         if (_materialIds != null)
             return _materialIds;
 

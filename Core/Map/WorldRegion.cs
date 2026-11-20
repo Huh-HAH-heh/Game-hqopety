@@ -11,7 +11,8 @@ public sealed class WorldRegion
     public const int TilesPerSide = TerrainRegion.TilesPerSide;
     public const int TileCount = TerrainRegion.TotalTiles;
 
-    private readonly TerrainRegion[] _terrainSlices;
+    private readonly TerrainLayer[] _layers;
+    private readonly TerrainRegion?[] _terrainSlices;
 
     public int RegionX { get; }
     public int RegionY { get; }
@@ -29,7 +30,7 @@ public sealed class WorldRegion
         TilesPerSide;
 
     public int LayerCount =>
-        _terrainSlices.Length;
+        _layers.Length;
 
     /// <summary>
     /// Changes whenever terrain inside this region is edited.
@@ -43,8 +44,16 @@ public sealed class WorldRegion
     /// <summary>
     /// The region's tile grid. Tile metadata is allocated lazily by WorldMap.
     /// </summary>
-    public ReadOnlySpan<TerrainRegion> TerrainSlices =>
-        _terrainSlices;
+    public ReadOnlySpan<TerrainRegion> TerrainSlices
+    {
+        get
+        {
+            for (int z = 0; z < _layers.Length; z++)
+                GetTerrainSlice(z);
+
+            return _terrainSlices!;
+        }
+    }
 
     public ReadOnlySpan<Tile> Tiles =>
         GetTerrainSlice(0).Tiles;
@@ -68,22 +77,17 @@ public sealed class WorldRegion
         RegionX = regionX;
         RegionY = regionY;
 
-        _terrainSlices = new TerrainRegion[layers.Length];
-
-        for (int z = 0; z < layers.Length; z++)
-        {
-            _terrainSlices[z] = layers[z].GetRegion(regionX, regionY) ??
-                throw new InvalidOperationException(
-                    "Terrain layer does not contain the requested region.");
-        }
+        _layers = layers;
+        _terrainSlices = new TerrainRegion?[layers.Length];
     }
 
     public TerrainRegion GetTerrainSlice(int zLevel)
     {
-        if (zLevel < 0 || zLevel >= _terrainSlices.Length)
+        if (zLevel < 0 || zLevel >= _layers.Length)
             throw new ArgumentOutOfRangeException(nameof(zLevel));
 
-        return _terrainSlices[zLevel];
+        return _terrainSlices[zLevel] ??=
+            _layers[zLevel].GetOrCreateRegion(RegionX, RegionY);
     }
 
     public ushort GetMaterialId(
