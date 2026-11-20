@@ -18,6 +18,10 @@ public static class RaylibTerrainViewer
         RaylibViewerSettings settings = RaylibViewerSettings.Load();
         TerrainRenderSnapshot terrain =
             TerrainRenderSnapshot.Create(worldMap, settings.TerrainMode);
+        TerrainRenderSnapshot? coarseVoxelTerrain =
+            settings.TerrainMode == TerrainRenderMode.Voxel
+                ? TerrainRenderSnapshot.CreateVoxelLod(worldMap, cellSizeInMeters: 4)
+                : null;
 
         ConfigFlags windowFlags = ConfigFlags.ResizableWindow;
         if (settings.VSync)
@@ -58,7 +62,8 @@ public static class RaylibTerrainViewer
             renderer = new RaylibTerrainRenderer(
                 terrain,
                 settings.Palette,
-                settings.TerrainMode);
+                settings.TerrainMode,
+                coarseVoxelTerrain);
             int appliedPaletteRevision = menu.PaletteRevision;
 
             Console.WriteLine(
@@ -104,7 +109,8 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                            renderer?.Synchronize(terrain);
+                            coarseVoxelTerrain?.DisableCutaway();
+                            renderer?.Synchronize(terrain, coarseVoxelTerrain);
                         }
                     }
 
@@ -130,7 +136,8 @@ public static class RaylibTerrainViewer
                         menu.SaveSettings();
                         focusName = "SURFACE";
                         terrain.DisableCutaway();
-                        renderer.Synchronize(terrain);
+                            coarseVoxelTerrain?.DisableCutaway();
+                        renderer.Synchronize(terrain, coarseVoxelTerrain);
                         camera.ResetTopDownView();
                         break;
 
@@ -157,6 +164,9 @@ public static class RaylibTerrainViewer
                         terrain = TerrainRenderSnapshot.Create(
                             worldMap,
                             menu.Settings.TerrainMode);
+                        coarseVoxelTerrain = menu.Settings.TerrainMode == TerrainRenderMode.Voxel
+                            ? TerrainRenderSnapshot.CreateVoxelLod(worldMap, cellSizeInMeters: 4)
+                            : null;
                         if (cutawayMode)
                         {
                             int currentCutLayer = Math.Clamp(
@@ -166,12 +176,14 @@ public static class RaylibTerrainViewer
                                 0,
                                 worldMap.LayerCount - 1);
                             terrain.SetCutawayLayer(currentCutLayer);
+                            coarseVoxelTerrain?.SetCutawayLayer(currentCutLayer);
                         }
 
                         renderer = new RaylibTerrainRenderer(
                             terrain,
                             menu.Settings.Palette,
-                            menu.Settings.TerrainMode);
+                            menu.Settings.TerrainMode,
+                            coarseVoxelTerrain);
                         appliedPaletteRevision = menu.PaletteRevision;
                         break;
 
@@ -190,7 +202,8 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                            renderer.Synchronize(terrain);
+                            coarseVoxelTerrain?.DisableCutaway();
+                            renderer.Synchronize(terrain, coarseVoxelTerrain);
                             camera.ResetTopDownView();
                         }
                         break;
@@ -253,7 +266,8 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                            renderer.Synchronize(terrain);
+                            coarseVoxelTerrain?.DisableCutaway();
+                            renderer.Synchronize(terrain, coarseVoxelTerrain);
                             camera.ResetTopDownView();
                         }
                     }
@@ -295,6 +309,8 @@ public static class RaylibTerrainViewer
                 }
 
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
+                bool coarseTerrainChanged =
+                    coarseVoxelTerrain?.RefreshFromWorld(worldMap) ?? false;
 
                 if (cutawayMode)
                 {
@@ -308,10 +324,16 @@ public static class RaylibTerrainViewer
                         worldMap.LayerCount - 1);
 
                     terrain.SetCutawayLayer(cutLayer);
+                    coarseVoxelTerrain?.SetCutawayLayer(cutLayer);
+                }
+                else
+                {
+                    terrain.DisableCutaway();
+                    coarseVoxelTerrain?.DisableCutaway();
                 }
 
-                if (terrainChanged)
-                    renderer.Synchronize(terrain);
+                if (terrainChanged || coarseTerrainChanged)
+                    renderer.Synchronize(terrain, coarseVoxelTerrain);
 
                 BeginDrawing();
                 ClearBackground(menu.Settings.Palette.Background.ToRaylibColor());
@@ -384,7 +406,7 @@ public static class RaylibTerrainViewer
         Font font,
         OrbitCameraController camera)
     {
-        DrawRectangle(12, 12, 700, 268, new Color(0, 0, 0, 235));
+        DrawRectangle(12, 12, 700, 288, new Color(0, 0, 0, 235));
 
         DrawHudText(
             font,
@@ -401,41 +423,44 @@ public static class RaylibTerrainViewer
                 $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
                 24, 50, 17f, Color.RayWhite);
             DrawHudText(font,
-                $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
+                $"VOXEL LOD {renderer.ActiveVoxelCellSize}x{renderer.ActiveVoxelCellSize} m | Z 0.1 m",
                 24, 76, 14f, Color.LightGray);
             DrawHudText(font,
+                $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
+                24, 96, 14f, Color.LightGray);
+            DrawHudText(font,
                 $"VISIBLE GPU BATCHES {renderer.VisibleRegionsLastFrame}/{terrain.StorageRegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
-                24, 98, 14f, Color.LightGray);
+                24, 118, 14f, Color.LightGray);
             DrawHudText(font,
                 $"BASE MESH BUILDS {renderer.RebuiltRegions}   CUT CAP UPDATES {renderer.CutSurfaceRebuilds}",
-                24, 120, 14f, Color.LightGray);
+                24, 140, 14f, Color.LightGray);
         }
 
         if (settings.ShowControls)
         {
             DrawHudText(font,
                 "F1 lower tunnel | F2 upper passage | C surface | Tab layers | T top-down view",
-                24, 146, 14f, Color.RayWhite);
+                24, 166, 14f, Color.RayWhite);
         }
 
         if (settings.ShowCaveCoordinates)
         {
             DrawHudText(font,
                 "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
-                24, 170, 14f, Color.LightGray);
+                24, 190, 14f, Color.LightGray);
             DrawHudText(font,
                 "UPPER: near X 1152 | Z 1136-1168 | HEIGHT 25-33 m",
-                24, 192, 14f, Color.LightGray);
+                24, 212, 14f, Color.LightGray);
         }
 
         if (settings.ShowControls)
         {
             DrawHudText(font,
                 $"WASD {camera.CurrentMovementSpeedMetersPerSecond:0} m/s | RMB orbit | MMB pan | Shift+MMB speed",
-                24, 218, 14f, Color.RayWhite);
+                24, 238, 14f, Color.RayWhite);
             DrawHudText(font,
                 "Wheel zoom | Q/E faster slice | PgUp/PgDn 0.1m | Shift+Wheel 0.1m",
-                24, 240, 14f, Color.RayWhite);
+                24, 260, 14f, Color.RayWhite);
         }
     }
 
