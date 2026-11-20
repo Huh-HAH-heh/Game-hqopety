@@ -177,31 +177,25 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         bool forceRebuild = false)
     {
         ThrowIfDisposed();
-        InvalidateMeshes(_regionMeshes, terrain.SourceRegionVersions, forceRebuild);
+        InvalidateMeshes(_regionMeshes, forceRebuild);
 
         if (_coarseRegionMeshes.Length > 0)
-        {
-            TerrainRenderSnapshot source = coarseTerrain ?? _coarseTerrain!;
-            InvalidateMeshes(_coarseRegionMeshes, source.SourceRegionVersions, forceRebuild);
-        }
+            InvalidateMeshes(_coarseRegionMeshes, forceRebuild);
     }
 
     private static void InvalidateMeshes(
         RegionGpuMesh?[] meshes,
-        long[] sourceVersions,
         bool forceRebuild)
     {
-        for (int i = 0; i < meshes.Length; i++)
-        {
-            RegionGpuMesh? existing = meshes[i];
-            if (existing == null ||
-                (!forceRebuild && existing.RegionVersion == sourceVersions[i]))
-            {
-                continue;
-            }
+        if (!forceRebuild)
+            return;
 
-            existing.Dispose();
-            meshes[i] = null;
+        // Keep the previous GPU mesh alive until its replacement has been
+        // built successfully. Draw() will detect this version and rebuild it.
+        foreach (RegionGpuMesh? existing in meshes)
+        {
+            if (existing != null)
+                existing.RegionVersion = long.MinValue;
         }
     }
 
@@ -230,9 +224,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 ? cameraDistance > FineLodEnterDistanceMeters
                 : cameraDistance >= FineLodExitDistanceMeters;
 
-            if (nextCoarseState && !_usingCoarseLod)
-                DisposeMeshes(_regionMeshes);
-
+            // Keep the fine cache when switching to coarse LOD. Re-entering
+            // close view can then reuse existing meshes instead of blanking and
+            // rebuilding the visible terrain every time the zoom crosses LOD.
             _usingCoarseLod = nextCoarseState;
         }
 
@@ -282,21 +276,30 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             if (baseIsStale)
             {
                 if (baseBuildsThisFrame >= maximumBaseBuilds)
-                    continue;
+                {
+                    // A stale mesh is still preferable to a black hole while
+                    // the per-frame upload budget catches up.
+                    if (region == null)
+                        continue;
+                }
+                else
+                {
+                    int regionX = i % terrain.StorageRegionsX;
+                    int regionY = i / terrain.StorageRegionsX;
+                    RegionGpuMesh rebuilt = _mode == TerrainRenderMode.Voxel
+                        ? RegionMeshBuilder.BuildVoxel(
+                            drawTerrain, regionX, regionY, _palette, _paletteVersion)
+                        : RegionMeshBuilder.Build(
+                            drawTerrain, regionX, regionY, _palette, _paletteVersion);
 
-                region?.Dispose();
-
-                int regionX = i % terrain.StorageRegionsX;
-                int regionY = i / terrain.StorageRegionsX;
-                region = _mode == TerrainRenderMode.Voxel
-                    ? RegionMeshBuilder.BuildVoxel(
-                        drawTerrain, regionX, regionY, _palette, _paletteVersion)
-                    : RegionMeshBuilder.Build(
-                        drawTerrain, regionX, regionY, _palette, _paletteVersion);
-
-                drawMeshes[i] = region;
-                RebuiltRegions++;
-                baseBuildsThisFrame++;
+                    // Swap only after a successful build/upload. The old mesh
+                    // remains drawable if building the replacement throws.
+                    drawMeshes[i] = rebuilt;
+                    region?.Dispose();
+                    region = rebuilt;
+                    RebuiltRegions++;
+                    baseBuildsThisFrame++;
+                }
             }
 
             if (region == null || !region.IsUploaded)
