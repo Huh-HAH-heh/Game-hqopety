@@ -98,7 +98,7 @@ internal sealed class OrbitCameraController
         UpdateCamera();
     }
 
-    public void Update(float deltaTime)
+    public void Update(float deltaTime, float mouseWheel)
     {
         if (deltaTime <= 0f)
             return;
@@ -108,7 +108,7 @@ internal sealed class OrbitCameraController
 
         UpdateMouseMode();
         UpdateMouseInput();
-        UpdateZoomInput();
+        UpdateZoomInput(mouseWheel);
         UpdateKeyboardInput(deltaTime);
 
         _target = SmoothDamp(
@@ -237,24 +237,10 @@ internal sealed class OrbitCameraController
         _desiredTarget.Z += pointBefore.Z - pointAfter.Z;
     }
 
-    private void UpdateZoomInput()
+    private void UpdateZoomInput(float wheel)
     {
-        float wheel = GetMouseWheelMove();
         if (wheel == 0f)
             return;
-
-        bool adjustCutHeight =
-            IsKeyDown(KeyboardKey.LeftShift) ||
-            IsKeyDown(KeyboardKey.RightShift);
-
-        if (adjustCutHeight)
-        {
-            _desiredTarget.Y = Math.Clamp(
-                _desiredTarget.Y + wheel,
-                -VerticalTargetLimitMeters,
-                VerticalTargetLimitMeters);
-            return;
-        }
 
         Vector2 cursor = GetMousePosition();
         bool hasAnchor = TryGetTargetPlanePoint(
@@ -353,17 +339,6 @@ internal sealed class OrbitCameraController
         if (IsKeyPressed(KeyboardKey.T))
             ResetTopDownView();
 
-        if (IsKeyPressed(KeyboardKey.PageUp))
-            _desiredTarget.Y = Math.Clamp(
-                _desiredTarget.Y + 1f,
-                -VerticalTargetLimitMeters,
-                VerticalTargetLimitMeters);
-        if (IsKeyPressed(KeyboardKey.PageDown))
-            _desiredTarget.Y = Math.Clamp(
-                _desiredTarget.Y - 1f,
-                -VerticalTargetLimitMeters,
-                VerticalTargetLimitMeters);
-
         float moveX = 0f;
         float moveZ = 0f;
 
@@ -400,18 +375,6 @@ internal sealed class OrbitCameraController
             _desiredTarget += direction * (speed * deltaTime);
         }
 
-        float verticalInput = 0f;
-        if (IsKeyDown(KeyboardKey.E)) verticalInput += 1f;
-        if (IsKeyDown(KeyboardKey.Q)) verticalInput -= 1f;
-
-        if (verticalInput != 0f)
-        {
-            float speed = Math.Clamp(_desiredDistance * 0.018f, 1.5f, 7f) * VerticalSpeedMultiplier;
-            _desiredTarget.Y = Math.Clamp(
-                _desiredTarget.Y + verticalInput * speed * deltaTime,
-                -VerticalTargetLimitMeters,
-                VerticalTargetLimitMeters);
-        }
     }
 
     private float CalculateFitDistance(int viewportWidth, int viewportHeight)
