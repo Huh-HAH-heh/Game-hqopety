@@ -29,8 +29,25 @@ public static class RaylibTerrainViewer
         if (settings.Msaa4x)
             windowFlags |= ConfigFlags.Msaa4xHint;
 
+        int monitorWidth = Math.Max(960, GetMonitorWidth(0));
+        int monitorHeight = Math.Max(540, GetMonitorHeight(0));
+
+        if (settings.Fullscreen)
+        {
+            settings.WindowWidth = monitorWidth;
+            settings.WindowHeight = monitorHeight;
+        }
+        else
+        {
+            settings.WindowWidth = Math.Clamp(
+                settings.WindowWidth, 960, Math.Max(960, monitorWidth - 32));
+            settings.WindowHeight = Math.Clamp(
+                settings.WindowHeight, 540, Math.Max(540, monitorHeight - 64));
+        }
+
         SetConfigFlags(windowFlags);
         InitWindow(settings.WindowWidth, settings.WindowHeight, "RimClone | Raylib Terrain Viewer");
+        SetWindowMinSize(960, 540);
         if (settings.Fullscreen)
             ToggleFullscreen();
 
