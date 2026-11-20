@@ -69,8 +69,11 @@ public sealed class SparseVoxelStore
 
     public int ChunkCount => _chunks.Count;
     public int ComplexColumnCount { get; private set; }
+
+    // Every in-bounds column is either one simple bottom-filled run (including
+    // empty air) or a variable list of solid runs.
     public int SimpleColumnCount =>
-        _chunks.Count * ColumnsPerChunk - ComplexColumnCount;
+        checked(Width * Height - ComplexColumnCount);
 
     /// <summary>
     /// True when the store contains any occupied voxel. Air is implicit and
