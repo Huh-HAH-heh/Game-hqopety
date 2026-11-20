@@ -16,6 +16,8 @@ internal sealed class OrbitCameraController
     private const float MovementSmoothTime = 0.075f;
     private const float ZoomSmoothTime = 0.095f;
     private const float MinimumPitch = 0.08f;
+    private const float RtsMinimumPitch = 0.42f;
+    private const float RtsMaximumPitch = 1.48f;
     private const float TopDownPitch = 1.565f;
     private const float MaximumPitch = TopDownPitch;
     private const float VerticalTargetLimitMeters = 500f;
@@ -43,6 +45,7 @@ internal sealed class OrbitCameraController
 
     private MouseMode _mouseMode;
     private bool _ignoreFirstMouseDelta;
+    private RaylibCameraMode _mode = RaylibCameraMode.Rts;
 
     private enum MouseMode : byte
     {
@@ -54,6 +57,11 @@ internal sealed class OrbitCameraController
     public Camera3D Camera { get; private set; }
     public float TargetHeightMeters => _target.Y;
     public float RotationSensitivityMultiplier { get; set; } = 1f;
+    public float MovementSpeedMultiplier { get; set; } = 1f;
+    public float PanSpeedMultiplier { get; set; } = 1f;
+    public float ZoomSpeedMultiplier { get; set; } = 1f;
+    public float VerticalSpeedMultiplier { get; set; } = 1f;
+    public RaylibCameraMode Mode => _mode;
 
     public OrbitCameraController(TerrainRenderSnapshot terrain)
     {
@@ -138,7 +146,8 @@ internal sealed class OrbitCameraController
     {
         if (_mouseMode == MouseMode.None)
         {
-            if (IsMouseButtonPressed(MouseButton.Right))
+            if (_mode != RaylibCameraMode.TopDown &&
+                IsMouseButtonPressed(MouseButton.Right))
             {
                 _mouseMode = MouseMode.Orbit;
                 _ignoreFirstMouseDelta = true;
@@ -185,8 +194,8 @@ internal sealed class OrbitCameraController
             _desiredYawRadians += mouseDelta.X * BaseRotationSensitivity * RotationSensitivityMultiplier;
             _desiredPitchRadians = Math.Clamp(
                 _desiredPitchRadians - mouseDelta.Y * BaseRotationSensitivity * RotationSensitivityMultiplier,
-                MinimumPitch,
-                MaximumPitch);
+                _mode == RaylibCameraMode.Rts ? RtsMinimumPitch : MinimumPitch,
+                _mode == RaylibCameraMode.Rts ? RtsMaximumPitch : MaximumPitch);
             NormalizeYawRange();
 
             return;
@@ -198,6 +207,7 @@ internal sealed class OrbitCameraController
 
     private void PanByMouseDelta(Vector2 mouseDelta)
     {
+        mouseDelta *= PanSpeedMultiplier;
         Vector2 center = new(
             GetScreenWidth() * 0.5f,
             GetScreenHeight() * 0.5f);
@@ -255,7 +265,7 @@ internal sealed class OrbitCameraController
             _desiredDistance,
             out Vector3 pointBeforeZoom);
 
-        _desiredDistance *= MathF.Pow(0.88f, wheel);
+        _desiredDistance *= MathF.Pow(0.88f, wheel * ZoomSpeedMultiplier);
         _desiredDistance = Math.Clamp(
             _desiredDistance,
             _minimumDistance,
@@ -380,7 +390,7 @@ internal sealed class OrbitCameraController
 
             // Move by a fraction of the visible map per second, not over half
             // of the world in one second at the initial zoom level.
-            float speed = MathF.Max(5f, _desiredDistance * 0.075f);
+            float speed = MathF.Max(5f, _desiredDistance * 0.075f) * MovementSpeedMultiplier;
             if (IsKeyDown(KeyboardKey.LeftShift) ||
                 IsKeyDown(KeyboardKey.RightShift))
             {
@@ -396,7 +406,7 @@ internal sealed class OrbitCameraController
 
         if (verticalInput != 0f)
         {
-            float speed = Math.Clamp(_desiredDistance * 0.018f, 1.5f, 7f);
+            float speed = Math.Clamp(_desiredDistance * 0.018f, 1.5f, 7f) * VerticalSpeedMultiplier;
             _desiredTarget.Y = Math.Clamp(
                 _desiredTarget.Y + verticalInput * speed * deltaTime,
                 -VerticalTargetLimitMeters,
@@ -466,6 +476,49 @@ internal sealed class OrbitCameraController
             -MathF.Sin(yaw) * MathF.Sin(pitch),
             MathF.Cos(pitch),
             -MathF.Cos(yaw) * MathF.Sin(pitch)));
+    }
+
+    public void ApplySettings(RaylibViewerSettings settings)
+    {
+        RotationSensitivityMultiplier = settings.CameraRotationSpeed;
+        MovementSpeedMultiplier = settings.CameraMoveSpeed;
+        PanSpeedMultiplier = settings.CameraPanSpeed;
+        ZoomSpeedMultiplier = settings.CameraZoomSpeed;
+        VerticalSpeedMultiplier = settings.CameraVerticalSpeed;
+
+        if (_mode != settings.CameraMode)
+            SetMode(settings.CameraMode);
+    }
+
+    public void SetMode(RaylibCameraMode mode)
+    {
+        _mode = mode;
+
+        if (_mode == RaylibCameraMode.TopDown)
+        {
+            _desiredYawRadians = 0f;
+            _desiredPitchRadians = TopDownPitch;
+            _yawRadians = 0f;
+            _pitchRadians = TopDownPitch;
+        }
+        else
+        {
+            float minimumPitch = _mode == RaylibCameraMode.Rts
+                ? RtsMinimumPitch
+                : MinimumPitch;
+            float maximumPitch = _mode == RaylibCameraMode.Rts
+                ? RtsMaximumPitch
+                : MaximumPitch;
+
+            _desiredPitchRadians = Math.Clamp(
+                _desiredPitchRadians,
+                minimumPitch,
+                maximumPitch);
+            _pitchRadians = _desiredPitchRadians;
+        }
+
+        ResetSmoothing();
+        UpdateCamera();
     }
 
     public void FocusOn(Vector3 target, float distance, float pitchRadians)
