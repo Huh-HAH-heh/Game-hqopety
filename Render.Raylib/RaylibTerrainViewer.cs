@@ -24,9 +24,10 @@ public static class RaylibTerrainViewer
 
         InitWindow(1600, 900, "RimClone | Raylib Terrain Viewer");
         SetTargetFPS(144);
-        SetExitKey(KeyboardKey.Escape);
+        SetExitKey(KeyboardKey.Null);
 
         OrbitCameraController camera = new(terrain);
+        using RaylibPauseMenu menu = new();
         RaylibTerrainRenderer? renderer = null;
         bool cutawayMode = false;
         string focusName = "SURFACE";
@@ -48,43 +49,105 @@ public static class RaylibTerrainViewer
                 "Z about 1140-1164, H 13-21m; upper passage near X 1152, Z 1136-1168, " +
                 "H 25-33m. F1/F2 focus, C surface.");
 
-            while (!WindowShouldClose())
+            bool exitRequested = false;
+
+            while (!WindowShouldClose() && !exitRequested)
             {
                 float deltaTime = Math.Clamp(GetFrameTime(), 0f, 0.05f);
+                RaylibMenuAction menuAction = menu.Update();
 
-                if (IsKeyPressed(KeyboardKey.F1))
+                switch (menuAction)
                 {
-                    cutawayMode = true;
-                    focusName = "LOWER TUNNEL";
-                    FocusLowerTunnel(camera, terrain);
-                }
+                    case RaylibMenuAction.Exit:
+                        exitRequested = true;
+                        break;
 
-                if (IsKeyPressed(KeyboardKey.F2))
-                {
-                    cutawayMode = true;
-                    focusName = "UPPER PASSAGE";
-                    FocusUpperPassage(camera, terrain);
-                }
-
-                if (IsKeyPressed(KeyboardKey.C))
-                {
-                    cutawayMode = !cutawayMode;
-
-                    if (cutawayMode)
-                    {
-                        focusName = "LOWER TUNNEL";
-                        FocusLowerTunnel(camera, terrain);
-                    }
-                    else
-                    {
+                    case RaylibMenuAction.ResetCamera:
+                        cutawayMode = false;
+                        menu.CutawayEnabled = false;
                         focusName = "SURFACE";
                         terrain.DisableCutaway();
                         renderer.Synchronize(terrain);
                         camera.ResetTopDownView();
-                    }
+                        break;
+
+                    case RaylibMenuAction.FocusLowerTunnel:
+                        cutawayMode = true;
+                        menu.CutawayEnabled = true;
+                        focusName = "LOWER TUNNEL";
+                        FocusLowerTunnel(camera, terrain);
+                        break;
+
+                    case RaylibMenuAction.FocusUpperPassage:
+                        cutawayMode = true;
+                        menu.CutawayEnabled = true;
+                        focusName = "UPPER PASSAGE";
+                        FocusUpperPassage(camera, terrain);
+                        break;
+
+                    case RaylibMenuAction.ToggleCutaway:
+                        cutawayMode = menu.CutawayEnabled;
+
+                        if (cutawayMode)
+                        {
+                            focusName = "LOWER TUNNEL";
+                            FocusLowerTunnel(camera, terrain);
+                        }
+                        else
+                        {
+                            focusName = "SURFACE";
+                            terrain.DisableCutaway();
+                            renderer.Synchronize(terrain);
+                            camera.ResetTopDownView();
+                        }
+                        break;
                 }
 
-                camera.Update(deltaTime);
+                if (menu.IsOpen)
+                {
+                    camera.ReleaseMouse();
+                }
+                else
+                {
+                    camera.RotationSensitivityMultiplier = menu.CameraSensitivity;
+
+                    if (IsKeyPressed(KeyboardKey.F1))
+                    {
+                        cutawayMode = true;
+                        menu.CutawayEnabled = true;
+                        focusName = "LOWER TUNNEL";
+                        FocusLowerTunnel(camera, terrain);
+                    }
+
+                    if (IsKeyPressed(KeyboardKey.F2))
+                    {
+                        cutawayMode = true;
+                        menu.CutawayEnabled = true;
+                        focusName = "UPPER PASSAGE";
+                        FocusUpperPassage(camera, terrain);
+                    }
+
+                    if (IsKeyPressed(KeyboardKey.C))
+                    {
+                        cutawayMode = !cutawayMode;
+                        menu.CutawayEnabled = cutawayMode;
+
+                        if (cutawayMode)
+                        {
+                            focusName = "LOWER TUNNEL";
+                            FocusLowerTunnel(camera, terrain);
+                        }
+                        else
+                        {
+                            focusName = "SURFACE";
+                            terrain.DisableCutaway();
+                            renderer.Synchronize(terrain);
+                            camera.ResetTopDownView();
+                        }
+                    }
+
+                    camera.Update(deltaTime);
+                }
 
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
 
@@ -118,7 +181,10 @@ public static class RaylibTerrainViewer
                     GetScreenWidth(),
                     GetScreenHeight());
 
-                DrawHud(terrain, renderer, cutawayMode, focusName);
+                if (menu.ShowHud)
+                    DrawHud(terrain, renderer, cutawayMode, focusName, menu.ShowControls);
+
+                menu.Draw();
                 EndDrawing();
             }
         }
@@ -160,7 +226,8 @@ public static class RaylibTerrainViewer
         TerrainRenderSnapshot terrain,
         RaylibTerrainRenderer renderer,
         bool cutawayMode,
-        string focusName)
+        string focusName,
+        bool showControls)
     {
         DrawRectangle(12, 12, 640, 244, new Color(0, 0, 0, 235));
 
@@ -200,12 +267,15 @@ public static class RaylibTerrainViewer
             14,
             Color.LightGray);
 
-        DrawText(
-            "F1 lower tunnel | F2 upper passage | C surface | T top-down view",
-            24,
-            146,
-            14,
-            Color.RayWhite);
+        if (showControls)
+        {
+            DrawText(
+                "F1 lower tunnel | F2 upper passage | C surface | T top-down view",
+                24,
+                146,
+                14,
+                Color.RayWhite);
+        }
 
         DrawText(
             "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
@@ -221,11 +291,14 @@ public static class RaylibTerrainViewer
             14,
             Color.LightGray);
 
-        DrawText(
-            "WASD move | RMB drag tilt/orbit | MMB pan | Wheel zoom | Q/E height | PgUp/PgDn 1m | Shift+Wheel",
-            24,
-            218,
-            14,
-            Color.RayWhite);
+        if (showControls)
+        {
+            DrawText(
+                "WASD move | RMB drag tilt/orbit | MMB pan | Wheel zoom | Q/E height | PgUp/PgDn 1m | Shift+Wheel",
+                24,
+                218,
+                14,
+                Color.RayWhite);
+        }
     }
 }
