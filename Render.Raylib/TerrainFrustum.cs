@@ -38,8 +38,9 @@ internal static class TerrainFrustum
         Vector3 toCenter = center - camera.Position;
 
         float depth = Vector3.Dot(toCenter, forward);
+        float distanceToCenter = toCenter.Length();
         if (depth + radius <= 0.01f ||
-            depth - radius > maximumViewDistanceMeters)
+            distanceToCenter - radius > maximumViewDistanceMeters)
         {
             return false;
         }
