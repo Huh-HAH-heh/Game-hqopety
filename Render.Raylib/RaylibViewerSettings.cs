@@ -12,6 +12,12 @@ internal enum RaylibCameraMode : byte
     TopDown
 }
 
+internal enum TerrainRenderMode : byte
+{
+    Voxel,
+    HeightmapFallback
+}
+
 internal enum TerrainColorSlot : byte
 {
     Lowlands,
@@ -166,6 +172,7 @@ internal sealed class RaylibViewerSettings
 
     public bool CutawayEnabled { get; set; }
     public float CutawayHeightMeters { get; set; } = 17f;
+    public TerrainRenderMode TerrainMode { get; set; } = TerrainRenderMode.Voxel;
 
     public bool ShowHud { get; set; } = true;
     public bool ShowControls { get; set; } = true;
@@ -235,6 +242,8 @@ internal sealed class RaylibViewerSettings
 
         if (!Enum.IsDefined(CameraMode))
             CameraMode = RaylibCameraMode.Rts;
+        if (!Enum.IsDefined(TerrainMode))
+            TerrainMode = TerrainRenderMode.Voxel;
 
         CameraMoveSpeed = Math.Clamp(CameraMoveSpeed, 0.25f, 4f);
         CameraRotationSpeed = Math.Clamp(CameraRotationSpeed, 0.25f, 4f);
