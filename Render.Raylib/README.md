@@ -85,7 +85,7 @@ the visible volume at 0.5 m steps.
 
 `WorldGenerator.GenerateSmooth` creates a real multi-level volume system inside the mesa:
 
-- lower through-tunnel: 80 m long, normally 8 m wide and 5 m high, with occasional
+- lower through-tunnel: 152 m long, normally 8 m wide and 5 m high, with occasional
   12 m pockets and 6 m clearances; it bends in plan and opens through both canyon flanks;
 - upper passage: 32 m long, inside the mesa at 26 m depth, with both ends sealed;
 - lower and upper chambers: 20 x 20 m, with floors at 12 m and 24 m;
