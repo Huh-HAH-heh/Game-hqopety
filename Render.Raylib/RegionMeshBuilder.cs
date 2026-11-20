@@ -207,66 +207,68 @@ internal static class RegionMeshBuilder
         TerrainPalette palette,
         List<Mesh> output)
     {
-        List<TerrainQuad> quads = new(Math.Min(size * size * 2, MaximumQuadsPerMesh));
-        Span<TileRange> rangesBuffer = stackalloc TileRange[terrain.LayerCount];
+        // A cut section is a 2D material mask. Merge adjacent equal-material
+        // cells into horizontal runs instead of uploading one quad per metre.
+        // This reduces both CPU mesh construction and GPU vertex traffic.
+        List<TerrainQuad> quads = new(Math.Min(size * 2, MaximumQuadsPerMesh));
         float height = cutLayer * UnitsPerMeter;
 
         for (int localY = 0; localY < size; localY++)
         {
             int renderY = firstRenderY + localY;
             float z0 = renderY * terrain.RegionSize;
-            float z1 = z0 + terrain.RegionSize;
+            float z1 = Math.Min(z0 + terrain.RegionSize, terrain.WorldDepth);
 
-            for (int localX = 0; localX < size; localX++)
+            int runStart = 0;
+            ushort runMaterial = terrain.GetCutSurfaceMaterial(
+                firstRenderX,
+                renderY,
+                cutLayer);
+
+            for (int localX = 1; localX <= size; localX++)
             {
-                int renderX = firstRenderX + localX;
-                int rangeCount = terrain.CopyColumnRanges(
-                    renderX,
-                    renderY,
-                    rangesBuffer);
-                if (rangeCount == 0)
+                ushort materialId = localX < size
+                    ? terrain.GetCutSurfaceMaterial(
+                        firstRenderX + localX,
+                        renderY,
+                        cutLayer)
+                    : (ushort)0;
+
+                if (materialId == runMaterial)
                     continue;
 
-                ushort materialId = 0;
-                ReadOnlySpan<TileRange> ranges = rangesBuffer[..rangeCount];
-                foreach (TileRange range in ranges)
+                if (runMaterial != 0)
                 {
-                    if (range.State == WorldMap.StateSolid &&
-                        range.MaterialId != 0 &&
-                        range.StartZ < cutLayer &&
-                        range.EndZ > cutLayer)
+                    float x0 = (firstRenderX + runStart) * terrain.RegionSize;
+                    float x1 = Math.Min(
+                        (firstRenderX + localX) * terrain.RegionSize,
+                        terrain.WorldWidth);
+
+                    AddHorizontalFace(
+                        quads,
+                        x0, x1, z0, z1,
+                        height,
+                        runMaterial,
+                        palette,
+                        isTop: true,
+                        isCutFace: true);
+
+                    if (palette.ShowCutHatching)
                     {
-                        materialId = range.MaterialId;
-                        break;
+                        AddVoxelCutHatching(
+                            quads,
+                            x0,
+                            z0,
+                            height,
+                            runMaterial,
+                            palette.GetHatchingColor(),
+                            x1 - x0,
+                            z1 - z0);
                     }
                 }
 
-                if (materialId == 0)
-                    continue;
-
-                float x0 = renderX * terrain.RegionSize;
-                float x1 = x0 + terrain.RegionSize;
-
-                AddHorizontalFace(
-                    quads,
-                    x0, x1, z0, z1,
-                    height,
-                    materialId,
-                    palette,
-                    isTop: true,
-                    isCutFace: true);
-
-                if (palette.ShowCutHatching)
-                {
-                    AddVoxelCutHatching(
-                        quads,
-                        x0,
-                        z0,
-                        height,
-                        materialId,
-                        palette.GetHatchingColor(),
-                        terrain.RegionSize);
-                }
+                runStart = localX;
+                runMaterial = materialId;
             }
         }
 
@@ -291,12 +293,13 @@ internal static class RegionMeshBuilder
         float height,
         ushort materialId,
         Color color,
-        float cellSize)
+        float width,
+        float depth)
     {
-        float halfLength = cellSize * 0.24f;
-        float halfWidth = cellSize * 0.025f;
-        float centerX = x0 + cellSize * 0.5f;
-        float centerZ = z0 + cellSize * 0.5f;
+        float halfLength = MathF.Min(width, depth) * 0.24f;
+        float halfWidth = MathF.Min(width, depth) * 0.025f;
+        float centerX = x0 + width * 0.5f;
+        float centerZ = z0 + depth * 0.5f;
 
         Vector2 start;
         Vector2 end;
