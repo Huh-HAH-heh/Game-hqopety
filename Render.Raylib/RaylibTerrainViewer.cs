@@ -1,3 +1,4 @@
+using System.Numerics;
 using Core.Map;
 using Raylib_cs;
 using static Raylib_cs.Raylib;
@@ -38,6 +39,15 @@ public static class RaylibTerrainViewer
         RaylibPauseMenu menu = new(settings);
         RaylibTerrainRenderer? renderer = null;
         bool cutawayMode = settings.CutawayEnabled;
+        float maximumCutHeight = Math.Max(
+            0f,
+            terrain.VerticalWorldExtentMeters -
+            WorldMap.LayerHeightUnits * 0.1f);
+        settings.CutawayHeightMeters = Math.Clamp(
+            settings.CutawayHeightMeters,
+            0f,
+            maximumCutHeight);
+        bool cutHeightKeyWasHeld = false;
         string focusName = cutawayMode ? "LOWER TUNNEL" : "SURFACE";
 
         if (cutawayMode)
@@ -70,6 +80,7 @@ public static class RaylibTerrainViewer
             {
                 float deltaTime = Math.Clamp(GetFrameTime(), 0f, 0.05f);
                 RaylibMenuAction menuAction = menu.Update();
+                float mouseWheel = menu.IsOpen ? 0f : GetMouseWheelMove();
 
                 switch (menuAction)
                 {
@@ -90,6 +101,7 @@ public static class RaylibTerrainViewer
                     case RaylibMenuAction.FocusLowerTunnel:
                         cutawayMode = true;
                         menu.CutawayEnabled = true;
+                        menu.Settings.CutawayHeightMeters = 17f;
                         menu.SaveSettings();
                         focusName = "LOWER TUNNEL";
                         FocusLowerTunnel(camera, terrain);
@@ -98,6 +110,7 @@ public static class RaylibTerrainViewer
                     case RaylibMenuAction.FocusUpperPassage:
                         cutawayMode = true;
                         menu.CutawayEnabled = true;
+                        menu.Settings.CutawayHeightMeters = 28f;
                         menu.SaveSettings();
                         focusName = "UPPER PASSAGE";
                         FocusUpperPassage(camera, terrain);
@@ -109,6 +122,8 @@ public static class RaylibTerrainViewer
 
                         if (cutawayMode)
                         {
+                            menu.Settings.CutawayHeightMeters = 17f;
+                            menu.SaveSettings();
                             focusName = "LOWER TUNNEL";
                             FocusLowerTunnel(camera, terrain);
                         }
@@ -133,6 +148,11 @@ public static class RaylibTerrainViewer
                 if (menu.IsOpen)
                 {
                     camera.ReleaseMouse();
+                    if (cutHeightKeyWasHeld)
+                    {
+                        menu.SaveSettings();
+                        cutHeightKeyWasHeld = false;
+                    }
                 }
                 else
                 {
@@ -141,6 +161,7 @@ public static class RaylibTerrainViewer
                     {
                         cutawayMode = true;
                         menu.CutawayEnabled = true;
+                        menu.Settings.CutawayHeightMeters = 17f;
                         menu.SaveSettings();
                         focusName = "LOWER TUNNEL";
                         FocusLowerTunnel(camera, terrain);
@@ -150,6 +171,7 @@ public static class RaylibTerrainViewer
                     {
                         cutawayMode = true;
                         menu.CutawayEnabled = true;
+                        menu.Settings.CutawayHeightMeters = 28f;
                         menu.SaveSettings();
                         focusName = "UPPER PASSAGE";
                         FocusUpperPassage(camera, terrain);
@@ -163,6 +185,8 @@ public static class RaylibTerrainViewer
 
                         if (cutawayMode)
                         {
+                            menu.Settings.CutawayHeightMeters = 17f;
+                            menu.SaveSettings();
                             focusName = "LOWER TUNNEL";
                             FocusLowerTunnel(camera, terrain);
                         }
@@ -175,23 +199,49 @@ public static class RaylibTerrainViewer
                         }
                     }
 
-                    camera.Update(deltaTime);
+                    bool shiftDown =
+                        IsKeyDown(KeyboardKey.LeftShift) ||
+                        IsKeyDown(KeyboardKey.RightShift);
+                    bool sliceKeysDown =
+                        IsKeyDown(KeyboardKey.Q) ||
+                        IsKeyDown(KeyboardKey.E);
+                    bool sliceChanged = cutawayMode && UpdateCutawayInput(
+                        menu.Settings,
+                        camera.VerticalSpeedMultiplier,
+                        deltaTime,
+                        mouseWheel,
+                        shiftDown,
+                        maximumCutHeight);
+
+                    if (sliceChanged && !sliceKeysDown)
+                        menu.SaveSettings();
+
+                    if (sliceKeysDown)
+                    {
+                        cutHeightKeyWasHeld = true;
+                    }
+                    else if (cutHeightKeyWasHeld)
+                    {
+                        menu.SaveSettings();
+                        cutHeightKeyWasHeld = false;
+                    }
+
+                    float cameraWheel = cutawayMode && shiftDown
+                        ? 0f
+                        : mouseWheel;
+                    camera.Update(deltaTime, cameraWheel);
                 }
 
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
 
                 if (cutawayMode)
                 {
-                    // The horizontal cut plane follows the camera focus,
-                    // quantized to 0.5 m. Q/E move continuously; PageUp/PageDown
-                    // and Shift+Wheel step by one metre.
-                    const float cutStepMeters = 0.5f;
-                    int layersPerCutStep = (int)MathF.Round(
-                        cutStepMeters * WorldMap.HeightUnitsPerMeter);
+                    const float layerHeightMeters =
+                        WorldMap.LayerHeightUnits * 0.1f;
                     int cutLayer = Math.Clamp(
                         (int)MathF.Round(
-                            camera.Camera.Target.Y / cutStepMeters) *
-                            layersPerCutStep,
+                            menu.Settings.CutawayHeightMeters /
+                            layerHeightMeters),
                         0,
                         worldMap.LayerCount - 1);
 
@@ -212,7 +262,13 @@ public static class RaylibTerrainViewer
                     menu.Settings.RenderDistanceMeters);
 
                 if (menu.ShowHud)
-                    DrawHud(terrain, renderer, cutawayMode, focusName, menu.Settings);
+                    DrawHud(
+                        terrain,
+                        renderer,
+                        cutawayMode,
+                        focusName,
+                        menu.Settings,
+                        menu.HudFont);
 
                 menu.Draw();
                 EndDrawing();
@@ -258,84 +314,115 @@ public static class RaylibTerrainViewer
         RaylibTerrainRenderer renderer,
         bool cutawayMode,
         string focusName,
-        RaylibViewerSettings settings)
+        RaylibViewerSettings settings,
+        Font font)
     {
         DrawRectangle(12, 12, 640, 244, new Color(0, 0, 0, 235));
 
-        DrawText(
+        DrawHudText(
+            font,
             cutawayMode
                 ? $"RIMCLONE / {focusName} / CUT @ {terrain.CutawayHeightMeters:0.0} M"
                 : "RIMCLONE / TOP-DOWN TERRAIN",
-            24,
-            22,
-            18,
-            Color.RayWhite);
+            24, 22, 18f, Color.RayWhite);
+
         if (settings.ShowPerformanceStats)
         {
-            DrawText(
+            DrawHudText(font,
                 $"FPS {GetFPS()}   FRAME {GetFrameTime() * 1000f:0.00} ms",
-                24,
-                50,
-                17,
-                Color.RayWhite);
-
-            DrawText(
+                24, 50, 17f, Color.RayWhite);
+            DrawHudText(font,
                 $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
-                24,
-                76,
-                14,
-                Color.LightGray);
-
-            DrawText(
+                24, 76, 14f, Color.LightGray);
+            DrawHudText(font,
                 $"VISIBLE GPU BATCHES {renderer.VisibleRegionsLastFrame}/{terrain.StorageRegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
-                24,
-                98,
-                14,
-                Color.LightGray);
-
-            DrawText(
+                24, 98, 14f, Color.LightGray);
+            DrawHudText(font,
                 $"GPU MESH REBUILDS {renderer.RebuiltRegions}",
-                24,
-                120,
-                14,
-                Color.LightGray);
+                24, 120, 14f, Color.LightGray);
         }
 
         if (settings.ShowControls)
         {
-            DrawText(
+            DrawHudText(font,
                 "F1 lower tunnel | F2 upper passage | C surface | T top-down view",
-                24,
-                146,
-                14,
-                Color.RayWhite);
+                24, 146, 14f, Color.RayWhite);
         }
 
         if (settings.ShowCaveCoordinates)
         {
-            DrawText(
+            DrawHudText(font,
                 "LOWER: X 1076-1228 | Z ~1140-1164 | HEIGHT 13-21 m",
-                24,
-                170,
-                14,
-                Color.LightGray);
-
-            DrawText(
+                24, 170, 14f, Color.LightGray);
+            DrawHudText(font,
                 "UPPER: near X 1152 | Z 1136-1168 | HEIGHT 25-33 m",
-                24,
-                192,
-                14,
-                Color.LightGray);
+                24, 192, 14f, Color.LightGray);
         }
 
         if (settings.ShowControls)
         {
-            DrawText(
-                "WASD move | RMB drag tilt/orbit | MMB pan | Wheel zoom | Q/E height | PgUp/PgDn 1m | Shift+Wheel",
-                24,
-                218,
-                14,
-                Color.RayWhite);
+            DrawHudText(font,
+                "WASD move | RMB orbit | MMB pan | Wheel zoom | Q/E slice | PgUp/PgDn 0.1m | Shift+Wheel",
+                24, 218, 14f, Color.RayWhite);
         }
+    }
+
+    private static void DrawHudText(
+        Font font,
+        string text,
+        float x,
+        float y,
+        float fontSize,
+        Color color)
+    {
+        DrawTextEx(
+            font,
+            text,
+            new Vector2(MathF.Round(x), MathF.Round(y)),
+            fontSize,
+            0.5f,
+            color);
+    }
+
+    private static bool UpdateCutawayInput(
+        RaylibViewerSettings settings,
+        float speedMultiplier,
+        float deltaTime,
+        float mouseWheel,
+        bool shiftDown,
+        float maximumCutHeight)
+    {
+        const float layerStepMeters = WorldMap.LayerHeightUnits * 0.1f;
+        float change = 0f;
+
+        if (IsKeyPressed(KeyboardKey.PageUp))
+            change += layerStepMeters;
+        if (IsKeyPressed(KeyboardKey.PageDown))
+            change -= layerStepMeters;
+
+        if (shiftDown && mouseWheel != 0f)
+            change += mouseWheel * layerStepMeters;
+
+        float verticalInput = 0f;
+        if (IsKeyDown(KeyboardKey.E))
+            verticalInput += 1f;
+        if (IsKeyDown(KeyboardKey.Q))
+            verticalInput -= 1f;
+
+        if (verticalInput != 0f)
+            change += verticalInput * 0.75f * speedMultiplier * deltaTime;
+
+        if (change == 0f)
+            return false;
+
+        float nextHeight = Math.Clamp(
+            settings.CutawayHeightMeters + change,
+            0f,
+            maximumCutHeight);
+        if (MathF.Abs(nextHeight - settings.CutawayHeightMeters) < 0.0001f)
+            return false;
+
+        settings.CutawayHeightMeters = nextHeight;
+        return true;
     }
 }
