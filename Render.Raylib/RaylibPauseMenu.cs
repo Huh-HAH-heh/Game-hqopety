@@ -119,6 +119,7 @@ internal sealed class RaylibPauseMenu : IDisposable
     private bool _draggingMain;
     private bool _draggingSettings;
     private SliderId _activeSlider;
+    private bool _paletteSliderDirty;
 
     public RaylibViewerSettings Settings { get; }
     public bool IsOpen => _page != MenuPage.Closed;
@@ -178,6 +179,12 @@ internal sealed class RaylibPauseMenu : IDisposable
             else
             {
                 _activeSlider = SliderId.None;
+                if (_paletteSliderDirty)
+                {
+                    PaletteRevision++;
+                    _paletteSliderDirty = false;
+                }
+
                 SaveSettings();
             }
 
@@ -485,16 +492,35 @@ internal sealed class RaylibPauseMenu : IDisposable
                 Settings.RenderDistanceMeters = Lerp(500f, 18000f, amount);
                 break;
             case SliderId.PaletteRed:
-                GetSelectedColor().R = (int)MathF.Round(amount * 255f);
-                PaletteRevision++;
+                SetSelectedColorChannel(0, (int)MathF.Round(amount * 255f));
                 break;
             case SliderId.PaletteGreen:
-                GetSelectedColor().G = (int)MathF.Round(amount * 255f);
-                PaletteRevision++;
+                SetSelectedColorChannel(1, (int)MathF.Round(amount * 255f));
                 break;
             case SliderId.PaletteBlue:
-                GetSelectedColor().B = (int)MathF.Round(amount * 255f);
-                PaletteRevision++;
+                SetSelectedColorChannel(2, (int)MathF.Round(amount * 255f));
+                break;
+        }
+    }
+
+    private void SetSelectedColorChannel(int channel, int value)
+    {
+        RgbColorSetting color = GetSelectedColor();
+        value = Math.Clamp(value, 0, 255);
+
+        switch (channel)
+        {
+            case 0 when color.R != value:
+                color.R = value;
+                _paletteSliderDirty = true;
+                break;
+            case 1 when color.G != value:
+                color.G = value;
+                _paletteSliderDirty = true;
+                break;
+            case 2 when color.B != value:
+                color.B = value;
+                _paletteSliderDirty = true;
                 break;
         }
     }
