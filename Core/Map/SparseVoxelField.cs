@@ -191,6 +191,89 @@ public sealed class SparseVoxelField
         Version++;
     }
 
+    /// <summary>
+    /// Raycasts the same trilinear density field used by the surface mesher.
+    /// The ray is expressed in metres; hit and normal are returned in world space.
+    /// </summary>
+    public bool TryRaycast(
+        Vector3 originMeters,
+        Vector3 direction,
+        float maximumDistanceMeters,
+        out Vector3 hitPosition,
+        out Vector3 hitNormal)
+    {
+        hitPosition = default;
+        hitNormal = Vector3.UnitY;
+
+        if (!IsFinite(originMeters) || !IsFinite(direction) ||
+            direction.LengthSquared() < 0.000001f ||
+            !float.IsFinite(maximumDistanceMeters) || maximumDistanceMeters <= 0f)
+            return false;
+
+        direction = Vector3.Normalize(direction);
+        float distance = 0f;
+        float previousDistance = 0f;
+        Vector3 samplePosition = originMeters / VoxelSizeMeters - new Vector3(0.5f);
+        float previousDensity = SampleDensity(
+            samplePosition.X, samplePosition.Y, samplePosition.Z);
+        bool previousWasAir = previousDensity < 0f;
+
+        for (int iteration = 0; iteration < 20_000 && distance < maximumDistanceMeters; iteration++)
+        {
+            float stepMeters = Math.Clamp(
+                MathF.Abs(previousDensity) * VoxelSizeMeters * 0.45f,
+                0.025f,
+                1f);
+            previousDistance = distance;
+            distance = MathF.Min(maximumDistanceMeters, distance + stepMeters);
+
+            Vector3 position = originMeters + direction * distance;
+            Vector3 voxelPosition = position / VoxelSizeMeters - new Vector3(0.5f);
+            float density = SampleDensity(
+                voxelPosition.X, voxelPosition.Y, voxelPosition.Z);
+
+            if (previousWasAir && density >= 0f)
+            {
+                float low = previousDistance;
+                float high = distance;
+                for (int refine = 0; refine < 12; refine++)
+                {
+                    float middle = (low + high) * 0.5f;
+                    Vector3 middlePosition = originMeters + direction * middle;
+                    Vector3 middleVoxel = middlePosition / VoxelSizeMeters -
+                        new Vector3(0.5f);
+                    float middleDensity = SampleDensity(
+                        middleVoxel.X, middleVoxel.Y, middleVoxel.Z);
+                    if (middleDensity >= 0f)
+                        high = middle;
+                    else
+                        low = middle;
+                }
+
+                hitPosition = originMeters + direction * ((low + high) * 0.5f);
+                Vector3 hitVoxel = hitPosition / VoxelSizeMeters - new Vector3(0.5f);
+                const float normalStep = 0.5f;
+                Vector3 gradient = new(
+                    SampleDensity(hitVoxel.X + normalStep, hitVoxel.Y, hitVoxel.Z) -
+                    SampleDensity(hitVoxel.X - normalStep, hitVoxel.Y, hitVoxel.Z),
+                    SampleDensity(hitVoxel.X, hitVoxel.Y + normalStep, hitVoxel.Z) -
+                    SampleDensity(hitVoxel.X, hitVoxel.Y - normalStep, hitVoxel.Z),
+                    SampleDensity(hitVoxel.X, hitVoxel.Y, hitVoxel.Z + normalStep) -
+                    SampleDensity(hitVoxel.X, hitVoxel.Y, hitVoxel.Z - normalStep));
+
+                hitNormal = gradient.LengthSquared() > 0.000001f
+                    ? Vector3.Normalize(-gradient)
+                    : Vector3.UnitY;
+                return true;
+            }
+
+            previousDensity = density;
+            previousWasAir = density < 0f;
+        }
+
+        return false;
+    }
+
     public void ClearEdits()
     {
         if (_chunks.Count == 0)
