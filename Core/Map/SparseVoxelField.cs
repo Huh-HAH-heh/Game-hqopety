@@ -19,7 +19,7 @@ namespace Core.Map;
 public sealed class SparseVoxelField
 {
     public const int ChunkSize = 16;
-    public const int DensitySamplesPerAxis = ChunkSize + 1;
+    public const int DensitySamplesPerAxis = ChunkSize;
     public const float VoxelSizeMeters = 0.1f;
     public const float DensityScale = 32f;
 
@@ -316,7 +316,7 @@ public sealed class SparseVoxelField
 
     public void PaintSphere(Vector3 centerMeters, float radiusMeters, ushort materialId)
     {
-        ValidateBrush(radiusMeters, materialId, allowAir: false);
+        ValidateBrush(radiusMeters, materialId, requiresMaterial: true);
         Vector3 center = ToVoxelPosition(centerMeters);
         float radius = radiusMeters / VoxelSizeMeters;
         GetCellBounds(center, radius, out VoxelBounds bounds);
@@ -437,7 +437,7 @@ public sealed class SparseVoxelField
 
     private void EditSphere(Vector3 centerMeters, float radiusMeters, bool add, ushort materialId)
     {
-        ValidateBrush(radiusMeters, materialId, allowAir: add);
+        ValidateBrush(radiusMeters, materialId, requiresMaterial: add);
         Vector3 center = ToVoxelPosition(centerMeters);
         float radius = radiusMeters / VoxelSizeMeters;
         GetCellBounds(center, radius + 1f, out VoxelBounds bounds);
@@ -755,11 +755,11 @@ public sealed class SparseVoxelField
     private static Vector3 ToVoxelPosition(Vector3 meters) =>
         meters / VoxelSizeMeters;
 
-    private void ValidateBrush(float radiusMeters, ushort materialId, bool allowAir)
+    private void ValidateBrush(float radiusMeters, ushort materialId, bool requiresMaterial)
     {
         if (!float.IsFinite(radiusMeters) || radiusMeters <= 0f || radiusMeters > 8f)
             throw new ArgumentOutOfRangeException(nameof(radiusMeters));
-        if (allowAir && materialId == 0)
+        if (requiresMaterial && materialId == 0)
             throw new ArgumentOutOfRangeException(nameof(materialId));
     }
 
