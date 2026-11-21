@@ -367,7 +367,7 @@ public static class RaylibTerrainViewer
 
                         if (IsKeyPressed(KeyboardKey.F6))
                             voxelBrushRadiusMeters = Math.Min(
-                                12f, voxelBrushRadiusMeters + 0.25f);
+                                4f, voxelBrushRadiusMeters + 0.25f);
 
                         if (voxelEditMode != VoxelEditMode.Off &&
                             IsMouseButtonPressed(MouseButton.Left) &&
