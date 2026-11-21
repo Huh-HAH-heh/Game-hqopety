@@ -497,7 +497,7 @@ public sealed class SparseVoxelField
         bool add,
         ushort materialId)
     {
-        ValidateBrush(radiusMeters, materialId, allowAir: add);
+        ValidateBrush(radiusMeters, materialId, requiresMaterial: add);
         Vector3 start = ToVoxelPosition(startMeters);
         Vector3 end = ToVoxelPosition(endMeters);
         float radius = radiusMeters / VoxelSizeMeters;
