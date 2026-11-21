@@ -416,12 +416,29 @@ public sealed class TerrainRenderSnapshot
                 : (ushort)0;
         }
 
-        foreach (TileRange range in _worldMap.GetTileRanges(sourceX, sourceY))
+        ReadOnlySpan<TileRange> ranges =
+            _worldMap.GetTileRanges(sourceX, sourceY);
+        for (int i = 0; i < ranges.Length; i++)
         {
-            if (range.State == WorldMap.StateSolid &&
-                range.MaterialId != 0 &&
-                range.StartZ < cutLayer &&
-                range.EndZ > cutLayer)
+            TileRange range = ranges[i];
+            if (range.State != WorldMap.StateSolid ||
+                range.MaterialId == 0 ||
+                range.StartZ >= cutLayer)
+            {
+                continue;
+            }
+
+            if (range.EndZ > cutLayer)
+                return range.MaterialId;
+
+            // A material boundary can lie exactly on the section plane while
+            // solid material continues above it. The base mesher intentionally
+            // emits no face between two solid ranges, so the lower material
+            // must still supply the section cap.
+            if (range.EndZ == cutLayer &&
+                i + 1 < ranges.Length &&
+                ranges[i + 1].State == WorldMap.StateSolid &&
+                ranges[i + 1].StartZ == cutLayer)
             {
                 return range.MaterialId;
             }
