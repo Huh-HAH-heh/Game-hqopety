@@ -59,7 +59,7 @@ public sealed class GameRenderer
     private readonly VoxelTerrainSystem _voxelTerrains = new();
     private readonly IndependentVoxelTerrainRenderer _voxelTerrainRenderer = new();
     private bool _independentVoxelTerrainMode;
-    private readonly BlockTerrainPreviewRenderer _blockTerrainPreviewRenderer = new();
+    private readonly VoxelTerrainRenderer _voxelMapRenderer = new();
     private readonly UnitSimulation _unitSimulation;
     private readonly UnitRenderSystem _unitRenderer;
     private readonly ProjectileRenderSystem _projectileRenderer;
@@ -459,7 +459,7 @@ public sealed class GameRenderer
             _mapRenderer.Dispose();
             _voxelTerrainRenderer.Dispose();
             _voxelTerrains.Clear();
-            _blockTerrainPreviewRenderer.Dispose();
+            _voxelMapRenderer.Dispose();
             _projectileRenderer.Dispose();
             _unitRenderer.Dispose();
             _visionTestScene.Dispose();
@@ -786,7 +786,7 @@ public sealed class GameRenderer
         long stageStarted = Stopwatch.GetTimestamp();
         if (_showBlockTerrainPreview)
         {
-            _blockTerrainPreviewRenderer.Draw(
+            _voxelMapRenderer.Draw(
                 _window,
                 _worldMap,
                 _camera.View,
@@ -4389,11 +4389,11 @@ public sealed class GameRenderer
             _normalCameraIsometricProjectionEnabled = _camera.IsometricProjectionEnabled;
             _camera.SetIsometricProjection(false);
             _camera.CenterOnPosition(
-                BlockTerrainPreviewRenderer.GetCameraCenter(
+                VoxelTerrainRenderer.GetCameraCenter(
                     _worldMap,
                     TerrainTilePixelSize));
             Console.WriteLine(
-                "[Terrain preview] Isometric block view. " +
+                "[Voxel terrain] Isometric volume view. " +
                 "Middle mouse: pan; wheel: zoom; " +
                 $"{GameControlBindings.GetKeyName(_controlBindings.Get(GameControlAction.ToggleBlockTerrainPreview))}: return to game.");
         }
