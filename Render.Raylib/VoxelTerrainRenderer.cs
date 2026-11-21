@@ -524,8 +524,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         foreach (ChunkEntry entry in _chunks.Values)
             entry.Dispose();
         _chunks.Clear();
+        // UnloadMaterial also releases the non-default shader assigned to it.
         UnloadMaterial(_material);
-        UnloadShader(_shader);
         _disposed = true;
     }
 
