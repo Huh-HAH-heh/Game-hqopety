@@ -266,6 +266,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int cutLayer = cutEnabled
             ? (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters)
             : -1;
+        float effectiveCutHeight = cutEnabled
+            ? cutLayer * SparseVoxelField.VoxelSizeMeters
+            : cutHeightMeters;
 
         foreach (Candidate candidate in candidates)
         {
@@ -305,7 +308,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 cutBuilds < MaximumCutBuildsPerFrame)
             {
                 Mesh[] replacement = VoxelChunkMesher.BuildCutCap(
-                    field, key.X, key.Z, step, cutHeightMeters, _palette);
+                    field, key.X, key.Z, step, effectiveCutHeight, _palette);
 
                 Mesh[] previous = entry.CutCap;
                 entry.CutCap = replacement;
@@ -330,7 +333,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             EvictUnusedChunks();
 
         SetLighting();
-        SetCutShader(cutEnabled, cutHeightMeters);
+        SetCutShader(cutEnabled, effectiveCutHeight);
 
         float worldRadius = 0.5f * MathF.Sqrt(
             field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
