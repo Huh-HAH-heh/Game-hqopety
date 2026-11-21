@@ -29,10 +29,9 @@ public static class RaylibTerrainViewer
         RaylibViewerSettings settings = RaylibViewerSettings.Load();
         TerrainRenderSnapshot terrain =
             TerrainRenderSnapshot.Create(worldMap, settings.TerrainMode);
-        TerrainRenderSnapshot? coarseVoxelTerrain =
-            settings.TerrainMode == TerrainRenderMode.Voxel
-                ? TerrainRenderSnapshot.CreateVoxelLod(worldMap, cellSizeInMeters: 4)
-                : null;
+        // The 3D density renderer owns its own chunk LOD; do not allocate a
+        // second legacy column snapshot for the same voxel world.
+        TerrainRenderSnapshot? coarseVoxelTerrain = null;
 
         ConfigFlags windowFlags = ConfigFlags.ResizableWindow;
         if (settings.VSync)
@@ -207,9 +206,7 @@ public static class RaylibTerrainViewer
                         terrain = TerrainRenderSnapshot.Create(
                             worldMap,
                             menu.Settings.TerrainMode);
-                        coarseVoxelTerrain = menu.Settings.TerrainMode == TerrainRenderMode.Voxel
-                            ? TerrainRenderSnapshot.CreateVoxelLod(worldMap, cellSizeInMeters: 4)
-                            : null;
+                        coarseVoxelTerrain = null;
                         if (cutawayMode)
                         {
                             int currentCutLayer = Math.Clamp(
