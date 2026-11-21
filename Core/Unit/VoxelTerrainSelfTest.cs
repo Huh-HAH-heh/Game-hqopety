@@ -138,6 +138,29 @@ internal static class VoxelTerrainSelfTest
         return chunksMatch && densityMatches && materialMatches && surfacesMatch;
     }
 
+    public static bool FlattenPlaneChangesLocalSurface()
+    {
+        SparseVoxelField field = CreateField();
+        field.FlattenPlane(
+            centerMeters: new Vector3(3f, 1.5f, 3f),
+            normal: Vector3.UnitY,
+            radiusMeters: 1.5f,
+            materialId: BridgeMaterial,
+            strength: 1f);
+
+        Span<SparseVoxelField.WalkableSurface> surfaces =
+            stackalloc SparseVoxelField.WalkableSurface[16];
+        int count = field.FindWalkableSurfacesAt(
+            3f, 3f, minimumUpNormal: 0.72f, surfaces);
+        for (int i = 0; i < count; i++)
+        {
+            if (MathF.Abs(surfaces[i].HeightMeters - 1.5f) <= 0.12f)
+                return true;
+        }
+
+        return false;
+    }
+
     public static bool UndoRedoRestoresSdf()
     {
         SparseVoxelField field = CreateField();

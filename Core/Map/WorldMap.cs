@@ -1506,6 +1506,14 @@ public sealed class WorldMap
     }
 
 
+    public void FlattenVoxelPlane(
+        Vector3 centerMeters,
+        Vector3 normal,
+        float radiusMeters,
+        ushort materialId,
+        float strength = 1f) =>
+        Voxels.FlattenPlane(centerMeters, normal, radiusMeters, materialId, strength);
+
     public void PaintVoxelSphere(Vector3 centerMeters, float radiusMeters, ushort materialId) =>
         Voxels.PaintSphere(centerMeters, radiusMeters, materialId);
 

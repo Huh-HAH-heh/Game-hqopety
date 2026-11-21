@@ -21,7 +21,8 @@ public static class RaylibTerrainViewer
         PaintSphere,
         SmoothSphere,
         CarveCapsule,
-        AddCapsule
+        AddCapsule,
+        FlattenPlane
     }
 
     public static void Run(WorldMap worldMap)
@@ -368,7 +369,7 @@ public static class RaylibTerrainViewer
                         if (IsKeyPressed(KeyboardKey.F3))
                         {
                             voxelEditMode = (VoxelEditMode)(
-                                ((int)voxelEditMode + 1) % 7);
+                                ((int)voxelEditMode + 1) % 8);
                         }
 
                         if (IsKeyPressed(KeyboardKey.F4))
@@ -592,6 +593,7 @@ public static class RaylibTerrainViewer
             VoxelEditMode.SmoothSphere => "SMOOTH SPHERE",
             VoxelEditMode.CarveCapsule => "CARVE CAPSULE",
             VoxelEditMode.AddCapsule => "ADD CAPSULE",
+            VoxelEditMode.FlattenPlane => "FLATTEN PLANE",
             _ => "EDIT OFF"
         };
 
@@ -627,6 +629,14 @@ public static class RaylibTerrainViewer
 
             case VoxelEditMode.SmoothSphere:
                 worldMap.SmoothVoxelSphere(carveCenter, radiusMeters, 0.55f);
+                break;
+            case VoxelEditMode.FlattenPlane:
+                worldMap.FlattenVoxelPlane(
+                    hitPosition,
+                    hitNormal,
+                    radiusMeters,
+                    materialId,
+                    strength: 0.9f);
                 break;
         }
     }

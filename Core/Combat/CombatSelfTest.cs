@@ -93,6 +93,7 @@ public static class CombatSelfTest
         RunTest("Terrain: solid height columns stay compact and materialize on edit", TestCompactSolidHeightColumns, ref passed, ref failed);
         RunTest("Voxel terrain: stacked floors, surface and bridge are distinct", VoxelTerrainSelfTest.StackedSurfacesAreFound, ref passed, ref failed);
         RunTest("Voxel terrain: vertical capsule respects tunnel clearance", VoxelTerrainSelfTest.CapsuleUsesSdfClearance, ref passed, ref failed);
+        RunTest("Voxel terrain: flatten plane edits a local surface in the same density field", VoxelTerrainSelfTest.FlattenPlaneChangesLocalSurface, ref passed, ref failed);
         RunTest("Voxel terrain: edited chunks survive save/load", VoxelTerrainSelfTest.EditSaveRoundTrips, ref passed, ref failed);
         RunTest("Voxel terrain: edit history restores and reapplies density", VoxelTerrainSelfTest.UndoRedoRestoresSdf, ref passed, ref failed);
         RunTest("Voxel terrain: falling body lands on the lower voxel floor", VoxelTerrainSelfTest.VerticalGravityFindsTunnelFloor, ref passed, ref failed);

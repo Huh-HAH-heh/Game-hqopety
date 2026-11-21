@@ -980,6 +980,84 @@ public sealed class SparseVoxelField
     /// Smooths a local part of the signed-distance field without affecting
     /// unrelated chunks. Strength is the interpolation factor toward a six-neighbour average.
     /// </summary>
+    /// <summary>
+    /// Blends a local part of the density field toward a plane. The plane
+    /// normal points toward air; points below it become solid and points
+    /// above it become air. A smooth radial falloff avoids a hard brush rim.
+    /// </summary>
+    public void FlattenPlane(
+        Vector3 centerMeters,
+        Vector3 normal,
+        float radiusMeters,
+        ushort materialId,
+        float strength = 1f)
+    {
+        if (!IsFinite(centerMeters) || !IsFinite(normal) ||
+            normal.LengthSquared() < 0.000001f)
+            throw new ArgumentOutOfRangeException(nameof(normal));
+        if (!float.IsFinite(radiusMeters) || radiusMeters <= 0f || radiusMeters > 4f)
+            throw new ArgumentOutOfRangeException(nameof(radiusMeters));
+        if (!float.IsFinite(strength) || strength <= 0f || strength > 1f)
+            throw new ArgumentOutOfRangeException(nameof(strength));
+        if (materialId == 0)
+            throw new ArgumentOutOfRangeException(nameof(materialId));
+
+        normal = Vector3.Normalize(normal);
+        Vector3 center = ToVoxelPosition(centerMeters);
+        float radius = radiusMeters / VoxelSizeMeters;
+        GetCellBounds(center, radius + 1f, out VoxelBounds bounds);
+        ValidateEditWork(bounds);
+
+        long revision = Version + 1;
+        HashSet<ChunkCoordinate> touched = new();
+        float innerRadius = radius * 0.72f;
+        float outerRange = MathF.Max(1f, radius - innerRadius);
+
+        for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
+        for (int y = bounds.MinY; y < bounds.MaxY; y++)
+        for (int x = bounds.MinX; x < bounds.MaxX; x++)
+        {
+            Vector3 point = new(x + 0.5f, y + 0.5f, z + 0.5f);
+            Vector3 relative = point - center;
+            float planeDistance = Vector3.Dot(relative, normal);
+            float tangentSquared = MathF.Max(
+                0f, relative.LengthSquared() - planeDistance * planeDistance);
+            float tangentDistance = MathF.Sqrt(tangentSquared);
+            if (tangentDistance >= radius)
+                continue;
+
+            float edge = Math.Clamp(
+                (radius - tangentDistance) / outerRange,
+                0f,
+                1f);
+            edge = edge * edge * (3f - 2f * edge);
+            float blend = strength * edge;
+            float oldDensity = GetDensity(x, y, z);
+            float targetDensity = -planeDistance;
+            float nextDensity = Lerp(oldDensity, targetDensity, blend);
+            if (Quantize(nextDensity) == Quantize(oldDensity))
+                continue;
+
+            SetDensityOverride(
+                x, y, z, nextDensity, oldDensity, revision, touched);
+
+            if (oldDensity > 0f && nextDensity <= 0f)
+            {
+                SetMaterialOverride(x, y, z, 0, revision, touched);
+            }
+            else if (oldDensity <= 0f && nextDensity > 0f)
+            {
+                ushort resolvedMaterial = _baseMaterial(x, y, z);
+                SetMaterialOverride(
+                    x, y, z,
+                    resolvedMaterial == 0 ? materialId : resolvedMaterial,
+                    revision, touched);
+            }
+        }
+
+        CompleteEdit(bounds, revision, touched);
+    }
+
     public void SmoothSphere(Vector3 centerMeters, float radiusMeters, float strength = 0.5f)
     {
         if (!float.IsFinite(strength) || strength <= 0f || strength > 1f)

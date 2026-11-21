@@ -58,6 +58,7 @@ These are CSG/density-field operations. They change the 3D volume rather than ed
 - **F4**: cycle material ID.
 - **F5 / F6**: decrease / increase brush radius.
 - **F7 / F8**: undo / redo the last voxel edit (in-session history, bounded to 16 operations / 64 MiB).
+- The F3 tool cycle also includes **Flatten Plane**, which levels the selected area toward the hit surface plane with a smooth radial falloff.
 - **Shift + right mouse drag**: orbit the camera.
 - **Middle mouse drag**: pan.
 - **Mouse wheel**: zoom.
@@ -75,7 +76,7 @@ The Raylib viewer restores edited voxel chunks at startup and autosaves after a 
 
 The Raylib terrain viewer is still an isolated presentation path. Edited regions now use `VoxelNavigationSystem`: it extracts multiple upward-facing support surfaces at 0.5 m intervals and routes in `(X,Y,floor)` space. Movement keeps the selected floor and rejects steps where the SDF vertical capsule intersects solid terrain. Untouched terrain remains on the compact legacy XY route grid. Navigation between distinct 128 m voxel regions and vertical gravity/fall response are not complete. Pawn-to-pawn separation is still the horizontal crowd solver.
 
-Voxel edit chunks are serialized with a compressed, versioned format. The viewer loads the edit file after deterministic base-world generation, autosaves changes and writes a final save on exit. Undo/redo and campaign save-slot integration are not yet implemented.
+Voxel edit chunks are serialized with a compressed, versioned format. The viewer loads the edit file after deterministic base-world generation, autosaves changes and writes a final save on exit. The edit set supports sphere/capsule/box CSG, local smoothing, material paint and plane flattening. Undo/redo and campaign save-slot integration are not yet implemented.
 
 Performance budgets and sparse allocation are implemented in source, but the new renderer has not yet been benchmarked on target hardware. Do not treat the configured per-frame budgets as measured FPS.
 

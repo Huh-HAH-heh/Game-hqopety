@@ -24,12 +24,13 @@ The voxel field, 3D mesher, editable volumes, SDF support-surface queries, local
 | Tunnels and caves | Subtractive sphere/capsule/box CSG | Met in source |
 | Material painting | PaintSphere writes per-cell material IDs | Met in source |
 | Smoothing | Local six-neighbour density smoothing | Met in source |
+| Flatten / plane | Plane projection with smooth radial falloff in the same signed-density field | Met in source |
 | Camera editing | Camera raycast into the same density field; F3 tool cycle and mouse application | Met in source |
 | Horizontal cutaway | Cut cap clips/intersects the same density field | Implemented in source; flicker/seam test pending |
 | Local mesh rebuild | Field bounds dirty only intersecting cached 3D chunks and sampling neighbours | Met in source |
 | Distance LOD | 0.1 / 0.5 / 1.0 / 4.0 m sampling steps; source data remains 0.1 m | Met in source |
-| Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs 0.5 m A* on `(X,Y,floor)` nodes; unchanged areas retain the compact legacy graph | Partially met: route graph is local to one 128 m region and still needs end-to-end campaign tests |
-| Physics/collision from voxels | Movement in edited regions queries SDF support surfaces and a vertical capsule against the same 3D field; pawn-pawn collision remains the existing horizontal crowd solver | Partially met: no vertical rigid-body/fall simulation or full dynamic terrain physics |
+| Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs 0.5 m A* on `(X,Y,floor)` nodes; edits invalidate only intersecting cached regions and routes | Partially met: hierarchical links/portals across 128 m regions are not yet implemented |
+| Physics/collision from voxels | Movement in edited regions queries SDF support surfaces and a vertical capsule against the same 3D field; unsupported pawns integrate gravity and land on voxel floors | Partially met: pawn-pawn contact remains the horizontal crowd solver; no rigid-body/rolling terrain debris |
 | Save/load of edited chunks | Compressed versioned chunk serializer plus atomic world-file save/load; Raylib viewer autosaves edits and restores them at startup | Met for the Raylib terrain viewer; campaign/world seed migration still needs integration |
 | Undo/redo and edit history | Bounded 16-step / 64 MiB chunk-snapshot history; F7 undo and F8 redo in the Raylib editor | Met for in-session edit operations; history is intentionally not persisted between launches |
 | Measured performance | Sparse storage and per-frame build budgets exist; no target-PC benchmark has been run | Unverified |
@@ -69,8 +70,8 @@ The base canyon profile is still generated from the existing 1 m XY surface data
 3. Sculpt a sphere, a long capsule, a box cut and an additive arch. Confirm a bridge/overhang and an air gap below it can exist at the same X/Z coordinates.
 4. Move the cut plane through a carved cave and the upper/lower passages. Check for caps, holes, flicker and seams across 3D chunk boundaries.
 5. Measure frame time and memory while moving the camera and editing at close range. Current per-frame budgets are source-level safeguards, not measured performance results.
-6. Extend multi-level routes across 128 m navigation-region boundaries and integrate vertical fall/gravity response for unsupported pawns.
+6. Extend multi-level routes across 128 m navigation-region boundaries and integrate vertical pawn-to-pawn contacts.
 7. Integrate the voxel edit file with the campaign save-slot/seed lifecycle.
 8. Run the Raylib viewer on the target GPU and capture seam, cutaway, tunnel/bridge and memory/FPS evidence.
 
-Current status: the terrain is a **3D sparse voxel/SDF renderer with editable volumes, persisted terrain edits and multi-level pawn support in edited regions**. It is not yet a fully integrated Space Engineers-style simulation: cross-region level routing, gravity/falling, undo/redo, campaign save slots and target-hardware visual/performance acceptance remain open.
+Current status: the terrain is a **3D sparse voxel/SDF renderer with editable volumes, plane flattening, persisted terrain edits, bounded undo/redo, multi-level pawn support and vertical falling/landing inside edited areas**. It is not yet a fully integrated Space Engineers-style simulation: cross-region level routing, campaign save slots and target-hardware visual/performance acceptance remain open.
