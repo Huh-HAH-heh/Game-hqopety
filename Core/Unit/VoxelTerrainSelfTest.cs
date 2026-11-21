@@ -162,10 +162,12 @@ internal static class VoxelTerrainSelfTest
 
         float carved = field.GetDensity(30, 12, 30);
         bool canUndo = field.CanUndo && field.UndoCount == 1;
-        bool undoRestored = canUndo &&
+        bool didUndo = field.Undo();
+        bool undoRestored = canUndo && didUndo &&
             MathF.Abs(field.GetDensity(30, 12, 30) - original) < 0.001f &&
             field.CanRedo;
-        bool redoRestored = field.Redo() &&
+        bool didRedo = field.Redo();
+        bool redoRestored = didRedo &&
             MathF.Abs(field.GetDensity(30, 12, 30) - carved) < 0.001f &&
             field.CanUndo;
 
