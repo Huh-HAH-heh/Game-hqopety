@@ -417,18 +417,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     continue;
                 }
 
-                float minX = candidate.Key.X * newChunkSize;
-                float minY = candidate.Key.Y * newChunkSize;
-                float minZ = candidate.Key.Z * newChunkSize;
-                float maxX = minX + newChunkSize;
-                float maxY = minY + newChunkSize;
-                float maxZ = minZ + newChunkSize;
-                int firstX = (int)MathF.Floor(minX / oldChunkSize);
-                int firstY = (int)MathF.Floor(minY / oldChunkSize);
-                int firstZ = (int)MathF.Floor(minZ / oldChunkSize);
-                int lastX = (int)MathF.Floor((maxX - 0.0001f) / oldChunkSize);
-                int lastY = (int)MathF.Floor((maxY - 0.0001f) / oldChunkSize);
-                int lastZ = (int)MathF.Floor((maxZ - 0.0001f) / oldChunkSize);
+                float fallbackMinX = candidate.Key.X * newChunkSize;
+                float fallbackMinY = candidate.Key.Y * newChunkSize;
+                float fallbackMinZ = candidate.Key.Z * newChunkSize;
+                float fallbackMaxX = fallbackMinX + newChunkSize;
+                float fallbackMaxY = fallbackMinY + newChunkSize;
+                float fallbackMaxZ = fallbackMinZ + newChunkSize;
+                int firstX = (int)MathF.Floor(fallbackMinX / oldChunkSize);
+                int firstY = (int)MathF.Floor(fallbackMinY / oldChunkSize);
+                int firstZ = (int)MathF.Floor(fallbackMinZ / oldChunkSize);
+                int lastX = (int)MathF.Floor((fallbackMaxX - 0.0001f) / oldChunkSize);
+                int lastY = (int)MathF.Floor((fallbackMaxY - 0.0001f) / oldChunkSize);
+                int lastZ = (int)MathF.Floor((fallbackMaxZ - 0.0001f) / oldChunkSize);
                 bool addedFineFallback = false;
 
                 for (int z = firstZ; z <= lastZ; z++)
@@ -522,10 +522,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         };
     }
 
-    private static bool IsCurrentMeshReady(ChunkEntry entry, SparseVoxelField field) =>
+    private bool IsCurrentMeshReady(ChunkEntry entry, SparseVoxelField field) =>
         entry.Built &&
         !entry.SurfaceDirty &&
-        entry.BaseVersion == field.BaseVersion;
+        entry.BaseVersion == field.BaseVersion &&
+        entry.PaletteVersion == _paletteVersion;
 
     private void AddVisible(
         ChunkKey key,
