@@ -91,6 +91,10 @@ public static class CombatSelfTest
         RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
         RunTest("Terrain: solid height columns stay compact and materialize on edit", TestCompactSolidHeightColumns, ref passed, ref failed);
+        RunTest("Voxel terrain: stacked floors, surface and bridge are distinct", VoxelTerrainSelfTest.StackedSurfacesAreFound, ref passed, ref failed);
+        RunTest("Voxel terrain: vertical capsule respects tunnel clearance", VoxelTerrainSelfTest.CapsuleUsesSdfClearance, ref passed, ref failed);
+        RunTest("Voxel terrain: edited chunks survive save/load", VoxelTerrainSelfTest.EditSaveRoundTrips, ref passed, ref failed);
+        RunTest("Voxel navigation: route follows lower tunnel floor", VoxelTerrainSelfTest.NavigationKeepsLowerFloor, ref passed, ref failed);
         RunTest("Water: dry maps do not allocate dense vertical storage", TestSparseWaterLayerStorage, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);
         RunTest("Hit regions: custom circles drive visibility, hits and armor", TestHitRegionProfilesDriveVisionCollisionAndArmor, ref passed, ref failed);

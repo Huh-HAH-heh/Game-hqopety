@@ -1591,7 +1591,6 @@ public sealed class WorldMap
                 }
 
                 _simpleFillColumns[columnIndex] = false;
-                RecalculateSurfaceHeight(columnIndex);
                 MarkTerrainChanged(tileX, tileY);
             }
         }
