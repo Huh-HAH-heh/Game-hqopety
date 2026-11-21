@@ -8,7 +8,7 @@ The Raylib terrain path now has a real sparse 3D voxel representation and derive
 
 This is a **sparse procedural-base + 3D voxel-edit** design. The large untouched canyon base is evaluated from the existing base-surface generator as a 3D signed-distance function. Edited areas materialize true cubic 0.1 m voxel data in 16³ chunks. This avoids a dense X×Y×Z world allocation while supporting 3D volume operations.
 
-The voxel field, 3D mesher, editable volumes, SDF support-surface queries, local multi-level routing and Raylib edit persistence are implemented in source. Runtime visual acceptance and target-hardware performance remain unverified.
+The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint/smooth, SDF support-surface queries, portal-linked multi-level routing, vertical falling/landing, bounded Undo/Redo and Raylib edit persistence are implemented in source. Runtime visual acceptance and target-hardware performance remain unverified.
 
 ## Requirements audit
 
@@ -25,11 +25,12 @@ The voxel field, 3D mesher, editable volumes, SDF support-surface queries, local
 | Material painting | PaintSphere writes per-cell material IDs | Met in source |
 | Smoothing | Local six-neighbour density smoothing | Met in source |
 | Flatten / plane | Plane projection with smooth radial falloff in the same signed-density field | Met in source |
+| Ramp | Additive and subtractive sloped triangular-prism CSG brushes with material assignment | Met in source |
 | Camera editing | Camera raycast into the same density field; F3 tool cycle and mouse application | Met in source |
 | Horizontal cutaway | Cut cap clips/intersects the same density field | Implemented in source; flicker/seam test pending |
 | Local mesh rebuild | Field bounds dirty only intersecting cached 3D chunks and sampling neighbours | Met in source |
 | Distance LOD | 0.1 / 0.5 / 1.0 / 4.0 m sampling steps; source data remains 0.1 m | Met in source |
-| Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs 0.5 m A* on `(X,Y,floor)` nodes; edits invalidate only intersecting cached regions and routes | Partially met: hierarchical links/portals across 128 m regions are not yet implemented |
+| Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs local 0.5 m A* on `(X,Y,floor)` nodes; portal-linked routes cross adjacent 128 m regions and local edits invalidate only affected routes | Partially met: portal corridor selection tries two Manhattan orders, not a global portal-graph optimum |
 | Physics/collision from voxels | Movement in edited regions queries SDF support surfaces and a vertical capsule against the same 3D field; unsupported pawns integrate gravity and land on voxel floors | Partially met: pawn-pawn contact remains the horizontal crowd solver; no rigid-body/rolling terrain debris |
 | Save/load of edited chunks | Compressed versioned chunk serializer plus atomic world-file save/load; Raylib viewer autosaves edits and restores them at startup | Met for the Raylib terrain viewer; campaign/world seed migration still needs integration |
 | Undo/redo and edit history | Bounded 16-step / 64 MiB chunk-snapshot history; F7 undo and F8 redo in the Raylib editor | Met for in-session edit operations; history is intentionally not persisted between launches |
@@ -67,7 +68,7 @@ The base canyon profile is still generated from the existing 1 m XY surface data
 
 1. Build the full .NET solution and resolve any compile/API issues.
 2. Run the Raylib viewer at close, medium and far zoom. Check the visible 0.1 / 0.5 / 1 / 4 m mesh steps and transitions.
-3. Sculpt a sphere, a long capsule, a box cut and an additive arch. Confirm a bridge/overhang and an air gap below it can exist at the same X/Z coordinates.
+3. Sculpt a sphere, long capsule, box cut, additive arch and sloped ramp. Confirm a bridge/overhang and an air gap below it can exist at the same X/Z coordinates.
 4. Move the cut plane through a carved cave and the upper/lower passages. Check for caps, holes, flicker and seams across 3D chunk boundaries.
 5. Measure frame time and memory while moving the camera and editing at close range. Current per-frame budgets are source-level safeguards, not measured performance results.
 6. Extend multi-level routes across 128 m navigation-region boundaries and integrate vertical pawn-to-pawn contacts.

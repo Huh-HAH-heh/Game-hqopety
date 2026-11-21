@@ -1077,10 +1077,6 @@ public sealed class SparseVoxelField
         float slope = (topEnd - startMeters.Y) / length;
         float slopeScale = MathF.Sqrt(1f + slope * slope);
 
-        float extentX = MathF.Abs(direction.X) * length +
-            MathF.Abs(side.X) * halfWidth;
-        float extentZ = MathF.Abs(direction.Y) * length +
-            MathF.Abs(side.Y) * halfWidth;
         float minWorldX = MathF.Min(startMeters.X, endMeters.X) -
             MathF.Abs(side.X) * halfWidth - VoxelSizeMeters;
         float maxWorldX = MathF.Max(startMeters.X, endMeters.X) +

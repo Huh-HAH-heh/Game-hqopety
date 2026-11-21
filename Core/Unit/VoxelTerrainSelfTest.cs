@@ -182,6 +182,29 @@ internal static class VoxelTerrainSelfTest
                material == BridgeMaterial;
     }
 
+    public static bool RampBrushCarvesSlopedVolume()
+    {
+        SparseVoxelField field = new(
+            width: 64,
+            height: 64,
+            depth: 64,
+            baseDensity: static (_, y, _) => 30f - (y + 0.5f),
+            baseMaterial: static (_, y, _) => y < 30 ? Rock : (ushort)0);
+
+        float outsideBefore = field.GetDensity(48, 28, 30);
+        field.CarveRamp(
+            startMeters: new Vector3(1f, 3f, 2f),
+            endMeters: new Vector3(5f, 3f, 2f),
+            widthMeters: 1f,
+            thicknessMeters: 1f);
+
+        float rampInterior = field.GetDensity(48, 28, 20);
+        float outsideAfter = field.GetDensity(48, 28, 30);
+        return rampInterior < 0f &&
+               outsideBefore > 0f &&
+               MathF.Abs(outsideAfter - outsideBefore) < 0.001f;
+    }
+
     public static bool BoxBrushChangesOnlyIts3DVolume()
     {
         SparseVoxelField field = CreateField();
