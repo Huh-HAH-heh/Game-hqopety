@@ -200,6 +200,7 @@ public sealed class UnitMovementSystem
                 _navigation.ClearRoute(unit);
 
             Vector2 velocity = new(velocities[unit].X, velocities[unit].Y);
+            float verticalVelocity = velocities[unit].Z;
 
             // Route geometry does not change during this unit's fixed substeps.
             // Compute the look-ahead and formation adjustment once, then reuse
@@ -479,9 +480,24 @@ public sealed class UnitMovementSystem
                     if (!voxelNavigationHandled)
                         position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
                 }
+
+                if (worldMap.HasVoxelEditsAt(position.X, position.Y))
+                {
+                    VoxelGroundPhysics.Step(
+                        worldMap,
+                        ref position,
+                        ref verticalVelocity,
+                        substepDelta,
+                        GetCollisionRadius(units, unit),
+                        units.Height[unit]);
+                }
+                else
+                {
+                    verticalVelocity = 0f;
+                }
             }
 
-            velocities[unit] = new Vector3(velocity.X, velocity.Y, 0f);
+            velocities[unit] = new Vector3(velocity.X, velocity.Y, verticalVelocity);
             positions[unit] = position;
 
             if (hasTarget[unit] &&
@@ -1029,9 +1045,9 @@ public sealed class UnitMovementSystem
                                 }
 
                                 units.Velocity[unit] =
-                                    new Vector3(velocityA.X, velocityA.Y, 0f);
+                                    new Vector3(velocityA.X, velocityA.Y, storedVelocityA.Z);
                                 units.Velocity[other] =
-                                    new Vector3(velocityB.X, velocityB.Y, 0f);
+                                    new Vector3(velocityB.X, velocityB.Y, storedVelocityB.Z);
                             }
 
                             other = next;

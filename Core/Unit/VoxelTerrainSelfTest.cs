@@ -165,6 +165,34 @@ internal static class VoxelTerrainSelfTest
                undoRestored && redoRestored;
     }
 
+    public static bool VerticalGravityFindsTunnelFloor()
+    {
+        WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        for (int x = 0; x < worldMap.TileWidth; x++)
+            worldMap.SetSolidHeight(x, y, 20, Rock);
+
+        worldMap.Voxels.CarveBox(
+            new Vector3(2f, 0.5f, 2f),
+            new Vector3(4f, 2.5f, 4f));
+
+        Vector3 position = new(3f, 3f, 3f);
+        float verticalVelocity = 0f;
+        for (int i = 0; i < 180; i++)
+            VoxelGroundPhysics.Step(
+                worldMap,
+                ref position,
+                ref verticalVelocity,
+                1f / 60f,
+                radiusMeters: 0.2f,
+                bodyHeightMeters: 1.1f);
+
+        return MathF.Abs(position.Z - 0.5f) <= 0.12f &&
+               MathF.Abs(verticalVelocity) <= 0.01f &&
+               worldMap.IsVoxelCapsuleClear(
+                   position.X, position.Z, position.Y, 0.2f, 1.1f);
+    }
+
     public static bool NavigationKeepsLowerFloor()
     {
         WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
