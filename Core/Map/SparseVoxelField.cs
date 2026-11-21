@@ -76,7 +76,7 @@ public sealed class SparseVoxelField
     public float GetDensity(int x, int y, int z)
     {
         if (x < 0 || y < 0 || z < 0 ||
-            x > Width || y > Height || z > Depth)
+            x >= Width || y >= Height || z >= Depth)
             return -1f;
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
@@ -120,7 +120,7 @@ public sealed class SparseVoxelField
     public ushort GetMaterialId(int x, int y, int z)
     {
         if (!IsInsideCell(x, y, z) ||
-            SampleDensity(x + 0.5f, y + 0.5f, z + 0.5f) <= 0f)
+            GetDensity(x, y, z) <= 0f)
             return 0;
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
@@ -142,6 +142,28 @@ public sealed class SparseVoxelField
 
     public bool IsChunkKnown(int chunkX, int chunkY, int chunkZ) =>
         _chunks.ContainsKey(new ChunkCoordinate(chunkX, chunkY, chunkZ));
+
+    public bool HasEditsInArea(int minX, int maxX, int minZ, int maxZ)
+    {
+        if (maxX < 0 || maxZ < 0 || minX >= Width || minZ >= Depth)
+            return false;
+
+        int firstChunkX = Math.Max(0, minX) / ChunkSize;
+        int lastChunkX = Math.Min(Width - 1, maxX) / ChunkSize;
+        int firstChunkZ = Math.Max(0, minZ) / ChunkSize;
+        int lastChunkZ = Math.Min(Depth - 1, maxZ) / ChunkSize;
+        int chunksY = (Height + ChunkSize - 1) / ChunkSize;
+
+        for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
+        for (int chunkX = firstChunkX; chunkX <= lastChunkX; chunkX++)
+        for (int chunkY = 0; chunkY < chunksY; chunkY++)
+        {
+            if (_chunks.ContainsKey(new ChunkCoordinate(chunkX, chunkY, chunkZ)))
+                return true;
+        }
+
+        return false;
+    }
 
     public bool HasEditsInColumn(int sampleX, int sampleZ)
     {
@@ -226,7 +248,7 @@ public sealed class SparseVoxelField
             float dy = y + 0.5f - center.Y;
             float dz = z + 0.5f - center.Z;
             if (dx * dx + dy * dy + dz * dz > radiusSquared ||
-                SampleDensity(x + 0.5f, y + 0.5f, z + 0.5f) <= 0f)
+                GetDensity(x, y, z) <= 0f)
                 continue;
 
             SetMaterialOverride(x, y, z, materialId, revision, touched);
@@ -273,9 +295,9 @@ public sealed class SparseVoxelField
         for (int y = minY; y <= maxY; y++)
         for (int x = minX; x <= maxX; x++)
         {
-            float dx = x - center.X;
-            float dy = y - center.Y;
-            float dz = z - center.Z;
+            float dx = x + 0.5f - center.X;
+            float dy = y + 0.5f - center.Y;
+            float dz = z + 0.5f - center.Z;
             float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
             float shapeDensity = radius - distance;
             float oldDensity = GetDensity(x, y, z);
@@ -296,7 +318,7 @@ public sealed class SparseVoxelField
             if (!inside)
                 continue;
 
-            float density = SampleDensity(x + 0.5f, y + 0.5f, z + 0.5f);
+            float density = GetDensity(x, y, z);
             if (add && density > 0f)
                 SetMaterialOverride(x, y, z, materialId, revision, touched);
             else if (!add && density <= 0f)
@@ -335,7 +357,7 @@ public sealed class SparseVoxelField
         for (int y = minY; y <= maxY; y++)
         for (int x = minX; x <= maxX; x++)
         {
-            Vector3 point = new(x, y, z);
+            Vector3 point = new(x + 0.5f, y + 0.5f, z + 0.5f);
             float t = segmentLengthSquared > 0.0001f
                 ? Math.Clamp(Vector3.Dot(point - start, segment) / segmentLengthSquared, 0f, 1f)
                 : 0f;
@@ -393,7 +415,7 @@ public sealed class SparseVoxelField
         Vector3 center = (min + max) * 0.5f;
         // Expand by half a native cell so even a one-voxel-thick edit
         // produces positive lattice samples and a closed isosurface.
-        Vector3 half = (max - min) * 0.5f + new Vector3(0.5f);
+        Vector3 half = (max - min) * 0.5f;
         int minX = bounds.MinX;
         int minY = bounds.MinY;
         int minZ = bounds.MinZ;
@@ -407,7 +429,7 @@ public sealed class SparseVoxelField
         for (int y = minY; y <= maxY; y++)
         for (int x = minX; x <= maxX; x++)
         {
-            Vector3 q = Vector3.Abs(new Vector3(x, y, z) - center) - half;
+            Vector3 q = Vector3.Abs(new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) - center) - half;
             Vector3 outside = Vector3.Max(q, Vector3.Zero);
             float signedDistance = outside.Length() +
                 MathF.Min(MathF.Max(q.X, MathF.Max(q.Y, q.Z)), 0f);
