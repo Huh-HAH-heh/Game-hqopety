@@ -101,6 +101,8 @@ public static class CombatSelfTest
         RunTest("Voxel terrain: falling body lands on the lower voxel floor", VoxelTerrainSelfTest.VerticalGravityFindsTunnelFloor, ref passed, ref failed);
         RunTest("Voxel navigation: distant voxel edits preserve unaffected local graph", VoxelTerrainSelfTest.DistantVoxelEditsKeepLocalNavCache, ref passed, ref failed);
         RunTest("Voxel navigation: hierarchical portals cross region boundaries", VoxelTerrainSelfTest.NavigationCrossesRegionPortals, ref passed, ref failed);
+        RunTest("Voxel navigation: route follows bridge deck independently", VoxelTerrainSelfTest.NavigationKeepsBridgeFloor, ref passed, ref failed);
+        RunTest("Voxel navigation: route rejects floors without body clearance", VoxelTerrainSelfTest.NavigationRejectsInsufficientHeadroom, ref passed, ref failed);
         RunTest("Voxel navigation: route follows lower tunnel floor", VoxelTerrainSelfTest.NavigationKeepsLowerFloor, ref passed, ref failed);
         RunTest("Water: dry maps do not allocate dense vertical storage", TestSparseWaterLayerStorage, ref passed, ref failed);
         RunTest("Vision: LOS respects 0.1 m terrain layers", TestVisionHeightUnits, ref passed, ref failed);

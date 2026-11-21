@@ -338,6 +338,49 @@ internal static class VoxelTerrainSelfTest
                navigation.CachedRouteCount == 1;
     }
 
+    public static bool NavigationKeepsBridgeFloor()
+    {
+        WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        for (int x = 0; x < worldMap.TileWidth; x++)
+            worldMap.SetSolidHeight(x, y, 20, Rock);
+
+        BuildTunnelAndBridge(worldMap.Voxels);
+        VoxelNavigationSystem navigation = new();
+        bool found = navigation.TryGetWaypoint(
+            worldMap,
+            new UnitId(3, 1),
+            new Vector3(2.25f, 3.25f, 4.4f),
+            new Vector3(4.25f, 3.25f, 4.4f),
+            bodyHeight: 1.1f,
+            out bool ownsVoxelRegion,
+            out Vector3 waypoint);
+
+        return found && ownsVoxelRegion &&
+            MathF.Abs(waypoint.Z - 4.4f) <= 0.2f;
+    }
+
+    public static bool NavigationRejectsInsufficientHeadroom()
+    {
+        WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        for (int x = 0; x < worldMap.TileWidth; x++)
+            worldMap.SetSolidHeight(x, y, 20, Rock);
+
+        BuildTunnelAndBridge(worldMap.Voxels);
+        VoxelNavigationSystem navigation = new();
+        bool found = navigation.TryGetWaypoint(
+            worldMap,
+            new UnitId(4, 1),
+            new Vector3(2.25f, 3.25f, 0.5f),
+            new Vector3(4.25f, 3.25f, 0.5f),
+            bodyHeight: 2.5f,
+            out bool ownsVoxelRegion,
+            out _);
+
+        return ownsVoxelRegion && !found;
+    }
+
     public static bool NavigationKeepsLowerFloor()
     {
         WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
