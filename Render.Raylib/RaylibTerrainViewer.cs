@@ -16,7 +16,10 @@ public static class RaylibTerrainViewer
         Off,
         CarveSphere,
         AddSphere,
-        PaintSphere
+        PaintSphere,
+        SmoothSphere,
+        CarveCapsule,
+        AddCapsule
     }
 
     public static void Run(WorldMap worldMap)
@@ -91,6 +94,8 @@ public static class RaylibTerrainViewer
         VoxelEditMode voxelEditMode = VoxelEditMode.Off;
         float voxelBrushRadiusMeters = 1.5f;
         ushort voxelBrushMaterial = 1;
+        bool voxelStrokeActive = false;
+        Vector3 voxelStrokeStart = default;
 
         if (cutawayMode)
             FocusLowerTunnel(camera, terrain);
@@ -376,29 +381,55 @@ public static class RaylibTerrainViewer
                                 out Vector3 hitPosition,
                                 out Vector3 hitNormal))
                             {
-                                switch (voxelEditMode)
+                                if (voxelEditMode is VoxelEditMode.CarveCapsule or VoxelEditMode.AddCapsule)
                                 {
-                                    case VoxelEditMode.CarveSphere:
-                                        worldMap.CarveVoxelSphere(
-                                            hitPosition - hitNormal * voxelBrushRadiusMeters * 0.2f,
-                                            voxelBrushRadiusMeters);
-                                        break;
-
-                                    case VoxelEditMode.AddSphere:
-                                        worldMap.AddVoxelSphere(
-                                            hitPosition + hitNormal * voxelBrushRadiusMeters * 0.25f,
-                                            voxelBrushRadiusMeters,
-                                            voxelBrushMaterial);
-                                        break;
-
-                                    case VoxelEditMode.PaintSphere:
-                                        worldMap.PaintVoxelSphere(
-                                            hitPosition - hitNormal * voxelBrushRadiusMeters * 0.2f,
-                                            voxelBrushRadiusMeters,
-                                            voxelBrushMaterial);
-                                        break;
+                                    voxelStrokeStart = hitPosition -
+                                        hitNormal * voxelBrushRadiusMeters * 0.2f;
+                                    voxelStrokeActive = true;
+                                }
+                                else
+                                {
+                                    ApplyVoxelBrush(
+                                        worldMap,
+                                        voxelEditMode,
+                                        hitPosition,
+                                        hitNormal,
+                                        voxelBrushRadiusMeters,
+                                        voxelBrushMaterial);
                                 }
                             }
+                        }
+
+                        if (voxelStrokeActive &&
+                            IsMouseButtonReleased(MouseButton.Left))
+                        {
+                            Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
+                            if (worldMap.Voxels.TryRaycast(
+                                editRay.Position,
+                                editRay.Direction,
+                                menu.Settings.RenderDistanceMeters,
+                                out Vector3 hitPosition,
+                                out Vector3 hitNormal))
+                            {
+                                Vector3 end = hitPosition -
+                                    hitNormal * voxelBrushRadiusMeters * 0.2f;
+                                if (voxelEditMode == VoxelEditMode.CarveCapsule)
+                                {
+                                    worldMap.CarveVoxelCapsule(
+                                        voxelStrokeStart,
+                                        end,
+                                        voxelBrushRadiusMeters);
+                                }
+                                else if (voxelEditMode == VoxelEditMode.AddCapsule)
+                                {
+                                    worldMap.AddVoxelCapsule(
+                                        voxelStrokeStart,
+                                        end,
+                                        voxelBrushRadiusMeters,
+                                        voxelBrushMaterial);
+                                }
+                            }
+                            voxelStrokeActive = false;
                         }
                     }
                 }
@@ -480,10 +511,45 @@ public static class RaylibTerrainViewer
             VoxelEditMode.CarveSphere => "CARVE SPHERE",
             VoxelEditMode.AddSphere => "ADD SPHERE",
             VoxelEditMode.PaintSphere => "PAINT SPHERE",
+            VoxelEditMode.SmoothSphere => "SMOOTH SPHERE",
+            VoxelEditMode.CarveCapsule => "CARVE CAPSULE",
+            VoxelEditMode.AddCapsule => "ADD CAPSULE",
             _ => "EDIT OFF"
         };
 
         return $"VOXEL TOOL {name} | RADIUS {radiusMeters:0.00}m | MATERIAL {materialId}";
+    }
+
+    private static void ApplyVoxelBrush(
+        WorldMap worldMap,
+        VoxelEditMode mode,
+        Vector3 hitPosition,
+        Vector3 hitNormal,
+        float radiusMeters,
+        ushort materialId)
+    {
+        Vector3 carveCenter = hitPosition - hitNormal * radiusMeters * 0.2f;
+        switch (mode)
+        {
+            case VoxelEditMode.CarveSphere:
+                worldMap.CarveVoxelSphere(carveCenter, radiusMeters);
+                break;
+
+            case VoxelEditMode.AddSphere:
+                worldMap.AddVoxelSphere(
+                    hitPosition + hitNormal * radiusMeters * 0.25f,
+                    radiusMeters,
+                    materialId);
+                break;
+
+            case VoxelEditMode.PaintSphere:
+                worldMap.PaintVoxelSphere(carveCenter, radiusMeters, materialId);
+                break;
+
+            case VoxelEditMode.SmoothSphere:
+                worldMap.SmoothVoxelSphere(carveCenter, radiusMeters, 0.55f);
+                break;
+        }
     }
 
     private static void FocusLowerTunnel(
@@ -609,7 +675,7 @@ public static class RaylibTerrainViewer
             {
                 lines.Add((voxelToolStatus, 15f, Color.LightGray));
                 lines.Add((
-                    "F3 tool | LMB apply | F4 material | F5/F6 brush radius",
+                    "F3 tool | LMB click/drag | F4 material | F5/F6 radius",
                     15f,
                     Color.LightGray));
             }
