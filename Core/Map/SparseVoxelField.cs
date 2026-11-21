@@ -143,6 +143,23 @@ public sealed class SparseVoxelField
     public bool IsChunkKnown(int chunkX, int chunkY, int chunkZ) =>
         _chunks.ContainsKey(new ChunkCoordinate(chunkX, chunkY, chunkZ));
 
+    public bool HasEditsInColumn(int sampleX, int sampleZ)
+    {
+        if (sampleX < 0 || sampleX >= Width ||
+            sampleZ < 0 || sampleZ >= Depth)
+            return false;
+
+        int chunkX = sampleX / ChunkSize;
+        int chunkZ = sampleZ / ChunkSize;
+        int chunksY = (Height + ChunkSize - 1) / ChunkSize;
+        for (int chunkY = 0; chunkY < chunksY; chunkY++)
+        {
+            if (_chunks.ContainsKey(new ChunkCoordinate(chunkX, chunkY, chunkZ)))
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>
     /// Marks a procedural base-surface change without allocating voxel chunks.
     /// The owner is responsible for invalidating its navigation/surface caches.
@@ -374,7 +391,9 @@ public sealed class SparseVoxelField
             (int)MathF.Ceiling(max.Z + 1f));
 
         Vector3 center = (min + max) * 0.5f;
-        Vector3 half = (max - min) * 0.5f;
+        // Expand by half a native cell so even a one-voxel-thick edit
+        // produces positive lattice samples and a closed isosurface.
+        Vector3 half = (max - min) * 0.5f + new Vector3(0.5f);
         int minX = bounds.MinX;
         int minY = bounds.MinY;
         int minZ = bounds.MinZ;
@@ -551,7 +570,7 @@ public sealed class SparseVoxelField
     {
         if (!float.IsFinite(radiusMeters) || radiusMeters <= 0f || radiusMeters > 64f)
             throw new ArgumentOutOfRangeException(nameof(radiusMeters));
-        if (!allowAir && materialId == 0)
+        if (allowAir && materialId == 0)
             throw new ArgumentOutOfRangeException(nameof(materialId));
     }
 
