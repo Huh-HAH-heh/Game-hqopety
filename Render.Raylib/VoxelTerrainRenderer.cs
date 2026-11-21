@@ -179,7 +179,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _frame++;
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
-        int step = SelectLod(cameraDistance);
+        int previousStep = _activeStep;
+        int step = SelectLod(cameraDistance, previousStep);
+        bool lodChanged = step != previousStep;
+        if (_chunks.Count == 0)
+        {
+            previousStep = step;
+            lodChanged = false;
+        }
         _activeStep = step;
 
         float chunkSizeMeters = ChunkCells * step * SparseVoxelField.VoxelSizeMeters;
@@ -250,6 +257,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             a.DistanceSquared.CompareTo(b.DistanceSquared));
 
         _visible.Clear();
+        HashSet<ChunkKey> visibleKeys = new();
+        List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
+            new(candidates.Count);
         int baseBuilds = 0;
         int cutBuilds = 0;
         int maximumBaseBuilds = step >= 40
@@ -325,8 +335,117 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 ClearCutCap(entry);
             }
 
-            if (entry.Built)
-                _visible.Add((key, entry));
+            candidateEntries.Add((candidate, entry));
+        }
+
+        if (!lodChanged)
+        {
+            foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
+            {
+                if (entry.Built)
+                    AddVisible(candidate.Key, entry, visibleKeys);
+            }
+        }
+        else if (step < previousStep)
+        {
+            // Refining LOD: keep each old coarse parent until every visible
+            // child that replaces it has a clean mesh. Never mix a coarse
+            // parent with only some of its finer children (z-fighting/overdraw).
+            float oldChunkSize = ChunkCells * previousStep *
+                SparseVoxelField.VoxelSizeMeters;
+            Dictionary<ChunkKey, List<(Candidate Candidate, ChunkEntry Entry)>> groups = new();
+            foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
+            {
+                ChunkKey parent = new(
+                    previousStep,
+                    (int)MathF.Floor(candidate.Center.X / oldChunkSize),
+                    (int)MathF.Floor(candidate.Center.Y / oldChunkSize),
+                    (int)MathF.Floor(candidate.Center.Z / oldChunkSize));
+                if (!groups.TryGetValue(parent, out var children))
+                {
+                    children = new List<(Candidate, ChunkEntry)>();
+                    groups.Add(parent, children);
+                }
+                children.Add((candidate, entry));
+            }
+
+            foreach ((ChunkKey parent, List<(Candidate Candidate, ChunkEntry Entry)> children) in groups)
+            {
+                bool allReady = true;
+                foreach ((Candidate _, ChunkEntry child) in children)
+                {
+                    if (!IsCurrentMeshReady(child, field))
+                    {
+                        allReady = false;
+                        break;
+                    }
+                }
+
+                if (allReady)
+                {
+                    foreach ((Candidate candidate, ChunkEntry child) in children)
+                        AddVisible(candidate.Key, child, visibleKeys);
+                    continue;
+                }
+
+                if (_chunks.TryGetValue(parent, out ChunkEntry? fallback) && fallback.Built)
+                {
+                    AddVisible(parent, fallback, visibleKeys);
+                    continue;
+                }
+
+                foreach ((Candidate candidate, ChunkEntry child) in children)
+                {
+                    if (child.Built)
+                        AddVisible(candidate.Key, child, visibleKeys);
+                }
+            }
+        }
+        else
+        {
+            // Coarsening LOD: draw the previous finer meshes until their
+            // replacement coarse chunk is ready.
+            float newChunkSize = ChunkCells * step *
+                SparseVoxelField.VoxelSizeMeters;
+            float oldChunkSize = ChunkCells * previousStep *
+                SparseVoxelField.VoxelSizeMeters;
+            foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
+            {
+                if (IsCurrentMeshReady(entry, field))
+                {
+                    AddVisible(candidate.Key, entry, visibleKeys);
+                    continue;
+                }
+
+                float minX = candidate.Key.X * newChunkSize;
+                float minY = candidate.Key.Y * newChunkSize;
+                float minZ = candidate.Key.Z * newChunkSize;
+                float maxX = minX + newChunkSize;
+                float maxY = minY + newChunkSize;
+                float maxZ = minZ + newChunkSize;
+                int firstX = (int)MathF.Floor(minX / oldChunkSize);
+                int firstY = (int)MathF.Floor(minY / oldChunkSize);
+                int firstZ = (int)MathF.Floor(minZ / oldChunkSize);
+                int lastX = (int)MathF.Floor((maxX - 0.0001f) / oldChunkSize);
+                int lastY = (int)MathF.Floor((maxY - 0.0001f) / oldChunkSize);
+                int lastZ = (int)MathF.Floor((maxZ - 0.0001f) / oldChunkSize);
+                bool addedFineFallback = false;
+
+                for (int z = firstZ; z <= lastZ; z++)
+                for (int y = firstY; y <= lastY; y++)
+                for (int x = firstX; x <= lastX; x++)
+                {
+                    ChunkKey fineKey = new(previousStep, x, y, z);
+                    if (!_chunks.TryGetValue(fineKey, out ChunkEntry? fine) || !fine.Built)
+                        continue;
+
+                    AddVisible(fineKey, fine, visibleKeys);
+                    addedFineFallback = true;
+                }
+
+                if (!addedFineFallback && entry.Built)
+                    AddVisible(candidate.Key, entry, visibleKeys);
+            }
         }
 
         if (_chunks.Count > MaximumCachedChunks)
@@ -380,12 +499,41 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             EvictUnusedChunks();
     }
 
-    private static int SelectLod(float cameraDistance)
+    private static int SelectLod(float cameraDistance, int currentStep)
     {
-        if (cameraDistance < 26f) return 1;
-        if (cameraDistance < 95f) return 5;
-        if (cameraDistance < 420f) return 10;
-        return 40;
+        // Small dead bands stop the mesh tier from oscillating around thresholds.
+        return currentStep switch
+        {
+            1 => cameraDistance < 28f ? 1 :
+                 cameraDistance < 105f ? 5 :
+                 cameraDistance < 450f ? 10 : 40,
+            5 => cameraDistance < 24f ? 1 :
+                 cameraDistance < 105f ? 5 :
+                 cameraDistance < 450f ? 10 : 40,
+            10 => cameraDistance < 24f ? 1 :
+                  cameraDistance < 90f ? 5 :
+                  cameraDistance < 450f ? 10 : 40,
+            40 => cameraDistance < 24f ? 1 :
+                  cameraDistance < 90f ? 5 :
+                  cameraDistance < 390f ? 10 : 40,
+            _ => cameraDistance < 26f ? 1 :
+                 cameraDistance < 95f ? 5 :
+                 cameraDistance < 420f ? 10 : 40
+        };
+    }
+
+    private static bool IsCurrentMeshReady(ChunkEntry entry, SparseVoxelField field) =>
+        entry.Built &&
+        !entry.SurfaceDirty &&
+        entry.BaseVersion == field.BaseVersion;
+
+    private void AddVisible(
+        ChunkKey key,
+        ChunkEntry entry,
+        HashSet<ChunkKey> visibleKeys)
+    {
+        if (entry.Built && visibleKeys.Add(key))
+            _visible.Add((key, entry));
     }
 
     private static float GetViewRadius(
