@@ -56,15 +56,94 @@ public sealed class SparseVoxelField
         public long Revision;
     }
 
+    private sealed class ChunkSnapshot
+    {
+        public required short[] Density { get; init; }
+        public required byte[] DensityMask { get; init; }
+        public required ushort[] Materials { get; init; }
+        public required byte[] MaterialMask { get; init; }
+
+        public static ChunkSnapshot From(Chunk chunk) => new()
+        {
+            Density = (short[])chunk.Density.Clone(),
+            DensityMask = (byte[])chunk.DensityMask.Clone(),
+            Materials = (ushort[])chunk.Materials.Clone(),
+            MaterialMask = (byte[])chunk.MaterialMask.Clone()
+        };
+
+        public Chunk ToChunk(long revision)
+        {
+            Chunk chunk = new() { Revision = revision };
+            Density.CopyTo(chunk.Density, 0);
+            DensityMask.CopyTo(chunk.DensityMask, 0);
+            Materials.CopyTo(chunk.Materials, 0);
+            MaterialMask.CopyTo(chunk.MaterialMask, 0);
+            return chunk;
+        }
+
+        public bool ContentEquals(ChunkSnapshot other) =>
+            Density.AsSpan().SequenceEqual(other.Density) &&
+            DensityMask.AsSpan().SequenceEqual(other.DensityMask) &&
+            Materials.AsSpan().SequenceEqual(other.Materials) &&
+            MaterialMask.AsSpan().SequenceEqual(other.MaterialMask);
+    }
+
+    private sealed class EditHistoryCapture
+    {
+        public readonly Dictionary<ChunkCoordinate, ChunkSnapshot?> Before = new();
+        public VoxelBounds Bounds;
+        public bool HasBounds;
+    }
+
+    private sealed class EditHistoryEntry
+    {
+        public required Dictionary<ChunkCoordinate, ChunkSnapshot?> Before { get; init; }
+        public required Dictionary<ChunkCoordinate, ChunkSnapshot?> After { get; init; }
+        public required VoxelBounds Bounds { get; init; }
+        public long EstimatedBytes { get; init; }
+    }
+
+    private sealed class UndoScope : IDisposable
+    {
+        private SparseVoxelField? _owner;
+
+        public UndoScope(SparseVoxelField owner) => _owner = owner;
+
+        public void Dispose()
+        {
+            SparseVoxelField? owner = _owner;
+            if (owner == null)
+                return;
+
+            _owner = null;
+            owner.FinishUndoableEdit();
+        }
+    }
+
+    private const int MaximumUndoEntries = 16;
+    private const long MaximumUndoBytes = 64L * 1024 * 1024;
+    private const long ChunkSnapshotBytes =
+        SampleCount * (sizeof(short) + sizeof(byte)) +
+        CellCount * (sizeof(ushort) + sizeof(byte));
+
     private readonly Dictionary<ChunkCoordinate, Chunk> _chunks = new();
     private readonly HashSet<(int X, int Z)> _editedChunkColumns = new();
+    private readonly List<EditHistoryEntry> _undoHistory = new();
+    private readonly List<EditHistoryEntry> _redoHistory = new();
     private readonly Func<int, int, int, float> _baseDensity;
     private readonly Func<int, int, int, ushort> _baseMaterial;
+    private EditHistoryCapture? _historyCapture;
+    private long _undoHistoryBytes;
+    private bool _isRestoringHistory;
 
     public int Width { get; }
     public int Height { get; }
     public int Depth { get; }
     public int ChunkCount => _chunks.Count;
+    public int UndoCount => _undoHistory.Count;
+    public int RedoCount => _redoHistory.Count;
+    public bool CanUndo => _undoHistory.Count > 0;
+    public bool CanRedo => _redoHistory.Count > 0;
     public long Version { get; private set; }
     public long BaseVersion { get; private set; }
 
@@ -500,6 +579,10 @@ public sealed class SparseVoxelField
             }
         }
 
+        _undoHistory.Clear();
+        _redoHistory.Clear();
+        _undoHistoryBytes = 0;
+        _historyCapture = null;
         _chunks.Clear();
         foreach ((ChunkCoordinate key, Chunk chunk) in loaded)
             _chunks.Add(key, chunk);
@@ -690,6 +773,7 @@ public sealed class SparseVoxelField
             if (!_chunks.TryGetValue(key, out Chunk? chunk))
                 continue;
 
+            CaptureChunkBeforeWrite(key);
             int localMinX = Math.Max(0, minX - chunkX * ChunkSize);
             int localMaxX = Math.Min(ChunkSize, maxX - chunkX * ChunkSize);
             int localMinZ = Math.Max(0, minZ - chunkZ * ChunkSize);
@@ -763,6 +847,9 @@ public sealed class SparseVoxelField
         }
 
         Version = revision;
+        IncludeHistoryBounds(new VoxelBounds(
+            minX, 0, minZ,
+            maxX, Height, maxZ));
         Changed?.Invoke(new VoxelBounds(
             minX, 0, minZ,
             maxX, Height, maxZ));
@@ -773,10 +860,63 @@ public sealed class SparseVoxelField
         if (_chunks.Count == 0)
             return;
 
+        foreach (ChunkCoordinate key in _chunks.Keys)
+            CaptureChunkBeforeWrite(key);
+
         _chunks.Clear();
         _editedChunkColumns.Clear();
         Version++;
-        Changed?.Invoke(new VoxelBounds(0, 0, 0, Width, Height, Depth));
+        VoxelBounds bounds = new(0, 0, 0, Width, Height, Depth);
+        IncludeHistoryBounds(bounds);
+        Changed?.Invoke(bounds);
+    }
+
+    /// <summary>
+    /// Starts one undoable user operation. All voxel mutations until the
+    /// returned scope is disposed are grouped into a single undo step.
+    /// </summary>
+    public IDisposable BeginUndoableEdit()
+    {
+        if (_historyCapture != null)
+            throw new InvalidOperationException("Nested voxel edit history scopes are not supported.");
+
+        _historyCapture = new EditHistoryCapture();
+        return new UndoScope(this);
+    }
+
+    public bool Undo()
+    {
+        if (_historyCapture != null)
+            throw new InvalidOperationException("Finish the active voxel edit before undoing.");
+
+        if (_undoHistory.Count == 0)
+            return false;
+
+        int last = _undoHistory.Count - 1;
+        EditHistoryEntry entry = _undoHistory[last];
+        _undoHistory.RemoveAt(last);
+        _undoHistoryBytes -= entry.EstimatedBytes;
+        RestoreHistory(entry.Before, entry.Bounds);
+        _redoHistory.Add(entry);
+        return true;
+    }
+
+    public bool Redo()
+    {
+        if (_historyCapture != null)
+            throw new InvalidOperationException("Finish the active voxel edit before redoing.");
+
+        if (_redoHistory.Count == 0)
+            return false;
+
+        int last = _redoHistory.Count - 1;
+        EditHistoryEntry entry = _redoHistory[last];
+        _redoHistory.RemoveAt(last);
+        RestoreHistory(entry.After, entry.Bounds);
+        _undoHistory.Add(entry);
+        _undoHistoryBytes += entry.EstimatedBytes;
+        TrimUndoHistory();
+        return true;
     }
 
     public void CarveSphere(Vector3 centerMeters, float radiusMeters) =>
@@ -1134,6 +1274,7 @@ public sealed class SparseVoxelField
             return;
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
+        CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
         chunk.Density[index] = Quantize(density);
         chunk.DensityMask[index] = 1;
@@ -1152,6 +1293,12 @@ public sealed class SparseVoxelField
             return;
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
+        if (_chunks.TryGetValue(key, out Chunk? existing) &&
+            existing.MaterialMask[index] != 0 &&
+            existing.Materials[index] == materialId)
+            return;
+
+        CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
         chunk.Materials[index] = materialId;
         chunk.MaterialMask[index] = 1;
@@ -1169,6 +1316,132 @@ public sealed class SparseVoxelField
             return;
 
         Version = revision;
+        IncludeHistoryBounds(bounds);
+        Changed?.Invoke(bounds);
+    }
+
+    private void CaptureChunkBeforeWrite(ChunkCoordinate key)
+    {
+        if (_historyCapture == null || _isRestoringHistory ||
+            _historyCapture.Before.ContainsKey(key))
+            return;
+
+        _historyCapture.Before.Add(
+            key,
+            _chunks.TryGetValue(key, out Chunk? chunk)
+                ? ChunkSnapshot.From(chunk)
+                : null);
+    }
+
+    private void IncludeHistoryBounds(VoxelBounds bounds)
+    {
+        if (_historyCapture == null)
+            return;
+
+        if (!_historyCapture.HasBounds)
+        {
+            _historyCapture.Bounds = bounds;
+            _historyCapture.HasBounds = true;
+            return;
+        }
+
+        VoxelBounds current = _historyCapture.Bounds;
+        _historyCapture.Bounds = new VoxelBounds(
+            Math.Min(current.MinX, bounds.MinX),
+            Math.Min(current.MinY, bounds.MinY),
+            Math.Min(current.MinZ, bounds.MinZ),
+            Math.Max(current.MaxX, bounds.MaxX),
+            Math.Max(current.MaxY, bounds.MaxY),
+            Math.Max(current.MaxZ, bounds.MaxZ));
+    }
+
+    private void FinishUndoableEdit()
+    {
+        EditHistoryCapture? capture = _historyCapture;
+        _historyCapture = null;
+        if (capture == null || capture.Before.Count == 0)
+            return;
+
+        Dictionary<ChunkCoordinate, ChunkSnapshot?> after = new(capture.Before.Count);
+        long estimatedBytes = 0;
+        bool anyDifference = false;
+        foreach ((ChunkCoordinate key, ChunkSnapshot? before) in capture.Before)
+        {
+            ChunkSnapshot? current = _chunks.TryGetValue(key, out Chunk? chunk)
+                ? ChunkSnapshot.From(chunk)
+                : null;
+            after.Add(key, current);
+
+            if (before == null && current == null)
+                continue;
+            if (before != null && current != null && before.ContentEquals(current))
+                continue;
+
+            anyDifference = true;
+            if (before != null)
+                estimatedBytes += ChunkSnapshotBytes;
+            if (current != null)
+                estimatedBytes += ChunkSnapshotBytes;
+        }
+
+        if (!anyDifference)
+            return;
+
+        _redoHistory.Clear();
+        EditHistoryEntry entry = new()
+        {
+            Before = capture.Before,
+            After = after,
+            Bounds = capture.HasBounds
+                ? capture.Bounds
+                : new VoxelBounds(0, 0, 0, Width, Height, Depth),
+            EstimatedBytes = estimatedBytes
+        };
+
+        _undoHistory.Add(entry);
+        _undoHistoryBytes += estimatedBytes;
+        TrimUndoHistory();
+    }
+
+    private void TrimUndoHistory()
+    {
+        while (_undoHistory.Count > MaximumUndoEntries ||
+               (_undoHistoryBytes > MaximumUndoBytes && _undoHistory.Count > 1))
+        {
+            EditHistoryEntry oldest = _undoHistory[0];
+            _undoHistory.RemoveAt(0);
+            _undoHistoryBytes -= oldest.EstimatedBytes;
+        }
+    }
+
+    private void RestoreHistory(
+        Dictionary<ChunkCoordinate, ChunkSnapshot?> snapshots,
+        VoxelBounds bounds)
+    {
+        _isRestoringHistory = true;
+        Version++;
+        try
+        {
+            foreach ((ChunkCoordinate key, ChunkSnapshot? snapshot) in snapshots)
+            {
+                if (snapshot == null)
+                {
+                    _chunks.Remove(key);
+                    continue;
+                }
+
+                _chunks[key] = snapshot.ToChunk(Version);
+            }
+        }
+        finally
+        {
+            _isRestoringHistory = false;
+        }
+
+        _editedChunkColumns.Clear();
+        foreach (ChunkCoordinate key in _chunks.Keys)
+            _editedChunkColumns.Add((key.X, key.Z));
+
         Changed?.Invoke(bounds);
     }
 
