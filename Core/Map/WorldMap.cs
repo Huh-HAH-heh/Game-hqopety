@@ -1312,11 +1312,11 @@ public sealed class WorldMap
     private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
     {
         if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
-            voxelX > Voxels.Width || voxelY > Voxels.Height || voxelZ > Voxels.Depth)
+            voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
             return -1f;
 
-        float tileX = voxelX * 0.1f;
-        float tileY = voxelZ * 0.1f;
+        float tileX = (voxelX + 0.5f) * 0.1f;
+        float tileY = (voxelZ + 0.5f) * 0.1f;
         int x0 = Math.Clamp((int)MathF.Floor(tileX), 0, MaxTileX);
         int y0 = Math.Clamp((int)MathF.Floor(tileY), 0, MaxTileY);
         int x1 = Math.Min(x0 + 1, MaxTileX);
@@ -1330,7 +1330,7 @@ public sealed class WorldMap
         float h11 = _surfaceHeights[GetColumnIndex(x1, y1)];
         float top = h00 + (h10 - h00) * tx;
         float bottom = h01 + (h11 - h01) * tx;
-        return top + (bottom - top) * ty - voxelY;
+        return top + (bottom - top) * ty - (voxelY + 0.5f);
     }
 
     private ushort SampleBaseVoxelMaterial(int voxelX, int voxelY, int voxelZ)
