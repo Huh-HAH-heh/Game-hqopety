@@ -106,11 +106,24 @@ internal static class VoxelTerrainSelfTest
         int surfaceCount = restored.FindWalkableSurfacesAt(
             3f, 3f, minimumUpNormal: 0.72f, surfaces);
 
-        return restored.ChunkCount == source.ChunkCount &&
-               MathF.Abs(restored.GetDensity(30, 12, 30) - carvedDensity) < 0.001f &&
-               restored.GetMaterialId(30, 43, 30) == bridgeMaterial &&
-               bridgeMaterial == BridgeMaterial &&
-               surfaceCount >= 3;
+        int restoredChunkCount = restored.ChunkCount;
+        float restoredCarvedDensity = restored.GetDensity(30, 12, 30);
+        ushort restoredBridgeMaterial = restored.GetMaterialId(30, 43, 30);
+        bool chunksMatch = restoredChunkCount == source.ChunkCount;
+        bool densityMatches = MathF.Abs(restoredCarvedDensity - carvedDensity) < 0.001f;
+        bool materialMatches = restoredBridgeMaterial == bridgeMaterial &&
+            bridgeMaterial == BridgeMaterial;
+        bool surfacesMatch = surfaceCount >= 3;
+
+        if (!chunksMatch || !densityMatches || !materialMatches || !surfacesMatch)
+        {
+            Console.WriteLine(
+                $"[DETAIL] voxel save: chunks={restoredChunkCount}/{source.ChunkCount}, " +
+                $"density={restoredCarvedDensity:0.000}/{carvedDensity:0.000}, " +
+                $"material={restoredBridgeMaterial}/{bridgeMaterial}, surfaces={surfaceCount}.");
+        }
+
+        return chunksMatch && densityMatches && materialMatches && surfacesMatch;
     }
 
     public static bool NavigationKeepsLowerFloor()
@@ -131,8 +144,16 @@ internal static class VoxelTerrainSelfTest
             out bool ownsVoxelRegion,
             out Vector3 waypoint);
 
-        return found &&
-               ownsVoxelRegion &&
-               MathF.Abs(waypoint.Z - 0.5f) <= 0.2f;
+        bool lowerFloorSelected = found &&
+            ownsVoxelRegion &&
+            MathF.Abs(waypoint.Z - 0.5f) <= 0.2f;
+        if (!lowerFloorSelected)
+        {
+            Console.WriteLine(
+                $"[DETAIL] voxel route: found={found}, owns={ownsVoxelRegion}, " +
+                $"waypoint=({waypoint.X:0.00},{waypoint.Y:0.00},{waypoint.Z:0.00}), " +
+                $"terrainVersion={worldMap.TerrainVersion}, chunks={worldMap.Voxels.ChunkCount}.");
+        }
+        return lowerFloorSelected;
     }
 }
