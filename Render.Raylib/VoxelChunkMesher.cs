@@ -138,9 +138,9 @@ internal static class VoxelChunkMesher
         for (int y = 0; y < SampleSide; y++)
         for (int x = 0; x < SampleSide; x++)
         {
-            int worldX = originX + (x - 1) * step;
-            int worldY = originY + (y - 1) * step;
-            int worldZ = originZ + (z - 1) * step;
+            int worldX = SparseVoxelField.GetChunkSampleCoordinate(chunkX, x, step);
+            int worldY = SparseVoxelField.GetChunkSampleCoordinate(chunkY, y, step);
+            int worldZ = SparseVoxelField.GetChunkSampleCoordinate(chunkZ, z, step);
             density[GetSampleIndex(x, y, z)] =
                 field.GetDensity(worldX, worldY, worldZ);
         }

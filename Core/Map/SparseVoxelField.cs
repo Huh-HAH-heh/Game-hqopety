@@ -139,6 +139,25 @@ public sealed class SparseVoxelField
     public int Width { get; }
     public int Height { get; }
     public int Depth { get; }
+
+    /// <summary>
+    /// Maps a chunk-local halo sample index (0..18) onto the shared global
+    /// density lattice. Adjacent chunks therefore address identical boundary
+    /// samples, including all supported LOD steps.
+    /// </summary>
+    public static int GetChunkSampleCoordinate(int chunkIndex, int sampleIndex, int step)
+    {
+        if (chunkIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+        if (sampleIndex < 0 || sampleIndex >= ChunkSize + 3)
+            throw new ArgumentOutOfRangeException(nameof(sampleIndex));
+        if (step < 1)
+            throw new ArgumentOutOfRangeException(nameof(step));
+
+        return checked(chunkIndex * ChunkSize * step +
+            (sampleIndex - 1) * step);
+    }
+
     public int ChunkCount => _chunks.Count;
     public int UndoCount => _undoHistory.Count;
     public int RedoCount => _redoHistory.Count;

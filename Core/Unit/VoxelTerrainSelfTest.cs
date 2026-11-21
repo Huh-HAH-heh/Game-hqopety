@@ -338,6 +338,54 @@ internal static class VoxelTerrainSelfTest
                navigation.CachedRouteCount == 1;
     }
 
+    public static bool ChunkBoundarySamplesMatchAcrossLods()
+    {
+        SparseVoxelField field = CreateField();
+        field.CarveSphere(new Vector3(1.6f, 1.05f, 3f), 0.82f);
+
+        foreach (int step in new[] { 1, 5, 10, 40 })
+        {
+            int left = SparseVoxelField.GetChunkSampleCoordinate(0, 17, step);
+            int right = SparseVoxelField.GetChunkSampleCoordinate(1, 1, step);
+            if (left != right)
+                return false;
+
+            for (int sample = 0; sample < SparseVoxelField.ChunkSize + 3; sample++)
+            {
+                int y = SparseVoxelField.GetChunkSampleCoordinate(0, sample, step);
+                int z = SparseVoxelField.GetChunkSampleCoordinate(1, sample, step);
+                int yRight = SparseVoxelField.GetChunkSampleCoordinate(0, sample, step);
+                int zRight = SparseVoxelField.GetChunkSampleCoordinate(1, sample, step);
+
+                if (y != yRight || z != zRight)
+                    return false;
+
+                float leftDensity = field.GetDensity(left, y, z);
+                float rightDensity = field.GetDensity(right, yRight, zRight);
+                if (MathF.Abs(leftDensity - rightDensity) > 0.0001f)
+                    return false;
+
+                // Verify the halo used for central-difference normals is also
+                // identical on both sides of the same chunk boundary.
+                int leftPrevious = SparseVoxelField.GetChunkSampleCoordinate(0, 16, step);
+                int rightPrevious = SparseVoxelField.GetChunkSampleCoordinate(1, 0, step);
+                int leftNext = SparseVoxelField.GetChunkSampleCoordinate(0, 18, step);
+                int rightNext = SparseVoxelField.GetChunkSampleCoordinate(1, 2, step);
+                if (leftPrevious != rightPrevious || leftNext != rightNext)
+                    return false;
+
+                float gxLeft = field.GetDensity(leftNext, y, z) -
+                    field.GetDensity(leftPrevious, y, z);
+                float gxRight = field.GetDensity(rightNext, yRight, zRight) -
+                    field.GetDensity(rightPrevious, yRight, zRight);
+                if (MathF.Abs(gxLeft - gxRight) > 0.0001f)
+                    return false;
+            }
+        }
+
+        return field.ChunkCount >= 2;
+    }
+
     public static bool NavigationKeepsBridgeFloor()
     {
         WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
