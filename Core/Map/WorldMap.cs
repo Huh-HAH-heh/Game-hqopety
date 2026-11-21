@@ -1320,8 +1320,8 @@ public sealed class WorldMap
             voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
             return -1f;
 
-        float tileX = (voxelX + 0.5f) * 0.1f;
-        float tileY = (voxelZ + 0.5f) * 0.1f;
+        float tileX = Math.Clamp((voxelX + 0.5f) * 0.1f - 0.5f, 0f, MaxTileX);
+        float tileY = Math.Clamp((voxelZ + 0.5f) * 0.1f - 0.5f, 0f, MaxTileY);
         int x0 = Math.Clamp((int)MathF.Floor(tileX), 0, MaxTileX);
         int y0 = Math.Clamp((int)MathF.Floor(tileY), 0, MaxTileY);
         int x1 = Math.Min(x0 + 1, MaxTileX);
