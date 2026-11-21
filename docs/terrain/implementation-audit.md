@@ -72,8 +72,9 @@ This avoids allocating a cubic grid for the whole 2304 x 2304 x 50 m world while
 ## Changes made during this audit
 
 - Camera orbit was inconsistent: README promised right mouse, while the controller was still listening to Shift+left mouse. The controller, HUD and README now consistently use **Shift+right mouse drag**. MMB remains pan; Shift+MMB remains the temporary speed adjustment.
-- Cut caps were being generated when the slice exactly coincided with a natural top face. That creates duplicate coplanar polygons and can cause z-fighting. The cap lookup now requires the cut plane to pass strictly through a solid run; the original top face is retained at an exact run boundary.
+- Cut-cap geometry had two duplication paths: the cap lookup could return material at an exact natural top boundary, and the base mesher could also emit a top face at the cut plane while the separate cap mesh emitted the same face. The cap lookup now requires a strict interior crossing, and the voxel base mesher suppresses its own top face for those crossed runs. At an exact natural top boundary the base face remains and no separate cap is created.
 - Cut-cap meshes are built before replacing old ones. Region scanning is round-robin, and old base meshes remain visible while replacements are being prepared.
+- Camera zoom documentation was also brought in line with the current axis zoom (no cursor-anchored focus shift).
 - The architecture proposal now uses an explicit Space Engineers-style hybrid base-surface + local 3D voxel-storage target rather than implying a dense 3D volume across the whole map.
 
 ## Remaining acceptance work
