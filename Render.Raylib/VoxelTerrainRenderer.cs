@@ -1,0 +1,474 @@
+using System;
+using System.Collections.Generic;
+using System.Numerics;
+using Core.Map;
+using Raylib_cs;
+using static Raylib_cs.Raylib;
+
+namespace RimClone.Render.Raylib;
+
+/// <summary>
+/// Chunked renderer for the authoritative 3D density field.
+/// The visible mesh is extracted from the same scalar voxels used by CSG edits,
+/// material queries and cut sections. No XY column or height-run mesh is used.
+/// </summary>
+internal sealed class VoxelTerrainRenderer : IDisposable
+{
+    private const int ChunkCells = SparseVoxelField.ChunkSize;
+    private const int MaximumCachedChunks = 1800;
+    private const int MaximumCoarseBuildsPerFrame = 10;
+    private const int MaximumMediumBuildsPerFrame = 5;
+    private const int MaximumFineBuildsPerFrame = 2;
+    private const int MaximumCutBuildsPerFrame = 20;
+
+    private const string VertexShader = """
+        #version 330
+        in vec3 vertexPosition;
+        in vec4 vertexColor;
+        in vec3 vertexNormal;
+        uniform mat4 mvp;
+        uniform mat4 matModel;
+        out vec3 fragWorldPosition;
+        out vec3 fragWorldNormal;
+        out vec4 fragColor;
+        void main()
+        {
+            vec4 worldPosition = matModel * vec4(vertexPosition, 1.0);
+            fragWorldPosition = worldPosition.xyz;
+            fragWorldNormal = normalize(mat3(matModel) * vertexNormal);
+            fragColor = vertexColor;
+            gl_Position = mvp * vec4(vertexPosition, 1.0);
+        }
+        """;
+
+    private const string FragmentShader = """
+        #version 330
+        in vec3 fragWorldPosition;
+        in vec3 fragWorldNormal;
+        in vec4 fragColor;
+        uniform int uCutEnabled;
+        uniform float uCutHeight;
+        uniform vec3 uSunDirection;
+        uniform float uAmbientLight;
+        uniform float uSunIntensity;
+        out vec4 finalColor;
+        void main()
+        {
+            if (uCutEnabled != 0 && fragWorldPosition.y > uCutHeight + 0.0001)
+                discard;
+            float diffuse = max(
+                dot(normalize(fragWorldNormal), normalize(uSunDirection)),
+                0.0);
+            float illumination = clamp(
+                uAmbientLight + diffuse * uSunIntensity,
+                0.05,
+                1.5);
+            finalColor = vec4(fragColor.rgb * illumination, fragColor.a);
+        }
+        """;
+
+    private readonly record struct ChunkKey(int Step, int X, int Y, int Z);
+
+    private sealed class ChunkEntry : IDisposable
+    {
+        public Mesh[] Surface = Array.Empty<Mesh>();
+        public Mesh[] CutCap = Array.Empty<Mesh>();
+        public long SourceVersion = long.MinValue;
+        public int PaletteVersion = int.MinValue;
+        public int CutLayer = int.MinValue;
+        public long LastSeenFrame;
+        public bool Built;
+
+        public void Dispose()
+        {
+            foreach (Mesh mesh in Surface)
+                UnloadMesh(mesh);
+            foreach (Mesh mesh in CutCap)
+                UnloadMesh(mesh);
+            Surface = Array.Empty<Mesh>();
+            CutCap = Array.Empty<Mesh>();
+            Built = false;
+        }
+    }
+
+    private readonly record struct Candidate(
+        ChunkKey Key,
+        Vector3 Center,
+        float Radius,
+        float DistanceSquared);
+
+    private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
+    private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
+    private readonly Material _material;
+    private readonly Shader _shader;
+    private readonly int _cutEnabledLocation;
+    private readonly int _cutHeightLocation;
+    private readonly int _sunDirectionLocation;
+    private readonly int _ambientLightLocation;
+    private readonly int _sunIntensityLocation;
+
+    private TerrainPalette _palette;
+    private int _paletteVersion;
+    private long _frame;
+    private bool _disposed;
+    private int _activeStep = 40;
+
+    public int ActiveRenderCellSize => _activeStep;
+    public float ActiveVoxelSizeMeters => _activeStep * SparseVoxelField.VoxelSizeMeters;
+    public bool IsUsingCoarseLod => _activeStep >= 40;
+    public int DrawCallsLastFrame { get; private set; }
+    public int VisibleChunksLastFrame { get; private set; }
+    public int RebuiltChunks { get; private set; }
+    public int RebuiltCutCaps { get; private set; }
+    public int CachedChunks => _chunks.Count;
+
+    public VoxelTerrainRenderer(TerrainPalette palette)
+    {
+        _palette = palette ?? throw new ArgumentNullException(nameof(palette));
+
+        _shader = LoadShaderFromMemory(VertexShader, FragmentShader);
+        if (!IsShaderValid(_shader))
+            throw new InvalidOperationException("The 3D voxel surface shader could not be created.");
+
+        _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
+        _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
+        _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
+        _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
+        _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
+
+        if (_cutEnabledLocation < 0 ||
+            _cutHeightLocation < 0 ||
+            _sunDirectionLocation < 0 ||
+            _ambientLightLocation < 0 ||
+            _sunIntensityLocation < 0)
+        {
+            UnloadShader(_shader);
+            throw new InvalidOperationException("The 3D voxel shader is missing a required uniform.");
+        }
+
+        _material = LoadMaterialDefault();
+        _material.Shader = _shader;
+    }
+
+    public void SetPalette(TerrainPalette palette)
+    {
+        _palette = palette ?? throw new ArgumentNullException(nameof(palette));
+        _paletteVersion++;
+    }
+
+    public void Draw(
+        SparseVoxelField field,
+        Camera3D camera,
+        int viewportWidth,
+        int viewportHeight,
+        float maximumViewDistanceMeters,
+        bool cutEnabled,
+        float cutHeightMeters)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(field);
+
+        _frame++;
+        float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
+        int step = SelectLod(cameraDistance);
+        _activeStep = step;
+
+        float chunkSizeMeters = ChunkCells * step * SparseVoxelField.VoxelSizeMeters;
+        float viewRadius = GetViewRadius(
+            step,
+            cameraDistance,
+            chunkSizeMeters,
+            maximumViewDistanceMeters);
+
+        int chunksX = DivideRoundUp(field.Width, ChunkCells * step);
+        int chunksY = DivideRoundUp(field.Height, ChunkCells * step);
+        int chunksZ = DivideRoundUp(field.Depth, ChunkCells * step);
+
+        int minX = Math.Clamp(
+            (int)MathF.Floor((camera.Target.X - viewRadius) / chunkSizeMeters),
+            0, chunksX - 1);
+        int maxX = Math.Clamp(
+            (int)MathF.Floor((camera.Target.X + viewRadius) / chunkSizeMeters),
+            0, chunksX - 1);
+        int minY = Math.Clamp(
+            (int)MathF.Floor((camera.Target.Y - viewRadius) / chunkSizeMeters),
+            0, chunksY - 1);
+        int maxY = Math.Clamp(
+            (int)MathF.Floor((camera.Target.Y + viewRadius) / chunkSizeMeters),
+            0, chunksY - 1);
+        int minZ = Math.Clamp(
+            (int)MathF.Floor((camera.Target.Z - viewRadius) / chunkSizeMeters),
+            0, chunksZ - 1);
+        int maxZ = Math.Clamp(
+            (int)MathF.Floor((camera.Target.Z + viewRadius) / chunkSizeMeters),
+            0, chunksZ - 1);
+
+        List<Candidate> candidates = new();
+        float chunkRadius = chunkSizeMeters * 0.8660254f;
+        for (int chunkZ = minZ; chunkZ <= maxZ; chunkZ++)
+        for (int chunkY = minY; chunkY <= maxY; chunkY++)
+        for (int chunkX = minX; chunkX <= maxX; chunkX++)
+        {
+            Vector3 center = new(
+                (chunkX + 0.5f) * chunkSizeMeters,
+                (chunkY + 0.5f) * chunkSizeMeters,
+                (chunkZ + 0.5f) * chunkSizeMeters);
+
+            float distanceSquared = Vector3.DistanceSquared(center, camera.Position);
+            if (distanceSquared > maximumViewDistanceMeters * maximumViewDistanceMeters &&
+                Vector3.DistanceSquared(center, camera.Target) >
+                (maximumViewDistanceMeters + chunkRadius) *
+                (maximumViewDistanceMeters + chunkRadius))
+                continue;
+
+            if (!TerrainFrustum.IsSphereVisible(
+                camera,
+                center,
+                chunkRadius,
+                viewportWidth,
+                viewportHeight,
+                maximumViewDistanceMeters))
+                continue;
+
+            candidates.Add(new Candidate(
+                new ChunkKey(step, chunkX, chunkY, chunkZ),
+                center,
+                chunkRadius,
+                distanceSquared));
+        }
+
+        candidates.Sort(static (a, b) =>
+            a.DistanceSquared.CompareTo(b.DistanceSquared));
+
+        _visible.Clear();
+        int baseBuilds = 0;
+        int cutBuilds = 0;
+        int maximumBaseBuilds = step >= 40
+            ? MaximumCoarseBuildsPerFrame
+            : step >= 10
+                ? MaximumMediumBuildsPerFrame
+                : MaximumFineBuildsPerFrame;
+
+        int cutSampleY = (int)MathF.Floor(
+            cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f);
+        int cutChunkY = cutEnabled
+            ? Math.Clamp(cutSampleY / (ChunkCells * step), 0, chunksY - 1)
+            : -1;
+        int cutLayer = cutEnabled
+            ? (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters)
+            : -1;
+
+        foreach (Candidate candidate in candidates)
+        {
+            ChunkKey key = candidate.Key;
+            if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
+            {
+                entry = new ChunkEntry();
+                _chunks.Add(key, entry);
+            }
+
+            entry.LastSeenFrame = _frame;
+            bool surfaceStale = !entry.Built ||
+                entry.SourceVersion != field.Version ||
+                entry.PaletteVersion != _paletteVersion;
+
+            if (surfaceStale && baseBuilds < maximumBaseBuilds)
+            {
+                Mesh[] replacement = VoxelChunkMesher.BuildSurface(
+                    field, key.X, key.Y, key.Z, step, _palette);
+
+                Mesh[] previous = entry.Surface;
+                entry.Surface = replacement;
+                entry.SourceVersion = field.Version;
+                entry.PaletteVersion = _paletteVersion;
+                entry.Built = true;
+                foreach (Mesh mesh in previous)
+                    UnloadMesh(mesh);
+
+                RebuiltChunks++;
+                baseBuilds++;
+            }
+
+            if (cutEnabled && key.Y == cutChunkY &&
+                entry.CutLayer != cutLayer &&
+                cutBuilds < MaximumCutBuildsPerFrame)
+            {
+                Mesh[] replacement = VoxelChunkMesher.BuildCutCap(
+                    field, key.X, key.Z, step, cutHeightMeters, _palette);
+
+                Mesh[] previous = entry.CutCap;
+                entry.CutCap = replacement;
+                entry.CutLayer = cutLayer;
+                foreach (Mesh mesh in previous)
+                    UnloadMesh(mesh);
+
+                RebuiltCutCaps++;
+                cutBuilds++;
+            }
+            else if (!cutEnabled && entry.CutCap.Length > 0)
+            {
+                ClearCutCap(entry);
+            }
+
+            if (entry.Built)
+                _visible.Add((key, entry));
+        }
+
+        if (_chunks.Count > MaximumCachedChunks)
+            EvictUnusedChunks();
+
+        SetLighting();
+        SetCutShader(cutEnabled, cutHeightMeters);
+
+        float worldRadius = 0.5f * MathF.Sqrt(
+            field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
+            field.Depth * field.Depth * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
+            field.Height * field.Height * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters);
+        float distanceToOrigin = camera.Position.Length();
+        Rlgl.SetClipPlanes(
+            Math.Clamp(cameraDistance * 0.002f, 0.02f, 2f),
+            MathF.Max(1000f, distanceToOrigin + worldRadius + 100f));
+
+        BeginMode3D(camera);
+        int draws = 0;
+        foreach ((ChunkKey _, ChunkEntry entry) in _visible)
+        {
+            foreach (Mesh mesh in entry.Surface)
+            {
+                DrawMesh(mesh, _material, Matrix4x4.Identity);
+                draws++;
+            }
+        }
+
+        if (cutEnabled)
+        {
+            SetCutShader(enabled: false, cutHeightMeters);
+            foreach ((ChunkKey _, ChunkEntry entry) in _visible)
+            {
+                if (entry.CutLayer != cutLayer)
+                    continue;
+
+                foreach (Mesh mesh in entry.CutCap)
+                {
+                    DrawMesh(mesh, _material, Matrix4x4.Identity);
+                    draws++;
+                }
+            }
+        }
+
+        EndMode3D();
+
+        DrawCallsLastFrame = draws;
+        VisibleChunksLastFrame = _visible.Count;
+
+        if ((_frame % 90) == 0 && _chunks.Count > MaximumCachedChunks / 2)
+            EvictUnusedChunks();
+    }
+
+    private static int SelectLod(float cameraDistance)
+    {
+        if (cameraDistance < 26f) return 1;
+        if (cameraDistance < 95f) return 5;
+        if (cameraDistance < 420f) return 10;
+        return 40;
+    }
+
+    private static float GetViewRadius(
+        int step,
+        float cameraDistance,
+        float chunkSizeMeters,
+        float maximumViewDistanceMeters)
+    {
+        float minimum = step switch
+        {
+            1 => 8f,
+            5 => 30f,
+            10 => 90f,
+            _ => 300f
+        };
+        float multiplier = step switch
+        {
+            1 => 0.9f,
+            5 => 1.0f,
+            10 => 1.15f,
+            _ => 1.4f
+        };
+
+        return Math.Clamp(
+            MathF.Max(minimum, cameraDistance * multiplier),
+            chunkSizeMeters * 2f,
+            Math.Clamp(maximumViewDistanceMeters, minimum, 18000f));
+    }
+
+    private static int DivideRoundUp(int value, int divisor) =>
+        (value + divisor - 1) / divisor;
+
+    private void SetLighting()
+    {
+        Vector3 direction = _palette.GetSunDirection();
+        SetShaderValue(_shader, _sunDirectionLocation, direction, ShaderUniformDataType.Vec3);
+        SetShaderValue(_shader, _ambientLightLocation, _palette.AmbientLight, ShaderUniformDataType.Float);
+        SetShaderValue(_shader, _sunIntensityLocation, _palette.SunIntensity, ShaderUniformDataType.Float);
+    }
+
+    private void SetCutShader(bool enabled, float height)
+    {
+        SetShaderValue(
+            _shader,
+            _cutEnabledLocation,
+            enabled ? 1 : 0,
+            ShaderUniformDataType.Int);
+        SetShaderValue(
+            _shader,
+            _cutHeightLocation,
+            height,
+            ShaderUniformDataType.Float);
+    }
+
+    private static void ClearCutCap(ChunkEntry entry)
+    {
+        foreach (Mesh mesh in entry.CutCap)
+            UnloadMesh(mesh);
+        entry.CutCap = Array.Empty<Mesh>();
+        entry.CutLayer = int.MinValue;
+    }
+
+    private void EvictUnusedChunks()
+    {
+        long threshold = _frame - 240;
+        List<ChunkKey>? remove = null;
+
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
+        {
+            if (entry.LastSeenFrame >= threshold)
+                continue;
+
+            (remove ??= new List<ChunkKey>()).Add(key);
+        }
+
+        if (remove == null)
+            return;
+
+        foreach (ChunkKey key in remove)
+        {
+            _chunks[key].Dispose();
+            _chunks.Remove(key);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        foreach (ChunkEntry entry in _chunks.Values)
+            entry.Dispose();
+        _chunks.Clear();
+        UnloadMaterial(_material);
+        UnloadShader(_shader);
+        _disposed = true;
+    }
+
+    private void ThrowIfDisposed() =>
+        ObjectDisposedException.ThrowIf(_disposed, this);
+}
