@@ -245,6 +245,99 @@ public sealed class SparseVoxelField
     }
 
 
+
+    /// <summary>
+    /// Finds the highest upward-facing solid/air surface at one horizontal point.
+    /// Used by legacy systems that expect one surface height for an XY column.
+    /// Multi-level navigation must use FindWalkableSurfacesAt instead.
+    /// </summary>
+    public bool TryFindHighestWalkableSurfaceAt(
+        float xMeters,
+        float zMeters,
+        float minimumUpNormal,
+        out WalkableSurface surface)
+    {
+        surface = default;
+        if (!float.IsFinite(xMeters) || !float.IsFinite(zMeters))
+            return false;
+
+        float sampleX = xMeters / VoxelSizeMeters - 0.5f;
+        float sampleZ = zMeters / VoxelSizeMeters - 0.5f;
+        if (sampleX < 0f || sampleZ < 0f ||
+            sampleX > Width - 1 || sampleZ > Depth - 1)
+            return false;
+
+        float minNormal = Math.Clamp(minimumUpNormal, 0.05f, 1f);
+        int xCell = Math.Clamp((int)MathF.Round(sampleX), 0, Width - 1);
+        int zCell = Math.Clamp((int)MathF.Round(sampleZ), 0, Depth - 1);
+
+        for (int y = Height - 2; y >= 0; y--)
+        {
+            float lower = SampleDensity(sampleX, y, sampleZ);
+            float upper = SampleDensity(sampleX, y + 1, sampleZ);
+            if (lower <= 0f || upper > 0f)
+                continue;
+
+            float denominator = lower - upper;
+            float blend = denominator > 0.00001f
+                ? Math.Clamp(lower / denominator, 0f, 1f)
+                : 0.5f;
+            float surfaceSampleY = y + blend;
+            float heightMeters = (surfaceSampleY + 0.5f) * VoxelSizeMeters;
+            Vector3 gradient = new(
+                SampleDensity(sampleX + 1f, surfaceSampleY, sampleZ) -
+                    SampleDensity(sampleX - 1f, surfaceSampleY, sampleZ),
+                SampleDensity(sampleX, surfaceSampleY + 1f, sampleZ) -
+                    SampleDensity(sampleX, surfaceSampleY - 1f, sampleZ),
+                SampleDensity(sampleX, surfaceSampleY, sampleZ + 1f) -
+                    SampleDensity(sampleX, surfaceSampleY, sampleZ - 1f));
+            Vector3 normal = gradient.LengthSquared() > 0.000001f
+                ? -Vector3.Normalize(gradient)
+                : Vector3.UnitY;
+            if (normal.Y < minNormal)
+                continue;
+
+            surface = new WalkableSurface(
+                heightMeters,
+                normal,
+                GetMaterialId(xCell, Math.Clamp(y, 0, Height - 1), zCell),
+                MathF.Max(0f, Height * VoxelSizeMeters - heightMeters));
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Tests a legacy one-metre map column against the 0.1 m density field.
+    /// The vertical interval is inclusive and uses the world's 0.1 m layer index.
+    /// </summary>
+    public bool IsColumnSolidBetweenTiles(
+        int tileX,
+        int tileZ,
+        int firstLayer,
+        int lastLayer)
+    {
+        if (tileX < 0 || tileZ < 0 ||
+            tileX * 10 + 9 >= Width || tileZ * 10 + 9 >= Depth)
+            return true;
+
+        int first = Math.Max(0, firstLayer);
+        int last = Math.Min(Height - 1, lastLayer);
+        if (first > last)
+            return false;
+
+        float sampleX = tileX * 10 + 4.5f;
+        float sampleZ = tileZ * 10 + 4.5f;
+        for (int y = first; y <= last; y++)
+        {
+            if (SampleDensity(sampleX, y, sampleZ) > 0f)
+                return true;
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Finds every upward-facing solid/air boundary below this horizontal point.
     /// The returned list is ordered from the lowest floor to the highest bridge.

@@ -46,6 +46,8 @@ public sealed class WorldMap
     private readonly bool[] _navigationBlocked;
     private readonly bool[] _simpleFillColumns;
     private readonly ushort[] _columnMaterialIds;
+    private readonly byte[] _voxelSurfaceCacheState;
+    private readonly ushort[] _voxelSurfaceHeightCache;
     private readonly TileRange[]?[] _rangeCache;
 
     public WorldMap(
@@ -108,6 +110,8 @@ public sealed class WorldMap
         _simpleFillColumns = new bool[columnCount];
         Array.Fill(_simpleFillColumns, true);
         _columnMaterialIds = new ushort[columnCount];
+        _voxelSurfaceCacheState = new byte[columnCount];
+        _voxelSurfaceHeightCache = new ushort[columnCount];
         _rangeCache = new TileRange[]?[columnCount];
 
         Water = new WaterLayer(width, height);
@@ -650,18 +654,27 @@ public sealed class WorldMap
         TerrainVersion++;
     }
 
-    // Uppermost occupied voxel at or below a horizontal Z slice.
-    // Uniform columns resolve through one compressed run without scanning Z.
-        public int FindTopOccupiedLayer(int x, int y, int maxLayer)
+    // Uppermost upward-facing surface in the effective terrain column.
+    public int FindTopOccupiedLayer(int x, int y, int maxLayer)
     {
         if (!IsInside(x, y) || maxLayer < 0)
             return -1;
 
         int lastLayer = Math.Min(maxLayer, LayerCount - 1);
-        if (_simpleFillColumns[GetColumnIndex(x, y)])
+        int column = GetColumnIndex(x, y);
+        if (HasVoxelEditsInColumn(x, y))
+        {
+            ushort height = GetVoxelSurfaceHeightUnits(x, y, column);
+            int surfaceLayer = height == 0
+                ? -1
+                : (height + LayerHeightUnits - 1) / LayerHeightUnits - 1;
+            return Math.Min(surfaceLayer, lastLayer);
+        }
+
+        if (_simpleFillColumns[column])
         {
             int filledLayers = Math.Clamp(
-                (_surfaceHeights[GetColumnIndex(x, y)] + LayerHeightUnits - 1) /
+                (_surfaceHeights[column] + LayerHeightUnits - 1) /
                     LayerHeightUnits,
                 0,
                 LayerCount);
@@ -677,7 +690,7 @@ public sealed class WorldMap
     }
 
     // Inclusive interval: is any voxel in this vertical column solid?
-        public bool IsColumnSolidBetween(
+    public bool IsColumnSolidBetween(
         int x,
         int y,
         int firstLayer,
@@ -692,6 +705,9 @@ public sealed class WorldMap
             return false;
 
         int index = GetColumnIndex(x, y);
+        if (HasVoxelEditsInColumn(x, y))
+            return Voxels.IsColumnSolidBetweenTiles(x, y, first, last);
+
         if (_simpleFillColumns[index])
         {
             if (_columnMaterialIds[index] == 0)
@@ -737,28 +753,21 @@ public sealed class WorldMap
         return false;
     }
 
-    public int GetSurfaceLayer(
-        int x,
-        int y)
+    public int GetSurfaceLayer(int x, int y)
     {
         if (!IsInside(x, y))
             return -1;
 
-        WorldRegion? region = GetWorldRegionAtTile(x, y);
-        ushort height = region != null && region.HasUniformSurface
-            ? region.UniformSurfaceHeightUnits
-            : _surfaceHeights[GetColumnIndex(x, y)];
-
+        int column = GetColumnIndex(x, y);
+        ushort height = HasVoxelEditsInColumn(x, y)
+            ? GetVoxelSurfaceHeightUnits(x, y, column)
+            : GetSurfaceHeightUnits(x, y);
         if (height == 0)
             return -1;
 
-        int layer =
-            (height + LayerHeightUnits - 1) /
+        int layer = (height + LayerHeightUnits - 1) /
             LayerHeightUnits - 1;
-
-        return Math.Min(
-            LayerCount - 1,
-            layer);
+        return Math.Min(LayerCount - 1, layer);
     }
 
     public int GetHighestOccupiedLayer()
@@ -794,22 +803,21 @@ public sealed class WorldMap
 
         for (int i = 0; i < _surfaceHeights.Length; i++)
         {
-            ushort height = _surfaceHeights[i];
-
+            int x = i % TileWidth;
+            int y = i / TileWidth;
+            ushort height = HasVoxelEditsInColumn(x, y)
+                ? GetVoxelSurfaceHeightUnits(x, y, i)
+                : _surfaceHeights[i];
             if (height == 0)
                 continue;
 
-            int layer =
-                (height + LayerHeightUnits - 1) /
+            int layer = (height + LayerHeightUnits - 1) /
                 LayerHeightUnits - 1;
-
             if (layer > highest)
                 highest = layer;
         }
 
-        return Math.Min(
-            LayerCount - 1,
-            highest);
+        return Math.Min(LayerCount - 1, highest);
     }
 
     // ============================================================
@@ -1185,6 +1193,8 @@ public sealed class WorldMap
                 region.TileOriginX,
                 region.TileOriginY + row);
             Array.Fill(_surfaceHeights, normalizedHeight, index, region.TileWidth);
+            Array.Clear(_voxelSurfaceCacheState, index, region.TileWidth);
+            Array.Clear(_voxelSurfaceHeightCache, index, region.TileWidth);
             Array.Clear(_volumeSurfaceHeights, index, region.TileWidth);
             Array.Fill(_columnMaterialIds, normalizedMaterial, index, region.TileWidth);
             Array.Fill(_simpleFillColumns, true, index, region.TileWidth);
@@ -1258,6 +1268,8 @@ public sealed class WorldMap
                         : (ushort)0;
 
                     Array.Fill(_surfaceHeights, storedHeight, targetIndex, patchSize);
+                    Array.Clear(_voxelSurfaceCacheState, targetIndex, patchSize);
+                    Array.Clear(_voxelSurfaceHeightCache, targetIndex, patchSize);
                     Array.Fill(_columnMaterialIds, storedMaterial, targetIndex, patchSize);
                     Array.Fill(_simpleFillColumns, true, targetIndex, patchSize);
                     Array.Clear(_rangeCache, targetIndex, patchSize);
@@ -1311,6 +1323,8 @@ public sealed class WorldMap
         Blocks.Volumes.ClearColumn(globalX, globalY);
         _surfaceHeights[index] = storedHeight;
         _volumeSurfaceHeights[index] = 0;
+        _voxelSurfaceCacheState[index] = 0;
+        _voxelSurfaceHeightCache[index] = 0;
         _simpleFillColumns[index] = true;
         _columnMaterialIds[index] = storedMaterial;
         _rangeCache[index] = null;
@@ -1344,6 +1358,9 @@ public sealed class WorldMap
             return 0;
 
         int index = GetColumnIndex(globalX, globalY);
+        if (HasVoxelEditsInColumn(globalX, globalY))
+            return GetVoxelSurfaceHeightUnits(globalX, globalY, index);
+
         if (_simpleFillColumns[index])
             return _surfaceHeights[index];
 
@@ -1351,6 +1368,46 @@ public sealed class WorldMap
         return topLayer < 0
             ? (ushort)0
             : checked((ushort)((topLayer + 1) * LayerHeightUnits));
+    }
+
+    private bool HasVoxelEditsInColumn(int globalX, int globalY)
+    {
+        int index = GetColumnIndex(globalX, globalY);
+        if (_voxelSurfaceCacheState[index] == 1 ||
+            _voxelSurfaceCacheState[index] == 2)
+            return true;
+
+        if (!Voxels.HasEditsInColumn(globalX * 10 + 5, globalY * 10 + 5))
+            return false;
+
+        _voxelSurfaceCacheState[index] = 1;
+        return true;
+    }
+
+    private ushort GetVoxelSurfaceHeightUnits(
+        int globalX,
+        int globalY,
+        int columnIndex)
+    {
+        if (_voxelSurfaceCacheState[columnIndex] == 1)
+        {
+            bool found = Voxels.TryFindHighestWalkableSurfaceAt(
+                globalX + 0.5f,
+                globalY + 0.5f,
+                minimumUpNormal: 0.35f,
+                out SparseVoxelField.WalkableSurface surface);
+            _voxelSurfaceHeightCache[columnIndex] = found
+                ? checked((ushort)Math.Clamp(
+                    (int)MathF.Round(
+                        surface.HeightMeters * HeightUnitsPerMeter,
+                        MidpointRounding.AwayFromZero),
+                    0,
+                    LayerCount * LayerHeightUnits))
+                : (ushort)0;
+            _voxelSurfaceCacheState[columnIndex] = 2;
+        }
+
+        return _voxelSurfaceHeightCache[columnIndex];
     }
 
     public float GetSurfaceHeight(
@@ -1367,6 +1424,8 @@ public sealed class WorldMap
         _volumeSurfaceHeights[index] = 0;
         _surfaceHeights[index] = 0;
         _rangeCache[index] = null;
+        _voxelSurfaceCacheState[index] = 0;
+        _voxelSurfaceHeightCache[index] = 0;
         _simpleFillColumns[index] = true;
         _columnMaterialIds[index] = 0;
         Voxels.ResetBaseColumn(globalX, globalY);
@@ -1620,6 +1679,8 @@ public sealed class WorldMap
             bounds.MaxZ >= Voxels.Depth)
         {
             Array.Fill(_simpleFillColumns, true);
+            Array.Clear(_voxelSurfaceCacheState);
+            Array.Clear(_voxelSurfaceHeightCache);
             Array.Clear(_rangeCache);
             foreach (WorldRegion region in _worldRegions)
                 region.MarkTerrainChanged();
@@ -1641,6 +1702,7 @@ public sealed class WorldMap
             {
                 int columnIndex = GetColumnIndex(tileX, tileY);
                 _rangeCache[columnIndex] = null;
+                _voxelSurfaceCacheState[columnIndex] = 1;
 
                 // A local 3D edit promotes an ordinary implicit surface column
                 // to the compatibility volume tree once, preserving old range

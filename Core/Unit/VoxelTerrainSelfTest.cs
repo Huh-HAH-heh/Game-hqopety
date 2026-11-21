@@ -230,6 +230,49 @@ internal static class VoxelTerrainSelfTest
                MathF.Abs(outsideAfter - outsideBefore) < 0.001f;
     }
 
+    public static bool LegacyWorldMapQueriesUseVoxelField()
+    {
+        WorldMap map = new(regionsX: 1, regionsY: 1, layerCount: 64);
+        for (int y = 0; y < map.TileHeight; y++)
+        for (int x = 0; x < map.TileWidth; x++)
+            map.SetSolidHeight(x, y, 20, Rock);
+
+        map.Voxels.CarveBox(
+            new Vector3(1f, 0.5f, 1f),
+            new Vector3(5f, 1.8f, 5f));
+        map.Voxels.FillBox(
+            new Vector3(1f, 4f, 1f),
+            new Vector3(5f, 4.4f, 5f),
+            BridgeMaterial);
+
+        float topHeight = map.GetSurfaceHeight(2, 2);
+        ushort topHeightUnits = map.GetSurfaceHeightUnits(2, 2);
+        int topLayer = map.GetSurfaceLayer(2, 2);
+        int highestSolidLayer = map.FindTopOccupiedLayer(2, 2, 63);
+        bool topQueriesSeeBridge =
+            MathF.Abs(topHeight - 4.4f) <= 0.12f &&
+            Math.Abs(topHeightUnits - 44) <= 1 &&
+            topLayer >= 42 &&
+            highestSolidLayer >= 42;
+
+        bool bridgeSolid = map.IsColumnSolidBetween(2, 2, 40, 44);
+        bool tunnelAir = !map.IsColumnSolidBetween(2, 2, 5, 17);
+        bool bridgeFloorFound = map.TryFindWalkableSurface(
+            2, 2, 0, 63, clearanceLayers: 8, out int floorLayer) &&
+            floorLayer >= 43;
+
+        map.Voxels.CarveBox(
+            new Vector3(1f, 4f, 1f),
+            new Vector3(5f, 4.4f, 5f));
+        float restoredBaseHeight = map.GetSurfaceHeight(2, 2);
+
+        return topQueriesSeeBridge &&
+               bridgeSolid &&
+               tunnelAir &&
+               bridgeFloorFound &&
+               MathF.Abs(restoredBaseHeight - 2f) <= 0.12f;
+    }
+
     public static bool SaveRejectsDifferentBaseWorld()
     {
         SparseVoxelField source = CreateField();
