@@ -1481,7 +1481,7 @@ public sealed class WorldMap
             using (FileStream stream = new(
                 temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                Voxels.SaveEdits(stream);
+                Voxels.SaveEdits(stream, ComputeVoxelBaseSignature());
                 stream.Flush(flushToDisk: true);
             }
             File.Move(temporaryPath, fullPath, overwrite: true);
@@ -1493,6 +1493,39 @@ public sealed class WorldMap
         }
     }
 
+    private ulong ComputeVoxelBaseSignature()
+    {
+        const ulong offset = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+        ulong hash = offset;
+
+        static ulong Add(ulong current, ushort value)
+        {
+            const ulong hashPrime = 1099511628211UL;
+            current ^= (byte)value;
+            current *= hashPrime;
+            current ^= (byte)(value >> 8);
+            current *= hashPrime;
+            return current;
+        }
+
+        hash = Add(hash, checked((ushort)TileWidth));
+        hash = Add(hash, checked((ushort)TileHeight));
+        hash = Add(hash, checked((ushort)LayerCount));
+        for (int index = 0; index < _surfaceHeights.Length; index++)
+        {
+            hash = Add(hash, _surfaceHeights[index]);
+            hash = Add(hash, _columnMaterialIds[index]);
+            hash = Add(hash, _volumeSurfaceHeights[index]);
+        }
+
+        // Keep the hash useful even when the world contains more than one
+        // million columns; no string serialization or temporary world copy.
+        hash ^= (ulong)_surfaceHeights.Length;
+        hash *= prime;
+        return hash;
+    }
+
     public bool LoadVoxelEdits(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -1501,7 +1534,7 @@ public sealed class WorldMap
             return false;
 
         using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        Voxels.LoadEdits(stream);
+        Voxels.LoadEdits(stream, ComputeVoxelBaseSignature());
         return true;
     }
 

@@ -161,6 +161,36 @@ internal static class VoxelTerrainSelfTest
         return false;
     }
 
+    public static bool SaveRejectsDifferentBaseWorld()
+    {
+        SparseVoxelField source = CreateField();
+        source.CarveBox(
+            new Vector3(1f, 0.5f, 1f),
+            new Vector3(5f, 1.8f, 5f));
+        using MemoryStream save = new();
+        source.SaveEdits(save, worldSignature: 0xA17B_02UL);
+
+        SparseVoxelField destination = CreateField();
+        destination.AddSphere(new Vector3(3f, 2f, 3f), 0.4f, BridgeMaterial);
+        int originalChunkCount = destination.ChunkCount;
+        float originalDensity = destination.GetDensity(30, 20, 30);
+        save.Position = 0;
+
+        bool rejected = false;
+        try
+        {
+            destination.LoadEdits(save, expectedWorldSignature: 0xBEEF_91UL);
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+
+        return rejected &&
+               destination.ChunkCount == originalChunkCount &&
+               MathF.Abs(destination.GetDensity(30, 20, 30) - originalDensity) < 0.001f;
+    }
+
     public static bool UndoRedoRestoresSdf()
     {
         SparseVoxelField field = CreateField();

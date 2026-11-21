@@ -95,6 +95,7 @@ public static class CombatSelfTest
         RunTest("Voxel terrain: vertical capsule respects tunnel clearance", VoxelTerrainSelfTest.CapsuleUsesSdfClearance, ref passed, ref failed);
         RunTest("Voxel terrain: flatten plane edits a local surface in the same density field", VoxelTerrainSelfTest.FlattenPlaneChangesLocalSurface, ref passed, ref failed);
         RunTest("Voxel terrain: edited chunks survive save/load", VoxelTerrainSelfTest.EditSaveRoundTrips, ref passed, ref failed);
+        RunTest("Voxel terrain: edits reject a mismatched base-world signature", VoxelTerrainSelfTest.SaveRejectsDifferentBaseWorld, ref passed, ref failed);
         RunTest("Voxel terrain: edit history restores and reapplies density", VoxelTerrainSelfTest.UndoRedoRestoresSdf, ref passed, ref failed);
         RunTest("Voxel terrain: falling body lands on the lower voxel floor", VoxelTerrainSelfTest.VerticalGravityFindsTunnelFloor, ref passed, ref failed);
         RunTest("Voxel navigation: distant voxel edits preserve unaffected local graph", VoxelTerrainSelfTest.DistantVoxelEditsKeepLocalNavCache, ref passed, ref failed);

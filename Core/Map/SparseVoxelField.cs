@@ -45,7 +45,7 @@ public sealed class SparseVoxelField
         float ClearanceMeters);
 
     private const int SaveMagic = 0x31585652;
-    private const int SaveFormatVersion = 1;
+    private const int SaveFormatVersion = 2;
 
     private sealed class Chunk
     {
@@ -449,7 +449,9 @@ public sealed class SparseVoxelField
     /// Writes only materialized 16^3 edit chunks. The compact procedural base
     /// remains supplied by the owning WorldMap and is not duplicated in saves.
     /// </summary>
-    public void SaveEdits(Stream destination)
+    public void SaveEdits(Stream destination) => SaveEdits(destination, 0UL);
+
+    public void SaveEdits(Stream destination, ulong worldSignature)
     {
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite)
@@ -462,6 +464,7 @@ public sealed class SparseVoxelField
         writer.Write(Width);
         writer.Write(Height);
         writer.Write(Depth);
+        writer.Write(worldSignature);
 
         List<ChunkCoordinate> keys = new(_chunks.Keys);
         keys.Sort(static (a, b) =>
@@ -494,7 +497,9 @@ public sealed class SparseVoxelField
     /// Atomically replaces the current edit set after validating the complete
     /// compressed stream. A failed or incompatible save leaves the live field intact.
     /// </summary>
-    public void LoadEdits(Stream source)
+    public void LoadEdits(Stream source) => LoadEdits(source, 0UL);
+
+    public void LoadEdits(Stream source, ulong expectedWorldSignature)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (!source.CanRead)
@@ -514,6 +519,10 @@ public sealed class SparseVoxelField
                 reader.ReadInt32() != Height ||
                 reader.ReadInt32() != Depth)
                 throw new InvalidDataException("The voxel save belongs to a different world size.");
+
+            if (reader.ReadUInt64() != expectedWorldSignature)
+                throw new InvalidDataException(
+                    "The voxel save belongs to a different base world.");
 
             int chunkCount = reader.ReadInt32();
             long capacity = ((Width + ChunkSize - 1L) / ChunkSize) *
