@@ -216,16 +216,29 @@ public sealed class VoxelNavigationSystem
         float maximumY = Math.Min(map.Voxels.Depth, bounds.MaxZ + 5) *
             SparseVoxelField.VoxelSizeMeters;
 
-        HashSet<RegionKey> invalidated = new();
-        foreach (RegionKey key in _graphs.Keys)
+        bool IntersectsEditedArea(RegionKey key)
         {
             float regionMinX = key.X * RegionSizeMeters;
             float regionMaxX = regionMinX + RegionSizeMeters;
             float regionMinY = key.Y * RegionSizeMeters;
             float regionMaxY = regionMinY + RegionSizeMeters;
-            if (minimumX < regionMaxX && maximumX > regionMinX &&
-                minimumY < regionMaxY && maximumY > regionMinY)
+            return minimumX < regionMaxX && maximumX > regionMinX &&
+                   minimumY < regionMaxY && maximumY > regionMinY;
+        }
+
+        HashSet<RegionKey> invalidated = new();
+        foreach (RegionKey key in _graphs.Keys)
+        {
+            if (IntersectsEditedArea(key))
                 invalidated.Add(key);
+        }
+
+        // A route may outlive its graph in the bounded LRU cache. Keep its
+        // region dependency independently so edits cannot leave a stale path.
+        foreach (Route route in _routes.Values)
+        {
+            if (IntersectsEditedArea(route.Region))
+                invalidated.Add(route.Region);
         }
 
         if (invalidated.Count == 0)
