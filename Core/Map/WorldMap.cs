@@ -1,4 +1,5 @@
-using System;\nusing System.Numerics;
+using System;
+using System.Numerics;
 
 namespace Core.Map;
 
@@ -32,7 +33,8 @@ public sealed class WorldMap
     public long NavigationVersion { get; private set; }
 
     public WaterLayer Water { get; }
-    public BlockTerrain Blocks { get; }\n    public SparseVoxelField Voxels { get; }
+    public BlockTerrain Blocks { get; }
+    public SparseVoxelField Voxels { get; }
     public bool UsesDiscreteBlockTerrain { get; private set; }
 
     private readonly TerrainTileRegion?[] _tileRegions;
@@ -107,10 +109,14 @@ public sealed class WorldMap
         _columnMaterialIds = new ushort[columnCount];
         _rangeCache = new TileRange[]?[columnCount];
 
-        Water =
-            new WaterLayer(
-                width,
-                height);
+        Water = new WaterLayer(width, height);
+        Voxels = new SparseVoxelField(
+            checked(width * 10),
+            layerCount,
+            checked(height * 10),
+            SampleBaseVoxelDensity,
+            SampleBaseVoxelMaterial);
+        Voxels.Changed += OnVoxelFieldChanged;
     }
 
     public long GetRegionTerrainVersion(int regionX, int regionY)
@@ -1092,7 +1098,8 @@ public sealed class WorldMap
                 levels, normalizedMaterial);
         }
 
-        region.SetUniformSurface(normalizedHeight, normalizedMaterial);\n        Voxels.InvalidateBaseField();
+        region.SetUniformSurface(normalizedHeight, normalizedMaterial);
+        Voxels.InvalidateBaseField();
         NavigationVersion++;
         TerrainVersion++;
         TerrainGeometryVersion++;
@@ -1362,7 +1369,8 @@ public sealed class WorldMap
 
         NavigationVersion++;
     }
-\n    private int GetColumnIndex(
+
+    private int GetColumnIndex(
         int x,
         int y)
     {
