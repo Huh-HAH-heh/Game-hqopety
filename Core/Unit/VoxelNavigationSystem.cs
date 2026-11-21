@@ -139,9 +139,11 @@ public sealed class VoxelNavigationSystem
         float preferredGoalHeight = target.Z > 0.01f ? target.Z : position.Z;
         float requiredClearance = MathF.Max(0.1f, bodyHeight);
         int startNode = FindNearestNode(
-            graph, position.X, position.Y, position.Z, requiredClearance, maximumCellRadius: 3);
+            graph, position.X, position.Y, position.Z, requiredClearance,
+            maximumHeightDistance: 0.75f, maximumCellRadius: 3);
         int goalNode = FindNearestNode(
-            graph, target.X, target.Y, preferredGoalHeight, requiredClearance, maximumCellRadius: 5);
+            graph, target.X, target.Y, preferredGoalHeight, requiredClearance,
+            maximumHeightDistance: 0.75f, maximumCellRadius: 5);
         if (startNode < 0 || goalNode < 0)
             return false;
 
@@ -526,7 +528,8 @@ public sealed class VoxelNavigationSystem
 
         int currentNode = FindNearestNode(
             currentGraph, position.X, position.Y, position.Z,
-            requiredClearance, maximumCellRadius: 3);
+            requiredClearance, maximumHeightDistance: 0.75f,
+            maximumCellRadius: 3);
         if (currentNode < 0)
             return false;
 
@@ -555,7 +558,8 @@ public sealed class VoxelNavigationSystem
 
         int goalNode = FindNearestNode(
             currentGraph, target.X, target.Y, preferredGoalHeight,
-            requiredClearance, maximumCellRadius: 5);
+            requiredClearance, maximumHeightDistance: 0.75f,
+            maximumCellRadius: 5);
         if (goalNode < 0)
             return false;
 
@@ -792,6 +796,7 @@ public sealed class VoxelNavigationSystem
         float worldY,
         float preferredHeight,
         float bodyHeight,
+        float maximumHeightDistance,
         int maximumCellRadius)
     {
         int globalCellX = (int)MathF.Floor(worldX * CellsPerMeter);
@@ -827,6 +832,8 @@ public sealed class VoxelNavigationSystem
                         float dy = node.Y - worldY;
                         float horizontal = MathF.Sqrt(dx * dx + dy * dy);
                         float vertical = MathF.Abs(node.Height - preferredHeight);
+                        if (vertical > maximumHeightDistance)
+                            continue;
                         float cost = horizontal + vertical * 2.0f;
                         if (cost < bestCost)
                         {
