@@ -385,7 +385,8 @@ public sealed class TerrainRenderSnapshot
     /// Returns the material exposed by a horizontal cut plane in one render cell.
     /// The common bottom-filled case is resolved directly from the compact
     /// height/material snapshot; only edited columns need their exact run list.
-    /// A run [StartZ, EndZ) has an exposed top face when EndZ equals the cut layer.
+    /// A cut cap is required only when the plane crosses the inside of a solid run.
+    /// If EndZ equals the cut layer, the base mesh already owns that natural top face.
     /// </summary>
     internal ushort GetCutSurfaceMaterial(int regionX, int regionY, int cutLayer)
     {
