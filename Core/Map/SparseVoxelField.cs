@@ -275,6 +275,113 @@ public sealed class SparseVoxelField
         return false;
     }
 
+    /// <summary>
+    /// Removes voxel overrides inside one coarse 1 m map column and restores
+    /// samples from the procedural/legacy base callbacks. Used when a legacy
+    /// height column is intentionally replaced with a new simple fill.
+    /// </summary>
+    public void ResetBaseColumn(int tileX, int tileZ)
+    {
+        if (tileX < 0 || tileX * 10 >= Width ||
+            tileZ < 0 || tileZ * 10 >= Depth)
+            throw new ArgumentOutOfRangeException(nameof(tileX));
+
+        int minX = tileX * 10;
+        int maxX = Math.Min(Width, minX + 10);
+        int minZ = tileZ * 10;
+        int maxZ = Math.Min(Depth, minZ + 10);
+
+        int firstChunkX = minX / ChunkSize;
+        int lastChunkX = (maxX - 1) / ChunkSize;
+        int firstChunkZ = minZ / ChunkSize;
+        int lastChunkZ = (maxZ - 1) / ChunkSize;
+        int chunkCountY = (Height + ChunkSize - 1) / ChunkSize;
+
+        List<ChunkCoordinate> removeChunks = new();
+        long revision = Version + 1;
+
+        for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
+        for (int chunkX = firstChunkX; chunkX <= lastChunkX; chunkX++)
+        for (int chunkY = 0; chunkY < chunkCountY; chunkY++)
+        {
+            ChunkCoordinate key = new(chunkX, chunkY, chunkZ);
+            if (!_chunks.TryGetValue(key, out Chunk? chunk))
+                continue;
+
+            int localMinX = Math.Max(0, minX - chunkX * ChunkSize);
+            int localMaxX = Math.Min(ChunkSize, maxX - chunkX * ChunkSize);
+            int localMinZ = Math.Max(0, minZ - chunkZ * ChunkSize);
+            int localMaxZ = Math.Min(ChunkSize, maxZ - chunkZ * ChunkSize);
+            int chunkYStart = chunkY * ChunkSize;
+            int localMaxY = Math.Min(ChunkSize, Height - chunkYStart);
+            bool changed = false;
+
+            for (int localZ = localMinZ; localZ < localMaxZ; localZ++)
+            for (int localX = localMinX; localX < localMaxX; localX++)
+            {
+                int cellColumn = localX + localZ * ChunkSize;
+                for (int localY = 0; localY < localMaxY; localY++)
+                {
+                    int densityIndex = localX +
+                        localY * DensitySamplesPerAxis +
+                        localZ * SamplePlane;
+                    if (chunk.DensityMask[densityIndex] != 0)
+                    {
+                        chunk.DensityMask[densityIndex] = 0;
+                        chunk.Density[densityIndex] = 0;
+                        changed = true;
+                    }
+
+                    int materialIndex = cellColumn + localY * CellPlane;
+                    if (chunk.MaterialMask[materialIndex] != 0)
+                    {
+                        chunk.MaterialMask[materialIndex] = 0;
+                        chunk.Materials[materialIndex] = 0;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (!changed)
+                continue;
+
+            chunk.Revision = revision;
+            if (Array.IndexOf(chunk.DensityMask, (byte)1) < 0 &&
+                Array.IndexOf(chunk.MaterialMask, (byte)1) < 0)
+            {
+                removeChunks.Add(key);
+            }
+        }
+
+        if (removeChunks.Count == 0)
+            return;
+
+        foreach (ChunkCoordinate key in removeChunks)
+            _chunks.Remove(key);
+
+        for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
+        for (int chunkX = firstChunkX; chunkX <= lastChunkX; chunkX++)
+        {
+            bool stillEdited = false;
+            for (int chunkY = 0; chunkY < chunkCountY; chunkY++)
+            {
+                if (_chunks.ContainsKey(new ChunkCoordinate(chunkX, chunkY, chunkZ)))
+                {
+                    stillEdited = true;
+                    break;
+                }
+            }
+
+            if (!stillEdited)
+                _editedChunkColumns.Remove((chunkX, chunkZ));
+        }
+
+        Version = revision;
+        Changed?.Invoke(new VoxelBounds(
+            minX, 0, minZ,
+            maxX, Height, maxZ));
+    }
+
     public void ClearEdits()
     {
         if (_chunks.Count == 0)
