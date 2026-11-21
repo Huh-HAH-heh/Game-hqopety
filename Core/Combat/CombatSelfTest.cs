@@ -1525,36 +1525,69 @@ public static class CombatSelfTest
         }
         long generationBytes = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        if (generationBytes > 256 * 1024 ||
-            worldMap.Blocks.Volumes.ChunkCount > 144 ||
-            worldMap.Blocks.Volumes.ComplexColumnCount != 0 ||
-            worldMap.GetMaterialId(5, 5, 0) != 1 ||
-            worldMap.GetMaterialId(5, 5, 99) != 1 ||
-            worldMap.GetMaterialId(5, 5, 100) != 0 ||
-            worldMap.GetLayer(50).GetMaterialId(5, 5) != 1 ||
-            worldMap.GetSurfaceLayer(5, 5) != 99)
+        bool initialValid =
+            generationBytes <= 256 * 1024 &&
+            worldMap.Blocks.Volumes.ChunkCount <= 144 &&
+            worldMap.Blocks.Volumes.ComplexColumnCount == 0 &&
+            worldMap.GetMaterialId(5, 5, 0) == 1 &&
+            worldMap.GetMaterialId(5, 5, 99) == 1 &&
+            worldMap.GetMaterialId(5, 5, 100) == 0 &&
+            worldMap.GetLayer(50).GetMaterialId(5, 5) == 1 &&
+            worldMap.GetSurfaceLayer(5, 5) == 99;
+        if (!initialValid)
         {
+            Console.WriteLine(
+                $"[DETAIL] compact initial bytes={generationBytes}, " +
+                $"chunks={worldMap.Blocks.Volumes.ChunkCount}, " +
+                $"complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"m0={worldMap.GetMaterialId(5, 5, 0)}, " +
+                $"m99={worldMap.GetMaterialId(5, 5, 99)}, " +
+                $"m100={worldMap.GetMaterialId(5, 5, 100)}, " +
+                $"layer50={worldMap.GetLayer(50).GetMaterialId(5, 5)}, " +
+                $"surface={worldMap.GetSurfaceLayer(5, 5)}");
             return false;
         }
 
         // Editing a single voxel must first materialize the compact column.
         worldMap.SetMaterialId(5, 5, 50, 2);
-        if (worldMap.Blocks.Volumes.ComplexColumnCount != 1 ||
-            worldMap.GetMaterialId(5, 5, 49) != 1 ||
-            worldMap.GetMaterialId(5, 5, 50) != 2 ||
-            worldMap.GetMaterialId(5, 5, 99) != 1 ||
-            worldMap.GetMaterialId(5, 5, 100) != 0)
+        bool editedValid =
+            worldMap.Blocks.Volumes.ComplexColumnCount == 1 &&
+            worldMap.GetMaterialId(5, 5, 49) == 1 &&
+            worldMap.GetMaterialId(5, 5, 50) == 2 &&
+            worldMap.GetMaterialId(5, 5, 99) == 1 &&
+            worldMap.GetMaterialId(5, 5, 100) == 0;
+        if (!editedValid)
         {
+            Console.WriteLine(
+                $"[DETAIL] material edit complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"m49={worldMap.GetMaterialId(5, 5, 49)}, " +
+                $"m50={worldMap.GetMaterialId(5, 5, 50)}, " +
+                $"m99={worldMap.GetMaterialId(5, 5, 99)}, " +
+                $"m100={worldMap.GetMaterialId(5, 5, 100)}");
             return false;
         }
 
         // Replacing that edited column with a simple height must clear stale upper voxels.
         worldMap.SetSolidHeight(5, 5, 30, 1);
-        return worldMap.Blocks.Volumes.ComplexColumnCount == 0 &&
-               worldMap.GetMaterialId(5, 5, 29) == 1 &&
-               worldMap.GetMaterialId(5, 5, 30) == 0 &&
-               worldMap.GetLayer(30).GetMaterialId(5, 5) == 0 &&
-               worldMap.GetSurfaceLayer(5, 5) == 29;
+        bool resetValid =
+            worldMap.Blocks.Volumes.ComplexColumnCount == 0 &&
+            worldMap.GetMaterialId(5, 5, 29) == 1 &&
+            worldMap.GetMaterialId(5, 5, 30) == 0 &&
+            worldMap.GetLayer(30).GetMaterialId(5, 5) == 0 &&
+            worldMap.GetSurfaceLayer(5, 5) == 29;
+        if (!resetValid)
+        {
+            Console.WriteLine(
+                $"[DETAIL] reset complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"m29={worldMap.GetMaterialId(5, 5, 29)}, " +
+                $"m30={worldMap.GetMaterialId(5, 5, 30)}, " +
+                $"layer30={worldMap.GetLayer(30).GetMaterialId(5, 5)}, " +
+                $"surface={worldMap.GetSurfaceLayer(5, 5)}, " +
+                $"simple={worldMap.IsColumnSimpleFill(5, 5)}");
+            return false;
+        }
+
+        return true;
     }
 
     private static bool TestSparseWaterLayerStorage()
