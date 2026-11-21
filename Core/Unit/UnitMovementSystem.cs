@@ -8,6 +8,7 @@ namespace Core.Unit;
 public sealed class UnitMovementSystem
 {
     private readonly UnitNavigationSystem _navigation = new UnitNavigationSystem();
+    private readonly VoxelNavigationSystem _voxelNavigation = new VoxelNavigationSystem();
     private Vector2[] _lastMotorForce = Array.Empty<Vector2>();
     private int _collisionWidth;
     private int _collisionHeight;
@@ -192,6 +193,8 @@ public sealed class UnitMovementSystem
             float distanceToNextTurn = float.PositiveInfinity;
             float turnSeverity = 0f;
             bool hasWaypoint = false;
+            bool voxelNavigationHandled = false;
+            Vector3 voxelSteeringPoint = position;
 
             if (!steeringActive)
                 _navigation.ClearRoute(unit);
@@ -203,62 +206,89 @@ public sealed class UnitMovementSystem
             // the result while the force controller integrates each substep.
             if (steeringActive && moveSpeed > 0f)
             {
-                float speedBeforeSteering = velocity.Length();
-                hasWaypoint = _navigation.TryGetLookAheadWaypoint(
-                    units,
-                    unit,
+                bool voxelWaypointFound = _voxelNavigation.TryGetWaypoint(
                     worldMap,
+                    movementUnitId,
                     position,
                     target,
-                    speedBeforeSteering,
-                    out steeringPoint,
-                    out distanceToGoal,
-                    out distanceToNextTurn,
-                    out turnSeverity);
+                    units.Height[unit],
+                    out voxelNavigationHandled,
+                    out voxelSteeringPoint);
 
-                Vector2 aStarWaypoint = steeringPoint;
-                if (hasWaypoint &&
-                    squadMovement != null &&
-                    squadMovement.TryAdjustAStarFormationWaypoint(
+                if (voxelNavigationHandled)
+                {
+                    hasWaypoint = voxelWaypointFound;
+                    if (hasWaypoint)
+                    {
+                        steeringPoint = new Vector2(
+                            voxelSteeringPoint.X,
+                            voxelSteeringPoint.Y);
+                        distanceToGoal = Vector2.Distance(
+                            new Vector2(position.X, position.Y),
+                            new Vector2(target.X, target.Y));
+                        distanceToNextTurn = float.PositiveInfinity;
+                        turnSeverity = 0f;
+                    }
+                }
+                else
+                {
+                    float speedBeforeSteering = velocity.Length();
+                    hasWaypoint = _navigation.TryGetLookAheadWaypoint(
                         units,
                         unit,
+                        worldMap,
                         position,
-                        steeringPoint,
-                        ai,
-                        out Vector2 formationWaypoint))
-                {
-                    Vector2 currentPosition = new(position.X, position.Y);
-                    bool foundSafeFormationPoint = false;
-                    float formationBlend = 1f;
-                    for (int attempt = 0; attempt < 6; attempt++)
+                        target,
+                        speedBeforeSteering,
+                        out steeringPoint,
+                        out distanceToGoal,
+                        out distanceToNextTurn,
+                        out turnSeverity);
+
+                    Vector2 aStarWaypoint = steeringPoint;
+                    if (hasWaypoint &&
+                        squadMovement != null &&
+                        squadMovement.TryAdjustAStarFormationWaypoint(
+                            units,
+                            unit,
+                            position,
+                            steeringPoint,
+                            ai,
+                            out Vector2 formationWaypoint))
                     {
-                        Vector2 candidate = Vector2.Lerp(
-                            aStarWaypoint,
-                            formationWaypoint,
-                            formationBlend);
-                        if (_navigation.CanMoveDirectly(
-                                units, unit, worldMap, currentPosition, candidate))
+                        Vector2 currentPosition = new(position.X, position.Y);
+                        bool foundSafeFormationPoint = false;
+                        float formationBlend = 1f;
+                        for (int attempt = 0; attempt < 6; attempt++)
                         {
-                            steeringPoint = candidate;
-                            foundSafeFormationPoint = true;
-                            break;
+                            Vector2 candidate = Vector2.Lerp(
+                                aStarWaypoint,
+                                formationWaypoint,
+                                formationBlend);
+                            if (_navigation.CanMoveDirectly(
+                                    units, unit, worldMap, currentPosition, candidate))
+                            {
+                                steeringPoint = candidate;
+                                foundSafeFormationPoint = true;
+                                break;
+                            }
+
+                            formationBlend *= 0.5f;
                         }
 
-                        formationBlend *= 0.5f;
-                    }
-
-                    if (!foundSafeFormationPoint)
-                    {
-                        steeringPoint = aStarWaypoint;
-                    }
-                    else if (hasCollectiveMove)
-                    {
-                        float localSteeringDistance = Vector2.Distance(
-                            currentPosition,
-                            steeringPoint);
-                        distanceToGoal = MathF.Max(
-                            distanceToGoal,
-                            localSteeringDistance + ArrivalRadius);
+                        if (!foundSafeFormationPoint)
+                        {
+                            steeringPoint = aStarWaypoint;
+                        }
+                        else if (hasCollectiveMove)
+                        {
+                            float localSteeringDistance = Vector2.Distance(
+                                currentPosition,
+                                steeringPoint);
+                            distanceToGoal = MathF.Max(
+                                distanceToGoal,
+                                localSteeringDistance + ArrivalRadius);
+                        }
                     }
                 }
             }
@@ -391,7 +421,19 @@ public sealed class UnitMovementSystem
                 Vector2 proposed = new(nextX, nextY);
                 if ((proposed - from).LengthSquared() > 0.0000001f)
                 {
-                    if (_navigation.CanMoveDirectly(units, unit, worldMap, from, proposed))
+                    if (voxelNavigationHandled)
+                    {
+                        TryMoveOnVoxelTerrain(
+                            worldMap,
+                            ref position,
+                            nextX,
+                            nextY,
+                            voxelSteeringPoint.Z,
+                            GetCollisionRadius(units, unit),
+                            units.Height[unit],
+                            ref velocity);
+                    }
+                    else if (_navigation.CanMoveDirectly(units, unit, worldMap, from, proposed))
                     {
                         position.X = nextX;
                         position.Y = nextY;
@@ -434,7 +476,8 @@ public sealed class UnitMovementSystem
                 if (MathF.Abs(position.X - from.X) > 0.000001f ||
                     MathF.Abs(position.Y - from.Y) > 0.000001f)
                 {
-                    position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+                    if (!voxelNavigationHandled)
+                        position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
                 }
             }
 
@@ -1067,7 +1110,104 @@ public sealed class UnitMovementSystem
 
         position.X = Math.Clamp(position.X, minX, maxX);
         position.Y = Math.Clamp(position.Y, minY, maxY);
-        position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+
+        if (worldMap.HasVoxelEditsAt(position.X, position.Y))
+        {
+            if (worldMap.TryFindVoxelWalkableSurface(
+                    position.X, position.Y, position.Z,
+                    0.75f, 0.75f, units.Height[unit],
+                    out SparseVoxelField.WalkableSurface support) &&
+                MathF.Abs(support.HeightMeters - position.Z) <= 0.75f &&
+                worldMap.IsVoxelCapsuleClear(
+                    position.X, support.HeightMeters, position.Y,
+                    GetCollisionRadius(units, unit), units.Height[unit]))
+            {
+                position.Z = support.HeightMeters;
+            }
+        }
+        else
+        {
+            position.Z = SampleSurfaceZ(worldMap, position.X, position.Y);
+        }
+    }
+
+    private static void TryMoveOnVoxelTerrain(
+        WorldMap worldMap,
+        ref Vector3 position,
+        float targetX,
+        float targetY,
+        float targetFloorHeight,
+        float radius,
+        float bodyHeight,
+        ref Vector2 velocity)
+    {
+        float originalX = position.X;
+        float originalY = position.Y;
+        float originalHeight = position.Z;
+
+        if (TryResolveVoxelPosition(
+                worldMap, targetX, targetY, originalHeight,
+                targetFloorHeight, radius, bodyHeight, out float newHeight))
+        {
+            position = new Vector3(targetX, targetY, newHeight);
+            return;
+        }
+
+        if (MathF.Abs(targetX - originalX) > 0.000001f)
+        {
+            if (TryResolveVoxelPosition(
+                    worldMap, targetX, originalY, originalHeight,
+                    targetFloorHeight, radius, bodyHeight, out newHeight))
+            {
+                position.X = targetX;
+                position.Z = newHeight;
+            }
+            else
+            {
+                velocity.X = 0f;
+            }
+        }
+
+        if (MathF.Abs(targetY - originalY) > 0.000001f)
+        {
+            if (TryResolveVoxelPosition(
+                    worldMap, position.X, targetY, position.Z,
+                    targetFloorHeight, radius, bodyHeight, out newHeight))
+            {
+                position.Y = targetY;
+                position.Z = newHeight;
+            }
+            else
+            {
+                velocity.Y = 0f;
+            }
+        }
+    }
+
+    private static bool TryResolveVoxelPosition(
+        WorldMap worldMap,
+        float x,
+        float y,
+        float previousFloor,
+        float targetFloor,
+        float radius,
+        float bodyHeight,
+        out float resolvedFloor)
+    {
+        resolvedFloor = previousFloor;
+        if (!worldMap.TryFindVoxelWalkableSurface(
+                x, y, targetFloor,
+                0.72f, 0.72f, bodyHeight,
+                out SparseVoxelField.WalkableSurface support))
+            return false;
+
+        if (MathF.Abs(support.HeightMeters - previousFloor) > 0.65f ||
+            !worldMap.IsVoxelCapsuleClear(
+                x, support.HeightMeters, y, radius, bodyHeight))
+            return false;
+
+        resolvedFloor = support.HeightMeters;
+        return true;
     }
 
     private static Vector2 GetTerrainSlopeAcceleration(
