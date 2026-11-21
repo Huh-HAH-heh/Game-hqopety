@@ -126,7 +126,7 @@ visible storage-region caps can be refreshed in one frame.
 - WASD: move the camera focus across the terrain
 - Shift + right mouse button + drag: orbit around the focus; dragging right rotates right
 - Middle mouse button + drag: grab-and-pan using screen-ray intersections with the focus plane
-- Mouse wheel: zoom toward the cursor when the ground anchor is visible
+- Mouse wheel: zoom along the camera-target axis without shifting the focus
 - Left Shift / Right Shift: faster WASD movement
 - C: toggle cutaway mode and focus on the lower through-tunnel
 - F1: focus on the lower through-tunnel (cut plane 17 m, inside the lower passage)
