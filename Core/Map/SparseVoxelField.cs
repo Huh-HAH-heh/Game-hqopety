@@ -51,7 +51,8 @@ public sealed class SparseVoxelField
     public int Height { get; }
     public int Depth { get; }
     public int ChunkCount => _chunks.Count;
-    public long Version { get; private set; }\n    public long BaseVersion { get; private set; }
+    public long Version { get; private set; }
+    public long BaseVersion { get; private set; }
 
     public event Action<VoxelBounds>? Changed;
 
