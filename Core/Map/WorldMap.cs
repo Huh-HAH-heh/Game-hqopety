@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Numerics;
 
 namespace Core.Map;
@@ -1382,7 +1383,8 @@ public sealed class WorldMap
 
         _volumeSurfaceHeights[columnIndex] = 0;
 
-        if (Blocks.Volumes.TryGetSimpleColumn(
+        if (!Voxels.HasEditsInColumn(globalX * 10 + 5, globalY * 10 + 5) &&
+            Blocks.Volumes.TryGetSimpleColumn(
                 globalX, globalY,
                 out ushort topExclusive,
                 out ushort simpleMaterial))
@@ -1394,11 +1396,8 @@ public sealed class WorldMap
             return;
         }
 
-        int topLayer = Blocks.Volumes.FindHighestSolidLayerInColumn(
-            globalX, globalY, LayerCount - 1);
-        _surfaceHeights[columnIndex] = topLayer < 0
-            ? (ushort)0
-            : checked((ushort)((topLayer + 1) * LayerHeightUnits));
+        // _surfaceHeights is also the procedural SDF base input. Keep it intact:
+        // the effective top surface is derived on demand from Voxels below.
         _simpleFillColumns[columnIndex] = false;
         _columnMaterialIds[columnIndex] = 0;
     }
@@ -1416,6 +1415,96 @@ public sealed class WorldMap
     public void AddVoxelCapsule(
         Vector3 startMeters, Vector3 endMeters, float radiusMeters, ushort materialId) =>
         Voxels.AddCapsule(startMeters, endMeters, radiusMeters, materialId);
+
+
+    public bool HasVoxelEditsAt(float xMeters, float yMeters)
+    {
+        if (!float.IsFinite(xMeters) || !float.IsFinite(yMeters))
+            return false;
+
+        int sampleX = (int)MathF.Round(xMeters / SparseVoxelField.VoxelSizeMeters - 0.5f);
+        int sampleY = (int)MathF.Round(yMeters / SparseVoxelField.VoxelSizeMeters - 0.5f);
+        return Voxels.HasEditsInColumn(sampleX, sampleY);
+    }
+
+    public int FindVoxelWalkableSurfacesAt(
+        float xMeters,
+        float yMeters,
+        float minimumUpNormal,
+        Span<SparseVoxelField.WalkableSurface> destination) =>
+        Voxels.FindWalkableSurfacesAt(
+            xMeters, yMeters, minimumUpNormal, destination);
+
+    public bool TryFindVoxelWalkableSurface(
+        float xMeters,
+        float yMeters,
+        float referenceHeightMeters,
+        float searchBelowMeters,
+        float searchAboveMeters,
+        float bodyHeightMeters,
+        out SparseVoxelField.WalkableSurface surface) =>
+        Voxels.TryFindClosestWalkableSurface(
+            xMeters, yMeters,
+            referenceHeightMeters,
+            searchBelowMeters,
+            searchAboveMeters,
+            bodyHeightMeters,
+            minimumUpNormal: 0.72f,
+            out surface);
+
+    public bool IsVoxelCapsuleClear(
+        float xMeters,
+        float feetHeightMeters,
+        float yMeters,
+        float radiusMeters,
+        float bodyHeightMeters) =>
+        Voxels.IsCapsuleClear(
+            xMeters, feetHeightMeters, yMeters, radiusMeters, bodyHeightMeters);
+
+    /// <summary>
+    /// Saves locally edited voxel chunks only. The base world remains compact
+    /// and must be regenerated with the same world seed before loading this file.
+    /// </summary>
+    public void SaveVoxelEdits(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("A save path is required.", nameof(path));
+
+        string fullPath = Path.GetFullPath(path);
+        string? directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
+        string temporaryPath = fullPath + ".tmp";
+        try
+        {
+            using (FileStream stream = new(
+                temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                Voxels.SaveEdits(stream);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporaryPath, fullPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
+    }
+
+    public bool LoadVoxelEdits(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("A save path is required.", nameof(path));
+        if (!File.Exists(path))
+            return false;
+
+        using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Voxels.LoadEdits(stream);
+        return true;
+    }
+
 
     public void PaintVoxelSphere(Vector3 centerMeters, float radiusMeters, ushort materialId) =>
         Voxels.PaintSphere(centerMeters, radiusMeters, materialId);
@@ -1502,6 +1591,7 @@ public sealed class WorldMap
                 }
 
                 _simpleFillColumns[columnIndex] = false;
+                RecalculateSurfaceHeight(columnIndex);
                 MarkTerrainChanged(tileX, tileY);
             }
         }

@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using System.Numerics;
+using System.Text;
 
 namespace Core.Map;
 
@@ -34,6 +37,15 @@ public sealed class SparseVoxelField
     public readonly record struct VoxelBounds(
         int MinX, int MinY, int MinZ,
         int MaxX, int MaxY, int MaxZ);
+
+    public readonly record struct WalkableSurface(
+        float HeightMeters,
+        Vector3 Normal,
+        ushort MaterialId,
+        float ClearanceMeters);
+
+    private const int SaveMagic = 0x31585652;
+    private const int SaveFormatVersion = 1;
 
     private sealed class Chunk
     {
@@ -133,6 +145,372 @@ public sealed class SparseVoxelField
 
         return _baseMaterial(x, y, z);
     }
+
+
+    /// <summary>
+    /// Finds every upward-facing solid/air boundary below this horizontal point.
+    /// The returned list is ordered from the lowest floor to the highest bridge.
+    /// Heights and horizontal coordinates are in metres; field Y is world height.
+    /// </summary>
+    public int FindWalkableSurfacesAt(
+        float xMeters,
+        float zMeters,
+        float minimumUpNormal,
+        Span<WalkableSurface> destination)
+    {
+        if (destination.IsEmpty ||
+            !float.IsFinite(xMeters) || !float.IsFinite(zMeters))
+            return 0;
+
+        float sampleX = xMeters / VoxelSizeMeters - 0.5f;
+        float sampleZ = zMeters / VoxelSizeMeters - 0.5f;
+        if (sampleX < 0f || sampleZ < 0f ||
+            sampleX > Width - 1 || sampleZ > Depth - 1)
+            return 0;
+
+        float minNormal = Math.Clamp(minimumUpNormal, 0.05f, 1f);
+        int xCell = Math.Clamp((int)MathF.Round(sampleX), 0, Width - 1);
+        int zCell = Math.Clamp((int)MathF.Round(sampleZ), 0, Depth - 1);
+        int count = 0;
+
+        for (int y = 0; y < Height - 1 && count < destination.Length; y++)
+        {
+            float lower = SampleDensity(sampleX, y, sampleZ);
+            float upper = SampleDensity(sampleX, y + 1, sampleZ);
+            if (lower <= 0f || upper > 0f)
+                continue;
+
+            float denominator = lower - upper;
+            float blend = denominator > 0.00001f
+                ? Math.Clamp(lower / denominator, 0f, 1f)
+                : 0.5f;
+            float surfaceSampleY = y + blend;
+            float heightMeters = (surfaceSampleY + 0.5f) * VoxelSizeMeters;
+
+            Vector3 gradient = new(
+                SampleDensity(sampleX + 1f, surfaceSampleY, sampleZ) -
+                    SampleDensity(sampleX - 1f, surfaceSampleY, sampleZ),
+                SampleDensity(sampleX, surfaceSampleY + 1f, sampleZ) -
+                    SampleDensity(sampleX, surfaceSampleY - 1f, sampleZ),
+                SampleDensity(sampleX, surfaceSampleY, sampleZ + 1f) -
+                    SampleDensity(sampleX, surfaceSampleY, sampleZ - 1f));
+
+            // Density is positive inside matter, so the outward normal is -gradient.
+            Vector3 normal = gradient.LengthSquared() > 0.000001f
+                ? -Vector3.Normalize(gradient)
+                : Vector3.UnitY;
+            if (normal.Y < minNormal)
+                continue;
+
+            float ceilingMeters = Height * VoxelSizeMeters;
+            for (int ceilingY = y + 1; ceilingY < Height; ceilingY++)
+            {
+                if (SampleDensity(sampleX, ceilingY, sampleZ) <= 0f)
+                    continue;
+
+                ceilingMeters = (ceilingY + 0.5f) * VoxelSizeMeters;
+                break;
+            }
+
+            float clearance = MathF.Max(0f, ceilingMeters - heightMeters);
+            ushort material = GetMaterialId(xCell, y, zCell);
+            destination[count++] = new WalkableSurface(
+                heightMeters, normal, material, clearance);
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Resolves the closest walkable floor near an existing foot height. The
+    /// bounded vertical search is intended for per-step movement collision.
+    /// </summary>
+    public bool TryFindClosestWalkableSurface(
+        float xMeters,
+        float zMeters,
+        float referenceHeightMeters,
+        float searchBelowMeters,
+        float searchAboveMeters,
+        float minimumBodyClearanceMeters,
+        float minimumUpNormal,
+        out WalkableSurface surface)
+    {
+        surface = default;
+        if (!float.IsFinite(referenceHeightMeters) ||
+            !float.IsFinite(searchBelowMeters) ||
+            !float.IsFinite(searchAboveMeters) ||
+            searchBelowMeters < 0f || searchAboveMeters < 0f)
+            return false;
+
+        float sampleX = xMeters / VoxelSizeMeters - 0.5f;
+        float sampleZ = zMeters / VoxelSizeMeters - 0.5f;
+        if (sampleX < 0f || sampleZ < 0f ||
+            sampleX > Width - 1 || sampleZ > Depth - 1)
+            return false;
+
+        int firstY = Math.Clamp(
+            (int)MathF.Floor(
+                (referenceHeightMeters - searchBelowMeters) / VoxelSizeMeters - 0.5f),
+            0, Height - 2);
+        int lastY = Math.Clamp(
+            (int)MathF.Ceiling(
+                (referenceHeightMeters + searchAboveMeters) / VoxelSizeMeters - 0.5f),
+            firstY + 1, Height - 1);
+
+        float minNormal = Math.Clamp(minimumUpNormal, 0.05f, 1f);
+        int xCell = Math.Clamp((int)MathF.Round(sampleX), 0, Width - 1);
+        int zCell = Math.Clamp((int)MathF.Round(sampleZ), 0, Depth - 1);
+        float bestDistance = float.PositiveInfinity;
+        bool found = false;
+
+        for (int y = firstY; y < lastY; y++)
+        {
+            float lower = SampleDensity(sampleX, y, sampleZ);
+            float upper = SampleDensity(sampleX, y + 1, sampleZ);
+            if (lower <= 0f || upper > 0f)
+                continue;
+
+            float denominator = lower - upper;
+            float blend = denominator > 0.00001f
+                ? Math.Clamp(lower / denominator, 0f, 1f)
+                : 0.5f;
+            float surfaceSampleY = y + blend;
+            float heightMeters = (surfaceSampleY + 0.5f) * VoxelSizeMeters;
+
+            Vector3 gradient = new(
+                SampleDensity(sampleX + 1f, surfaceSampleY, sampleZ) -
+                    SampleDensity(sampleX - 1f, surfaceSampleY, sampleZ),
+                SampleDensity(sampleX, surfaceSampleY + 1f, sampleZ) -
+                    SampleDensity(sampleX, surfaceSampleY - 1f, sampleZ),
+                SampleDensity(sampleX, surfaceSampleY, sampleZ + 1f) -
+                    SampleDensity(sampleX, surfaceSampleY, sampleZ - 1f));
+            Vector3 normal = gradient.LengthSquared() > 0.000001f
+                ? -Vector3.Normalize(gradient)
+                : Vector3.UnitY;
+            if (normal.Y < minNormal)
+                continue;
+
+            float ceilingMeters = Height * VoxelSizeMeters;
+            for (int ceilingY = y + 1; ceilingY < Height; ceilingY++)
+            {
+                if (SampleDensity(sampleX, ceilingY, sampleZ) <= 0f)
+                    continue;
+
+                ceilingMeters = (ceilingY + 0.5f) * VoxelSizeMeters;
+                break;
+            }
+
+            float clearance = MathF.Max(0f, ceilingMeters - heightMeters);
+            if (clearance + 0.0001f < minimumBodyClearanceMeters)
+                continue;
+
+            float distance = MathF.Abs(heightMeters - referenceHeightMeters);
+            if (distance >= bestDistance)
+                continue;
+
+            bestDistance = distance;
+            surface = new WalkableSurface(
+                heightMeters, normal, GetMaterialId(xCell, y, zCell), clearance);
+            found = true;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Tests a vertical capsule approximation against the same signed-distance
+    /// field used by rendering. The five-point cross-section catches overhangs
+    /// and tunnel walls without creating a dense collision grid.
+    /// </summary>
+    public bool IsCapsuleClear(
+        float xMeters,
+        float feetHeightMeters,
+        float zMeters,
+        float radiusMeters,
+        float heightMeters)
+    {
+        if (!float.IsFinite(xMeters) || !float.IsFinite(feetHeightMeters) ||
+            !float.IsFinite(zMeters) || !float.IsFinite(radiusMeters) ||
+            !float.IsFinite(heightMeters) || radiusMeters <= 0f ||
+            heightMeters <= 2f * radiusMeters)
+            return false;
+
+        float sampleX = xMeters / VoxelSizeMeters - 0.5f;
+        float sampleZ = zMeters / VoxelSizeMeters - 0.5f;
+        float offset = radiusMeters * 0.72f;
+        Span<Vector2> ring = stackalloc Vector2[5]
+        {
+            Vector2.Zero,
+            new Vector2(offset, 0f),
+            new Vector2(-offset, 0f),
+            new Vector2(0f, offset),
+            new Vector2(0f, -offset)
+        };
+
+        float bottom = feetHeightMeters + MathF.Max(0.12f, radiusMeters * 0.35f);
+        float top = feetHeightMeters + heightMeters - MathF.Max(0.12f, radiusMeters * 0.35f);
+        for (float height = bottom; height <= top; height += 0.2f)
+        {
+            float sampleY = height / VoxelSizeMeters - 0.5f;
+            for (int i = 0; i < ring.Length; i++)
+            {
+                float density = SampleDensity(
+                    sampleX + ring[i].X / VoxelSizeMeters,
+                    sampleY,
+                    sampleZ + ring[i].Y / VoxelSizeMeters);
+                if (density > 0.02f)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Writes only materialized 16^3 edit chunks. The compact procedural base
+    /// remains supplied by the owning WorldMap and is not duplicated in saves.
+    /// </summary>
+    public void SaveEdits(Stream destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (!destination.CanWrite)
+            throw new ArgumentException("The destination stream is not writable.", nameof(destination));
+
+        using GZipStream compressed = new(destination, CompressionLevel.Optimal, leaveOpen: true);
+        using BinaryWriter writer = new(compressed, Encoding.UTF8, leaveOpen: true);
+        writer.Write(SaveMagic);
+        writer.Write(SaveFormatVersion);
+        writer.Write(Width);
+        writer.Write(Height);
+        writer.Write(Depth);
+
+        List<ChunkCoordinate> keys = new(_chunks.Keys);
+        keys.Sort(static (a, b) =>
+        {
+            int order = a.Z.CompareTo(b.Z);
+            if (order != 0) return order;
+            order = a.Y.CompareTo(b.Y);
+            return order != 0 ? order : a.X.CompareTo(b.X);
+        });
+
+        writer.Write(keys.Count);
+        foreach (ChunkCoordinate key in keys)
+        {
+            Chunk chunk = _chunks[key];
+            writer.Write(key.X);
+            writer.Write(key.Y);
+            writer.Write(key.Z);
+            writer.Write(chunk.Revision);
+            for (int i = 0; i < SampleCount; i++)
+                writer.Write(chunk.Density[i]);
+            writer.Write(chunk.DensityMask);
+            for (int i = 0; i < CellCount; i++)
+                writer.Write(chunk.Materials[i]);
+            writer.Write(chunk.MaterialMask);
+        }
+        writer.Flush();
+    }
+
+    /// <summary>
+    /// Atomically replaces the current edit set after validating the complete
+    /// compressed stream. A failed or incompatible save leaves the live field intact.
+    /// </summary>
+    public void LoadEdits(Stream source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (!source.CanRead)
+            throw new ArgumentException("The source stream is not readable.", nameof(source));
+
+        Dictionary<ChunkCoordinate, Chunk> loaded = new();
+        HashSet<(int X, int Z)> editedColumns = new();
+        long maximumRevision = 0;
+        using (GZipStream decompressed = new(source, CompressionMode.Decompress, leaveOpen: true))
+        using (BinaryReader reader = new(decompressed, Encoding.UTF8, leaveOpen: true))
+        {
+            if (reader.ReadInt32() != SaveMagic)
+                throw new InvalidDataException("The voxel save has an invalid signature.");
+            if (reader.ReadInt32() != SaveFormatVersion)
+                throw new InvalidDataException("The voxel save version is not supported.");
+            if (reader.ReadInt32() != Width ||
+                reader.ReadInt32() != Height ||
+                reader.ReadInt32() != Depth)
+                throw new InvalidDataException("The voxel save belongs to a different world size.");
+
+            int chunkCount = reader.ReadInt32();
+            long capacity = ((Width + ChunkSize - 1L) / ChunkSize) *
+                ((Height + ChunkSize - 1L) / ChunkSize) *
+                ((Depth + ChunkSize - 1L) / ChunkSize);
+            if (chunkCount < 0 || chunkCount > capacity)
+                throw new InvalidDataException("The voxel save contains an invalid chunk count.");
+
+            for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+            {
+                int chunkX = reader.ReadInt32();
+                int chunkY = reader.ReadInt32();
+                int chunkZ = reader.ReadInt32();
+                long revision = reader.ReadInt64();
+                if (chunkX < 0 || chunkY < 0 || chunkZ < 0 ||
+                    chunkX >= (Width + ChunkSize - 1) / ChunkSize ||
+                    chunkY >= (Height + ChunkSize - 1) / ChunkSize ||
+                    chunkZ >= (Depth + ChunkSize - 1) / ChunkSize ||
+                    revision < 0)
+                    throw new InvalidDataException("The voxel save contains an invalid chunk coordinate.");
+
+                ChunkCoordinate key = new(chunkX, chunkY, chunkZ);
+                if (loaded.ContainsKey(key))
+                    throw new InvalidDataException("The voxel save contains a duplicate chunk.");
+
+                Chunk chunk = new() { Revision = revision };
+                for (int i = 0; i < SampleCount; i++)
+                    chunk.Density[i] = reader.ReadInt16();
+
+                byte[] densityMask = reader.ReadBytes(SampleCount);
+                if (densityMask.Length != SampleCount)
+                    throw new EndOfStreamException();
+                densityMask.CopyTo(chunk.DensityMask, 0);
+
+                for (int i = 0; i < CellCount; i++)
+                    chunk.Materials[i] = reader.ReadUInt16();
+
+                byte[] materialMask = reader.ReadBytes(CellCount);
+                if (materialMask.Length != CellCount)
+                    throw new EndOfStreamException();
+                materialMask.CopyTo(chunk.MaterialMask, 0);
+
+                bool hasOverrides = false;
+                for (int i = 0; i < SampleCount; i++)
+                {
+                    if (chunk.DensityMask[i] > 1)
+                        throw new InvalidDataException("The voxel save contains an invalid density mask.");
+                    hasOverrides |= chunk.DensityMask[i] != 0;
+                }
+                for (int i = 0; i < CellCount; i++)
+                {
+                    if (chunk.MaterialMask[i] > 1)
+                        throw new InvalidDataException("The voxel save contains an invalid material mask.");
+                    hasOverrides |= chunk.MaterialMask[i] != 0;
+                }
+
+                if (!hasOverrides)
+                    continue;
+
+                loaded.Add(key, chunk);
+                editedColumns.Add((chunkX, chunkZ));
+                maximumRevision = Math.Max(maximumRevision, revision);
+            }
+        }
+
+        _chunks.Clear();
+        foreach ((ChunkCoordinate key, Chunk chunk) in loaded)
+            _chunks.Add(key, chunk);
+        _editedChunkColumns.Clear();
+        foreach ((int x, int z) in editedColumns)
+            _editedChunkColumns.Add((x, z));
+
+        Version = Math.Max(Version, maximumRevision) + 1;
+        Changed?.Invoke(new VoxelBounds(0, 0, 0, Width, Height, Depth));
+    }
+
 
     public VoxelMaterialDefinition GetMaterialDefinition(int x, int y, int z) =>
         VoxelMaterialCatalog.Get(GetMaterialId(x, y, z));
