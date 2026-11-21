@@ -647,7 +647,7 @@ void main()
             "Нажми на назначение, затем нажми новую клавишу", 11,
             new Color(154, 168, 185), new Vector2f(0f, 0f));
         _controlsHint = CreateText(
-            "Esc — отмена переназначения   •   Колесо — масштаб   •   СКМ — панорама   •   ПКМ — поворот",
+            "Esc — отмена   •   Колесо — масштаб   •   СКМ — панорама   •   ПКМ+перетаскивание — поворот в изометрии",
             10, new Color(154, 168, 185), new Vector2f(0f, 0f));
         _resetControlsLabel = CreateText(
             "СБРОСИТЬ НАЗНАЧЕНИЯ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
