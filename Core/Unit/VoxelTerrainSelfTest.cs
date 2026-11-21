@@ -260,6 +260,8 @@ internal static class VoxelTerrainSelfTest
         bool bridgeFloorFound = map.TryFindWalkableSurface(
             2, 2, 0, 63, clearanceLayers: 8, out int floorLayer) &&
             floorLayer >= 43;
+        int globalHighestLayer = map.GetHighestOccupiedLayer();
+        bool globalMaximumSeesBridge = globalHighestLayer >= 43;
 
         map.Voxels.CarveBox(
             new Vector3(1f, 4f, 1f),
@@ -270,6 +272,7 @@ internal static class VoxelTerrainSelfTest
                bridgeSolid &&
                tunnelAir &&
                bridgeFloorFound &&
+               globalMaximumSeesBridge &&
                MathF.Abs(restoredBaseHeight - 2f) <= 0.12f;
     }
 
