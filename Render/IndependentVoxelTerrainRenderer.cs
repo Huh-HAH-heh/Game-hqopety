@@ -22,8 +22,14 @@ public sealed class IndependentVoxelTerrainRenderer : IDisposable
         float tilePixelSize,
         float zoomLevel)
     {
-        if (terrainSystem.Count == 0 || tilePixelSize <= 0f)
+        if (tilePixelSize <= 0f)
             return;
+
+        if (terrainSystem.Count == 0)
+        {
+            PruneRemovedTerrains(terrainSystem);
+            return;
+        }
 
         try
         {
