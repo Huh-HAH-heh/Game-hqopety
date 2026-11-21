@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Numerics;
 using Core.Map;
 using Raylib_cs;
@@ -26,6 +28,20 @@ public static class RaylibTerrainViewer
     {
         ArgumentNullException.ThrowIfNull(worldMap);
 
+        string voxelSavePath = GetVoxelSavePath();
+        try
+        {
+            if (worldMap.LoadVoxelEdits(voxelSavePath))
+                Console.WriteLine($"[Voxel] Restored edited chunks: {voxelSavePath}");
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(
+                $"[Voxel] Could not load terrain edits from '{voxelSavePath}': {exception.Message}");
+        }
+
+        long savedVoxelVersion = worldMap.Voxels.Version;
+        double lastVoxelSaveTime = GetTime();
         RaylibViewerSettings settings = RaylibViewerSettings.Load();
         TerrainRenderSnapshot terrain =
             TerrainRenderSnapshot.Create(worldMap, settings.TerrainMode);
@@ -458,6 +474,24 @@ public static class RaylibTerrainViewer
                 if (terrainChanged || coarseTerrainChanged)
                     renderer.Synchronize(terrain, coarseVoxelTerrain);
 
+                long currentVoxelVersion = worldMap.Voxels.Version;
+                if (currentVoxelVersion != savedVoxelVersion &&
+                    GetTime() - lastVoxelSaveTime >= 1.25d)
+                {
+                    try
+                    {
+                        worldMap.SaveVoxelEdits(voxelSavePath);
+                        savedVoxelVersion = currentVoxelVersion;
+                        lastVoxelSaveTime = GetTime();
+                    }
+                    catch (Exception exception)
+                    {
+                        Console.Error.WriteLine(
+                            $"[Voxel] Autosave failed: {exception.Message}");
+                        lastVoxelSaveTime = GetTime();
+                    }
+                }
+
                 BeginDrawing();
                 ClearBackground(menu.Settings.Palette.Background.ToRaylibColor());
 
@@ -491,11 +525,40 @@ public static class RaylibTerrainViewer
         }
         finally
         {
+            if (worldMap.Voxels.Version != savedVoxelVersion)
+            {
+                try
+                {
+                    worldMap.SaveVoxelEdits(voxelSavePath);
+                    Console.WriteLine($"[Voxel] Saved edited chunks: {voxelSavePath}");
+                }
+                catch (Exception exception)
+                {
+                    Console.Error.WriteLine(
+                        $"[Voxel] Final save failed: {exception.Message}");
+                }
+            }
+
             camera.ReleaseMouse();
             menu.Dispose();
             renderer?.Dispose();
             CloseWindow();
         }
+    }
+
+    private static string GetVoxelSavePath()
+    {
+        string? configuredPath =
+            Environment.GetEnvironmentVariable("RIMCLONE_VOXEL_SAVE_PATH");
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+            return Path.GetFullPath(configuredPath);
+
+        string localData = Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData);
+        string root = string.IsNullOrWhiteSpace(localData)
+            ? AppContext.BaseDirectory
+            : localData;
+        return Path.Combine(root, "RimClone", "voxel-terrain.rvx");
     }
 
     private static string GetVoxelToolStatus(

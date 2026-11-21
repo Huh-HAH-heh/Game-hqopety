@@ -125,8 +125,8 @@ internal static class VoxelTerrainSelfTest
         bool found = navigation.TryGetWaypoint(
             worldMap,
             new UnitId(0, 1),
-            new Vector3(2.25f, 0.5f, 3.25f),
-            new Vector3(4.25f, 0.5f, 3.25f),
+            new Vector3(2.25f, 3.25f, 0.5f),
+            new Vector3(4.25f, 3.25f, 0.5f),
             bodyHeight: 1.1f,
             out bool ownsVoxelRegion,
             out Vector3 waypoint);

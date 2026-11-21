@@ -141,10 +141,10 @@ internal static class Program
 
         Check("visual observation stores an identified, confirmed contact",
             visible != null &&
-            visible.Kind == TacticalContactKind.VisualConfirmed &&
-            visible.SubjectUnit.HasValue &&
-            visible.SubjectUnit.Value.Equals(target) &&
-            visible.PositionErrorRadius == 0.25f);
+            visible.Value.Kind == TacticalContactKind.VisualConfirmed &&
+            visible.Value.SubjectUnit.HasValue &&
+            visible.Value.SubjectUnit.Value.Equals(target) &&
+            visible.Value.PositionErrorRadius == 0.25f);
 
         memory.AdvanceTime(1.11f);
         Check("old visual confirmation downgrades to last-known",
@@ -190,11 +190,11 @@ internal static class Program
         Check("unknown stimuli create and merge an uncertain contact",
             suspected != null &&
             merged != null &&
-            suspected.ContactId == merged.ContactId &&
-            merged.Kind == TacticalContactKind.Suspected &&
-            !merged.SubjectUnit.HasValue &&
-            MathF.Abs(merged.EstimatedPosition.X - 55f) < 0.001f &&
-            MathF.Abs(merged.Confidence - 0.45f) < 0.001f &&
+            suspected.Value.ContactId == merged.Value.ContactId &&
+            merged.Value.Kind == TacticalContactKind.Suspected &&
+            !merged.Value.SubjectUnit.HasValue &&
+            MathF.Abs(merged.Value.EstimatedPosition.X - 55f) < 0.001f &&
+            MathF.Abs(merged.Value.Confidence - 0.45f) < 0.001f &&
             audioMemory.Contacts.Count == 1);
 
         var distantShot = new TacticalStimulus(
@@ -231,11 +231,11 @@ internal static class Program
         Check("identified report does not guess the identity of an earlier uncertain sound",
             audioContact != null &&
             resolvedContact != null &&
-            audioContact.ContactId != resolvedContact.ContactId &&
-            !audioContact.SubjectUnit.HasValue &&
-            resolvedContact.SubjectUnit.HasValue &&
-            resolvedContact.SubjectUnit.Value.Equals(resolvedTarget) &&
-            resolvedContact.Kind == TacticalContactKind.Reported &&
+            audioContact.Value.ContactId != resolvedContact.Value.ContactId &&
+            !audioContact.Value.SubjectUnit.HasValue &&
+            resolvedContact.Value.SubjectUnit.HasValue &&
+            resolvedContact.Value.SubjectUnit.Value.Equals(resolvedTarget) &&
+            resolvedContact.Value.Kind == TacticalContactKind.Reported &&
             resolvingMemory.Contacts.Count == 2);
 
         UnitId reporter = new(4, 1);
@@ -253,11 +253,11 @@ internal static class Program
         TacticalContact? reported = reportMemory.Record(report, 3.2f, 5f);
         Check("ally reports preserve subject identity without claiming direct sight",
             reported != null &&
-            reported.Kind == TacticalContactKind.Reported &&
-            reported.SubjectUnit.HasValue &&
-            reported.SubjectUnit.Value.Equals(reportedTarget) &&
-            reported.ReporterUnit.HasValue &&
-            reported.ReporterUnit.Value.Equals(reporter));
+            reported.Value.Kind == TacticalContactKind.Reported &&
+            reported.Value.SubjectUnit.HasValue &&
+            reported.Value.SubjectUnit.Value.Equals(reportedTarget) &&
+            reported.Value.ReporterUnit.HasValue &&
+            reported.Value.ReporterUnit.Value.Equals(reporter));
 
         var clamped = new TacticalStimulus(
             TacticalStimulusType.Footstep,
@@ -291,10 +291,10 @@ internal static class Program
             1f,
             4f);
         bool markedInvestigated = investigationContact != null &&
-            investigationMemory.MarkInvestigated(investigationContact.ContactId);
+            investigationMemory.MarkInvestigated(investigationContact.Value.ContactId);
         Check("a handled contact is not immediately investigated again",
             markedInvestigated &&
-            investigationContact!.IsInvestigated &&
+            investigationContact!.Value.IsInvestigated &&
             !investigationMemory.MarkInvestigated(long.MaxValue));
 
         Check("contact memory clear resets its contacts and simulation clock",
