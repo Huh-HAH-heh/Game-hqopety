@@ -4401,7 +4401,7 @@ public sealed class GameRenderer
         {
             _camera.SetIsometricProjection(_normalCameraIsometricProjectionEnabled);
             _camera.CenterOnPosition(_normalCameraCenter);
-            Console.WriteLine("[Terrain preview] Game camera view restored.");
+            Console.WriteLine("[Voxel terrain] Game camera view restored.");
         }
     }
 
