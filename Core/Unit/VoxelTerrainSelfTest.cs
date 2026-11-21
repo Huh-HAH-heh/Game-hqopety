@@ -171,15 +171,23 @@ internal static class VoxelTerrainSelfTest
             thicknessMeters: 1f,
             materialId: BridgeMaterial);
 
-        float lowRamp = field.GetDensity(12, 20, 20);
+        float lowRamp = field.GetDensity(14, 20, 20);
         float highRamp = field.GetDensity(48, 28, 20);
-        float outside = field.GetDensity(12, 30, 20);
+        float outside = field.GetDensity(14, 30, 20);
         ushort material = field.GetMaterialId(48, 28, 20);
+        bool passed = lowRamp > 0f &&
+            highRamp > 0f &&
+            outside < 0f &&
+            material == BridgeMaterial;
 
-        return lowRamp > 0f &&
-               highRamp > 0f &&
-               outside < 0f &&
-               material == BridgeMaterial;
+        if (!passed)
+        {
+            Console.WriteLine(
+                $"[DETAIL] ramp add: low={lowRamp:0.000}, high={highRamp:0.000}, " +
+                $"outside={outside:0.000}, material={material}.");
+        }
+
+        return passed;
     }
 
     public static bool RampBrushCarvesSlopedVolume()
